@@ -73,6 +73,9 @@ const CORS_WHITELIST = new Set([
   'https://tsc2025.onrender.com',
   'https://www.thesupremecollective.co.uk',
   'https://api.thesupremecollective.co.uk',
+  'https://meek-biscotti-8d5020.netlify.app',
+  'https://tsc-backend-v2.onrender.com',
+  'https://tsc2025-tscadmin.netlify.app',
 ]);
 
 const corsOptions = {
