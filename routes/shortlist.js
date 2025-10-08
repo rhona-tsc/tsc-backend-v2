@@ -121,47 +121,50 @@ const sseNoCompression = (req, res, next) => {
 };
 
 // Live subscribe to availability updates over SSE
+// Live subscribe to availability updates over SSE
 router.get('/availability/subscribe', sseNoCompression, (req, res) => {
   console.log('📡 SSE subscribe: /api/shortlist/availability/subscribe');
-  // Resolve ACAO dynamically – support multiple frontends
-  const ALLOWED_SSE_ORIGINS = new Set(
-    [
-      process.env.FRONTEND_URL,
-      'https://tsc2025.netlify.app',
-      'https://www.thesupremecollective.co.uk',
-      'https://thesupremecollective.co.uk',
-      'http://localhost:5173',
-      'http://localhost:5174'
-    ].filter(Boolean)
-  );
-  const reqOrigin = req.headers.origin || '';
-  const acao = ALLOWED_SSE_ORIGINS.has(reqOrigin)
-    ? reqOrigin
-    : (process.env.FRONTEND_URL || 'https://tsc2025.netlify.app');
 
+  // Build a dynamic allow-list (keep in sync with server.js CORS)
+  const STATIC_ALLOWED = new Set([
+    process.env.FRONTEND_URL,                      // e.g. https://www.thesupremecollective.co.uk
+    'https://tsc2025.netlify.app',
+    'https://www.thesupremecollective.co.uk',
+    'https://thesupremecollective.co.uk',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'https://meek-biscotti-8d5020.netlify.app',    // <-- your new site
+  ].filter(Boolean));
+
+  // Also allow any Netlify preview/site under *.netlify.app
+  const NETLIFY_RE = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i;
+
+  const origin = req.headers.origin || '';
+  const isAllowed = STATIC_ALLOWED.has(origin) || NETLIFY_RE.test(origin);
+
+  if (!isAllowed) {
+    console.warn('❌ SSE origin blocked by CORS:', origin);
+    return res.status(403).end();
+  }
+
+  // CORS headers specifically for the SSE stream
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Credentials', 'false');
+  res.setHeader('Vary', 'Origin');
+
+  // SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Origin', acao);
-  // EventSource does not send cookies by default; no need for credentials
-  // If you later enable withCredentials on the client, flip this to 'true'
-  res.setHeader('Access-Control-Allow-Credentials', 'false');
-  // Prevent proxy buffering (NGINX/Heroku/etc.)
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
-  console.log('   ↳ SSE ACAO:', acao);
 
-  // Advise the client to retry quickly if the connection drops
+  // Kick off stream
   res.write('retry: 5000\n\n');
-  // Send an initial no-op event so clients mark as open
   res.write('event: open\n');
   res.write(`data: ${Date.now()}\n\n`);
-
-  // Initial comment keeps some proxies happy
   res.write(': connected\n\n');
 
-  // Heartbeat to keep the connection alive
   const heartbeat = setInterval(() => {
     res.write('event: ping\n');
     res.write(`data: ${Date.now()}\n\n`);
