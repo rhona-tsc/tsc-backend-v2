@@ -1,0 +1,25 @@
+cat > .gitignore << 'EOF'
+# dependencies
+node_modules/
+
+# env & credentials
+.env
+.env.*
+*.pem
+*.key
+
+# build/output
+dist/
+coverage/
+*.log
+
+# local files
+uploads/
+.DS_Store
+
+# editor
+.vscode/
+.idea/
+EOFbackend/.env
+backend/uploads/
+backend/node_modules/

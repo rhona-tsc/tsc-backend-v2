@@ -1,0 +1,30 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[dev]
+  command = "npm run dev"
+  port = 5173
+  targetPort = 8888
+  framework = "vite"
+  autoLaunch = false
+
+  # Block any accidental ngrok traffic
+[[redirects]]
+from = "/*"
+to = "/404.html"
+status = 404
+conditions = { Host = ["*.ngrok-free.app", "*.ngrok.io"] }
+
+# Lets you call /api/... in both dev and prod
+[[redirects]]
+  from = "/api/*"
+  to   = "https://tsc2025.onrender.com/:splat"
+  status = 200
+  force = true
+
+  [[headers]]
+for = "/*"
+[headers.values]
+X-Backend-Policy = "Only Render backend allowed — ngrok blocked"

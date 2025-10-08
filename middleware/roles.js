@@ -1,0 +1,2 @@
+export const isAdmin = (user) => ["admin","superadmin","tsc_admin"].includes(String(user?.role || "").toLowerCase());
+export const isActOwner = (user) => String(user?.role || "").toLowerCase() === "musician";

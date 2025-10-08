@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Booking Contract</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      padding: 40px;
+      font-size: 14px;
+      color: #111;
+    }
+    h1,h2,h3 { margin: 0.6rem 0; }
+    .title { font-size: 28px; font-weight: 800; letter-spacing: .02em; }
+    .subtitle { font-size: 14px; color:#555; }
+    .contract-section p {
+      margin-bottom: 0.75rem;
+      line-height: 1.6;
+    }
+    .contract-section strong {
+      display: block;
+      margin-top: 1rem;
+      font-size: 1.1rem;
+    }
+    .contract-section table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+    }
+    .contract-section th, .contract-section td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: left;
+    }
+    .contract-section ul {
+      padding-left: 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .header-logo {
+      width: 200px;
+      margin-bottom: 20px;
+    }
+    .signature {
+      margin-top: 40px;
+    }
+    .signature img {
+      width: 200px;
+      height: auto;
+    }
+    .contract-section { line-height:1.5; }
+    ul { margin:0.5rem 1rem; }
+    table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+    th, td { border: 1px solid #ccc; padding: 6px 8px; text-align:left; }
+  </style>
+</head>
+<body>
+  <img src="<%= logoUrl %>" alt="The Supreme Collective Logo" class="header-logo" />
+  <div class="title">THE <span style="color:#ff6667">CONTRACT</span></div>
+
+    <div class="contract-section" aria-label="Booking contract terms">
+      <p class="subtitle">
+        Booking ID: <strong><%= bookingId %></strong><br/>
+        Client: <%= userAddress?.firstName %> <%= userAddress?.lastName %><br/>
+        Act(/s): <%= (actsSummary||[]).map(a => a.actName || a.name).join(", ") %>
+        Total: £<%= (total||0).toLocaleString("en-GB") %>, Deposit: £<%= (deposit||0).toLocaleString("en-GB") %>
+      </p>
+
+      <hr style="margin:24px 0"/>
+
+<h2>Booking Details</h2>
+
+<% if (!actsSummary || actsSummary.length === 0) { %>
+  <div>—</div>
+<% } else { %>
+  <% actsSummary.forEach(function(it){ %>
+    <div style="display:flex; gap:12px; align-items:flex-start; margin:10px 0;">
+      <% if (it.image && it.image.url) { %>
+        <img src="<%= it.image.url %>" alt="<%= it.actName %>" style="width:80px; height:80px; object-fit:cover; border-radius:6px;"
+             onerror="this.style.display='none'"/>
+      <% } %>
+      <div style="flex:1; min-width:0;">
+        <div>
+          <strong><%= it.actName %></strong>
+          <% if (it.lineupLabel) { %>
+            <span> — <%= it.lineupLabel %></span>
+          <% } %>
+        </div>
+
+        <% if (Number(it.quantity||0) > 1) { %>
+          <div>Quantity: <%= Number(it.quantity) %></div>
+        <% } %>
+
+        <% if (it.performance) { %>
+          <div style="margin-top:4px;">
+            <% if (it.performance.arrivalTime) { %>
+              <div>Arrival: <%= it.performance.arrivalTime %></div>
+            <% } %>
+            <% if (it.performance.setupAndSoundcheckedBy) { %>
+              <div>Soundcheck by: <%= it.performance.setupAndSoundcheckedBy %></div>
+            <% } %>
+            <% if (it.performance.startTime) { %>
+              <div>Start: <%= it.performance.startTime %></div>
+            <% } %>
+            <% if (it.performance.finishTime) { %>
+              <div>
+                Finish: <%= it.performance.finishTime %>
+                <% if (it.performance.finishDayOffset) { %>
+                  (+<%= it.performance.finishDayOffset %>d)
+                <% } %>
+              </div>
+            <% } %>
+          </div>
+        <% } %>
+
+        <% if (Array.isArray(it.afternoonSets) && it.afternoonSets.length) { %>
+          <div style="margin-top:4px;">
+            <div style="font-size:12px; color:#666;">Afternoon Sets:</div>
+            <ul style="margin:6px 0 0 18px;">
+              <% it.afternoonSets.forEach(function(set){ %>
+                <li>
+                  <%= set.name || set.label || "Set" %>
+                  <% if (Number(set.price)) { %>
+                    (£<%= Number(set.price).toFixed(2) %>)
+                  <% } %>
+                </li>
+              <% }) %>
+            </ul>
+          </div>
+        <% } %>
+
+        <% if (Array.isArray(it.selectedExtras) && it.selectedExtras.length) { %>
+          <div style="margin-top:4px;">
+            <div style="font-size:12px; color:#666;">Extras:</div>
+            <ul style="margin:6px 0 0 18px;">
+              <% it.selectedExtras.forEach(function(ex){ %>
+                <li>
+                  <%= ex.name || ex.key %>
+                  <% if (ex.quantity && Number(ex.quantity) > 1) { %> × <%= Number(ex.quantity) %><% } %>
+                </li>
+              <% }) %>
+            </ul>
+          </div>
+        <% } %>
+      </div>
+    </div>
+  <% }) %>
+
+  <hr style="margin:12px 0"/>
+
+  <div style="font-size:14px;">
+    <div style="display:flex; justify-content:space-between;">
+      <span>Booking total</span>
+      <span>£<%= Number(total||0).toFixed(2) %></span>
+    </div>
+    <div style="display:flex; justify-content:space-between;">
+      <span>Deposit paid</span>
+      <span>£<%= Number(deposit||0).toFixed(2) %></span>
+    </div>
+    <div style="display:flex; justify-content:space-between; font-weight:700; margin-top:8px;">
+      <span>Outstanding Balance</span>
+      <span>£<%= Math.max(0, Number(total||0) - Number(deposit||0)).toFixed(2) %></span>
+    </div>
+  </div>
+<% } %>
+
+      <p><strong>Key Points</strong></p>
+      <ul>
+        <li>This Contract is subject to Bamboo Music Management's Terms and Conditions.</li>
+        <li>The Client must complete the Event Sheet four weeks prior to the event to ensure the finer details of the performance can be processed in a timely fashion.</li>
+        <li>Point of contact numbers should be provided on the Event Sheet.</li>
+        <li>The Client must provide the Artist with a reasonable free supply of soft drinks, hot meal or hot buffet (for bookings when artist is on site for 3 hours or more), free parking for all vehicles, a secure changing area, and a safe, level, dry, covered performance area, unless otherwise noted.</li>
+      </ul>
+
+      <p><strong>Client Authorisation</strong></p>
+      <p>
+        By signing below, you confirm that you are the authorised signatory for contract <%= bookingId || 'TBC' %>
+        (<%= (actsSummary||[]).map(a => a.actName || a.name).join(", ") %>, <%= new Date().toLocaleDateString('en-GB') %>) and agree to be bound by Bamboo Music Management’s Terms and Conditions of booking.
+      </p>
+
+      <p><strong>Agent Authorisation</strong></p>
+      <p>
+        Company Name: The Supreme Collective<br/>
+        Artist Name(/s): <%= (actsSummary||[]).map(a => a.actName || a.name).join(", ") %>
+      </p>
+
+      <p><strong>Bamboo Music Management - Terms and Conditions of Booking</strong></p>
+      <p>If you do not understand any part of these Terms and Conditions, please check in with Bamboo Music Management or seek legal advice before agreeing to them and confirming a booking.</p>
+
+      <p><strong>Definition</strong></p>
+      <p>The following definitions refer to the 'Contract' (Bamboo Music Management Booking Contract) and these 'Terms and Conditions'. Bamboo Music Management, Company No. 09318270, is the 'Agent', the proposed entertainment booker is the 'Client' and the proposed entertainment act is the 'Artist'.</p>
+
+      <p><strong>1 | Introduction</strong></p>
+      <p>This booking contract is provided by the Agent and is made between the Client and Agent on behalf of the Artist. In issuing this Contract, the Agent is acting as an employment agency for the Artist, and is responsible for ensuring all band members are allocated, and fully briefed in a timely manner in the run-up to the event, and the Artist is responsible for all preparation for the event, and performance on the day. Artist, Client, and Agent responsibilities are detailed within this contract. Any breach of contract can fall upon the Artist, or Client depending upon the item being breached.</p>
+
+      <p><strong>2 | Booking</strong></p>
+      <ul>
+        <li>All bookings are confirmed immediately upon signing of this contract and with complete payment of the deposit. The booking is then confirmed.</li>
+        <li>A copy of the contract will be shared with the Client. The Agent will file completed contracts and will store until 4 years after the contract completion date.</li>
+        <li>The Contract may be modified/changed upon agreement from both parties in advance of the event date.</li>
+        <li>Changes must be notified to the Agent who will re-issue the contract if necessary.</li>
+        <li>The agreed total cost and Deposit amount may change with any alterations agreed by both the Client and Artist.</li>
+        <li>The Agent will act as negotiator until the date of the event and completion of the contract.</li>
+      </ul>
+
+      <p><strong>3 | Payment of Booking Fees</strong></p>
+      <ul>
+        <li>The Deposit payment is due upon booking.</li>
+        <li>The Balance (remaining fee owed) is due one week before the event day and must also be paid to the Agent.</li>
+      </ul>
+
+      <p><strong>4 | Late/Failure Payment of Balance</strong></p>
+      <ul>
+        <li>The Client must pay the Balance within the specified time.</li>
+        <li>If the Client fails to do so, the Agent has the right to terminate the Contract without penalty. The Client would still be subject to the cancellation fee specified in Clause 6.1.1.</li>
+        <li>The Agent has the right to claim interest of 20% on the balance of any late payments.</li>
+        <li>Late payments will incur a £50 administration fee, payable by the Client to the Agent within 14 days.</li>
+        <li>If full payment is not made within 14 days the debt may be passed to a Debt Recovery Firm by the Artist, possibly incurring additional costs.</li>
+      </ul>
+
+      <p><strong>5 | Cancellation</strong></p>
+      <ul>
+        <li>Termination of the Contract is only allowed in cases of 'Force Majeure' or if all parties mutually agree.</li>
+        <li>In the event of mutual cancellation, the Deposit will not be refunded.</li>
+      </ul>
+
+      <p><strong>6 | Client Cancellation</strong></p>
+      <ul>
+        <li>If the Client cancels for any reason other than Force Majeure, cancellation fees apply.</li>
+      </ul>
+
+      <table>
+        <thead><tr><th>Cancellation Timescale</th><th>Cancellation Fee</th></tr></thead>
+        <tbody>
+          <tr><td>More than 365 days before event</td><td>Nil</td></tr>
+          <tr><td>Less than 24 hours after confirmation (8+ days before event)</td><td>Nil</td></tr>
+          <tr><td>Less than 24 hours after confirmation within 7 days of event</td><td>Full Fee</td></tr>
+          <tr><td>More than 90 days before event</td><td>60% of Full Fee</td></tr>
+          <tr><td>Between 61-90 days before event</td><td>80% of Full Fee</td></tr>
+          <tr><td>60 days or less before event</td><td>Full Fee</td></tr>
+        </tbody>
+      </table>
+
+      <p><strong>7 | Artist Cancellation</strong></p>
+      <ul>
+        <li>The Agent cannot cancel on behalf of the Artist unless for Force Majeure.</li>
+        <li>If Force Majeure applies, the Agent must present a replacement if possible, and refund 50% of the Deposit if not possible.</li>
+        <li>If the Artist cancels improperly, the Client may seek legal recourse against the Artist.</li>
+        <li>If a replacement Artist is secured and accepted, the Deposit is not refunded but transferred to the new act.</li>
+      </ul>
+
+      <p><strong>8 | Complaints</strong></p>
+      <ul>
+        <li>Complaints must be made in writing within 30 days of the incident.</li>
+        <li>Payment obligations remain despite complaints.</li>
+        <li>Any unnotified changes agreed between Client and Artist are to be dealt with directly between them.</li>
+      </ul>
+
+      <p><strong>9 | Responsibilities of the Client</strong></p>
+      <ul>
+        <li>Ensuring the venue provides safe, dry, and licensed conditions.</li>
+        <li>Provide refreshments and hot meals for the Artist if required, as well as the appropriate number of chairs for the Artist.</li>
+        <li>Free parking, which must be available, or parking expenses reimbursed.</li>
+        <li>Changing area, which must be secure and adequate.</li>
+        <li>Electrical sockets, as per the Artist's requirements.</li>
+        <li>Ensure the Artist's equipment is safe from spillages and from guests.</li>
+        <li>Ensure the Artist's is able to perform in a safe environment with no agression or violence towards them.</li>
+      </ul>
+
+      <p><strong>10 | Responsibilities of the Agent</strong></p>
+      <ul>
+        <li>Provide a service for Clients to find an Artist that is not double-booked through the company.</li>
+        <li>Ensure Artist quality, professionalism, and safety compliance.</li>
+        <li>Provide the Event Sheet and reminders to ensure both parties have all of the information they need so that the artist can carry out a successful performance.</li>
+      </ul>
+
+      <p><strong>11 | Expenses</strong></p>
+      <p>Client is only liable for additional expenses if agreed in advance.</p>
+
+      <p><strong>12 | Artist Equipment</strong></p>
+      <p>Artist equipment must not be used by guests. Client is liable for any damage caused.</p>
+
+      <p><strong>13 | Changes to Performance Schedule</strong></p>
+      <ul>
+        <li>Changes can be made on the Event Sheet up to one month before the performance date.</li>
+        <li>Overruns by the Client do not extend Artist time unless agreed and paid for additionally.</li>
+      </ul>
+
+      <p><strong>14 | Deputies</strong></p>
+      <p>The Agent may substitute musicians of similar ability without notice.</p>
+
+      <p><strong>15 | Force Majeure</strong></p>
+      <ul>
+        <li>Force Majeure includes natural disasters, illness, war, terrorism, etc.</li>
+        <li>Evidence must be provided to justify Force Majeure claims.</li>
+      </ul>
+
+      <p><strong>16 | Terms Acceptance</strong></p>
+      <p>By signing the contract, you agree to all Terms and Conditions listed above.</p>
+    </div>
+  </body>
+<footer style="margin-top: 60px; font-size: 12px; color: #666; text-align: center; border-top: 1px solid #ccc; padding-top: 10px;">
+  <p>Bamboo Music Management Ltd (trading as The Supreme Collective)</p>
+  <p>Tel: +44 7594 223200 | Email: hello@thesupremecollective.co.uk</p>
+  <p>Address: Cramond, Reeves Lane, Roydon, CM19 5LE</p>
+  <p>Company Number: 09318270</p>
+</footer>
