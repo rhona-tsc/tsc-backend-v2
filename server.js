@@ -80,12 +80,13 @@ const ALLOWED_HOSTS = new Set([
 function isAllowedOrigin(origin) {
   if (!origin) return true; // curl / same-origin
   try {
-    const { host, protocol } = new URL(origin);
-    if (!/^https?:$/.test(protocol)) return false;
-    // allow your known hosts, and optionally any Netlify preview:
+    // normalize
+    const u = new URL(String(origin).trim().replace(/['"]+/g, ''));
+    const host = u.host.toLowerCase();
+
     return (
       ALLOWED_HOSTS.has(host) ||
-      host.endsWith('.netlify.app') // <— enable if you want all Netlify previews
+      host.endsWith('.netlify.app') // allow all Netlify previews
     );
   } catch {
     return false;
@@ -94,10 +95,12 @@ function isAllowedOrigin(origin) {
 
 const corsOptions = {
   origin(origin, cb) {
-    isAllowedOrigin(origin) ? cb(null, true) : cb(new Error(`CORS blocked origin: ${origin}`));
+    if (isAllowedOrigin(origin)) return cb(null, true);
+    console.warn('CORS rejecting origin:', origin);
+    return cb(null, false); // ← deny silently, no 500
   },
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'token', 'X-Requested-With'],
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','token','X-Requested-With'],
   credentials: true,
   optionsSuccessStatus: 204,
 };
