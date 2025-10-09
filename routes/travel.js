@@ -8,7 +8,7 @@ export default async function getTravelV2(origin, destination, dateISO) {
   // 2) window.__BACKEND_URL__ set in index.html at runtime (optional)
   // 3) Render URL fallback (safe default for prod)
   const BASE_RAW =
-    "https://tsc2025.onrender.com";
+    "https://tsc-backend-v2.onrender.com";
 
   const BASE = String(BASE_RAW || "").replace(/\/+$/, "");
   if (!/^https?:\/\//i.test(BASE)) {

@@ -20,7 +20,7 @@ conditions = { Host = ["*.ngrok-free.app", "*.ngrok.io"] }
 # Lets you call /api/... in both dev and prod
 [[redirects]]
   from = "/api/*"
-  to   = "https://tsc2025.onrender.com/:splat"
+  to   = "https://tsc-backend-v2.onrender.com/:splat"
   status = 200
   force = true
 

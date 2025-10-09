@@ -62,7 +62,7 @@ async function getTravelData(originPostcode, destination, dateISO) {
     process.env.INTERNAL_BASE_URL ||   // e.g. http://localhost:4000 or internal service URL
     process.env.BACKEND_PUBLIC_URL ||
     process.env.BACKEND_URL ||
-    "https://tsc2025.onrender.com"
+    "https://tsc-backend-v2.onrender.com"
   ).replace(/\/+$/, "");
 
   // ✅ use the v2 route

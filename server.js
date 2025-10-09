@@ -65,28 +65,40 @@ const port = process.env.PORT || 4000;
 /*                                 CORS FIRST                                 */
 /* -------------------------------------------------------------------------- */
 
-const CORS_WHITELIST = new Set([
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'https://tsc2025.netlify.app',
-  'https://tsc2025-admin-portal.netlify.app',
-  'https://tsc2025.onrender.com',
-  'https://www.thesupremecollective.co.uk',
-  'https://api.thesupremecollective.co.uk',
-  'https://meek-biscotti-8d5020.netlify.app',
-  'https://tsc-backend-v2.onrender.com',
-  'https://tsc2025-tscadmin.netlify.app',
+// replace CORS_WHITELIST + origin() with this:
+const ALLOWED_HOSTS = new Set([
+  'tsc2025.netlify.app',
+  'tsc2025-admin-portal.netlify.app',
+  'meek-biscotti-8d5020.netlify.app', // current preview
+  'tsc-backend-v2.onrender.com',
+  'www.thesupremecollective.co.uk',
+  'api.thesupremecollective.co.uk',
+  'localhost:5173',
+  'localhost:5174',
 ]);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // curl / same-origin
+  try {
+    const { host, protocol } = new URL(origin);
+    if (!/^https?:$/.test(protocol)) return false;
+    // allow your known hosts, and optionally any Netlify preview:
+    return (
+      ALLOWED_HOSTS.has(host) ||
+      host.endsWith('.netlify.app') // <— enable if you want all Netlify previews
+    );
+  } catch {
+    return false;
+  }
+}
 
 const corsOptions = {
   origin(origin, cb) {
-    // allow same-origin / curl (no Origin) and our whitelist
-    if (!origin || CORS_WHITELIST.has(origin)) return cb(null, true);
-    return cb(new Error(`CORS blocked origin: ${origin}`));
+    isAllowedOrigin(origin) ? cb(null, true) : cb(new Error(`CORS blocked origin: ${origin}`));
   },
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','token','X-Requested-With'],
-  credentials: true, // allow credentials so axios/fetch withCredentials: true preflights succeed
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'token', 'X-Requested-With'],
+  credentials: true,
   optionsSuccessStatus: 204,
 };
 
@@ -318,5 +330,12 @@ app.use("/api/upload", uploadRoutes);
 /* -------------------------------------------------------------------------- */
 /*                                   Server                                   */
 /* -------------------------------------------------------------------------- */
+// after all routes, before app.listen
+app.use((err, req, res, next) => {
+  console.error('🔥 Unhandled error:', err?.stack || err);
+  // cors() already set ACAO earlier if the origin was allowed
+  if (res.headersSent) return;
+  res.status(err.status || 500).json({ success: false, message: err.message || 'Server error' });
+});
 
 app.listen(port, () => console.log(`🚀 Server started on PORT: ${port}`));

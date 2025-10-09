@@ -277,7 +277,7 @@ async function computeMemberFeeDetailed({ member, lineup, booking, act }, dbgTag
           process.env.BACKEND_PUBLIC_URL ||
           process.env.BACKEND_URL ||
           process.env.INTERNAL_BASE_URL ||
-          "https://tsc2025.onrender.com"
+          "https://tsc-backend-v2.onrender.com"
         ).replace(/\/+$/, "");
 
         const res = await fetch(`${BASE}/api/v2/travel?${qs.toString()}`, {

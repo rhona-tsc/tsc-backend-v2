@@ -55,7 +55,7 @@ router.get("/availability/check", async (req, res) => {
  * Delegates directly to the travel controller to avoid any internal fetches,
  * so it works the same locally, on Render, and on Netlify.
  */
-router.get("/v2/travel/travel-data", async (req, res) => {
+router.get("/travel/travel-data", async (req, res) => {
   try {
     // Controller already validates params and returns normalized shape:
     // { success, date, outbound, returnTrip, sources }
