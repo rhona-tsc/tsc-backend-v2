@@ -1,0 +1,2 @@
+/api/*  https://tsc-backend-v2.onrender.com/api/:splat  200
+/*      /index.html                                   200

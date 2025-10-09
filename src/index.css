@@ -1,0 +1,85 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&family=Prata&display=swap');
+@import "slick-carousel/slick/slick.css"; 
+@import "slick-carousel/slick/slick-theme.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+a.active hr{
+    display: block;
+}
+
+*{
+    font-family: Outfit;
+}
+
+.prata-regular {
+    font-family: "Prata", serif;
+    font-weight: 400;
+    font-style: normal;
+  }
+
+  /* base: phones */
+.container { padding: 16px; }
+
+@media (max-width:640px) {
+    a.active{
+        background-color: black;
+        color: white;
+    }
+  }
+
+  .flash {
+    animation: flash 0.5s;
+  }
+  
+  @keyframes flash {
+    0% { background-color: #fff9c4; } /* pale yellow flash */
+    100% { background-color: transparent; }
+  }
+
+
+/* tablets (portrait/landscape) */
+@media (min-width: 768px) { .container { padding: 24px; } }
+
+/* small laptops */
+@media (min-width: 1024px) { .container { padding: 32px; } }
+
+  
+
+  /* src/index.css */
+
+.footer-cta { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+
+.contract-section p {
+  margin-bottom: 0.75rem;
+  line-height: 1.6;
+}
+.contract-section strong {
+  display: block;
+  margin-top: 1rem;
+  font-size: 1.1rem;
+}
+.contract-section table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+.contract-section th, .contract-section td {
+  border: 1px solid #d1d5db; /* light gray */
+  padding: 8px;
+  text-align: left;
+}
+.contract-section ul {
+  padding-left: 1.25rem;
+  margin-bottom: 1rem;
+  list-style-type: disc;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+  
+
+img, video { max-width: 100%; height: auto; }
