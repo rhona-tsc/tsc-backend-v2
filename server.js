@@ -66,26 +66,45 @@ const port = process.env.PORT || 4000;
 /* -------------------------------------------------------------------------- */
 
 
-const CORS_WHITELIST = new Set([
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'https://tsc2025.netlify.app',
-  'https://meek-biscotti-8d5020.netlify.app',
-  'https://tsc2025-admin-portal.netlify.app',
-  'https://tsc2025.onrender.com',
-  'https://www.thesupremecollective.co.uk',
-  'https://api.thesupremecollective.co.uk',
+const ALLOWED_HOSTS = new Set([
+  'localhost:5173',
+  'localhost:5174',
+  'tsc2025.netlify.app',
+  'meek-biscotti-8d5020.netlify.app',
+  'tsc2025-admin-portal.netlify.app',
+  'tsc-backend-v2.onrender.com',
+  'www.thesupremecollective.co.uk',
+  'api.thesupremecollective.co.uk',
 ]);
 
 const corsOptions = {
   origin(origin, cb) {
-    // allow same-origin / curl (no Origin) and our whitelist
-    if (!origin || CORS_WHITELIST.has(origin)) return cb(null, true);
-    return cb(new Error(`CORS blocked origin: ${origin}`));
+    if (!origin) return cb(null, true); // allow same-origin or curl
+
+    try {
+      const { host, protocol } = new URL(origin);
+      const allowed =
+        /^https?:$/.test(protocol) && (
+          ALLOWED_HOSTS.has(host) ||
+          host.endsWith('.netlify.app') ||
+          host.includes('localhost')
+        );
+
+      if (allowed) {
+        console.log(`✅ CORS allowed: ${origin} (host=${host})`);
+        return cb(null, true);
+      } else {
+        console.warn(`🚫 CORS blocked: ${origin} (host=${host})`);
+        return cb(new Error(`CORS blocked origin: ${origin}`));
+      }
+    } catch (err) {
+      console.error('CORS parse error:', origin, err.message);
+      return cb(new Error(`CORS parsing error for origin: ${origin}`));
+    }
   },
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','token','X-Requested-With'],
-  credentials: true, // allow credentials so axios/fetch withCredentials: true preflights succeed
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'token', 'X-Requested-With'],
+  credentials: true,
   optionsSuccessStatus: 204,
 };
 
