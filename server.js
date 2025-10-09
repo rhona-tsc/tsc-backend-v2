@@ -65,43 +65,27 @@ const port = process.env.PORT || 4000;
 /*                                 CORS FIRST                                 */
 /* -------------------------------------------------------------------------- */
 
-// replace CORS_WHITELIST + origin() with this:
-const ALLOWED_HOSTS = new Set([
-  'tsc2025.netlify.app',
-  'tsc2025-admin-portal.netlify.app',
-  'meek-biscotti-8d5020.netlify.app', // current preview
-  'tsc-backend-v2.onrender.com',
-  'www.thesupremecollective.co.uk',
-  'api.thesupremecollective.co.uk',
-  'localhost:5173',
-  'localhost:5174',
+
+const CORS_WHITELIST = new Set([
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://tsc2025.netlify.app',
+  'https://meek-biscotti-8d5020.netlify.app',
+  'https://tsc2025-admin-portal.netlify.app',
+  'https://tsc2025.onrender.com',
+  'https://www.thesupremecollective.co.uk',
+  'https://api.thesupremecollective.co.uk',
 ]);
-
-function isAllowedOrigin(origin) {
-  if (!origin) return true; // curl / same-origin
-  try {
-    // normalize
-    const u = new URL(String(origin).trim().replace(/['"]+/g, ''));
-    const host = u.host.toLowerCase();
-
-    return (
-      ALLOWED_HOSTS.has(host) ||
-      host.endsWith('.netlify.app') // allow all Netlify previews
-    );
-  } catch {
-    return false;
-  }
-}
 
 const corsOptions = {
   origin(origin, cb) {
-    if (isAllowedOrigin(origin)) return cb(null, true);
-    console.warn('CORS rejecting origin:', origin);
-    return cb(null, false); // ← deny silently, no 500
+    // allow same-origin / curl (no Origin) and our whitelist
+    if (!origin || CORS_WHITELIST.has(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked origin: ${origin}`));
   },
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization','token','X-Requested-With'],
-  credentials: true,
+  credentials: true, // allow credentials so axios/fetch withCredentials: true preflights succeed
   optionsSuccessStatus: 204,
 };
 
