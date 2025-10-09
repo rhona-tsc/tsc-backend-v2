@@ -1,10 +1,31 @@
-import { getCountyData } from './locations';
+
+// Fallback: if ./locations.js isn't present in this deploy, use a no-op
+// so the service boots while we add the data module.
+// If you add controllers/locations.js exporting getCountyData, it will be used.
+let getCountyData = () => null;
+// Try dynamic import if the module exists (non-fatal if it does not).
+try {
+  // Top‑level await is supported in Node 18+, Render uses Node 22 by default.
+  const mod = await import('./locations.js').catch(() => null);
+  if (mod?.getCountyData) getCountyData = mod.getCountyData;
+} catch (e) {
+  // keep stub
+  console.warn('locations module not found; using empty getCountyData()', e?.message || e);
+}
 
 export function calculateActPricing(act, selectedLineupName, derivedCounty, isNorthernGig) {
   console.group(`\n=== Calculating Pricing for Act: ${act.name} ===`);
   console.log(`Selected Lineup: ${selectedLineupName}`);
   console.log(`Derived County: ${derivedCounty}`);
   console.log(`Is Northern Gig: ${isNorthernGig}`);
+
+  console.log('Act meta:', {
+    managementFee: act.managementFee ?? 0,
+    margin: act.margin ?? 0,
+    costPerMile: act.costPerMile ?? 0,
+    muRates: act.muRates ?? 0,
+    travelMiles: act.travelMiles ?? 0
+  });
 
   const lineup = act.lineups.find(l => l.name === selectedLineupName);
   if (!lineup) {
@@ -14,18 +35,35 @@ export function calculateActPricing(act, selectedLineupName, derivedCounty, isNo
   }
 
   let subtotal = 0;
-  console.group('Band Members Details:');
-  lineup.members.forEach(member => {
-    console.group(`Member: ${member.name}`);
-    console.log(`Instrument: ${member.instrument}`);
-    console.log(`Base Fee: ${member.baseFee}`);
-    const essentialRole = member.essential ? 'Yes' : 'No';
-    console.log(`Essential Role: ${essentialRole}`);
-    const roleFees = member.roleFees || 0;
-    console.log(`Role Fees: ${roleFees}`);
+  console.group('Band Members (pricing inputs)');
+  lineup.members.forEach((member, idx) => {
+    const roleFees = Number(member.roleFees || 0);
+    const baseFee  = Number(member.baseFee || 0);
+    const essential = !!member.essential;
+    const addRoles = Array.isArray(member.additionalRoles) ? member.additionalRoles : [];
+    const essentialRoles = addRoles.filter(r => r?.isEssential).map(r => ({
+      role: r?.role || r?.title || 'n/a',
+      fee: Number(r?.additionalFee || r?.fee || 0)
+    }));
+    const essentialRolesTotal = essentialRoles.reduce((s, r) => s + (r.fee || 0), 0);
+    const memberTotal = baseFee + roleFees + essentialRolesTotal;
+
+    console.group(`#${idx+1} ${member.name || (member.firstName + ' ' + (member.lastName || '')).trim()}`);
+    console.table({
+      instrument: member.instrument,
+      isEssential: essential,
+      travelEligible: !!member.travelEligible,
+      baseFee,
+      roleFees,
+      essentialRolesTotal,
+      memberTotal
+    });
+    if (essentialRoles.length) {
+      console.table(essentialRoles);
+    }
     console.groupEnd();
 
-    subtotal += member.baseFee + (member.roleFees || 0);
+    subtotal += memberTotal;
   });
   console.groupEnd();
 
@@ -48,12 +86,17 @@ export function calculateActPricing(act, selectedLineupName, derivedCounty, isNo
     console.log('No travel fee data found, travelFee set to 0.');
   }
 
+  console.log('Travel fee computed:', travelFee);
+
   // Per-member travel cost breakdown
-  console.group('Per Member Travel Costs:');
-  lineup.members.forEach(member => {
-    const memberTravel = (travelFee / lineup.members.length) || 0;
-    console.log(`${member.name}: ${memberTravel.toFixed(2)}`);
-  });
+  console.group('Per Member Travel Costs');
+  const perMemberTravel = (travelFee / Math.max(1, lineup.members.length));
+  console.table(lineup.members.map(m => ({
+    name: m.name || [m.firstName, m.lastName].filter(Boolean).join(' '),
+    instrument: m.instrument,
+    travelEligible: !!m.travelEligible,
+    perMemberTravel: perMemberTravel.toFixed(2)
+  })));
   console.groupEnd();
 
   // Management and travel eligibility
@@ -64,11 +107,21 @@ export function calculateActPricing(act, selectedLineupName, derivedCounty, isNo
 
   // Final totals
   const total = subtotal + travelFee + (managementFeeApplicable ? act.managementFee : 0);
-  const margin = act.margin || 0;
-  const grossTotal = total * (1 + margin);
+  const commissionRate = act.margin ?? 0; // treating act.margin as commission %
+  const commissionFee  = total * commissionRate;
+  console.log('Breakdown:', {
+    membersSubtotal: subtotal,
+    travelFee,
+    managementFee: (act.managementFee && act.managementFee > 0) ? act.managementFee : 0,
+    preCommissionTotal: total,
+    commissionRate,
+    commissionFee,
+    grossTotal: total + commissionFee
+  });
+  const grossTotal = total + commissionFee;
 
   console.log(`Final Totals: subtotal(${subtotal}) + travelFee(${travelFee}) + managementFee(${managementFeeApplicable ? act.managementFee : 0}) = total(${total})`);
-  console.log(`Margin: ${margin * 100}%`);
+  console.log(`Margin: ${commissionRate * 100}%`);
   console.log(`Gross Total after margin: ${grossTotal}`);
 
   console.groupEnd();
