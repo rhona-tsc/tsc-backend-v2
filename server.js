@@ -66,41 +66,36 @@ const port = process.env.PORT || 4000;
 /* -------------------------------------------------------------------------- */
 
 
+// Host-based allowlist (safer than full-origin string matching)
 const ALLOWED_HOSTS = new Set([
   'localhost:5173',
   'localhost:5174',
   'tsc2025.netlify.app',
-  'meek-biscotti-8d5020.netlify.app',
+  'meek-biscotti-8d5020.netlify.app', // preview site
   'tsc2025-admin-portal.netlify.app',
   'tsc-backend-v2.onrender.com',
   'www.thesupremecollective.co.uk',
   'api.thesupremecollective.co.uk',
 ]);
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // allow same-origin / curl
+  try {
+    const { host, protocol } = new URL(origin);
+    if (!/^https?:$/.test(protocol)) return false;
+    return (
+      ALLOWED_HOSTS.has(host) ||
+      host.endsWith('.netlify.app') || // allow other Netlify previews if needed
+      host.includes('localhost')
+    );
+  } catch {
+    return false;
+  }
+}
+
 const corsOptions = {
   origin(origin, cb) {
-    if (!origin) return cb(null, true); // allow same-origin or curl
-
-    try {
-      const { host, protocol } = new URL(origin);
-      const allowed =
-        /^https?:$/.test(protocol) && (
-          ALLOWED_HOSTS.has(host) ||
-          host.endsWith('.netlify.app') ||
-          host.includes('localhost')
-        );
-
-      if (allowed) {
-        console.log(`✅ CORS allowed: ${origin} (host=${host})`);
-        return cb(null, true);
-      } else {
-        console.warn(`🚫 CORS blocked: ${origin} (host=${host})`);
-        return cb(new Error(`CORS blocked origin: ${origin}`));
-      }
-    } catch (err) {
-      console.error('CORS parse error:', origin, err.message);
-      return cb(new Error(`CORS parsing error for origin: ${origin}`));
-    }
+    isAllowedOrigin(origin) ? cb(null, true) : cb(new Error(`CORS blocked origin: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'token', 'X-Requested-With'],
@@ -336,11 +331,10 @@ app.use("/api/upload", uploadRoutes);
 /* -------------------------------------------------------------------------- */
 /*                                   Server                                   */
 /* -------------------------------------------------------------------------- */
-// after all routes, before app.listen
+// Global error handler (returns JSON)
 app.use((err, req, res, next) => {
   console.error('🔥 Unhandled error:', err?.stack || err);
-  // cors() already set ACAO earlier if the origin was allowed
-  if (res.headersSent) return;
+  if (res.headersSent) return; // if headers already sent, let Express finish
   res.status(err.status || 500).json({ success: false, message: err.message || 'Server error' });
 });
 
