@@ -329,7 +329,31 @@ const handleSubmit = async () => {
 
     const signatureImage = signaturePad.getTrimmedCanvas().toDataURL("image/png");
 
-    const endpoint = `${backendUrl}/api/booking/create-checkout-session`;
+    // Decide which backend route to hit (live vs test) based on cart contents
+    const isTestCart = actsSummary.some((a) =>
+      (a.actSlug || "").toLowerCase() === "test-act" || /(^|\b)test\s*act(\b|$)/i.test(a.tscName || "")
+    );
+
+    // Endpoint + request bodies for each mode
+    const endpoint = isTestCart
+      ? `${backendUrl}/api/payments/test-act-checkout`
+      : `${backendUrl}/api/booking/create-checkout-session`;
+
+    const amountToCharge = clientWantsFull ? fullAmount : depositAmount; // integer pence
+
+    // Prepare a concise description for test payments
+    const testDescription = `Test booking: ${actsSummary.map(a => a.tscName || a.actName || "Act").join(" + ")} on ${new Date(selectedDate).toLocaleDateString("en-GB")}`;
+
+    // Payload for test checkout (Stripe test key route)
+    const testPayload = {
+      actId: actsSummary[0]?.actId,
+      amount: Math.round(amountToCharge), // pence
+      currency: "gbp",
+      bookingId,
+      description: testDescription,
+      metadata: { bookingId, mode: clientWantsFull ? "full" : "deposit" }
+    };
+
     console.log("📡 POST", endpoint, {
       items: validItems.length,
       actsSummary: actsSummary.length,
@@ -341,11 +365,11 @@ const handleSubmit = async () => {
     });
 
     const performanceTimesTop =
-  actsSummary[0]?.performance
-    ? { ...actsSummary[0].performance }
-    : null;
+      actsSummary[0]?.performance
+        ? { ...actsSummary[0].performance }
+        : null;
 
-    const stripeResponse = await axios.post(endpoint, {
+    const livePayload = {
       cartDetails: validItems,            // Stripe line_items (if needed)
       actsSummary,                        // rich snapshot persisted in DB
       // 🔝 send top-level performance block too
@@ -372,7 +396,11 @@ const handleSubmit = async () => {
       bookingId,                          // optional: if you want server to use this
       userId,
       userEmail,
-    });
+    };
+
+    const requestBody = isTestCart ? testPayload : livePayload;
+
+    const stripeResponse = await axios.post(endpoint, requestBody);
 
     if (stripeResponse.data?.url) {
       window.location.href = stripeResponse.data.url;
