@@ -1,4 +1,5 @@
 import React from "react";
+import { jwtDecode } from "jwt-decode";
 import { BrowserRouter } from "react-router-dom"; // Import BrowserRouter
 import { ToastContainer } from "react-toastify";
 import Navbar from "./components/Navbar";
@@ -25,13 +26,13 @@ import BookingSuccess from './pages/BookingSuccess';
 import BookingCancelled from './pages/BookingCancelled';
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
-import { useState, useEffect } from "react";
+import { useState, useEffect   } from "react";
 
 // 👇 helper to decode token once
 function parseToken(t) {
   if (!t) return {};
   try {
-    const d = jwtDecode(t);
+    const d = jwtDecode (t);
     const user = {
       firstName: d?.firstName || "",
       lastName: d?.lastName || "",
