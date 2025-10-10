@@ -4,8 +4,12 @@ import outcodeToCounty from "./outcodeToCounty";
 import getTravelV2 from "./travelV2";
 
 const calculateActPricing = async (act, selectedCounty, selectedAddress, selectedDate, selectedLineup) => {
-  // Guard
+  console.groupCollapsed("🧾 calculateActPricing Debug");
+  console.log("Inputs →", { actName: act?.tscName, selectedCounty, selectedAddress, selectedDate, selectedLineup });
+
   if (!act || !selectedLineup) {
+    console.warn("⚠️ Missing act or lineup");
+    console.groupEnd();
     return { total: 0, travelCalculated: false };
   }
 
@@ -116,11 +120,15 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
     return { total: null, travelCalculated: false };
   }
 
+    console.log("🎸 Using lineup:", smallestLineup?.actSize, smallestLineup?.bandMembers?.length, "members");
+
+
   // Derive county (so we can use county travel & northern team)
   const guessedFromAddress = guessCountyFromAddress(selectedAddress, act?.countyFees);
   const outcode = extractOutcode(selectedAddress);
   const guessedFromOutcode = countyFromOutcode(outcode);
   const derivedCounty = selectedCounty || guessedFromAddress || guessedFromOutcode;
+  console.log("📍 County derived:", { guessedFromAddress, outcode, guessedFromOutcode, derivedCounty });
 
   // Northern detection
   const northernCounties = new Set([
@@ -139,6 +147,7 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
     "stirling","west dunbartonshire","west lothian"
   ]);
   const isNorthernGig = northernCounties.has(normalizeCounty(derivedCounty));
+  console.log("🧭 Is northern gig?", isNorthernGig);
 
   // Team (for travel postcode list)
   const bandMembers =
@@ -150,6 +159,7 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
   // Exclude band managers/non-performers from travel calculations
   const travelEligibleMembers = Array.isArray(bandMembers) ? bandMembers.filter((m) => !isManagerLike(m)) : [];
   const travelEligibleCount = travelEligibleMembers.length;
+  console.log("👥 Band members:", bandMembers.length, "Travel eligible:", travelEligibleMembers.length);
 
   // --- FEES (NET) ----------------------------------------------------------
   const perMemberFees = (smallestLineup.bandMembers || []).map((m) => {
@@ -159,6 +169,8 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
       .map((r) => ({ role: r?.role, fee: Number(r?.additionalFee) || 0 }));
     const rolesTotal = essentialRoles.reduce((s, r) => s + (r.fee || 0), 0);
     const memberTotal = baseFee + rolesTotal;
+        console.log("💰 Member fee:", m.firstName, { baseFee, rolesTotal, memberTotal, essentialRoles });
+
     return {
       id: m?._id?.toString?.() || "",
       name: `${m.firstName || ""} ${m.lastName || ""}`.trim() || (m.instrument || "Member"),
@@ -172,23 +184,32 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
   });
 
   const fee = perMemberFees.reduce((s, m) => s + (m.memberTotal || 0), 0);
+  console.log("💸 Total base lineup fee:", fee);
 
   // ----- TRAVEL -----
   // County-fee path (per-member)
   const hasCountyTable = !!(act?.useCountyTravelFee && hasAnyCountyFees(act?.countyFees) && derivedCounty);
+  console.log("🗺️ Travel method:", hasCountyTable ? "County table" : act.costPerMile > 0 ? "Cost per mile" : "MU Rates");
 
   if (hasCountyTable) {
     const feePerMemberRaw = getCountyFeeFromMap(act.countyFees, derivedCounty);
     const feePerMember = Number(feePerMemberRaw) || 0;
+        console.log("📊 County travel fee per member:", feePerMember);
+
     if (feePerMember > 0 && travelEligibleCount > 0) {
       travelFee = feePerMember * travelEligibleCount;
       travelCalculated = true;
+          console.log("🚗 Travel fee (county):", travelFee);
+
     }
   }
 
   // If county path didn't run and we don't have addr/date → return base+margin
   if (!travelCalculated && (!selectedAddress || !selectedDate)) {
     const totalPrice = Math.ceil(fee / 0.75);
+        console.log("⚠️ No travel data → base + margin only", totalPrice);
+    console.groupEnd();
+
     return { total: totalPrice, travelCalculated: false };
   }
 
@@ -204,6 +225,8 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
 
       const { miles } = await getTravelV2(postCode, destination, selectedDate);
       const cost = (miles || 0) * Number(act.costPerMile) * 25;
+            console.log(`🛣️ ${m.firstName} travel: ${miles} miles × £${act.costPerMile}/mi × 25 →`, cost);
+
       travelFee += cost;
     }
     travelCalculated = true;
@@ -227,6 +250,7 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
       const lateFee = (returnTrip.duration.value / 3600) > 1 ? 136 : 0;
       const tollFee = (outbound.fare?.value || 0) + (returnTrip.fare?.value || 0);
       const cost = fuelFee + timeFee + lateFee + tollFee;
+      console.log(`🚕 MU Travel (${m.firstName})`, { totalDistanceMiles, totalDurationHours, fuelFee, timeFee, lateFee, tollFee, cost });
 
       travelFee += cost;
     }
@@ -235,7 +259,8 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
 
   // Gross with 25% margin
   const totalPrice = Math.ceil((fee + travelFee) / 0.75);
-
+ console.log("✅ Final:", { fee, travelFee, marginApplied: 0.25, totalPrice, travelCalculated });
+  console.groupEnd();
   return { total: totalPrice, travelCalculated };
 };
 
