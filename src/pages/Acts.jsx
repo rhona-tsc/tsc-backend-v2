@@ -14,7 +14,7 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const api = (p) => `${backendUrl}/${String(p).replace(/^\/+/, "")}`;
 
 
-const Acts = () => {
+const Acts = ({ userRole: userRoleProp }) => {
   const [filteredActs, setFilteredActs] = useState([]);
   const {
     acts,
@@ -33,19 +33,35 @@ const Acts = () => {
     selectedAddress,
     setSelectedAddress,
   } = useContext(ShopContext);
-// Only use approved acts for filtering and display
-const user = JSON.parse(localStorage.getItem("user")); // safely get user from storage
-const userRole = user?.userRole || user?.role || "";   // handle either property name
+ // ---- role + test-flag helpers ----
+  const looksLikeTrue = (v) => v === true || v === "true" || v === 1 || v === "1";
+  const storedUser = (() => {
+    try { return JSON.parse(localStorage.getItem("user") || "{}"); } catch { return {}; }
+  })();
 
-const approvedActs = acts.filter(
-  (act) =>
-    (
-      act.status === "approved" ||
-      act.status === "Approved, changes pending"
-    ) &&
-    // hide test acts unless the logged-in user is an agent
-    (!act.isTest || userRole === "agent")
-);
+  // Prefer the prop from App; fall back to localStorage only if prop is missing
+  const effectiveUserRole = userRoleProp || storedUser?.userRole || storedUser?.role || "";
+
+  // Only use approved acts for filtering and display
+  const approvedActs = acts.filter((act) => {
+    const isApproved =
+      act.status === "approved" || act.status === "Approved, changes pending";
+
+   // Only use approved acts for filtering and display
+const approvedActs = acts.filter((act) => {
+  const isApproved =
+    act.status === "approved" || act.status === "Approved, changes pending";
+
+  // 🔍 Debug log: see what the test flag actually looks like
+  console.log("Act:", act.tscName || act.name, "isTest:", act.isTest, "effectiveUserRole:", effectiveUserRole);
+
+  // Hide test acts unless the logged-in user is an agent
+  if (effectiveUserRole === "agent") return isApproved;
+
+  // ✅ For non-agents, hide if act.isTest is true
+  return isApproved && act.isTest !== true;
+});
+
   // --- Add isLoading state for fetching acts ---
     const filterRunIdRef = useRef(0);
 const [initializing, setInitializing] = useState(true);
