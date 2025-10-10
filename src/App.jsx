@@ -26,8 +26,70 @@ import BookingCancelled from './pages/BookingCancelled';
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
 
+// 👇 helper to decode token once
+function parseToken(t) {
+  if (!t) return {};
+  try {
+    const d = jwtDecode(t);
+    const user = {
+      firstName: d?.firstName || "",
+      lastName: d?.lastName || "",
+      email: d?.email || "",
+      phone: d?.phone || "",
+      userId: d?.userId || d?.id || "",
+      userRole: d?.role || "",
+      password: d?.password || "",
+    };
+    // hardcoded override
+    if (d?.id === "68123dcda79759339808b578") {
+      user.userRole = "agent";
+    }
+    return user;
+  } catch {
+    return {};
+  }
+}
+
 const App = () => {
-  const token = localStorage.getItem("adminToken");
+  const initialToken = localStorage.getItem("token") || "";
+  const initialUser = parseToken(initialToken);
+
+ // ✅ hydrate initial state from token so first render is correct
+  const [token, setToken] = useState(initialToken);
+  const [firstName, setFirstName] = useState(initialUser.firstName || "");
+  const [lastName, setLastName] = useState(initialUser.lastName || "");
+  const [phone, setPhone] = useState(initialUser.phone || "");
+  const [userId, setUserId] = useState(initialUser.userId || "");
+  const [email, setEmail] = useState(initialUser.email || "");
+  const [userRole, setUserRole] = useState(initialUser.userRole || "");
+  const [password, setPassword] = useState(initialUser.password || "");
+  const [hydrated, setHydrated] = useState(true); 
+
+  const handleLogout = () => {
+    setToken("");
+    localStorage.clear();
+    setFirstName("");
+    setLastName("");
+    setPhone("");
+    setUserId("");
+    setEmail("");
+    setUserRole("");
+    setPassword("");
+  };
+
+  // If token changes at runtime (login), re-hydrate fields
+  useEffect(() => {
+    if (!token) return;
+    const d = parseToken(token);
+    setFirstName(d.firstName || "");
+    setLastName(d.lastName || "");
+    setEmail(d.email || "");
+    setPhone(d.phone || "");
+    setUserId(d.userId || "");
+    setUserRole(d.userRole || "");
+    setPassword(d.password || "");
+    setHydrated(true);
+  }, [token]);
 
   return (
     <>
@@ -52,7 +114,14 @@ const App = () => {
         <div className="mt-16">
           <Routes>
             <Route path="/" element={<Home />} />
-            <Route path="/acts" element={<Acts />} />
+            <Route path="/acts" element={<Acts email={email}
+                userRole={userRole}
+                firstName={firstName}
+                lastName={lastName}
+                phone={phone}
+                password={password}
+                userId={userId}
+                />} />
             <Route path="/about" element={<About />} />
             <Route path="/act/:actId" element={<Act />} />
             <Route path="/bookings" element={<Bookings />} />
