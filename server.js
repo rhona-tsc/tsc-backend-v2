@@ -65,27 +65,28 @@ const port = process.env.PORT || 4000;
 /*                                 CORS FIRST                                 */
 /* -------------------------------------------------------------------------- */
 
-// replace CORS_WHITELIST + origin() with this:
+
+// Host-based allowlist (safer than full-origin string matching)
 const ALLOWED_HOSTS = new Set([
+  'localhost:5173',
+  'localhost:5174',
   'tsc2025.netlify.app',
+  'meek-biscotti-8d5020.netlify.app', // preview site
   'tsc2025-admin-portal.netlify.app',
-  'meek-biscotti-8d5020.netlify.app', // current preview
   'tsc-backend-v2.onrender.com',
   'www.thesupremecollective.co.uk',
   'api.thesupremecollective.co.uk',
-  'localhost:5173',
-  'localhost:5174',
 ]);
 
 function isAllowedOrigin(origin) {
-  if (!origin) return true; // curl / same-origin
+  if (!origin) return true; // allow same-origin / curl
   try {
     const { host, protocol } = new URL(origin);
     if (!/^https?:$/.test(protocol)) return false;
-    // allow your known hosts, and optionally any Netlify preview:
     return (
       ALLOWED_HOSTS.has(host) ||
-      host.endsWith('.netlify.app') // <— enable if you want all Netlify previews
+      host.endsWith('.netlify.app') || // allow other Netlify previews if needed
+      host.includes('localhost')
     );
   } catch {
     return false;
@@ -330,11 +331,10 @@ app.use("/api/upload", uploadRoutes);
 /* -------------------------------------------------------------------------- */
 /*                                   Server                                   */
 /* -------------------------------------------------------------------------- */
-// after all routes, before app.listen
+// Global error handler (returns JSON)
 app.use((err, req, res, next) => {
   console.error('🔥 Unhandled error:', err?.stack || err);
-  // cors() already set ACAO earlier if the origin was allowed
-  if (res.headersSent) return;
+  if (res.headersSent) return; // if headers already sent, let Express finish
   res.status(err.status || 500).json({ success: false, message: err.message || 'Server error' });
 });
 
