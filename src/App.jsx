@@ -25,6 +25,7 @@ import BookingSuccess from './pages/BookingSuccess';
 import BookingCancelled from './pages/BookingCancelled';
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
+import { useState } from "react";
 
 // 👇 helper to decode token once
 function parseToken(t) {
