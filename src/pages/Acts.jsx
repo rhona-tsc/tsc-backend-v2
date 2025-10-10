@@ -33,11 +33,19 @@ const Acts = () => {
     selectedAddress,
     setSelectedAddress,
   } = useContext(ShopContext);
-  // Only use approved acts for filtering and display
-  const approvedActs = acts.filter(
-    (act) =>
-      act.status === "approved" || act.status === "Approved, changes pending"
-  );
+// Only use approved acts for filtering and display
+const user = JSON.parse(localStorage.getItem("user")); // safely get user from storage
+const userRole = user?.userRole || user?.role || "";   // handle either property name
+
+const approvedActs = acts.filter(
+  (act) =>
+    (
+      act.status === "approved" ||
+      act.status === "Approved, changes pending"
+    ) &&
+    // hide test acts unless the logged-in user is an agent
+    (!act.isTest || userRole === "agent")
+);
   // --- Add isLoading state for fetching acts ---
     const filterRunIdRef = useRef(0);
 const [initializing, setInitializing] = useState(true);
