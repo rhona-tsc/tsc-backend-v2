@@ -42,10 +42,6 @@ const Acts = ({ userRole: userRoleProp }) => {
   // Prefer the prop from App; fall back to localStorage only if prop is missing
   const effectiveUserRole = userRoleProp || storedUser?.userRole || storedUser?.role || "";
 
-  // Only use approved acts for filtering and display
-  const approvedActs = acts.filter((act) => {
-    const isApproved =
-      act.status === "approved" || act.status === "Approved, changes pending";
 
    // Only use approved acts for filtering and display
 const approvedActs = acts.filter((act) => {
