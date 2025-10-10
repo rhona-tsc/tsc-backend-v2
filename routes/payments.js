@@ -6,15 +6,15 @@ import bodyParser from "body-parser";
 
 const router = express.Router();
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_V2, { apiVersion: "2024-06-20" });
 
-// Runtime guard: warn if STRIPE_SECRET_KEY is missing or invalid
+// Runtime guard: warn if STRIPE_SECRET_KEY_V2 is missing or invalid
 if (
-  !process.env.STRIPE_SECRET_KEY ||
-  !/^sk_(test|live)_/.test(String(process.env.STRIPE_SECRET_KEY))
+  !process.env.STRIPE_SECRET_KEY_V2 ||
+  !/^sk_(test|live)_/.test(String(process.env.STRIPE_SECRET_KEY_V2))
 ) {
   console.warn(
-    "⚠️ STRIPE_SECRET_KEY is missing or invalid. It must start with sk_test_ or sk_live_. Checkout will fail with 401."
+    "⚠️ STRIPE_SECRET_KEY_V2 is missing or invalid. It must start with sk_test_ or sk_live_. Checkout will fail with 401."
   );
 }
 

@@ -3,7 +3,7 @@ import { startOfDay, subDays, subHours, isValid, parseISO } from "date-fns";
 import Booking from "../models/bookingModel.js";
 import { enqueueReminder } from "../services/remindersQueue.js"; // BullMQ / Agenda / node-cron wrapper
 import Stripe from "stripe";
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_V2, { apiVersion: "2024-06-20" });
 
 
 const looksLikeObjectId = (v) => typeof v === "string" && /^[0-9a-f]{24}$/i.test(v);

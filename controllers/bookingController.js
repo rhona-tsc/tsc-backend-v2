@@ -683,7 +683,7 @@ async function pingLineupForAllocation({ actId, lineupId, dateISO, venueShort, d
   }
 }
 
-const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY_V2);
 
 
 // ---------------- helpers ----------------
