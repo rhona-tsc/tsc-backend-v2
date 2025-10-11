@@ -1052,7 +1052,7 @@ async function upsertCalendarForConfirmedBooking({
 // ---------------- Stripe checkout → pending booking ----------------
 
 export const createCheckoutSession = async (req, res) => {
-    logStart("createCheckoutSession", );
+  logStart("createCheckoutSession");
 
   try {
     const {
@@ -1211,6 +1211,9 @@ export const createCheckoutSession = async (req, res) => {
 
     const bookingId = makeBookingId(date, customer?.lastName || "TSC");
 
+    // ✅ Adjust deposit logic for full payments
+    const fixedDeposit = finalMode === "full" ? 0 : depositGross;
+
     await Booking.create({
       bookingId,
 
@@ -1233,7 +1236,7 @@ export const createCheckoutSession = async (req, res) => {
       userEmail,
       totals: {
         fullAmount: grossTotal,
-        depositAmount: depositGross,
+        depositAmount: fixedDeposit, // ✅ fixes £41 issue
         chargedAmount: chargeGross,
         chargeMode: finalMode,
       },

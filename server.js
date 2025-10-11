@@ -98,7 +98,7 @@ const corsOptions = {
     isAllowedOrigin(origin) ? cb(null, true) : cb(new Error(`CORS blocked origin: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'token', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'token', 'X-Requested-With', "x-eventsheet-client", "x-requested-with"],
   credentials: true,
   optionsSuccessStatus: 204,
 };
