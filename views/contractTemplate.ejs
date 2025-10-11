@@ -81,8 +81,54 @@
       <div style="flex:1; min-width:0;">
         <div>
           <strong><%= it.actName %></strong>
+          <% // Enhanced lineup label with instruments
+            // Helper to extract, order, and join instruments (vocals first, drums last, remove duplicates)
+            function getInstrumentList(bandMembers) {
+              if (!Array.isArray(bandMembers)) return [];
+              // Extract all instruments, flatten if array
+              let all = [];
+              bandMembers.forEach(function(m) {
+                if (!m) return;
+                let inst = m.instrument || m.role || "";
+                if (Array.isArray(inst)) {
+                  all = all.concat(inst);
+                } else if (typeof inst === "string") {
+                  // Split by comma or &
+                  inst.split(/[,&]/).forEach(function(i) {
+                    let s = i.trim();
+                    if (s) all.push(s);
+                  });
+                }
+              });
+              // Normalize, remove empty, dedupe (case-insensitive)
+              let seen = {};
+              let deduped = [];
+              all.forEach(function(i) {
+                let norm = i.charAt(0).toUpperCase() + i.slice(1).toLowerCase();
+                // Alias: "Lead Vocalist" => "Lead Vocal", "Vocals" => "Vocal", "Singer" => "Vocal"
+                if (/singer|vocals?/i.test(norm)) norm = "Lead Vocal";
+                if (/drums?/i.test(norm)) norm = "Drums";
+                if (/bass/i.test(norm)) norm = "Bass";
+                if (/guitar/i.test(norm)) {
+                  if (/bass/i.test(norm)) norm = "Bass"; // "Bass Guitar" as "Bass"
+                  else norm = "Guitar";
+                }
+                if (!seen[norm]) {
+                  seen[norm] = 1;
+                  deduped.push(norm);
+                }
+              });
+              // Order: vocals first, drums last
+              let vocals = deduped.filter(i => /vocal/i.test(i));
+              let drums = deduped.filter(i => /drum/i.test(i));
+              let others = deduped.filter(i => !/vocal/i.test(i) && !/drum/i.test(i));
+              return [].concat(vocals, others, drums);
+            }
+            var instrumentsArr = getInstrumentList(it.bandMembers);
+            var instrumentsStr = instrumentsArr.length ? instrumentsArr.join(", ").replace(/, ([^,]*)$/, ' & $1') : "";
+          %>
           <% if (it.lineupLabel) { %>
-            <span> — <%= it.lineupLabel %></span>
+            <span> — <%= it.lineupLabel %><% if (instrumentsStr) { %> (<%= instrumentsStr %>)<% } %></span>
           <% } %>
         </div>
 
