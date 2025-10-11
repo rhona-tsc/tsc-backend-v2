@@ -1684,12 +1684,12 @@ const manualCreateBooking = async (req, res) => {
     // ⬇️ normalize perf & patch items (mirrors the other flows)
     const normalizedPerf = (performanceTimes && typeof performanceTimes === 'object')
       ? {
-          arrivalTime: performanceTimes.arrivalTime || '',
-          setupAndSoundcheckedBy: performanceTimes.setupAndSoundcheckedBy || '',
-          startTime: performanceTimes.startTime || '',
-          finishTime: performanceTimes.finishTime || '',
+          arrivalTime: performanceTimes.arrivalTime || undefined,
+          setupAndSoundcheckedBy: performanceTimes.setupAndSoundcheckedBy || undefined,
+          startTime: performanceTimes.startTime || undefined,
+          finishTime: performanceTimes.finishTime || undefined,
           finishDayOffset: Number(performanceTimes.finishDayOffset || 0) || 0,
-          paLightsFinishTime: performanceTimes.paLightsFinishTime || '',
+          paLightsFinishTime: performanceTimes.paLightsFinishTime || undefined,
           paLightsFinishDayOffset: Number(performanceTimes.paLightsFinishDayOffset || 0) || 0,
         }
       : null;
