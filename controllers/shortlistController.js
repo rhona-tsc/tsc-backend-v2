@@ -65,6 +65,7 @@ export const shortlistActAndTrack = async (req, res) => {
 
     if (!user.shortlistedActs.includes(actId)) {
       user.shortlistedActs.push(actId);
+      if (!user.lastName) user.lastName = "Unknown";
       await user.save();
       await Act.findByIdAndUpdate(actId, { $inc: { timesShortlisted: 1 } });
     }
@@ -157,42 +158,6 @@ console.log("🎤 Checking vocalist contact →", {
   }
 }
 
-    for (const v of vocalists) {
-const phone = v.phoneNormalized;
-      try {
-        await sendWhatsAppMessage({
-          to: phone,
-          contentSid: process.env.TWILIO_ENQUIRY_SID,
-          variables: {
-            1: v.firstName || "Musician",
-            2: new Date(selectedDate).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric" }),
-            3: selectedAddress,
-            4: act?.tscName || act?.name || "",
-          },
-        });
-        console.log("📤 Enquiry WhatsApp sent to", phone);
-      } catch (waErr) {
-        console.warn("⚠️ WA enquiry failed, trying SMS:", waErr.message);
-        if (phone)
-          await sendSMSMessage(phone, `Availability check: ${act?.tscName || act?.name} on ${selectedDate} at ${selectedAddress}`);
-      }
-
-      // Calendar hold (optional)
-      if (v.email && selectedDate) {
-        try {
-          await createCalendarInvite({
-            actId,
-            dateISO: selectedDate,
-            email: v.email,
-            summary: `TSC: Enquiry – ${act?.tscName}`,
-            description: `Enquiry: ${selectedAddress}`,
-            extendedProperties: { line: `Availability check for ${act?.tscName}` },
-          });
-        } catch (calErr) {
-          console.warn("⚠️ Calendar invite skipped:", calErr.message);
-        }
-      }
-    }
 
     console.log("✅ Shortlist + enquiry notifications complete");
     return res.json({ success: true });
