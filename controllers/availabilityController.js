@@ -946,12 +946,7 @@ const act = await Act.findById(actId).lean();
       return res.status(404).json({ success: false, message: "Act not found" });
 
     const formattedDate = formatWithOrdinal(date);
-    const shortAddress = (address || "")
-      .split(",")
-      .slice(-2)
-      .join(",")
-      .replace(/,\s*UK$/i, "")
-      .trim();
+   
 
       const { outcode, county: selectedCounty } = countyFromAddress(address);
 
