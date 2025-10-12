@@ -10,7 +10,7 @@ import { createCalendarInvite } from './googleController.js';
 
 /// old code start
 import Musician from '../models/musicianModel.js';
-import Availability from '../models/availability.js';
+import Availability from '../models/availabilityModel.js';
 import EnquiryMessage from '../models/EnquiryMessage.js';
 
 
