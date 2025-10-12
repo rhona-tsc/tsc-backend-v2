@@ -78,6 +78,15 @@ export const shortlistActAndTrack = async (req, res) => {
     const county = selectedCounty || (selectedAddress?.split(",").slice(-2)[0]?.trim() || "");
     const potentialGross = base ? Math.ceil(base / 0.75) : 0;
 
+    console.log("📋 Enquiry upsert payload", {
+  actName: act?.tscName,
+  selectedLineup: lineup?._id,
+  selectedDate,
+  address: selectedAddress,
+  county,
+  user: { id: user._id, firstName: user.firstName, lastName: user.lastName },
+});
+
     await upsertEnquiryRowFromShortlist({
       actName: act?.tscName || act?.name || "",
       selectedLineup: lineup || null,
