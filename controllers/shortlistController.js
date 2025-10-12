@@ -107,7 +107,24 @@ const vocalists = (lineup?.bandMembers || []).filter(m =>
 );
 
 for (const v of vocalists) {
-  const phone = v.phone?.startsWith("+") ? v.phone : `+44${v.phone?.replace(/^0/, "")}`;
+const rawPhone = v.phone || v.phoneNumber || v.phoneNormalized || "";
+const phone = rawPhone.startsWith("+")
+  ? rawPhone.replace(/\s+/g, "")
+  : rawPhone
+  ? `+44${rawPhone.replace(/^0/, "").replace(/\s+/g, "")}`
+  : null;
+
+console.log("🎤 Checking vocalist contact →", {
+  name: `${v.firstName || ""} ${v.lastName || ""}`.trim(),
+  instrument: v.instrument || "",
+  rawPhone,
+  formattedPhone: phone,
+  email: v.email || null,
+});
+if (!phone) {
+  console.warn(`⚠️ Skipping ${v.firstName || "Unknown"} — invalid or missing phone number`);
+  continue;
+}
   
   console.log("🎤 Checking vocalist contact →", {
     name: `${v.firstName || ""} ${v.lastName || ""}`.trim(),
