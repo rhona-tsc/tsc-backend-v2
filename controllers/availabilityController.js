@@ -945,7 +945,6 @@ const act = await Act.findById(actId).lean();
     if (!act)
       return res.status(404).json({ success: false, message: "Act not found" });
 
-    const dateISO = new Date(date).toISOString().slice(0, 10);
     const formattedDate = formatWithOrdinal(date);
     const shortAddress = (address || "")
       .split(",")
