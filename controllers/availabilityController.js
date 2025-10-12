@@ -166,7 +166,10 @@ async function _finalFeeForMember({ act, lineup, members, member, address, dateI
   return Math.max(0, Math.ceil(Number(base || 0) + Number(travelFee || 0)));
 }
 
-// Send the booking-request message to ALL performers in a lineup
+
+
+
+// Send the booking-request message to ALL performers in a lineup //whatsapp going to band working
 export async function sendBookingRequestToLineup({ actId, lineupId, date, address }) {
   const act = await Act.findById(actId).lean();
   if (!act) { console.warn("sendBookingRequestToLineup: no act", actId); return { sent: 0 }; }
@@ -574,37 +577,6 @@ function findPersonByMusicianId(act, musicianId) {
 }
 
 
-
-async function resolveMusicianPhoto(person) {
-  if (!person) return "";
-
-  // 1) Prefer any image URLs directly present on the matched person (member or deputy)
-  const direct = getPictureUrlFrom(person || {});
-  if (direct) return direct;
-
-  // 2) Only look up in Musician by strong identifiers (musicianId or email).
-  //    Do NOT search by phone — that can collide with the core member's phone and return the wrong photo.
-  try {
-    const query = [];
-    if (person.musicianId) query.push({ _id: person.musicianId });
-    if (person.email) query.push({ email: person.email });
-    if (person.emailAddress) query.push({ email: person.emailAddress });
-
-    if (!query.length) return "";
-
-    const mus = await Musician.findOne({ $or: query })
-      .select("musicianProfileImageUpload profileImage profilePicture.url photoUrl imageUrl")
-      .lean();
-
-    const fromMusician = getPictureUrlFrom(mus || {});
-
-    return fromMusician || "";
-  } catch (e) {
-    console.warn("⚠️ resolveMusicianPhoto failed:", e?.message || e);
-    return "";
-  }
-}
-
 // --- New helpers for badge rebuilding ---
 const isVocalRoleGlobal = (role = "") => {
   const r = String(role || "").toLowerCase();
@@ -938,14 +910,38 @@ export const triggerAvailabilityRequest = async (req, res) => {
   try {
     console.log("🛎 triggerAvailabilityRequest", req.body);
 
-    const { actId, lineupId, date, address } = req.body;
-    if (!actId || !date || !address) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing actId/date/address" });
-    }
+const { actId, lineupId, date, address } = req.body;
+if (!actId || !date || !address) {
+  return res
+    .status(400)
+    .json({ success: false, message: "Missing actId/date/address" });
+}
 
-    const act = await Act.findById(actId).lean();
+// 🧩 Guard: prevent duplicate trigger for same act/date/address
+const dateISO = new Date(date).toISOString().slice(0, 10);
+const shortAddress = (address || "")
+  .split(",")
+  .slice(-2)
+  .join(",")
+  .replace(/,\s*UK$/i, "")
+  .trim();
+
+const existingEnquiry = await AvailabilityModel.findOne({
+  actId,
+  dateISO,
+  formattedAddress: new RegExp(shortAddress, "i"), // case-insensitive partial match
+}).lean();
+
+if (existingEnquiry) {
+  console.log("⛔ Availability already triggered for this act/date/address — skipping send");
+  return res.json({
+    success: false,
+    message: "Availability already triggered for this act/date/address",
+  });
+}
+
+// Continue if no duplicate found
+const act = await Act.findById(actId).lean();
     if (!act)
       return res.status(404).json({ success: false, message: "Act not found" });
 
@@ -1003,15 +999,7 @@ export const triggerAvailabilityRequest = async (req, res) => {
       return v;
     };
 
-    // Normalise to E.164-ish (+44...) for lookups against Musician.phoneNormalized
-function normalizeToE164(raw = "") {
-  let s = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
-  if (!s) return "";
-  if (s.startsWith("+")) return s;
-  if (s.startsWith("07")) return s.replace(/^0/, "+44");
-  if (s.startsWith("44")) return `+${s}`;
-  return s;
-}
+
 
     // 1) Availability state for this act/date across all contacts
     const prevRows = await AvailabilityModel.find({ actId, dateISO })
@@ -1243,7 +1231,7 @@ if (!force && availabilityDoc?.messageSidOut) {
   }
 }
 
-  // Try WA then fallback to SMS
+// --- Build unified copy for both WA + SMS ---
 const smsBody = buildAvailabilitySMS({
   firstName: firstNameOf(lead),
   formattedDate,
@@ -1253,21 +1241,111 @@ const smsBody = buildAvailabilitySMS({
   actName: act.tscName || act.name || "the act",
 });
 
-  const sendRes = await sendWhatsAppMessage({
-    to: phone,
-    templateParams: {
-      FirstName: firstNameOf(lead),
-      FormattedDate: formattedDate,
-      FormattedAddress: shortAddress,
-      Fee: String(finalFee),
-      Duties: lead.instrument || "Lead Vocal",
-      ActName: act.tscName || act.name || "the band",
-      MetaActId: String(act._id || ""),
-      MetaISODate: dateISO,
-      MetaAddress: shortAddress,
-    },
-    smsBody,
+// Use the enquiry template SID you already created
+const contentSid = process.env.TWILIO_ENQUIRY_SID;
+
+// WhatsApp template variables: numbered 1-6
+const variables = {
+  "1": firstNameOf(lead),
+  "2": formattedDate,
+  "3": shortAddress,
+  "4": String(finalFee),
+  "5": lead.instrument || "performance",
+  "6": act.tscName || act.name || "the band",
+};
+
+let sendRes = null;
+try {
+  // 🟢 Try WhatsApp first
+  sendRes = await sendWhatsAppMessage({
+    to: `whatsapp:${phone}`,
+    contentSid,
+    variables,
+    smsBody, // stored for webhook SMS fallback
   });
+
+  console.log("📣 Availability request (WA) sent", {
+    to: phone,
+    duties: lead.instrument,
+    fee: finalFee,
+    sid: sendRes?.sid,
+  });
+} catch (waErr) {
+  console.warn("⚠️ WA send failed — trying SMS fallback", {
+    to: phone,
+    err: waErr?.message || waErr,
+  });
+
+  // 🧠 SMS cooldown rule: only one pending SMS per musician
+  const pendingSMS = await AvailabilityModel.findOne({
+    phone,
+    contactChannel: "sms",
+    reply: null,
+    createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // within 24h
+  }).lean();
+
+  if (pendingSMS) {
+    console.log("⏸️ Skipping SMS — awaiting reply from earlier enquiry:", {
+      phone,
+      lastSent: pendingSMS.createdAt,
+    });
+    sendRes = { channel: "sms", status: "skipped_pending" };
+  } else {
+    try {
+      await sendSMSMessage(phone, smsBody);
+      sendRes = { channel: "sms", status: "sent" };
+      console.log("✅ SMS fallback sent", { to: phone });
+    } catch (smsErr) {
+      console.warn("❌ SMS fallback also failed", {
+        to: phone,
+        err: smsErr?.message || smsErr,
+      });
+      sendRes = { channel: "none", status: "failed" };
+    }
+  }
+}
+
+// Update DB so webhook / dashboards stay in sync
+await AvailabilityModel.updateOne(
+  { _id: availabilityDoc._id },
+  {
+    $set: {
+      status: sendRes?.status || "queued",
+      messageSidOut: sendRes?.sid || null,
+      contactChannel: sendRes?.channel || "whatsapp",
+      actName: act.tscName || act.name || "",
+      musicianName: `${lead.firstName || ""} ${lead.lastName || ""}`.trim(),
+      contactName: firstNameOf(lead),
+      duties: lead.instrument || "Lead Vocal",
+      fee: String(finalFee),
+      formattedDate,
+      formattedAddress: shortAddress,
+      updatedAt: new Date(),
+    },
+  }
+);
+
+await EnquiryMessage.create({
+  enquiryId,
+  actId: act._id,
+  lineupId: lineup?._id || lineup?.lineupId || null,
+  musicianId: lead._id || null,
+  phone,
+  duties: lead.instrument || "Lead Vocal",
+  fee: String(finalFee),
+  formattedDate,
+  formattedAddress: shortAddress,
+  messageSid: sendRes?.sid || null,
+  status: mapTwilioToEnquiryStatus(sendRes?.status),
+  meta: {
+    actName: act.tscName || act.name,
+    selectedCounty,
+    isNorthernGig: false,
+    MetaActId: String(act._id || ""),
+    MetaISODate: dateISO,
+    MetaAddress: shortAddress,
+  },
+});
 
   await AvailabilityModel.updateOne(
     { _id: availabilityDoc._id },

@@ -2227,198 +2227,250 @@ export const ensureEmergencyContact = async (req, res) => {
 
 
 
-const completeBookingV2 = async (req, res) => {
-    logStart("completeBookingV2", );
+export const completeBookingV2 = async (req, res) => {
+  logStart("completeBookingV2");
 
   const t0 = Date.now();
   try {
     const { session_id } = req.query;
     console.log("[completeBookingV2] ▶ start", { session_id });
 
+    if (!session_id) {
+      console.error("[completeBookingV2] ❌ Missing session_id in query");
+      return res.status(400).json({ message: "Missing session_id." });
+    }
+
+    // 🧾 Try to retrieve Stripe session for verification
+    let stripeSession = null;
+    try {
+      stripeSession = await stripe.checkout.sessions.retrieve(session_id);
+      console.log("[completeBookingV2] ✅ Stripe session retrieved:", stripeSession?.id);
+    } catch (err) {
+      console.warn("[completeBookingV2] ⚠️ Stripe session retrieval failed:", err?.message || err);
+    }
+
+    // 🗂️ Locate booking/order record by sessionId
     const order = await Order.findOne({ sessionId: session_id });
     if (!order) {
-      console.error("[completeBookingV2] ✖ no order for session", { session_id });
+      console.error("[completeBookingV2] ✖ No Order found for session:", session_id);
       return res.status(404).json({ message: "Booking not found." });
     }
 
-    // hard idempotency guard
+    // Prevent re-execution if already completed
     if (order?.completionRan === true || (order?.status === "confirmed" && order?.pdfUrl)) {
-      console.log("[completeBookingV2] ℹ already completed; skipping side-effects");
+      console.log("[completeBookingV2] ℹ Already completed; skipping side-effects");
       return res.status(200).send("Already completed.");
     }
 
-    // mark BEFORE side-effects
+    // Mark confirmed before triggering side effects
     order.status = "confirmed";
     order.completionRan = true;
     order.completedAt = new Date();
+    if (stripeSession?.payment_intent) {
+      order.stripePaymentId = stripeSession.payment_intent;
+    }
     await order.save();
 
-    // board
-    try { await upsertBoardRowFromBooking(order); }
-    catch (e) { console.warn("[completeBookingV2] board upsert failed:", e?.message || e); }
+    // ✅ Board sync
+    try {
+      await upsertBoardRowFromBooking(order);
+    } catch (e) {
+      console.warn("[completeBookingV2] board upsert failed:", e?.message || e);
+    }
 
-    // client confirmation
+    // ✅ Client confirmation email
     try {
       const confirmedActName =
         order?.actsSummary?.[0]?.actTscName || order?.actsSummary?.[0]?.actName;
-      await sendClientBookingConfirmation({ booking: order, actName: confirmedActName });
-    } catch (e) { console.warn("[completeBookingV2] client confirm failed:", e?.message || e); }
-
-// --- Messaging: notify lineup (lead, manager, instrumentalists) ---
-try {
-  const actIdForCalc   = order?.actsSummary?.[0]?.actId   || order?.act;
-  const lineupIdForCalc= order?.actsSummary?.[0]?.lineupId|| order?.lineupId;
-  const dateISO        = new Date(order?.date || order?.eventDate).toISOString().slice(0,10);
-
-  // Short address for copy
-  const shortAddr = (order?.venueAddress || order?.venue || "")
-    .split(",").slice(-2).join(",").replace(/,\s*UK$/i,"").trim();
-
-  // Load act + lineup
-  const actDoc = actIdForCalc ? await Act.findById(actIdForCalc).lean() : null;
-  const allLineups = Array.isArray(actDoc?.lineups) ? actDoc.lineups : [];
-  const lineupDoc = allLineups.find(l =>
-    String(l._id) === String(lineupIdForCalc) || String(l.lineupId) === String(lineupIdForCalc)
-  ) || allLineups[0];
-
-  if (!actDoc || !lineupDoc) {
-    console.warn("[completeBookingV2] lineup notify skipped (no act/lineup)", { actIdForCalc, lineupIdForCalc });
-  } else {
-    const actName     = actDoc?.tscName || actDoc?.name || "the band";
-    const formattedDate = formatWithOrdinal(dateISO);
-
-    // Helper(s)
-    const normalizePhone = (raw="") => {
-      let v = String(raw).replace(/^whatsapp:/i,"").replace(/\s+/g,"");
-      if (!v) return "";
-      if (v.startsWith("+")) return v;
-      if (v.startsWith("07")) return v.replace(/^0/,"+44");
-      if (v.startsWith("44")) return `+${v}`;
-      return v;
-    };
-    const firstNameOf = (p={}) => String(p?.firstName || p?.givenName || p?.name || "there").split(/\s+/)[0];
-
-    const members = Array.isArray(lineupDoc.bandMembers) ? lineupDoc.bandMembers : [];
-
-    // Compute a fallback per-member fee (ceil of gross/performers) – used if member.fee unset
-    const perMemberFallback = computePerMemberFee({ lineup: lineupDoc, booking: order }, "completeBookingV2");
-
-    // Send to everyone except admin rows; manager gets “Band Management” + manager fee if present
-    for (const member of members) {
-      const roleLower = String(member?.instrument || "").trim().toLowerCase();
-      if (!roleLower || roleLower === "admin") continue;
-
-      // Phone resolve
-      let phone = normalizePhone(member?.phoneNumber || member?.phone || "");
-      if (!phone && (member?.musicianId || member?._id)) {
-        try {
-          const mus = await Musician.findById(member.musicianId || member._id)
-            .select("phone phoneNumber").lean();
-          phone = normalizePhone(mus?.phone || mus?.phoneNumber || "");
-        } catch {}
-      }
-      if (!phone) continue;
-
-      // Duties + fee (manager special-case)
-      const roles = Array.isArray(member?.additionalRoles) ? member.additionalRoles : [];
-      const isManager = /\b(manager|management)\b/i.test(String(member?.instrument||"")) ||
-                        /\b(manager|management)\b/i.test(String(member?.title||"")) ||
-                        roles.some(r => /\b(manager|management)\b/i.test(String(r?.role||r?.title||"")));
-      const duties = isManager ? "Band Management" : (member?.instrument || "performance");
-
-      let fee = 0;
-      if (isManager) {
-        const mgrRole = roles.find(r => /\b(manager|management)\b/i.test(String(r?.role||r?.title||"")));
-        const add = Number(mgrRole?.additionalFee);
-        fee = Number.isFinite(add) && add > 0 ? add : Number(member?.fee || 0);
-      } else {
-        try {
-          const f = await computeMemberFeeDetailed({ member, lineup: lineupDoc, booking: order, act: actDoc }, "completeBookingV2");
-          fee = Number.isFinite(f) && f > 0 ? f : perMemberFallback;
-        } catch {
-          fee = perMemberFallback;
-        }
-      }
-      const feeText = String(Math.round(fee));
-
-      const firstName = firstNameOf(member);
-      const smsBody =
-        `Hi ${firstName}, you've received a booking request for ${formattedDate} in ${shortAddr} ` +
-        `with ${actName} for ${duties} at a rate of £${feeText}. Please reply YES or NO. 🤍 TSC`;
-
-      // 1) Upsert availability row for tracking + fallback
-      try {
-        const enquiryId = `${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-        await AvailabilityModel.findOneAndUpdate(
-          { actId: actIdForCalc, dateISO, phone },
-          {
-            $setOnInsert: {
-              enquiryId,
-              actId: actIdForCalc,
-              lineupId: lineupDoc?._id || lineupDoc?.lineupId || null,
-              musicianId: member?._id || member?.musicianId || null,
-              phone,
-              duties,
-              formattedDate: formattedDate,
-              formattedAddress: shortAddr,
-              fee: feeText,
-              reply: null,
-              v2: true,
-              createdAt: new Date(),
-              actName,
-              musicianName: `${member.firstName||""} ${member.lastName||""}`.trim(),
-              contactName: firstName,
-              dateISO
-            },
-            $set: { updatedAt: new Date(), status: "queued", smsBody }
-          },
-          { upsert: true }
-        );
-      } catch (e) {
-        console.warn("[completeBookingV2] avail upsert failed", e?.message || e);
-      }
-
-      // 2) Send WA with SMS fallback (your utils store smsBody for webhook fallback)
-      try {
-        await sendWhatsAppMessage({
-          to: `whatsapp:${phone}`,
-          contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
-          variables: { "1": firstName, "2": formattedDate, "3": shortAddr, "4": duties, "5": actName, "6": feeText },
-          smsBody,
-        });
-        console.log("📣 Booking-request (WA) sent", { to: phone, duties, feeUsed: feeText });
-      } catch (e) {
-        console.warn("⚠️ WA failed, fallback to SMS", { to: phone, err: e?.message || e });
-        try {
-          await sendWAOrSMS({ to: phone, smsBody }); // Twilio messaging service
-          console.log("📣 Booking-request (SMS) sent", { to: phone, duties, feeUsed: feeText });
-        } catch (ee) {
-          console.warn("❌ Booking-request failed", { to: phone, err: ee?.message || ee });
-        }
-      }
-    }
-
-    // After messages: create/replace “Confirmed Booking” calendar event and invite all members who have emails
-    try {
-      const attendees = members.map(m => {
-        const em = m?.email || m?.emailAddress;
-        return em ? { email: em, name: `${m.firstName||""} ${m.lastName||""}`.trim() } : null;
-      }).filter(Boolean);
-      await createOrReplaceBookingInvite({
-        actId: actIdForCalc,
-        lineup: lineupDoc,
+      await sendClientBookingConfirmation({
         booking: order,
-        attendees,
+        actName: confirmedActName,
       });
     } catch (e) {
-      console.warn("[completeBookingV2] calendar create/replace failed:", e?.message || e);
+      console.warn("[completeBookingV2] client confirm failed:", e?.message || e);
     }
-  }
-} catch (e) {
-  console.warn("[completeBookingV2] lineup notify failed:", e?.message || e);
-}
 
-    // contract render + upload + email
+    // ✅ Notify lineup (lead, manager, instrumentalists)
+    try {
+      const actIdForCalc = order?.actsSummary?.[0]?.actId || order?.act;
+      const lineupIdForCalc = order?.actsSummary?.[0]?.lineupId || order?.lineupId;
+      const dateISO = new Date(order?.date || order?.eventDate).toISOString().slice(0, 10);
+
+      const shortAddr = (order?.venueAddress || order?.venue || "")
+        .split(",")
+        .slice(-2)
+        .join(",")
+        .replace(/,\s*UK$/i, "")
+        .trim();
+
+      const actDoc = actIdForCalc ? await Act.findById(actIdForCalc).lean() : null;
+      const allLineups = Array.isArray(actDoc?.lineups) ? actDoc.lineups : [];
+      const lineupDoc =
+        allLineups.find(
+          (l) =>
+            String(l._id) === String(lineupIdForCalc) ||
+            String(l.lineupId) === String(lineupIdForCalc)
+        ) || allLineups[0];
+
+      if (!actDoc || !lineupDoc) {
+        console.warn("[completeBookingV2] lineup notify skipped (no act/lineup)", {
+          actIdForCalc,
+          lineupIdForCalc,
+        });
+      } else {
+        const actName = actDoc?.tscName || actDoc?.name || "the band";
+        const formattedDate = formatWithOrdinal(dateISO);
+
+        const normalizePhone = (raw = "") => {
+          let v = String(raw).replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+          if (!v) return "";
+          if (v.startsWith("+")) return v;
+          if (v.startsWith("07")) return v.replace(/^0/, "+44");
+          if (v.startsWith("44")) return `+${v}`;
+          return v;
+        };
+        const firstNameOf = (p = {}) =>
+          String(p?.firstName || p?.givenName || p?.name || "there").split(/\s+/)[0];
+
+        const members = Array.isArray(lineupDoc.bandMembers) ? lineupDoc.bandMembers : [];
+        const perMemberFallback = computePerMemberFee(
+          { lineup: lineupDoc, booking: order },
+          "completeBookingV2"
+        );
+
+        for (const member of members) {
+          const roleLower = String(member?.instrument || "").trim().toLowerCase();
+          if (!roleLower || roleLower === "admin") continue;
+
+          let phone = normalizePhone(member?.phoneNumber || member?.phone || "");
+          if (!phone && (member?.musicianId || member?._id)) {
+            try {
+              const mus = await Musician.findById(member.musicianId || member._id)
+                .select("phone phoneNumber")
+                .lean();
+              phone = normalizePhone(mus?.phone || mus?.phoneNumber || "");
+            } catch {}
+          }
+          if (!phone) continue;
+
+          const roles = Array.isArray(member?.additionalRoles) ? member.additionalRoles : [];
+          const isManager =
+            /\b(manager|management)\b/i.test(String(member?.instrument || "")) ||
+            roles.some((r) => /\b(manager|management)\b/i.test(String(r?.role || "")));
+
+          const duties = isManager
+            ? "Band Management"
+            : member?.instrument || "performance";
+
+          let fee = 0;
+          if (isManager) {
+            const mgrRole = roles.find((r) =>
+              /\b(manager|management)\b/i.test(String(r?.role || ""))
+            );
+            const add = Number(mgrRole?.additionalFee);
+            fee =
+              Number.isFinite(add) && add > 0
+                ? add
+                : Number(member?.fee || 0);
+          } else {
+            try {
+              const f = await computeMemberFeeDetailed(
+                { member, lineup: lineupDoc, booking: order, act: actDoc },
+                "completeBookingV2"
+              );
+              fee = Number.isFinite(f) && f > 0 ? f : perMemberFallback;
+            } catch {
+              fee = perMemberFallback;
+            }
+          }
+
+          const feeText = String(Math.round(fee));
+          const firstName = firstNameOf(member);
+
+          const smsBody = `Hi ${firstName}, you've received a booking request for ${formattedDate} in ${shortAddr} with ${actName} for ${duties} at a rate of £${feeText}. Please reply YES or NO. 🤍 TSC`;
+
+          try {
+            const enquiryId = `${Date.now()}_${Math.random()
+              .toString(36)
+              .slice(2, 7)}`;
+            await AvailabilityModel.findOneAndUpdate(
+              { actId: actIdForCalc, dateISO, phone },
+              {
+                $setOnInsert: {
+                  enquiryId,
+                  actId: actIdForCalc,
+                  lineupId: lineupDoc?._id || lineupDoc?.lineupId || null,
+                  musicianId: member?._id || member?.musicianId || null,
+                  phone,
+                  duties,
+                  formattedDate,
+                  formattedAddress: shortAddr,
+                  fee: feeText,
+                  reply: null,
+                  v2: true,
+                  createdAt: new Date(),
+                  actName,
+                  musicianName: `${member.firstName || ""} ${member.lastName || ""}`.trim(),
+                  contactName: firstName,
+                  dateISO,
+                },
+                $set: { updatedAt: new Date(), status: "queued", smsBody },
+              },
+              { upsert: true }
+            );
+          } catch (e) {
+            console.warn("[completeBookingV2] avail upsert failed:", e?.message || e);
+          }
+
+          // Try WA, fallback to SMS
+          try {
+            await sendWhatsAppMessage({
+              to: `whatsapp:${phone}`,
+              contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+              variables: {
+                "1": firstName,
+                "2": formattedDate,
+                "3": shortAddr,
+                "4": duties,
+                "5": actName,
+                "6": feeText,
+              },
+              smsBody,
+            });
+            console.log("📣 Booking-request (WA) sent", { to: phone, duties, feeUsed: feeText });
+          } catch (e) {
+            console.warn("⚠️ WA failed, fallback to SMS", { to: phone, err: e?.message || e });
+            try {
+              await sendWAOrSMS({ to: phone, smsBody });
+              console.log("📣 Booking-request (SMS) sent", { to: phone, duties, feeUsed: feeText });
+            } catch (ee) {
+              console.warn("❌ Booking-request failed", { to: phone, err: ee?.message || ee });
+            }
+          }
+        }
+
+        try {
+          const attendees = members
+            .map((m) => {
+              const em = m?.email || m?.emailAddress;
+              return em ? { email: em, name: `${m.firstName || ""} ${m.lastName || ""}`.trim() } : null;
+            })
+            .filter(Boolean);
+          await createOrReplaceBookingInvite({
+            actId: actIdForCalc,
+            lineup: lineupDoc,
+            booking: order,
+            attendees,
+          });
+        } catch (e) {
+          console.warn("[completeBookingV2] calendar create/replace failed:", e?.message || e);
+        }
+      }
+    } catch (e) {
+      console.warn("[completeBookingV2] lineup notify failed:", e?.message || e);
+    }
+
+    // ✅ Contract generation + upload + client email (unchanged)
     try {
       const templatePath = path.join(__dirname, "..", "views", "contractTemplate.ejs");
       const html = await ejs.renderFile(templatePath, {
@@ -2450,7 +2502,9 @@ try {
         async (error, result) => {
           if (!error && result?.secure_url) {
             order.pdfUrl = result.secure_url;
-            try { await order.save(); } catch {}
+            try {
+              await order.save();
+            } catch {}
             try {
               await BookingBoardItem.updateOne(
                 { bookingRef: order.bookingId },
@@ -2460,71 +2514,65 @@ try {
             } catch {}
           }
 
-          // email to client (best-effort)
           try {
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
-    });
-    const toList = [order?.userAddress?.email].filter(Boolean);
+            const transporter = nodemailer.createTransport({
+              service: "gmail",
+              auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
+            });
+            const toList = [order?.userAddress?.email].filter(Boolean);
 
-           const tscName =
-  (order?.actsSummary?.[0]?.tscName) ||
-  (order?.actsSummary?.[0]?.actName) ||
-  "the band";
+            const tscName =
+              order?.actsSummary?.[0]?.tscName ||
+              order?.actsSummary?.[0]?.actName ||
+              "the band";
 
-const eventDate = new Date(order?.date || order?.eventDate || Date.now());
-const fmt = (d) => d.toLocaleDateString("en-GB", {
-  weekday: "long", day: "numeric", month: "short", year: "numeric"
-});
-const fourWeeksBefore = new Date(eventDate.getTime()); fourWeeksBefore.setDate(fourWeeksBefore.getDate() - 28);
-const twoWeeksBefore  = new Date(eventDate.getTime()); twoWeeksBefore.setDate(twoWeeksBefore.getDate() - 14);
+            const eventDate = new Date(order?.date || order?.eventDate || Date.now());
+            const fmt = (d) =>
+              d.toLocaleDateString("en-GB", {
+                weekday: "long",
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              });
+            const fourWeeksBefore = new Date(eventDate);
+            fourWeeksBefore.setDate(fourWeeksBefore.getDate() - 28);
+            const twoWeeksBefore = new Date(eventDate);
+            twoWeeksBefore.setDate(twoWeeksBefore.getDate() - 14);
 
-const eventSheetUrl = `${process.env.FRONTEND_BASE_URL || "http://localhost:5174"}/event-sheet/${order.bookingId}`;
+            const eventSheetUrl = `${
+              process.env.FRONTEND_BASE_URL || "http://localhost:5174"
+            }/event-sheet/${order.bookingId}`;
 
-await transporter.sendMail({
-  from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
-  to: toList,
-  bcc: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
-  subject: `${tscName} Booking Confirmation – ${order.bookingId}`,
-  html: `
-    <p>Hi ${order?.userAddress?.firstName || ''},</p>
+            await transporter.sendMail({
+              from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
+              to: toList,
+              bcc: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
+              subject: `${tscName} Booking Confirmation – ${order.bookingId}`,
+              html: `
+                <p>Hi ${order?.userAddress?.firstName || ""},</p>
+                <p>Thank you for booking <strong>${tscName}</strong>! They’re very much looking forward to performing for you.</p>
+                <p>Please complete your <a href="${eventSheetUrl}"><strong>Event Sheet</strong></a> when ready.</p>
+                <p>Balance is due 2 weeks before your event.</p>
+                <p><strong>Key dates:</strong></p>
+                <ul>
+                  <li>Song suggestions due by ${fmt(fourWeeksBefore)}</li>
+                  <li>Event sheet and balance due by ${fmt(twoWeeksBefore)}</li>
+                </ul>
+                <p>Warmest wishes,<br/><strong>The Supreme Collective</strong> 💫</p>
+              `,
+              attachments: [
+                { filename: `Booking_${order.bookingId}.pdf`, content: pdfBuffer },
+              ],
+            });
 
-    <p>Thank you for booking <strong>${tscName}</strong>! They’re very much looking forward to performing for you and your guests, and we’re excited to make sure we’ve got all the fine details so ${tscName} can put on a stellar show for you.</p>
-
-    <p>When you’re ready, please click through to your <a href="${eventSheetUrl}"><strong>Event Sheet</strong></a> and kindly fill in the blanks — you can check things off as you go, and it will auto-save.</p>
-
-    <p>Also, please feel free to email or WhatsApp us if you have any urgent questions or requests. Or, you can schedule a call directly in our calendar:
-      <a href="https://calendly.com/thesupremecollective/call">https://calendly.com/thesupremecollective/call</a>
-    </p>
-
-    <p>The invoice for the balance, which is due 2 weeks before the performance, can be found on the Event Sheet.</p>
-
-    <p><strong>Key dates for your diary</strong>:</p>
-    <ul>
-      <li>Song suggestions and First Dance (if Wedding) / Off-repertoire request (if not a wedding) due by <strong>${fmt(fourWeeksBefore)}</strong></li>
-      <li>Completed Event Sheet (including playlists) and balance due by <strong>${fmt(twoWeeksBefore)}</strong></li>
-    </ul>
-
-    <p>You’ll also receive a few emails from us in the run-up to the performance date as reminders to submit information on the Event Sheet, just to keep everything on track for you and ${tscName}.</p>
-
-    <p>Hopefully everything makes sense — but any questions, don’t hesitate!</p>
-
-    <p>Warmest wishes,<br/><strong>The Supreme Collective</strong> 💫</p>
-        ${signature}
-
-  `,
-  attachments: [{ filename: `Booking_${order.bookingId}.pdf`, content: pdfBuffer }],
-});
-            
+            console.log(`[completeBookingV2] ✓ done in ${Date.now() - t0}ms`);
+            return res.send(
+              "<h2>Thank you! Your booking has been confirmed and a copy of the contract emailed to you.</h2>"
+            );
           } catch (mailErr) {
             console.warn("[completeBookingV2] email failed:", mailErr?.message || mailErr);
+            return res.status(500).json({ message: "Booking confirmed but email failed." });
           }
-
-          console.log(`[completeBookingV2] ✓ done in ${Date.now() - t0}ms`);
-          return res.send(
-            "<h2>Thank you! Your booking has been confirmed and a copy of the contract emailed to you.</h2>"
-          );
         }
       );
 

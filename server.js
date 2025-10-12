@@ -41,8 +41,7 @@ import { startRemindersPoller } from "./services/remindersQueue.js";
 import uploadRoutes from "./routes/upload.js";
 import notificationsRoutes from "./routes/notifications.js";
 import { WA_FALLBACK_CACHE, sendSMSMessage } from './utils/twilioClient.js';
-import availabilityV2Routes from "./routes/availabilityV2.js";
-import { twilioInboundV2, twilioStatusV2 } from './controllers/availabilityControllerV2.js';
+import { twilioStatusV2 } from './controllers/availabilityControllerV2.js';
 import newsletterRoutes from './routes/newsletterRoutes.js';
 import { getAvailableActIds } from './controllers/actAvailabilityController.js';
 
@@ -50,6 +49,7 @@ import mongoose from "mongoose";
 import musicianModel from "./models/musicianModel.js";
 import { submitActSubmission } from './controllers/actSubmissionController.js';
 import v2Routes from "./routes/v2.js";
+import { twilioInbound } from './controllers/availabilityController.js';
 
 // at the top of backend/server.js (after dotenv)
 console.log('ENV CHECK:', {
@@ -173,6 +173,9 @@ app.use('/api/musician-login', (req, _res, next) => {
   next();
 }, musicianLoginRouter);
 
+
+app.use("/api/v2", v2Routes);
+
 // Twilio webhook test endpoint
 app.post(
   "/api/shortlist/wh",
@@ -187,7 +190,6 @@ app.post(
     res.sendStatus(200);
   }
 );
-app.use("/api/v2", v2Routes);
 
 // Twilio generic status (kept for backwards compat)
 app.post("/api/shortlist/twilio/status", async (req, res) => {
@@ -219,6 +221,30 @@ app.post("/api/shortlist/twilio/status", async (req, res) => {
   }
 });
 
+
+// Temporary aliases so existing Twilio config keeps working
+app.post(
+  "/api/shortlist/twilio/inbound",
+  express.urlencoded({ extended: false }),
+  (req, res) => {
+    console.log("✅ Twilio inbound alias hit /api/shortlist/twilio/inbound", {
+      from: req.body?.From,
+      waId: req.body?.WaId,
+      body: String(req.body?.Body || "").slice(0, 140)
+    });
+    return twilioInbound(req, res);
+  }
+);
+
+app.post(
+  "/api/shortlist/twilio/status",
+  express.urlencoded({ extended: false }),
+  (req, res) => {
+    console.log("✅ Twilio status alias hit /api/shortlist/twilio/status");
+    return twilioStatusV2(req, res);
+  }
+);
+
 startRemindersPoller({ intervalMs: 30000 }); // every 30s
 
 // Main API mounts
@@ -242,8 +268,6 @@ app.use("/api/moderation", moderationRoutes);
 app.use('/api/act', userRoute);
 app.use('/api/musician/trash-act', actV2Routes);
 app.use('/api', actV2Routes);
-app.use('/api/shortlist', shortlistRoutes);
-
 app.use('/api/musician/account', accountRouter);
 app.use('/api/account', accountRouter);
 
@@ -255,9 +279,6 @@ app.use("/api", boardBackfillRoutes);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use('/api/act-submission', submitActSubmission);
-
-// V2 availability queue endpoints
-app.use("/api/availability-v2", availabilityV2Routes);
 
 // Legacy availability
 app.use('/api/availability', availabilityRoutes);
@@ -280,28 +301,6 @@ app.get("/api/availability/acts-available", async (req, res) => {
 
 
 
-// Temporary aliases so existing Twilio config keeps working
-app.post(
-  "/api/shortlist/twilio/inboundV2",
-  express.urlencoded({ extended: false }),
-  (req, res) => {
-    console.log("✅ Twilio inbound alias hit /api/shortlist/twilio/inboundV2", {
-      from: req.body?.From,
-      waId: req.body?.WaId,
-      body: String(req.body?.Body || "").slice(0, 140)
-    });
-    return twilioInboundV2(req, res);
-  }
-);
-
-app.post(
-  "/api/shortlist/twilio/status",
-  express.urlencoded({ extended: false }),
-  (req, res) => {
-    console.log("✅ Twilio status alias hit /api/shortlist/twilio/status");
-    return twilioStatusV2(req, res);
-  }
-);
 
 // Health check
 app.get('/', (_req, res) => {
