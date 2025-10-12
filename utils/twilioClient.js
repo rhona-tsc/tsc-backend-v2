@@ -165,35 +165,58 @@ export async function sendWhatsAppMessage(opts = {}) {
 /**
  * Send a plain SMS (used for fallback or reminders).
  */
-export async function sendSMSMessage(to, body) {
-  const client = getTwilioClient();
-  if (!client) throw new Error('Twilio disabled');
 
-  const toE = toE164(to);
-  if (!toE) throw new Error('Bad SMS destination');
+
+// --- SMS sender (used for fallback) ---
+export const sendSMSMessage = async (to, body) => {
+  let dest = String(to).replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+  if (!dest.startsWith("+")) {
+    if (dest.startsWith("07")) dest = dest.replace(/^0/, "+44");
+    else if (dest.startsWith("44")) dest = `+${dest}`;
+  }
 
   const payload = {
-    to: toE,
-    body: String(body || ''),
+    to: dest,
+    ...(process.env.TWILIO_MESSAGING_SERVICE_SID
+        ? { messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID }
+        : { from: process.env.TWILIO_SMS_FROM }),
+    body,
     ...(statusCallback ? { statusCallback } : {}),
   };
 
-  if (TWILIO_MESSAGING_SERVICE_SID) {
-    payload.messagingServiceSid = TWILIO_MESSAGING_SERVICE_SID;
-  } else if (TWILIO_SMS_FROM) {
-    payload.from = toE164(TWILIO_SMS_FROM);
-  } else {
-    throw new Error('No SMS sender configured');
-  }
+  return client.messages.create(payload);
+};
 
-  console.log('📤 Twilio SMS create()', {
-    to: payload.to,
-    via: payload.messagingServiceSid ? 'service' : payload.from,
-  });
 
-  const msg = await client.messages.create(payload);
-  return msg; // { sid, status, ... }
-}
+// *{ export async function sendSMSMessage(to, body) {
+// const client = getTwilioClient();
+// if (!client) throw new Error('Twilio disabled');
+
+//  const toE = toE164(to);
+// if (!toE) throw new Error('Bad SMS destination');
+
+  // const payload = {
+  //  to: toE,
+   // body: String(body || ''),
+   // ...(statusCallback ? { statusCallback } : {}),
+  //};
+
+  //if (TWILIO_MESSAGING_SERVICE_SID) {
+  //  payload.messagingServiceSid = TWILIO_MESSAGING_SERVICE_SID;
+  //} else if (TWILIO_SMS_FROM) {
+  //  payload.from = toE164(TWILIO_SMS_FROM);
+  //} else {
+  //  throw new Error('No SMS sender configured');
+  //}
+
+  //console.log('📤 Twilio SMS create()', {
+  //  to: payload.to,
+  //  via: payload.messagingServiceSid ? 'service' : payload.from,
+  //});
+
+  //const msg = await client.messages.create(payload);
+  //return msg; // { sid, status, ... }
+//}
 
 /**
  * Try WA first; if creation fails, fallback to SMS (requires smsBody).
