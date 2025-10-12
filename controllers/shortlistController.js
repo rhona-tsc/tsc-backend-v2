@@ -108,11 +108,13 @@ const vocalists = (lineup?.bandMembers || []).filter(m =>
 
 for (const v of vocalists) {
 const rawPhone = v.phone || v.phoneNumber || v.phoneNormalized || "";
-const phone = rawPhone.startsWith("+")
-  ? rawPhone.replace(/\s+/g, "")
-  : rawPhone
-  ? `+44${rawPhone.replace(/^0/, "").replace(/\s+/g, "")}`
+const phone = rawPhone
+  ? rawPhone.startsWith("+")
+    ? rawPhone.replace(/\s+/g, "")
+    : `+44${rawPhone.replace(/^0/, "").replace(/\s+/g, "")}`
   : null;
+
+  if (!user.lastName) user.lastName = "Unknown";
 
 console.log("🎤 Checking vocalist contact →", {
   name: `${v.firstName || ""} ${v.lastName || ""}`.trim(),
@@ -125,7 +127,7 @@ if (!phone) {
   console.warn(`⚠️ Skipping ${v.firstName || "Unknown"} — invalid or missing phone number`);
   continue;
 }
-  
+
   console.log("🎤 Checking vocalist contact →", {
     name: `${v.firstName || ""} ${v.lastName || ""}`.trim(),
     instrument: v.instrument || "",
