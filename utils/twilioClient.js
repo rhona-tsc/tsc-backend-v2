@@ -216,7 +216,7 @@ export const sendSMSMessage = async (to, body) => {
 
   //const msg = await client.messages.create(payload);
   //return msg; // { sid, status, ... }
-}
+//}
 
 /**
  * Try WA first; if creation fails, fallback to SMS (requires smsBody).
