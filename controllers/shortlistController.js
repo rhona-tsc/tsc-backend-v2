@@ -53,102 +53,89 @@ await sendSMSMessage(phone, message);
  */
 export const shortlistActAndTrack = async (req, res) => {
   try {
-    const {
-      userId,
-      actId,
-
-      // NEW optional fields to enrich the Enquiry Board row:
-      lineupId,
-      selectedDate,
-      selectedAddress,
-      selectedCounty,
-      source,
-      maxBudget,
-      notes,
-      enquiryRef,
-    } = req.body;
+    const { userId, actId, lineupId, selectedDate, selectedAddress, selectedCounty, source, maxBudget, notes, enquiryRef } = req.body;
 
     if (!userId || !actId) {
-      return res.status(400).json({ success: false, message: 'Missing userId or actId' });
+      return res.status(400).json({ success: false, message: "Missing userId or actId" });
     }
 
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-    console.log("🔍 User found:", user._id, "Shortlisted acts before:", user.shortlistedActs);
-
-    // Your existing shortlist storage
     if (!user.shortlistedActs.includes(actId)) {
       user.shortlistedActs.push(actId);
       await user.save();
       await Act.findByIdAndUpdate(actId, { $inc: { timesShortlisted: 1 } });
     }
 
-    // ---- Mirror to Enquiry Board (idempotent-ish via enquiryRef if you pass one) ----
-    try {
-      const act = await Act.findById(actId).lean();
+    const act = await Act.findById(actId).lean();
+    const lineup = Array.isArray(act?.lineups)
+      ? act.lineups.find(l => String(l?._id) === String(lineupId) || String(l?.lineupId) === String(lineupId))
+      : null;
 
-      // Try to find the selected lineup on the act
-      const lineup = Array.isArray(act?.lineups)
-        ? act.lineups.find(
-            (l) =>
-              String(l?._id) === String(lineupId) ||
-              String(l?.lineupId) === String(lineupId)
-          )
-        : null;
+    const base = Number(lineup?.base_fee?.[0]?.total_fee || 0);
+    const county = selectedCounty || (selectedAddress?.split(",").slice(-2)[0]?.trim() || "");
+    const potentialGross = base ? Math.ceil(base / 0.75) : 0;
 
-      // Compute a display gross (base + essential add-ons, grossed up by 25% margin)
-      let base = Number(lineup?.base_fee?.[0]?.total_fee || 0);
-      const essentialAddOns = (lineup?.bandMembers || [])
-        .flatMap((m) => (m.additionalRoles || []).filter((r) => r.isEssential && typeof r.additionalFee === 'number'))
-        .reduce((sum, r) => sum + (r.additionalFee || 0), 0);
-      base += essentialAddOns;
-      const potentialGross = base > 0 ? Math.ceil(base / 0.75) : 0;
+    await upsertEnquiryRowFromShortlist({
+      actName: act?.tscName || act?.name || "",
+      selectedLineup: lineup || null,
+      selectedDate: selectedDate || null,
+      address: selectedAddress || "",
+      county,
+      source: source || "Direct",
+      notes: notes || "",
+      enquiryRef: enquiryRef || undefined,
+      potentialGross,
+      status: "open",
+    });
 
-      // County: prefer explicit selectedCounty, else parse from address
-      const county =
-        selectedCounty ||
-        (selectedAddress ? (selectedAddress.split(",").slice(-2)[0] || "").trim() : "");
+    // 🔔 Send WhatsApp availability to vocalists
+    const vocalists = (lineup?.bandMembers || []).filter(m =>
+      /(vocal|singer)/i.test(m.instrument || "")
+    );
 
-      await upsertEnquiryRowFromShortlist({
-        // Identifiers / naming
-        actName: act?.name || act?.tscName || "",
-        actTscName: act?.tscName || act?.name || "",
+    for (const v of vocalists) {
+      const phone = v.phone?.startsWith("+") ? v.phone : `+44${v.phone?.replace(/^0/, "")}`;
+      try {
+        await sendWhatsAppMessage({
+          to: phone,
+          contentSid: process.env.TWILIO_ENQUIRY_SID,
+          variables: {
+            1: v.firstName || "Musician",
+            2: new Date(selectedDate).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric" }),
+            3: selectedAddress,
+            4: act?.tscName || act?.name || "",
+          },
+        });
+        console.log("📤 Enquiry WhatsApp sent to", phone);
+      } catch (waErr) {
+        console.warn("⚠️ WA enquiry failed, trying SMS:", waErr.message);
+        if (phone)
+          await sendSMSMessage(phone, `Availability check: ${act?.tscName || act?.name} on ${selectedDate} at ${selectedAddress}`);
+      }
 
-        // Lineup/date/location
-        selectedLineup: lineup || null,
-        selectedDate: selectedDate || null, // becomes eventDateISO
-        address: selectedAddress || "",
-        county,
-
-        // Source + free text
-        source: source || "Direct",
-        agent: source || "Direct",
-        notes: notes || "",
-        enquiryRef: enquiryRef || undefined,
-
-        // Money + quoted details
-        potentialGross,
-        maxBudget: maxBudget != null ? Number(maxBudget) : undefined,
-
-        // Leave status open on first capture
-        status: "open",
-      });
-
-      console.log("✅ EnquiryBoard upserted for shortlist:", {
-        act: act?.tscName || act?.name,
-        selectedDate,
-        county,
-        potentialGross,
-      });
-    } catch (mirrorErr) {
-      // Non-fatal – still return success for the shortlist action
-      console.warn("⚠️ Mirror to EnquiryBoard failed:", mirrorErr?.message || mirrorErr);
+      // Calendar hold (optional)
+      if (v.email && selectedDate) {
+        try {
+          await createCalendarInvite({
+            actId,
+            dateISO: selectedDate,
+            email: v.email,
+            summary: `TSC: Enquiry – ${act?.tscName}`,
+            description: `Enquiry: ${selectedAddress}`,
+            extendedProperties: { line: `Availability check for ${act?.tscName}` },
+          });
+        } catch (calErr) {
+          console.warn("⚠️ Calendar invite skipped:", calErr.message);
+        }
+      }
     }
 
+    console.log("✅ Shortlist + enquiry notifications complete");
     return res.json({ success: true });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    console.error("❌ shortlistActAndTrack error:", err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
