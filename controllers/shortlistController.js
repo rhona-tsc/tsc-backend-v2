@@ -113,12 +113,11 @@ const phone = v.phoneNormalized;
 console.log("🎤 Checking vocalist contact →", {
   instrument: v.instrument || "",
   phone,
-  formattedPhone: phone,
   email: v.email || null,
 });
 
 
-  if (!v.phone) {
+  if (!phone) {
     console.warn(`⚠️ Skipping ${v.firstName || "Unknown"} — no phone number found`);
     continue;
   }
