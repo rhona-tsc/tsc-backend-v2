@@ -6,6 +6,7 @@ import { sendSMSMessage } from "../utils/twilioClient.js";
 
 // ⬇️ Import the helper that writes to the Enquiry Board
 import { upsertEnquiryRowFromShortlist } from './bookingController.js';
+import { createCalendarInvite } from './googleController.js';
 
 // --- phone helpers (keep in this file)
 const normalizePhoneE164 = (raw = "") => {
@@ -91,9 +92,61 @@ export const shortlistActAndTrack = async (req, res) => {
     });
 
     // 🔔 Send WhatsApp availability to vocalists
-    const vocalists = (lineup?.bandMembers || []).filter(m =>
-      /(vocal|singer)/i.test(m.instrument || "")
-    );
+// 🔔 Send WhatsApp availability to vocalists
+const vocalists = (lineup?.bandMembers || []).filter(m =>
+  /(vocal|singer)/i.test(m.instrument || "")
+);
+
+for (const v of vocalists) {
+  const phone = v.phone?.startsWith("+") ? v.phone : `+44${v.phone?.replace(/^0/, "")}`;
+  
+  console.log("🎤 Checking vocalist contact →", {
+    name: `${v.firstName || ""} ${v.lastName || ""}`.trim(),
+    instrument: v.instrument || "",
+    rawPhone: v.phone || null,
+    formattedPhone: phone || null,
+    email: v.email || null,
+  });
+
+  if (!v.phone) {
+    console.warn(`⚠️ Skipping ${v.firstName || "Unknown"} — no phone number found`);
+    continue;
+  }
+
+  try {
+    await sendWhatsAppMessage({
+      to: phone,
+      contentSid: process.env.TWILIO_ENQUIRY_SID,
+      variables: {
+        1: v.firstName || "Musician",
+        2: new Date(selectedDate).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric" }),
+        3: selectedAddress,
+        4: act?.tscName || act?.name || "",
+      },
+    });
+    console.log("📤 Enquiry WhatsApp sent to", phone);
+  } catch (waErr) {
+    console.warn("⚠️ WA enquiry failed, trying SMS:", waErr.message);
+    if (phone)
+      await sendSMSMessage(phone, `Availability check: ${act?.tscName || act?.name} on ${selectedDate} at ${selectedAddress}`);
+  }
+
+  // Calendar hold (optional)
+  if (v.email && selectedDate) {
+    try {
+      await createCalendarInvite({
+        actId,
+        dateISO: selectedDate,
+        email: v.email,
+        summary: `TSC: Enquiry – ${act?.tscName}`,
+        description: `Enquiry: ${selectedAddress}`,
+        extendedProperties: { line: `Availability check for ${act?.tscName}` },
+      });
+    } catch (calErr) {
+      console.warn("⚠️ Calendar invite skipped:", calErr.message);
+    }
+  }
+}
 
     for (const v of vocalists) {
       const phone = v.phone?.startsWith("+") ? v.phone : `+44${v.phone?.replace(/^0/, "")}`;
