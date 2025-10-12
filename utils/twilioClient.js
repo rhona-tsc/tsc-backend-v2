@@ -11,7 +11,7 @@ const {
   TWILIO_WA_SENDER,
   TWILIO_SMS_FROM,
   TWILIO_MESSAGING_SERVICE_SID,
-  TWILIO_CONTENT_SID,            // default WA template SID
+  TWILIO_ENQUIRY_SID,            // default WA template SID
   BACKEND_URL,
 } = process.env;
 
@@ -130,7 +130,7 @@ export async function sendWhatsAppMessage(opts = {}) {
   const payload = {
     from: `whatsapp:${fromE}`,
     to: `whatsapp:${toE}`,
-    contentSid: contentSid || TWILIO_CONTENT_SID,
+    contentSid: contentSid || TWILIO_ENQUIRY_SID,
     contentVariables: makeContentVariables({ variables, templateParams }),
     ...(statusCallback ? { statusCallback } : {}),
   };
@@ -216,7 +216,7 @@ export const sendSMSMessage = async (to, body) => {
 
   //const msg = await client.messages.create(payload);
   //return msg; // { sid, status, ... }
-//}
+}
 
 /**
  * Try WA first; if creation fails, fallback to SMS (requires smsBody).
