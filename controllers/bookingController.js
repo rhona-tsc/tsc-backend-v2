@@ -2623,5 +2623,4 @@ export {
   markMusicianAsPaid,
   upsertBoardRowFromBooking,
   upsertEnquiryRowFromShortlist,
-  completeBookingV2,
 };
