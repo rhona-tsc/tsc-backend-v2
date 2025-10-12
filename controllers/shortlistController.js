@@ -54,7 +54,7 @@ await sendSMSMessage(phone, message);
  */
 export const shortlistActAndTrack = async (req, res) => {
   try {
-    const { userId, actId, lineupId, selectedDate, selectedAddress, selectedCounty, source, maxBudget, notes, enquiryRef } = req.body;
+    const { userId, actId, lineupId, selectedDate, selectedAddress, selectedCounty, source, notes, enquiryRef } = req.body;
 
     if (!userId || !actId) {
       return res.status(400).json({ success: false, message: "Missing userId or actId" });
@@ -107,19 +107,14 @@ const vocalists = (lineup?.bandMembers || []).filter(m =>
 );
 
 for (const v of vocalists) {
-const rawPhone = v.phone || v.phoneNumber || v.phoneNormalized || "";
-const phone = rawPhone
-  ? rawPhone.startsWith("+")
-    ? rawPhone.replace(/\s+/g, "")
-    : `+44${rawPhone.replace(/^0/, "").replace(/\s+/g, "")}`
-  : null;
+const phone = v.phoneNormalized;
 
   if (!user.lastName) user.lastName = "Unknown";
 
 console.log("🎤 Checking vocalist contact →", {
   name: `${v.firstName || ""} ${v.lastName || ""}`.trim(),
   instrument: v.instrument || "",
-  rawPhone,
+  phone,
   formattedPhone: phone,
   email: v.email || null,
 });
@@ -177,7 +172,7 @@ if (!phone) {
 }
 
     for (const v of vocalists) {
-      const phone = v.phone?.startsWith("+") ? v.phone : `+44${v.phone?.replace(/^0/, "")}`;
+const phone = v.phoneNormalized;
       try {
         await sendWhatsAppMessage({
           to: phone,
