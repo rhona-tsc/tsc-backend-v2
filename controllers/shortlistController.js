@@ -84,7 +84,6 @@ export const shortlistActAndTrack = async (req, res) => {
   selectedDate,
   address: selectedAddress,
   county,
-  user: { id: user._id, firstName: user.firstName, lastName: user.lastName },
 });
 
     await upsertEnquiryRowFromShortlist({
@@ -109,27 +108,14 @@ const vocalists = (lineup?.bandMembers || []).filter(m =>
 for (const v of vocalists) {
 const phone = v.phoneNormalized;
 
-  if (!user.lastName) user.lastName = "Unknown";
 
 console.log("🎤 Checking vocalist contact →", {
-  name: `${v.firstName || ""} ${v.lastName || ""}`.trim(),
   instrument: v.instrument || "",
   phone,
   formattedPhone: phone,
   email: v.email || null,
 });
-if (!phone) {
-  console.warn(`⚠️ Skipping ${v.firstName || "Unknown"} — invalid or missing phone number`);
-  continue;
-}
 
-  console.log("🎤 Checking vocalist contact →", {
-    name: `${v.firstName || ""} ${v.lastName || ""}`.trim(),
-    instrument: v.instrument || "",
-    rawPhone: v.phone || null,
-    formattedPhone: phone || null,
-    email: v.email || null,
-  });
 
   if (!v.phone) {
     console.warn(`⚠️ Skipping ${v.firstName || "Unknown"} — no phone number found`);
