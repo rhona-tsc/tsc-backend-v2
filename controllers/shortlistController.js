@@ -12,8 +12,7 @@ import Shortlist from "../models/shortlistModel.js";
 import { extractOutcode, countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
 
 
-const outcode = extractOutcode(selectedAddress);
-const resolvedCounty = countyFromOutcode(outcode);
+
 
 
 const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -136,6 +135,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
         phone,
         dateISO: selectedDate,
         formattedAddress: selectedAddress,
+        county: resolvedCounty,
         formattedDate: new Date(selectedDate).toLocaleDateString("en-GB"),
         duties: vocalist.instrument,
         reply: null,
