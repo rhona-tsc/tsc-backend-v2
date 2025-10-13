@@ -12,8 +12,13 @@ const availabilitySchema = new mongoose.Schema(
     lineupId: { type: mongoose.Schema.Types.ObjectId, ref: "Lineup" },
     musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician" },
 
-    phone: { type: String, required: true },
-    duties: { type: String, default: "" },
+phone: {
+  type: String,
+  required: function () {
+    // Only require phone if this record represents a musician enquiry
+    return !!(this.actId && this.dateISO);
+  },
+},    duties: { type: String, default: "" },
     fee: { type: String, default: "" },
     formattedDate: { type: String, default: "" },
     formattedAddress: { type: String, default: "" },
