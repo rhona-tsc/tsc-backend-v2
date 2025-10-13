@@ -117,17 +117,25 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       console.log("💬 Triggering availability WhatsApp message…");
 
       const actData = await Act.findById(actId).lean();
-      if (!actData) throw new Error("Act not found");
+     if (!actData) throw new Error("Act not found");
 
+// ✅ Re-derive lineup so we can log size and store lineupId
+const lineup =
+  lineupId
+    ? actData.lineups?.find(l => String(l._id) === String(lineupId))
+    : actData.lineups?.[0];
+if (!lineup) throw new Error("No lineup found in act");
+
+// Then continue as before
 const { vocalist, phone } = findVocalistPhone(actData, lineupId) || {};
 if (!phone || !vocalist) throw new Error("No valid phone found for vocalist");
 
-      console.log("✅ Vocalist identified:", {
-        name: `${vocalist.firstName} ${vocalist.lastName}`,
-        phone,
-        act: actData.name,
-        lineup: lineup.actSize,
-      });
+console.log("✅ Vocalist identified:", {
+  name: `${vocalist.firstName} ${vocalist.lastName}`,
+  phone,
+  act: actData.name,
+  lineup: lineup.actSize, // now defined
+});
 
       // 🧾 Create availability entry
       const availabilityDoc = {
