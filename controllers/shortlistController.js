@@ -100,6 +100,19 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     const alreadyShortlisted = actsAsStrings.includes(String(actId));
     console.log("🧮 alreadyShortlisted:", alreadyShortlisted);
 
+    console.log("🔎 Comparing actId vs shortlist contents:");
+console.log("   → actId (stringified):", String(actId));
+if (!Array.isArray(shortlist.acts) || !shortlist.acts.length) {
+  console.log("   → shortlist.acts is empty or invalid:", shortlist.acts);
+} else {
+  shortlist.acts.forEach((a, i) => {
+    const val = a && a._id ? String(a._id) : String(a);
+    console.log(`   [${i}] raw:`, a);
+    console.log(`       asString: "${val}"`);
+    console.log(`       equals actId?`, val === String(actId));
+  });
+}
+
     if (alreadyShortlisted) {
       await Shortlist.updateOne({ _id: shortlist._id }, { $pull: { acts: actId } });
       console.log("❌ Pulled act from shortlist via $pull");
