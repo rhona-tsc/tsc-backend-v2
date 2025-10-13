@@ -120,18 +120,8 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       const actData = await Act.findById(actId).lean();
       if (!actData) throw new Error("Act not found");
 
-      const lineup = lineupId
-        ? actData.lineups?.find((l) => String(l._id) === String(lineupId))
-        : actData.lineups?.[0];
-      if (!lineup) throw new Error("No lineup found for act");
-
-      const vocalist = lineup.bandMembers?.find((m) =>
-        m.instrument?.toLowerCase().includes("vocal")
-      );
-      if (!vocalist) throw new Error("No vocalist found in lineup");
-
-      const phone = vocalist.phone || vocalist.whatsapp || vocalist.mobile;
-      if (!phone) throw new Error("No valid phone found for vocalist");
+    const phone = findVocalistPhone(actData, lineupId);
+if (!phone) throw new Error("No valid phone found for vocalist");
 
       console.log("✅ Vocalist identified:", {
         name: `${vocalist.firstName} ${vocalist.lastName}`,
