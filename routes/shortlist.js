@@ -4,6 +4,8 @@ import User from '../models/userModel.js';
 import {
   notifyMusician,
   shortlistActAndTrack,
+    shortlistActAndTriggerAvailability,
+  getUserShortlist
 } from '../controllers/shortlistController.js';
 import {
   triggerAvailabilityRequest,
@@ -14,6 +16,13 @@ import {
 } from '../controllers/availabilityController.js';
 
 const router = express.Router();
+
+// Add / toggle shortlist + trigger Twilio availability
+router.post("/add", shortlistActAndTriggerAvailability);
+
+// Fetch user's shortlisted acts
+router.get("/user/:userId/shortlisted", getUserShortlist);
+
 
 // --- in-memory SSE hub for availability updates ---
 const sseClients = new Set();

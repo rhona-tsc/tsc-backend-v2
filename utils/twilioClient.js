@@ -169,20 +169,29 @@ export async function sendWhatsAppMessage(opts = {}) {
 
 // --- SMS sender (used for fallback) ---
 export const sendSMSMessage = async (to, body) => {
-  let dest = String(to).replace(/^whatsapp:/i, "").replace(/\s+/g, "");
-  if (!dest.startsWith("+")) {
-    if (dest.startsWith("07")) dest = dest.replace(/^0/, "+44");
-    else if (dest.startsWith("44")) dest = `+${dest}`;
+  const client = getTwilioClient();
+  if (!client) throw new Error('Twilio disabled');
+
+  // normalise dest to E.164
+  let dest = String(to || '').replace(/^whatsapp:/i, '').replace(/\s+/g, '');
+  if (!dest.startsWith('+')) {
+    if (dest.startsWith('07')) dest = dest.replace(/^0/, '+44');
+    else if (dest.startsWith('44')) dest = `+${dest}`;
   }
 
   const payload = {
     to: dest,
-    ...(process.env.TWILIO_MESSAGING_SERVICE_SID
-        ? { messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID }
-        : { from: process.env.TWILIO_SMS_FROM }),
-    body,
+    body: String(body || ''),
     ...(statusCallback ? { statusCallback } : {}),
+    ...(process.env.TWILIO_MESSAGING_SERVICE_SID
+      ? { messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID }
+      : { from: toE164(process.env.TWILIO_SMS_FROM || '') }),
   };
+
+  console.log('📤 Twilio SMS create()', {
+    to: payload.to,
+    via: payload.messagingServiceSid ? 'service' : payload.from,
+  });
 
   return client.messages.create(payload);
 };

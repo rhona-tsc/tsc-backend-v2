@@ -2,18 +2,65 @@ import { sendWhatsAppMessage } from '../utils/twilioClient.js';
 import Act from '../models/actModel.js';
 import User from '../models/userModel.js';
 import { sendSMSMessage } from "../utils/twilioClient.js";
-
-
+import Availability from "../models/availabilityModel.js";
+import { sendAvailabilityMessage } from "../utils/twilioHelpers.js";
 import { createCalendarInvite } from './googleController.js';
-
-
-
-/// old code start
 import Musician from '../models/musicianModel.js';
-import Availability from '../models/availabilityModel.js';
 import EnquiryMessage from '../models/EnquiryMessage.js';
 
 
+export const shortlistActAndTriggerAvailability = async (req, res) => {
+  try {
+    const { userId, actId, selectedDate, selectedAddress, selectedCounty, lineupId } = req.body;
+
+    if (!userId || !actId) {
+      return res.status(400).json({ success: false, message: "Missing userId or actId" });
+    }
+
+    // 1️⃣ Add or toggle in shortlist DB
+    let shortlist = await Availability.findOne({ userId });
+    if (!shortlist) shortlist = await Availability.create({ userId, acts: [] });
+
+    const alreadyShortlisted = shortlist.acts.includes(actId);
+    if (alreadyShortlisted) {
+      shortlist.acts = shortlist.acts.filter((a) => String(a) !== String(actId));
+    } else {
+      shortlist.acts.push(actId);
+    }
+
+    await shortlist.save();
+
+    // 2️⃣ Trigger WhatsApp message (only when adding, not removing)
+    if (!alreadyShortlisted && selectedDate && selectedAddress) {
+      await sendAvailabilityMessage({ actId, selectedDate, selectedAddress, lineupId });
+    }
+
+    res.json({
+      success: true,
+      message: alreadyShortlisted ? "Removed from shortlist" : "Added and message sent",
+      shortlisted: !alreadyShortlisted,
+    });
+  } catch (err) {
+    console.error("❌ shortlistActAndTriggerAvailability error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/**
+ * Get all shortlisted acts for a user.
+ */
+export const getUserShortlist = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const shortlist = await Availability.findOne({ userId }).populate("acts");
+    if (!shortlist) {
+      return res.json({ success: true, acts: [] });
+    }
+    res.json({ success: true, acts: shortlist.acts });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 export const notifyMusician = async (req, res) => {
     const { phone, message } = req.body;

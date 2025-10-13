@@ -29,7 +29,7 @@ import { format } from "date-fns"; // optional
 import { setSharedIVR } from "../utils/proxySetup.js";
 import { logStart, logOk, logWarn, logErr } from "../utils/logger.js";
 
-import { sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
+import { sendSMSMessage, sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
 import { sendWAOrSMS } from "../utils/twilioClient.js";
 
 

@@ -1,16 +1,14 @@
-// backend/server.js
+
 // backend/server.js
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
-
-
 import connectDB from './config/mongodb.js';
 import connectCloudinary from './config/connectCloudinary.js';
 import cloudinary from './config/cloudinary.js';
 import bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
-
+import shortlistRoutes from "./routes/shortlistRoutes.js";
 import router from "./routes/debugRoutes.js";
 import boardBackfillRoutes from "./routes/boardBackfillRoutes.js";
 import invoiceRoutes from "./routes/invoiceRoutes.js";
@@ -173,6 +171,7 @@ app.use('/api/musician-login', (req, _res, next) => {
   next();
 }, musicianLoginRouter);
 
+app.use("/api/shortlist", shortlistRoutes);
 
 app.use("/api/v2", v2Routes);
 
