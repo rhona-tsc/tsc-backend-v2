@@ -38,7 +38,7 @@ phone: {
     messageSid: { type: String, select: false },
     status: {
       type: String,
-      enum: ["queued", "sent", "delivered", "read", "undelivered", "failed"],
+      enum: ["pending", "queued", "sent", "delivered", "read", "undelivered", "failed"],
       default: "queued",
     },
 

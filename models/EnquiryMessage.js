@@ -24,7 +24,7 @@ const enquiryMessageSchema = new mongoose.Schema(
      */
     deliveryStatus: {
       type: String,
-      enum: ["queued", "sent", "delivered", "read", "undelivered", "failed"],
+      enum: ["queued", "pending", "sent", "delivered", "read", "undelivered", "failed"],
       default: "queued",
       index: true,
     },
