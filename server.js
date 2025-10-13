@@ -17,7 +17,6 @@ import musicianRouter from './routes/musicianRoute.js';
 import actV2Routes from './routes/actV2Routes.js';
 import travelRoutes from './routes/v2.js';
 import cartRouter from './routes/cartRoute.js';
-import shortlistRoutes from './routes/shortlist.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import googleRoutes from './routes/google.js';
 import calendarWebhook from './routes/calendarWebhook.js';
