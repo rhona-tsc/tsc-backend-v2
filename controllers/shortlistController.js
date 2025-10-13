@@ -8,6 +8,8 @@ import { createCalendarInvite } from './googleController.js';
 import Musician from '../models/musicianModel.js';
 import EnquiryMessage from '../models/EnquiryMessage.js';
 import twilio from "twilio";
+import Shortlist from "../models/shortlistModel.js";
+
 
 
 
@@ -74,11 +76,11 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     }
 
     // 1️⃣ Add or toggle in shortlist DB
-    console.log("📚 Looking up existing Availability shortlist for userId:", userId);
-    let shortlist = await Availability.findOne({ userId });
+    console.log("📚 Looking up existing shortlist for userId:", userId);
+    let shortlist = await Shortlist.findOne({ userId });
     if (!shortlist) {
-      console.log("🆕 Creating new Availability shortlist for userId:", userId);
-      shortlist = await Availability.create({ userId, acts: [] });
+      console.log("🆕 Creating new shortlist for userId:", userId);
+      shortlist = await Shortlist.create({ userId, acts: [] });
     }
 
     const alreadyShortlisted = shortlist.acts.includes(actId);
