@@ -14,6 +14,54 @@ import twilio from "twilio";
 
 const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
 
+
+import { toE164 } from "../utils/twilioClient.js";
+
+function findVocalistPhone(actData, lineupId) {
+  if (!actData?.lineups?.length) return null;
+
+  // Prefer specified lineupId
+  const lineup = lineupId
+    ? actData.lineups.find(l => String(l._id || l.lineupId) === String(lineupId))
+    : actData.lineups[0];
+
+  if (!lineup?.bandMembers?.length) return null;
+
+  // Find first member with instrument containing "vocal"
+  const vocalist = lineup.bandMembers.find(m =>
+    String(m.instrument || "").toLowerCase().includes("vocal")
+  );
+
+  if (!vocalist) return null;
+
+  // Safely pick phone fields
+  let phone = vocalist.phoneNormalized || vocalist.phoneNumber || "";
+  if (!phone && Array.isArray(vocalist.deputies) && vocalist.deputies.length) {
+    phone = vocalist.deputies[0].phoneNormalized || vocalist.deputies[0].phoneNumber || "";
+  }
+
+  // Normalise to E.164 if needed
+  phone = toE164(phone);
+
+  if (!phone) {
+    console.warn("⚠️ No valid phone found for vocalist:", {
+      vocalist: `${vocalist.firstName} ${vocalist.lastName}`,
+      lineup: lineup.actSize,
+      act: actData.tscName || actData.name,
+    });
+    return null;
+  }
+
+  console.log("🎤 Lead vocalist found:", {
+    name: `${vocalist.firstName} ${vocalist.lastName}`,
+    instrument: vocalist.instrument,
+    phone,
+  });
+
+  return phone;
+}
+
+
 export const shortlistActAndTriggerAvailability = async (req, res) => {
   try {
     const { userId, actId, selectedDate, selectedAddress, selectedCounty, lineupId } = req.body;
@@ -56,10 +104,8 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
 
       if (!vocalist) throw new Error("No vocalist found in lineup");
 
-      const phone =
-        vocalist.phoneNormalized || vocalist.phoneNumber || vocalist.phone || null;
-
-      if (!phone) throw new Error("No phone found for lead vocalist");
+     const phone = findVocalistPhone(actData, lineupId);
+if (!phone) throw new Error("No valid phone found for vocalist");
 
       console.log("🎤 Lead vocalist identified:", {
         name: `${vocalist.firstName} ${vocalist.lastName}`,
