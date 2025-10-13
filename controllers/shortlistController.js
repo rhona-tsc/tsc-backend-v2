@@ -71,7 +71,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
 
     // (Optional helpful debug) Log DB connection info
     try {
-      const mongooseConn = (await import('mongoose')).default.connection;
+      const mongooseConn = (await import("mongoose")).default.connection;
       console.log("🗃️ DB:", { name: mongooseConn?.name, host: mongooseConn?.host });
     } catch {}
 
@@ -85,70 +85,90 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     const resolvedCounty = countyFromOutcode(outcode);
     console.log("🌍 Derived county:", resolvedCounty || "❌ none");
 
-    // 1️⃣ Handle shortlist toggle
+    // 1️⃣ Lookup or create shortlist doc
     let shortlist = await Shortlist.findOne({ userId });
     if (!shortlist) {
       console.log("🆕 Creating new shortlist for userId:", userId);
       shortlist = await Shortlist.create({ userId, acts: [] });
     }
-    // 🔎 Debug what we are checking against
-    const actsAsStrings = Array.isArray(shortlist.acts)
-      ? shortlist.acts.map(a => (a && a._id ? String(a._id) : String(a)))
-      : [];
-    console.log("🗂 Shortlist doc:", { _id: String(shortlist._id), acts: actsAsStrings });
 
-    const alreadyShortlisted = actsAsStrings.includes(String(actId));
+    // 2️⃣ Check if this (actId + dateISO + address) triple already exists
+    const existingEntry = shortlist.acts.find((entry) => {
+      const sameAct = String(entry.actId) === String(actId);
+      const sameDate = entry.dateISO === selectedDate;
+
+      // Normalize addresses to avoid case or spacing mismatches
+      const addrA = (entry.formattedAddress || "").trim().toLowerCase();
+      const addrB = (selectedAddress || "").trim().toLowerCase();
+      const sameAddress = addrA === addrB;
+
+      return sameAct && sameDate && sameAddress;
+    });
+
+    const alreadyShortlisted = !!existingEntry;
+
     console.log("🧮 alreadyShortlisted:", alreadyShortlisted);
+    console.log("📅 Checking for triple:", { actId, selectedDate, selectedAddress });
+    console.log("🧾 Current shortlist entries:", shortlist.acts);
 
-    console.log("🔎 Comparing actId vs shortlist contents:");
-console.log("   → actId (stringified):", String(actId));
-if (!Array.isArray(shortlist.acts) || !shortlist.acts.length) {
-  console.log("   → shortlist.acts is empty or invalid:", shortlist.acts);
-} else {
-  shortlist.acts.forEach((a, i) => {
-    const val = a && a._id ? String(a._id) : String(a);
-    console.log(`   [${i}] raw:`, a);
-    console.log(`       asString: "${val}"`);
-    console.log(`       equals actId?`, val === String(actId));
-  });
-}
-
+    // 3️⃣ Add or remove the triple
     if (alreadyShortlisted) {
-      await Shortlist.updateOne({ _id: shortlist._id }, { $pull: { acts: actId } });
-      console.log("❌ Pulled act from shortlist via $pull");
+      shortlist.acts = shortlist.acts.filter((entry) => {
+        const sameAct = String(entry.actId) === String(actId);
+        const sameDate = entry.dateISO === selectedDate;
+        const sameAddress =
+          (entry.formattedAddress || "").trim().toLowerCase() ===
+          (selectedAddress || "").trim().toLowerCase();
+        return !(sameAct && sameDate && sameAddress);
+      });
+      console.log("❌ Removed specific act/date/address triple");
     } else {
-      await Shortlist.updateOne({ _id: shortlist._id }, { $addToSet: { acts: actId } });
-      console.log("✅ Added act to shortlist via $addToSet");
+      shortlist.acts.push({
+        actId,
+        dateISO: selectedDate,
+        formattedAddress: selectedAddress,
+      });
+      console.log("✅ Added new act/date/address triple to shortlist");
     }
-    // Reload to show current state
-    const after = await Shortlist.findById(shortlist._id).lean();
-    const afterActs = Array.isArray(after?.acts) ? after.acts.map(a => String(a)) : [];
-    console.log("💾 shortlist now:", afterActs);
 
-    // 2️⃣ Trigger message only when adding
+    await shortlist.save();
+    console.log("💾 shortlist saved:", shortlist.acts);
+
+    // Reload to show current state
+    const refreshed = await Shortlist.findById(shortlist._id).lean();
+    console.log(
+      "💾 shortlist now:",
+      refreshed.acts.map((a) => ({
+        actId: String(a.actId),
+        dateISO: a.dateISO,
+        address: a.formattedAddress,
+      }))
+    );
+
+    // 4️⃣ Trigger message only when adding
     if (!alreadyShortlisted && selectedDate && selectedAddress) {
       console.log("💬 Triggering availability WhatsApp message…");
 
       const actData = await Act.findById(actId).lean();
-     if (!actData) throw new Error("Act not found");
+      if (!actData) throw new Error("Act not found");
 
-// ✅ Re-derive lineup so we can log size and store lineupId
-const lineup =
-  lineupId
-    ? actData.lineups?.find(l => String(l._id) === String(lineupId))
-    : actData.lineups?.[0];
-if (!lineup) throw new Error("No lineup found in act");
+      // ✅ Re-derive lineup so we can log size and store lineupId
+      const lineup =
+        lineupId
+          ? actData.lineups?.find((l) => String(l._id) === String(lineupId))
+          : actData.lineups?.[0];
+      if (!lineup) throw new Error("No lineup found in act");
 
-// Then continue as before
-const { vocalist, phone } = findVocalistPhone(actData, lineupId) || {};
-if (!phone || !vocalist) throw new Error("No valid phone found for vocalist");
+      // 🧩 Find vocalist and phone
+      const { vocalist, phone } = findVocalistPhone(actData, lineupId) || {};
+      if (!phone || !vocalist) throw new Error("No valid phone found for vocalist");
 
-console.log("✅ Vocalist identified:", {
-  name: `${vocalist.firstName} ${vocalist.lastName}`,
-  phone,
-  act: actData.name,
-  lineup: lineup.actSize, // now defined
-});
+      console.log("✅ Vocalist identified:", {
+        name: `${vocalist.firstName} ${vocalist.lastName}`,
+        phone,
+        act: actData.name,
+        lineup: lineup.actSize,
+      });
 
       // 🧾 Create availability entry
       const availabilityDoc = {
@@ -162,40 +182,39 @@ console.log("✅ Vocalist identified:", {
         formattedDate: new Date(selectedDate).toLocaleDateString("en-GB"),
         duties: vocalist.instrument,
         reply: null,
-        status: "queued", // ✅ use valid enum value
+        status: "queued", // ✅ valid enum value
       };
       console.log("📋 Availability payload:", availabilityDoc);
       await Availability.create(availabilityDoc);
 
-    // 📨 Send WhatsApp via Twilio template
-const shortAddress = selectedAddress
-  ?.split(",")
-  ?.slice(-2)
-  ?.join(" ")
-  ?.trim() || selectedAddress || "";
+      // 📨 Send WhatsApp via Twilio template
+      const shortAddress =
+        selectedAddress?.split(",")?.slice(-2)?.join(" ")?.trim() ||
+        selectedAddress ||
+        "";
 
-const msgVars = {
-  1: vocalist.firstName || "", // recipient name
-  2: new Date(selectedDate).toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }), // date
-  3: shortAddress, // simplified location (e.g. "Maidenhead SL6 8HN")
-  4: String(vocalist.fee || 0), // rate
-  5: vocalist.instrument || "", // duties
-  6: actData.name || "", // act name
-};
+      const msgVars = {
+        1: vocalist.firstName || "",
+        2: new Date(selectedDate).toLocaleDateString("en-GB", {
+          weekday: "long",
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        }),
+        3: shortAddress,
+        4: String(vocalist.fee || 0),
+        5: vocalist.instrument || "",
+        6: actData.name || "",
+      };
 
-console.log("📤 Twilio contentVariables:", msgVars);
+      console.log("📤 Twilio contentVariables:", msgVars);
 
-await client.messages.create({
-  from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
-  to: `whatsapp:${phone}`,
-  contentSid: process.env.TWILIO_ENQUIRY_SID,
-  contentVariables: JSON.stringify(msgVars),
-});
+      await client.messages.create({
+        from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+        to: `whatsapp:${phone}`,
+        contentSid: process.env.TWILIO_ENQUIRY_SID,
+        contentVariables: JSON.stringify(msgVars),
+      });
 
       console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone})`);
     } else {
@@ -204,7 +223,9 @@ await client.messages.create({
 
     res.json({
       success: true,
-      message: alreadyShortlisted ? "Removed from shortlist" : "Added and message sent",
+      message: alreadyShortlisted
+        ? "Removed from shortlist"
+        : "Added and message sent",
       shortlisted: !alreadyShortlisted,
     });
   } catch (err) {
