@@ -9,9 +9,11 @@ import Musician from '../models/musicianModel.js';
 import EnquiryMessage from '../models/EnquiryMessage.js';
 import twilio from "twilio";
 import Shortlist from "../models/shortlistModel.js";
+import { extractOutcode, countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
 
 
-
+const outcode = extractOutcode(selectedAddress);
+const resolvedCounty = countyFromOutcode(outcode);
 
 
 const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -67,16 +69,20 @@ function findVocalistPhone(actData, lineupId) {
 export const shortlistActAndTriggerAvailability = async (req, res) => {
   console.log("🎯 [START] shortlistActAndTriggerAvailability");
   try {
-    const { userId, actId, selectedDate, selectedAddress, selectedCounty, lineupId } = req.body;
-    console.log("📦 Incoming body:", { userId, actId, selectedDate, selectedAddress, selectedCounty, lineupId });
+    const { userId, actId, selectedDate, selectedAddress, lineupId } = req.body;
+    console.log("📦 Incoming body:", { userId, actId, selectedDate, selectedAddress, lineupId });
 
     if (!userId || !actId) {
       console.warn("⚠️ Missing userId or actId");
       return res.status(400).json({ success: false, message: "Missing userId or actId" });
     }
 
-    // 1️⃣ Add or toggle in shortlist DB
-    console.log("📚 Looking up existing shortlist for userId:", userId);
+    // 🗺️ Auto-derive county
+    const outcode = extractOutcode(selectedAddress);
+    const resolvedCounty = countyFromOutcode(outcode);
+    console.log("🌍 Derived county:", resolvedCounty || "❌ none");
+
+    // 1️⃣ Handle shortlist toggle
     let shortlist = await Shortlist.findOne({ userId });
     if (!shortlist) {
       console.log("🆕 Creating new shortlist for userId:", userId);
@@ -87,44 +93,32 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     console.log("🧮 alreadyShortlisted:", alreadyShortlisted);
 
     if (alreadyShortlisted) {
-      console.log("❌ Removing from shortlist");
       shortlist.acts = shortlist.acts.filter((a) => String(a) !== String(actId));
     } else {
-      console.log("✅ Adding act to shortlist array");
       shortlist.acts.push(actId);
     }
 
     await shortlist.save();
     console.log("💾 shortlist saved:", shortlist.acts);
 
-    // 2️⃣ Trigger WhatsApp message (only when adding)
+    // 2️⃣ Trigger message only when adding
     if (!alreadyShortlisted && selectedDate && selectedAddress) {
       console.log("💬 Triggering availability WhatsApp message…");
 
-      // --- Fetch act with lineup and members ---
       const actData = await Act.findById(actId).lean();
-      console.log("🎭 Act data loaded:", actData ? "✅ Found" : "❌ Not found");
-
       if (!actData) throw new Error("Act not found");
 
       const lineup = lineupId
         ? actData.lineups?.find((l) => String(l._id) === String(lineupId))
         : actData.lineups?.[0];
-      console.log("🎼 Selected lineup:", lineup ? lineup.actSize : "❌ None found");
-
       if (!lineup) throw new Error("No lineup found for act");
 
-      console.log("👥 Band members:", lineup.bandMembers?.length || 0);
       const vocalist = lineup.bandMembers?.find((m) =>
         m.instrument?.toLowerCase().includes("vocal")
       );
-      console.log("🎤 Vocalist found:", vocalist ? `${vocalist.firstName} ${vocalist.lastName}` : "❌ None");
-
       if (!vocalist) throw new Error("No vocalist found in lineup");
 
-      // --- Resolve phone ---
-      const phone = findVocalistPhone(actData, lineupId);
-      console.log("📞 Phone resolved:", phone || "❌ NULL");
+      const phone = vocalist.phone || vocalist.whatsapp || vocalist.mobile;
       if (!phone) throw new Error("No valid phone found for vocalist");
 
       console.log("✅ Vocalist identified:", {
@@ -134,8 +128,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
         lineup: lineup.actSize,
       });
 
-      // --- Create an availability record ---
-      console.log("🧾 Creating new Availability entry…");
+      // 🧾 Create availability entry
       const availabilityDoc = {
         actId,
         lineupId: lineup._id,
@@ -146,40 +139,39 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
         formattedDate: new Date(selectedDate).toLocaleDateString("en-GB"),
         duties: vocalist.instrument,
         reply: null,
-        status: "pending",
+        status: "queued", // ✅ use valid enum value
       };
       console.log("📋 Availability payload:", availabilityDoc);
-
       await Availability.create(availabilityDoc);
-      console.log("✅ Availability document created successfully");
 
-      // --- Send WhatsApp via Twilio template ---
-      console.log("📨 Sending WhatsApp template message via Twilio…");
+      // 📨 Send WhatsApp via Twilio template
+      const msgVars = {
+        1: vocalist.firstName || "",
+        2: new Date(selectedDate).toLocaleDateString("en-GB", {
+          weekday: "long",
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        }),
+        3: selectedAddress || "",
+        4: String(vocalist.fee || 0),
+        5: vocalist.instrument || "",
+        6: actData.name || "",
+      };
+      console.log("📤 Twilio contentVariables:", msgVars);
+
       await client.messages.create({
         from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
         to: `whatsapp:${phone}`,
         contentSid: process.env.TWILIO_ENQUIRY_SID,
-        contentVariables: JSON.stringify({
-          1: vocalist.firstName,
-          2: new Date(selectedDate).toLocaleDateString("en-GB", {
-            weekday: "long",
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-          }),
-          3: selectedAddress,
-          4: vocalist.fee || 0,
-          5: vocalist.instrument,
-          6: actData.name,
-        }),
+        contentVariables: JSON.stringify(msgVars),
       });
 
-      console.log(`✅ WhatsApp enquiry sent successfully to ${vocalist.firstName} (${phone})`);
+      console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone})`);
     } else {
-      console.log("🚫 Not sending message (either already shortlisted or missing date/address)");
+      console.log("🚫 Not sending message (already shortlisted or missing date/address)");
     }
 
-    console.log("🏁 [END] shortlistActAndTriggerAvailability");
     res.json({
       success: true,
       message: alreadyShortlisted ? "Removed from shortlist" : "Added and message sent",
