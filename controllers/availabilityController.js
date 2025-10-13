@@ -1706,6 +1706,7 @@ export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
 
 
 export const twilioInbound = async (req, res) => {
+  console.log("🛰️ Raw inbound body:", req.body);
   try {
     const bodyText = String(req.body?.Body || "");
     const buttonText = String(req.body?.ButtonText || "");
@@ -2311,15 +2312,13 @@ if (av?._id) {
 
 
 
-function parsePayload(p = "") {
-  const s = String(p).trim();
-  if (!s) return { reply: null, enquiryId: null };
-  // Matches: YES<enquiryId>  or  NO<enquiryId>
-  const m = s.match(/^(YES|NO)([A-Za-z0-9_-]+)?$/i);
-  if (!m) return { reply: null, enquiryId: null };
+function parsePayload(payload = "") {
+  // Trim, uppercase, and match "YES<id>" / "NOLOC<id>" / "UNAVAILABLE<id>"
+  const match = payload.trim().match(/^(YES|NOLOC|UNAVAILABLE)([A-Za-z0-9]+)?$/i);
+  if (!match) return { reply: null, enquiryId: null };
   return {
-    reply: m[1].toUpperCase() === "YES" ? "yes" : "no",
-    enquiryId: m[2] || null,
+    reply: match[1].toLowerCase(),
+    enquiryId: match[2] || null,
   };
 }
 
