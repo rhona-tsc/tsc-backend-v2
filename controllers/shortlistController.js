@@ -14,7 +14,6 @@ import { extractOutcode, countyFromOutcode } from "../controllers/helpersForCorr
 
 
 
-
 const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
 
 
@@ -71,6 +70,12 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     const { userId, actId, selectedDate, selectedAddress, lineupId } = req.body;
     console.log("📦 Incoming body:", { userId, actId, selectedDate, selectedAddress, lineupId });
 
+    // (Optional helpful debug) Log DB connection info
+    try {
+      const mongooseConn = (await import('mongoose')).default.connection;
+      console.log("🗃️ DB:", { name: mongooseConn?.name, host: mongooseConn?.host });
+    } catch {}
+
     if (!userId || !actId) {
       console.warn("⚠️ Missing userId or actId");
       return res.status(400).json({ success: false, message: "Missing userId or actId" });
@@ -87,18 +92,26 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       console.log("🆕 Creating new shortlist for userId:", userId);
       shortlist = await Shortlist.create({ userId, acts: [] });
     }
+    // 🔎 Debug what we are checking against
+    const actsAsStrings = Array.isArray(shortlist.acts)
+      ? shortlist.acts.map(a => (a && a._id ? String(a._id) : String(a)))
+      : [];
+    console.log("🗂 Shortlist doc:", { _id: String(shortlist._id), acts: actsAsStrings });
 
-    const alreadyShortlisted = shortlist.acts.includes(actId);
+    const alreadyShortlisted = actsAsStrings.includes(String(actId));
     console.log("🧮 alreadyShortlisted:", alreadyShortlisted);
 
     if (alreadyShortlisted) {
-      shortlist.acts = shortlist.acts.filter((a) => String(a) !== String(actId));
+      await Shortlist.updateOne({ _id: shortlist._id }, { $pull: { acts: actId } });
+      console.log("❌ Pulled act from shortlist via $pull");
     } else {
-      shortlist.acts.push(actId);
+      await Shortlist.updateOne({ _id: shortlist._id }, { $addToSet: { acts: actId } });
+      console.log("✅ Added act to shortlist via $addToSet");
     }
-
-    await shortlist.save();
-    console.log("💾 shortlist saved:", shortlist.acts);
+    // Reload to show current state
+    const after = await Shortlist.findById(shortlist._id).lean();
+    const afterActs = Array.isArray(after?.acts) ? after.acts.map(a => String(a)) : [];
+    console.log("💾 shortlist now:", afterActs);
 
     // 2️⃣ Trigger message only when adding
     if (!alreadyShortlisted && selectedDate && selectedAddress) {
