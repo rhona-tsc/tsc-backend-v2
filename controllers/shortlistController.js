@@ -7,7 +7,12 @@ import { sendAvailabilityMessage } from "../utils/twilioHelpers.js";
 import { createCalendarInvite } from './googleController.js';
 import Musician from '../models/musicianModel.js';
 import EnquiryMessage from '../models/EnquiryMessage.js';
+import twilio from "twilio";
 
+
+
+
+const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
 
 export const shortlistActAndTriggerAvailability = async (req, res) => {
   try {
@@ -32,7 +37,72 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
 
     // 2️⃣ Trigger WhatsApp message (only when adding, not removing)
     if (!alreadyShortlisted && selectedDate && selectedAddress) {
-      await sendAvailabilityMessage({ actId, selectedDate, selectedAddress, lineupId });
+      console.log(`💬 Sending Twilio availability check for act ${actId}...`);
+
+      // --- Fetch act with lineup and members ---
+      const actData = await Act.findById(actId).lean();
+      if (!actData) throw new Error("Act not found");
+
+      const lineup = lineupId
+        ? actData.lineups?.find((l) => String(l._id) === String(lineupId))
+        : actData.lineups?.[0];
+
+      if (!lineup) throw new Error("No lineup found for act");
+
+      // --- Find vocalist ---
+      const vocalist = lineup.bandMembers?.find((m) =>
+        m.instrument?.toLowerCase().includes("vocal")
+      );
+
+      if (!vocalist) throw new Error("No vocalist found in lineup");
+
+      const phone =
+        vocalist.phoneNormalized || vocalist.phoneNumber || vocalist.phone || null;
+
+      if (!phone) throw new Error("No phone found for lead vocalist");
+
+      console.log("🎤 Lead vocalist identified:", {
+        name: `${vocalist.firstName} ${vocalist.lastName}`,
+        phone,
+        act: actData.name,
+        lineup: lineup.actSize,
+      });
+
+      // --- Create an availability record ---
+      await Availability.create({
+        actId,
+        lineupId: lineup._id,
+        musicianId: vocalist._id,
+        phone,
+        dateISO: selectedDate,
+        formattedAddress: selectedAddress,
+        formattedDate: new Date(selectedDate).toLocaleDateString("en-GB"),
+        duties: vocalist.instrument,
+        reply: null,
+        status: "pending",
+      });
+
+      // --- Send WhatsApp via Twilio template ---
+      await client.messages.create({
+        from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+        to: `whatsapp:${phone}`,
+        contentSid: process.env.TWILIO_ENQUIRY_SID, // <-- use your saved WhatsApp content template
+        contentVariables: JSON.stringify({
+          1: vocalist.firstName,
+          2: new Date(selectedDate).toLocaleDateString("en-GB", {
+            weekday: "long",
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          }),
+          3: selectedAddress,
+          4: vocalist.fee || 0,
+          5: vocalist.instrument,
+          6: actData.name,
+        }),
+      });
+
+      console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone})`);
     }
 
     res.json({
