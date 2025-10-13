@@ -144,28 +144,35 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       console.log("📋 Availability payload:", availabilityDoc);
       await Availability.create(availabilityDoc);
 
-      // 📨 Send WhatsApp via Twilio template
-      const msgVars = {
-        1: vocalist.firstName || "",
-        2: new Date(selectedDate).toLocaleDateString("en-GB", {
-          weekday: "long",
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-        }),
-        3: selectedAddress || "",
-        4: String(vocalist.fee || 0),
-        5: vocalist.instrument || "",
-        6: actData.name || "",
-      };
-      console.log("📤 Twilio contentVariables:", msgVars);
+    // 📨 Send WhatsApp via Twilio template
+const shortAddress = selectedAddress
+  ?.split(",")
+  ?.slice(-2)
+  ?.join(" ")
+  ?.trim() || selectedAddress || "";
 
-      await client.messages.create({
-        from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
-        to: `whatsapp:${phone}`,
-        contentSid: process.env.TWILIO_ENQUIRY_SID,
-        contentVariables: JSON.stringify(msgVars),
-      });
+const msgVars = {
+  1: vocalist.firstName || "", // recipient name
+  2: new Date(selectedDate).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }), // date
+  3: shortAddress, // simplified location (e.g. "Maidenhead SL6 8HN")
+  4: String(vocalist.fee || 0), // rate
+  5: vocalist.instrument || "", // duties
+  6: actData.name || "", // act name
+};
+
+console.log("📤 Twilio contentVariables:", msgVars);
+
+await client.messages.create({
+  from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+  to: `whatsapp:${phone}`,
+  contentSid: process.env.TWILIO_ENQUIRY_SID,
+  contentVariables: JSON.stringify(msgVars),
+});
 
       console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone})`);
     } else {
