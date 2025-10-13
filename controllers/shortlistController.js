@@ -63,51 +63,69 @@ function findVocalistPhone(actData, lineupId) {
 
 
 export const shortlistActAndTriggerAvailability = async (req, res) => {
+  console.log("🎯 [START] shortlistActAndTriggerAvailability");
   try {
     const { userId, actId, selectedDate, selectedAddress, selectedCounty, lineupId } = req.body;
+    console.log("📦 Incoming body:", { userId, actId, selectedDate, selectedAddress, selectedCounty, lineupId });
 
     if (!userId || !actId) {
+      console.warn("⚠️ Missing userId or actId");
       return res.status(400).json({ success: false, message: "Missing userId or actId" });
     }
 
     // 1️⃣ Add or toggle in shortlist DB
+    console.log("📚 Looking up existing Availability shortlist for userId:", userId);
     let shortlist = await Availability.findOne({ userId });
-    if (!shortlist) shortlist = await Availability.create({ userId, acts: [] });
+    if (!shortlist) {
+      console.log("🆕 Creating new Availability shortlist for userId:", userId);
+      shortlist = await Availability.create({ userId, acts: [] });
+    }
 
     const alreadyShortlisted = shortlist.acts.includes(actId);
+    console.log("🧮 alreadyShortlisted:", alreadyShortlisted);
+
     if (alreadyShortlisted) {
+      console.log("❌ Removing from shortlist");
       shortlist.acts = shortlist.acts.filter((a) => String(a) !== String(actId));
     } else {
+      console.log("✅ Adding act to shortlist array");
       shortlist.acts.push(actId);
     }
 
     await shortlist.save();
+    console.log("💾 shortlist saved:", shortlist.acts);
 
-    // 2️⃣ Trigger WhatsApp message (only when adding, not removing)
+    // 2️⃣ Trigger WhatsApp message (only when adding)
     if (!alreadyShortlisted && selectedDate && selectedAddress) {
-      console.log(`💬 Sending Twilio availability check for act ${actId}...`);
+      console.log("💬 Triggering availability WhatsApp message…");
 
       // --- Fetch act with lineup and members ---
       const actData = await Act.findById(actId).lean();
+      console.log("🎭 Act data loaded:", actData ? "✅ Found" : "❌ Not found");
+
       if (!actData) throw new Error("Act not found");
 
       const lineup = lineupId
         ? actData.lineups?.find((l) => String(l._id) === String(lineupId))
         : actData.lineups?.[0];
+      console.log("🎼 Selected lineup:", lineup ? lineup.actSize : "❌ None found");
 
       if (!lineup) throw new Error("No lineup found for act");
 
-      // --- Find vocalist ---
+      console.log("👥 Band members:", lineup.bandMembers?.length || 0);
       const vocalist = lineup.bandMembers?.find((m) =>
         m.instrument?.toLowerCase().includes("vocal")
       );
+      console.log("🎤 Vocalist found:", vocalist ? `${vocalist.firstName} ${vocalist.lastName}` : "❌ None");
 
       if (!vocalist) throw new Error("No vocalist found in lineup");
 
-     const phone = findVocalistPhone(actData, lineupId);
-if (!phone) throw new Error("No valid phone found for vocalist");
+      // --- Resolve phone ---
+      const phone = findVocalistPhone(actData, lineupId);
+      console.log("📞 Phone resolved:", phone || "❌ NULL");
+      if (!phone) throw new Error("No valid phone found for vocalist");
 
-      console.log("🎤 Lead vocalist identified:", {
+      console.log("✅ Vocalist identified:", {
         name: `${vocalist.firstName} ${vocalist.lastName}`,
         phone,
         act: actData.name,
@@ -115,7 +133,8 @@ if (!phone) throw new Error("No valid phone found for vocalist");
       });
 
       // --- Create an availability record ---
-      await Availability.create({
+      console.log("🧾 Creating new Availability entry…");
+      const availabilityDoc = {
         actId,
         lineupId: lineup._id,
         musicianId: vocalist._id,
@@ -126,13 +145,18 @@ if (!phone) throw new Error("No valid phone found for vocalist");
         duties: vocalist.instrument,
         reply: null,
         status: "pending",
-      });
+      };
+      console.log("📋 Availability payload:", availabilityDoc);
+
+      await Availability.create(availabilityDoc);
+      console.log("✅ Availability document created successfully");
 
       // --- Send WhatsApp via Twilio template ---
+      console.log("📨 Sending WhatsApp template message via Twilio…");
       await client.messages.create({
         from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
         to: `whatsapp:${phone}`,
-        contentSid: process.env.TWILIO_ENQUIRY_SID, // <-- use your saved WhatsApp content template
+        contentSid: process.env.TWILIO_ENQUIRY_SID,
         contentVariables: JSON.stringify({
           1: vocalist.firstName,
           2: new Date(selectedDate).toLocaleDateString("en-GB", {
@@ -148,9 +172,12 @@ if (!phone) throw new Error("No valid phone found for vocalist");
         }),
       });
 
-      console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone})`);
+      console.log(`✅ WhatsApp enquiry sent successfully to ${vocalist.firstName} (${phone})`);
+    } else {
+      console.log("🚫 Not sending message (either already shortlisted or missing date/address)");
     }
 
+    console.log("🏁 [END] shortlistActAndTriggerAvailability");
     res.json({
       success: true,
       message: alreadyShortlisted ? "Removed from shortlist" : "Added and message sent",
