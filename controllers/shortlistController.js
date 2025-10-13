@@ -60,8 +60,7 @@ function findVocalistPhone(actData, lineupId) {
     phone,
   });
 
-  return phone;
-}
+return { vocalist, phone };}
 
 
 export const shortlistActAndTriggerAvailability = async (req, res) => {
@@ -120,8 +119,8 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       const actData = await Act.findById(actId).lean();
       if (!actData) throw new Error("Act not found");
 
-    const phone = findVocalistPhone(actData, lineupId);
-if (!phone) throw new Error("No valid phone found for vocalist");
+const { vocalist, phone } = findVocalistPhone(actData, lineupId) || {};
+if (!phone || !vocalist) throw new Error("No valid phone found for vocalist");
 
       console.log("✅ Vocalist identified:", {
         name: `${vocalist.firstName} ${vocalist.lastName}`,
