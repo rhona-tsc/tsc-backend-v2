@@ -189,34 +189,11 @@ app.post(
 );
 
 // Twilio generic status (kept for backwards compat)
-app.post("/api/shortlist/twilio/status", async (req, res) => {
-  try {
-    const sid    = req.body?.MessageSid || req.body?.SmsSid || req.body?.Sid;
-    const status = (req.body?.MessageStatus || req.body?.Status || "").toLowerCase();
-    const code   = String(req.body?.ErrorCode ?? "");
-    const to     = String(req.body?.To || "");
-    const from   = String(req.body?.From || "");
-    console.log("📡 Twilio status:", { sid, status, to, from, err: code || null });
-
-    const isBad = status === "undelivered" || status === "failed";
-    if (sid && isBad && WA_FALLBACK_CACHE.has(sid)) {
-      const cached = WA_FALLBACK_CACHE.get(sid);
-      if (cached?.to && cached?.smsBody) {
-        try {
-          await sendSMSMessage(cached.to, cached.smsBody);
-          console.log("📨 Fallback SMS sent from status webhook", { to: cached.to, forSid: sid, code });
-          WA_FALLBACK_CACHE.delete(sid);
-        } catch (e) {
-          console.warn("❌ SMS fallback failed", { to: cached.to, err: e?.message || e });
-        }
-      }
-    }
-  } catch (e) {
-    console.warn("⚠️ status webhook error:", e?.message || e);
-  } finally {
-    res.sendStatus(200);
-  }
-});
+app.post(
+  "/api/shortlist/twilio/status",
+  express.urlencoded({ extended: false }),
+  twilioStatusHandler
+);
 
 
 // Temporary aliases so existing Twilio config keeps working
@@ -233,14 +210,6 @@ app.post(
   }
 );
 
-// app.post(
-//  "/api/shortlist/twilio/status",
-//  express.urlencoded({ extended: false }),
-//  (req, res) => {
-//    console.log("✅ Twilio status alias hit /api/shortlist/twilio/status");
-//    return twilioStatusV2(req, res);
-//  }
-//);
 
 startRemindersPoller({ intervalMs: 30000 }); // every 30s
 
