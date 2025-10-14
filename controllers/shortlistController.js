@@ -190,17 +190,42 @@ export const twilioStatusHandler = async (req, res) => {
     const act = await Act.findById(availability.actId).lean();
     const vocalistName = availability.contactName || availability.firstName || "there";
 // Rebuild SMS body from the stored availability data
+// 🧭 Find matching band member
+let member =
+  act.lineups?.flatMap(l => l.bandMembers || [])
+    .find(m =>
+      (m.email && m.email.toLowerCase() === (availability.email || "").toLowerCase()) ||
+      (m.phoneNumber && m.phoneNumber.replace(/\s+/g, "") === (availability.phone || "").replace(/\s+/g, ""))
+    ) || {};
+
+// 🧾 Compute base, essential extras, and travel
+const essentialExtras = (member.additionalRoles || [])
+  .filter(r => r.isEssential)
+  .reduce((sum, r) => sum + (r.additionalFee || 0), 0);
+
+const base = member.fee || 0;
+let travel = 0;
+
+// countyFees or costPerMile or MU rates
+if (act.useCountyTravelFee && act.countyFees) {
+  const countyMatch = Object.entries(act.countyFees).find(([county]) =>
+    availability.formattedAddress?.includes(county)
+  );
+  if (countyMatch) travel = Number(countyMatch[1]) || 0;
+} else if (act.costPerMile && member.postcode) {
+  // (you can later reuse your DistanceCache function for this)
+  travel = 0; // stub until DistanceCache integrated
+}
+
+// 🔧 Build SMS with correct data
 const smsBody = await buildAvailabilitySMS({
-  firstName: availability.contactName || availability.firstName,
+  firstName: member.firstName || availability.contactName || availability.firstName,
   formattedDate: availability.dateISO,
   formattedAddress: availability.formattedAddress,
   act,
-  member: { 
-    fee: availability.fee || 0,
-    instrument: availability.duties,
-    postcode: availability.postcode
-  },
+  member: { ...member, fee: base, travel, essentialExtras }
 });
+
     // Send fallback SMS
     await sendSMSMessage(to, smsBody);
     console.log(`📩 SMS fallback sent to ${to}`, { sid });
