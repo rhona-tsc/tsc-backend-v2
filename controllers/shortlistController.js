@@ -66,51 +66,6 @@ function findVocalistPhone(actData, lineupId) {
 
 return { vocalist, phone };}
 
-
-import { sendWhatsAppMessage } from '../utils/twilioClient.js';
-import Act from '../models/actModel.js';
-import User from '../models/userModel.js';
-import { sendSMSMessage } from "../utils/twilioClient.js";
-import Availability from "../models/availabilityModel.js";
-import { sendAvailabilityMessage } from "../utils/twilioHelpers.js";
-import { createCalendarInvite } from './googleController.js';
-import Musician from '../models/musicianModel.js';
-import EnquiryMessage from '../models/EnquiryMessage.js';
-import twilio from "twilio";
-import Shortlist from "../models/shortlistModel.js";
-import { extractOutcode, countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
-import { computePerMemberFee } from "./bookingController.js";
-import { toE164 } from "../utils/twilioClient.js";
-
-const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
-
-// ✅ helper function
-function findVocalistPhone(actData, lineupId) {
-  if (!actData?.lineups?.length) return null;
-
-  const lineup = lineupId
-    ? actData.lineups.find(l => String(l._id || l.lineupId) === String(lineupId))
-    : actData.lineups[0];
-
-  if (!lineup?.bandMembers?.length) return null;
-
-  const vocalist = lineup.bandMembers.find(m =>
-    String(m.instrument || "").toLowerCase().includes("vocal")
-  );
-
-  if (!vocalist) return null;
-
-  let phone = vocalist.phoneNormalized || vocalist.phoneNumber || "";
-  if (!phone && vocalist.deputies?.length) {
-    phone = vocalist.deputies[0].phoneNormalized || vocalist.deputies[0].phoneNumber || "";
-  }
-
-  phone = toE164(phone);
-  if (!phone) return null;
-
-  return { vocalist, phone };
-}
-
 // ✅ main function
 export const shortlistActAndTriggerAvailability = async (req, res) => {
   console.log("🎯 [START] shortlistActAndTriggerAvailability");
