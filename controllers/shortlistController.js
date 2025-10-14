@@ -188,6 +188,13 @@ export const twilioStatusHandler = async (req, res) => {
 
     // Rebuild SMS body
     const act = await Act.findById(availability.actId).lean();
+    console.log("🧭 County travel debug:", {
+  county: availability.county || "none",
+  useCountyTravelFee: act.useCountyTravelFee,
+  countyFees: act.countyFees,
+  costPerMile: act.costPerMile,
+  useMURates: act.useMURates,
+});
     const vocalistName = availability.contactName || availability.firstName || "there";
 // Rebuild SMS body from the stored availability data
 // 🧭 Find matching band member
@@ -206,6 +213,15 @@ const essentialExtras = (member.additionalRoles || [])
 const base = member.fee || 0;
 let travel = 0;
 
+if (act.useCountyTravelFee && act.countyFees) {
+  const countyName = availability.county || ""; // 🌍 stored when derived
+  travel = Number(act.countyFees[countyName]) || 0;
+  console.log("🏞️ County-based travel:", { countyName, travel });
+} else if (act.costPerMile) {
+  console.log("🛣️ costPerMile travel calculation not implemented here");
+} else if (act.useMURates) {
+  console.log("🎼 MU rate fallback active");
+}
 // countyFees or costPerMile or MU rates
 if (act.useCountyTravelFee && act.countyFees) {
   const countyMatch = Object.entries(act.countyFees).find(([county]) =>

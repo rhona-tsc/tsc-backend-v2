@@ -188,74 +188,74 @@ const _cleanPrivate = (obj = {}) =>
  * - Uses deterministic event id so subsequent calls patch the same event.
  */
 export async function createCalendarInvite({
-  enquiryId,         // kept for compatibility (not used in id)
-  actId,
+  enquiryId,         // optional, for traceability
+  actId,             // required
   dateISO,           // 'YYYY-MM-DD'
-  email,             // musician email
-  summary = "TSC: Enquiry",
-  description = "",  // optional block (we’ll still append a line if provided via extendedProperties.line)
-  startTime,         // ISO "…T17:00:00.000Z" (optional)
-  endTime,           // ISO "…T23:59:00.000Z" (optional)
-  extendedProperties // may include { line: "• …" } for the one-line append
+  email,             // musician email (required)
+  summary = "TSC: Enquiry", // default title
+  description = "",  // optional freeform
+  startTime,         // optional ISO, defaults 17:00
+  endTime,           // optional ISO, defaults 23:59
+  extendedProperties = {},
+  address = "TBC",   // optional
+  fee = null,        // optional numeric
 }) {
-  // Debug log inputs
-  console.log("📅 [createCalendarInvite] args:", {
-    actId: _asStr(actId),
-    dateISO: _asStr(dateISO),
-    email: _asStr(email),
-    summary,
+  console.log("📅 [createCalendarInvite] called with:", {
+    actId, dateISO, email, address, fee,
   });
 
   if (!actId || !dateISO || !email) {
-    throw new Error("createCalendarInvite requires actId, dateISO, email");
+    throw new Error("createCalendarInvite requires actId, dateISO, and email");
   }
 
+  // Prep Google client + calendar
   const cal = google.calendar({ version: "v3", auth: oauth2Client });
   const calendarId = "primary";
+
+  // ✅ Deterministic per-musician event ID
   const eventId = makePersonalEventId({ actId, dateISO, email });
-  if (!/^[a-zA-Z0-9_-]{5,100}$/.test(eventId)) {
-    console.warn("⚠️ [createCalendarInvite] generated invalid eventId, sanitizing:", eventId);
-  }
 
-  // The line we’ll append to description for this enquiry (deduped)
-  const appendLine = (extendedProperties?.line || "").trim();
-
-  // Default timings if not supplied
+  // ✅ Format start/end times
   const start = startTime || `${dateISO}T17:00:00.000Z`;
-  const end   = endTime   || `${dateISO}T23:59:00.000Z`;
+  const end = endTime || `${dateISO}T23:59:00.000Z`;
 
-  // Private tags for easy filtering/debug
+  // ✅ Format readable line for description
+  const detailsLine =
+    `• ${new Date(dateISO).toLocaleDateString("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    })} – ${address}${fee ? ` (£${fee})` : ""}`;
+
   const privateProps = {
-    ..._cleanPrivate(extendedProperties?.private),
-    actId: _asStr(actId),
-    dateISO: _asStr(dateISO),
+    ..._cleanPrivate(extendedProperties.private),
+    actId: String(actId),
+    dateISO,
     kind: "enquiry_personal",
-    owner: _asStr(email).toLowerCase(),
+    owner: email.toLowerCase(),
+    enquiryId: enquiryId || "",
   };
 
-  // Throttle per recipient to avoid bursts
+  // --- Ensure spacing between API calls ---
   await throttlePerRecipient(email);
 
-  // Try to GET (if exists, PATCH); else INSERT with explicit id
   try {
+    // 🔍 Try to PATCH if existing event found
     const getRes = await withBackoff(() =>
       cal.events.get({ calendarId, eventId })
     );
     const ev = getRes.data || {};
 
-    // merge description (dedupe exact line)
+    // Merge descriptions idempotently
     const existingDesc = ev.description || "";
-    const lines = new Set(existingDesc.split(/\r?\n/).map(s => s.trim()).filter(Boolean));
-    if (description) {
-      for (const l of String(description).split(/\r?\n/)) {
-        const t = l.trim(); if (t) lines.add(t);
-      }
-    }
-    if (appendLine) lines.add(appendLine);
+    const lines = new Set(existingDesc.split(/\r?\n/).map(l => l.trim()).filter(Boolean));
+    if (description) lines.add(description.trim());
+    lines.add(detailsLine);
     const mergedDesc = Array.from(lines).join("\n");
 
-    // attendees = exactly this musician
-    const attendees = [{ email: String(email).toLowerCase() }];
+    // Update attendees (ensure only this musician)
+    const attendees = [{ email: email.toLowerCase() }];
 
     const patchBody = {
       summary: ev.summary || summary,
@@ -264,52 +264,53 @@ export async function createCalendarInvite({
       extendedProperties: { private: { ...(ev.extendedProperties?.private || {}), ...privateProps } },
     };
 
-    console.log("🩹 [createCalendarInvite] PATCH", { eventId, attendeesCount: attendees.length });
+    console.log("🩹 [createCalendarInvite] PATCH existing event:", { eventId, attendees });
     const patch = await withBackoff(() =>
       cal.events.patch({
         calendarId,
         eventId,
         requestBody: patchBody,
-        sendUpdates: "all", // sends notification if attendee was missing previously
-      })
-    );
-    return patch;
-  } catch (e) {
-    // If not found, insert
-    const notFound = e?.code === 404;
-    if (!notFound) throw e;
-  }
-
-  // INSERT new event (personal)
-  const requestBody = {
-    id: eventId, // deterministic per musician per act+date
-    summary,
-    description: [description, appendLine].filter(Boolean).join("\n"),
-    start: { dateTime: start, timeZone: "Europe/London" },
-    end:   { dateTime: end,   timeZone: "Europe/London" },
-    attendees: [{ email: String(email).toLowerCase() }],
-    extendedProperties: { private: privateProps },
-    guestsCanModify: false,
-    guestsCanInviteOthers: false,
-    guestsCanSeeOtherGuests: true,
-  };
-
-  console.log("🆕 [createCalendarInvite] INSERT", { eventId, attendee: String(email).toLowerCase() });
-  let ins;
-  try {
-    ins = await withBackoff(() =>
-      cal.events.insert({
-        calendarId,
-        requestBody,
         sendUpdates: "all",
       })
     );
+    return { event: patch.data, created: false };
   } catch (e) {
-    console.error("❌ [createCalendarInvite] INSERT failed:", e?.message || e);
-    throw e;
+    // If not found (404), we create it fresh
+    if (e?.code !== 404) {
+      console.error("❌ [createCalendarInvite] Error fetching existing event:", e.message);
+      throw e;
+    }
   }
 
-  return ins;
+  // 🆕 Create a new event if none found
+  const insertBody = {
+    id: eventId,
+    summary,
+    description: [description, detailsLine].filter(Boolean).join("\n"),
+    start: { dateTime: start, timeZone: "Europe/London" },
+    end: { dateTime: end, timeZone: "Europe/London" },
+    attendees: [{ email: email.toLowerCase() }],
+    extendedProperties: { private: privateProps },
+    guestsCanModify: false,
+    guestsCanInviteOthers: false,
+    guestsCanSeeOtherGuests: false,
+  };
+
+  console.log("🆕 [createCalendarInvite] INSERT new event:", { eventId, email });
+  try {
+    const ins = await withBackoff(() =>
+      cal.events.insert({
+        calendarId,
+        requestBody: insertBody,
+        sendUpdates: "all",
+      })
+    );
+    console.log(`✅ Event created for ${email}:`, ins.data.htmlLink);
+    return { event: ins.data, created: true };
+  } catch (e) {
+    console.error("❌ [createCalendarInvite] INSERT failed:", e.message);
+    throw e;
+  }
 }
 
 /**
