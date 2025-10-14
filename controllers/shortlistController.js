@@ -17,7 +17,23 @@ const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TO
 
 import { toE164 } from "../utils/twilioClient.js";
 
+// --- SMS helper for graceful names ---
+const safeFirst = (s) => {
+  const v = String(s || "").trim();
+  return v ? v.split(/\s+/)[0] : "there";
+};
 
+// --- Build friendly availability SMS ---
+function buildAvailabilitySMS({ firstName, formattedDate, formattedAddress, fee, duties, actName }) {
+  const feeTxt = String(fee ?? "").replace(/^[£$]/, "");
+  return (
+    `Hi ${safeFirst(firstName)}, you've received an enquiry for a gig on ` +
+    `${formattedDate} in ${formattedAddress} ` +
+    `at a rate of £${feeTxt} for ${duties || "performance"} duties ` +
+    `with ${actName}. Please indicate your availability 💫 ` +
+    `Reply YES / NO.`
+  );
+}
 
 
 function findVocalistPhone(actData, lineupId) {
@@ -268,13 +284,20 @@ Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
     console.warn(`⚠️ WhatsApp undeliverable (${err.code}) for ${phone}. Sending SMS fallback...`);
 
     // send a regular SMS with equivalent content
-    const smsBody = `Hi ${msgVars[1]}, you've received an enquiry for a gig on ${msgVars[2]} in ${msgVars[3]} at a rate of £${msgVars[4]} for ${msgVars[5]} duties with ${msgVars[6]}. Please indicate your availability: Yes or No.`;
+ const smsBody = buildAvailabilitySMS({
+  firstName: msgVars[1],
+  formattedDate: msgVars[2],
+  formattedAddress: msgVars[3],
+  fee: msgVars[4],
+  duties: msgVars[5],
+  actName: msgVars[6],
+});
 
-    await client.messages.create({
-      from: process.env.TWILIO_SMS_SENDER,
-      to: phone,
-      body: smsBody,
-    });
+await client.messages.create({
+  from: process.env.TWILIO_SMS_SENDER,
+  to: phone,
+  body: smsBody,
+});
 
     console.log(`📩 SMS fallback sent to ${phone}`);
   } else {
