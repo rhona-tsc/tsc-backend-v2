@@ -216,7 +216,7 @@ if (!Array.isArray(shortlist.acts)) {
       console.log("📤 Twilio contentVariables:", msgVars);
 
       await client.messages.create({
-        from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+        from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,
         to: `whatsapp:${phone}`,
         contentSid: process.env.TWILIO_ENQUIRY_SID,
         contentVariables: JSON.stringify(msgVars),
