@@ -122,13 +122,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     const { userId, actId, selectedDate, selectedAddress, lineupId } = req.body;
     console.log("📦 Incoming body:", { userId, actId, selectedDate, selectedAddress, lineupId });
 
-    try {
-      const mongooseConn = (await import("mongoose")).default.connection;
-      console.log("🗃️ DB:", { name: mongooseConn?.name, host: mongooseConn?.host });
-    } catch {}
-
     if (!userId || !actId) {
-      console.warn("⚠️ Missing userId or actId");
       return res.status(400).json({ success: false, message: "Missing userId or actId" });
     }
 
@@ -137,32 +131,28 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     console.log("🌍 Derived county:", resolvedCounty || "❌ none");
 
     let shortlist = await Shortlist.findOne({ userId });
-    if (!shortlist) {
-      console.log("🆕 Creating new shortlist for userId:", userId);
-      shortlist = await Shortlist.create({ userId, acts: [] });
-    }
+    if (!shortlist) shortlist = await Shortlist.create({ userId, acts: [] });
     if (!Array.isArray(shortlist.acts)) shortlist.acts = [];
 
     const existingEntry = shortlist.acts.find((entry) => {
       const sameAct = String(entry.actId) === String(actId);
       const sameDate = entry.dateISO === selectedDate;
-      const addrA = (entry.formattedAddress || "").trim().toLowerCase();
-      const addrB = (selectedAddress || "").trim().toLowerCase();
-      return sameAct && sameDate && addrA === addrB;
+      const sameAddr =
+        (entry.formattedAddress || "").trim().toLowerCase() ===
+        (selectedAddress || "").trim().toLowerCase();
+      return sameAct && sameDate && sameAddr;
     });
 
     const alreadyShortlisted = !!existingEntry;
-    console.log("🧮 alreadyShortlisted:", alreadyShortlisted);
 
-    // ✅ Add or remove act from shortlist
     if (alreadyShortlisted) {
       shortlist.acts = shortlist.acts.filter((entry) => {
         const sameAct = String(entry.actId) === String(actId);
         const sameDate = entry.dateISO === selectedDate;
-        const sameAddress =
+        const sameAddr =
           (entry.formattedAddress || "").trim().toLowerCase() ===
           (selectedAddress || "").trim().toLowerCase();
-        return !(sameAct && sameDate && sameAddress);
+        return !(sameAct && sameDate && sameAddr);
       });
       console.log("❌ Removed specific act/date/address triple");
     } else {
@@ -171,19 +161,15 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     }
 
     await shortlist.save();
-    console.log("💾 shortlist saved:", shortlist.acts);
 
     // ✅ Only send WA if newly added
     if (!alreadyShortlisted && selectedDate && selectedAddress) {
-      console.log("💬 Triggering availability WhatsApp message…");
-
       const actData = await Act.findById(actId).lean();
       if (!actData) throw new Error("Act not found");
 
-      const lineup =
-        lineupId
-          ? actData.lineups?.find((l) => String(l._id) === String(lineupId))
-          : actData.lineups?.[0];
+      const lineup = lineupId
+        ? actData.lineups?.find((l) => String(l._id) === String(lineupId))
+        : actData.lineups?.[0];
       if (!lineup) throw new Error("No lineup found");
 
       const { vocalist, phone } = findVocalistPhone(actData, lineupId) || {};
@@ -222,12 +208,9 @@ Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
         });
       }
 
-      // 🧾 Create availability record
+      // 🧾 Compute fee and message vars
       const shortAddress =
-        selectedAddress?.split(",")?.slice(-2)?.join(" ")?.trim() ||
-        selectedAddress ||
-        "";
-
+        selectedAddress?.split(",")?.slice(-2)?.join(" ")?.trim() || selectedAddress || "";
       const fee = await computePerMemberFee({
         act: actData,
         lineup,
@@ -250,7 +233,6 @@ Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
         6: actData.name || "",
       };
 
-      // Build SMS fallback text (same info)
       const smsBody = buildAvailabilitySMS({
         firstName: msgVars[1],
         formattedDate: msgVars[2],
@@ -260,8 +242,24 @@ Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
         actName: msgVars[6],
       });
 
+      // 🧾 Create availability record first (before WA send)
+      const availability = await Availability.create({
+        actId,
+        lineupId: lineup._id,
+        musicianId: vocalist._id,
+        phone,
+        dateISO: selectedDate,
+        formattedAddress: selectedAddress,
+        county: resolvedCounty,
+        formattedDate: new Date(selectedDate).toLocaleDateString("en-GB"),
+        duties: vocalist.instrument,
+        reply: null,
+        status: "queued",
+        outbound: { sid: null, smsBody }, // add SMS body upfront
+      });
+
       try {
-        // ✅ Send WhatsApp message first
+        // ✅ Send WhatsApp message
         const waMsg = await client.messages.create({
           from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,
           to: `whatsapp:${phone}`,
@@ -271,22 +269,13 @@ Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
 
         console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone}), sid=${waMsg.sid}`);
 
-        // 🗂️ Store outbound SID + SMS fallback body
-        await Availability.create({
-          actId,
-          lineupId: lineup._id,
-          musicianId: vocalist._id,
-          phone,
-          dateISO: selectedDate,
-          formattedAddress: selectedAddress,
-          county: resolvedCounty,
-          formattedDate: new Date(selectedDate).toLocaleDateString("en-GB"),
-          duties: vocalist.instrument,
-          reply: null,
-          status: "queued",
-          outbound: { sid: waMsg.sid, smsBody },
-        });
+        // 🗂️ Update Availability with Twilio SID
+        await Availability.updateOne(
+          { _id: availability._id },
+          { $set: { "outbound.sid": waMsg.sid } }
+        );
       } catch (err) {
+        // --- WhatsApp undeliverable fallback ---
         if (err.code === 63024 || err.code === 63016) {
           console.warn(`⚠️ WhatsApp undeliverable (${err.code}) for ${phone}. Sending SMS fallback...`);
           await sendSMSMessage(phone, smsBody);
@@ -296,8 +285,6 @@ Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
           throw err;
         }
       }
-    } else {
-      console.log("🚫 Not sending message (already shortlisted or missing date/address)");
     }
 
     res.json({
