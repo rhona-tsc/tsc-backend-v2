@@ -84,16 +84,31 @@ export const twilioStatusHandler = async (req, res) => {
   const { MessageSid: sid, MessageStatus: status, ErrorCode: err, To: to } = req.body;
   console.log("📡 Twilio status callback:", { sid, status, err, to });
 
-  // if WhatsApp failed because recipient is invalid → send SMS fallback
+  // Only act if WhatsApp failed due to invalid number or undelivered
   if (status === "undelivered" && (err === "63024" || err === "63016")) {
     try {
-const smsBody =
-  WA_FALLBACK_CACHE.get(sid)?.smsBody ||
-  `Hi there, you've received an enquiry for a gig. Please reply YES or NO to confirm availability.`;
+      const availability = await Availability.findOne({ "outbound.sid": sid }).lean();
+      if (!availability) {
+        console.log("⚠️ No matching availability found for sid:", sid);
+        return res.status(200).send("OK");
+      }
+
+      const act = await Act.findById(availability.actId).lean();
+      const vocalistName = availability.contactName || availability.firstName || "there";
+
+      const smsBody = buildAvailabilitySMS({
+        firstName: vocalistName,
+        formattedDate: availability.formattedDate,
+        formattedAddress: availability.formattedAddress,
+        fee: availability.fee,
+        duties: availability.duties,
+        actName: act?.name,
+      });
+
       await sendSMSMessage(to, smsBody);
-      console.log(`📩 SMS fallback triggered automatically for ${to}`);
+      console.log(`📩 SMS sent to ${to} after WA undelivered`, { sid });
     } catch (e) {
-      console.error("❌ Failed to send SMS fallback:", e.message);
+      console.error("❌ Failed to send SMS:", e.message);
     }
   }
 

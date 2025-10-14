@@ -2061,17 +2061,26 @@ const emailForInvite =
       
 
     try {
-      const event = await createCalendarInvite({
-        enquiryId: updated.enquiryId,
-        actId: actIdStr,
-        dateISO: dateISOday, // 'YYYY-MM-DD'
-        email: emailForInvite,
-        summary: "TSC: Enquiry",
-        description: desc,
-        startTime: `${dateISOday}T17:00:00.000Z`,
-        endTime:   `${dateISOday}T23:59:00.000Z`,
-        extendedProperties: { private: { actId: actIdStr, dateISO: dateISOday, enquiryId: updated.enquiryId } },
-      });
+      const safeStr = (v) => (v ? String(v) : "");
+
+
+    const event = await createCalendarInvite({
+  enquiryId: safeStr(updated.enquiryId),
+  actId: safeStr(actIdStr),
+  dateISO: safeStr(dateISOday),
+  email: emailForInvite,
+  summary: "TSC: Enquiry",
+  description: desc,
+  startTime: `${dateISOday}T17:00:00.000Z`,
+  endTime:   `${dateISOday}T23:59:00.000Z`,
+  extendedProperties: {
+    private: {
+      actId: safeStr(actIdStr),
+      dateISO: safeStr(dateISOday),
+      enquiryId: safeStr(updated.enquiryId),
+    },
+  },
+});
 
       console.log("📆 Calendar invite created:", {
         eventId: event?.data?.id, attendee: emailForInvite,

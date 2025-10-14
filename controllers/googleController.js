@@ -162,6 +162,15 @@ function makePersonalEventId({ actId, dateISO, email }) {
     .slice(0, 100);
 }
 
+// Coerce to string and strip null/undefined
+const _asStr = (v) => (v === undefined || v === null ? "" : String(v));
+const _cleanPrivate = (obj = {}) =>
+  Object.fromEntries(
+    Object.entries(obj)
+      .filter(([_, v]) => v !== undefined && v !== null)
+      .map(([k, v]) => [k, String(v)])
+  );
+
 /**
  * Create/update ONE personal enquiry event for { actId, dateISO, email }.
  * - Keeps attendees to just this musician.
@@ -179,6 +188,14 @@ export async function createCalendarInvite({
   endTime,           // ISO "…T23:59:00.000Z" (optional)
   extendedProperties // may include { line: "• …" } for the one-line append
 }) {
+  // Debug log inputs
+  console.log("📅 [createCalendarInvite] args:", {
+    actId: _asStr(actId),
+    dateISO: _asStr(dateISO),
+    email: _asStr(email),
+    summary,
+  });
+
   if (!actId || !dateISO || !email) {
     throw new Error("createCalendarInvite requires actId, dateISO, email");
   }
@@ -186,6 +203,9 @@ export async function createCalendarInvite({
   const cal = google.calendar({ version: "v3", auth: oauth2Client });
   const calendarId = "primary";
   const eventId = makePersonalEventId({ actId, dateISO, email });
+  if (!/^[a-zA-Z0-9_-]{5,100}$/.test(eventId)) {
+    console.warn("⚠️ [createCalendarInvite] generated invalid eventId, sanitizing:", eventId);
+  }
 
   // The line we’ll append to description for this enquiry (deduped)
   const appendLine = (extendedProperties?.line || "").trim();
@@ -196,11 +216,11 @@ export async function createCalendarInvite({
 
   // Private tags for easy filtering/debug
   const privateProps = {
-    ...(extendedProperties?.private || {}),
-    actId: String(actId),
-    dateISO: String(dateISO),
+    ..._cleanPrivate(extendedProperties?.private),
+    actId: _asStr(actId),
+    dateISO: _asStr(dateISO),
     kind: "enquiry_personal",
-    owner: String(email).toLowerCase(),
+    owner: _asStr(email).toLowerCase(),
   };
 
   // Throttle per recipient to avoid bursts
@@ -234,6 +254,7 @@ export async function createCalendarInvite({
       extendedProperties: { private: { ...(ev.extendedProperties?.private || {}), ...privateProps } },
     };
 
+    console.log("🩹 [createCalendarInvite] PATCH", { eventId, attendeesCount: attendees.length });
     const patch = await withBackoff(() =>
       cal.events.patch({
         calendarId,
@@ -263,13 +284,20 @@ export async function createCalendarInvite({
     guestsCanSeeOtherGuests: true,
   };
 
-  const ins = await withBackoff(() =>
-    cal.events.insert({
-      calendarId,
-      requestBody,
-      sendUpdates: "all",
-    })
-  );
+  console.log("🆕 [createCalendarInvite] INSERT", { eventId, attendee: String(email).toLowerCase() });
+  let ins;
+  try {
+    ins = await withBackoff(() =>
+      cal.events.insert({
+        calendarId,
+        requestBody,
+        sendUpdates: "all",
+      })
+    );
+  } catch (e) {
+    console.error("❌ [createCalendarInvite] INSERT failed:", e?.message || e);
+    throw e;
+  }
 
   return ins;
 }
@@ -388,7 +416,7 @@ export const ensureBookingEvent = async ({ actId, dateISO, address }) => {
 
   const ins = await calendar.events.insert({
     calendarId: "primary",
-    resource: newEvt,
+    requestBody: newEvt,
     sendUpdates: "all",
   });
 
