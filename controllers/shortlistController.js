@@ -203,10 +203,10 @@ if (!Array.isArray(shortlist.acts)) {
         selectedAddress ||
         "";
 
-        const fee = await computeMemberMessageFee({
-  act,
+const fee = await computeMemberMessageFee({
+  act: actData,
   lineup,
-  member,
+  member: vocalist,
   address: selectedAddress,
   dateISO: selectedDate,
 });
