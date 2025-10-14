@@ -105,6 +105,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     const alreadyShortlisted = !!existingEntry;
     console.log("🧮 alreadyShortlisted:", alreadyShortlisted);
 
+    // ✅ Add or remove act from shortlist
     if (alreadyShortlisted) {
       shortlist.acts = shortlist.acts.filter((entry) => {
         const sameAct = String(entry.actId) === String(actId);
@@ -123,6 +124,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     await shortlist.save();
     console.log("💾 shortlist saved:", shortlist.acts);
 
+    // ✅ Only send WA if newly added
     if (!alreadyShortlisted && selectedDate && selectedAddress) {
       console.log("💬 Triggering availability WhatsApp message…");
 
@@ -145,10 +147,25 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
         lineup: lineup.actSize,
       });
 
-      // 🛡️ Check WhatsApp opt-in
-      if (!Boolean(vocalist.whatsappOptIn)) {
-        console.log(`🚫 Skipping WhatsApp for ${vocalist.firstName} (no opt-in)`);
+      // 🧠 Debug: check if whatsappOptIn is coming through
+      console.log("🎤 Vocalist full object snapshot:", {
+        name: `${vocalist.firstName} ${vocalist.lastName}`,
+        phone: vocalist.phoneNormalized || vocalist.phoneNumber,
+        whatsappOptIn: vocalist.whatsappOptIn,
+        rawKeys: Object.keys(vocalist),
+      });
 
+      // 🛡️ Respect WhatsApp opt-in flag
+      if (!Boolean(vocalist.whatsappOptIn)) {
+        console.log(`🚫 Skipping WhatsApp for ${vocalist.firstName} (opt-in=${vocalist.whatsappOptIn})`);
+        console.log("🧩 Opt-in Debug Context:", {
+          actId,
+          lineupId,
+          phone: vocalist.phoneNormalized || vocalist.phoneNumber,
+          availableKeys: Object.keys(vocalist),
+        });
+
+        // 📨 Send one-time opt-in invitation via SMS
         try {
           await client.messages.create({
             from: process.env.TWILIO_SMS_SENDER,
