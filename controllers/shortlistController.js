@@ -86,11 +86,17 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     console.log("🌍 Derived county:", resolvedCounty || "❌ none");
 
     // 1️⃣ Lookup or create shortlist doc
-    let shortlist = await Shortlist.findOne({ userId });
-    if (!shortlist) {
-      console.log("🆕 Creating new shortlist for userId:", userId);
-      shortlist = await Shortlist.create({ userId, acts: [] });
-    }
+ let shortlist = await Shortlist.findOne({ userId });
+if (!shortlist) {
+  console.log("🆕 Creating new shortlist for userId:", userId);
+  shortlist = await Shortlist.create({ userId, acts: [] });
+}
+
+// 🛠 Ensure it’s initialized properly
+if (!Array.isArray(shortlist.acts)) {
+  console.log("⚙️ Initializing empty acts array on shortlist");
+  shortlist.acts = [];
+}
 
     // 2️⃣ Check if this (actId + dateISO + address) triple already exists
     const existingEntry = shortlist.acts.find((entry) => {
