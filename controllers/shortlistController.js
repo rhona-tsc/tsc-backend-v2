@@ -80,36 +80,47 @@ function findVocalistPhone(actData, lineupId) {
 return { vocalist, phone };}
 
 // handle status callback from Twilio
+// ✅ Handle Twilio Status Callback (WhatsApp delivery)
 export const twilioStatusHandler = async (req, res) => {
-  const { MessageSid: sid, MessageStatus: status, ErrorCode: err, To: to } = req.body;
-  console.log("📡 Twilio status callback:", { sid, status, err, to });
+  try {
+    const { MessageSid: sid, MessageStatus: status, ErrorCode: err, To: to } = req.body;
+    console.log("📡 Twilio status callback:", { sid, status, err, to });
 
-  // Only act if WhatsApp failed due to invalid number or undelivered
-  if (status === "undelivered" && (err === "63024" || err === "63016")) {
-    try {
-      const availability = await Availability.findOne({ "outbound.sid": sid }).lean();
-      if (!availability) {
-        console.log("⚠️ No matching availability found for sid:", sid);
-        return res.status(200).send("OK");
-      }
+    // Only act if WA failed (undelivered or invalid destination)
+    const failed = status === "undelivered" && (err === "63024" || err === "63016");
+    if (!failed) return res.status(200).send("OK");
 
-      const act = await Act.findById(availability.actId).lean();
-      const vocalistName = availability.contactName || availability.firstName || "there";
+    // Try find the availability record
+    let availability = await Availability.findOne({ "outbound.sid": sid }).lean();
 
-      const smsBody = buildAvailabilitySMS({
-        firstName: vocalistName,
-        formattedDate: availability.formattedDate,
-        formattedAddress: availability.formattedAddress,
-        fee: availability.fee,
-        duties: availability.duties,
-        actName: act?.name,
-      });
-
-      await sendSMSMessage(to, smsBody);
-      console.log(`📩 SMS sent to ${to} after WA undelivered`, { sid });
-    } catch (e) {
-      console.error("❌ Failed to send SMS:", e.message);
+    // Fallback: match by phone if SID wasn’t yet written
+    if (!availability && to) {
+      const normalized = String(to).replace(/^whatsapp:/i, "");
+      availability = await Availability.findOne({ phone: normalized }).sort({ createdAt: -1 }).lean();
     }
+
+    if (!availability) {
+      console.warn("⚠️ No matching availability found for sid or phone:", sid, to);
+      return res.status(200).send("OK");
+    }
+
+    // Rebuild SMS body
+    const act = await Act.findById(availability.actId).lean();
+    const vocalistName = availability.contactName || availability.firstName || "there";
+    const smsBody = buildAvailabilitySMS({
+      firstName: vocalistName,
+      formattedDate: availability.formattedDate,
+      formattedAddress: availability.formattedAddress,
+      fee: availability.fee,
+      duties: availability.duties,
+      actName: act?.name,
+    });
+
+    // Send fallback SMS
+    await sendSMSMessage(to, smsBody);
+    console.log(`📩 SMS fallback sent to ${to}`, { sid });
+  } catch (err) {
+    console.error("❌ Error in Twilio status handler:", err.message);
   }
 
   res.status(200).send("OK");
