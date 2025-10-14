@@ -210,8 +210,17 @@ export async function createCalendarInvite({
 
   // Prep Google client + calendar
   const cal = google.calendar({ version: "v3", auth: oauth2Client });
-  const calendarId = "primary";
-
+// Determine calendar ID safely
+let calendarId = "primary";
+try {
+  // For some accounts (esp. service accounts), "primary" isn’t valid — we list calendars to find one
+  const { data } = await cal.calendarList.list({ maxResults: 1 });
+  const first = data.items?.[0]?.id;
+  if (first) calendarId = first;
+  console.log(`📅 Using calendarId: ${calendarId}`);
+} catch (err) {
+  console.warn("⚠️ Falling back to 'primary' calendar due to lookup error:", err.message);
+}
   // ✅ Deterministic per-musician event ID
   const eventId = makePersonalEventId({ actId, dateISO, email });
 
