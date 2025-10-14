@@ -196,30 +196,13 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
         lineup: lineup.actSize,
       });
 
-      // 🧠 Debug: check if whatsappOptIn is coming through
-      console.log("🎤 Vocalist full object snapshot:", {
-        name: `${vocalist.firstName} ${vocalist.lastName}`,
-        phone: vocalist.phoneNormalized || vocalist.phoneNumber,
-        whatsappOptIn: vocalist.whatsappOptIn,
-        rawKeys: Object.keys(vocalist),
-      });
-
       // 🛡️ Respect WhatsApp opt-in flag
       if (!Boolean(vocalist.whatsappOptIn)) {
         console.log(`🚫 Skipping WhatsApp for ${vocalist.firstName} (opt-in=${vocalist.whatsappOptIn})`);
-        console.log("🧩 Opt-in Debug Context:", {
-          actId,
-          lineupId,
-          phone: vocalist.phoneNormalized || vocalist.phoneNumber,
-          availableKeys: Object.keys(vocalist),
-        });
-
-        // 📨 Send one-time opt-in invitation via SMS
         try {
-          await client.messages.create({
-            from: process.env.TWILIO_SMS_SENDER,
-            to: phone,
-            body: `Hi ${vocalist.firstName}, it's The Supreme Collective 👋 
+          await sendSMSMessage(
+            phone,
+            `Hi ${vocalist.firstName}, it's The Supreme Collective 👋 
 We send gig availability requests via WhatsApp for quick replies. 
 Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
               "whatsapp:",
@@ -227,13 +210,12 @@ Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
             )} or click: https://wa.me/${process.env.TWILIO_WA_SENDER.replace(
               "whatsapp:+",
               ""
-            )} to opt in.`,
-          });
+            )} to opt in.`
+          );
           console.log(`📩 Opt-in invite SMS sent to ${phone}`);
         } catch (err) {
           console.error("❌ Failed to send opt-in SMS:", err.message);
         }
-
         return res.json({
           success: true,
           message: `${vocalist.firstName} not opted in — sent opt-in invite.`,
@@ -241,21 +223,6 @@ Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
       }
 
       // 🧾 Create availability record
-      const availabilityDoc = {
-        actId,
-        lineupId: lineup._id,
-        musicianId: vocalist._id,
-        phone,
-        dateISO: selectedDate,
-        formattedAddress: selectedAddress,
-        county: resolvedCounty,
-        formattedDate: new Date(selectedDate).toLocaleDateString("en-GB"),
-        duties: vocalist.instrument,
-        reply: null,
-        status: "queued",
-      };
-      await Availability.create(availabilityDoc);
-
       const shortAddress =
         selectedAddress?.split(",")?.slice(-2)?.join(" ")?.trim() ||
         selectedAddress ||
@@ -283,42 +250,50 @@ Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
         6: actData.name || "",
       };
 
-     try {
-  // Attempt WhatsApp message first
-  await client.messages.create({
-    from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,
-    to: `whatsapp:${phone}`,
-    contentSid: process.env.TWILIO_ENQUIRY_SID,
-    contentVariables: JSON.stringify(msgVars),
-  });
+      // Build SMS fallback text (same info)
+      const smsBody = buildAvailabilitySMS({
+        firstName: msgVars[1],
+        formattedDate: msgVars[2],
+        formattedAddress: msgVars[3],
+        fee: msgVars[4],
+        duties: msgVars[5],
+        actName: msgVars[6],
+      });
 
-  console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone})`);
-} catch (err) {
-  // --- WhatsApp Undeliverable Fallback ---
-  if (err.code === 63024 || err.code === 63016) {
-    console.warn(`⚠️ WhatsApp undeliverable (${err.code}) for ${phone}. Sending SMS fallback...`);
+      try {
+        // ✅ Send WhatsApp message first
+        const waMsg = await client.messages.create({
+          from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,
+          to: `whatsapp:${phone}`,
+          contentSid: process.env.TWILIO_ENQUIRY_SID,
+          contentVariables: JSON.stringify(msgVars),
+        });
 
-    // send a regular SMS with equivalent content
- const smsBody = buildAvailabilitySMS({
-  firstName: msgVars[1],
-  formattedDate: msgVars[2],
-  formattedAddress: msgVars[3],
-  fee: msgVars[4],
-  duties: msgVars[5],
-  actName: msgVars[6],
-});
+        console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone}), sid=${waMsg.sid}`);
 
-await client.messages.create({
-  from: process.env.TWILIO_SMS_SENDER,
-  to: phone,
-  body: smsBody,
-});
-
-    console.log(`📩 SMS fallback sent to ${phone}`);
-  } else {
-    console.error("❌ WhatsApp send error:", err.message);
-    throw err;
-  
+        // 🗂️ Store outbound SID + SMS fallback body
+        await Availability.create({
+          actId,
+          lineupId: lineup._id,
+          musicianId: vocalist._id,
+          phone,
+          dateISO: selectedDate,
+          formattedAddress: selectedAddress,
+          county: resolvedCounty,
+          formattedDate: new Date(selectedDate).toLocaleDateString("en-GB"),
+          duties: vocalist.instrument,
+          reply: null,
+          status: "queued",
+          outbound: { sid: waMsg.sid, smsBody },
+        });
+      } catch (err) {
+        if (err.code === 63024 || err.code === 63016) {
+          console.warn(`⚠️ WhatsApp undeliverable (${err.code}) for ${phone}. Sending SMS fallback...`);
+          await sendSMSMessage(phone, smsBody);
+          console.log(`📩 SMS fallback sent to ${phone}`);
+        } else {
+          console.error("❌ WhatsApp send error:", err.message);
+          throw err;
         }
       }
     } else {
