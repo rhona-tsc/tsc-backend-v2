@@ -10,6 +10,7 @@ import EnquiryMessage from '../models/EnquiryMessage.js';
 import twilio from "twilio";
 import Shortlist from "../models/shortlistModel.js";
 import { extractOutcode, countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
+import { computeMemberMessageFee } from "./helpersForCorrectFee.js";
 
 
 
@@ -18,6 +19,9 @@ const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
 
 
 import { toE164 } from "../utils/twilioClient.js";
+
+
+
 
 function findVocalistPhone(actData, lineupId) {
   if (!actData?.lineups?.length) return null;
@@ -199,6 +203,14 @@ if (!Array.isArray(shortlist.acts)) {
         selectedAddress ||
         "";
 
+        const fee = await computeMemberMessageFee({
+  act,
+  lineup,
+  member,
+  address: selectedAddress,
+  dateISO: selectedDate,
+});
+
       const msgVars = {
         1: vocalist.firstName || "",
         2: new Date(selectedDate).toLocaleDateString("en-GB", {
@@ -208,7 +220,7 @@ if (!Array.isArray(shortlist.acts)) {
           year: "numeric",
         }),
         3: shortAddress,
-        4: String(vocalist.fee || 0),
+        4: fee.toString(),
         5: vocalist.instrument || "",
         6: actData.name || "",
       };
