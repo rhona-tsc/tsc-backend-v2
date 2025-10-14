@@ -234,26 +234,35 @@ Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
         6: actData.name || "",
       };
 
-      try {
-        await client.messages.create({
-          from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,
-          to: `whatsapp:${phone}`,
-          contentSid: process.env.TWILIO_ENQUIRY_SID,
-          contentVariables: JSON.stringify(msgVars),
-        });
-        console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone})`);
-      } catch (err) {
-        if (err.code === 63024 || err.code === 63016) {
-          console.warn("⚠️ WhatsApp delivery failed — sending SMS fallback...");
-          await client.messages.create({
-            from: process.env.TWILIO_SMS_SENDER,
-            to: phone,
-            body: `Hi ${msgVars[1]}, just checking availability for ${msgVars[6]} on ${msgVars[2]} in ${msgVars[3]}. Can you confirm if you’re free?`,
-          });
-          console.log(`📩 SMS fallback sent to ${phone}`);
-        } else {
-          console.error("❌ WhatsApp send error:", err.message);
-          throw err;
+     try {
+  // Attempt WhatsApp message first
+  await client.messages.create({
+    from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,
+    to: `whatsapp:${phone}`,
+    contentSid: process.env.TWILIO_ENQUIRY_SID,
+    contentVariables: JSON.stringify(msgVars),
+  });
+
+  console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone})`);
+} catch (err) {
+  // --- WhatsApp Undeliverable Fallback ---
+  if (err.code === 63024 || err.code === 63016) {
+    console.warn(`⚠️ WhatsApp undeliverable (${err.code}) for ${phone}. Sending SMS fallback...`);
+
+    // send a regular SMS with equivalent content
+    const smsBody = `Hi ${msgVars[1]}, you've received an enquiry for a gig on ${msgVars[2]} in ${msgVars[3]} at a rate of £${msgVars[4]} for ${msgVars[5]} duties with ${msgVars[6]}. Please indicate your availability: Yes or No.`;
+
+    await client.messages.create({
+      from: process.env.TWILIO_SMS_SENDER,
+      to: phone,
+      body: smsBody,
+    });
+
+    console.log(`📩 SMS fallback sent to ${phone}`);
+  } else {
+    console.error("❌ WhatsApp send error:", err.message);
+    throw err;
+  
         }
       }
     } else {
