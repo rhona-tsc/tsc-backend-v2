@@ -9,7 +9,8 @@ import twilio from "twilio";
 import Shortlist from "../models/shortlistModel.js";
 import { extractOutcode, countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
 import { computePerMemberFee } from "./bookingController.js";
-
+import DistanceCache from "../models/distanceCacheModel.js";
+import mongoose from "mongoose";
 
 
 const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -23,13 +24,94 @@ const safeFirst = (s) => {
   return v ? v.split(/\s+/)[0] : "there";
 };
 
-// --- Build friendly availability SMS ---
-function buildAvailabilitySMS({ firstName, formattedDate, formattedAddress, fee, duties, actName }) {
-  const feeTxt = String(fee ?? "").replace(/^[£$]/, "");
+// Helper: format 26th Jun 2026
+function formatShortDate(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  const day = date.getDate();
+  const suffix = [1, 21, 31].includes(day)
+    ? "st"
+    : [2, 22].includes(day)
+    ? "nd"
+    : [3, 23].includes(day)
+    ? "rd"
+    : "th";
+  const month = date.toLocaleString("en-GB", { month: "short" });
+  const year = date.getFullYear();
+  return `${day}${suffix} ${month} ${year}`;
+}
+
+// Helper: extract "Berkshire RG45 3RG"
+function formatShortAddress(full) {
+  if (!full) return "";
+  const parts = full.split(",").map((p) => p.trim());
+  const lastTwo = parts.slice(-2).join(" ");
+  return lastTwo;
+}
+
+// Compute travel component from cache or county/costPerMile
+async function computeTravelComponent({ act, member, address }) {
+  if (!act || !member?.postcode || !address) return 0;
+  const from = member.postcode.replace(/\s+/g, "").toUpperCase();
+  const toMatch = address.match(/[A-Z]{1,2}\d[\dA-Z]?\s*\d[A-Z]{2}/i);
+  const to = toMatch ? toMatch[0].replace(/\s+/g, "").toUpperCase() : null;
+
+  if (act.countyFees && act.useCountyTravelFee) {
+    const county = act.countyFees.find((c) => c.county && address.includes(c.county));
+    return county ? county.feePerMember || 0 : 0;
+  }
+
+  if (act.costPerMile > 0 && from && to) {
+    const cached = await DistanceCache.findOne({ from, to });
+    if (cached?.distanceKm) {
+      const miles = cached.distanceKm * 0.621371;
+      return Math.round(miles * act.costPerMile);
+    }
+  }
+
+  return 0;
+}
+
+// Main builder
+export async function buildAvailabilitySMS({
+  firstName,
+  formattedDate,
+  formattedAddress,
+  act,
+  member,
+}) {
+  const shortDate = formatShortDate(formattedDate);
+  const shortAddress = formatShortAddress(formattedAddress);
+
+  // Base fee + essential roles
+  const base = member?.fee || 0;
+  const essentialExtras = (member?.additionalRoles || [])
+    .filter((r) => r.isEssential)
+    .reduce((sum, r) => sum + (r.fee || 0), 0);
+
+  // Travel fee
+  const travel = await computeTravelComponent({ act, member, address: formattedAddress });
+
+  const total = base + essentialExtras + travel;
+  const duties = member?.instrument || "performance";
+  const actName = act?.tscName || act?.name || "the act";
+
+  // 🧾 Debug breakdown (safe console output)
+  console.log("💰 Fee breakdown:", {
+    musician: `${member?.firstName || ""} ${member?.lastName || ""}`.trim() || "(unknown)",
+    act: actName,
+    date: shortDate,
+    location: shortAddress,
+    base,
+    essentialExtras,
+    travel,
+    total,
+  });
+
   return (
-    `Hi ${safeFirst(firstName)}, you've received an enquiry for a gig on ` +
-    `${formattedDate} in ${formattedAddress} ` +
-    `at a rate of £${feeTxt} for ${duties || "performance"} duties ` +
+    `Hi ${firstName || "there"}, you've received an enquiry for a gig on ` +
+    `${shortDate} in ${shortAddress} ` +
+    `at a rate of £${total} for ${duties} duties ` +
     `with ${actName}. Please indicate your availability 💫 ` +
     `Reply YES / NO.`
   );
@@ -107,15 +189,18 @@ export const twilioStatusHandler = async (req, res) => {
     // Rebuild SMS body
     const act = await Act.findById(availability.actId).lean();
     const vocalistName = availability.contactName || availability.firstName || "there";
-    const smsBody = buildAvailabilitySMS({
-      firstName: vocalistName,
-      formattedDate: availability.formattedDate,
-      formattedAddress: availability.formattedAddress,
-      fee: availability.fee,
-      duties: availability.duties,
-      actName: act?.name,
-    });
-
+// Rebuild SMS body from the stored availability data
+const smsBody = await buildAvailabilitySMS({
+  firstName: availability.contactName || availability.firstName,
+  formattedDate: availability.dateISO,
+  formattedAddress: availability.formattedAddress,
+  act,
+  member: { 
+    fee: availability.fee || 0,
+    instrument: availability.duties,
+    postcode: availability.postcode
+  },
+});
     // Send fallback SMS
     await sendSMSMessage(to, smsBody);
     console.log(`📩 SMS fallback sent to ${to}`, { sid });
@@ -197,18 +282,13 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       if (!Boolean(vocalist.whatsappOptIn)) {
         console.log(`🚫 Skipping WhatsApp for ${vocalist.firstName} (opt-in=${vocalist.whatsappOptIn})`);
         try {
-          await sendSMSMessage(
-            phone,
-            `Hi ${vocalist.firstName}, it's The Supreme Collective 👋 
+         const waNumber = (process.env.TWILIO_WA_SENDER || "").replace("whatsapp:+", "");
+await sendSMSMessage(
+  phone,
+  `Hi ${vocalist.firstName}, it's The Supreme Collective 👋 
 We send gig availability requests via WhatsApp for quick replies. 
-Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
-              "whatsapp:",
-              ""
-            )} or click: https://wa.me/${process.env.TWILIO_WA_SENDER.replace(
-              "whatsapp:+",
-              ""
-            )} to opt in.`
-          );
+Please message us on WhatsApp at +${waNumber} or click https://wa.me/${waNumber} to opt in.`
+);
           console.log(`📩 Opt-in invite SMS sent to ${phone}`);
         } catch (err) {
           console.error("❌ Failed to send opt-in SMS:", err.message);
@@ -244,7 +324,7 @@ Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
         6: actData.name || "",
       };
 
-      const smsBody = buildAvailabilitySMS({
+      const smsBody = await buildAvailabilitySMS({
         firstName: msgVars[1],
         formattedDate: msgVars[2],
         formattedAddress: msgVars[3],

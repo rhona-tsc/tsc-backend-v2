@@ -155,11 +155,21 @@ async function withBackoff(fn, { tries = 5, base = 300 } = {}) {
 }
 
 // Build a stable event id PER PERSON for this act+date
-// (we use dateISO in the "enquiryId" slot so id is stable across many enquiries that day)
+// This guarantees that repeated enquiries for the same musician (email) and act on a given date
+// always generate the same deterministic event id for Google Calendar. The format is:
+//   enq_${dateISO}_${actId}_${hashBase36(email)}
+// The result is sanitized to alphanumeric/underscore/dash and trimmed to 100 chars max.
 function makePersonalEventId({ actId, dateISO, email }) {
-  return `enq_${(dateISO || "0")}_${(actId || "0")}_${hashBase36((email || "").toLowerCase())}`
-    .replace(/[^a-z0-9_-]/gi, "")
-    .slice(0, 100);
+  // Defensive: ensure all fields are strings, lowercased for email
+  const act = String(actId ?? "0");
+  const date = String(dateISO ?? "0");
+  const mail = String(email ?? "").toLowerCase();
+  // hashBase36 should produce only alphanumeric, but we sanitize anyway
+  let id = `enq_${date}_${act}_${hashBase36(mail)}`;
+  // Only allow alphanumeric, underscores, and dashes
+  id = id.replace(/[^a-z0-9_-]/gi, "");
+  // Trim to 100 chars max
+  return id.slice(0, 100);
 }
 
 // Coerce to string and strip null/undefined
