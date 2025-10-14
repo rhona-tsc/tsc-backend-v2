@@ -17,6 +17,7 @@ const musicianSchema = new mongoose.Schema(
     lastName: { type: String },
     phone: { type: String, index: true },
     phoneNormalized: { type: String, index: true },
+    whatsappOptIn: { type: Boolean, default: false },
     password: { type: String },
     basicInfo: {
       firstName: { type: String },

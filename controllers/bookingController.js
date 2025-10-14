@@ -2392,4 +2392,5 @@ export {
   markMusicianAsPaid,
   upsertBoardRowFromBooking,
   upsertEnquiryRowFromShortlist,
+  computePerMemberFee,
 };

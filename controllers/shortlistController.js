@@ -10,7 +10,7 @@ import EnquiryMessage from '../models/EnquiryMessage.js';
 import twilio from "twilio";
 import Shortlist from "../models/shortlistModel.js";
 import { extractOutcode, countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
-import { computeMemberMessageFee } from "./helpersForCorrectFee.js";
+import { computePerMemberFee } from "./bookingController.js";
 
 
 
@@ -67,13 +67,57 @@ function findVocalistPhone(actData, lineupId) {
 return { vocalist, phone };}
 
 
+import { sendWhatsAppMessage } from '../utils/twilioClient.js';
+import Act from '../models/actModel.js';
+import User from '../models/userModel.js';
+import { sendSMSMessage } from "../utils/twilioClient.js";
+import Availability from "../models/availabilityModel.js";
+import { sendAvailabilityMessage } from "../utils/twilioHelpers.js";
+import { createCalendarInvite } from './googleController.js';
+import Musician from '../models/musicianModel.js';
+import EnquiryMessage from '../models/EnquiryMessage.js';
+import twilio from "twilio";
+import Shortlist from "../models/shortlistModel.js";
+import { extractOutcode, countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
+import { computePerMemberFee } from "./bookingController.js";
+import { toE164 } from "../utils/twilioClient.js";
+
+const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
+
+// ✅ helper function
+function findVocalistPhone(actData, lineupId) {
+  if (!actData?.lineups?.length) return null;
+
+  const lineup = lineupId
+    ? actData.lineups.find(l => String(l._id || l.lineupId) === String(lineupId))
+    : actData.lineups[0];
+
+  if (!lineup?.bandMembers?.length) return null;
+
+  const vocalist = lineup.bandMembers.find(m =>
+    String(m.instrument || "").toLowerCase().includes("vocal")
+  );
+
+  if (!vocalist) return null;
+
+  let phone = vocalist.phoneNormalized || vocalist.phoneNumber || "";
+  if (!phone && vocalist.deputies?.length) {
+    phone = vocalist.deputies[0].phoneNormalized || vocalist.deputies[0].phoneNumber || "";
+  }
+
+  phone = toE164(phone);
+  if (!phone) return null;
+
+  return { vocalist, phone };
+}
+
+// ✅ main function
 export const shortlistActAndTriggerAvailability = async (req, res) => {
   console.log("🎯 [START] shortlistActAndTriggerAvailability");
   try {
     const { userId, actId, selectedDate, selectedAddress, lineupId } = req.body;
     console.log("📦 Incoming body:", { userId, actId, selectedDate, selectedAddress, lineupId });
 
-    // (Optional helpful debug) Log DB connection info
     try {
       const mongooseConn = (await import("mongoose")).default.connection;
       console.log("🗃️ DB:", { name: mongooseConn?.name, host: mongooseConn?.host });
@@ -84,44 +128,28 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing userId or actId" });
     }
 
-    // 🗺️ Auto-derive county
     const outcode = extractOutcode(selectedAddress);
     const resolvedCounty = countyFromOutcode(outcode);
     console.log("🌍 Derived county:", resolvedCounty || "❌ none");
 
-    // 1️⃣ Lookup or create shortlist doc
- let shortlist = await Shortlist.findOne({ userId });
-if (!shortlist) {
-  console.log("🆕 Creating new shortlist for userId:", userId);
-  shortlist = await Shortlist.create({ userId, acts: [] });
-}
+    let shortlist = await Shortlist.findOne({ userId });
+    if (!shortlist) {
+      console.log("🆕 Creating new shortlist for userId:", userId);
+      shortlist = await Shortlist.create({ userId, acts: [] });
+    }
+    if (!Array.isArray(shortlist.acts)) shortlist.acts = [];
 
-// 🛠 Ensure it’s initialized properly
-if (!Array.isArray(shortlist.acts)) {
-  console.log("⚙️ Initializing empty acts array on shortlist");
-  shortlist.acts = [];
-}
-
-    // 2️⃣ Check if this (actId + dateISO + address) triple already exists
     const existingEntry = shortlist.acts.find((entry) => {
       const sameAct = String(entry.actId) === String(actId);
       const sameDate = entry.dateISO === selectedDate;
-
-      // Normalize addresses to avoid case or spacing mismatches
       const addrA = (entry.formattedAddress || "").trim().toLowerCase();
       const addrB = (selectedAddress || "").trim().toLowerCase();
-      const sameAddress = addrA === addrB;
-
-      return sameAct && sameDate && sameAddress;
+      return sameAct && sameDate && addrA === addrB;
     });
 
     const alreadyShortlisted = !!existingEntry;
-
     console.log("🧮 alreadyShortlisted:", alreadyShortlisted);
-    console.log("📅 Checking for triple:", { actId, selectedDate, selectedAddress });
-    console.log("🧾 Current shortlist entries:", shortlist.acts);
 
-    // 3️⃣ Add or remove the triple
     if (alreadyShortlisted) {
       shortlist.acts = shortlist.acts.filter((entry) => {
         const sameAct = String(entry.actId) === String(actId);
@@ -133,45 +161,27 @@ if (!Array.isArray(shortlist.acts)) {
       });
       console.log("❌ Removed specific act/date/address triple");
     } else {
-      shortlist.acts.push({
-        actId,
-        dateISO: selectedDate,
-        formattedAddress: selectedAddress,
-      });
-      console.log("✅ Added new act/date/address triple to shortlist");
+      shortlist.acts.push({ actId, dateISO: selectedDate, formattedAddress: selectedAddress });
+      console.log("✅ Added new act/date/address triple");
     }
 
     await shortlist.save();
     console.log("💾 shortlist saved:", shortlist.acts);
 
-    // Reload to show current state
-    const refreshed = await Shortlist.findById(shortlist._id).lean();
-    console.log(
-      "💾 shortlist now:",
-      refreshed.acts.map((a) => ({
-        actId: String(a.actId),
-        dateISO: a.dateISO,
-        address: a.formattedAddress,
-      }))
-    );
-
-    // 4️⃣ Trigger message only when adding
     if (!alreadyShortlisted && selectedDate && selectedAddress) {
       console.log("💬 Triggering availability WhatsApp message…");
 
       const actData = await Act.findById(actId).lean();
       if (!actData) throw new Error("Act not found");
 
-      // ✅ Re-derive lineup so we can log size and store lineupId
       const lineup =
         lineupId
           ? actData.lineups?.find((l) => String(l._id) === String(lineupId))
           : actData.lineups?.[0];
-      if (!lineup) throw new Error("No lineup found in act");
+      if (!lineup) throw new Error("No lineup found");
 
-      // 🧩 Find vocalist and phone
       const { vocalist, phone } = findVocalistPhone(actData, lineupId) || {};
-      if (!phone || !vocalist) throw new Error("No valid phone found for vocalist");
+      if (!phone || !vocalist) throw new Error("No valid phone for vocalist");
 
       console.log("✅ Vocalist identified:", {
         name: `${vocalist.firstName} ${vocalist.lastName}`,
@@ -180,7 +190,36 @@ if (!Array.isArray(shortlist.acts)) {
         lineup: lineup.actSize,
       });
 
-      // 🧾 Create availability entry
+      // 🛡️ Check WhatsApp opt-in
+      if (!Boolean(vocalist.whatsappOptIn)) {
+        console.log(`🚫 Skipping WhatsApp for ${vocalist.firstName} (no opt-in)`);
+
+        try {
+          await client.messages.create({
+            from: process.env.TWILIO_SMS_SENDER,
+            to: phone,
+            body: `Hi ${vocalist.firstName}, it's The Supreme Collective 👋 
+We send gig availability requests via WhatsApp for quick replies. 
+Please message us on WhatsApp at ${process.env.TWILIO_WA_SENDER.replace(
+              "whatsapp:",
+              ""
+            )} or click: https://wa.me/${process.env.TWILIO_WA_SENDER.replace(
+              "whatsapp:+",
+              ""
+            )} to opt in.`,
+          });
+          console.log(`📩 Opt-in invite SMS sent to ${phone}`);
+        } catch (err) {
+          console.error("❌ Failed to send opt-in SMS:", err.message);
+        }
+
+        return res.json({
+          success: true,
+          message: `${vocalist.firstName} not opted in — sent opt-in invite.`,
+        });
+      }
+
+      // 🧾 Create availability record
       const availabilityDoc = {
         actId,
         lineupId: lineup._id,
@@ -192,24 +231,22 @@ if (!Array.isArray(shortlist.acts)) {
         formattedDate: new Date(selectedDate).toLocaleDateString("en-GB"),
         duties: vocalist.instrument,
         reply: null,
-        status: "queued", // ✅ valid enum value
+        status: "queued",
       };
-      console.log("📋 Availability payload:", availabilityDoc);
       await Availability.create(availabilityDoc);
 
-      // 📨 Send WhatsApp via Twilio template
       const shortAddress =
         selectedAddress?.split(",")?.slice(-2)?.join(" ")?.trim() ||
         selectedAddress ||
         "";
 
-const fee = await computeMemberMessageFee({
-  act: actData,
-  lineup,
-  member: vocalist,
-  address: selectedAddress,
-  dateISO: selectedDate,
-});
+      const fee = await computePerMemberFee({
+        act: actData,
+        lineup,
+        member: vocalist,
+        address: selectedAddress,
+        dateISO: selectedDate,
+      });
 
       const msgVars = {
         1: vocalist.firstName || "",
@@ -225,16 +262,28 @@ const fee = await computeMemberMessageFee({
         6: actData.name || "",
       };
 
-      console.log("📤 Twilio contentVariables:", msgVars);
-
-      await client.messages.create({
-        from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,
-        to: `whatsapp:${phone}`,
-        contentSid: process.env.TWILIO_ENQUIRY_SID,
-        contentVariables: JSON.stringify(msgVars),
-      });
-
-      console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone})`);
+      try {
+        await client.messages.create({
+          from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,
+          to: `whatsapp:${phone}`,
+          contentSid: process.env.TWILIO_ENQUIRY_SID,
+          contentVariables: JSON.stringify(msgVars),
+        });
+        console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone})`);
+      } catch (err) {
+        if (err.code === 63024 || err.code === 63016) {
+          console.warn("⚠️ WhatsApp delivery failed — sending SMS fallback...");
+          await client.messages.create({
+            from: process.env.TWILIO_SMS_SENDER,
+            to: phone,
+            body: `Hi ${msgVars[1]}, just checking availability for ${msgVars[6]} on ${msgVars[2]} in ${msgVars[3]}. Can you confirm if you’re free?`,
+          });
+          console.log(`📩 SMS fallback sent to ${phone}`);
+        } else {
+          console.error("❌ WhatsApp send error:", err.message);
+          throw err;
+        }
+      }
     } else {
       console.log("🚫 Not sending message (already shortlisted or missing date/address)");
     }

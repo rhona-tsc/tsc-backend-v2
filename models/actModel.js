@@ -285,6 +285,7 @@ const actSchema = new mongoose.Schema(
             lastName: { type: String },
             phoneNumber: { type: String },
             phoneNormalized: { type: String },
+            whatsappOptIn: { type: Boolean, default: false },
             email: { type: String },
             instrument: { type: String },
             useMURatesForFees: { type: Boolean },
