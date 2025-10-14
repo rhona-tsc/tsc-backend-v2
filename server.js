@@ -41,6 +41,7 @@ import { WA_FALLBACK_CACHE, sendSMSMessage } from './utils/twilioClient.js';
 import { twilioStatusV2 } from './controllers/availabilityControllerV2.js';
 import newsletterRoutes from './routes/newsletterRoutes.js';
 import { getAvailableActIds } from './controllers/actAvailabilityController.js';
+import { twilioStatusHandler } from './controllers/shortlistController.js';
 
 import mongoose from "mongoose";
 import musicianModel from "./models/musicianModel.js";
@@ -232,14 +233,14 @@ app.post(
   }
 );
 
-app.post(
-  "/api/shortlist/twilio/status",
-  express.urlencoded({ extended: false }),
-  (req, res) => {
-    console.log("✅ Twilio status alias hit /api/shortlist/twilio/status");
-    return twilioStatusV2(req, res);
-  }
-);
+// app.post(
+//  "/api/shortlist/twilio/status",
+//  express.urlencoded({ extended: false }),
+//  (req, res) => {
+//    console.log("✅ Twilio status alias hit /api/shortlist/twilio/status");
+//    return twilioStatusV2(req, res);
+//  }
+//);
 
 startRemindersPoller({ intervalMs: 30000 }); // every 30s
 

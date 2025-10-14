@@ -1,7 +1,5 @@
-import { sendWhatsAppMessage } from '../utils/twilioClient.js';
-import Act from '../models/actModel.js';
+import { sendWhatsAppMessage, sendSMSMessage } from "../utils/twilioClient.js";import Act from '../models/actModel.js';
 import User from '../models/userModel.js';
-import { sendSMSMessage } from "../utils/twilioClient.js";
 import Availability from "../models/availabilityModel.js";
 import { sendAvailabilityMessage } from "../utils/twilioHelpers.js";
 import { createCalendarInvite } from './googleController.js';
@@ -15,7 +13,7 @@ import { computePerMemberFee } from "./bookingController.js";
 
 
 
-const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
+const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
 
 import { toE164 } from "../utils/twilioClient.js";
@@ -65,6 +63,27 @@ function findVocalistPhone(actData, lineupId) {
   });
 
 return { vocalist, phone };}
+
+// handle status callback from Twilio
+export const twilioStatusHandler = async (req, res) => {
+  const { MessageSid: sid, MessageStatus: status, ErrorCode: err, To: to } = req.body;
+  console.log("📡 Twilio status callback:", { sid, status, err, to });
+
+  // if WhatsApp failed because recipient is invalid → send SMS fallback
+  if (status === "undelivered" && (err === "63024" || err === "63016")) {
+    try {
+const smsBody =
+  WA_FALLBACK_CACHE.get(sid)?.smsBody ||
+  `Hi there, you've received an enquiry for a gig. Please reply YES or NO to confirm availability.`;
+      await sendSMSMessage(to, smsBody);
+      console.log(`📩 SMS fallback triggered automatically for ${to}`);
+    } catch (e) {
+      console.error("❌ Failed to send SMS fallback:", e.message);
+    }
+  }
+
+  res.status(200).send("OK");
+};
 
 // ✅ main function
 export const shortlistActAndTriggerAvailability = async (req, res) => {
