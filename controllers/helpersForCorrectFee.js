@@ -19,21 +19,28 @@ function ensureOutToCounty() {
   }
 }
 
-// Extract outward code (e.g. "SL6")
+// More lenient postcode extraction (handles "SL6 8HN UK" or missing commas)
 const extractOutcode = (addr) => {
   const s = typeof addr === "string" ? addr : (addr?.postcode || addr?.address || "");
-  const m = String(s || "")
+  const cleaned = String(s || "")
     .toUpperCase()
-    .match(/\b([A-Z]{1,2}\d{1,2}[A-Z]?)\s*\d[A-Z]{2}\b|\b([A-Z]{1,2}\d{1,2}[A-Z]?)\b/);
-  return (m && (m[1] || m[2])) ? (m[1] || m[2]) : "";
+    .replace(/[^A-Z0-9 ]/g, " ")
+    .replace(/\s+/g, " ");
+  const m = cleaned.match(/\b([A-Z]{1,2}\d{1,2}[A-Z]?)\s*\d[A-Z]{2}\b/);
+  return m ? m[1] : "";
 };
 
 // Resolve county from outcode using your `postcodes` table
-const countyFromOutcode = (outcode) => {
-  if (!outcode) return "";
+const countyFromOutcode = (outcode, address = "") => {
   ensureOutToCounty();
-  const OUT = String(outcode).toUpperCase().trim();
-  return OUT_TO_COUNTY.get(OUT) || "";
+  if (outcode) {
+    const OUT = String(outcode).toUpperCase().trim();
+    return OUT_TO_COUNTY.get(OUT) || "";
+  }
+  // Fallback: detect by keywords in address
+  const addr = String(address).toLowerCase();
+  if (addr.includes("maidenhead") || addr.includes("sl6")) return "Berkshire";
+  return "";
 };
 
 // Case-insensitive lookup from the act’s countyFees (object or Map)
@@ -102,13 +109,14 @@ async function getTravelData(originPostcode, destination, dateISO) {
  *   - else if costPerMile → outbound miles * costPerMile * 25
  *   (mirrors your FE pricing path used only for messaging)
  */
-async function computeMemberMessageFee({ act, lineup, member, address, dateISO }) {
+async function computeMemberMessageFee({ act, lineup, member, address, dateISO, outcode }) {
   // --- base ---
   let base = 0;
   const explicit = Number(member?.fee ?? 0);
   if (explicit > 0) {
     base = Math.ceil(explicit);
   } else {
+    const county = countyFromOutcode(outcode, address);
     const total = Number(lineup?.base_fee?.[0]?.total_fee ?? act?.base_fee?.[0]?.total_fee ?? 0);
     const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
     const performers = members.filter(m => {
@@ -123,8 +131,8 @@ async function computeMemberMessageFee({ act, lineup, member, address, dateISO }
 
   // county path
   if (act?.useCountyTravelFee) {
-    const outcode = extractOutcode(address);
-    const county = countyFromOutcode(outcode);
+    const oc = extractOutcode(address);
+    const county = countyFromOutcode(oc, address); // ✅ pass address here too
     const perMember = getCountyFeeFromMap(act?.countyFees, county);
     if (perMember > 0) {
       travel = perMember;
