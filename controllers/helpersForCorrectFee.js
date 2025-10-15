@@ -92,6 +92,8 @@ async function getTravelData(originPostcode, destination, dateISO) {
   return { outbound, returnTrip, raw: data };
 }
 
+
+
 /**
  * Compute the **per-musician** message rate:
  *   base (member.fee or per-head from lineup) + TRAVEL
@@ -145,4 +147,9 @@ async function computeMemberMessageFee({ act, lineup, member, address, dateISO }
   const total = Math.ceil(Math.max(0, base + travel));
   return total; // return NET per-musician message rate
 }
+
+// --- diagnostic check ---
+console.log("🧩 Outcode test:", extractOutcode("Maidenhead SL6 8HN"));
+console.log("🌍 County from SL6:", countyFromOutcode("SL6"));
+
 export { computeMemberMessageFee, getTravelData, extractOutcode, countyFromOutcode, getCountyFeeFromMap };

@@ -423,6 +423,8 @@ Please message us on WhatsApp at +${waNumber} or click https://wa.me/${waNumber}
         6: actData.name || "",
       };
 
+      console.log("🎭 actData.tscName:", actData.tscName, actData.name);
+      
 // controllers/shortlistController.js (inside shortlistActAndTriggerAvailability)
 const smsBody = await buildAvailabilitySMS({
   firstName: msgVars[1],
