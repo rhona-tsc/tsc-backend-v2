@@ -107,7 +107,7 @@ export async function buildAvailabilitySMS({
   travelOverride,
   dutiesOverride,
   actNameOverride,
-  countyName,         // help travel calc (e.g., "Berkshire")
+  countyName,         // e.g. "Berkshire"
 }) {
   const shortDate = formatShortDate(formattedDate);
   const shortAddress = formatShortAddress(formattedAddress);
@@ -117,20 +117,40 @@ export async function buildAvailabilitySMS({
     .filter(r => r.isEssential)
     .reduce((sum, r) => sum + Number(r.fee || r.additionalFee || 0), 0);
 
-  const travel = (travelOverride != null)
-    ? Number(travelOverride) || 0
-    : await computeTravelComponent({ act, member, address: formattedAddress, countyName });
+  // 🧾 Travel calculation (direct, matches your working block)
+  let travel = 0;
+  if (travelOverride != null) {
+    travel = Number(travelOverride) || 0;
+  } else if (act?.useCountyTravelFee && act?.countyFees) {
+    const county = countyName || "";
+    travel = Number(act.countyFees[county]) || 0;
 
+    // fallback: search address text for county name
+    if (!travel) {
+      const match = Object.entries(act.countyFees).find(([k]) =>
+        new RegExp(`(^|\\b)${k}(\\b|$)`, "i").test(formattedAddress)
+      );
+      if (match) travel = Number(match[1]) || 0;
+    }
+
+    console.log("🏞️ County-based travel:", { countyName: county, travel });
+  } else if (act?.costPerMile) {
+    console.log("🛣️ costPerMile travel calculation not implemented here");
+  } else if (act?.useMURates) {
+    console.log("🎼 MU rate fallback active");
+  }
+
+  // 🧮 Totals
   const computedTotal = base + essentialExtras + travel;
-  const total = (feeOverride != null && String(feeOverride).trim() !== '')
-    ? Number(String(feeOverride).replace(/[^0-9.]/g, ''))
+  const total = (feeOverride != null && String(feeOverride).trim() !== "")
+    ? Number(String(feeOverride).replace(/[^0-9.]/g, ""))
     : computedTotal;
 
-  const duties = dutiesOverride || member?.instrument || 'performance';
-  const actName = actNameOverride || act?.tscName || act?.name || 'the act';
+  const duties = dutiesOverride || member?.instrument || "performance";
+  const actName = actNameOverride || act?.tscName || act?.name || "the act";
 
   console.log("💰 Fee breakdown:", {
-    musician: `${member?.firstName || ''} ${member?.lastName || ''}`.trim() || "(unknown)",
+    musician: `${member?.firstName || ""} ${member?.lastName || ""}`.trim() || "(unknown)",
     act: actName,
     date: shortDate,
     location: shortAddress,
