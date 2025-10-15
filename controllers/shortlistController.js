@@ -377,26 +377,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
         lineup: lineup.actSize,
       });
 
-      // 🛡️ Respect WhatsApp opt-in flag
-      if (!Boolean(vocalist.whatsappOptIn)) {
-        console.log(`🚫 Skipping WhatsApp for ${vocalist.firstName} (opt-in=${vocalist.whatsappOptIn})`);
-        try {
-         const waNumber = (process.env.TWILIO_WA_SENDER || "").replace("whatsapp:+", "");
-await sendSMSMessage(
-  phone,
-  `Hi ${vocalist.firstName}, it's The Supreme Collective 👋 
-We send gig availability requests via WhatsApp for quick replies. 
-Please message us on WhatsApp at +${waNumber} or click https://wa.me/${waNumber} to opt in.`
-);
-          console.log(`📩 Opt-in invite SMS sent to ${phone}`);
-        } catch (err) {
-          console.error("❌ Failed to send opt-in SMS:", err.message);
-        }
-        return res.json({
-          success: true,
-          message: `${vocalist.firstName} not opted in — sent opt-in invite.`,
-        });
-      }
+
 
       // 🧾 Compute fee and message vars
       const shortAddress =
