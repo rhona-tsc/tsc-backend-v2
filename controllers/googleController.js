@@ -6,6 +6,28 @@ import { hashBase36 } from "../utils/hash.js";
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
+
+
+function makePersonalEventId({ actId, dateISO, email }) {
+  const act  = String(actId ?? "0").toLowerCase();
+  const date = String(dateISO ?? "0").replace(/[^0-9]/g, ""); // 20260626
+  const mail = String(email ?? "").toLowerCase();
+
+  // Base token; will clamp to allowed charset
+  let token = hashBase36(mail); // [a-z0-9], may include w-z
+
+  // Allow only [a-v0-9]; clamp w-z -> v, drop anything else
+  const toAllowed = (s) => s
+    .toLowerCase()
+    .replace(/[wxyz]/g, "v")
+    .replace(/[^a-v0-9]/g, "");
+
+  const id = toAllowed(`enq${date}${act}${token}`);
+  const padded = (id.length < 5) ? (id + "enqvv").slice(0, 5) : id;
+  return padded.slice(0, 100);
+}
+
+
 export const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
@@ -154,23 +176,6 @@ async function withBackoff(fn, { tries = 5, base = 300 } = {}) {
   }
 }
 
-// Build a stable event id PER PERSON for this act+date
-// This guarantees that repeated enquiries for the same musician (email) and act on a given date
-// always generate the same deterministic event id for Google Calendar. The format is:
-//   enq_${dateISO}_${actId}_${hashBase36(email)}
-// The result is sanitized to alphanumeric/underscore/dash and trimmed to 100 chars max.
-function makePersonalEventId({ actId, dateISO, email }) {
-  // Defensive: ensure all fields are strings, lowercased for email
-  const act = String(actId ?? "0");
-  const date = String(dateISO ?? "0");
-  const mail = String(email ?? "").toLowerCase();
-  // hashBase36 should produce only alphanumeric, but we sanitize anyway
-  let id = `enq_${date}_${act}_${hashBase36(mail)}`;
-  // Only allow alphanumeric, underscores, and dashes
-  id = id.replace(/[^a-z0-9_-]/gi, "");
-  // Trim to 100 chars max
-  return id.slice(0, 100);
-}
 
 // Coerce to string and strip null/undefined
 const _asStr = (v) => (v === undefined || v === null ? "" : String(v));

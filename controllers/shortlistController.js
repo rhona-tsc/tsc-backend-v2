@@ -49,56 +49,88 @@ function formatShortAddress(full) {
   return lastTwo;
 }
 
-// Compute travel component from cache or county/costPerMile
-async function computeTravelComponent({ act, member, address }) {
-  if (!act || !member?.postcode || !address) return 0;
-  const from = member.postcode.replace(/\s+/g, "").toUpperCase();
-  const toMatch = address.match(/[A-Z]{1,2}\d[\dA-Z]?\s*\d[A-Z]{2}/i);
-  const to = toMatch ? toMatch[0].replace(/\s+/g, "").toUpperCase() : null;
 
-  if (act.countyFees && act.useCountyTravelFee) {
-    const county = act.countyFees.find((c) => c.county && address.includes(c.county));
-    return county ? county.feePerMember || 0 : 0;
+// 1) Support object & array forms + optional countyName
+async function computeTravelComponent({ act, member, address, countyName }) {
+  if (!act || !address) return 0;
+
+  // County-fee path
+  if (act.useCountyTravelFee && act.countyFees) {
+    const pickByName = String(countyName || '').trim();
+
+    // Object form: { Berkshire: 70, ... }
+    if (!Array.isArray(act.countyFees)) {
+      if (pickByName && act.countyFees[pickByName] != null) {
+        return Number(act.countyFees[pickByName]) || 0;
+      }
+      // Fallback: try to match by county name in address (case-insensitive)
+      const hit = Object.entries(act.countyFees)
+        .find(([k]) => new RegExp(`(^|\\b)${k}(\\b|$)`, 'i').test(address));
+      return hit ? Number(hit[1]) || 0 : 0;
+    }
+
+    // Array form: [{ county, feePerMember }]
+    const arr = act.countyFees;
+    if (pickByName) {
+      const found = arr.find(c => String(c.county||'').toLowerCase() === pickByName.toLowerCase());
+      if (found) return Number(found.feePerMember || found.fee || 0);
+    }
+    const county = arr.find(c => c.county && new RegExp(`(^|\\b)${c.county}(\\b|$)`, 'i').test(address));
+    return county ? Number(county.feePerMember || county.fee || 0) : 0;
   }
 
-  if (act.costPerMile > 0 && from && to) {
-    const cached = await DistanceCache.findOne({ from, to });
-    if (cached?.distanceKm) {
-      const miles = cached.distanceKm * 0.621371;
-      return Math.round(miles * act.costPerMile);
+  // costPerMile path (cached)
+  if (act.costPerMile > 0 && member?.postcode) {
+    const from = member.postcode.replace(/\s+/g, '').toUpperCase();
+    const toMatch = address.match(/[A-Z]{1,2}\d[\dA-Z]?\s*\d[A-Z]{2}/i);
+    const to = toMatch ? toMatch[0].replace(/\s+/g, '').toUpperCase() : null;
+    if (from && to) {
+      const cached = await DistanceCache.findOne({ from, to });
+      if (cached?.distanceKm) {
+        const miles = cached.distanceKm * 0.621371;
+        return Math.round(miles * act.costPerMile);
+      }
     }
   }
 
   return 0;
 }
 
-// Main builder
+// 2) Allow overrides (feeOverride/travelOverride/dutiesOverride/actNameOverride)
 export async function buildAvailabilitySMS({
   firstName,
   formattedDate,
   formattedAddress,
   act,
   member,
+  feeOverride,        // preferred if provided
+  travelOverride,
+  dutiesOverride,
+  actNameOverride,
+  countyName,         // help travel calc (e.g., "Berkshire")
 }) {
   const shortDate = formatShortDate(formattedDate);
   const shortAddress = formatShortAddress(formattedAddress);
 
-  // Base fee + essential roles
-  const base = member?.fee || 0;
+  const base = Number(member?.fee || 0);
   const essentialExtras = (member?.additionalRoles || [])
-    .filter((r) => r.isEssential)
-    .reduce((sum, r) => sum + (r.fee || 0), 0);
+    .filter(r => r.isEssential)
+    .reduce((sum, r) => sum + Number(r.fee || r.additionalFee || 0), 0);
 
-  // Travel fee
-  const travel = await computeTravelComponent({ act, member, address: formattedAddress });
+  const travel = (travelOverride != null)
+    ? Number(travelOverride) || 0
+    : await computeTravelComponent({ act, member, address: formattedAddress, countyName });
 
-  const total = base + essentialExtras + travel;
-  const duties = member?.instrument || "performance";
-  const actName = act?.tscName || act?.name || "the act";
+  const computedTotal = base + essentialExtras + travel;
+  const total = (feeOverride != null && String(feeOverride).trim() !== '')
+    ? Number(String(feeOverride).replace(/[^0-9.]/g, ''))
+    : computedTotal;
 
-  // 🧾 Debug breakdown (safe console output)
+  const duties = dutiesOverride || member?.instrument || 'performance';
+  const actName = actNameOverride || act?.tscName || act?.name || 'the act';
+
   console.log("💰 Fee breakdown:", {
-    musician: `${member?.firstName || ""} ${member?.lastName || ""}`.trim() || "(unknown)",
+    musician: `${member?.firstName || ''} ${member?.lastName || ''}`.trim() || "(unknown)",
     act: actName,
     date: shortDate,
     location: shortAddress,
@@ -116,6 +148,8 @@ export async function buildAvailabilitySMS({
     `Reply YES / NO.`
   );
 }
+
+
 
 
 function findVocalistPhone(actData, lineupId) {
@@ -239,7 +273,11 @@ const smsBody = await buildAvailabilitySMS({
   formattedDate: availability.dateISO,
   formattedAddress: availability.formattedAddress,
   act,
-  member: { ...member, fee: base, travel, essentialExtras }
+  member,
+  travelOverride: travel,                        // ✅ use the travel you computed
+  dutiesOverride: member.instrument,
+  actNameOverride: act?.name || act?.tscName,
+  countyName: availability.county,               // may be 'Berkshire'
 });
 
     // Send fallback SMS
@@ -365,14 +403,18 @@ Please message us on WhatsApp at +${waNumber} or click https://wa.me/${waNumber}
         6: actData.name || "",
       };
 
-      const smsBody = await buildAvailabilitySMS({
-        firstName: msgVars[1],
-        formattedDate: msgVars[2],
-        formattedAddress: msgVars[3],
-        fee: msgVars[4],
-        duties: msgVars[5],
-        actName: msgVars[6],
-      });
+// controllers/shortlistController.js (inside shortlistActAndTriggerAvailability)
+const smsBody = await buildAvailabilitySMS({
+  firstName: msgVars[1],
+  formattedDate: msgVars[2],
+  formattedAddress: msgVars[3],
+  act: actData,                                 // ✅ pass the act
+  member: vocalist,                             // ✅ pass the member
+  feeOverride: msgVars[4],                      // ✅ let override win if present
+  dutiesOverride: msgVars[5],
+  actNameOverride: msgVars[6],
+  countyName: resolvedCounty,                   // ✅ "Berkshire"
+});
 
       // 🧾 Create availability record first (before WA send)
       const availability = await Availability.create({
