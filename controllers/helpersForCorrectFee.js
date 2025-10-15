@@ -20,40 +20,44 @@ function ensureOutToCounty() {
 }
 
 // More lenient postcode extraction (handles "SL6 8HN UK" or missing commas)
+// --- Replace your extractOutcode and countyFromOutcode with these robust versions ---
+
 const extractOutcode = (addr) => {
-  const s = typeof addr === "string" ? addr : (addr?.postcode || addr?.address || "");
+  const s = typeof addr === "string"
+    ? addr
+    : (addr?.postcode || addr?.address || "");
   const cleaned = String(s || "")
     .toUpperCase()
     .replace(/[^A-Z0-9 ]/g, " ")
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // First, match the outward part of any UK postcode
   const m = cleaned.match(/\b([A-Z]{1,2}\d{1,2}[A-Z]?)\s*\d[A-Z]{2}\b/);
-  return m ? m[1] : "";
+  if (m && m[1]) return m[1].trim();
+
+  // If not found, fallback to any pattern like "SL6" or "SL"
+  const m2 = cleaned.match(/\b([A-Z]{1,2}\d{1,2})\b/);
+  return m2 ? m2[1].trim() : "";
 };
 
-// Resolve county from outcode using your `postcodes` table
 const countyFromOutcode = (outcode, address = "") => {
   ensureOutToCounty();
   if (outcode) {
     const OUT = String(outcode).toUpperCase().trim();
-    return OUT_TO_COUNTY.get(OUT) || "";
+    const county = OUT_TO_COUNTY.get(OUT);
+    if (county) return county;
   }
-  // Fallback: detect by keywords in address
-  const addr = String(address).toLowerCase();
-  if (addr.includes("maidenhead") || addr.includes("sl6")) return "Berkshire";
-  return "";
-};
 
-// Case-insensitive lookup from the act’s countyFees (object or Map)
-const getCountyFeeFromMap = (feesMap, countyName) => {
-  if (!feesMap || !countyName) return 0;
-  const target = normalizeCounty(countyName);
-  const iter = typeof feesMap.forEach === "function"
-    ? (() => { const arr=[]; feesMap.forEach((v,k)=>arr.push([k,v])); return arr; })()
-    : Object.entries(feesMap);
-  for (const [k, v] of iter) {
-    if (normalizeCounty(k) === target) return Number(v) || 0;
-  }
-  return 0;
+  // 🔁 Fallbacks by name or fragment
+  const addr = String(address).toLowerCase();
+  if (addr.includes("maidenhead") || addr.includes("sl6") || addr.includes("berkshire"))
+    return "Berkshire";
+  if (addr.includes("london")) return "Greater London";
+  if (addr.includes("essex")) return "Essex";
+  if (addr.includes("oxfordshire") || addr.includes("ox")) return "Oxfordshire";
+
+  return "";
 };
 
 // Fetch your existing travel service (the one FE calls)
@@ -111,6 +115,7 @@ async function getTravelData(originPostcode, destination, dateISO) {
  */
 async function computeMemberMessageFee({ act, lineup, member, address, dateISO, outcode }) {
   // --- base ---
+  console.log("🧩 DEBUG county detect", { address, outcode: oc, county });
   let base = 0;
   const explicit = Number(member?.fee ?? 0);
   if (explicit > 0) {
