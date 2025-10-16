@@ -313,7 +313,6 @@ app.use((err, req, res, next) => {
 // 🕒 Google Calendar auto-watch refresh (runs daily at 3am UTC)
 // ---------------------------------------------------------------------------
 import cron from 'node-cron';
-import { watchCalendar } from './controllers/googleController.js';
 
 cron.schedule('0 3 * * *', async () => {
   try {
