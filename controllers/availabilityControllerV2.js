@@ -358,14 +358,14 @@ export async function twilioInboundV2(req, res) {
       }
 
       // Acknowledge
-      try {
-        await sendSMSMessage(
-          from,
-          "Thanks for letting us know! We'll update your availability on our system!"
-        );
-      } catch (ackErr) {
-        console.warn("[V2] NO acknowledgement SMS failed:", ackErr?.message || ackErr);
-      }
+ try {
+   await sendWhatsAppText(
+     toE164(updated.phone || fromRaw),
+     "Thanks for letting us know — we’ve updated your availability!"
+   );
+ } catch (e) {
+   console.warn("[twilioInbound] auto-reply NO (WhatsApp) failed:", e?.message || e);
+ }
 
       // Top up deputies to 3 (re-ping stale pendings, skip NOs, send fresh pings)
       if (act && typeof handleLeadNegativeReply === "function") {

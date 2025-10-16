@@ -4,7 +4,7 @@ import EnquiryMessage from "../models/EnquiryMessage.js";
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
 import { createCalendarInvite, updateCalendarEvent } from "../controllers/googleController.js";
-import { sendSMSMessage } from "../utils/twilioClient.js";
+import { sendSMSMessage, sendWhatsAppText } from "../utils/twilioClient.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import DeferredAvailability from "../models/deferredAvailabilityModel.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js";
@@ -2009,12 +2009,12 @@ try {} catch (e) {
 
       // Auto-reply to NO/UNAVAILABLE
 try {
-  await sendSMSMessage(
+  await sendWhatsAppText(
     normalizeToE164(updated.phone || fromRaw),
     "Thanks for letting us know — we’ve updated your availability!"
   );
 } catch (e) {
-  console.warn("[twilioInbound] auto-reply NO failed:", e?.message || e);
+  console.warn("[twilioInbound] auto-reply NO (WhatsApp) failed:", e?.message || e);
 }
 // After clearing the badge (inside NO/UNAVAILABLE)
 try {
@@ -2117,15 +2117,13 @@ try {
     });
   }
 
-  // ONE confirmation SMS (personalised). No WhatsApp here → avoids fallback duplication.
-  try {
-    const msg =
-      `Super — we’ll send a diary invite to log the enquiry for your records.`;
-    await sendSMSMessage(toE164, msg);
-  } catch (e) {
-    console.warn("[twilioInbound] YES confirmation SMS failed:", e?.message || e);
-  }
-
+  /// ONE confirmation WhatsApp message (personalised).
+try {
+  const msg = `Super — we’ll send a diary invite to log the enquiry for your records.`;
+  await sendWhatsAppText(toE164, msg);
+} catch (e) {
+  console.warn("[twilioInbound] YES confirmation WA failed:", e?.message || e);
+}
   // short-circuit; we’ve done all YES work and avoided any WA send
   return res.status(200).send("<Response/>");
 }
