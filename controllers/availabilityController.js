@@ -2051,36 +2051,34 @@ const emailForInvite =
   null;
 
   if (emailForInvite && dateISOday) {
-    const desc =
-      `TSC enquiry:\n` +
-      `Act: ${updated?.actName || ""}\n` +
-      `Role: ${duties}\n` +
-      `Rate: £${String(fee)}\n` +
-      `Address: ${formattedAddress}\n` +
-      `Date: ${formattedDate}`;
-      
+   try {
+          const desc =
+            `TSC enquiry:\n` +
+            `Act: ${updated?.actName || ""}\n` +
+            `Role: ${updated?.duties || ""}\n` +
+            `Rate: £${String(updated?.fee || "TBC")}\n` +
+            `Address: ${updated?.formattedAddress || ""}\n` +
+            `Date: ${updated?.formattedDate || updated?.dateISO || ""}\n` +
+            `Date enquiry made: ${new Date(updated?.createdAt || Date.now()).toLocaleString("en-GB")}`;
 
-    try {
-      const safeStr = (v) => (v ? String(v) : "");
-
-
-    const event = await createCalendarInvite({
-  enquiryId: safeStr(updated.enquiryId),
-  actId: safeStr(actIdStr),
-  dateISO: safeStr(dateISOday),
-  email: emailForInvite,
-  summary: "TSC: Enquiry",
-  description: desc,
-  startTime: `${dateISOday}T17:00:00.000Z`,
-  endTime:   `${dateISOday}T23:59:00.000Z`,
-  extendedProperties: {
-    private: {
-      actId: safeStr(actIdStr),
-      dateISO: safeStr(dateISOday),
-      enquiryId: safeStr(updated.enquiryId),
-    },
-  },
-});
+          const event = await createCalendarInvite({
+            enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
+            actId: String(updated.actId || ""),
+            dateISO: dateISOday, // YYYY-MM-DD
+            email: emailForInvite,
+            summary: "TSC: Enquiry",
+            description: desc,
+            startTime: `${dateISOday}T17:00:00.000Z`,
+            endTime: `${dateISOday}T23:59:00.000Z`,
+            attendees: [{ email: emailForInvite }],
+            extendedProperties: {
+              private: {
+                actId: String(updated.actId || ""),
+                dateISO: dateISOday,
+                enquiryId: updated.enquiryId || "",
+              },
+            },
+          });
 
       console.log("📆 Calendar invite created:", {
         eventId: event?.data?.id, attendee: emailForInvite,
