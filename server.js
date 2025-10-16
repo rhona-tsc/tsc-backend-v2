@@ -24,7 +24,7 @@ import authRoutes from './routes/authRoutes.js';
 import moderationRoutes from "./routes/moderationRoutes.js";
 import userRoute from './routes/userRoute.js';
 import debugRoutes from "./routes/debug.js";
-import { watchCalendar } from './controllers/googleController.js';
+import { getCalendarEvent, watchCalendar } from './controllers/googleController.js';
 import musicianLoginRouter from './routes/musicianLoginRoute.js';
 import allocationRoutes from "./routes/allocationRoutes.js";
 import availabilityRoutes from './routes/availability.js';
@@ -48,6 +48,8 @@ import musicianModel from "./models/musicianModel.js";
 import { submitActSubmission } from './controllers/actSubmissionController.js';
 import v2Routes from "./routes/v2.js";
 import { twilioInbound } from './controllers/availabilityController.js';
+import { handleGoogleWebhook } from './controllers/googleController.js';
+
 
 // at the top of backend/server.js (after dotenv)
 console.log('ENV CHECK:', {
@@ -196,6 +198,8 @@ app.post(
 );
 
 
+app.post('/api/google/webhook', handleGoogleWebhook);
+
 // Temporary aliases so existing Twilio config keeps working
 app.post(
   "/api/shortlist/twilio/inbound",
@@ -304,3 +308,13 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(port, () => console.log(`🚀 Server started on PORT: ${port}`));
+
+// Auto-register Google Calendar watch channel at server startup
+(async () => {
+  try {
+    await watchCalendar();
+    console.log('📡 Google Calendar watch channel started');
+  } catch (err) {
+    console.warn('⚠️ Could not start calendar watch:', err.message);
+  }
+})();
