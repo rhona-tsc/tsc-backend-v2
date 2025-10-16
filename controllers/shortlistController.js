@@ -7,7 +7,7 @@ import Musician from '../models/musicianModel.js';
 import EnquiryMessage from '../models/EnquiryMessage.js';
 import twilio from "twilio";
 import Shortlist from "../models/shortlistModel.js";
-import { extractOutcode, countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
+import { extractOutcode, countyFromOutcode, computeMemberMessageFee } from "../controllers/helpersForCorrectFee.js";
 import { computePerMemberFee } from "./bookingController.js";
 import DistanceCache from "../models/distanceCacheModel.js";
 import mongoose from "mongoose";
@@ -382,7 +382,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       // 🧾 Compute fee and message vars
       const shortAddress =
         selectedAddress?.split(",")?.slice(-2)?.join(" ")?.trim() || selectedAddress || "";
-      const fee = await computePerMemberFee({
+      const fee = await computeMemberMessageFee({
         act: actData,
         lineup,
         member: vocalist,
