@@ -232,6 +232,25 @@ export async function applyFeaturedBadgeOnYesV2({
     { _id: act._id },
     { $pull: { "availabilityBadge.deputies": { musicianId: deputyRecord.musicianId } } }
   );
+  // ✅ Add (or re-add) this deputy to the array, keeping only the latest 3
+await Act.updateOne(
+  { _id: act._id },
+  {
+    $push: {
+      "availabilityBadge.deputies": {
+        $each: [deputyRecord],
+        $position: 0, // add to front (most recent first)
+        $slice: 3     // cap to 3 deputies total
+      }
+    },
+    $set: {
+      "availabilityBadge.active": true,
+"availabilityBadge.dateISO": updated.dateISO || null,
+      "availabilityBadge.setAt": new Date(),
+      "availabilityBadge.isDeputy": true
+    }
+  }
+);
   console.log("🧹 pull deputy result:", {
     matched: pullRes.matchedCount,
     modified: pullRes.modifiedCount,

@@ -2462,9 +2462,19 @@ export const rebuildAvailabilityBadge = async (req, res) => {
       $set["availabilityBadge.profileUrl"] = "";
     }
 
-    if (Array.isArray(badge.deputies)) {
-      $set["availabilityBadge.deputies"] = badge.deputies;
-    }
+  if (Array.isArray(badge.deputies) && badge.deputies.length) {
+  // Merge with any existing deputies in DB
+  const existing = Array.isArray(act.availabilityBadge?.deputies)
+    ? act.availabilityBadge.deputies
+    : [];
+
+  // Combine and dedupe by musicianId
+  const merged = [...existing, ...badge.deputies].filter(
+    (v, i, a) => a.findIndex(t => String(t.musicianId) === String(v.musicianId)) === i
+  ).slice(0, 3); // cap to 3
+
+  $set["availabilityBadge.deputies"] = merged;
+}
 
     await Act.updateOne({ _id: actId }, { $set });
 
