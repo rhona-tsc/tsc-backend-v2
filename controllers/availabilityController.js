@@ -10,6 +10,7 @@ import DeferredAvailability from "../models/deferredAvailabilityModel.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is correct in backend
+import { computeMemberMessageFee } from "./helpersForCorrectFee.js";
 
 const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
 const normCountyKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, "_");
@@ -1706,6 +1707,9 @@ export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
 
 
 export const twilioInbound = async (req, res) => {
+
+      const { userId, actId, selectedDate, selectedAddress, lineupId } = req.body;
+
   console.log("🛰️ Raw inbound body:", req.body);
   try {
     const bodyText = String(req.body?.Body || "");
@@ -1871,104 +1875,103 @@ try {} catch (e) {
     });
 
     // 7) YES → apply badge once (with resolved photo + musicianId)
-    if (reply === "yes" && updated.actId && act) {
-      let who = null;
-      let isDeputy = false;
+ if (reply === "yes") {
+  const toE164 = normalizeToE164(updated?.phone || fromRaw);
+  const dateISOday = String((updated?.dateISO || "").slice(0, 10));
+  const shortAddress = (updated?.formattedAddress || selectedAddress || "").split(",").slice(-2).join(" ").trim();
+  const emailForInvite = musicianEmail || updated?.calendarInviteEmail || null;
 
-      // Prefer exact by musicianId
-      let match = updated.musicianId ? findPersonByMusicianId(act, updated.musicianId) : null;
-      if (match) {
-        who = match.person;
-        isDeputy = !!match.parentMember;
-      }
+  // --- Compute actual fee using helper ---
+let fee = 0;
+try {
+  const targetLineup = act?.lineups?.find(
+    l => String(l._id) === String(updated.lineupId)
+  );
 
-      // Fallback by phone in lineup, then all lineups
-      if (!who) {
-        match = findPersonByPhone(act, updated.lineupId, updated.phone || fromRaw) ||
-                findPersonByPhone(act, null,       updated.phone || fromRaw);
-        if (match) {
-          who = match.person;
-          isDeputy = !!match.parentMember;
-        }
-      }
+  fee = await computeMemberMessageFee({
+    act,
+    lineup: targetLineup,
+    member: musicianDoc || personFromAct,
+    address: updated.formattedAddress || selectedAddress,
+    dateISO: updated.dateISO || selectedDate,
+  });
 
-      // Helpful debug
-      await debugLogMusicianByPhone(updated.phone || fromRaw);
+  console.log("💰 computeMemberMessageFee result:", fee);
+} catch (err) {
+  console.warn("⚠️ Fee computation failed:", err?.message || err);
+}
 
-      // Get a musician doc for the matched person if needed
-      let docForPhoto = musicianDoc;
-      if (who?.musicianId && (!docForPhoto || String(docForPhoto._id) !== String(who.musicianId))) {
-        try { docForPhoto = await Musician.findById(who.musicianId).lean(); } catch {}
-      }
-      if (!docForPhoto && (who?.email || who?.emailAddress)) {
-        try { docForPhoto = await Musician.findOne({ email: who.email || who.emailAddress }).lean(); } catch {}
-      }
-      // As a last resort, try phoneNormalized (module-level helper is normalizePhoneE164)
-      if (!docForPhoto) {
-        try {
-          const e164 = normalizePhoneE164(updated.phone || fromRaw);
-          if (e164) {
-            const byPhone = await Musician.findOne({
-              $or: [
-                { phoneNormalized: e164 },
-                { phone: e164 },
-                { phoneNumber: e164 },
-              ],
-            })
-              .select("_id musicianProfileImageUpload profileImage profilePicture.url photoUrl imageUrl firstName lastName")
-              .lean();
-            if (byPhone) docForPhoto = byPhone;
-          }
-        } catch (e) {
-          console.warn("⚠️ phoneNormalized lookup failed:", e?.message || e);
-        }
-      }
+  // human-readable date
+  const formattedDateString = dateISOday
+    ? new Date(dateISOday).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+    : "the date discussed";
 
-      // Resolve photo strictly from the matched vocalist
-      let resolvedPhotoUrl = resolveMatchedMusicianPhoto({ who, musicianDoc: docForPhoto });
-      if (!resolvedPhotoUrl && docForPhoto) {
-        // tiny safety net for unusual field shapes
-        const pic =
-          (typeof docForPhoto.musicianProfileImageUpload === "string" && docForPhoto.musicianProfileImageUpload) ||
-          (typeof docForPhoto.musicianProfileImage === "string" && docForPhoto.musicianProfileImage) ||
-          (typeof docForPhoto.profileImage === "string" ? docForPhoto.profileImage : docForPhoto.profileImage?.url) ||
-          (typeof docForPhoto.profilePicture === "string" ? docForPhoto.profilePicture : docForPhoto.profilePicture?.url) ||
-          docForPhoto.photoUrl ||
-          docForPhoto.imageUrl ||
-          "";
-        if (pic) resolvedPhotoUrl = pic;
-      }
+  if (emailForInvite && dateISOday) {
+    try {
+      const desc =
+        `TSC enquiry logged: ${new Date(updated?.createdAt || Date.now()).toLocaleString("en-GB")}\n` +
+        `Act: ${act?.tscName || act?.name || ""}\n` +
+        `Role: ${updated?.duties || ""}\n` +
+        `Rate: £${fee}\n` +
+        `Address: ${shortAddress}\n` +
+        `Date: ${formattedDateString}\n`;
 
-      const vocalistName = [who?.firstName, who?.lastName].filter(Boolean).join(" ");
-      const resolvedMusicianId =
-        (who?.musicianId && String(who.musicianId)) ||
-        (updated?.musicianId && String(updated.musicianId)) ||
-        (docForPhoto?._id && String(docForPhoto._id)) ||
-        (musicianDoc?._id && String(musicianDoc._id)) ||
-        "";
-
-      const badgeSet = {
-        "availabilityBadge.active": true,
-        "availabilityBadge.isDeputy": isDeputy,
-        "availabilityBadge.inPromo": !!who?.inPromo,
-        "availabilityBadge.vocalistName": vocalistName || (updated?.name || "").trim(),
-        "availabilityBadge.photoUrl": resolvedPhotoUrl || "",
-        "availabilityBadge.musicianId": resolvedMusicianId || "",
-        "availabilityBadge.dateISO": updated.dateISO || null,
-        "availabilityBadge.address": updated.formattedAddress || "",
-        "availabilityBadge.setAt": new Date(),
-      };
-
-      await Act.updateOne({ _id: act._id }, { $set: badgeSet });
-
-      console.log("🏷️ Applying badge", {
-        actId: updated.actId,
-        vocalistName,
-        isDeputy,
-        candidatePhones: [who?.phone, who?.phoneNumber, musicianDoc?.phone],
-        photoUrl: resolvedPhotoUrl,
+      const event = await createCalendarInvite({
+        enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
+        actId: String(updated.actId || ""),
+        dateISO: dateISOday,
+        email: emailForInvite,
+        summary: `TSC: ${act?.tscName || act?.name || ""} enquiry`,
+        description: desc,
+        startTime: `${dateISOday}T17:00:00Z`,
+        endTime: `${dateISOday}T23:59:00Z`,
+        attendees: [{ email: emailForInvite }],
+        extendedProperties: {
+          private: {
+            actId: String(updated.actId || ""),
+            dateISO: dateISOday,
+            enquiryId: updated.enquiryId || "",
+          },
+        },
       });
+
+      await AvailabilityModel.updateOne(
+        { _id: updated._id },
+        {
+          $set: {
+            calendarEventId: event?.id || event?.data?.id || null,
+            calendarInviteEmail: emailForInvite,
+            calendarInviteSentAt: new Date(),
+            calendarStatus: "needsAction",
+          },
+        }
+      );
+
+      console.log("📆 Calendar invite created for:", {
+        musician: emailForInvite,
+        act: act?.tscName,
+        dateISOday,
+        eventId: event?.id || event?.data?.id,
+      });
+    } catch (calErr) {
+      console.warn("⚠️ Calendar invite creation failed:", calErr?.message || calErr);
     }
+  } else {
+    console.warn("⚠️ Skipped calendar invite — missing musician email or date.", {
+      emailForInvite,
+      dateISO: updated?.dateISO,
+    });
+  }
+
+  // confirmation WhatsApp
+  try {
+    await sendWhatsAppText(toE164, "Super — we’ll send a diary invite to log the enquiry for your records.");
+  } catch (e) {
+    console.warn("[twilioInbound] YES confirmation WA failed:", e?.message || e);
+  }
+
+  return res.status(200).send("<Response/>");
+}
 
     // 8) NO/UNAVAILABLE → clear badge and top up deputies to 3
     if (updated && (reply === "no" || reply === "unavailable")) {
@@ -2030,16 +2033,22 @@ try {
 }
     }
 
-    // 9) YES → calendar invite
 // 9) YES → create calendar invite + send ONE confirmation SMS (no WA)
 if (reply === "yes") {
   // pull details from the Availability row you just updated
   const firstName         = (updated?.contactName || "").trim() || "there";
   const duties            = updated?.duties || "performance";
-  const fee               = updated?.fee || "TBC";
+  const fee               = await computeMemberMessageFee({
+          act: actData,
+          lineup,
+          member: vocalist,
+          address: selectedAddress,
+          dateISO: selectedDate,
+        });
   const formattedDate     = updated?.formattedDate || "the date discussed";
-  const formattedAddress  = updated?.formattedAddress || "test 2 the area";
-  const actIdStr          = String(updated?.actId || "");
+const shortAddress =
+          selectedAddress?.split(",")?.slice(-2)?.join(" ")?.trim() || selectedAddress || "";
+   const actIdStr          = String(updated?.actId || "");
   const dateISOday        = String((updated?.dateISO || "").slice(0, 10));
   const toE164            = normalizeToE164(updated?.phone || fromRaw);
 
@@ -2050,37 +2059,36 @@ const emailForInvite =
   updated?.calendarInviteEmail ||
   null;
 
+     
+
   if (emailForInvite && dateISOday) {
-    const desc =
-      `TSC enquiry:\n` +
-      `Act: ${updated?.actName || ""}\n` +
-      `Role: ${duties}\n` +
-      `Rate: £${String(fee)}\n` +
-      `Address: ${formattedAddress}\n` +
-      `Date: ${formattedDate}`;
-      
+   try {
+          const desc =
+            `TSC enquiry made on: ${new Date(updated?.createdAt || Date.now()).toLocaleString("en-GB")}\n` +
+            `Act: ${actIdStr}\n` +
+            `Role: ${updated?.duties || ""}\n` +
+            `Rate: £${fee}\n` +
+            `Address: ${shortAddress}\n` +
+            `Date: ${formatWithOrdinal}\n`;
 
-    try {
-      const safeStr = (v) => (v ? String(v) : "");
-
-
-    const event = await createCalendarInvite({
-  enquiryId: safeStr(updated.enquiryId),
-  actId: safeStr(actIdStr),
-  dateISO: safeStr(dateISOday),
-  email: emailForInvite,
-  summary: "TSC: Enquiry",
-  description: desc,
-  startTime: `${dateISOday}T17:00:00.000Z`,
-  endTime:   `${dateISOday}T23:59:00.000Z`,
-  extendedProperties: {
-    private: {
-      actId: safeStr(actIdStr),
-      dateISO: safeStr(dateISOday),
-      enquiryId: safeStr(updated.enquiryId),
-    },
-  },
-});
+          const event = await createCalendarInvite({
+            enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
+            actId: String(updated.actId || ""),
+            dateISO: dateISOday, // YYYY-MM-DD
+            email: emailForInvite,
+            summary: "TSC: Enquiry",
+            description: desc,
+            startTime: `${dateISOday}T17:00:00.000Z`,
+            endTime: `${dateISOday}T23:59:00.000Z`,
+            attendees: [{ email: emailForInvite }],
+            extendedProperties: {
+              private: {
+                actId: String(updated.actId || ""),
+                dateISO: dateISOday,
+                enquiryId: updated.enquiryId || "",
+              },
+            },
+          });
 
       console.log("📆 Calendar invite created:", {
         eventId: event?.data?.id, attendee: emailForInvite,
@@ -2171,18 +2179,57 @@ await rebuildAndApplyBadge(updated.actId, updated.dateISO);
 async function rebuildAndApplyBadge(actId, dateISO) {
   try {
     if (!actId || !dateISO) return;
+
     const act = await Act.findById(actId).lean();
     if (!act) return;
 
     const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
 
-    if (badge) {
+    // --- NEW: Aggregate deputy replies (up to 3) ---
+    const deputies = await AvailabilityModel.find({
+      actId,
+      dateISO,
+      reply: "yes",
+      isDeputy: true,
+    })
+      .sort({ repliedAt: 1 })
+      .limit(3)
+      .lean();
+
+    const deputyBadges = deputies.map((dep) => ({
+      musicianId: dep.musicianId?.toString?.() || "",
+      photoUrl:
+        dep.photoUrl ||
+        dep.profilePicture ||
+        dep.musician?.profilePicture ||
+        "",
+      profilePicture: dep.profilePicture || "",
+      profileUrl: dep.musicianId
+        ? `${process.env.FRONTEND_URL || process.env.PUBLIC_SITE_BASE}/musician/${dep.musicianId}`
+        : "",
+      setAt: dep.updatedAt || new Date(),
+    }));
+
+    // --- Combine lead + deputy badges ---
+    if (badge || deputyBadges.length > 0) {
+      const combined = {
+        ...(act.availabilityBadge || {}),
+        ...(badge || {}),
+        deputies: deputyBadges,
+      };
+
       await Act.updateOne(
         { _id: act._id },
-        { $set: { availabilityBadge: { ...(act.availabilityBadge || {}), ...badge } } }
+        { $set: { availabilityBadge: combined } }
+      );
+
+      console.log(
+        `✅ Applied badge for ${act.tscName || act.name}: lead=${
+          badge?.active ? "active" : "none"
+        }, deputies=${deputyBadges.length}`
       );
     } else {
-      // No active state → clear the badge
+      // No lead and no deputies → clear badge
       await Act.updateOne(
         { _id: act._id },
         {
@@ -2200,6 +2247,8 @@ async function rebuildAndApplyBadge(actId, dateISO) {
           },
         }
       );
+
+      console.log(`🧹 Cleared badge for ${act.tscName || act.name}`);
     }
   } catch (e) {
     console.warn("⚠️ rebuildAndApplyBadge failed:", e?.message || e);

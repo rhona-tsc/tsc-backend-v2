@@ -377,6 +377,33 @@ export const getCalendarEvent = async (eventId) => {
   return res.data;
 };
 
+export const handleGoogleWebhook = async (req, res) => {
+  console.log('📬 Google Calendar webhook:', req.headers['x-goog-resource-state']);
+
+  res.status(200).send(); // acknowledge quickly
+
+  try {
+    const eventId = req.headers['x-goog-resource-uri']?.split('/events/')[1];
+    const resourceState = req.headers['x-goog-resource-state'];
+
+    if (resourceState === 'exists' && eventId) {
+      const event = await getCalendarEvent(eventId);
+      console.log('📅 Event updated:', event.summary, event.status);
+
+      // Detect musician declined
+      const declined = event.attendees?.some(a => a.responseStatus === 'declined');
+      if (declined) {
+        // Find linked act via event.extendedProperties.private.actId
+        // Update the availabilityBadge to inactive
+        console.log('🚫 Musician declined — clearing badge');
+        // await Act.updateOne({ _id: actId }, { $set: { "availabilityBadge.active": false } });
+      }
+    }
+  } catch (err) {
+    console.error('❌ handleGoogleWebhook failed:', err);
+  }
+};
+
 // --- Booking: ensure 1 event per act+date, append description lines, add attendees ---
 
 /**

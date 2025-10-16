@@ -24,7 +24,7 @@ import authRoutes from './routes/authRoutes.js';
 import moderationRoutes from "./routes/moderationRoutes.js";
 import userRoute from './routes/userRoute.js';
 import debugRoutes from "./routes/debug.js";
-import { watchCalendar } from './controllers/googleController.js';
+import { getCalendarEvent, watchCalendar } from './controllers/googleController.js';
 import musicianLoginRouter from './routes/musicianLoginRoute.js';
 import allocationRoutes from "./routes/allocationRoutes.js";
 import availabilityRoutes from './routes/availability.js';
@@ -42,12 +42,13 @@ import { twilioStatusV2 } from './controllers/availabilityControllerV2.js';
 import newsletterRoutes from './routes/newsletterRoutes.js';
 import { getAvailableActIds } from './controllers/actAvailabilityController.js';
 import { twilioStatusHandler } from './controllers/shortlistController.js';
-
+import availabilityV2Routes from "./routes/availabilityV2.js";
 import mongoose from "mongoose";
 import musicianModel from "./models/musicianModel.js";
 import { submitActSubmission } from './controllers/actSubmissionController.js';
 import v2Routes from "./routes/v2.js";
 import { twilioInbound } from './controllers/availabilityController.js';
+import { handleGoogleWebhook } from './controllers/googleController.js';
 
 // at the top of backend/server.js (after dotenv)
 console.log('ENV CHECK:', {
@@ -172,7 +173,6 @@ app.use('/api/musician-login', (req, _res, next) => {
 }, musicianLoginRouter);
 
 app.use("/api/v2", v2Routes);
-
 // Twilio webhook test endpoint
 app.post(
   "/api/shortlist/wh",
@@ -195,6 +195,10 @@ app.post(
   twilioStatusHandler
 );
 
+
+app.post('/api/google/webhook', handleGoogleWebhook);
+
+app.post('/api/google/notifications', handleGoogleWebhook);
 
 // Temporary aliases so existing Twilio config keeps working
 app.post(
@@ -303,4 +307,40 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ success: false, message: err.message || 'Server error' });
 });
 
+// ---------------------------------------------------------------------------
+// 🕒 Google Calendar auto-watch refresh (runs daily at 3am UTC)
+// ---------------------------------------------------------------------------
+import cron from 'node-cron';
+
+let isRegistering = false;
+
+cron.schedule('0 3 * * *', async () => {
+  if (isRegistering) {
+    console.log('⏸️ Skipping duplicate cron run (already refreshing)');
+    return;
+  }
+
+  try {
+    isRegistering = true;
+    console.log('🔄 [CRON] Re-registering Google Calendar webhook...');
+    const res = await watchCalendar();
+    console.log('✅ Webhook refreshed:', res.id || '(no id returned)');
+  } catch (err) {
+    console.error('❌ [CRON] Webhook refresh failed:', err.message);
+  } finally {
+    isRegistering = false;
+  }
+});
+console.log('🕒 Cron job scheduled: Google Calendar webhook will refresh daily at 03:00 UTC');
+
 app.listen(port, () => console.log(`🚀 Server started on PORT: ${port}`));
+
+// Auto-register Google Calendar watch channel at server startup
+(async () => {
+  try {
+    await watchCalendar();
+    console.log('📡 Google Calendar watch channel started');
+  } catch (err) {
+    console.warn('⚠️ Could not start calendar watch:', err.message);
+  }
+})();

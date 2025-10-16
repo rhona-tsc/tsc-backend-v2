@@ -56,7 +56,7 @@ const toWhatsAppAddr = (raw = '') => `whatsapp:${toE164(raw)}`;
 
 /** Only send status callbacks when we have an HTTPS public URL */
 const statusCallback = (BACKEND_URL && /^https:\/\//i.test(BACKEND_URL))
-  ? `${BACKEND_URL.replace(/\/$/, '')}/api/availability-v2/twilio/status`
+  ? `${BACKEND_URL.replace(/\/$/, '')}/api/availability/twilio/status`
   : undefined;
 
 /**
