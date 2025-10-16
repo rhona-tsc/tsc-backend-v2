@@ -314,15 +314,26 @@ app.use((err, req, res, next) => {
 // ---------------------------------------------------------------------------
 import cron from 'node-cron';
 
+let isRegistering = false;
+
 cron.schedule('0 3 * * *', async () => {
+  if (isRegistering) {
+    console.log('⏸️ Skipping duplicate cron run (already refreshing)');
+    return;
+  }
+
   try {
+    isRegistering = true;
     console.log('🔄 [CRON] Re-registering Google Calendar webhook...');
     const res = await watchCalendar();
     console.log('✅ Webhook refreshed:', res.id || '(no id returned)');
   } catch (err) {
     console.error('❌ [CRON] Webhook refresh failed:', err.message);
+  } finally {
+    isRegistering = false;
   }
 });
+console.log('🕒 Cron job scheduled: Google Calendar webhook will refresh daily at 03:00 UTC');
 
 app.listen(port, () => console.log(`🚀 Server started on PORT: ${port}`));
 
