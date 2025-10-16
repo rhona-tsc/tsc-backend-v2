@@ -200,6 +200,8 @@ app.post(
 
 app.post('/api/google/webhook', handleGoogleWebhook);
 
+app.post('/api/google/notifications', handleGoogleWebhook);
+
 // Temporary aliases so existing Twilio config keeps working
 app.post(
   "/api/shortlist/twilio/inbound",
@@ -305,6 +307,22 @@ app.use((err, req, res, next) => {
   console.error('🔥 Unhandled error:', err?.stack || err);
   if (res.headersSent) return; // if headers already sent, let Express finish
   res.status(err.status || 500).json({ success: false, message: err.message || 'Server error' });
+});
+
+// ---------------------------------------------------------------------------
+// 🕒 Google Calendar auto-watch refresh (runs daily at 3am UTC)
+// ---------------------------------------------------------------------------
+import cron from 'node-cron';
+import { watchCalendar } from './controllers/googleController.js';
+
+cron.schedule('0 3 * * *', async () => {
+  try {
+    console.log('🔄 [CRON] Re-registering Google Calendar webhook...');
+    const res = await watchCalendar();
+    console.log('✅ Webhook refreshed:', res.id || '(no id returned)');
+  } catch (err) {
+    console.error('❌ [CRON] Webhook refresh failed:', err.message);
+  }
 });
 
 app.listen(port, () => console.log(`🚀 Server started on PORT: ${port}`));
