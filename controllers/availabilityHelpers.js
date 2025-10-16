@@ -163,17 +163,57 @@ export function findPersonByMusicianId(act, musicianId) {
   return null;
 }
 
+// Format date like "Saturday, 5th Oct 2025"
+const formatWithOrdinal = (dateLike) => {
+  const d = new Date(dateLike);
+  if (isNaN(d)) return String(dateLike);
+  const day = d.getDate();
+  const j = day % 10,
+    k = day % 100;
+  const suffix =
+    j === 1 && k !== 11
+      ? "st"
+      : j === 2 && k !== 12
+      ? "nd"
+      : j === 3 && k !== 13
+      ? "rd"
+      : "th";
+  const weekday = d.toLocaleDateString("en-GB", { weekday: "long" });
+  const month = d.toLocaleDateString("en-GB", { month: "short" }); // Oct
+  const year = d.getFullYear();
+  return `${weekday}, ${day}${suffix} ${month} ${year}`;
+};
+
+const shortAddressOf = (full = "") => {
+  if (!full) return "";
+  // Grab last 2 comma-separated parts (e.g. "Maidenhead, SL6 8HN")
+  const parts = full.split(",").map(s => s.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    return parts.slice(-2).join(", ");
+  }
+  // If no commas, just return the last 2 words (e.g. "Maidenhead SL6 8HN")
+  const words = full.split(/\s+/);
+  return words.slice(-3).join(" "); // fallback
+};
+
 export const notifyDeputyOneShot = async ({
   act,
   lineupId,
   deputy,
   dateISO,
-  formattedDate,
   formattedAddress,
   duties,
   finalFee,
   metaActId,
 }) => {
+  const formattedDate = formatWithOrdinal(dateISO);
+  const shortAddress = shortAddressOf(formattedAddress);
+
+  console.log("🟡 notifyDeputyOneShot(): INPUT", {
+    dateISO,
+    formattedDate,
+    shortAddress,
+  });
   // local helpers
   const maskPhone = (p = "") =>
     String(p).replace(/^\+?(\d{2})\d+(?=\d{3}$)/, "+$1•••").replace(/(\d{2})$/, "••$1");
@@ -256,24 +296,24 @@ export const notifyDeputyOneShot = async ({
     });
 
     // WA template + the exact SMS fallback text we want the webhook to reuse
-    const templateParams = {
-      FirstName: firstNameOf(deputy),
-      FormattedDate: formattedDate,
-      FormattedAddress: formattedAddress,
-      Fee: String(finalFee),
-      Duties: duties,
-      ActName: act?.tscName || act?.name || "the band",
-      MetaActId: String(metaActId || act?._id || ""),
-      MetaISODate: dateISO,
-      MetaAddress: formattedAddress,
-    };
+   const templateParams = {
+    FirstName: firstNameOf(deputy),
+    FormattedDate: formattedDate,
+    FormattedAddress: shortAddress,
+    Fee: String(finalFee),
+    Duties: duties,
+    ActName: act?.tscName || act?.name || "the band",
+    MetaActId: String(metaActId || act?._id || ""),
+    MetaISODate: dateISO,
+    MetaAddress: shortAddress,
+  };
     console.log("📦 Twilio template params:", templateParams);
 
-    const smsBody =
-      `Hi ${templateParams.FirstName}, you've received an enquiry for a gig on ` +
-      `${templateParams.FormattedDate} in ${templateParams.FormattedAddress} ` +
-      `at a rate of £${templateParams.Fee} for ${templateParams.Duties} duties with ` +
-      `${templateParams.ActName}. Please indicate your availability 💫 Reply YES / NO.`;
+const smsBody =
+  `Hi ${templateParams.FirstName}, you've received an enquiry for a gig on ` +
+  `${templateParams.FormattedDate} in ${templateParams.FormattedAddress} ` +
+  `at a rate of £${templateParams.Fee} for ${templateParams.Duties} duties with ` +
+  `${templateParams.ActName}. Please indicate your availability 💫 Reply YES / NO.`;
 
     // ① Try WA; if creation fails, send SMS immediately (handled inside sendWAOrSMS)
     // ② If WA is accepted but later UNDDELIVERED/FAILED, twilioStatusV2 will send the SMS
