@@ -110,7 +110,11 @@ const ActSummarySchema = new mongoose.Schema(
     lineupLabel: String,
     bandSize: Number,
     image: mongoose.Schema.Types.Mixed,
-
+chosenVocalists: [
+  {
+    musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician" },
+  },
+],
     quantity: { type: Number, default: 1 },
     prices: {
       base: { type: Number, default: 0 },

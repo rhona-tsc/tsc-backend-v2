@@ -1851,6 +1851,7 @@ const newBooking = new Booking({
   clientName,
   clientEmail,
   clientPhone,
+  chosenVocalists: act.chosenVocalists || [],
 
   // ✅ use normalized block, not the raw input
   performanceTimes: normalizedPerf || undefined,
