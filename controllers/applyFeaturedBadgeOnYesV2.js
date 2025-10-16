@@ -6,6 +6,8 @@ import {
   resolveMatchedMusicianPhoto,
   debugLogMusicianByPhone,
 } from "./availabilityHelpers.js";
+import { rebuildAndApplyBadge } from "./availabilityController.js";
+
 
 // --- tiny debugger for badge state -----------------------------------------
 export async function debugLogBadgeState(actId, label = "badge") {
@@ -252,6 +254,9 @@ export async function applyFeaturedBadgeOnYesV2({
         matched: pushRes.matchedCount,
         modified: pushRes.modifiedCount,
       });
+
+      // after updating the availability record
+await rebuildAndApplyBadge(updated.actId, updated.dateISO);
 
       await debugLogBadgeState(act._id, "after DEPUTY YES");
     }
