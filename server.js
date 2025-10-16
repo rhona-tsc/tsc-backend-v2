@@ -50,7 +50,6 @@ import v2Routes from "./routes/v2.js";
 import { twilioInbound } from './controllers/availabilityController.js';
 import { handleGoogleWebhook } from './controllers/googleController.js';
 
-
 // at the top of backend/server.js (after dotenv)
 console.log('ENV CHECK:', {
   INTERNAL_BASE_URL: process.env.INTERNAL_BASE_URL,

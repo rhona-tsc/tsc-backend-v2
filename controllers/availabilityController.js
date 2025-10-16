@@ -2179,18 +2179,57 @@ await rebuildAndApplyBadge(updated.actId, updated.dateISO);
 async function rebuildAndApplyBadge(actId, dateISO) {
   try {
     if (!actId || !dateISO) return;
+
     const act = await Act.findById(actId).lean();
     if (!act) return;
 
     const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
 
-    if (badge) {
+    // --- NEW: Aggregate deputy replies (up to 3) ---
+    const deputies = await AvailabilityModel.find({
+      actId,
+      dateISO,
+      reply: "yes",
+      isDeputy: true,
+    })
+      .sort({ repliedAt: 1 })
+      .limit(3)
+      .lean();
+
+    const deputyBadges = deputies.map((dep) => ({
+      musicianId: dep.musicianId?.toString?.() || "",
+      photoUrl:
+        dep.photoUrl ||
+        dep.profilePicture ||
+        dep.musician?.profilePicture ||
+        "",
+      profilePicture: dep.profilePicture || "",
+      profileUrl: dep.musicianId
+        ? `${process.env.FRONTEND_URL || process.env.PUBLIC_SITE_BASE}/musician/${dep.musicianId}`
+        : "",
+      setAt: dep.updatedAt || new Date(),
+    }));
+
+    // --- Combine lead + deputy badges ---
+    if (badge || deputyBadges.length > 0) {
+      const combined = {
+        ...(act.availabilityBadge || {}),
+        ...(badge || {}),
+        deputies: deputyBadges,
+      };
+
       await Act.updateOne(
         { _id: act._id },
-        { $set: { availabilityBadge: { ...(act.availabilityBadge || {}), ...badge } } }
+        { $set: { availabilityBadge: combined } }
+      );
+
+      console.log(
+        `✅ Applied badge for ${act.tscName || act.name}: lead=${
+          badge?.active ? "active" : "none"
+        }, deputies=${deputyBadges.length}`
       );
     } else {
-      // No active state → clear the badge
+      // No lead and no deputies → clear badge
       await Act.updateOne(
         { _id: act._id },
         {
@@ -2208,6 +2247,8 @@ async function rebuildAndApplyBadge(actId, dateISO) {
           },
         }
       );
+
+      console.log(`🧹 Cleared badge for ${act.tscName || act.name}`);
     }
   } catch (e) {
     console.warn("⚠️ rebuildAndApplyBadge failed:", e?.message || e);
