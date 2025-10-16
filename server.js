@@ -42,7 +42,7 @@ import { twilioStatusV2 } from './controllers/availabilityControllerV2.js';
 import newsletterRoutes from './routes/newsletterRoutes.js';
 import { getAvailableActIds } from './controllers/actAvailabilityController.js';
 import { twilioStatusHandler } from './controllers/shortlistController.js';
-
+import availabilityV2Routes from "./routes/availabilityV2.js";
 import mongoose from "mongoose";
 import musicianModel from "./models/musicianModel.js";
 import { submitActSubmission } from './controllers/actSubmissionController.js';
@@ -174,7 +174,7 @@ app.use('/api/musician-login', (req, _res, next) => {
 }, musicianLoginRouter);
 
 app.use("/api/v2", v2Routes);
-
+app.use("/api/v2/availability", availabilityV2Routes);
 // Twilio webhook test endpoint
 app.post(
   "/api/shortlist/wh",
