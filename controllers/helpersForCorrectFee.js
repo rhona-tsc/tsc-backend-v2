@@ -100,26 +100,32 @@ async function getTravelData(originPostcode, destination, dateISO) {
  *   - else if costPerMile → outbound miles * costPerMile * 25
  *   (mirrors your FE pricing path used only for messaging)
  */
-async function computeMemberMessageFee({ act, lineup, member, address, dateISO }) {
-  // --- base ---
-  let base = 0;
-  const explicit = Number(member?.fee ?? 0);
-  if (explicit > 0) {
-    base = Math.ceil(explicit);
-  } else {
-    const total = Number(lineup?.base_fee?.[0]?.total_fee ?? act?.base_fee?.[0]?.total_fee ?? 0);
-    const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
-    const performers = members.filter(m => {
-      const r = String(m?.instrument || "").toLowerCase();
-      return r && r !== "manager" && r !== "admin";
-    }).length || 1;
-    base = total > 0 ? Math.ceil(total / performers) : 0;
+ async function computeMemberMessageFee({ act, lineup, member, address, dateISO }) {
+  if (!member || !lineup) return 0;
+
+  // --- 1️⃣ Find the full member record in the lineup ---
+  const fullMember = lineup.bandMembers?.find(m =>
+    m._id?.toString() === member._id?.toString() ||
+    m.email?.toLowerCase() === member.email?.toLowerCase() ||
+    m.phoneNumber?.replace(/\s+/g, "") === member.phoneNumber?.replace(/\s+/g, "")
+  );
+
+  if (!fullMember) {
+    console.warn("⚠️ Member not found in lineup for fee calculation:", member?.firstName);
   }
 
-  // --- travel ---
+  // --- 2️⃣ Base fee ---
+  const base = Number(fullMember?.fee ?? member?.fee ?? 0);
+
+  // --- 3️⃣ Add essential additional roles ---
+  const essentialExtras = (fullMember?.additionalRoles || [])
+    .filter(r => r.isEssential)
+    .reduce((sum, r) => sum + Number(r.additionalFee || 0), 0);
+
+  // --- 4️⃣ Travel fee (keep your existing logic) ---
   let travel = 0;
 
-  // county path
+  // County-based travel
   if (act?.useCountyTravelFee) {
     const outcode = extractOutcode(address);
     const county = countyFromOutcode(outcode);
@@ -129,20 +135,32 @@ async function computeMemberMessageFee({ act, lineup, member, address, dateISO }
     }
   }
 
-  // cost-per-mile path (only if no county fee applied)
-  if (!travel && Number(act?.costPerMile) > 0 && member?.postCode && address) {
+  // Cost-per-mile travel (only if no county fee)
+  if (!travel && Number(act?.costPerMile) > 0 && fullMember?.postCode && address) {
     try {
-      const dest = typeof address === "string" ? address : (address?.postcode || address?.address || "");
-      const t = await getTravelData(member.postCode, dest, dateISO);
+      const dest = typeof address === "string"
+        ? address
+        : (address?.postcode || address?.address || "");
+      const t = await getTravelData(fullMember.postCode, dest, dateISO);
       const distanceMeters = t?.outbound?.distance?.value || 0;
       const miles = distanceMeters / 1609.34;
-      travel = (miles || 0) * Number(act.costPerMile) * 25;
+      travel = (miles || 0) * Number(act.costPerMile) * 2; // round trip
     } catch (e) {
-      // swallow; leave travel = 0
+      console.warn("⚠️ Travel calculation failed:", e.message);
     }
   }
 
-  const total = Math.ceil(Math.max(0, base + travel));
-  return total; // return NET per-musician message rate
+  // --- 5️⃣ Total fee ---
+  const total = Math.ceil(Math.max(0, base + essentialExtras + travel));
+
+  console.log("💰 Member fee breakdown:", {
+    name: `${fullMember?.firstName} ${fullMember?.lastName}`,
+    base,
+    essentialExtras,
+    travel,
+    total,
+  });
+
+  return total;
 }
 export { computeMemberMessageFee, getTravelData, extractOutcode, countyFromOutcode, getCountyFeeFromMap };
