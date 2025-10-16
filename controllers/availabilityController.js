@@ -2176,7 +2176,7 @@ await rebuildAndApplyBadge(updated.actId, updated.dateISO);
 }; 
 
 // availabilityController.js (helpers)
-async function rebuildAndApplyBadge(actId, dateISO) {
+export async function rebuildAndApplyBadge(actId, dateISO) {
   try {
     if (!actId || !dateISO) return;
 
