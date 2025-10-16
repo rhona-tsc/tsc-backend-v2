@@ -1881,19 +1881,25 @@ try {} catch (e) {
   const shortAddress = (updated?.formattedAddress || selectedAddress || "").split(",").slice(-2).join(" ").trim();
   const emailForInvite = musicianEmail || updated?.calendarInviteEmail || null;
 
-  // compute fee safely
-  let fee = 0;
-  try {
-    fee = await computeMemberMessageFee({
-      act,
-      lineup: act?.lineups?.find(l => String(l._id) === String(updated.lineupId)),
-      member: musicianDoc,
-      address: updated.formattedAddress || selectedAddress,
-      dateISO: updated.dateISO || selectedDate,
-    });
-  } catch (e) {
-    console.warn("⚠️ computeMemberMessageFee failed:", e?.message || e);
-  }
+  // --- Compute actual fee using helper ---
+let fee = 0;
+try {
+  const targetLineup = act?.lineups?.find(
+    l => String(l._id) === String(updated.lineupId)
+  );
+
+  fee = await computeMemberMessageFee({
+    act,
+    lineup: targetLineup,
+    member: musicianDoc || personFromAct,
+    address: updated.formattedAddress || selectedAddress,
+    dateISO: updated.dateISO || selectedDate,
+  });
+
+  console.log("💰 computeMemberMessageFee result:", fee);
+} catch (err) {
+  console.warn("⚠️ Fee computation failed:", err?.message || err);
+}
 
   // human-readable date
   const formattedDateString = dateISOday
