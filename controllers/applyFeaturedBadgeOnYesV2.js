@@ -1,7 +1,6 @@
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
-
 import {
   findPersonByMusicianId,
   resolveMatchedMusicianPhoto,
@@ -30,8 +29,7 @@ export async function debugLogBadgeState(actId, label = "badge") {
   }
 }
 
-
-// Local E.164 normalizer (kept here so this helper is standalone)
+// --- Local E.164 normalizer -------------------------------------------------
 const normalizePhoneE164_V2 = (raw = "") => {
   let s = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
   if (!s) return "";
@@ -41,9 +39,7 @@ const normalizePhoneE164_V2 = (raw = "") => {
   return s;
 };
 
-
-// Apply "Featured Vocalist Available" badge after a YES reply.
-
+// --- Apply "Featured Vocalist Available" badge after a YES reply ------------
 export async function applyFeaturedBadgeOnYesV2({
   updated,
   actDoc = null,
@@ -65,7 +61,7 @@ export async function applyFeaturedBadgeOnYesV2({
     let who = null;
     let isDeputy = false;
 
-    // 1) Prefer exact by musicianId
+    // 1️⃣ Prefer exact by musicianId
     let match = updated.musicianId
       ? findPersonByMusicianId(act, updated.musicianId)
       : null;
@@ -74,7 +70,7 @@ export async function applyFeaturedBadgeOnYesV2({
       isDeputy = !!match.parentMember;
     }
 
-    // 2) Fallback by phone in lineup, then all lineups
+    // 2️⃣ Fallback by phone
     if (!who) {
       match =
         findPersonByPhone(act, updated.lineupId, updated.phone || fromRaw) ||
@@ -85,10 +81,10 @@ export async function applyFeaturedBadgeOnYesV2({
       }
     }
 
-    // 3) Helpful debug (will show all phone-normalized variants you store)
+    // 3️⃣ Debug
     await debugLogMusicianByPhone(updated.phone || fromRaw);
 
-    // 4) Load a Musician doc for photo (only if needed)
+    // 4️⃣ Load Musician doc for photo
     let docForPhoto = musicianDoc;
     if (
       who?.musicianId &&
@@ -98,6 +94,7 @@ export async function applyFeaturedBadgeOnYesV2({
         docForPhoto = await Musician.findById(who.musicianId).lean();
       } catch {}
     }
+
     if (!docForPhoto && (who?.email || who?.emailAddress)) {
       try {
         docForPhoto = await Musician.findOne({
@@ -105,6 +102,7 @@ export async function applyFeaturedBadgeOnYesV2({
         }).lean();
       } catch {}
     }
+
     if (!docForPhoto) {
       try {
         const e164 = normalizePhoneE164_V2(updated.phone || fromRaw);
@@ -127,7 +125,7 @@ export async function applyFeaturedBadgeOnYesV2({
       }
     }
 
-    // 5) Resolve a safe photo URL (strict priority via your resolver)
+    // 5️⃣ Resolve photo URL
     let resolvedPhotoUrl = resolveMatchedMusicianPhoto({
       who,
       musicianDoc: docForPhoto,
@@ -160,7 +158,7 @@ export async function applyFeaturedBadgeOnYesV2({
       (musicianDoc?._id && String(musicianDoc._id)) ||
       "";
 
-    // Construct a deputy record we can push if needed
+    // Build deputy record
     const deputyRecord = {
       musicianId: resolvedMusicianId,
       vocalistName: vocalistName || (updated?.name || "").trim(),
@@ -183,112 +181,93 @@ export async function applyFeaturedBadgeOnYesV2({
       setAt: new Date(),
     };
 
-    // Always set the common meta (active + date/address window)
     const commonSet = {
-      "availabilityBadge.active": true,
       "availabilityBadge.dateISO": updated.dateISO || null,
       "availabilityBadge.address": updated.formattedAddress || "",
       "availabilityBadge.setAt": new Date(),
     };
 
-   if (!isDeputy) {
-  await Act.updateOne(
-    { _id: act._id },
-    {
-      $set: {
-        ...commonSet,
-        "availabilityBadge.isDeputy": false,
-        "availabilityBadge.vocalistName": vocalistName || (updated?.name || "").trim(),
-        "availabilityBadge.photoUrl": resolvedPhotoUrl || "",
-        "availabilityBadge.musicianId": resolvedMusicianId || "",
-      },
+    // 🎤 If lead replies YES → set lead as active
+    if (!isDeputy) {
+      await Act.updateOne(
+        { _id: act._id },
+        {
+          $set: {
+            ...commonSet,
+            "availabilityBadge.active": true,
+            "availabilityBadge.isDeputy": false,
+            "availabilityBadge.vocalistName":
+              vocalistName || (updated?.name || "").trim(),
+            "availabilityBadge.photoUrl": resolvedPhotoUrl || "",
+            "availabilityBadge.musicianId": resolvedMusicianId || "",
+          },
+        }
+      );
+      await debugLogBadgeState(act._id, "after LEAD YES");
     }
-  );
-  await debugLogBadgeState(act._id, "after LEAD YES");
-} else {
-  // Log state before any changes
-  await debugLogBadgeState(act._id, "before DEPUTY YES");
 
-  // Always ensure the meta for this date/address is set
-  const setMetaRes = await Act.updateOne(
-    { _id: act._id },
-    {
-      $set: {
-        ...commonSet,
-        "availabilityBadge.isDeputy": true,
-        "availabilityBadge.vocalistName": deputyRecord.vocalistName,
-        "availabilityBadge.photoUrl": deputyRecord.photoUrl,
-        "availabilityBadge.musicianId": deputyRecord.musicianId,
-      },
+    // 🎤 If deputy replies YES → accumulate deputies
+    else {
+      await debugLogBadgeState(act._id, "before DEPUTY YES");
+
+      // Keep lead inactive; just update deputies
+      await Act.updateOne(
+        { _id: act._id },
+        {
+          $set: {
+            ...commonSet,
+            "availabilityBadge.active": false,
+            "availabilityBadge.isDeputy": true,
+          },
+        }
+      );
+
+      // Remove duplicate deputy if exists
+      await Act.updateOne(
+        { _id: act._id },
+        {
+          $pull: {
+            "availabilityBadge.deputies": {
+              musicianId: deputyRecord.musicianId,
+            },
+          },
+        }
+      );
+
+      // Push this deputy (max 3)
+      const pushRes = await Act.updateOne(
+        { _id: act._id },
+        {
+          $push: {
+            "availabilityBadge.deputies": {
+              $each: [deputyRecord],
+              $position: 0,
+              $slice: 3,
+            },
+          },
+        }
+      );
+
+      console.log("➕ push deputy result:", {
+        matched: pushRes.matchedCount,
+        modified: pushRes.modifiedCount,
+      });
+
+      await debugLogBadgeState(act._id, "after DEPUTY YES");
     }
-  );
-  console.log("🧭 set meta result:", {
-    matched: setMetaRes.matchedCount,
-    modified: setMetaRes.modifiedCount,
-  });
 
-  // Remove any existing entry for this musicianId (dedupe)
-  const pullRes = await Act.updateOne(
-    { _id: act._id },
-    { $pull: { "availabilityBadge.deputies": { musicianId: deputyRecord.musicianId } } }
-  );
-  // ✅ Add (or re-add) this deputy to the array, keeping only the latest 3
-await Act.updateOne(
-  { _id: act._id },
-  {
-    $push: {
-      "availabilityBadge.deputies": {
-        $each: [deputyRecord],
-        $position: 0, // add to front (most recent first)
-        $slice: 3     // cap to 3 deputies total
-      }
-    },
-    $set: {
-      "availabilityBadge.active": true,
-"availabilityBadge.dateISO": updated.dateISO || null,
-      "availabilityBadge.setAt": new Date(),
-      "availabilityBadge.isDeputy": true
-    }
-  }
-);
-  console.log("🧹 pull deputy result:", {
-    matched: pullRes.matchedCount,
-    modified: pullRes.modifiedCount,
-  });
-
-  // Push this deputy to the FRONT, keep only the latest 3 for this badge/date
-  const pushRes = await Act.updateOne(
-    { _id: act._id },
-    {
-      $push: {
-        "availabilityBadge.deputies": {
-          $each: [deputyRecord],
-          $position: 0,
-          $slice: 3, // keep max 3 (remove this if you want unbounded)
-        },
-      },
-    }
-  );
-  console.log("➕ push deputy result:", {
-    matched: pushRes.matchedCount,
-    modified: pushRes.modifiedCount,
-  });
-
-  // Log state after
-  await debugLogBadgeState(act._id, "after DEPUTY YES");
-}
-
-console.log("🏷️ [V2] Applying featured badge", {
-  actId: updated.actId?.toString?.(),
-  vocalistName,
-  isDeputy,
-  photoUrl: resolvedPhotoUrl,
-  dateISO: updated.dateISO,
-  address: updated.formattedAddress,
-  musicianId: resolvedMusicianId,
-});
+    console.log("🏷️ [V2] Applying featured badge", {
+      actId: updated.actId?.toString?.(),
+      vocalistName,
+      isDeputy,
+      photoUrl: resolvedPhotoUrl,
+      dateISO: updated.dateISO,
+      address: updated.formattedAddress,
+      musicianId: resolvedMusicianId,
+    });
   } catch (e) {
     console.warn("⚠️ applyFeaturedBadgeOnYesV2 failed:", e?.message || e);
   }
 }
+
 export default { debugLogBadgeState, applyFeaturedBadgeOnYesV2 };
