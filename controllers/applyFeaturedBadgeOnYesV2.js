@@ -287,4 +287,155 @@ await rebuildAndApplyBadge(updated.actId, updated.dateISO);
   }
 }
 
+// --- Apply "Featured Vocalist Available" badge after a YES reply (Hybrid v3) ---
+export async function applyFeaturedBadgeOnYesV3({
+  updated,
+  actDoc = null,
+  musicianDoc = null,
+  fromRaw = "",
+}) {
+  try {
+    if (
+      !updated ||
+      !updated.actId ||
+      String(updated.reply || "").toLowerCase() !== "yes"
+    ) {
+      return;
+    }
+
+    const act = actDoc || (await Act.findById(updated.actId).lean());
+    if (!act) return;
+
+    console.log("🎯 [applyFeaturedBadgeOnYesV3] triggered for", {
+      actName: act.tscName || act.name,
+      dateISO: updated.dateISO,
+      phone: updated.phone,
+      fromRaw,
+    });
+
+    // 🧩 1️⃣ Identify musician
+    const e164 = normalizePhoneE164_V2(updated.phone || fromRaw);
+    let musician =
+      musicianDoc ||
+      (await Musician.findOne({
+        $or: [
+          { _id: updated.musicianId },
+          { phoneNormalized: e164 },
+          { phone: e164 },
+          { phoneNumber: e164 },
+          { email: updated.email },
+        ],
+      })
+        .select(
+          "_id firstName lastName email profilePicture coverHeroImage musicianProfileImageUpload musicianProfileImage images digitalWardrobeBlackTie digitalWardrobeFormal digitalWardrobeSmartCasual"
+        )
+        .lean());
+
+    if (!musician) {
+      console.warn("⚠️ No musician found for", e164, "— badge skipped");
+      return;
+    }
+
+    const isDeputy = act.lineups?.some(l =>
+      l.bandMembers?.some(m =>
+        m.deputies?.some(d => String(d.musicianId) === String(musician._id))
+      )
+    );
+
+    // 🧠 2️⃣ Pick best photo from all known fields
+    const possiblePhotos = [
+      musician.profilePicture?.url,
+      musician.profilePicture,
+      musician.coverHeroImage,
+      musician.musicianProfileImageUpload?.url,
+      musician.musicianProfileImage?.url,
+      musician.images?.[0]?.url,
+      musician.digitalWardrobeBlackTie?.[0],
+      musician.digitalWardrobeFormal?.[0],
+      musician.digitalWardrobeSmartCasual?.[0],
+    ].filter(Boolean);
+
+    const photoUrl = possiblePhotos[0] || "";
+
+    const vocalistName =
+      [musician.firstName, musician.lastName].filter(Boolean).join(" ") ||
+      updated.musicianName ||
+      "Unknown";
+
+    const musicianId = String(musician._id);
+
+    // 🧾 3️⃣ Shared update fields
+    const baseSet = {
+      "availabilityBadge.dateISO": updated.dateISO || null,
+      "availabilityBadge.address": updated.formattedAddress || "",
+      "availabilityBadge.setAt": new Date(),
+    };
+
+    // 🎤 4️⃣ If lead
+    if (!isDeputy) {
+      await Act.updateOne(
+        { _id: act._id },
+        {
+          $set: {
+            ...baseSet,
+            "availabilityBadge.active": true,
+            "availabilityBadge.isDeputy": false,
+            "availabilityBadge.vocalistName": vocalistName,
+            "availabilityBadge.musicianId": musicianId,
+            "availabilityBadge.photoUrl": photoUrl,
+            "availabilityBadge.profileUrl": `${
+              process.env.PUBLIC_SITE_URL || "http://localhost:5174"
+            }/musician/${musicianId}`,
+          },
+        }
+      );
+      console.log("✅ Lead badge updated:", { vocalistName, photoUrl });
+    }
+
+    // 🎙️ 5️⃣ If deputy
+    else {
+      const deputyRecord = {
+        musicianId,
+        vocalistName,
+        photoUrl,
+        profileUrl: `${
+          process.env.PUBLIC_SITE_URL || "http://localhost:5174"
+        }/musician/${musicianId}`,
+        setAt: new Date(),
+      };
+
+      await Act.updateOne(
+        { _id: act._id },
+        {
+          $set: {
+            ...baseSet,
+            "availabilityBadge.isDeputy": true,
+          },
+          $pull: { "availabilityBadge.deputies": { musicianId } },
+        }
+      );
+
+      await Act.updateOne(
+        { _id: act._id },
+        {
+          $push: {
+            "availabilityBadge.deputies": {
+              $each: [deputyRecord],
+              $position: 0,
+              $slice: 3,
+            },
+          },
+        }
+      );
+
+      // 🔁 refresh after deputy added
+      await rebuildAndApplyBadge(updated.actId, updated.dateISO);
+      console.log("➕ Deputy badge updated:", vocalistName);
+    }
+
+    await debugLogBadgeState(act._id, "[applyFeaturedBadgeOnYesV3]");
+  } catch (err) {
+    console.error("❌ applyFeaturedBadgeOnYesV3 error:", err.message);
+  }
+}
 export default { debugLogBadgeState, applyFeaturedBadgeOnYesV2 };
