@@ -43,8 +43,7 @@ router.options('/toggle', (req, res) => res.sendStatus(200));
 
 router.post('/availability/request', triggerAvailabilityRequest);
 
-// Your shortlist endpoint that also mirrors to Enquiry Board
-router.post('/add', shortlistActAndTrack);
+
 // ✅ Alias so you can call /api/shortlist/toggle as well
 router.post('/toggle', shortlistActAndTrack);
 

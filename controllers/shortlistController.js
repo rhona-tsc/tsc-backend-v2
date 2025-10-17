@@ -325,6 +325,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     const resolvedCounty = countyFromOutcode(outcode);
     console.log("🌍 Derived county:", resolvedCounty || "❌ none");
 
+    // 🗂️ Find or create shortlist
     let shortlist = await Shortlist.findOne({ userId });
     if (!shortlist) shortlist = await Shortlist.create({ userId, acts: [] });
     if (!Array.isArray(shortlist.acts)) shortlist.acts = [];
@@ -357,7 +358,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
 
     await shortlist.save();
 
-    // ✅ Only send WA if newly added
+    // ✅ Only send WhatsApp if newly added
     if (!alreadyShortlisted && selectedDate && selectedAddress) {
       const actData = await Act.findById(actId).lean();
       if (!actData) throw new Error("Act not found");
@@ -377,9 +378,27 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
         lineup: lineup.actSize,
       });
 
+      // 🛡️ Guard: prevent duplicate WA sends
+      const existingAvailability = await Availability.findOne({
+        actId,
+        lineupId: lineup._id,
+        musicianId: vocalist._id,
+        dateISO: selectedDate,
+      }).sort({ createdAt: -1 });
 
+      if (existingAvailability && !["no", "unavailable"].includes(existingAvailability.reply)) {
+        const status = existingAvailability.status || "sent";
+        console.log(
+          `🛑 Skipping duplicate WA send — existing record found (status=${status}, reply=${existingAvailability.reply})`
+        );
+        return res.json({
+          success: true,
+          message: "Already sent availability request",
+          shortlisted: true,
+        });
+      }
 
-      // 🧾 Compute fee and message vars
+      // 🧾 Compute fee + build message variables
       const shortAddress =
         selectedAddress?.split(",")?.slice(-2)?.join(" ")?.trim() || selectedAddress || "";
       const fee = await computeMemberMessageFee({
@@ -404,20 +423,19 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
         6: actData.name || "",
       };
 
-// controllers/shortlistController.js (inside shortlistActAndTriggerAvailability)
-const smsBody = await buildAvailabilitySMS({
-  firstName: msgVars[1],
-  formattedDate: msgVars[2],
-  formattedAddress: msgVars[3],
-  act: actData,                                 // ✅ pass the act
-  member: vocalist,                             // ✅ pass the member
-  feeOverride: msgVars[4],                      // ✅ let override win if present
-  dutiesOverride: msgVars[5],
-  actNameOverride: msgVars[6],
-  countyName: resolvedCounty,                   // ✅ "Berkshire"
-});
+      const smsBody = await buildAvailabilitySMS({
+        firstName: msgVars[1],
+        formattedDate: msgVars[2],
+        formattedAddress: msgVars[3],
+        act: actData,
+        member: vocalist,
+        feeOverride: msgVars[4],
+        dutiesOverride: msgVars[5],
+        actNameOverride: msgVars[6],
+        countyName: resolvedCounty,
+      });
 
-      // 🧾 Create availability record first (before WA send)
+      // 🧾 Create availability record before WA send
       const availability = await Availability.create({
         actId,
         lineupId: lineup._id,
@@ -430,7 +448,7 @@ const smsBody = await buildAvailabilitySMS({
         duties: vocalist.instrument,
         reply: null,
         status: "queued",
-        outbound: { sid: null, smsBody }, // add SMS body upfront
+        outbound: { sid: null, smsBody },
       });
 
       try {
@@ -444,10 +462,9 @@ const smsBody = await buildAvailabilitySMS({
 
         console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone}), sid=${waMsg.sid}`);
 
-        // 🗂️ Update Availability with Twilio SID
         await Availability.updateOne(
           { _id: availability._id },
-          { $set: { "outbound.sid": waMsg.sid } }
+          { $set: { "outbound.sid": waMsg.sid, status: "sent" } }
         );
       } catch (err) {
         // --- WhatsApp undeliverable fallback ---
@@ -455,6 +472,10 @@ const smsBody = await buildAvailabilitySMS({
           console.warn(`⚠️ WhatsApp undeliverable (${err.code}) for ${phone}. Sending SMS fallback...`);
           await sendSMSMessage(phone, smsBody);
           console.log(`📩 SMS fallback sent to ${phone}`);
+          await Availability.updateOne(
+            { _id: availability._id },
+            { $set: { status: "sms_sent" } }
+          );
         } else {
           console.error("❌ WhatsApp send error:", err.message);
           throw err;
