@@ -1776,8 +1776,16 @@ export const rebuildAvailabilityBadge = async (req, res) => {
       let found = await findPersonByPhone(act, replyRow.lineupId, phone);
       let person = found?.person || null;
 
-      // Fallback to Musicians DB if no match found
-      if (!person) {
+      // Check if the found person has an image
+      const hasPhoto =
+        person?.profilePicture?.url ||
+        person?.profilePicture ||
+        person?.photoUrl ||
+        person?.imageUrl ||
+        (Array.isArray(person?.images) && person.images.length > 0);
+
+      // Fallback to Musicians DB if no person found OR no image present
+      if (!person || !hasPhoto) {
         const musicianDoc = await Musician.findOne({
           $or: [
             { phoneNormalized: phone },
