@@ -200,6 +200,18 @@ app.post('/api/google/webhook', handleGoogleWebhook);
 
 app.post('/api/google/notifications', handleGoogleWebhook);
 
+// ✅ Legacy alias for old Twilio webhook
+app.post(
+  "/api/shortlist/twilio/inbound",
+  express.urlencoded({ extended: false }),
+  (req, res) => {
+    console.log("🟡 Legacy alias hit — forwarding to /api/availability/twilio/inbound");
+    req.url = "/api/availability/twilio/inbound"; // rewrite path
+    app.handle(req, res); // forward internally
+  }
+);
+
+
 // Temporary aliases so existing Twilio config keeps working
 app.post("/api/twilio/inbound", express.urlencoded({ extended: false }), twilioInbound);
 app.post("/api/twilio/status", express.urlencoded({ extended: false }), twilioStatusHandler);
