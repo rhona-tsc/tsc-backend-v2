@@ -1285,22 +1285,7 @@ selectedCounty,
   }
 };
 
-// Helper: safely extract image URL from a deputy/musician object or string
-function getPictureUrlFrom(obj = {}) {
-  // Accept string or object with url property
-  if (typeof obj === "string") return obj;
-  if (!obj || typeof obj !== "object") return "";
-  return (
-    obj.profilePicture?.url ||
-    obj.profilePicture ||
-    obj.musicianProfileImageUpload ||
-    obj.musicianProfileImage ||
-    obj.profileImage ||
-    obj.photoUrl ||
-    obj.imageUrl ||
-    ""
-  );
-}
+
 
 async function getDeputyDisplayBits(dep) {
   // Return { musicianId, photoUrl, profileUrl }
