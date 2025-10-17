@@ -2410,143 +2410,98 @@ export const rebuildAvailabilityBadge = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing actId/dateISO" });
     }
 
-    const act = await Act.findById(actId).lean();
-    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
+    // Pull all relevant replies for that act/date directly from AvailabilityModel
+    const availRows = await AvailabilityModel.find({
+      actId,
+      dateISO,
+      reply: { $in: ["yes", "no", "unavailable"] },
+    }).lean();
 
-    // Build the suggested badge state (may include either single featured musician or deputies)
-    let badge = await buildAvailabilityBadgeFromRows(act, dateISO);
+    console.log("🎤 rebuildAvailabilityBadge → availRows:", availRows.length);
 
-    const yesReplies = await AvailabilityModel.find({
-  actId,
-  dateISO,
-  reply: "yes",
-  v2: true
-}).lean();
-
-console.log("🎤 Found YES replies:", yesReplies.map(r => r.musicianName));
-
-if (yesReplies.length > 1) {
-  const deputies = yesReplies.filter(r => r.musicianName !== badge.vocalistName);
-  badge.deputies = deputies.slice(0, 3).map(r => ({
-    musicianId: r.musicianId,
-    vocalistName: r.musicianName,
-    photoUrl: r.photoUrl || "",
-    profileUrl: `/musician/${r.musicianId}`,
-    setAt: r.repliedAt || new Date(),
-  }));
-}
-
-
-    if (!badge) {
+    if (!availRows.length) {
       await Act.updateOne(
         { _id: actId },
-        {
-          $set: { "availabilityBadge.active": false },
-          $unset: {
-            "availabilityBadge.deputies": "",
-            "availabilityBadge.musicianId": "",
-            "availabilityBadge.photoUrl": "",
-            "availabilityBadge.vocalistName": "",
-            "availabilityBadge.profileUrl": "",
-            "availabilityBadge.setAt": "",
-          },
-        }
+        { $set: { "availabilityBadge.active": false }, $unset: { "availabilityBadge.deputies": "" } }
       );
-      return res.json({ success: true, updated: false, reason: "No qualifying replies" });
+      return res.json({ success: true, updated: false, reason: "No replies found" });
     }
 
-    // ---- Enrichment helpers (strict: only use Musician.profilePicture if it's a string URL) ----
+    // Separate YES replies
+    const yesReplies = availRows.filter(r => r.reply === "yes");
+    console.log("🎤 Found YES replies:", yesReplies.map(r => r.musicianName));
+
+    if (!yesReplies.length) {
+      await Act.updateOne(
+        { _id: actId },
+        { $set: { "availabilityBadge.active": false }, $unset: { "availabilityBadge.deputies": "" } }
+      );
+      return res.json({ success: true, updated: false, reason: "No YES replies" });
+    }
+
+    // ---- Build the badge purely from availability replies ----
+    // Pick the first YES reply as the "lead" (typically the main vocalist)
+    const lead = yesReplies[0];
+    const deputies = yesReplies.slice(1, 4); // up to 3 deputies
+
+    // --- Helper: pick a proper profile picture ---
     const pickProfilePicture = (doc) => {
       if (!doc) return "";
       const v = typeof doc.profilePicture === "string" ? doc.profilePicture.trim() : doc.profilePicture?.url;
-      return v && typeof v === "string" && v.startsWith("http") ? v : "";
+      return v && v.startsWith("http") ? v : "";
     };
 
-    const ensureProfileForId = async (maybeId) => {
-      if (!maybeId) return { profilePicture: "" };
-      try {
-        const m = await Musician.findById(maybeId).select("profilePicture").lean();
-        return { profilePicture: pickProfilePicture(m) };
-      } catch {
-        return { profilePicture: "" };
-      }
+    const ensureProfileForId = async (id) => {
+      if (!id) return { profilePicture: "" };
+      const m = await Musician.findById(id).select("profilePicture").lean();
+      return { profilePicture: pickProfilePicture(m) };
     };
 
-    // Compute profileUrl (frontend also builds this, but we store for convenience)
     const buildProfileUrl = (id) => (id ? `/musician/${id}` : "");
 
-    // If this is a single-person badge, make sure musicianId/profileUrl are present
-    if (!badge.isDeputy) {
-      if (badge.musicianId) {
-        badge.profileUrl = badge.profileUrl || buildProfileUrl(badge.musicianId);
-        // Optional: enrich photoUrl from profilePicture if photoUrl missing
-        if (!badge.photoUrl) {
-          const { profilePicture } = await ensureProfileForId(badge.musicianId);
-          if (profilePicture) badge.photoUrl = profilePicture;
-        }
-      }
-    }
+    // Lead enrichment
+    const { profilePicture: leadPic } = await ensureProfileForId(lead.musicianId);
 
-    // If this is a deputies badge, normalise each deputy entry
-    if (Array.isArray(badge.deputies) && badge.deputies.length) {
-      const enriched = [];
-      for (const d of badge.deputies) {
-        const musId = d?.musicianId ? String(d.musicianId) : "";
-        const base = {
-          name: (d?.name || "").trim(),
-          musicianId: musId,
-          profileUrl: d?.profileUrl || buildProfileUrl(musId),
-          setAt: d?.setAt || new Date(),
-        };
-        // Prefer an explicit d.profilePicture if valid; otherwise look it up by musicianId
-        let profilePicture = typeof d?.profilePicture === "string" && d.profilePicture.startsWith("http")
-          ? d.profilePicture
-          : "";
-        if (!profilePicture && musId) {
-          const looked = await ensureProfileForId(musId);
-          profilePicture = looked.profilePicture || "";
-        }
-        enriched.push({ ...base, profilePicture });
-      }
-      badge.deputies = enriched;
-    }
-
-    const $set = {
-      "availabilityBadge.active": !!badge.active,
-      "availabilityBadge.dateISO": badge.dateISO,
-      "availabilityBadge.setAt": badge.setAt,
-      "availabilityBadge.address": badge.address || "",
-      "availabilityBadge.vocalistName": badge.vocalistName || "",
-      "availabilityBadge.isDeputy": !!badge.isDeputy,
-      "availabilityBadge.inPromo": !!badge.inPromo,
+    const badge = {
+      active: true,
+      dateISO,
+      vocalistName: lead.musicianName,
+      musicianId: lead.musicianId,
+      photoUrl: leadPic || "",
+      profileUrl: buildProfileUrl(lead.musicianId),
+      setAt: lead.repliedAt || new Date(),
+      deputies: [],
     };
 
-    if (badge.photoUrl) $set["availabilityBadge.photoUrl"] = badge.photoUrl;
-
-    // Persist top-level identity fields for featured person (when present)
-    if (badge.musicianId) {
-      $set["availabilityBadge.musicianId"] = badge.musicianId;
-      $set["availabilityBadge.profileUrl"] = buildProfileUrl(badge.musicianId);
-    } else {
-      $set["availabilityBadge.musicianId"] = "";
-      $set["availabilityBadge.profileUrl"] = "";
+    // Deputies enrichment
+    for (const dep of deputies) {
+      const { profilePicture } = await ensureProfileForId(dep.musicianId);
+      badge.deputies.push({
+        musicianId: dep.musicianId,
+        vocalistName: dep.musicianName,
+        photoUrl: profilePicture || "",
+        profileUrl: buildProfileUrl(dep.musicianId),
+        setAt: dep.repliedAt || new Date(),
+      });
     }
 
-  if (Array.isArray(badge.deputies) && badge.deputies.length) {
-  // Merge with any existing deputies in DB
-  const existing = Array.isArray(act.availabilityBadge?.deputies)
-    ? act.availabilityBadge.deputies
-    : [];
+    // Cap to 3 deputies max
+    badge.deputies = badge.deputies.slice(0, 3);
 
-  // Combine and dedupe by musicianId
-  const merged = [...existing, ...badge.deputies].filter(
-    (v, i, a) => a.findIndex(t => String(t.musicianId) === String(v.musicianId)) === i
-  ).slice(0, 3); // cap to 3
-
-  $set["availabilityBadge.deputies"] = merged;
-}
+    // --- Write it back to Act ---
+    const $set = {
+      "availabilityBadge.active": true,
+      "availabilityBadge.dateISO": badge.dateISO,
+      "availabilityBadge.setAt": badge.setAt,
+      "availabilityBadge.vocalistName": badge.vocalistName,
+      "availabilityBadge.musicianId": badge.musicianId,
+      "availabilityBadge.photoUrl": badge.photoUrl,
+      "availabilityBadge.profileUrl": badge.profileUrl,
+      "availabilityBadge.deputies": badge.deputies,
+    };
 
     await Act.updateOne({ _id: actId }, { $set });
+    console.log("✅ Updated badge for act:", actId, badge);
 
     return res.json({ success: true, updated: true, badge });
   } catch (err) {
