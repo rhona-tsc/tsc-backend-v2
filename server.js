@@ -201,18 +201,8 @@ app.post('/api/google/webhook', handleGoogleWebhook);
 app.post('/api/google/notifications', handleGoogleWebhook);
 
 // Temporary aliases so existing Twilio config keeps working
-app.post(
-  "/api/shortlist/twilio/inbound",
-  express.urlencoded({ extended: false }),
-  (req, res) => {
-    console.log("✅ Twilio inbound alias hit /api/shortlist/twilio/inbound", {
-      from: req.body?.From,
-      waId: req.body?.WaId,
-      body: String(req.body?.Body || "").slice(0, 140)
-    });
-    return twilioInbound(req, res);
-  }
-);
+app.post("/api/twilio/inbound", express.urlencoded({ extended: false }), twilioInbound);
+app.post("/api/twilio/status", express.urlencoded({ extended: false }), twilioStatusHandler);
 
 
 startRemindersPoller({ intervalMs: 30000 }); // every 30s

@@ -16,9 +16,6 @@ router.post("/cancel-active", async (req, res) => {
   res.json({ success:true });
 });
 
-// Webhooks for this V2 path (keep separate from V1 so it’s not tangled)
-router.post("/twilio/inbound",  express.urlencoded({ extended: false }), twilioInboundV2);
-router.post("/twilio/status",   express.urlencoded({ extended: false }), twilioStatusV2);
 
 router.post("/check-duplicate", async (req, res) => {
   const { actId, date, address } = req.body;

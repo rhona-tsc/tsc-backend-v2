@@ -8,12 +8,10 @@ import {
   twilioInbound,
   rebuildAndApplyBadge
 } from '../controllers/availabilityController.js';
+import { applyFeaturedBadgeOnYesV3 } from '../controllers/applyFeaturedBadgeOnYesV2.js';
+import { findPersonByPhone } from '../utils/findPersonByPhone.js';
 
 const router = express.Router();
-
-// Twilio inbound & status webhooks
-router.post('/twilio/inbound', express.urlencoded({ extended: false }), twilioInbound);
-router.post('/twilio/status',  express.urlencoded({ extended: false }), twilioStatus);
 
 // Quick latest-reply check
 router.get('/check-latest', async (req, res) => {
@@ -35,8 +33,38 @@ router.get('/check-latest', async (req, res) => {
   }
 });
 
+router.post("/twilio/inbound", async (req, res) => {
+  try {
+    const { From, Body, ButtonText, ButtonPayload } = req.body;
+
+    const fromPhone = From?.replace(/^whatsapp:/i, "").trim();
+
+    console.log("📩 Twilio inbound webhook:", {
+      From: fromPhone,
+      Body,
+      ButtonText,
+      ButtonPayload,
+    });
+
+    // 🔍 Lookup musician by phone (direct DB lookup)
+    const musician = await findPersonByPhone(fromPhone);
+
+    if (musician) {
+      console.log("✅ Matched musician:", musician.firstName, musician.lastName);
+      // continue handling reply logic...
+    } else {
+      console.warn("❌ No musician found for", fromPhone);
+    }
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error("❌ Twilio inbound error:", err);
+    res.sendStatus(500);
+  }
+});
+
 // Manual rebuild endpoints
-router.post('/rebuild-availability-badge', rebuildAvailabilityBadge);
+router.post('/rebuild-availability-badge', applyFeaturedBadgeOnYesV3);
 router.post('/badges/rebuild', rebuildAndApplyBadge); // data-driven version
 router.get('/resolve-musician', resolveAvailableMusician);
 

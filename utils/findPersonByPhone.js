@@ -24,7 +24,6 @@ function normalizePhoneE164(raw = "") {
 export const findPersonByPhone = async (fromValue) => {
   const q = normalizePhoneE164(fromValue);
   if (!q) {
-    console.warn("⚠️ findPersonByPhone called without valid phone:", fromValue);
     return null;
   }
 

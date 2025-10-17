@@ -191,8 +191,6 @@ router.get('/availability/subscribe', sseNoCompression, (req, res) => {
 
 router.post('/notify-musician', notifyMusician);
 
-router.post('/twilio/inbound', express.urlencoded({ extended: false }), twilioInbound);
-router.post('/twilio/status',  express.urlencoded({ extended: false }), twilioStatus);
 
 // Clear the availability badge (e.g., when Google Calendar webhook signals a decline)
 router.post('/availability/badge/clear', clearAvailabilityBadge);
