@@ -11,6 +11,7 @@ import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is correct in backend
 import { computeMemberMessageFee } from "./helpersForCorrectFee.js";
+import { rebuildAvailabilityBadge } from "./availabilityController.js";
 
 const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
 const normCountyKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, "_");
@@ -1969,7 +1970,21 @@ try {
   } catch (e) {
     console.warn("[twilioInbound] YES confirmation WA failed:", e?.message || e);
   }
-
+// ✅ Auto-refresh badge after YES reply
+try {
+  console.log("🔄 Auto-refreshing availability badge after YES reply...");
+  await rebuildAvailabilityBadge({
+    body: {
+      actId: String(updated.actId),
+      dateISO: String(updated.dateISO),
+    },
+  }, {
+    json: (result) => console.log("✅ Badge rebuild result:", result),
+    status: () => ({ json: () => {} }),
+  });
+} catch (err) {
+  console.warn("⚠️ Failed to auto-refresh badge:", err?.message || err);
+}
   return res.status(200).send("<Response/>");
 }
 
