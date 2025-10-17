@@ -1,14 +1,21 @@
 // routes/availability.js
 import express from 'express';
 import AvailabilityModel from '../models/availabilityModel.js';
-import { rebuildAvailabilityBadge, resolveAvailableMusician, twilioStatus, twilioInbound } from '../controllers/availabilityController.js';
+import {
+  rebuildAvailabilityBadge,
+  resolveAvailableMusician,
+  twilioStatus,
+  twilioInbound,
+  rebuildAndApplyBadge
+} from '../controllers/availabilityController.js';
 
 const router = express.Router();
 
-// Twilio webhooks (production & sandbox)
+// Twilio inbound & status webhooks
 router.post('/twilio/inbound', express.urlencoded({ extended: false }), twilioInbound);
 router.post('/twilio/status',  express.urlencoded({ extended: false }), twilioStatus);
 
+// Quick latest-reply check
 router.get('/check-latest', async (req, res) => {
   try {
     const { actId, dateISO } = req.query;
@@ -23,11 +30,14 @@ router.get('/check-latest', async (req, res) => {
 
     res.json({ latestReply: latestReply || null });
   } catch (e) {
+    console.error("⚠️ check-latest error:", e.message);
     res.status(500).json({ latestReply: null });
   }
 });
 
+// Manual rebuild endpoints
 router.post('/rebuild-availability-badge', rebuildAvailabilityBadge);
+router.post('/badges/rebuild', rebuildAndApplyBadge); // data-driven version
 router.get('/resolve-musician', resolveAvailableMusician);
 
 export default router;

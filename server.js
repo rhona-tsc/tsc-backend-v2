@@ -250,7 +250,6 @@ app.use("/api/invoices", invoiceRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use('/api/act-submission', submitActSubmission);
 
-// Legacy availability
 app.use('/api/availability', availabilityRoutes);
 
 // Direct mount
@@ -311,6 +310,7 @@ app.use((err, req, res, next) => {
 // 🕒 Google Calendar auto-watch refresh (runs daily at 3am UTC)
 // ---------------------------------------------------------------------------
 import cron from 'node-cron';
+import { buildBadgeFromAvailability } from './controllers/availabilityBadgeController.js';
 
 let isRegistering = false;
 
@@ -334,6 +334,30 @@ cron.schedule('0 3 * * *', async () => {
 console.log('🕒 Cron job scheduled: Google Calendar webhook will refresh daily at 03:00 UTC');
 
 app.listen(port, () => console.log(`🚀 Server started on PORT: ${port}`));
+
+cron.schedule("*/30 * * * *", async () => {
+  console.log("🔁 [CRON] Refreshing availability badges...");
+  try {
+    const upcomingActs = await mongoose.model("Act").find({
+      "availabilityBadge.active": true,
+    }).select("_id availabilityBadge.dateISO");
+
+    for (const act of upcomingActs) {
+      const dateISO = act.availabilityBadge?.dateISO;
+      if (!dateISO) continue;
+
+      const badge = await buildBadgeFromAvailability(act._id, dateISO);
+      if (badge) {
+        await mongoose.model("Act").updateOne({ _id: act._id }, { $set: { availabilityBadge: badge } });
+        console.log(`✅ Refreshed badge for ${act._id} (${badge.vocalistName})`);
+      }
+    }
+
+    console.log("🌙 [CRON] Badge refresh complete.");
+  } catch (err) {
+    console.error("❌ [CRON] Badge refresh failed:", err);
+  }
+});
 
 // Auto-register Google Calendar watch channel at server startup
 (async () => {
