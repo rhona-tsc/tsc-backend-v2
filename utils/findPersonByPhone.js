@@ -1,4 +1,6 @@
-// Normaliser used everywhere
+import Musician from "../models/musicianModel.js";
+
+// --- Normalise UK phone numbers to +44 (E.164 format) ---
 function normalizePhoneE164(raw = "") {
   let s = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
   if (!s) return "";
@@ -8,52 +10,38 @@ function normalizePhoneE164(raw = "") {
   return s;
 }
 
-export const findPersonByPhone = (act, lineupId, fromValue) => {
-  if (!act) return null;
+/**
+ * 🔍 Finds a musician directly from the Musician collection by phone number.
+ * @param {string} fromValue - raw phone input (+447..., 07..., whatsapp:+447...)
+ * @returns {Promise<{ type: 'musician', person: Object } | null>}
+ */
+export const findPersonByPhone = async (fromValue) => {
   const q = normalizePhoneE164(fromValue);
   if (!q) return null;
 
-  const allLineups = Array.isArray(act.lineups) ? act.lineups : [];
-  const primary = lineupId
-    ? allLineups.filter(
-        (l) =>
-          l._id?.toString?.() === String(lineupId) ||
-          String(l.lineupId) === String(lineupId)
-      )
-    : allLineups;
+  console.log("📞 [findPersonByPhone] Searching musician DB for:", q);
 
-  const same = (v) => normalizePhoneE164(v) === q;
+  const musician = await Musician.findOne({
+    $or: [
+      { phoneNormalized: q },
+      { phone: q },
+      { phoneNumber: q },
+      { "basicInfo.phone": q },
+    ],
+  })
+    .select(
+      "_id firstName lastName email phone phoneNumber phoneNormalized profilePicture musicianProfileImageUpload musicianProfileImage musicianProfilePhoto images photoUrl imageUrl"
+    )
+    .lean();
 
-  const searchIn = (lineups) => {
-    for (const l of lineups) {
-      const members = Array.isArray(l.bandMembers) ? l.bandMembers : [];
-      for (const m of members) {
-        // prefer normalized, then fallbacks
-        if (same(m.phoneNormalized) || same(m.phoneNumber) || same(m.phone)) {
-          console.log("✅ findPersonByPhone matched member", {
-            q,
-            matched: m.phoneNormalized || m.phoneNumber || m.phone,
-            name: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
-          });
-          return { type: "member", person: m, parentMember: null, lineup: l };
-        }
+  if (musician) {
+    console.log("✅ Found musician by phone:", {
+      name: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+      id: musician._id,
+    });
+    return { type: "musician", person: musician };
+  }
 
-        const deputies = Array.isArray(m.deputies) ? m.deputies : [];
-        for (const d of deputies) {
-          if (same(d.phoneNormalized) || same(d.phoneNumber) || same(d.phone)) {
-            console.log("✅ findPersonByPhone matched deputy", {
-              q,
-              matched: d.phoneNormalized || d.phoneNumber || d.phone,
-              name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-            });
-            return { type: "deputy", person: d, parentMember: m, lineup: l };
-          }
-        }
-      }
-    }
-    return null;
-  };
-
-  // Prefer the requested lineup, otherwise search everything
-  return searchIn(primary) || searchIn(allLineups);
+  console.warn("⚠️ No musician found in DB for phone:", q);
+  return null;
 };
