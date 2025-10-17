@@ -2416,6 +2416,27 @@ export const rebuildAvailabilityBadge = async (req, res) => {
     // Build the suggested badge state (may include either single featured musician or deputies)
     let badge = await buildAvailabilityBadgeFromRows(act, dateISO);
 
+    const yesReplies = await AvailabilityModel.find({
+  actId,
+  dateISO,
+  reply: "yes",
+  v2: true
+}).lean();
+
+console.log("🎤 Found YES replies:", yesReplies.map(r => r.musicianName));
+
+if (yesReplies.length > 1) {
+  const deputies = yesReplies.filter(r => r.musicianName !== badge.vocalistName);
+  badge.deputies = deputies.slice(0, 3).map(r => ({
+    musicianId: r.musicianId,
+    vocalistName: r.musicianName,
+    photoUrl: r.photoUrl || "",
+    profileUrl: `/musician/${r.musicianId}`,
+    setAt: r.repliedAt || new Date(),
+  }));
+}
+
+
     if (!badge) {
       await Act.updateOne(
         { _id: actId },
