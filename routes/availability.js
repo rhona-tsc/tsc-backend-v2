@@ -27,7 +27,7 @@ router.get('/check-latest', async (req, res) => {
   }
 });
 
-router.post('/rebuild-badge', rebuildAvailabilityBadge);
+router.post('/rebuild-availability-badge', rebuildAvailabilityBadge);
 router.get('/resolve-musician', resolveAvailableMusician);
 
 export default router;
