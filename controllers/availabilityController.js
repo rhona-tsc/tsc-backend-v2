@@ -11,7 +11,6 @@ import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is correct in backend
 import { computeMemberMessageFee } from "./helpersForCorrectFee.js";
-import { buildAvailabilityBadgeFromRows } from "../utils/buildAvailabilityBadgeFromRows.js";
 
 const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
 const normCountyKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, "_");
