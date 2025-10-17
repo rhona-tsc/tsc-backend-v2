@@ -2,6 +2,7 @@
 import express from 'express';
 import AvailabilityModel from '../models/availabilityModel.js';
 import { rebuildAvailabilityBadge, resolveAvailableMusician, twilioStatus, twilioInbound } from '../controllers/availabilityController.js';
+import { applyFeaturedBadgeOnYesV2 } from '../controllers/applyFeaturedBadgeOnYesV2.js';
 
 const router = express.Router();
 
@@ -27,7 +28,7 @@ router.get('/check-latest', async (req, res) => {
   }
 });
 
-router.post('/rebuild-availability-badge', rebuildAvailabilityBadge);
+router.post('/rebuild-availability-badge', applyFeaturedBadgeOnYesV2);
 router.get('/resolve-musician', resolveAvailableMusician);
 
 export default router;
