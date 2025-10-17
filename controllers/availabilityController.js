@@ -1784,6 +1784,50 @@ export async function rebuildAndApplyBadge(actId, dateISO) {
   }
 }
 
+// --- Helper: pick a proper profile picture (with fallback to images array) ---
+const pickProfilePicture = (doc) => {
+  if (!doc) return "";
+  if (typeof doc.profilePicture === "string" && doc.profilePicture.startsWith("http"))
+    return doc.profilePicture.trim();
+  if (doc.profilePicture?.url?.startsWith("http"))
+    return doc.profilePicture.url.trim();
+  if (Array.isArray(doc.images) && doc.images[0]?.url?.startsWith("http"))
+    return doc.images[0].url.trim();
+  return "";
+};
+
+// --- Helper: lookup musician by phone or ID ---
+const ensureProfileForMusician = async ({ musicianId, phone }) => {
+  try {
+    let musician = null;
+
+    // 1️⃣ Try direct ID first (fastest)
+    if (musicianId) {
+      musician = await Musician.findById(musicianId)
+        .select("profilePicture images phone email firstName lastName")
+        .lean();
+    }
+
+    // 2️⃣ If not found, fallback to phone lookup
+    if (!musician && phone) {
+      const normalised = normalizeFrom(phone); // your existing helper: ['+447...', '447...', '07...']
+      musician = await Musician.findOne({ phone: { $in: normalised } })
+        .select("profilePicture images phone email firstName lastName")
+        .lean();
+    }
+
+    if (!musician) return { profilePicture: "" };
+
+    return { profilePicture: pickProfilePicture(musician) };
+  } catch (err) {
+    console.warn("⚠️ ensureProfileForMusician lookup failed:", err?.message);
+    return { profilePicture: "" };
+  }
+};
+
+// --- Helper: construct profile link safely ---
+const buildProfileUrl = (id) => (id ? `/musician/${id}` : "");
+
 // POST /api/availability/rebuild-availability-badge { actId, dateISO }
 export const rebuildAvailabilityBadge = async (req, res) => {
   try {
@@ -1894,31 +1938,37 @@ export const rebuildAvailabilityBadge = async (req, res) => {
     const buildProfileUrl = (id) => (id ? `/musician/${id}` : "");
 
     // Lead enrichment
-    const { profilePicture: leadPic } = await ensureProfileForId(lead.musicianId);
+const { profilePicture: leadPic } = await ensureProfileForMusician({
+  musicianId: lead.musicianId,
+  phone: lead.phone,
+});
 
-    badge = {
-      active: true,
-      dateISO,
-      vocalistName: lead.musicianName,
-      musicianId: lead.musicianId,
-      photoUrl: leadPic || "",
-      profileUrl: buildProfileUrl(lead.musicianId),
-      setAt: lead.repliedAt || new Date(),
-      deputies: [],
-      isDeputy: false,
-    };
+badge = {
+  active: true,
+  dateISO,
+  vocalistName: lead.musicianName,
+  musicianId: lead.musicianId,
+  photoUrl: leadPic || "",
+  profileUrl: buildProfileUrl(lead.musicianId),
+  setAt: lead.repliedAt || new Date(),
+  deputies: [],
+  isDeputy: false,
+};
 
-    // Deputies enrichment
-    for (const dep of deputies) {
-      const { profilePicture } = await ensureProfileForId(dep.musicianId);
-      badge.deputies.push({
-        musicianId: dep.musicianId,
-        vocalistName: dep.musicianName,
-        photoUrl: profilePicture || "",
-        profileUrl: buildProfileUrl(dep.musicianId),
-        setAt: dep.repliedAt || new Date(),
-      });
-    }
+// Deputies enrichment
+for (const dep of deputies) {
+  const { profilePicture } = await ensureProfileForMusician({
+    musicianId: dep.musicianId,
+    phone: dep.phone,
+  });
+  badge.deputies.push({
+    musicianId: dep.musicianId,
+    vocalistName: dep.musicianName,
+    photoUrl: profilePicture || "",
+    profileUrl: buildProfileUrl(dep.musicianId),
+    setAt: dep.repliedAt || new Date(),
+  });
+}
 
     badge.deputies = badge.deputies.slice(0, 3);
 
