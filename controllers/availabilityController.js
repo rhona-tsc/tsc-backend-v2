@@ -1846,27 +1846,31 @@ export const rebuildAvailabilityBadge = async (req, res) => {
     }
 
     // 🧠 Helper: get musician info using findPersonByPhone
-    const getMusicianFromReply = async (replyRow) => {
-      if (!replyRow) return null;
-      const phone = replyRow.phone || replyRow.availabilityPhone;
-      if (!phone) return null;
+  const getMusicianFromReply = async (replyRow) => {
+  if (!replyRow) return null;
+  const phone = replyRow.phone || replyRow.availabilityPhone;
+  if (!phone) {
+    console.log("⚠️ No phone in replyRow:", replyRow);
+    return null;
+  }
 
-      const person = await findPersonByPhone(phone);
-      if (!person) return null;
+  const person = await findPersonByPhone(phone);
+  console.log("🔎 findPersonByPhone result:", { phone, person: !!person });
 
-      const photoUrl =
-        person.profilePicture?.url ||
-        person.profilePicture ||
-        (Array.isArray(person.images) && person.images[0]?.url) ||
-        "";
+  // even if person is null, try to use fallback data
+  const name =
+    (person?.firstName && person?.lastName
+      ? `${person.firstName} ${person.lastName}`
+      : person?.displayName || replyRow.musicianName || "(unknown)").trim();
 
-      const name =
-        (person.firstName && person.lastName
-          ? `${person.firstName} ${person.lastName}`
-          : person.displayName || replyRow.musicianName || "(Unnamed)").trim();
+  const photoUrl =
+    person?.profilePicture?.url ||
+    person?.profilePicture ||
+    (Array.isArray(person?.images) && person?.images[0]?.url) ||
+    "";
 
-      return { person, name, photoUrl };
-    };
+  return { person, name, photoUrl };
+};
 
     // 🧩 Build the enriched badge
     const lead = yesReplies[0];
