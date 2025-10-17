@@ -1285,16 +1285,32 @@ selectedCounty,
   }
 };
 
+// Helper: safely extract image URL from a deputy/musician object or string
+function getPictureUrlFrom(obj = {}) {
+  // Accept string or object with url property
+  if (typeof obj === "string") return obj;
+  if (!obj || typeof obj !== "object") return "";
+  return (
+    obj.profilePicture?.url ||
+    obj.profilePicture ||
+    obj.musicianProfileImageUpload ||
+    obj.musicianProfileImage ||
+    obj.profileImage ||
+    obj.photoUrl ||
+    obj.imageUrl ||
+    ""
+  );
+}
+
 async function getDeputyDisplayBits(dep) {
   // Return { musicianId, photoUrl, profileUrl }
   const PUBLIC_SITE_BASE = (process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "http://localhost:5174").replace(/\/$/, "");
-
   try {
     // Prefer an explicit musicianId if present, else fall back to embedded _id
     const musicianId = (dep?.musicianId && String(dep.musicianId)) || (dep?._id && String(dep._id)) || "";
 
-    // 1) Try to read an image directly from the deputy object (handles both string or {url} shapes)
-    let photoUrl = musicianDoc?.profilePicture;
+    // 1) Try to read an image directly from dep (handles both string or {url} shapes)
+    let photoUrl = getPictureUrlFrom(dep);
 
     // 2) If none on the deputy, try by musicianId (strongest lookup)
     let mus = null;
@@ -1313,7 +1329,7 @@ async function getDeputyDisplayBits(dep) {
           .select("musicianProfileImageUpload musicianProfileImage profileImage profilePicture.url photoUrl imageUrl _id")
           .lean();
         if (musByEmail) {
-          photoUrl = getPictureUrlFrom(musByEmail || "");
+          photoUrl = getPictureUrlFrom(musByEmail);
           // If we didn't have a musicianId, populate it now
           if (!musicianId && musByEmail._id) {
             dep.musicianId = musByEmail._id; // non-persistent; used by caller for profile link
@@ -1333,7 +1349,7 @@ async function getDeputyDisplayBits(dep) {
   } catch (e) {
     console.warn("⚠️ getDeputyDisplayBits failed:", e?.message || e);
     const fallbackId = (dep?.musicianId && String(dep.musicianId)) || (dep?._id && String(dep._id)) || "";
-    const profileUrl = fallbackId ? `${(process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "http://localhost:5174").replace(/\/$/, "")}/musician/${fallbackId}` : "";
+    const profileUrl = fallbackId ? `${PUBLIC_SITE_BASE}/musician/${fallbackId}` : "";
     return { musicianId: fallbackId, photoUrl: "", profileUrl };
   }
 }
