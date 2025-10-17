@@ -11,6 +11,7 @@ import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is correct in backend
 import { computeMemberMessageFee } from "./helpersForCorrectFee.js";
+import { buildAvailabilityBadgeFromRows } from "../utils/buildAvailabilityBadgeFromRows.js";
 
 const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
 const normCountyKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, "_");
@@ -1784,51 +1785,9 @@ export async function rebuildAndApplyBadge(actId, dateISO) {
   }
 }
 
-// --- Helper: pick a proper profile picture (with fallback to images array) ---
-const pickProfilePicture = (doc) => {
-  if (!doc) return "";
-  if (typeof doc.profilePicture === "string" && doc.profilePicture.startsWith("http"))
-    return doc.profilePicture.trim();
-  if (doc.profilePicture?.url?.startsWith("http"))
-    return doc.profilePicture.url.trim();
-  if (Array.isArray(doc.images) && doc.images[0]?.url?.startsWith("http"))
-    return doc.images[0].url.trim();
-  return "";
-};
 
-// --- Helper: lookup musician by phone or ID ---
-const ensureProfileForMusician = async ({ musicianId, phone }) => {
-  try {
-    let musician = null;
 
-    // 1️⃣ Try direct ID first (fastest)
-    if (musicianId) {
-      musician = await Musician.findById(musicianId)
-        .select("profilePicture images phone email firstName lastName")
-        .lean();
-    }
 
-    // 2️⃣ If not found, fallback to phone lookup
-    if (!musician && phone) {
-      const normalised = normalizeFrom(phone); // your existing helper: ['+447...', '447...', '07...']
-      musician = await Musician.findOne({ phone: { $in: normalised } })
-        .select("profilePicture images phone email firstName lastName")
-        .lean();
-    }
-
-    if (!musician) return { profilePicture: "" };
-
-    return { profilePicture: pickProfilePicture(musician) };
-  } catch (err) {
-    console.warn("⚠️ ensureProfileForMusician lookup failed:", err?.message);
-    return { profilePicture: "" };
-  }
-};
-
-// --- Helper: construct profile link safely ---
-const buildProfileUrl = (id) => (id ? `/musician/${id}` : "");
-
-// POST /api/availability/rebuild-availability-badge { actId, dateISO }
 export const rebuildAvailabilityBadge = async (req, res) => {
   try {
     const { actId, dateISO } = req.body || {};
@@ -1842,13 +1801,11 @@ export const rebuildAvailabilityBadge = async (req, res) => {
       return res.status(404).json({ success: false, message: "Act not found" });
     }
 
-    // ✅ Call helper to attempt structured badge from rows
+    // 🔍 Try building an initial badge (for reference/debug)
     let badge = await buildAvailabilityBadgeFromRows(act, dateISO);
-
-    // 🧩 Debug early state before enrichment
     console.log("🧩 [BEFORE ENRICHMENT] buildAvailabilityBadgeFromRows result:", badge);
 
-    // Pull all relevant replies for that act/date directly from AvailabilityModel
+    // 🔹 Pull all relevant replies (yes/no/unavailable)
     const availRows = await AvailabilityModel.find({
       actId,
       dateISO,
@@ -1856,7 +1813,6 @@ export const rebuildAvailabilityBadge = async (req, res) => {
     }).lean();
 
     console.log("🎤 rebuildAvailabilityBadge → availRows:", availRows.length);
-
     if (!availRows.length) {
       await Act.updateOne(
         { _id: actId },
@@ -1865,12 +1821,13 @@ export const rebuildAvailabilityBadge = async (req, res) => {
       return res.json({ success: true, updated: false, reason: "No replies found" });
     }
 
-    // Separate YES replies
-    const yesReplies = availRows.filter((r) => r.reply === "yes");
-    console.log("🎤 Found YES replies:", yesReplies.map((r) => r.musicianName));
+    // 🟢 Filter YES replies
+    const yesReplies = availRows.filter(r => r.reply === "yes");
+    console.log("🎤 Found YES replies:", yesReplies.map(r => r.musicianName || "(no name)"));
     console.log(
       "📊 YES replies snapshot:",
-      yesReplies.map((r) => ({
+      yesReplies.map(r => ({
+        phone: r.phone,
         musicianId: r.musicianId,
         musicianName: r.musicianName,
         reply: r.reply,
@@ -1885,112 +1842,97 @@ export const rebuildAvailabilityBadge = async (req, res) => {
         { $set: { "availabilityBadge.active": false }, $unset: { "availabilityBadge.deputies": "" } }
       );
 
-      console.log("🎯 [REBUILD BADGE FINAL STATE]", {
-        actId,
-        dateISO,
-        badgeRaw: badge,
-        deputiesCount: Array.isArray(badge?.deputies) ? badge.deputies.length : 0,
-        isDeputy: badge?.isDeputy,
-        hasMusicianId: !!badge?.musicianId,
-        vocalistName: badge?.vocalistName,
-        photoUrl: badge?.photoUrl,
-        active: badge?.active,
-      });
-
-      if (Array.isArray(badge?.deputies)) {
-        console.log("🧑‍🤝‍🧑 Deputies details:");
-        badge.deputies.forEach((d, i) =>
-          console.log(`   → Deputy #${i + 1}`, {
-            name: d.vocalistName || d.name || "(no name)",
-            musicianId: d.musicianId,
-            profileUrl: d.profileUrl,
-            photoUrl: d.photoUrl,
-            setAt: d.setAt,
-          })
-        );
-      } else {
-        console.log("⚠️ No deputies array present at badge build time.");
-      }
-
+      console.log("⚠️ No YES replies — badge cleared.");
       return res.json({ success: true, updated: false, reason: "No YES replies" });
     }
 
-    // ---- Build the badge purely from availability replies ----
+    // 🧠 Helper: get musician info using findPersonByPhone
+    const getMusicianFromReply = async (replyRow) => {
+      if (!replyRow) return null;
+      const phone = replyRow.phone || replyRow.availabilityPhone;
+      if (!phone) return null;
+
+      const person = await findPersonByPhone(phone);
+      if (!person) return null;
+
+      const photoUrl =
+        person.profilePicture?.url ||
+        person.profilePicture ||
+        (Array.isArray(person.images) && person.images[0]?.url) ||
+        "";
+
+      const name =
+        (person.firstName && person.lastName
+          ? `${person.firstName} ${person.lastName}`
+          : person.displayName || replyRow.musicianName || "(Unnamed)").trim();
+
+      return { person, name, photoUrl };
+    };
+
+    // 🧩 Build the enriched badge
     const lead = yesReplies[0];
-    const deputies = yesReplies.slice(1, 4); // up to 3 deputies
+    const deputies = yesReplies.slice(1, 4);
 
-    // --- Helper: pick a proper profile picture ---
-    const pickProfilePicture = (doc) => {
-      if (!doc) return "";
-      const v =
-        typeof doc.profilePicture === "string"
-          ? doc.profilePicture.trim()
-          : doc.profilePicture?.url;
-      return v && v.startsWith("http") ? v : "";
+    const leadData = await getMusicianFromReply(lead);
+
+    const rebuiltBadge = {
+      active: true,
+      dateISO,
+      vocalistName: leadData?.name || "(unknown)",
+      musicianId: leadData?.person?._id || null,
+      photoUrl: leadData?.photoUrl || "",
+      profileUrl: leadData?.person?._id ? `/musician/${leadData.person._id}` : "",
+      setAt: lead.repliedAt || new Date(),
+      deputies: [],
+      isDeputy: false,
     };
 
-    const ensureProfileForId = async (id) => {
-      if (!id) return { profilePicture: "" };
-      const m = await Musician.findById(id).select("profilePicture").lean();
-      return { profilePicture: pickProfilePicture(m) };
-    };
+    // 🔁 Deputies enrichment
+    for (const dep of deputies) {
+      const depData = await getMusicianFromReply(dep);
+      if (depData) {
+        rebuiltBadge.deputies.push({
+          musicianId: depData.person?._id || null,
+          vocalistName: depData.name,
+          photoUrl: depData.photoUrl,
+          profileUrl: depData.person?._id ? `/musician/${depData.person._id}` : "",
+          setAt: dep.repliedAt || new Date(),
+        });
+      }
+    }
+    rebuiltBadge.deputies = rebuiltBadge.deputies.slice(0, 3);
 
-    const buildProfileUrl = (id) => (id ? `/musician/${id}` : "");
+    // 🧾 Log final enrichment result
+    console.log("🎤 [Badge Enriched via findPersonByPhone]:", {
+      lead: rebuiltBadge.vocalistName,
+      photo: rebuiltBadge.photoUrl,
+      deputies: rebuiltBadge.deputies.map(d => d.vocalistName),
+    });
 
-    // Lead enrichment
-const { profilePicture: leadPic } = await ensureProfileForMusician({
-  musicianId: lead.musicianId,
-  phone: lead.phone,
-});
-
-badge = {
-  active: true,
-  dateISO,
-  vocalistName: lead.musicianName,
-  musicianId: lead.musicianId,
-  photoUrl: leadPic || "",
-  profileUrl: buildProfileUrl(lead.musicianId),
-  setAt: lead.repliedAt || new Date(),
-  deputies: [],
-  isDeputy: false,
-};
-
-// Deputies enrichment
-for (const dep of deputies) {
-  const { profilePicture } = await ensureProfileForMusician({
-    musicianId: dep.musicianId,
-    phone: dep.phone,
-  });
-  badge.deputies.push({
-    musicianId: dep.musicianId,
-    vocalistName: dep.musicianName,
-    photoUrl: profilePicture || "",
-    profileUrl: buildProfileUrl(dep.musicianId),
-    setAt: dep.repliedAt || new Date(),
-  });
-}
-
-    badge.deputies = badge.deputies.slice(0, 3);
-
-    // --- Write it back to Act ---
+    // 📝 Write back to Act
     const $set = {
       "availabilityBadge.active": true,
-      "availabilityBadge.dateISO": badge.dateISO,
-      "availabilityBadge.setAt": badge.setAt,
-      "availabilityBadge.vocalistName": badge.vocalistName,
-      "availabilityBadge.musicianId": badge.musicianId,
-      "availabilityBadge.photoUrl": badge.photoUrl,
-      "availabilityBadge.profileUrl": badge.profileUrl,
-      "availabilityBadge.isDeputy": badge.isDeputy,
-      "availabilityBadge.deputies": badge.deputies,
+      "availabilityBadge.dateISO": rebuiltBadge.dateISO,
+      "availabilityBadge.setAt": rebuiltBadge.setAt,
+      "availabilityBadge.vocalistName": rebuiltBadge.vocalistName,
+      "availabilityBadge.musicianId": rebuiltBadge.musicianId,
+      "availabilityBadge.photoUrl": rebuiltBadge.photoUrl,
+      "availabilityBadge.profileUrl": rebuiltBadge.profileUrl,
+      "availabilityBadge.isDeputy": rebuiltBadge.isDeputy,
+      "availabilityBadge.deputies": rebuiltBadge.deputies,
     };
 
     await Act.updateOne({ _id: actId }, { $set });
-    console.log("✅ [REBUILD BADGE FINAL STATE]", badge);
 
-    return res.json({ success: true, updated: true, badge });
+    console.log("✅ [REBUILD BADGE FINAL STATE]", {
+      actId,
+      dateISO,
+      rebuiltBadge,
+    });
+
+    return res.json({ success: true, updated: true, badge: rebuiltBadge });
   } catch (err) {
-    console.error("rebuildAvailabilityBadge error:", err);
+    console.error("❌ rebuildAvailabilityBadge error:", err);
     return res.status(500).json({ success: false, message: err?.message || "Server error" });
   }
 };
