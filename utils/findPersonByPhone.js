@@ -1,6 +1,5 @@
 import Musician from "../models/musicianModel.js";
 
-// --- Normalise UK phone numbers to +44 (E.164 format) ---
 function normalizePhoneE164(raw = "") {
   let s = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
   if (!s) return "";
@@ -10,14 +9,24 @@ function normalizePhoneE164(raw = "") {
   return s;
 }
 
-/**
- * 🔍 Finds a musician directly from the Musician collection by phone number.
- * @param {string} fromValue - raw phone input (+447..., 07..., whatsapp:+447...)
- * @returns {Promise<{ type: 'musician', person: Object } | null>}
- */
 export const findPersonByPhone = async (fromValue) => {
-  const q = normalizePhoneE164(fromValue);
-  if (!q) return null;
+  // 🧠 Extract phone number if an object was passed
+  let phoneRaw = fromValue;
+  if (typeof fromValue === "object" && fromValue !== null) {
+    phoneRaw =
+      fromValue.phone ||
+      fromValue.phoneNumber ||
+      fromValue.phoneNormalized ||
+      fromValue.From ||
+      fromValue.to ||
+      "";
+  }
+
+  const q = normalizePhoneE164(phoneRaw);
+  if (!q) {
+    console.warn("⚠️ findPersonByPhone called without valid phone:", fromValue);
+    return null;
+  }
 
   console.log("📞 [findPersonByPhone] Searching musician DB for:", q);
 
@@ -38,6 +47,7 @@ export const findPersonByPhone = async (fromValue) => {
     console.log("✅ Found musician by phone:", {
       name: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
       id: musician._id,
+      phone: musician.phoneNormalized || musician.phone,
     });
     return { type: "musician", person: musician };
   }
