@@ -64,13 +64,15 @@ export async function applyFeaturedBadgeOnYesV2({
     let isDeputy = false;
 
     // 1️⃣ Prefer exact by musicianId
-    let match = updated.musicianId
-      ? findPersonByMusicianId(act, updated.musicianId)
-      : null;
-    if (match) {
-      who = match.person;
-      isDeputy = !!match.parentMember;
-    }
+ let match = updated.musicianId
+  ? findPersonByMusicianId(act, updated.musicianId)
+  : null;
+
+if (match) {
+  who = match.person;
+  // ✅ Mark as deputy if parentMember exists OR match.isDeputy is true
+  isDeputy = !!(match.parentMember || match.isDeputy || who?.isDeputy);
+}
 
     // 2️⃣ Fallback by phone
     if (!who) {
@@ -82,6 +84,16 @@ export async function applyFeaturedBadgeOnYesV2({
         isDeputy = !!match.parentMember;
       }
     }
+
+    if (who && !isDeputy) {
+  // Double check if this person appears as a deputy anywhere
+  const deputyHit = act.lineups?.some(lineup =>
+    lineup.bandMembers?.some(mem =>
+      mem.deputies?.some(dep => String(dep.musicianId) === String(who.musicianId))
+    )
+  );
+  if (deputyHit) isDeputy = true;
+}
 
     // 3️⃣ Debug
     await debugLogMusicianByPhone(updated.phone || fromRaw);
