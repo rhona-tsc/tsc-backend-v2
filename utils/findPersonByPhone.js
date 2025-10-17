@@ -30,6 +30,10 @@ export const findPersonByPhone = async (fromValue) => {
   }
 
   console.log("📞 [findPersonByPhone] Searching musician DB for:", q);
+  console.log("🔎 Querying musician DB with:", {
+    q,
+    orFields: ["phoneNormalized", "phone", "phoneNumber", "basicInfo.phone"]
+  });
 
   const musician = await Musician.findOne({
     $or: [
@@ -43,6 +47,12 @@ export const findPersonByPhone = async (fromValue) => {
       "_id firstName lastName email phone phoneNumber phoneNormalized profilePicture musicianProfileImageUpload musicianProfileImage musicianProfilePhoto images photoUrl imageUrl"
     )
     .lean();
+
+  console.log("📋 Musician DB lookup result (partial):", musician ? {
+    _id: musician._id,
+    name: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+    matchedPhone: musician.phoneNormalized || musician.phone || musician.phoneNumber || musician?.basicInfo?.phone,
+  } : "none found");
 
   if (musician) {
     console.log("✅ Found musician by phone:", {
