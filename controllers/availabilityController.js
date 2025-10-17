@@ -1796,13 +1796,42 @@ export const rebuildAvailabilityBadge = async (req, res) => {
           .select("firstName lastName email profilePicture musicianProfileImageUpload musicianProfileImage images photoUrl imageUrl _id")
           .lean();
 
-        if (musicianDoc) {
-          person = musicianDoc;
-          console.log(`✅ [Fallback] Found musician in DB for ${phone}:`, musicianDoc.firstName, musicianDoc.lastName);
-        } else {
-          console.warn(`⚠️ No musician found in DB for ${phone}`);
-        }
-      }
+   if (!person || !hasPhoto) {
+  const musicianDoc = await Musician.findOne({
+    $or: [
+      { phoneNormalized: phone },
+      { phone },
+      { phoneNumber: phone },
+    ],
+  })
+    .select("firstName lastName email profilePicture musicianProfileImageUpload musicianProfileImage musicianProfilePhoto images photoUrl imageUrl _id")
+    .lean();
+
+  if (musicianDoc) {
+    person = musicianDoc;
+    console.log(`✅ [Fallback] Found musician in DB for ${phone}:`, musicianDoc.firstName, musicianDoc.lastName);
+    console.log("📸 Musician keys:", Object.keys(musicianDoc));
+
+    // Expanded image extraction
+    const possiblePhotos = [
+      musicianDoc.profilePicture?.url,
+      musicianDoc.musicianProfileImageUpload?.url,
+      musicianDoc.musicianProfileImage?.url,
+      musicianDoc.musicianProfilePhoto?.url,
+      musicianDoc.profilePicture,
+      musicianDoc.photoUrl,
+      musicianDoc.imageUrl,
+      musicianDoc.musicianProfileImageUpload,
+      Array.isArray(musicianDoc.images) ? musicianDoc.images[0]?.url : null,
+    ].filter(Boolean);
+
+    if (possiblePhotos.length) {
+      person.profilePicture = possiblePhotos[0];
+    }
+  } else {
+    console.warn(`⚠️ No musician found in DB for ${phone}`);
+  }
+}
 
       // Construct data
       const name =
