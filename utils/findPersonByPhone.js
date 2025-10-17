@@ -1,8 +1,19 @@
 import Musician from "../models/musicianModel.js";
 
-// --- Normaliser (shared across project) ---
 function normalizePhoneE164(raw = "") {
-  let s = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+  let s = "";
+  if (typeof raw === "object" && raw !== null) {
+    s =
+      raw.phone ||
+      raw.phoneNormalized ||
+      raw.phoneNumber ||
+      raw.availabilityPhone ||
+      "";
+  } else {
+    s = String(raw || "").trim();
+  }
+
+  s = s.replace(/^whatsapp:/i, "").replace(/\s+/g, "");
   if (!s) return "";
   if (s.startsWith("+")) return s;
   if (s.startsWith("07")) return s.replace(/^0/, "+44");
@@ -10,7 +21,6 @@ function normalizePhoneE164(raw = "") {
   return s;
 }
 
-// --- Lookup musician directly in DB ---
 export const findPersonByPhone = async (fromValue) => {
   const q = normalizePhoneE164(fromValue);
   if (!q) {
@@ -20,14 +30,12 @@ export const findPersonByPhone = async (fromValue) => {
 
   console.log("🔍 [findPersonByPhone] Searching musician DB for:", q);
 
-  // All possible phone variants
   const candidates = [
     q,
     q.replace(/^\+44/, "0"),
     q.replace(/^\+44/, "44"),
   ].filter(Boolean);
 
-  // Query all likely phone fields
   const musician = await Musician.findOne({
     $or: [
       { phone: { $in: candidates } },
@@ -36,11 +44,11 @@ export const findPersonByPhone = async (fromValue) => {
       { "basicInfo.phone": { $in: candidates } },
     ],
   })
-    .select("firstName lastName phone phoneNormalized phoneNumber basicInfo.phone instrument")
+    .select("firstName lastName phone phoneNormalized phoneNumber basicInfo.phone email images profilePicture profileImage photoUrl")
     .lean();
 
   if (musician) {
-    console.log("✅ findPersonByPhone matched musician:", {
+    console.log("✅ [Musician DB match]", {
       q,
       matched:
         musician.phoneNormalized ||
@@ -48,6 +56,7 @@ export const findPersonByPhone = async (fromValue) => {
         musician.phoneNumber ||
         musician?.basicInfo?.phone,
       name: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+      _id: musician._id,
     });
     return musician;
   } else {
