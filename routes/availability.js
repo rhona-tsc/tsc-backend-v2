@@ -55,26 +55,41 @@ router.post("/twilio/inbound", async (req, res) => {
 
     console.log("✅ Matched musician:", musician.firstName, musician.lastName);
 
-    // 🔍 Parse actId and dateISO from payload (example: YES68a5f5f66b1506572e709171)
+    // 🔍 Parse actId from ButtonPayload (e.g. YES68a5f5f66b1506572e709171)
     const match = ButtonPayload?.match(/YES([a-f0-9]{24})/i);
     const actId = match?.[1];
-    const dateISO = new Date().toISOString().slice(0,10); // or extract if encoded
+    const dateISO = new Date().toISOString().slice(0, 10); // fallback if not encoded
 
-    if (actId) {
-      // ✅ Update AvailabilityModel
-      await AvailabilityModel.updateOne(
-        { actId, phone: fromPhone },
-        { $set: { reply: "yes", repliedAt: new Date() } },
-        { upsert: true }
-      );
+    if (!actId) {
+      console.warn("⚠️ No actId found in ButtonPayload:", ButtonPayload);
+      return res.sendStatus(200);
+    }
 
-      // ✅ Trigger badge rebuild
+    // ✅ Update AvailabilityModel
+    await AvailabilityModel.updateOne(
+      { actId, phone: fromPhone },
+      { $set: { reply: "yes", repliedAt: new Date() } },
+      { upsert: true }
+    );
+
+    // ✅ Try to trigger badge rebuild safely
+    try {
       const badge = await buildBadgeFromAvailability(actId, dateISO);
+
       if (badge) {
         await Act.updateOne({ _id: actId }, { $set: { availabilityBadge: badge } });
         console.log("🐊 (controllers/availabilityBadgeController.js) Badge updated:", badge.vocalistName);
       } else {
-        console.warn("⚠️ No badge could be built (no YES replies yet)");
+        console.warn(`⚠️ No badge could be built for actId=${actId} (no YES replies yet)`);
+      }
+
+    } catch (badgeErr) {
+      console.error(`🐊 (controllers/availabilityBadgeController.js) Badge build failed for ${actId}:`, badgeErr.message);
+
+      // Optional deeper debug:
+      if (badgeErr.message.includes("Act not found")) {
+        const acts = await Act.find().select("_id tscName name").limit(10).lean();
+        console.warn("🧩 (debug) Showing first 10 Acts for comparison:", acts);
       }
     }
 
