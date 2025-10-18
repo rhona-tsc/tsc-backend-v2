@@ -91,20 +91,25 @@ router.post("/twilio/inbound", async (req, res) => {
 
     console.log("🎵 Found act:", { tscName: act.tscName, actId, dateISO });
 
-    // 🧩 Step 4: Update or insert availability
-    await AvailabilityModel.updateOne(
-      { actId, phone: fromPhone },
-      {
-        $set: {
-          reply: replyType,
-          repliedAt: new Date(),
-          musicianId: musician._id,
-        },
-      },
-      { upsert: true }
-    );
-    console.log(`🟢 Availability updated: ${replyType} for ${musician.firstName}`);
-
+ // 🧩 Step 4: Update or insert availability (fix: include dateISO)
+await AvailabilityModel.updateOne(
+  {
+    actId,
+    phone: fromPhone,
+    dateISO, // ✅ include date in the match filter
+  },
+  {
+    $set: {
+      reply: replyType,
+      repliedAt: new Date(),
+      musicianId: musician._id,
+      musicianName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+      actName: act.tscName,
+    },
+  },
+  { upsert: true }
+);
+console.log(`🟢 Availability updated: ${replyType} for ${musician.firstName} (${act.tscName} @ ${dateISO})`);
     // 🧩 Step 5: Build badge only for YES replies
     if (replyType === "yes") {
       try {
