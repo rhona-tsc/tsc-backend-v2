@@ -1,11 +1,12 @@
 // routes/availability.js
 import express from "express";
 import AvailabilityModel from "../models/availabilityModel.js";
-import { resolveAvailableMusician, rebuildAndApplyBadge } from "../controllers/availabilityController.js";
+import { resolveAvailableMusician, rebuildAndApplyBadge, handleLeadNegativeReply } from "../controllers/availabilityController.js";
 import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYesV2.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import { buildBadgeFromAvailability } from "../controllers/availabilityBadgeController.js";
 import Act from "../models/actModel.js";
+import { notifyDeputyOneShot } from "../controllers/availabilityHelpers.js";
 
 const router = express.Router();
 
@@ -68,7 +69,7 @@ router.post("/twilio/inbound", async (req, res) => {
     }
 
     const normalize = (str = "") =>
-      str.toLowerCase().replace(/\s+/g, "").replace(/[^\w]/g, ""); // remove punctuation + spaces
+      str.toLowerCase().replace(/\s+/g, "").replace(/[^\w]/g, "");
 
     const normalizedKey = normalize(tscKey);
     console.log("🎯 Extracted from payload:", { replyType, normalizedKey });
@@ -91,26 +92,26 @@ router.post("/twilio/inbound", async (req, res) => {
 
     console.log("🎵 Found act:", { tscName: act.tscName, actId, dateISO });
 
- // 🧩 Step 4: Update or insert availability (fix: include dateISO)
-await AvailabilityModel.updateOne(
-  {
-    actId,
-    phone: fromPhone,
-    dateISO, // ✅ include date in the match filter
-  },
-  {
-    $set: {
-      reply: replyType,
-      repliedAt: new Date(),
-      musicianId: musician._id,
-      musicianName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
-      actName: act.tscName,
-    },
-  },
-  { upsert: true }
-);
-console.log(`🟢 Availability updated: ${replyType} for ${musician.firstName} (${act.tscName} @ ${dateISO})`);
-    // 🧩 Step 5: Build badge only for YES replies
+    // 🧩 Step 4: Update or insert availability
+    await AvailabilityModel.updateOne(
+      { actId, phone: fromPhone, dateISO },
+      {
+        $set: {
+          reply: replyType,
+          repliedAt: new Date(),
+          musicianId: musician._id,
+          musicianName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+          actName: act.tscName,
+        },
+      },
+      { upsert: true }
+    );
+
+    console.log(
+      `🟢 Availability updated: ${replyType} for ${musician.firstName} (${act.tscName} @ ${dateISO})`
+    );
+
+    // 🧩 Step 5A: Build badge for YES replies
     if (replyType === "yes") {
       try {
         const badge = await buildBadgeFromAvailability(actId, dateISO);
@@ -126,6 +127,24 @@ console.log(`🟢 Availability updated: ${replyType} for ${musician.firstName} (
         }
       } catch (err) {
         console.error("❌ Error building badge:", err.message);
+      }
+    }
+
+    // 🧩 Step 5B: Handle negative replies (UNAVAILABLE / NOLOC)
+    if (["unavailable", "noloc"].includes(replyType)) {
+      try {
+        console.log(`🚫 Lead responded ${replyType}. Triggering fallback sequence...`);
+
+        await handleLeadNegativeReply(actId, musician._id, dateISO);
+
+        // brief delay so DB changes propagate before deputy query
+        await new Promise((r) => setTimeout(r, 300));
+
+        await notifyDeputyOneShot(actId, dateISO);
+
+        console.log(`✅ Deputy notified due to lead ${replyType} response.`);
+      } catch (err) {
+        console.error("❌ Error during fallback handling:", err);
       }
     }
 
