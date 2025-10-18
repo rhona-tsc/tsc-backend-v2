@@ -4,6 +4,8 @@ import AvailabilityModel from "../models/availabilityModel.js";
 import { resolveAvailableMusician, rebuildAndApplyBadge } from "../controllers/availabilityController.js";
 import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYesV2.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
+import { buildBadgeFromAvailability } from "../controllers/availabilityBadgeController.js";
+import Act from "../models/actModel.js";
 
 const router = express.Router();
 
@@ -36,32 +38,44 @@ router.get("/check-latest", async (req, res) => {
 /* -------------------------------------------------------------------------- */
 /*                          POST /twilio/inbound                              */
 /* -------------------------------------------------------------------------- */
-router.post("/twilio/inbound", async (req, res) => {
-  console.log(`🟢 (routes/availability.js) /twilio/inbound route START at ${new Date().toISOString()}`, {
-    From: req.body?.From,
-    Body: req.body?.Body,
-    ButtonText: req.body?.ButtonText,
-    ButtonPayload: req.body?.ButtonPayload,
-  });
 
+
+
+router.post("/twilio/inbound", async (req, res) => {
+  console.log(`🟢 (routes/availability.js) /twilio/inbound route START ...`);
   try {
-    const { From, Body, ButtonText, ButtonPayload } = req.body;
+    const { From, Body, ButtonPayload } = req.body;
     const fromPhone = From?.replace(/^whatsapp:/i, "").trim();
 
-    console.log("📩 Twilio inbound webhook:", {
-      From: fromPhone,
-      Body,
-      ButtonText,
-      ButtonPayload,
-    });
-
-    // 🔍 Lookup musician by phone
     const musician = await findPersonByPhone(fromPhone);
-
-    if (musician) {
-      console.log("✅ Matched musician:", musician.firstName, musician.lastName);
-    } else {
+    if (!musician) {
       console.warn("❌ No musician found for", fromPhone);
+      return res.sendStatus(200);
+    }
+
+    console.log("✅ Matched musician:", musician.firstName, musician.lastName);
+
+    // 🔍 Parse actId and dateISO from payload (example: YES68a5f5f66b1506572e709171)
+    const match = ButtonPayload?.match(/YES([a-f0-9]{24})/i);
+    const actId = match?.[1];
+    const dateISO = new Date().toISOString().slice(0,10); // or extract if encoded
+
+    if (actId) {
+      // ✅ Update AvailabilityModel
+      await AvailabilityModel.updateOne(
+        { actId, phone: fromPhone },
+        { $set: { reply: "yes", repliedAt: new Date() } },
+        { upsert: true }
+      );
+
+      // ✅ Trigger badge rebuild
+      const badge = await buildBadgeFromAvailability(actId, dateISO);
+      if (badge) {
+        await Act.updateOne({ _id: actId }, { $set: { availabilityBadge: badge } });
+        console.log("🐊 (controllers/availabilityBadgeController.js) Badge updated:", badge.vocalistName);
+      } else {
+        console.warn("⚠️ No badge could be built (no YES replies yet)");
+      }
     }
 
     res.sendStatus(200);
