@@ -1,6 +1,8 @@
 import Musician from "../models/musicianModel.js";
 
 function normalizePhoneE164(raw = "") {
+    console.log(`🩵 (utils/fundPersonByPhone.js) normailizePhoneE164 START at ${new Date().toISOString()}`, { });
+
   let s = "";
   if (typeof raw === "object" && raw !== null) {
     s =
@@ -22,6 +24,8 @@ function normalizePhoneE164(raw = "") {
 }
 
 export const findPersonByPhone = async (fromValue) => {
+      console.log(`🩵 (utils/fundPersonByPhone.js) findPersonByPhone START at ${new Date().toISOString()}`, { });
+
   const q = normalizePhoneE164(fromValue);
   if (!q) {
     return null;

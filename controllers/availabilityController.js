@@ -16,6 +16,9 @@ const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate S
 const normCountyKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, "_");
 
 function classifyReply(text) {
+    console.log(`🟢 (availabilityController.js) classifyReply  START at ${new Date().toISOString()}`, {
+    actId: req.query?.actId,
+    dateISO: req.query?.dateISO, });
   const v = String(text || "").trim().toLowerCase();
 
   if (!v) return null;
@@ -40,6 +43,9 @@ function classifyReply(text) {
 }
 
 function getCountyFeeValue(countyFees, countyName) {
+  console.log(`🟢 (availabilityController.js) getCountyFeeValue  START at ${new Date().toISOString()}`, {
+    actId: req.query?.actId,
+    dateISO: req.query?.dateISO,});
   if (!countyFees || !countyName) return undefined;
 
   // Normalized compare: "Berkshire" === "berkshire" === "berk_shire"
@@ -71,12 +77,17 @@ const _waFallbackSent = new Set(); // remember WA SIDs we've already fallen back
 
 // Normalise first-name display so we never fall back to "there" when we actually have a name
 const safeFirst = (s) => {
+  console.log(`🟢 (availabilityController.js) safeFirst START at ${new Date().toISOString()}`, {
+    actId: req.query?.actId,
+    dateISO: req.query?.dateISO, });
   const v = String(s || "").trim();
   return v ? v.split(/\s+/)[0] : "there";
 };
 
 
 function extractOutcode(address = "") {
+  console.log(`🟢 (availabilityController.js) extractOutcode  START at ${new Date().toISOString()}`, {
+ });
   // Typical UK outcode patterns e.g. SL6, W1, SW1A, B23
   const s = String(address || "").toUpperCase();
   // Prefer the first token that looks like a postcode piece
@@ -88,6 +99,8 @@ function extractOutcode(address = "") {
 }
 
 function countyFromAddress(address = "") {
+    console.log(`🟢 (availabilityController.js) countyFromAddress START at ${new Date().toISOString()}`, {
+ });
   // pull something like SL6, W1, SW1A from the address
   const outcode = extractOutcode(address).toUpperCase();
   if (!outcode) return { outcode: "", county: "" };
@@ -109,6 +122,8 @@ function countyFromAddress(address = "") {
 
 // Return obj.profilePicture if it is a valid http(s) URL string; otherwise, empty string
 const getPictureUrlFrom = (obj = {}) => {
+    console.log(`🟢 (availabilityController.js) getPictureUrlFrom START at ${new Date().toISOString()}`, {
+ });
   if (typeof obj.profilePicture === "string" && obj.profilePicture.trim().startsWith("http")) {
     return obj.profilePicture;
   }
@@ -117,6 +132,8 @@ const getPictureUrlFrom = (obj = {}) => {
 
 // Build the exact SMS text we want for both send-time and fallback - THIS IS THE SMS TO LEAD VOCALISTS TO CHECK AVAILABILITY! (not used for booking confirmations)
 function buildAvailabilitySMS({ firstName, formattedDate, formattedAddress, fee, duties, actName }) {
+    console.log(`🟢 (availabilityController.js) buildAvailabilitySMS START at ${new Date().toISOString()}`, {
+ });
   const feeTxt = String(fee ?? '').replace(/^[£$]/, '');
   return (
     `Hi ${safeFirst(firstName)}, you've received an enquiry for a gig on ` +
@@ -133,6 +150,8 @@ function buildAvailabilitySMS({ firstName, formattedDate, formattedAddress, fee,
 // - explicit member.fee if set, else per-head from lineup.base_fee
 // - plus county travel fee (if enabled) OR distance-based travel
 async function _finalFeeForMember({ act, lineup, members, member, address, dateISO }) {
+   console.log(`🟢 (availabilityController.js) _finalFeeForMember START at ${new Date().toISOString()}`, {
+ });
   const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
   const membersCount = Math.max(1, Array.isArray(members) ? members.length : 1);
   const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
@@ -172,6 +191,8 @@ async function _finalFeeForMember({ act, lineup, members, member, address, dateI
 
 // Send the booking-request message to ALL performers in a lineup //whatsapp going to band working
 export async function sendBookingRequestToLineup({ actId, lineupId, date, address }) {
+   console.log(`🟢 (availabilityController.js) sendBookingRequestToLineup START at ${new Date().toISOString()}`, {
+ });
   const act = await Act.findById(actId).lean();
   if (!act) { console.warn("sendBookingRequestToLineup: no act", actId); return { sent: 0 }; }
 
@@ -295,6 +316,8 @@ export async function sendBookingRequestToLineup({ actId, lineupId, date, addres
 // Resolve the musicianId who replied YES for a given act/date.
 // Returns the most-recent YES row (if any).
 export const resolveAvailableMusician = async (req, res) => {
+   console.log(`🟢 (availabilityController.js) resolveAvailableMusician START at ${new Date().toISOString()}`, {
+ });
   try {
     const { actId, dateISO } = req.query || {};
     if (!actId || !dateISO) {
@@ -317,18 +340,10 @@ export const resolveAvailableMusician = async (req, res) => {
   }
 };
 
-const toWhatsAppPhone = (raw = "") => {
-  let v = String(raw).trim();
-  if (!v) return "";
-  v = v.replace(/\s+/g, "");
-  if (v.startsWith("+")) return v;
-  if (v.startsWith("07")) return v.replace(/^0/, "+44");
-  if (v.startsWith("44")) return `+${v}`;
-  return v; // assume already intl
-};
-
 // ---- Allocation sync with Booking Board ----
 async function refreshAllocationForActDate(actId, dateISO) {
+   console.log(`🟢 (availabilityController.js) refreshAllocationForActDate START at ${new Date().toISOString()}`, {
+ });
   try {
     if (!actId || !dateISO) return;
 
@@ -350,7 +365,6 @@ async function refreshAllocationForActDate(actId, dateISO) {
     console.warn("⚠️ refreshAllocationForActDate failed:", e?.message || e);
   }
 }
-
 // one-shot WA→SMS for a single deputy
 const notifyDeputyOneShot = async ({
   act,
@@ -363,6 +377,8 @@ const notifyDeputyOneShot = async ({
   finalFee,
   metaActId,
 }) => {
+   console.log(`🟢 (availabilityController.js) notifyDeputyOneshot START at ${new Date().toISOString()}`, {
+ });
   // local helpers
   const maskPhone = (p = "") =>
     String(p).replace(/^\+?(\d{2})\d+(?=\d{3}$)/, "+$1•••").replace(/(\d{2})$/, "••$1");
@@ -533,13 +549,10 @@ const notifyDeputyOneShot = async ({
     throw err;
   }
 };
-
-// --- helpers ---
-
-
-
 // --- New helpers for badge rebuilding ---
 const isVocalRoleGlobal = (role = "") => {
+   console.log(`🟢 (availabilityController.js) isVocalRoleGlobal START at ${new Date().toISOString()}`, {
+ });
   const r = String(role || "").toLowerCase();
   return [
     "lead male vocal", "lead female vocal", "lead vocal",
@@ -550,6 +563,8 @@ const isVocalRoleGlobal = (role = "") => {
 };
 
 const normalizePhoneE164 = (raw = "") => {
+   console.log(`🟢 (availabilityController.js) normalisePhoneE164 START at ${new Date().toISOString()}`, {
+ });
   let v = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
   if (!v) return "";
   if (v.startsWith("+")) return v;
@@ -558,10 +573,9 @@ const normalizePhoneE164 = (raw = "") => {
   return v;
 };
 
-
-
-
 export const clearAvailabilityBadge = async (req, res) => {
+   console.log(`🟢 (availabilityController.js) cleadAvailabilityBadge START at ${new Date().toISOString()}`, {
+ });
   try {
     const { actId } = req.body;
     if (!actId)
@@ -589,6 +603,8 @@ export const clearAvailabilityBadge = async (req, res) => {
 };
 
 const parseHumanDate = (s) => {
+   console.log(`🟢 (availabilityController.js) parseHumanDate START at ${new Date().toISOString()}`, {
+ });
   if (!s) return null;
   const m = String(s).match(/(\d{1,2})(st|nd|rd|th)?\s+([A-Za-z]+)\s+(\d{4})/);
   if (!m) return null;
@@ -617,6 +633,8 @@ const parseHumanDate = (s) => {
 // -------------------- Utilities --------------------
 
 const mapTwilioToEnquiryStatus = (s) => {
+   console.log(`🟢  (availabilityController.js) mapTwilioToEnquiryStatus START at ${new Date().toISOString()}`, {
+ });
   const v = String(s || "").toLowerCase();
   if (v === "accepted" || v === "queued" || v === "scheduled") return "queued";
   if (v === "sending") return "sent";
@@ -639,6 +657,8 @@ const NORTHERN_COUNTIES = new Set([
 
 // Availability controller: robust travel fetch that supports both API shapes
 const fetchTravel = async (origin, destination, dateISO) => {
+   console.log(`🟢 (availabilityController.js) fetchTravel START at ${new Date().toISOString()}`, {
+ });
   const BASE = (
     process.env.BACKEND_PUBLIC_URL ||
     process.env.BACKEND_URL ||
@@ -684,6 +704,8 @@ const computeMemberTravelFee = async ({
   selectedAddress,
   selectedDate,
 }) => {
+   console.log(`🟢 (availabilityController.js) computeMemberTravelFee START at ${new Date().toISOString()}`, {
+ });
   const destination =
     typeof selectedAddress === "string"
       ? selectedAddress
@@ -729,6 +751,8 @@ const computeMemberTravelFee = async ({
 
 // Format date like "Saturday, 5th Oct 2025"
 const formatWithOrdinal = (dateLike) => {
+   console.log(`🟢 (availabilityController.js) formatWithOrdinal START at ${new Date().toISOString()}`, {
+ });
   const d = new Date(dateLike);
   if (isNaN(d)) return String(dateLike);
   const day = d.getDate();
@@ -749,6 +773,8 @@ const formatWithOrdinal = (dateLike) => {
 };
 
 const firstNameOf = (p) => {
+   console.log(`🟢 (availabilityController.js) firstNameOf START at ${new Date().toISOString()}`, {
+ });
   if (!p) return "there";
 
   // If it's a string like "Miça Townsend"
@@ -779,9 +805,10 @@ const firstNameOf = (p) => {
 
   return "there";
 };
-
 // -------------------- Outbound Trigger --------------------
 export const triggerAvailabilityRequest = async (req, res) => {
+   console.log(`🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`, {
+ });
   try {
     console.log("🛎 triggerAvailabilityRequest", req.body);
 
@@ -1125,7 +1152,7 @@ const variables = {
 
 let sendRes = null;
 try {
-  // 🟢 Try WhatsApp first
+  // 🟢 (availabilityController.js) Try WhatsApp first
   sendRes = await sendWhatsAppMessage({
     to: `whatsapp:${phone}`,
     contentSid,
@@ -1284,10 +1311,9 @@ selectedCounty,
       .json({ success: false, message: err?.message || "Server error" });
   }
 };
-
-
-
 async function getDeputyDisplayBits(dep) {
+   console.log(`🟢 (availabilityController.js) getDeputyDisplayBits START at ${new Date().toISOString()}`, {
+ });
   // Return { musicianId, photoUrl, profileUrl }
   const PUBLIC_SITE_BASE = (process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "http://localhost:5174").replace(/\/$/, "");
   try {
@@ -1341,7 +1367,9 @@ async function getDeputyDisplayBits(dep) {
 
 // -------------------- SSE Broadcaster --------------------
 
-export const makeAvailabilityBroadcaster = (broadcastFn) => ({
+export const makeAvailabilityBroadcaster = (broadcastFn) => (
+  {
+  
   leadYes: ({ actId, actName, musicianName, dateISO }) => {
     broadcastFn({type: "availability_yes",actId,actName,musicianName,dateISO,});  },
   deputyYes: ({ actId, actName, musicianName, dateISO }) => {
@@ -1351,6 +1379,8 @@ const INBOUND_SEEN = new Map();
 const INBOUND_TTL_MS = 10 * 60 * 1000; 
 
 function seenInboundOnce(sid) {
+   console.log(`🟢 (availabilityController.js) seenInboundOnce START at ${new Date().toISOString()}`, {
+ });
   if (!sid) return false;
   const now = Date.now();
   for (const [k, t] of INBOUND_SEEN) {
@@ -1364,6 +1394,8 @@ function seenInboundOnce(sid) {
 
 // Build an availability badge state from Availability rows for a given act/date
 async function buildAvailabilityBadgeFromRows(act, dateISO) {
+   console.log(`🟢 (availabilityController.js) buildAvailabilityBadgeFromRows START at ${new Date().toISOString()}`, {
+ });
   if (!act || !dateISO) return null;
   const rows = await AvailabilityModel.find({ actId: act._id, dateISO })
     .select({ phone: 1, reply: 1, musicianId: 1, updatedAt: 1 })
@@ -1471,6 +1503,8 @@ try {
  * @param {string} [params.fromRaw]      // Raw "From" phone (optional)
  */
 export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
+   console.log(`🟢 (availabilityController.js) handleLeadNegativeReply START at ${new Date().toISOString()}`, {
+ });
   // 1) Find the lead in the lineup by phone (so we can access their deputies)
   const leadMatch = findPersonByPhone(act, updated.lineupId, updated.phone || fromRaw);
   const leadMember = leadMatch?.parentMember || leadMatch?.person || null;
@@ -1631,9 +1665,10 @@ export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
     newlyPinged: freshPinged,
   };
 }
-
 // availabilityController.js (helpers)
 export async function rebuildAndApplyBadge(actId, dateISO) {
+   console.log(`🟢 (availabilityController.js) rebuildAndApplyBadge START at ${new Date().toISOString()}`, {
+ });
   try {
     if (!actId || !dateISO) return;
 
@@ -1711,11 +1746,9 @@ export async function rebuildAndApplyBadge(actId, dateISO) {
     console.warn("⚠️ rebuildAndApplyBadge failed:", e?.message || e);
   }
 }
-
-
-
-
 export const rebuildAvailabilityBadge = async (req, res) => {
+   console.log(`🟢 (availabilityController.js) rebuildAvailabilityBadge START at ${new Date().toISOString()}`, {
+ });
   try {
     const { actId, dateISO } = req.body || {};
     if (!actId || !dateISO)
@@ -1917,13 +1950,9 @@ if (!person || !hasPhoto) {
     return res.status(500).json({ success: false, message: err?.message || "Server error" });
   }
 };
-
-
-
-
-
 export const twilioInbound = async (req, res) => {
-
+ console.log(`🟢 (availabilityController.js) twilioInbound START at ${new Date().toISOString()}`, {
+ });
       const { userId, actId, selectedDate, selectedAddress, lineupId } = req.body;
 
   console.log("🛰️ Raw inbound body:", req.body);
@@ -2404,16 +2433,11 @@ await rebuildAndApplyBadge(updated.actId, updated.dateISO);
     return res.status(200).send("<Response/>");
   }
 }; 
-
-
-
-
 // -------------------- Delivery/Read Receipts --------------------
-
-
 // module-scope guard so we don't double-fallback on Twilio retries
-
 export const twilioStatus = async (req, res) => {
+   console.log(`🟢 (availabilityController.js) twilioStatus START at ${new Date().toISOString()}`, {
+ });
   try {
     const {
       MessageSid,
@@ -2516,12 +2540,10 @@ if (av?._id) {
     return res.status(200).send("OK"); // still 200 so Twilio stops retrying
   }
 };
-
 // -------------------- Inbound from Twilio --------------------
-
-
-
 function parsePayload(payload = "") {
+   console.log(`🟢 (availabilityController.js) parsePayload START at ${new Date().toISOString()}`, {
+ });
   // Trim, uppercase, and match "YES<id>" / "NOLOC<id>" / "UNAVAILABLE<id>"
   const match = payload.trim().match(/^(YES|NOLOC|UNAVAILABLE)([A-Za-z0-9]+)?$/i);
   if (!match) return { reply: null, enquiryId: null };
@@ -2530,10 +2552,9 @@ function parsePayload(payload = "") {
     enquiryId: match[2] || null,
   };
 }
-
-
-
 const normalizeFrom = (from) => {
+   console.log(`🟢 (availabilityController.js) normalizeFrom START at ${new Date().toISOString()}`, {
+ });
   const v = String(from || "")
     .replace(/^whatsapp:/i, "")
     .trim();
@@ -2543,9 +2564,10 @@ const normalizeFrom = (from) => {
   const ukNoPlus = plus.replace(/^\+/, "");
   return Array.from(new Set([plus, uk07, ukNoPlus]));
 };
-
 // Module-scope E.164 normalizer (also strips "whatsapp:" prefix)
 const normalizeToE164 = (raw = "") => {
+   console.log(`🟢 (availabilityController.js) normalizeToE164 START at ${new Date().toISOString()}`, {
+ });
   let s = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
   if (!s) return "";
   if (s.startsWith("+")) return s;
@@ -2553,12 +2575,10 @@ const normalizeToE164 = (raw = "") => {
   if (s.startsWith("44")) return `+${s}`;
   return s;
 };
-
-
-
-
 // availabilityController.js (export this)
 export async function pingDeputiesFor(actId, lineupId, dateISO, formattedAddress, duties) {
+   console.log(`🟢 (availabilityController.js) pingDeputiesFor START at ${new Date().toISOString()}`, {
+ });
   const act = await Act.findById(actId).lean();
   if (!act) return;
   const fakeUpdated = {

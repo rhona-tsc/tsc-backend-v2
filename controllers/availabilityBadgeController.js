@@ -1,9 +1,13 @@
+// backend/controllers/availabilityBadgeController.js
 import Act from "../models/actModel.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 
-// 🔹 Shared logic — can also be reused by rebuildAvailabilityBadge
+/* -------------------------------------------------------------------------- */
+/*                        buildBadgeFromAvailability                          */
+/* -------------------------------------------------------------------------- */
 export async function buildBadgeFromAvailability(actId, dateISO) {
+  console.log(`🐊 (controllers/availabilityBadgeController.js) buildBadgeFromAvailability called at`, new Date().toISOString(), { actId, dateISO });
   const act = await Act.findById(actId).lean();
   if (!act) throw new Error("Act not found");
 
@@ -13,12 +17,23 @@ export async function buildBadgeFromAvailability(actId, dateISO) {
     reply: { $in: ["yes", "no", "unavailable"] },
   }).lean();
 
+  console.log(`🐊 buildBadgeFromAvailability found ${availRows.length} replies`, {
+    actId,
+    dateISO,
+  });
+
   if (!availRows.length) return null;
 
   const yesReplies = availRows.filter(r => r.reply === "yes");
+  console.log(`🐊 buildBadgeFromAvailability YES replies`, yesReplies.length);
+
   if (!yesReplies.length) return null;
 
   const getMusicianFromReply = async (replyRow) => {
+    console.log(`🐊 buildBadgeFromAvailability.getMusicianFromReply called`, {
+      phone: replyRow.phone || replyRow.availabilityPhone,
+      replyId: replyRow._id?.toString?.(),
+    });
     const phone = replyRow.phone || replyRow.availabilityPhone;
     if (!phone) return null;
     const person = await findPersonByPhone(phone);
@@ -36,6 +51,8 @@ export async function buildBadgeFromAvailability(actId, dateISO) {
 
   const lead = yesReplies[0];
   const deputies = yesReplies.slice(1, 4);
+
+  console.log(`🐊 buildBadgeFromAvailability assigning lead and ${deputies.length} deputies`);
 
   const leadData = await getMusicianFromReply(lead);
 
@@ -61,31 +78,45 @@ export async function buildBadgeFromAvailability(actId, dateISO) {
         profileUrl: depData.person?._id ? `/musician/${depData.person._id}` : "",
         setAt: dep.repliedAt || new Date(),
       });
+      console.log(`🐊 buildBadgeFromAvailability added deputy`, { name: depData.name });
     }
   }
 
   badge.deputies = badge.deputies.slice(0, 3);
+  console.log(`🐊 buildBadgeFromAvailability complete`, {
+    actId,
+    vocalistName: badge.vocalistName,
+    deputies: badge.deputies.map(d => d.vocalistName),
+  });
   return badge;
 }
 
-// GET endpoint handler
+/* -------------------------------------------------------------------------- */
+/*                          getAvailabilityBadge (GET)                        */
+/* -------------------------------------------------------------------------- */
 export async function getAvailabilityBadge(req, res) {
+  console.log(`🐊 (controllers/availabilityBadgeController.js) getAvailabilityBadge called at`, new Date().toISOString(), {
+    params: req.params,
+  });
   try {
     const { actId, dateISO } = req.params;
     const badge = await buildBadgeFromAvailability(actId, dateISO);
 
     if (!badge) {
-      console.log(`⚠️ No YES replies for act ${actId} on ${dateISO}`);
+      console.log(`🐊 getAvailabilityBadge: No YES replies`, { actId, dateISO });
       return res.json({ success: true, updated: false, badge: null });
     }
 
-    // Optionally: persist to Act for caching
     await Act.updateOne({ _id: actId }, { $set: { availabilityBadge: badge } });
 
-    console.log("✅ [Data-driven badge refresh]", { actId, dateISO, name: badge.vocalistName });
+    console.log(`🐊 getAvailabilityBadge updated`, {
+      actId,
+      dateISO,
+      vocalistName: badge.vocalistName,
+    });
     res.json({ success: true, updated: true, badge });
   } catch (err) {
-    console.error("❌ getAvailabilityBadge error:", err);
+    console.error(`🐊 getAvailabilityBadge error`, err);
     res.status(500).json({ success: false, message: err.message || "Server error" });
   }
 }

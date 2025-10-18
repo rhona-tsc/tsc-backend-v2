@@ -25,12 +25,9 @@ import BookingBoardItem from "../models/bookingBoardItem.js";
 import axios from "axios";
 import { differenceInCalendarDays, startOfDay, subDays } from "date-fns";
 import { postcodes } from "../utils/postcodes.js";
-import { format } from "date-fns"; // optional
-import { setSharedIVR } from "../utils/proxySetup.js";
-import { logStart, logOk, logWarn, logErr } from "../utils/logger.js";
+import { logStart } from "../utils/logger.js";
 
 import { sendSMSMessage, sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
-import { sendWAOrSMS } from "../utils/twilioClient.js";
 
 
 // bookingController.js (top-level, near other consts)
@@ -39,13 +36,6 @@ const SITE_URL = process.env.SITE_URL || "https://thesupremecollective.co.uk";
 const WHATSAPP_URL = process.env.WHATSAPP_URL || "https://api.whatsapp.com/send/?phone=7594223200&text&type=phone_number&app_absent=0";
 
 // --- small helpers reused from availability controller ---
-const to12h = (hhmm) => {
-  const [H, M] = String(hhmm || "00:00").split(":").map(Number);
-  let h = H % 12;
-  if (h === 0) h = 12;
-  const suffix = H >= 12 ? "pm" : "am";
-  return `${h}:${String(M).padStart(2, "0")}${suffix}`;
-};
 const firstNameOf = (p = {}) => {
   const direct = p.firstName || p.first_name || p.firstname || p.givenName || "";
   if (direct && String(direct).trim()) return String(direct).trim();
@@ -56,6 +46,7 @@ const firstNameOf = (p = {}) => {
 
 // (optional) tiny helper to mirror contactRouting -> eventSheet.emergencyContact
 function mirrorEmergencyContact(contactRouting = {}) {
+  console.log(`🐣 (controllers/bookingController.js) mirrorEmergencyContact called at`, new Date().toISOString(), { contactRouting });
   const number = contactRouting?.proxyNumber || "";
   const ivrCode = contactRouting?.ivrCode || "";
   let activeWindowSummary = "";
@@ -92,6 +83,7 @@ export const transporter = nodemailer.createTransport({
 
 // Resolve the signature GIF on disk (frontend during dev; allow override via env)
 function resolveSignatureGifPath() {
+    console.log(`🐣 (controllers/bookingController.js) resolveSignatureGifPath called at`, new Date().toISOString());
   // 1) explicit override (e.g. when deployed and assets live elsewhere)
   if (process.env.SIGNATURE_GIF_PATH && fs.existsSync(process.env.SIGNATURE_GIF_PATH)) {
     return process.env.SIGNATURE_GIF_PATH;
@@ -134,305 +126,6 @@ const signature = process.env.EMAIL_SIGNATURE_HTML || `
   </table>
 `;
 
-const normalizeCounty = (s) => String(s || "").toLowerCase().trim();
-const titleCase = (s) =>
-  String(s || "")
-    .toLowerCase()
-    .replace(/\b[a-z]/g, (c) => c.toUpperCase())
-    .replace(/_/g, " ");
-
-// Extract outward code (e.g., "SL6")
-const extractOutcode = (addr) => {
-  const s = typeof addr === "string" ? addr : (addr?.postcode || addr?.address || "");
-  const m = String(s || "")
-    .toUpperCase()
-    .match(/\b([A-Z]{1,2}\d{1,2}[A-Z]?)\s*\d[A-Z]{2}\b|\b([A-Z]{1,2}\d{1,2}[A-Z]?)\b/);
-  return (m && (m[1] || m[2])) ? (m[1] || m[2]) : "";
-};
-
-// Build OUT→County once from your postcodes file
-let OUT_TO_COUNTY; // Map like { "SL6" => "Berkshire" }
-function ensureOutToCounty() {
-  if (OUT_TO_COUNTY) return;
-  OUT_TO_COUNTY = new Map();
-  const root = Array.isArray(postcodes) ? (postcodes[0] || {}) : postcodes || {};
-  for (const [countyKey, outs] of Object.entries(root)) {
-    const countyName = titleCase(countyKey);
-    if (!Array.isArray(outs)) continue;
-    for (const oc of outs) {
-      OUT_TO_COUNTY.set(String(oc).toUpperCase().trim(), countyName);
-    }
-  }
-}
-
-// Lookup county from outward code using your table
-const countyFromOutcode = (out) => {
-  ensureOutToCounty();
-  const OUT = String(out || "").toUpperCase().trim();
-  return OUT_TO_COUNTY.get(OUT) || "";
-};
-
-// Try to spot a county by name inside the free-text address
-const guessCountyFromAddress = (addr, fees) => {
-  if (!addr || !fees) return "";
-  const s = String(typeof addr === "string" ? addr : (addr?.address || addr?.postcode || ""))
-    .toLowerCase();
-
-  const entries =
-    typeof fees?.forEach === "function"
-      ? (() => { const a = []; fees.forEach((v, k) => a.push([k, v])); return a; })()
-      : Object.entries(fees || {});
-
-  for (const [key] of entries) {
-    const k = normalizeCounty(key);
-    if (k && s.includes(k)) return key; // return original key as stored in fees
-  }
-  return "";
-};
-
-// Case/space-insensitive county fee lookup
-const getCountyFeeFromMap = (fees, county) => {
-  if (!fees || !county) return 0;
-  const entries =
-    typeof fees?.forEach === "function"
-      ? (() => { const a = []; fees.forEach((v, k) => a.push([k, v])); return a; })()
-      : Object.entries(fees || {});
-  for (const [k, v] of entries) {
-    if (normalizeCounty(k) === normalizeCounty(county)) return Number(v) || 0;
-  }
-  return 0;
-};
-
-// ---- Member fee with travel (county table first, else per-mile) ----
-async function computeMemberFeeDetailed({ member, lineup, booking, act }, dbgTag = "") {
-  logStart("computeMemberFeeDetailed");
-
-  // --- Base fee logic ---
-  const baseMemberFee = Number(member?.fee ?? 0);
-  const performers = Array.isArray(lineup?.bandMembers)
-    ? lineup.bandMembers.filter((bm) => {
-        const role = String(bm?.instrument || "").toLowerCase();
-        return role && role !== "manager" && role !== "admin";
-      }).length
-    : 0;
-
-  let fallbackPerHead = 0;
-  const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
-  if (lineupTotal > 0 && performers > 0) {
-    fallbackPerHead = Math.ceil(lineupTotal / performers);
-  } else if (Number(booking?.totals?.fullAmount ?? booking?.amount ?? 0) > 0 && performers > 0) {
-    fallbackPerHead = Math.ceil(Number(booking?.totals?.fullAmount ?? booking?.amount) / performers);
-  }
-
-  const base = baseMemberFee > 0 ? baseMemberFee : fallbackPerHead;
-
-  // --- Essential add-ons (e.g. Sound Engineer role) ---
-  const essentialAddOns = Array.isArray(member?.additionalRoles)
-    ? member.additionalRoles.reduce((sum, r) => {
-        const isEssential = r?.isEssential === true || /essential/i.test(String(r?.role || ""));
-        const add = Number(r?.additionalFee || 0);
-        return isEssential && Number.isFinite(add) ? sum + add : sum;
-      }, 0)
-    : 0;
-
-  const baseWithEssentials = base + essentialAddOns;
-
-  // --- Travel fee logic ---
-  let travel = 0;
-  let travelSource = "none";
-  const address = booking?.venueAddress || booking?.venue || "";
-
-  const countyByName = guessCountyFromAddress(address, act?.countyFees);
-  const outcode = extractOutcode(address);
-  const countyByOut = countyFromOutcode(outcode);
-  const county = countyByName || countyByOut;
-
-  // 1️⃣ County-based fee
-  if (act?.useCountyTravelFee && county) {
-    const feePerMember = getCountyFeeFromMap(act?.countyFees, county);
-    if (feePerMember > 0) {
-      travel = feePerMember;
-      travelSource = `county:${county}`;
-    }
-  }
-
-  // 2️⃣ Cost-per-mile fallback
-  if (travel === 0 && Number(act?.costPerMile) > 0) {
-    const origin = member?.postCode;
-    const destination =
-      typeof address === "string"
-        ? address
-        : address?.postcode || address?.address || "";
-
-    if (origin && destination) {
-      try {
-        const qs = new URLSearchParams({
-          origin,
-          destination,
-          date: String(booking?.date || booking?.eventDate || new Date()),
-        });
-
-        // ✅ unified backend URL logic (same as all other travel functions)
-        const BASE = (
-          process.env.BACKEND_PUBLIC_URL ||
-          process.env.BACKEND_URL ||
-          process.env.INTERNAL_BASE_URL ||
-          "https://tsc-backend-v2.onrender.com"
-        ).replace(/\/+$/, "");
-
-        const res = await fetch(`${BASE}/api/v2/travel?${qs.toString()}`, {
-          headers: { accept: "application/json" },
-        });
-
-        const text = await res.text();
-        let data = {};
-        try { data = text ? JSON.parse(text) : {}; } catch {}
-
-        if (!res.ok) throw new Error(`travel http ${res.status}`);
-
-        // --- Support both new + old shapes ---
-        const firstEl = data?.rows?.[0]?.elements?.[0];
-        const outbound = data?.outbound || (
-          firstEl?.distance && firstEl?.duration
-            ? { distance: firstEl.distance, duration: firstEl.duration, fare: firstEl.fare }
-            : undefined
-        );
-
-        const distanceMeters = outbound?.distance?.value || 0;
-        const miles = distanceMeters / 1609.34;
-
-        travel = miles * Number(act.costPerMile) * 25; // round trip multiplier
-        travelSource = `perMile:${miles.toFixed(1)}mi`;
-      } catch (err) {
-        console.warn("⚠️ Travel fetch failed:", err?.message || err);
-      }
-    }
-  }
-
-  // --- Final total ---
-  const total = Math.round(baseWithEssentials + travel);
-
-  if (process.env.DEBUG_FEE_LOGS === "1") {
-    console.log("[fee] member", {
-      dbgTag,
-      bookingId: booking?.bookingId,
-      name: member?.firstName || member?.instrument,
-      base,
-      essentialAddOns,
-      baseWithEssentials,
-      baseFrom: baseMemberFee > 0 ? "member.fee" : "fallbackPerHead",
-      travel: Math.round(travel),
-      travelSource,
-      county,
-      outcode,
-      lineupTotal,
-      performers,
-    });
-  }
-
-  return total;
-}
-
-// Build the SMS fallback text that mirrors your WA template copy
-function buildBandConfirmedSMS({ firstName, dateText, shortAddress, duties, actName, fee }) {
-    logStart("buildBandConfirmed", );
-
-  const f = String(fee || "").replace(/^[£$]/, "");
-  return (
-    `Hi ${firstName}, you have a booking request for ${dateText} in ${shortAddress} ` +
-    `with ${actName} for ${duties} at a rate of £${f}. ` +
-    `Please indicate if you'd like to be booked on the gig by replying YES or NO. 🤍 TSC`
-  );
-}
-
-async function notifyBandBookingConfirmed({ actId, lineupId, dateISO, venueShort, perMemberFee }) {
-    logStart("notifyBandBookingConfirmed", );
-
-  const act = await Act.findById(actId).lean();
-  if (!act) return;
-
-  // who replied YES?
-  const yesRow = await AvailabilityModel.findOne({ actId, dateISO, reply: "yes" })
-    .sort({ updatedAt: -1, createdAt: -1 })
-    .select({ phone: 1 })
-    .lean();
-  const leadPhone = yesRow ? normalizePhone(yesRow.phone) : "";
-
-  const lineup =
-    (act.lineups || []).find(l =>
-      String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId)
-    ) || (act.lineups || [])[0];
-
-  if (!lineup) return;
-
-  const formattedDate = formatWithOrdinal(dateISO);
-  const shortAddress = String(venueShort || "");
-  const feeText = Number(perMemberFee) > 0 ? String(Math.round(perMemberFee)) : "TBC";
-
-const members = Array.isArray(lineup.bandMembers) ? lineup.bandMembers : [];
-
-for (const m of members) {
-  const role = String(m?.instrument || "").trim();
-  const roleLower = role.toLowerCase();
-
-  // skip non-performers (manager/admin) and blanks
-  if (!roleLower || roleLower === "manager" || roleLower === "admin") continue;
-
-  const phone = normalizePhone(m?.phoneNumber || m?.phone || "");
-  if (!phone) continue;
-
-  // also skip the lead who already got the confirmed message
-  if (leadPhone && phone === leadPhone) continue;
-
-  const firstName = firstNameOf(m);
-  const duties = role || "performance";
-  const actName = act.tscName || act.name || "the band";
-  
-
-    // Use your WA Content template for instrumentalists (awaiting approval)
-    const contentSid = "HXcd9924913c814248bf429b316edebbcf";
-    const templateParams = {
-      FirstName: firstName,
-      FormattedDate: formattedDate,
-      FormattedAddress: shortAddress,
-      Duties: duties,                 // {{4}}
-      ActName: actName,               // {{5}}
-      Fee: feeText,                   // {{6}}
-      MetaActId: String(act._id || ""),
-      MetaISODate: dateISO,
-      MetaAddress: shortAddress,
-    };
-
-    const smsBody = buildBandConfirmedSMS({
-      firstName,
-      dateText: formattedDate,
-      shortAddress,
-      duties,
-      actName,
-      fee: feeText,
-    });
-
-    try {
-      await sendWhatsAppMessage({
-        to: phone,
-        templateParams,
-        contentSid, // 👈 ensures correct mapping for {{1..6}}
-        smsBody,    // 👈 webhook can reuse on WA failure
-      });
-      console.log("📣 Band-confirmed WA sent", { to: phone, duties });
-    } catch (e) {
-      console.warn("⚠️ Band-confirmed WA failed", { to: phone, err: e?.message || e });
-      // Optional: direct SMS here if you don't already do fallback in webhook
-      try {
-        await sendSMSMessage(phone, smsBody);
-        console.log("📣 Band-confirmed SMS fallback sent", { to: phone });
-      } catch (ee) {
-        console.warn("❌ Band-confirmed SMS failed", { to: phone, err: ee?.message || ee });
-      }
-    }
-  }
-}
-
 const formatWithOrdinal = (dateLike) => {
   const d = new Date(dateLike);
   if (isNaN(d)) return String(dateLike);
@@ -453,27 +146,9 @@ const normalizePhone = (raw = "") => {
   return v;
 };
 
-const deriveDutiesAndFee = (member={}) => {
-
-  // default duties from instrument
-  let duties = member.instrument || 'performance';
-  let fee = Number(member.fee || 0);
-
-  // If manager-like, show Band Management and prefer additionalFee if present
-  const roles = Array.isArray(member.additionalRoles) ? member.additionalRoles : [];
-  const mgrRole = roles.find(r => /\bmanager|management\b/i.test(String(r?.role||r?.title||'')));
-  if (isManagerLike(member)) {
-    duties = 'Band Management';
-    if (mgrRole && Number.isFinite(Number(mgrRole.additionalFee))) {
-      fee = Number(mgrRole.additionalFee);
-    }
-  }
-
-  return { duties, fee };
-};
-
 // ---- Fee helpers (mirror availability logic) ----
 function countPerformers(lineup) {
+    console.log(`🐣 (controllers/bookingController.js) countPerformers called at`, new Date().toISOString(), { lineupId: lineup?._id });
     logStart("countPerformers", );
 
   const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
@@ -484,6 +159,7 @@ function countPerformers(lineup) {
 }
 
 function computePerMemberFee({ lineup, booking }, debugLabel = "") {
+    console.log(`🐣 (controllers/bookingController.js) computePerMemberFee called at`, new Date().toISOString(), { lineupId: lineup?._id, bookingId: booking?.bookingId, debugLabel });
     logStart("computePerMemberFee", );
 
 
@@ -517,8 +193,7 @@ function computePerMemberFee({ lineup, booking }, debugLabel = "") {
 
 // --- messaging helpers ---
 async function sendClientBookingConfirmation({ booking, actName }) {
-    logStart("sendClientBookingConfirmation", );
-
+  console.log(`🐣 (controllers/bookingController.js) sendClientBookingConfirmation called at`, new Date().toISOString(), { bookingId: booking?.bookingId, actName });
   try {
     const user = booking?.userAddress || {};
     const to = normalizePhone(
@@ -578,8 +253,7 @@ async function sendClientBookingConfirmation({ booking, actName }) {
 }
 
 async function pingLineupForAllocation({ actId, lineupId, dateISO, venueShort, dutiesOverride, perMemberFee }) {
-    logStart("pingLineupforAllocation", );
-
+  console.log(`🐣 (controllers/bookingController.js) pingLineupForAllocation called at`, new Date().toISOString(), { actId, lineupId, dateISO, venueShort });
   try {
     const act = await Act.findById(actId).lean();
     if (!act) { console.warn("[pingLineupForAllocation] no act", { actId }); return; }
@@ -690,8 +364,7 @@ const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY_V2);
 
 // Normalise and validate contact routing payloads for IVR/call forwarding
 function normalizeContactRouting(src = {}) {
-    logStart("normalizeContactRouting", );
-
+  console.log(`🐣 (controllers/bookingController.js) normalizeContactRouting called at`, new Date().toISOString());
   if (!src || typeof src !== "object") return null;
   const cleanPhone = (v) => (typeof v === "string" ? v.trim() : "");
   const cleanDigits = (v) => String(v || "").replace(/\D+/g, "");
@@ -736,8 +409,7 @@ function normalizeContactRouting(src = {}) {
 
 // Human-friendly booking reference e.g. 250917-DOWNIE-19435
 function makeBookingRef({ date, eventDate, clientName, userAddress } = {}) {
-    logStart("makeBookingRef", );
-
+  console.log(`🐣 (controllers/bookingController.js) makeBookingRef called at`, new Date().toISOString(), { clientName });
   const d = new Date(date || eventDate || Date.now());
   const yy = String(d.getFullYear()).slice(-2);
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -753,8 +425,7 @@ function makeBookingRef({ date, eventDate, clientName, userAddress } = {}) {
 }
 
 function buildEmergencyMirror(contactRouting) {
-    logStart("buildEmergencyMirror", );
-
+  console.log(`🐣 (controllers/bookingController.js) buildEmergencyMirror called at`, new Date().toISOString());
   if (!contactRouting) return null;
   const number = contactRouting.proxyNumber || "";
   const ivrCode = contactRouting.ivrCode || "";
@@ -778,8 +449,7 @@ function buildEmergencyMirror(contactRouting) {
 }
 
 function daysUntil(dateStr) {
-    logStart("daysUntil", );
-
+  console.log(`🐣 (controllers/bookingController.js) daysUntil called at`, new Date().toISOString(), { dateStr });
   if (!dateStr) return null;
   const now = new Date();
   const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -789,13 +459,13 @@ function daysUntil(dateStr) {
 }
 
 function calcDeposit(totalGross) {
+    console.log(`🐣 (controllers/bookingController.js) calcDeposit called at`, new Date().toISOString(), { totalGross });
   if (!totalGross || totalGross <= 0) return 0;
   return Math.ceil((totalGross - 50) * 0.2) + 50;
 }
 
 const makeBookingId = (dateStr = new Date().toISOString(), lastName = 'TSC') => {
-    logStart("makeBookingId", );
-
+  console.log(`🐣 (controllers/bookingController.js) makeBookingId called at`, new Date().toISOString(), { dateStr, lastName });
   try {
     const d = new Date(dateStr);
     const yymmdd = d.toISOString().slice(2,10).replace(/-/g,'');
@@ -809,15 +479,13 @@ const makeBookingId = (dateStr = new Date().toISOString(), lastName = 'TSC') => 
 
 // keep controller self-contained
 function ensureHasScheme(urlLike) {
-    logStart("ensureHasScheme", );
-
+  console.log(`🐣 (controllers/bookingController.js) ensureHasScheme called at`, new Date().toISOString(), { urlLike });
   if (!urlLike) return '';
   if (/^https?:\/\//i.test(urlLike)) return urlLike;
   return `http://${urlLike.replace(/^\/+/, '')}`;
 }
 function getFrontendOrigin(req) {
-    logStart("getFrontEndOrigin", );
-
+  console.log(`🐣 (controllers/bookingController.js) getFrontendOrigin called at`, new Date().toISOString(), { originHeader: req.headers?.origin });
   const fromEnv = process.env.FRONTEND_URL;
   const envNormalized = fromEnv ? ensureHasScheme(fromEnv) : null;
   const fromHeader = req.headers?.origin;
@@ -832,8 +500,7 @@ function getFrontendOrigin(req) {
   }
 }
 function requireAbsoluteUrl(u) {
-    logStart("requireAbsoluteUrl", );
-
+  console.log(`🐣 (controllers/bookingController.js) requireAbsoluteUrl called at`, new Date().toISOString(), { u });
   const parsed = new URL(u);
   if (!/^https?:$/.test(parsed.protocol)) {
     throw new Error(`Unsupported protocol: ${parsed.protocol}`);
@@ -844,8 +511,7 @@ function requireAbsoluteUrl(u) {
 // ---------------- Enquiry Board helpers ----------------
 
 async function upsertEnquiryRowFromShortlist(src = {}) {
-    logStart("upsertEnquiryRowFromShortlist", );
-
+  console.log(`🐣 (controllers/bookingController.js) upsertEnquiryRowFromShortlist called at`, new Date().toISOString(), { actName: src.actName, actTscName: src.actTscName });
   try {
     const {
       actId,
@@ -900,8 +566,7 @@ async function upsertEnquiryRowFromShortlist(src = {}) {
   }
 }
 export const listEnquiryBoardRows = async (req, res) => {
-    logStart("listEnquiryBoardRows", );
-
+  console.log(`🐣 (controllers/bookingController.js) listEnquiryBoardRows called at`, new Date().toISOString(), { query: req.query });
   try {
     const { q, sortBy = "enquiryDateISO", sortDir = "asc" } = req.query;
     const query = {};
@@ -934,8 +599,7 @@ export const listEnquiryBoardRows = async (req, res) => {
  * Returns [{email}, ...].
  */
 async function buildAttendees({ actId, lineupId, bandLineup }) {
-    logStart("buildAttendees", );
-
+  console.log(`🐣 (controllers/bookingController.js) buildAttendees called at`, new Date().toISOString(), { actId, lineupId, bandLineupCount: bandLineup?.length });
   const act = await Act.findById(actId).lean();
   if (!act) return [];
 
@@ -966,29 +630,6 @@ async function buildAttendees({ actId, lineupId, bandLineup }) {
   return [];
 }
 
-
-// Back-compat wrapper used by older code paths
-  async function createOrReplaceBookingInvite({ actId, lineup, booking, attendees }) {
-      logStart("createOrReplaceBookingInvite", );
-
-    try {
-      const dateISO = new Date(booking?.date || booking?.eventDate).toISOString().slice(0,10);
-      const actIdStr = String(actId || "");
-      const lineupId = lineup?._id || lineup?.lineupId || null;
-      const venue = booking?.venueAddress || booking?.venue || "";
-      await upsertCalendarForConfirmedBooking({
-        booking,
-        actId: actIdStr,
-        lineupId: lineupId || null,
-        bandLineup: [],
-        venue,
-      });
-    } catch (e) {
-      console.warn("[completeBookingV2] calendar create/replace failed (wrapper):", e?.message || e);
-    }
-  }
-
-
 async function upsertCalendarForConfirmedBooking({
   
   booking,                // Booking document (lean or doc)
@@ -997,8 +638,7 @@ async function upsertCalendarForConfirmedBooking({
   bandLineup,             // array of musicianIds (fallback)
   venue,                  // string
 }) {
-    logStart("upsertCalendarForConfirmedBooking", );
-
+  console.log(`🐣 (controllers/bookingController.js) upsertCalendarForConfirmedBooking called at`, new Date().toISOString(), { actId, lineupId, venue });
   const dateISO = new Date(booking.date).toISOString().slice(0,10);
 
   // find an existing availability YES event if any
@@ -1047,13 +687,10 @@ async function upsertCalendarForConfirmedBooking({
   return { updatedEventId: null, createdEventId: created?.id || null };
 }
 
-
-
 // ---------------- Stripe checkout → pending booking ----------------
 
 export const createCheckoutSession = async (req, res) => {
-  logStart("createCheckoutSession");
-
+  console.log(`🐣 (controllers/bookingController.js) createCheckoutSession called at`, new Date().toISOString(), { bodyKeys: Object.keys(req.body || {}) });
   try {
     const {
       cartDetails,
@@ -1260,19 +897,11 @@ cloudinary.config({
   api_secret: process.env.REACT_APP_CLOUDINARY_API_SECRET,
 });
 
-const isManagerLike = (m={}) => {
-    logStart("isManagerLike", );
-
-  const s = (x='') => String(x).toLowerCase();
-  if (m.isManager || m.isNonPerformer) return true;
-  if (/\b(manager|management)\b/.test(s(m.instrument)) || /\b(manager|management)\b/.test(s(m.title))) return true;
-  const roles = Array.isArray(m.additionalRoles) ? m.additionalRoles : [];
-  return roles.some(r => /\bmanager|management\b/i.test(String(r?.role||r?.title||'')));
-};
-
 const completeBooking = async (req, res) => {
-    logStart("completeBooking", );
-
+ console.log(`🐣 (controllers/bookingController.js) completeBooking called at`, new Date().toISOString(), {
+    query: req.query,
+    body: req.body,
+  });
   // Deep, step-by-step logging to trace failures in PDF + email + board mirror
   const t0 = Date.now();
   try {
@@ -1570,8 +1199,7 @@ try {
 // ---------------- admin/listing endpoints ----------------
 
 const allBookings = async (req,res) => {
-    logStart("allBookings", );
-
+  console.log(`🐣 (controllers/bookingController.js) allBookings called at`, new Date().toISOString());
   try {
     const bookings = await bookingModel.find({});
     res.json({success:true,bookings});
@@ -1582,8 +1210,9 @@ const allBookings = async (req,res) => {
 };
 
 const userBookings = async (req, res) => {
-    logStart("userBookings", );
-
+  console.log(`🐣 (controllers/bookingController.js) userBookings called at`, new Date().toISOString(), {
+    params: req.params,
+  });
   try {
     const userId = req.params.userId || req.body.userId;
     if (!userId) return res.status(400).json({ success:false, message:"Missing userId" });
@@ -1597,8 +1226,9 @@ const userBookings = async (req, res) => {
 };
 
 export const getBookingByRef = async (req, res) => {
-    logStart("getBookingsByRef", );
-
+  console.log(`🐣 (controllers/bookingController.js) getBookingByRef called at`, new Date().toISOString(), {
+    params: req.params,
+  });
   try {
     const { ref } = req.params;
     if (!ref) return res.status(400).json({ success:false, message:"Missing ref" });
@@ -1619,8 +1249,9 @@ export const getBookingByRef = async (req, res) => {
 // ---------------- status update (admin) ----------------
 
 const updateStatus = async (req,res) => {
-    logStart("updateStatus", );
-
+  console.log(`🐣 (controllers/bookingController.js) updateStatus called at`, new Date().toISOString(), {
+    body: req.body,
+  });
   try {
     const { bookingId, status, lineupId, bandLineup } = req.body;
     const updated = await bookingModel.findByIdAndUpdate(
@@ -1659,8 +1290,9 @@ const updateStatus = async (req,res) => {
 
 
 const manualCreateBooking = async (req, res) => {
-    logStart("manualCreateBooking", );
-
+  console.log(`🐣 (controllers/bookingController.js) manualCreateBooking called at`, new Date().toISOString(), {
+    body: req.body,
+  });
   try {
     const {
       actId,
@@ -1772,8 +1404,9 @@ const manualCreateBooking = async (req, res) => {
 
 
 export const createBooking = async (req, res) => {
-    logStart("createBooking", );
-
+  console.log(`🐣 (controllers/bookingController.js) createBooking called at`, new Date().toISOString(), {
+    bodyKeys: Object.keys(req.body || {}),
+  });
   try {
     const {
       act,            // actId
@@ -1980,8 +1613,9 @@ const newBooking = new Booking({
 // ---------------- musician payout flag ----------------
 
 const markMusicianAsPaid = async (req, res) => {
-    logStart("markMusicianAsPaid", );
-
+  console.log(`🐣 (controllers/bookingController.js) markMusicianAsPaid called at`, new Date().toISOString(), {
+    body: req.body,
+  });
   try {
     const { bookingId, musicianId } = req.body;
 
@@ -2015,8 +1649,9 @@ const markMusicianAsPaid = async (req, res) => {
 // ---------------- event sheet ----------------
 
 export const updateEventSheet = async (req, res) => {
-    logStart("updateEventSheet", );
-
+  console.log(`🐣 (controllers/bookingController.js) updateEventSheet called at`, new Date().toISOString(), {
+    body: req.body,
+  });
   try {
     const { _id, bookingId, eventSheet } = req.body;
     if (!_id && !bookingId) {
@@ -2041,8 +1676,10 @@ export const updateEventSheet = async (req, res) => {
 };
 
 async function upsertBoardRowFromBooking(booking) {
-    logStart("upsertBoardrowFromBooking", );
-
+  console.log(`🐣 (controllers/bookingController.js) upsertBoardRowFromBooking called at`, new Date().toISOString(), {
+    bookingId: booking?.bookingId,
+    actName: booking?.actName,
+  });
   if (!booking) return;
 
   // --- identifiers (use human ref) ---
@@ -2189,8 +1826,9 @@ arrivalTime: (booking?.performanceTimes?.arrivalTime || booking.arrivalTime || "
 }
 
 export const ensureEmergencyContact = async (req, res) => {
-    logStart("ensureemergencyContact", );
-
+ console.log(`🐣 (controllers/bookingController.js) ensureEmergencyContact called at`, new Date().toISOString(), {
+    params: req.params,
+  });
   try {
     const id = String(req.params.id || "").trim();
     if (!id) return res.status(400).json({ success: false, message: "Missing id" });
@@ -2229,8 +1867,10 @@ export const ensureEmergencyContact = async (req, res) => {
 
 
 export const completeBookingV2 = async (req, res) => {
-  console.log("▶ completeBookingV2() ");
-  const { session_id } = req.query;
+  console.log(`🐣 (controllers/bookingController.js) completeBookingV2 called at`, new Date().toISOString(), {
+    query: req.query,
+  });
+    const { session_id } = req.query;
   if (!session_id) {
     console.warn("[completeBookingV2] ❌ Missing session_id");
     return res.status(400).json({ success: false, message: "Missing session_id" });
@@ -2357,30 +1997,6 @@ export const completeBookingV2 = async (req, res) => {
   }
 };
 
-async function sendBandRequest({ phone, firstName, formattedDate, shortAddress, actName, duties, fee, twilio, waTemplateSid }) {
-    logStart("sendBandRequest", );
-
-  const smsBody = `Hi ${firstName}, you've received a booking request for ${formattedDate} in ${shortAddress} with ${actName} for ${duties} at a rate of £${fee}. Please reply YES or NO. 🤍 TSC`;
-
-  try {
-    // try WhatsApp template first
-    await sendWhatsAppMessage({
-      to: `whatsapp:${phone}`,
-      contentSid: waTemplateSid,
-      variables: { "1": firstName, "2": formattedDate, "3": shortAddress, "4": duties, "5": actName, "6": String(fee) },
-      smsBody // kept for logs only
-    });
-    return { channel: 'whatsapp' };
-  } catch (e) {
-    const code = e?.code || e?.moreInfo || String(e?.message || '').match(/\d{5}/)?.[0];
-    // 63024 Invalid message recipient, 63016 Recipient not enabled for WA
-    const shouldFallback = code === '63024' || code === '63016';
-    if (!shouldFallback) throw e;
-    // immediate SMS fallback
-    await sendWAOrSMS({ to: phone, smsBody }); // your existing SMS helper via Twilio service
-    return { channel: 'sms_fallback' };
-  }
-}
 
 // ---------------- exports ----------------
 

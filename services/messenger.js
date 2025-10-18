@@ -6,6 +6,8 @@ const FROM_WHATSAPP = process.env.TWILIO_WA_SENDER
 const FROM_SMS = process.env.TWILIO_SMS_FROM
 
 export async function sendBookingRequest({ to, useWhatsApp, vars }) {
+      console.log(`🩵 (services/messenger.js) sendBookingRequest START at ${new Date().toISOString()}`, { });
+
   if (useWhatsApp) {
     try {
       // Template message (Interactive not shown here; you can also send with buttons)
@@ -30,6 +32,8 @@ Reply YES to confirm, or NO to decline.`
 }
 
 export async function sendConfirmed({ to, channel }) {
+        console.log(`🩵 (services/messenger.js) sendConfirmed START at ${new Date().toISOString()}`, { });
+
   const from = channel === "whatsapp" ? FROM_WHATSAPP : FROM_SMS;
   const prefix = channel === "whatsapp" ? "whatsapp:" : "";
   await client.messages.create({
@@ -40,6 +44,8 @@ export async function sendConfirmed({ to, channel }) {
 }
 
 export async function sendDeclined({ to, channel }) {
+        console.log(`🩵 (services/messenger.js) sendDeclined START at ${new Date().toISOString()}`, { });
+
   const from = channel === "whatsapp" ? FROM_WHATSAPP : FROM_SMS;
   const prefix = channel === "whatsapp" ? "whatsapp:" : "";
   await client.messages.create({

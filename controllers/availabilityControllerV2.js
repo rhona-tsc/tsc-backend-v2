@@ -18,6 +18,11 @@ const firstNameOf = (p) =>
   String(p?.firstName || p?.givenName || p?.name || "there").split(/\s+/)[0];
 
 const formatWithOrdinal = (dateLike) => {
+    console.log(`🔵 (controllers/availabilityControllerV2.js) formatWithOrdinal START at ${new Date().toISOString()}`, {
+    actId: params?.updated?.actId,
+    dateISO: params?.updated?.dateISO,
+    phone: params?.updated?.phone || params?.fromRaw,
+  });
   const d = new Date(dateLike);
   if (isNaN(d)) return String(dateLike || "");
   const day = d.getDate();
@@ -34,6 +39,11 @@ const shortAddressOf = (address = "") =>
   String(address || "").split(",").slice(-2).join(",").replace(/,\s*UK$/i, "").trim();
 
 export async function triggerLeadAvailabilityV2(req, res) {
+  console.log(`🔵 (controllers/availabilityControllerV2.js) [triggerLeadAvailabilityV2] START at ${new Date().toISOString()}`, {
+    actId: params?.updated?.actId,
+    dateISO: params?.updated?.dateISO,
+    phone: params?.updated?.phone || params?.fromRaw,
+  });
   try {
     const { actId, lineupId, date, address } = req.body || {};
     if (!actId || !date || !address) {
@@ -183,6 +193,11 @@ if (pending) {
 }
 
 export async function twilioInboundV2(req, res) {
+    console.log(`🔵 (controllers/availabilityControllerV2.js) [twilioInboundV2] START at ${new Date().toISOString()}`, {
+    actId: params?.updated?.actId,
+    dateISO: params?.updated?.dateISO,
+    phone: params?.updated?.phone || params?.fromRaw,
+  });
   try {
     const body    = String(req.body?.Body || "");
     const btn     = String(req.body?.ButtonText || "");
@@ -401,6 +416,11 @@ export async function twilioInboundV2(req, res) {
 }
 
 export async function twilioStatusV2(req, res) {
+    console.log(`🔵 (controllers/availabilityControllerV2.js) [twilioStatusV2] START at ${new Date().toISOString()}`, {
+    actId: params?.updated?.actId,
+    dateISO: params?.updated?.dateISO,
+    phone: params?.updated?.phone || params?.fromRaw,
+  });
   try {
     const sidRaw = req.body?.MessageSid || req.body?.SmsSid || req.body?.MessageSid;
     const statusRaw = req.body?.MessageStatus || req.body?.SmsStatus || "";

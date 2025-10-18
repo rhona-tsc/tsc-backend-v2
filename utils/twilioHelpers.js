@@ -8,12 +8,14 @@ export const sendAvailabilityMessage = async ({ actId, selectedDate, selectedAdd
     const act = await Act.findById(actId).lean();
     if (!act) throw new Error("Act not found");
 
+    console.log(`🩵 (utils/twilioHelpers.js) sendAvailabilityMessage START at ${new Date().toISOString()}`, {});
+
     const vocalist = act.lineups
       ?.flatMap((l) => l.bandMembers)
       ?.find((m) =>
-        ["Lead Male Vocal", "Lead Female Vocal", "Lead Vocal", "Vocalist-Guitarist"].includes(
-          m.instrument
-        )
+      ["Lead Male Vocal", "Lead Female Vocal", "Lead Vocal", "Vocalist-Guitarist"].includes(
+        m.instrument
+      )
       );
 
     if (!vocalist?.phone) throw new Error("No lead vocalist phone");

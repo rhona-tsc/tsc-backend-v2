@@ -34,10 +34,18 @@ const firstNameOfLoose = (p) => {
 
 // Build the exact SMS text we want for reminders/fallbacks
 function buildAvailabilitySMS({ firstName, formattedDate, formattedAddress, fee, duties, actName }) {
-  const feeTxt = String(fee ?? "").replace(/^[£$]/, "");
-  return ( //  (not used for booking confirmations)
+  console.log(`🟪 (jobs/availabilityQueue.js) buildAvailabilitySMS called at`, new Date().toISOString(), {
+    firstName,
+    formattedDate,
+    formattedAddress,
+    fee,
+    duties,
+    actName,
+  });
 
-    `Hi 7${safeFirst(firstName)}, you've received an enquiry for a gig on ` +
+  const feeTxt = String(fee ?? "").replace(/^[£$]/, "");
+  return (
+    `Hi ${safeFirst(firstName)}, you've received an enquiry for a gig on ` +
     `${formattedDate || "the date discussed"} in ${formattedAddress || "the area"} ` +
     `at a rate of £${feeTxt || "TBC"} for ${duties || "performance"} duties ` +
     `with ${actName || "the band"}. Please indicate your availability 💫 ` +
@@ -47,115 +55,146 @@ function buildAvailabilitySMS({ firstName, formattedDate, formattedAddress, fee,
 
 // Quiet hours for reminders: 21:00–08:59 local server time
 const isQuietHours = () => {
+  console.log(`🟪 (jobs/availabilityQueue.js) isQuietHours check at`, new Date().toISOString());
   const now = new Date();
   const hour = now.getHours();
   return hour >= 21 || hour < 9;
 };
 
 export async function processAvailabilityQueue() {
-  // 1) One-time reminder after 3h (respect quiet hours)
-  const pendings = await Availability.find({ reply: null }).lean();
+  console.log(`🟪 (jobs/availabilityQueue.js) processAvailabilityQueue called at`, new Date().toISOString());
 
-  for (const p of pendings) {
-    const age = Date.now() - new Date(p.updatedAt || p.createdAt).getTime();
+  try {
+    // 1) One-time reminder after 3h (respect quiet hours)
+    const pendings = await Availability.find({ reply: null }).lean();
+    console.log(`🟪 (jobs/availabilityQueue.js) Found ${pendings.length} pending availabilities`);
 
-    // 3h reminder
-    if (age > THREE_HOURS_MS && !p.reminderSent) {
-      if (isQuietHours()) continue; // skip reminder during quiet hours
+    for (const p of pendings) {
+      const age = Date.now() - new Date(p.updatedAt || p.createdAt).getTime();
+      console.log(`🟪 (jobs/availabilityQueue.js) Checking availability ${p._id} | Age (hrs): ${(age / 3600000).toFixed(2)}`);
 
-      try {
-        // Build a full, personalised SMS fallback body
-        const smsBody = buildAvailabilitySMS({
-          firstName: p.contactName || firstNameOfLoose(p) || p.musicianName || "",
-          formattedDate: p.formattedDate,
-          formattedAddress: p.formattedAddress,
-          fee: p.fee,
-          duties: p.duties,
+      // 3h reminder
+      if (age > THREE_HOURS_MS && !p.reminderSent) {
+        if (isQuietHours()) {
+          console.log(`🟪 (jobs/availabilityQueue.js) Skipping reminder (quiet hours) for ${p.phone}`);
+          continue;
+        }
+
+        console.log(`🟪 (jobs/availabilityQueue.js) Sending 3h reminder for`, {
           actName: p.actName,
+          phone: p.phone,
+          formattedDate: p.formattedDate,
         });
 
-        await sendWAOrSMS({
-          to: p.phone,
-          templateParams: {
-            FirstName: safeFirst(p.contactName || firstNameOfLoose(p) || p.musicianName),
-            FormattedDate: p.formattedDate,
-            FormattedAddress: p.formattedAddress,
-            Fee: p.fee,
-            Duties: p.duties,
-            ActName: p.actName,
-          },
-          smsBody,
-        });
+        try {
+          const smsBody = buildAvailabilitySMS({
+            firstName: p.contactName || firstNameOfLoose(p) || p.musicianName || "",
+            formattedDate: p.formattedDate,
+            formattedAddress: p.formattedAddress,
+            fee: p.fee,
+            duties: p.duties,
+            actName: p.actName,
+          });
 
-        await Availability.updateOne(
-          { _id: p._id },
-          { $set: { reminderSent: true, updatedAt: new Date() } }
-        );
+          await sendWAOrSMS({
+            to: p.phone,
+            templateParams: {
+              FirstName: safeFirst(p.contactName || firstNameOfLoose(p) || p.musicianName),
+              FormattedDate: p.formattedDate,
+              FormattedAddress: p.formattedAddress,
+              Fee: p.fee,
+              Duties: p.duties,
+              ActName: p.actName,
+            },
+            smsBody,
+          });
 
-        // Release next deferred (so new enquiries can flow)
-        const next = await DeferredAvailability.findOne({ phone: p.phone }).sort({ createdAt: 1 });
-        if (next) {
-          // Hydrate template params with sensible fallbacks; require date+address before sending
-          const tp = { ...(next.payload?.templateParams || {}) };
+          await Availability.updateOne(
+            { _id: p._id },
+            { $set: { reminderSent: true, updatedAt: new Date() } }
+          );
 
-          const ensure = (v, fb = "") => (String(v || "").trim() ? v : fb);
+          console.log(`🟪 (jobs/availabilityQueue.js) Reminder sent + marked for ${p.phone}`);
 
-          const hydrated = {
-            FirstName: ensure(tp.FirstName, next.contactName || firstNameOfLoose(next) || ""),
-            FormattedDate: ensure(tp.FormattedDate, next.formattedDate || ""),
-            FormattedAddress: ensure(tp.FormattedAddress, next.formattedAddress || ""),
-            Fee: ensure(tp.Fee, next.fee || "TBC"),
-            Duties: ensure(tp.Duties, next.duties || "performance"),
-            ActName: ensure(tp.ActName, next.actName || "the band"),
-          };
+          // Release next deferred (so new enquiries can flow)
+          const next = await DeferredAvailability.findOne({ phone: p.phone }).sort({ createdAt: 1 });
+          if (next) {
+            console.log(`🟪 (jobs/availabilityQueue.js) Processing deferred availability for ${p.phone}`);
 
-          // If we still don't have the critical Date+Address, skip sending to avoid a "generic" blast
-          if (!hydrated.FormattedDate || !hydrated.FormattedAddress) {
-            console.warn("⚠️ Skipping deferred send due to missing date/address; dropping zombie deferred.", {
-              FirstName: hydrated.FirstName, date: hydrated.FormattedDate, addr: hydrated.FormattedAddress
-            });
-            await DeferredAvailability.deleteOne({ _id: next._id });
-          } else {
-            const smsBody =
-              next.payload?.smsBody ||
-              buildAvailabilitySMS({
-                firstName: hydrated.FirstName,
-                formattedDate: hydrated.FormattedDate,
-                formattedAddress: hydrated.FormattedAddress,
-                fee: hydrated.Fee,
-                duties: hydrated.Duties,
-                actName: hydrated.ActName,
-              });
+            const tp = { ...(next.payload?.templateParams || {}) };
+            const ensure = (v, fb = "") => (String(v || "").trim() ? v : fb);
 
-            const payload = {
-              to: next.payload?.to || next.phone,
-              templateParams: hydrated,
-              smsBody,
+            const hydrated = {
+              FirstName: ensure(tp.FirstName, next.contactName || firstNameOfLoose(next) || ""),
+              FormattedDate: ensure(tp.FormattedDate, next.formattedDate || ""),
+              FormattedAddress: ensure(tp.FormattedAddress, next.formattedAddress || ""),
+              Fee: ensure(tp.Fee, next.fee || "TBC"),
+              Duties: ensure(tp.Duties, next.duties || "performance"),
+              ActName: ensure(tp.ActName, next.actName || "the band"),
             };
 
-            await sendWAOrSMS(payload);
-            await DeferredAvailability.deleteOne({ _id: next._id });
+            if (!hydrated.FormattedDate || !hydrated.FormattedAddress) {
+              console.warn("⚠️ Skipping deferred send due to missing date/address; dropping zombie deferred.", {
+                FirstName: hydrated.FirstName, date: hydrated.FormattedDate, addr: hydrated.FormattedAddress
+              });
+              await DeferredAvailability.deleteOne({ _id: next._id });
+            } else {
+              const smsBody =
+                next.payload?.smsBody ||
+                buildAvailabilitySMS({
+                  firstName: hydrated.FirstName,
+                  formattedDate: hydrated.FormattedDate,
+                  formattedAddress: hydrated.FormattedAddress,
+                  fee: hydrated.Fee,
+                  duties: hydrated.Duties,
+                  actName: hydrated.ActName,
+                });
+
+              const payload = {
+                to: next.payload?.to || next.phone,
+                templateParams: hydrated,
+                smsBody,
+              };
+
+              console.log(`🟪 (jobs/availabilityQueue.js) Sending deferred availability`, {
+                to: payload.to,
+                act: hydrated.ActName,
+                date: hydrated.FormattedDate,
+              });
+
+              await sendWAOrSMS(payload);
+              await DeferredAvailability.deleteOne({ _id: next._id });
+              console.log(`🟪 (jobs/availabilityQueue.js) Deferred availability sent + deleted`);
+            }
           }
+        } catch (e) {
+          console.warn("⚠️ reminder/send/dequeue failed:", e?.message || e);
         }
-      } catch (e) {
-        console.warn("⚠️ reminder/send/dequeue failed:", e?.message || e);
+      }
+
+      // 2) Lead-silent escalation after 24h → start pinging deputies + email client
+      if (age > TWENTY_FOUR_HOURS_MS && !p.deputyEscalated) {
+        console.log(`🟪 (jobs/availabilityQueue.js) Triggering 24h deputy escalation for`, {
+          act: p.actName,
+          phone: p.phone,
+          date: p.formattedDate,
+        });
+
+        try {
+          await pingDeputiesFor(p.actId, p.lineupId, p.dateISO, p.formattedAddress, p.duties);
+          await Availability.updateOne(
+            { _id: p._id },
+            { $set: { deputyEscalated: true, updatedAt: new Date() } }
+          );
+          console.log(`🟪 (jobs/availabilityQueue.js) Deputy escalation complete for ${p._id}`);
+        } catch (e) {
+          console.warn("⚠️ 24h deputy escalation failed:", e?.message || e);
+        }
       }
     }
 
-    // 2) Lead-silent escalation after 24h → start pinging deputies + email client
-    if (age > TWENTY_FOUR_HOURS_MS && !p.deputyEscalated) {
-      try {
-        await pingDeputiesFor(p.actId, p.lineupId, p.dateISO, p.formattedAddress, p.duties);
-
-        // (Optional) email the client here
-
-        await Availability.updateOne(
-          { _id: p._id },
-          { $set: { deputyEscalated: true, updatedAt: new Date() } }
-        );
-      } catch (e) {
-        console.warn("⚠️ 24h deputy escalation failed:", e?.message || e);
-      }
-    }
+    console.log(`🟪 (jobs/availabilityQueue.js) processAvailabilityQueue completed at`, new Date().toISOString());
+  } catch (err) {
+    console.error("❌ (jobs/availabilityQueue.js) processAvailabilityQueue error:", err.message);
   }
 }

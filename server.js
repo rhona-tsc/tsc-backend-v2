@@ -15,7 +15,6 @@ import invoiceRoutes from "./routes/invoiceRoutes.js";
 import userRouter from './routes/userRoute.js';
 import musicianRouter from './routes/musicianRoute.js';
 import actV2Routes from './routes/actV2Routes.js';
-import travelRoutes from './routes/v2.js';
 import cartRouter from './routes/cartRoute.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import googleRoutes from './routes/google.js';
@@ -24,11 +23,10 @@ import authRoutes from './routes/authRoutes.js';
 import moderationRoutes from "./routes/moderationRoutes.js";
 import userRoute from './routes/userRoute.js';
 import debugRoutes from "./routes/debug.js";
-import { getCalendarEvent, watchCalendar } from './controllers/googleController.js';
+import { watchCalendar } from './controllers/googleController.js';
 import musicianLoginRouter from './routes/musicianLoginRoute.js';
 import allocationRoutes from "./routes/allocationRoutes.js";
 import availabilityRoutes from './routes/availability.js';
-import cartRoute from './routes/cartRoute.js';
 import paymentsRouter from "./routes/payments.js";
 import musicianRoutes from "./routes/musicianRoute.js";
 import accountRouter from './routes/accountRoute.js';
@@ -37,14 +35,10 @@ import bookingBoardRoutes from "./routes/bookingBoardRoutes.js";
 import { startRemindersPoller } from "./services/remindersQueue.js";
 import uploadRoutes from "./routes/upload.js";
 import notificationsRoutes from "./routes/notifications.js";
-import { WA_FALLBACK_CACHE, sendSMSMessage } from './utils/twilioClient.js';
-import { twilioStatusV2 } from './controllers/availabilityControllerV2.js';
 import newsletterRoutes from './routes/newsletterRoutes.js';
 import { getAvailableActIds } from './controllers/actAvailabilityController.js';
 import { twilioStatusHandler } from './controllers/shortlistController.js';
-import availabilityV2Routes from "./routes/availabilityV2.js";
 import mongoose from "mongoose";
-import musicianModel from "./models/musicianModel.js";
 import { submitActSubmission } from './controllers/actSubmissionController.js';
 import v2Routes from "./routes/v2.js";
 import { twilioInbound } from './controllers/availabilityController.js';
@@ -159,6 +153,48 @@ cloudinary.config({
   api_secret: process.env.REACT_APP_CLOUDINARY_SECRET_KEY,
 });
 
+/* -------------------------------------------------------------------------- */
+/*                 🌍 Global color-coded route logging middleware              */
+/* -------------------------------------------------------------------------- */
+app.use((req, res, next) => {
+  const start = Date.now();
+
+  // ANSI color helpers
+  const color = {
+    reset: "\x1b[0m",
+    green: "\x1b[32m",
+    yellow: "\x1b[33m",
+    red: "\x1b[31m",
+    cyan: "\x1b[36m",
+  };
+
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    const method = req.method.padEnd(6);
+    const status = res.statusCode;
+    const time = new Date().toISOString();
+
+    // Choose color based on status
+    let statusColor =
+      status >= 500
+        ? color.red
+        : status >= 400
+        ? color.yellow
+        : color.green;
+
+    console.log(
+      `${color.cyan}🚴 (server.js)${color.reset} [${method}] ${req.originalUrl} → ${statusColor}${status}${color.reset} (${duration}ms)`,
+      {
+        ip: req.ip,
+        origin: req.headers.origin || "n/a",
+        userAgent: req.headers["user-agent"] || "unknown",
+        time,
+      }
+    );
+  });
+
+  next();
+});
 
 /* -------------------------------------------------------------------------- */
 /*                                   Routes                                   */

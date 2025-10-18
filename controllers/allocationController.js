@@ -1,16 +1,19 @@
+// backend/controllers/allocationController.js
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
 import EnquiryMessage from "../models/EnquiryMessage.js";
-import { sendWhatsAppMessage } from "../utils/twilioClient.js";
+import { sendWhatsAppMessage, sendWAOrSMS } from "../utils/twilioClient.js";
 import {
   ensureBookingEvent,
   appendLineToEventDescription,
+  addAttendeeToEvent,
 } from "./googleController.js";
-import { addAttendeeToEvent } from "./googleController.js";
-import { sendWAOrSMS } from "../utils/twilioClient.js";
 
-// Extract a friendly first name from various shapes
+/* -------------------------------------------------------------------------- */
+/*                            Helper: firstNameOf                             */
+/* -------------------------------------------------------------------------- */
 const firstNameOf = (p) => {
+  console.log(`🦚 (controllers/allocationController.js) firstNameOf called at`, new Date().toISOString(), { p });
   if (!p) return "there";
   if (typeof p === "string") {
     const parts = p.trim().split(/\s+/);
@@ -23,15 +26,21 @@ const firstNameOf = (p) => {
   return "there";
 };
 
-
-// normalize a phone variants (same helper you used elsewhere)
-// Ensure a clean numeric-esque value for Twilio var {{6}}
+/* -------------------------------------------------------------------------- */
+/*                               Helper: sanitizeFee                          */
+/* -------------------------------------------------------------------------- */
 const sanitizeFee = (v) => {
+  console.log(`🦚 (controllers/allocationController.js) sanitizeFee called at`, new Date().toISOString(), { v });
   const s = String(v ?? "").trim();
   if (!s) return "TBC";
   return s.replace(/[^\d.]/g, "");
 };
+
+/* -------------------------------------------------------------------------- */
+/*                              Helper: normalizeFrom                         */
+/* -------------------------------------------------------------------------- */
 const normalizeFrom = (from) => {
+  console.log(`🦚 (controllers/allocationController.js) normalizeFrom called at`, new Date().toISOString(), { from });
   const v = String(from || '').replace(/^whatsapp:/i, '').trim();
   if (!v) return [];
   const plus = v.startsWith('+') ? v : (v.startsWith('44') ? `+${v}` : v);
@@ -40,7 +49,13 @@ const normalizeFrom = (from) => {
   return Array.from(new Set([plus, uk07, ukNoPlus]));
 };
 
+/* -------------------------------------------------------------------------- */
+/*                        triggerBookingRequests (main)                       */
+/* -------------------------------------------------------------------------- */
 export const triggerBookingRequests = async (req, res) => {
+  console.log(`🦚 (controllers/allocationController.js) triggerBookingRequests called at`, new Date().toISOString(), {
+    bodyKeys: Object.keys(req.body || {}),
+  });
   try {
     const { actId, lineupId, dateISO, address, perMemberFee } = req.body;
     if (!actId || !dateISO || !address) {
@@ -62,7 +77,7 @@ export const triggerBookingRequests = async (req, res) => {
       },
     });
 
-    // 2) Ensure a single booking event exists for this act/day
+    // 2) Ensure booking event exists
     const { event } = await ensureBookingEvent({ actId, dateISO, address });
 
     // 3) Resolve lineup + members
@@ -80,9 +95,14 @@ export const triggerBookingRequests = async (req, res) => {
       return res.json({ success: false, message: "No bandMembers in lineup" });
     }
 
-    // 4) Send booking requests to all members in this lineup
+    console.log(`🦚 triggerBookingRequests: sending to ${members.length} members`, {
+      actName: act.tscName || act.name,
+      lineupId: lineup._id || lineup.lineupId,
+    });
+
     const ts = Date.now();
     const sent = [];
+
     for (const m of members) {
       let raw = String(m.phoneNumber || m.phone || "").replace(/\s+/g, "");
       if (!raw && (m.musicianId || m._id)) {
@@ -94,12 +114,13 @@ export const triggerBookingRequests = async (req, res) => {
         } catch {}
       }
       if (!raw) {
-        console.warn("[triggerBookingRequests] skip: no phone for member", {
+        console.warn("🦚 triggerBookingRequests skip: no phone for member", {
           name: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
           instrument: m.instrument || "",
         });
         continue;
       }
+
       const phone =
         raw.startsWith("+") ? raw :
         raw.startsWith("0") ? raw.replace(/^0/, "+44") :
@@ -107,16 +128,17 @@ export const triggerBookingRequests = async (req, res) => {
 
       const bookingId = `${ts}_${Math.random().toString(36).slice(2,7)}`;
 
-      // Persist a tracking row in EnquiryMessage (reuse model; mark it as booking via meta)
+      // Persist message
       await EnquiryMessage.create({
         actId,
         lineupId: lineup._id || lineup.lineupId || null,
-        musicianId: null, // optional—if you have musician doc id, set it
         enquiryId: bookingId,
         phone,
         duties: m.instrument || "",
         fee: perMemberFee ? String(perMemberFee) : undefined,
-        formattedDate: new Date(dateISO).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric" }),
+        formattedDate: new Date(dateISO).toLocaleDateString("en-GB", {
+          weekday: "long", day: "numeric", month: "short", year: "numeric"
+        }),
         formattedAddress: address,
         meta: {
           actName: act.tscName || act.name,
@@ -126,41 +148,37 @@ export const triggerBookingRequests = async (req, res) => {
           kind: "booking",
           lineupId: String(lineup._id || lineup.lineupId || ""),
         },
-        calendar: {
-          eventId: event.id,
-          calendarStatus: "needsAction",
-        },
+        calendar: { eventId: event.id, calendarStatus: "needsAction" },
       });
 
-      // Send WhatsApp or SMS booking request
-     await sendWAOrSMS({
-  to: phone,
-  templateParams: {
-    FirstName: firstNameOf(m), // {{1}}
-    FormattedDate: new Date(dateISO).toLocaleDateString(
-      "en-GB",
-      { weekday: "long", day: "numeric", month: "short", year: "numeric" }
-    ),                         // {{2}}
-    FormattedAddress: address, // {{3}}
-    Fee: sanitizeFee(perMemberFee),        // {{4}} (digits only)
-    Duties: m.instrument || "performance", // {{5}}
-    ActName: act.tscName || act.name || "the band", // {{6}}
-  },
-  // Fallback SMS with payloads included:
-  smsBody:
-    `Hi ${firstNameOf(m)}, booking request for ` +
-    `${new Date(dateISO).toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"short", year:"numeric" })} ` +
-    `at ${address} with ${act.tscName || act.name}. Role: ${m.instrument || "performance"}. ` +
-    `Fee: £${String(perMemberFee ?? "").replace(/[^\d.]/g,"") || "TBC"}. ` +
-    `Reply YES (${`YESBOOK_${bookingId}`}) or NO (${`NOBOOK_${bookingId}`}).`,
-});
-      console.log("[triggerBookingRequests] ✓ WA sent", {
+      await sendWAOrSMS({
         to: phone,
+        templateParams: {
+          FirstName: firstNameOf(m),
+          FormattedDate: new Date(dateISO).toLocaleDateString("en-GB", {
+            weekday: "long", day: "numeric", month: "short", year: "numeric"
+          }),
+          FormattedAddress: address,
+          Fee: sanitizeFee(perMemberFee),
+          Duties: m.instrument || "performance",
+          ActName: act.tscName || act.name || "the band",
+        },
+        smsBody:
+          `Hi ${firstNameOf(m)}, booking request for ` +
+          `${new Date(dateISO).toLocaleDateString("en-GB", {
+            weekday:"long", day:"numeric", month:"short", year:"numeric"
+          })} ` +
+          `at ${address} with ${act.tscName || act.name}. Role: ${m.instrument || "performance"}. ` +
+          `Fee: £${String(perMemberFee ?? "").replace(/[^\d.]/g,"") || "TBC"}. ` +
+          `Reply YES (YESBOOK_${bookingId}) or NO (NOBOOK_${bookingId}).`,
+      });
+
+      console.log(`🦚 triggerBookingRequests sent`, {
         name: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
+        phone,
         duties: m.instrument || "",
       });
 
-      // Add a line to event description (one line per member invite)
       const line = `Booking invite sent to ${m.firstName || ""} ${m.lastName || ""} (${m.instrument || ""})`;
       await appendLineToEventDescription({ eventId: event.id, line });
 
@@ -169,13 +187,16 @@ export const triggerBookingRequests = async (req, res) => {
 
     return res.json({ success: true, eventId: event.id, sent });
   } catch (err) {
-    console.error("❌ triggerBookingRequests error:", err);
+    console.error(`🦚 triggerBookingRequests error`, err);
     return res.status(500).json({ success: false, message: err?.message || "Server error" });
   }
 };
 
-/** Parse YESBOOK_<id> | NOBOOK_<id> */
+/* -------------------------------------------------------------------------- */
+/*                              parseBookingPayload                           */
+/* -------------------------------------------------------------------------- */
 const parseBookingPayload = (payload) => {
+  console.log(`🦚 (controllers/allocationController.js) parseBookingPayload called at`, new Date().toISOString(), { payload });
   const m = String(payload || '').trim().match(/^(YESBOOK|NOBOOK)_(.+)$/i);
   if (!m) return { reply: null, bookingId: null };
   const kind = m[1].toUpperCase();
@@ -184,19 +205,24 @@ const parseBookingPayload = (payload) => {
   return { reply, bookingId };
 };
 
+/* -------------------------------------------------------------------------- */
+/*                            twilioInboundBooking                            */
+/* -------------------------------------------------------------------------- */
 export const twilioInboundBooking = async (req, res) => {
+  console.log(`🦚 (controllers/allocationController.js) twilioInboundBooking called at`, new Date().toISOString(), {
+    body: req.body,
+  });
   try {
-    const bodyText     = String(req.body?.Body || "");
-    const buttonText   = String(req.body?.ButtonText || "");
-    const buttonPayload= String(req.body?.ButtonPayload || "");
-    const inboundSid   = String(req.body?.MessageSid || "");
-    const fromRaw      = String(req.body?.From || req.body?.WaId || "");
+    const bodyText = String(req.body?.Body || "");
+    const buttonText = String(req.body?.ButtonText || "");
+    const buttonPayload = String(req.body?.ButtonPayload || "");
+    const inboundSid = String(req.body?.MessageSid || "");
+    const fromRaw = String(req.body?.From || req.body?.WaId || "");
 
-    console.log("📩 Booking inbound webhook:", {
-      From: fromRaw, Body: bodyText, ButtonText: buttonText, ButtonPayload: buttonPayload, MessageSid: inboundSid
+    console.log(`🦚 twilioInboundBooking inbound`, {
+      From: fromRaw, Body: bodyText, ButtonText: buttonText, ButtonPayload: buttonPayload, MessageSid: inboundSid,
     });
 
-    // 1) Get bookingId + reply
     let { reply, bookingId } = parseBookingPayload(buttonPayload);
     if (!reply) {
       const low = (buttonText || bodyText).toLowerCase();
@@ -204,14 +230,12 @@ export const twilioInboundBooking = async (req, res) => {
       else if (low.includes("no")) reply = "no";
     }
     if (!bookingId) {
-      // Try to detect bookingId from free text if you ever include it in the copy
       const m = (bodyText.match(/YESBOOK_(\S+)/i) || bodyText.match(/NOBOOK_(\S+)/i));
       if (m) bookingId = m[1];
     }
 
     let msg = null;
     if (!bookingId) {
-      // Fallback: correlate by phone → most recent pending booking message
       const variants = normalizeFrom(fromRaw);
       msg = await EnquiryMessage.findOne({
         phone: { $in: variants },
@@ -222,11 +246,10 @@ export const twilioInboundBooking = async (req, res) => {
         .lean();
 
       if (!msg) {
-        console.warn("⚠️ No bookingId and no pending message matched by phone; ignoring");
+        console.warn("🦚 No bookingId and no pending message matched by phone");
         return res.status(200).send("<Response/>");
       }
 
-      // Update reply on that message
       await EnquiryMessage.updateOne(
         { _id: msg._id },
         {
@@ -239,7 +262,6 @@ export const twilioInboundBooking = async (req, res) => {
         }
       );
     } else {
-      // 2) Load the booking message row (EnquiryMessage with meta.kind=booking)
       msg = await EnquiryMessage.findOneAndUpdate(
         { enquiryId: bookingId },
         {
@@ -247,25 +269,24 @@ export const twilioInboundBooking = async (req, res) => {
             reply: reply || "yes",
             repliedAt: new Date(),
             status: "read",
-            "calendar.calendarStatus": "needsAction", // unchanged here
+            "calendar.calendarStatus": "needsAction",
           },
         },
         { new: true }
       );
 
       if (!msg) {
-        console.warn("⚠️ Booking message not found for", bookingId);
+        console.warn("🦚 Booking message not found", { bookingId });
         return res.status(200).send("<Response/>");
       }
     }
 
-    // 3) YES → add attendee to booking event
     if (reply === "yes") {
-      // Resolve email for this phone
+      console.log("🦚 twilioInboundBooking YES branch");
       const phoneVariants = normalizeFrom(fromRaw);
       let email = msg.calendar?.attendeeEmail || null;
+
       if (!email) {
-        // Try to match against act lineup members
         const act = await Act.findById(msg.actId).lean();
         const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
         const l = lineups.find(x =>
@@ -282,31 +303,25 @@ export const twilioInboundBooking = async (req, res) => {
       const eventId = msg.calendar?.eventId;
       if (eventId && email) {
         await addAttendeeToEvent({ eventId, email });
-        await EnquiryMessage.updateOne(
-          { _id: msg._id },
-          { $set: { "calendar.attendeeEmail": email } }
-        );
-        console.log("👥 Added attendee to booking event:", email);
+        await EnquiryMessage.updateOne({ _id: msg._id }, { $set: { "calendar.attendeeEmail": email } });
+        console.log("🦚 Added attendee to booking event", { email });
       } else {
-        console.warn("⚠️ Missing eventId or email; cannot add attendee", { eventId, email });
+        console.warn("🦚 Missing eventId or email for YES branch", { eventId, email });
       }
     }
 
-    // 4) NO → escalate to deputy (if present in lineup)
     if (reply === "no") {
+      console.log("🦚 twilioInboundBooking NO branch");
       const act = await Act.findById(msg.actId).lean();
       const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
       const l = lineups.find(x =>
         (x._id?.toString?.() === String(msg.lineupId)) || (String(x.lineupId) === String(msg.lineupId))
       ) || lineups[0];
-
       const members = Array.isArray(l?.bandMembers) ? l.bandMembers : [];
-      // Find the current member by phone
       const current = members.find(m => {
         const mPhones = normalizeFrom(m.phoneNumber || m.phone);
         return mPhones.some(p => normalizeFrom(msg.phone).includes(p));
       });
-
       const deputies = Array.isArray(current?.deputies) ? current.deputies : [];
       const nextDep = deputies.find(d => d.phoneNumber || d.phone);
 
@@ -322,7 +337,6 @@ export const twilioInboundBooking = async (req, res) => {
         await EnquiryMessage.create({
           actId: msg.actId,
           lineupId: msg.lineupId,
-          musicianId: null,
           enquiryId: newBookingId,
           phone,
           duties: current?.instrument || "",
@@ -343,33 +357,35 @@ export const twilioInboundBooking = async (req, res) => {
         });
 
         const smsBody =
-           `Hi ${firstNameOf(nextDep)}, ${msg.formattedDate} in ${msg.formattedAddress} ` +
-   `with ${msg.meta?.actName || "the band"} for ${current?.instrument || "performance"} ` +   `at £${sanitizeFee(msg.fee)}. Reply YES or NO. 🤍 TSC`;
-    await sendWhatsAppMessage({
-   to: phone,
-   // if you have a specific template for this flow, set contentSid: process.env.TWILIO_..., else omit to use default
-   templateParams: {
-     FirstName: firstNameOf(nextDep),
-     FormattedDate: msg.formattedDate,
-     FormattedAddress: msg.formattedAddress,
-     Fee: sanitizeFee(msg.fee),
-     Duties: current?.instrument || "performance",
-     ActName: msg.meta?.actName || "the band",
-   },
-   smsBody,
- });
+          `Hi ${firstNameOf(nextDep)}, ${msg.formattedDate} in ${msg.formattedAddress} ` +
+          `with ${msg.meta?.actName || "the band"} for ${current?.instrument || "performance"} ` +
+          `at £${sanitizeFee(msg.fee)}. Reply YES or NO. 🤍 TSC`;
 
-        console.log("➡️ Escalated booking request to deputy:", {
-          name: `${nextDep.firstName || ""} ${nextDep.lastName || ""}`.trim(), phone
+        await sendWhatsAppMessage({
+          to: phone,
+          templateParams: {
+            FirstName: firstNameOf(nextDep),
+            FormattedDate: msg.formattedDate,
+            FormattedAddress: msg.formattedAddress,
+            Fee: sanitizeFee(msg.fee),
+            Duties: current?.instrument || "performance",
+            ActName: msg.meta?.actName || "the band",
+          },
+          smsBody,
+        });
+
+        console.log("🦚 Escalated booking to deputy", {
+          name: `${nextDep.firstName || ""} ${nextDep.lastName || ""}`.trim(),
+          phone,
         });
       } else {
-        console.log("ℹ️ No deputy configured; stopping escalation.");
+        console.log("🦚 No deputy found; stopping escalation");
       }
     }
 
     return res.status(200).send("<Response/>");
   } catch (err) {
-    console.error("❌ Error in twilioInboundBooking:", err);
+    console.error(`🦚 twilioInboundBooking error`, err);
     return res.status(200).send("<Response/>");
   }
 };

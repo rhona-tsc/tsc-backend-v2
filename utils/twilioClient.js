@@ -7,7 +7,7 @@ const {
   TWILIO_ACCOUNT_SID,            // ACxxxxxxxx...
   TWILIO_AUTH_TOKEN,             // (with AC path)
   TWILIO_API_KEY,                // SKxxxxxxxx... (optional alt path)
-  TWILIO_API_SECRET,             // secret for SK
+   // secret for SK
   TWILIO_WA_SENDER,
   TWILIO_SMS_FROM,
   TWILIO_MESSAGING_SERVICE_SID,
@@ -18,6 +18,7 @@ const {
 // -------------------- Twilio client (lazy init, never crash app) --------------------
 let _twilioClient = null;
 function getTwilioClient() {
+  console.log(`🩵 (utils/twilioClient.js) getTwilioClient START at ${new Date().toISOString()}`, { });
   if (_twilioClient) return _twilioClient;
 
   try {
@@ -43,6 +44,8 @@ function getTwilioClient() {
 // -------------------- Helpers --------------------
 /** Normalize to E.164 (+44…) and strip any whatsapp: prefix */
 export const toE164 = (raw = '') => {
+    console.log(`🩵 (utils/twilioClient.js) toE164 START at ${new Date().toISOString()}`, { });
+
   let s = String(raw).replace(/^whatsapp:/i, '').replace(/\s+/g, '');
   if (!s) return '';
   if (s.startsWith('+')) return s;
@@ -50,9 +53,6 @@ export const toE164 = (raw = '') => {
   if (s.startsWith('44')) return `+${s}`;
   return s; // assume already valid for your region if not UK
 };
-
-/** `whatsapp:+NN…` wrapper from E.164 (or raw) */
-const toWhatsAppAddr = (raw = '') => `whatsapp:${toE164(raw)}`;
 
 /** Only send status callbacks when we have an HTTPS public URL */
 const statusCallback = (BACKEND_URL && /^https:\/\//i.test(BACKEND_URL))
@@ -64,6 +64,8 @@ const statusCallback = (BACKEND_URL && /^https:\/\//i.test(BACKEND_URL))
  * Returns only "1".."6" keys; NO extra meta keys to avoid 21656.
  */
 const buildVarsFromTemplateParams = (p = {}) => {
+    console.log(`🩵 (utils/twilioClient.js) buildVarsFromTemplateParams START at ${new Date().toISOString()}`, { });
+
   const pickFee = p.Fee ?? p.fee ?? p.Rate ?? p.rate ?? '';
   let fee = '';
   if (pickFee !== undefined && pickFee !== null) {
@@ -92,6 +94,8 @@ const buildVarsFromTemplateParams = (p = {}) => {
  * Otherwise we derive the standard 6-slot map from `templateParams`.
  */
 const makeContentVariables = ({ variables, templateParams } = {}) => {
+    console.log(`🩵 (utils/twilioClient.js) makeContentVariables START at ${new Date().toISOString()}`, { });
+
   let obj;
   if (variables && typeof variables === 'object') {
     obj = {};
@@ -112,6 +116,8 @@ export const WA_FALLBACK_CACHE = new Map(); // sid -> { to, smsBody }
  * Send a WhatsApp message via Content Template.
  */
 export async function sendWhatsAppMessage(opts = {}) {
+    console.log(`🩵 (utils/twilioClient.js) sendWhatsAppMessage START at ${new Date().toISOString()}`, { });
+
   const client = getTwilioClient();
   if (!client) throw new Error('Twilio disabled');
 
@@ -169,6 +175,8 @@ export async function sendWhatsAppMessage(opts = {}) {
 
 // --- SMS sender (used for fallback) ---
 export const sendSMSMessage = async (to, body) => {
+    console.log(`🩵 (utils/twilioClient.js) sendSMSMessage START at ${new Date().toISOString()}`, { });
+
   const client = getTwilioClient();
   if (!client) throw new Error('Twilio disabled');
 
@@ -231,6 +239,8 @@ export const sendSMSMessage = async (to, body) => {
  * Try WA first; if creation fails, fallback to SMS (requires smsBody).
  */
 export async function sendWAOrSMS(opts = {}) {
+    console.log(`🩵 (utils/twilioClient.js) sendWAOrSMS START at ${new Date().toISOString()}`, { });
+
   const { to, templateParams, variables, contentSid, smsBody = '' } = opts;
 
   try {
@@ -248,6 +258,8 @@ export async function sendWAOrSMS(opts = {}) {
  * Send a plain WhatsApp text (no template/content).
  */
 export async function sendWhatsAppText(to, body) {
+    console.log(`🩵 (utils/twilioClient.js) sendWhatsAppText START at ${new Date().toISOString()}`, { });
+
   const client = getTwilioClient();
   if (!client) throw new Error('Twilio disabled');
 

@@ -1,16 +1,13 @@
 import { sendWhatsAppMessage, sendSMSMessage, WA_FALLBACK_CACHE } from "../utils/twilioClient.js";import Act from '../models/actModel.js';
 import User from '../models/userModel.js';
 import Availability from "../models/availabilityModel.js";
-import { sendAvailabilityMessage } from "../utils/twilioHelpers.js";
 import { createCalendarInvite } from './googleController.js';
 import Musician from '../models/musicianModel.js';
 import EnquiryMessage from '../models/EnquiryMessage.js';
 import twilio from "twilio";
 import Shortlist from "../models/shortlistModel.js";
 import { extractOutcode, countyFromOutcode, computeMemberMessageFee } from "../controllers/helpersForCorrectFee.js";
-import { computePerMemberFee } from "./bookingController.js";
 import DistanceCache from "../models/distanceCacheModel.js";
-import mongoose from "mongoose";
 
 
 const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -18,11 +15,6 @@ const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TO
 
 import { toE164 } from "../utils/twilioClient.js";
 
-// --- SMS helper for graceful names ---
-const safeFirst = (s) => {
-  const v = String(s || "").trim();
-  return v ? v.split(/\s+/)[0] : "there";
-};
 
 // Helper: format 26th Jun 2026
 function formatShortDate(iso) {
@@ -50,51 +42,7 @@ function formatShortAddress(full) {
 }
 
 
-// 1) Support object & array forms + optional countyName
-async function computeTravelComponent({ act, member, address, countyName }) {
-  if (!act || !address) return 0;
 
-  // County-fee path
-  if (act.useCountyTravelFee && act.countyFees) {
-    const pickByName = String(countyName || '').trim();
-
-    // Object form: { Berkshire: 70, ... }
-    if (!Array.isArray(act.countyFees)) {
-      if (pickByName && act.countyFees[pickByName] != null) {
-        return Number(act.countyFees[pickByName]) || 0;
-      }
-      // Fallback: try to match by county name in address (case-insensitive)
-      const hit = Object.entries(act.countyFees)
-        .find(([k]) => new RegExp(`(^|\\b)${k}(\\b|$)`, 'i').test(address));
-      return hit ? Number(hit[1]) || 0 : 0;
-    }
-
-    // Array form: [{ county, feePerMember }]
-    const arr = act.countyFees;
-    if (pickByName) {
-      const found = arr.find(c => String(c.county||'').toLowerCase() === pickByName.toLowerCase());
-      if (found) return Number(found.feePerMember || found.fee || 0);
-    }
-    const county = arr.find(c => c.county && new RegExp(`(^|\\b)${c.county}(\\b|$)`, 'i').test(address));
-    return county ? Number(county.feePerMember || county.fee || 0) : 0;
-  }
-
-  // costPerMile path (cached)
-  if (act.costPerMile > 0 && member?.postcode) {
-    const from = member.postcode.replace(/\s+/g, '').toUpperCase();
-    const toMatch = address.match(/[A-Z]{1,2}\d[\dA-Z]?\s*\d[A-Z]{2}/i);
-    const to = toMatch ? toMatch[0].replace(/\s+/g, '').toUpperCase() : null;
-    if (from && to) {
-      const cached = await DistanceCache.findOne({ from, to });
-      if (cached?.distanceKm) {
-        const miles = cached.distanceKm * 0.621371;
-        return Math.round(miles * act.costPerMile);
-      }
-    }
-  }
-
-  return 0;
-}
 
 // 2) Allow overrides (feeOverride/travelOverride/dutiesOverride/actNameOverride)
 export async function buildAvailabilitySMS({
@@ -109,6 +57,13 @@ export async function buildAvailabilitySMS({
   actNameOverride,
   countyName,         // e.g. "Berkshire"
 }) {
+  console.log(`🐠 (controllers/shortlistController.js) buildAvailabilitySMS called at`, new Date().toISOString(), {
+  firstName,
+  formattedDate,
+  formattedAddress,
+  actName: act?.name || act?.tscName,
+  memberName: `${member?.firstName || ""} ${member?.lastName || ""}`.trim(),
+});
   const shortDate = formatShortDate(formattedDate);
   const shortAddress = formatShortAddress(formattedAddress);
 
@@ -169,10 +124,11 @@ export async function buildAvailabilitySMS({
   );
 }
 
-
-
-
 function findVocalistPhone(actData, lineupId) {
+  console.log(`🐠 (controllers/shortlistController.js) findVocalistPhone called at`, new Date().toISOString(), {
+  lineupId,
+  totalLineups: actData?.lineups?.length || 0,
+});
   if (!actData?.lineups?.length) return null;
 
   // Prefer specified lineupId
@@ -218,6 +174,9 @@ return { vocalist, phone };}
 // handle status callback from Twilio
 // ✅ Handle Twilio Status Callback (WhatsApp delivery)
 export const twilioStatusHandler = async (req, res) => {
+  console.log(`🐠 (controllers/shortlistController.js) twilioStatusHandler called at`, new Date().toISOString(), {
+  body: req.body,
+});
   try {
     const { MessageSid: sid, MessageStatus: status, ErrorCode: err, To: to } = req.body;
     console.log("📡 Twilio status callback:", { sid, status, err, to });
@@ -312,6 +271,9 @@ const smsBody = await buildAvailabilitySMS({
 
 // ✅ main function
 export const shortlistActAndTriggerAvailability = async (req, res) => {
+  console.log(`🐠 (controllers/shortlistController.js) shortlistActAndTriggerAvailability called at`, new Date().toISOString(), {
+  body: req.body,
+});
   console.log("🎯 [START] shortlistActAndTriggerAvailability");
   try {
     const { userId, actId, selectedDate, selectedAddress, lineupId } = req.body;
@@ -500,6 +462,10 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
  * Get all shortlisted acts for a user.
  */
 export const getUserShortlist = async (req, res) => {
+  
+  console.log(`🐠 (controllers/shortlistController.js) getUserShortlist called at`, new Date().toISOString(), {
+  userId: req.params.userId,
+});
   try {
     const { userId } = req.params;
     const shortlist = await Availability.findOne({ userId }).populate("acts");
@@ -513,6 +479,9 @@ export const getUserShortlist = async (req, res) => {
 };
 
 export const notifyMusician = async (req, res) => {
+  console.log(`🐠 (controllers/shortlistController.js) notifyMusician called at`, new Date().toISOString(), {
+  phone: req.body.phone,
+});
     const { phone, message } = req.body;
   
     if (!phone || !message) {
@@ -535,6 +504,9 @@ export const notifyMusician = async (req, res) => {
   };
 
 export const shortlistActAndTrack = async (req, res) => {
+  console.log(`🐠 (controllers/shortlistController.js) shortlistActAndTrack called at`, new Date().toISOString(), {
+  body: req.body,
+});
   try {
     const { userId, actId } = req.body;
     if (!userId || !actId) return res.status(400).json({ success: false, message: 'Missing userId or actId' });
@@ -556,8 +528,11 @@ export const shortlistActAndTrack = async (req, res) => {
   }
 };
   
-
   export const whatsappReplyHandler = async (req, res) => {
+    console.log(`🐠 (controllers/shortlistController.js) whatsappReplyHandler called at`, new Date().toISOString(), {
+  from: req.body.From,
+  body: req.body.Body,
+});
     console.log("🌍 Webhook HIT");
     const reply = req.body.Body?.trim().toLowerCase();
     const message = req.body.Body || '';

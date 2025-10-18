@@ -10,6 +10,8 @@ const router = express.Router();
  * Reuses your existing controller; no legacy aliasing.
  */
 router.get("/availability/acts-by-dateV2", async (req, res) => {
+        console.log(`🟠 (routes/v2) /availability/acts-by-dateV2 START at ${new Date().toISOString()}`, { });
+
   try {
     const date = String(req.query?.date || "").slice(0, 10);
     if (!date) return res.status(400).json({ success: false, message: "date required" });
@@ -26,6 +28,8 @@ router.get("/availability/acts-by-dateV2", async (req, res) => {
  * GET /api/v2/availability/check?actId=...&date=YYYY-MM-DD
  */
 router.get("/availability/check", async (req, res) => {
+          console.log(`🟠 (routes/v2) /availability/check START at ${new Date().toISOString()}`, { });
+
   try {
     const actId = String(req.query?.actId || "");
     const date  = String(req.query?.date || "").slice(0, 10);
@@ -56,6 +60,8 @@ router.get("/availability/check", async (req, res) => {
  * so it works the same locally, on Render, and on Netlify.
  */
 router.get("/travel/travel-data", async (req, res) => {
+            console.log(`🟠 (routes/v2) /travel/travel-data START at ${new Date().toISOString()}`, { });
+
   try {
     // Controller already validates params and returns normalized shape:
     // { success, date, outbound, returnTrip, sources }

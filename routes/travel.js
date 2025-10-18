@@ -3,20 +3,19 @@
 // Forces an ABSOLUTE backend base so calls never hit the Netlify origin.
 
 export default async function getTravelV2(origin, destination, dateISO) {
-  // Pick a backend base in this priority:
-  // 1) VITE_BACKEND_URL injected at build
-  // 2) window.__BACKEND_URL__ set in index.html at runtime (optional)
-  // 3) Render URL fallback (safe default for prod)
-  const BASE_RAW =
-    "https://tsc-backend-v2.onrender.com";
+  const startTime = performance.now();
+  console.log(
+    `🚴 (routes/travel.js) getTravelV2 START at`,
+    new Date().toISOString(),
+    { origin, destination, dateISO }
+  );
 
+  const BASE_RAW = "https://tsc-backend-v2.onrender.com";
   const BASE = String(BASE_RAW || "").replace(/\/+$/, "");
+
   if (!/^https?:\/\//i.test(BASE)) {
-    // If this ever triggers in prod, you know your env var is missing.
     console.warn(
-      "[travelV2] VITE_BACKEND_URL not set (got:",
-      BASE_RAW,
-      ") — falling back to Render default."
+      `🚴 (routes/travel.js) VITE_BACKEND_URL not set (got: ${BASE_RAW}) — falling back to Render default.`
     );
   }
 
@@ -27,33 +26,56 @@ export default async function getTravelV2(origin, destination, dateISO) {
 
   const url = `${BASE}/api/v2/travel/travel-data?${qs}`;
 
-  const res = await fetch(url, { headers: { accept: "application/json" } });
-  const text = await res.text();
-
-  // Try to JSON-parse; if it looks like HTML (e.g. Netlify/ngrok error page), throw early
-  let data = {};
   try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error("[travelV2] Non‑JSON response (possible proxy/redirect): " + text.slice(0, 80));
+    const res = await fetch(url, { headers: { accept: "application/json" } });
+    const text = await res.text();
+
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      console.error(
+        `🚴 (routes/travel.js) Non-JSON response (possible proxy/redirect):`,
+        text.slice(0, 80)
+      );
+      throw new Error("[travelV2] Non-JSON response");
+    }
+
+    if (!res.ok) {
+      const msg = data?.message || data?.error || text || `HTTP ${res.status}`;
+      console.error(`🚴 (routes/travel.js) ERROR: ${msg}`);
+      throw new Error(`[travelV2] ${res.status} ${msg}`);
+    }
+
+    // Normalize both the **new** shape and the Google Matrix legacy shape
+    const firstEl = data?.rows?.[0]?.elements?.[0];
+    const outbound =
+      data?.outbound ||
+      (firstEl?.distance && firstEl?.duration
+        ? {
+            distance: firstEl.distance,
+            duration: firstEl.duration,
+            fare: firstEl.fare,
+          }
+        : undefined);
+
+    const returnTrip = data?.returnTrip;
+    const miles =
+      (outbound?.distance?.value != null ? outbound.distance.value : 0) /
+      1609.34;
+
+    const durationMs = (performance.now() - startTime).toFixed(0);
+    console.log(
+      `🚴 (routes/travel.js) getTravelV2 SUCCESS in ${durationMs}ms`,
+      { origin, destination, miles }
+    );
+
+    return { outbound, returnTrip, miles, raw: data };
+  } catch (err) {
+    console.error(
+      `🚴 (routes/travel.js) getTravelV2 ERROR:`,
+      err?.message || err
+    );
+    throw err;
   }
-
-  if (!res.ok) {
-    const msg = data?.message || data?.error || text || `HTTP ${res.status}`;
-    throw new Error(`[travelV2] ${res.status} ${msg}`);
-  }
-
-  // Normalise both the **new** shape and the Google Matrix legacy shape
-  const firstEl = data?.rows?.[0]?.elements?.[0];
-  const outbound =
-    data?.outbound ||
-    (firstEl?.distance && firstEl?.duration
-      ? { distance: firstEl.distance, duration: firstEl.duration, fare: firstEl.fare }
-      : undefined);
-  const returnTrip = data?.returnTrip;
-
-  const miles =
-    (outbound?.distance?.value != null ? outbound.distance.value : 0) / 1609.34;
-
-  return { outbound, returnTrip, miles, raw: data };
 }

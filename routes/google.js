@@ -1,4 +1,4 @@
-// /routes/google.js
+// routes/google.js
 import express from "express";
 import {
   getAuthUrl,
@@ -9,10 +9,35 @@ import EnquiryMessage from "../models/EnquiryMessage.js";
 
 const router = express.Router();
 
-router.get("/auth-url", getAuthUrl);
-router.get("/oauth2callback", oauth2Callback);
+/* -------------------------------------------------------------------------- */
+/*                            GET /auth-url                                   */
+/* -------------------------------------------------------------------------- */
+router.get("/auth-url", (req, res, next) => {
+  console.log(`🌍 (routes/google.js) GET /api/google/auth-url called at`, new Date().toISOString(), {
+    query: req.query,
+  });
+  next();
+}, getAuthUrl);
 
+/* -------------------------------------------------------------------------- */
+/*                            GET /oauth2callback                             */
+/* -------------------------------------------------------------------------- */
+router.get("/oauth2callback", (req, res, next) => {
+  console.log(`🌍 (routes/google.js) GET /api/google/oauth2callback called at`, new Date().toISOString(), {
+    queryKeys: Object.keys(req.query || {}),
+  });
+  next();
+}, oauth2Callback);
+
+/* -------------------------------------------------------------------------- */
+/*                            POST /webhook                                   */
+/* -------------------------------------------------------------------------- */
 router.post("/webhook", async (req, res) => {
+  console.log(`🌍 (routes/google.js) POST /api/google/webhook called at`, new Date().toISOString(), {
+    headers: Object.keys(req.headers || {}),
+    bodyKeys: Object.keys(req.body || {}),
+  });
+
   console.log("📬 Google Calendar webhook headers:", req.headers);
   console.log("📬 Google Calendar webhook body:", req.body);
 
@@ -23,15 +48,12 @@ router.post("/webhook", async (req, res) => {
   console.log("🔔 Webhook received:", { channelId, resourceId, state });
 
   try {
-    // If you stored eventId with the enquiry, fetch it
-    // e.g., find enquiries with this resourceId (or eventId if you stored it)
-    const eventId = req.body.id || req.query.eventId; // adjust if you pass eventId when registering watch
+    const eventId = req.body.id || req.query.eventId;
     if (!eventId) {
       console.warn("⚠️ No eventId provided, cannot fetch event.");
       return res.sendStatus(200);
     }
 
-    // Fetch fresh event from Google
     const event = await getCalendarEvent(eventId);
 
     console.log("📆 Refetched event:", {
@@ -42,12 +64,10 @@ router.post("/webhook", async (req, res) => {
       })),
     });
 
-    // Loop through attendees and update enquiry DB
     if (event.attendees && event.attendees.length > 0) {
       for (const attendee of event.attendees) {
         const { email, responseStatus } = attendee;
 
-        // Find enquiry that matches this event + email
         const enquiry = await EnquiryMessage.findOneAndUpdate(
           { calendarEventId: event.id, "attendees.email": email },
           { $set: { "attendees.$.calendarStatus": responseStatus } },
@@ -55,18 +75,14 @@ router.post("/webhook", async (req, res) => {
         );
 
         if (enquiry) {
-          console.log(
-            `✅ Updated DB for ${email} → calendarStatus=${responseStatus}`
-          );
+          console.log(`✅ (routes/google.js) Updated DB for ${email} → calendarStatus=${responseStatus}`);
         } else {
-          console.warn(
-            `⚠️ No matching enquiry found for eventId=${event.id}, email=${email}`
-          );
+          console.warn(`⚠️ (routes/google.js) No matching enquiry found for eventId=${event.id}, email=${email}`);
         }
       }
     }
   } catch (err) {
-    console.error("❌ Error handling webhook:", err);
+    console.error("❌ (routes/google.js) Error handling webhook:", err);
   }
 
   res.sendStatus(200);

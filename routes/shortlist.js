@@ -10,19 +10,30 @@ import {
 import {
   triggerAvailabilityRequest,
   makeAvailabilityBroadcaster,
-  twilioStatus,
   clearAvailabilityBadge,
-  twilioInbound
 } from '../controllers/availabilityController.js';
 
 const router = express.Router();
 
-// Add / toggle shortlist + trigger Twilio availability
-router.post("/add", shortlistActAndTriggerAvailability);
+// ---------------------------------------------------------------------------
+// 🧾 Shortlist + Availability Integration
+// ---------------------------------------------------------------------------
+
+// Add or toggle shortlist + trigger Twilio availability
+router.post("/add", (req, res, next) => {
+  console.log('🔵 (routes/shortlist.js) /add triggered at', new Date().toISOString(), {
+    body: req.body,
+  });
+  next(); // continue to controller
+}, shortlistActAndTriggerAvailability);
 
 // Fetch user's shortlisted acts
-router.get("/user/:userId/shortlisted", getUserShortlist);
-
+router.get("/user/:userId/shortlisted", (req, res, next) => {
+  console.log('🔵 (routes/shortlist.js) /user/:userId/shortlisted triggered at', new Date().toISOString(), {
+    userId: req.params.userId,
+  });
+  next(); // continue to controller
+}, getUserShortlist);
 
 // --- in-memory SSE hub for availability updates ---
 const sseClients = new Set();
@@ -37,18 +48,45 @@ const availabilityNotify = makeAvailabilityBroadcaster(broadcastAvailability);
 // ✅ Expose the broadcaster for controller code that calls availabilityNotify.leadYes/deputyYes
 global.availabilityNotify = availabilityNotify;
 
-// If you need CORS preflight for POSTs from the web app:
-router.options('/add', (req, res) => res.sendStatus(200));
-router.options('/toggle', (req, res) => res.sendStatus(200));
+// ---------------------------------------------------------------------------
+// 🧭 CORS Preflight Routes
+// ---------------------------------------------------------------------------
 
-router.post('/availability/request', triggerAvailabilityRequest);
+// Log CORS preflight hits
+router.options('/add', (req, res) => {
+  console.log('🔵 (routes/shortlist.js) OPTIONS /add preflight triggered at', new Date().toISOString());
+  res.sendStatus(200);
+});
 
+router.options('/toggle', (req, res) => {
+  console.log('🔵 (routes/shortlist.js) OPTIONS /toggle preflight triggered at', new Date().toISOString());
+  res.sendStatus(200);
+});
 
-// ✅ Alias so you can call /api/shortlist/toggle as well
-router.post('/toggle', shortlistActAndTrack);
+// ---------------------------------------------------------------------------
+// 🟢 Availability + Shortlist Routes
+// ---------------------------------------------------------------------------
+
+// Availability request route
+router.post('/availability/request', (req, res, next) => {
+  console.log('🔵 (routes/shortlist.js) /availability/request triggered at', new Date().toISOString(), {
+    body: req.body,
+  });
+  next(); // pass to controller
+}, triggerAvailabilityRequest);
+
+// Alias for /api/shortlist/toggle
+router.post('/toggle', (req, res, next) => {
+  console.log('🔵 (routes/shortlist.js) /toggle triggered at', new Date().toISOString(), {
+    body: req.body,
+  });
+  next(); // pass to controller
+}, shortlistActAndTrack);
 
 // PATCH /api/shortlist/act/:id/increment-shortlist
 router.patch('/act/:id/increment-shortlist', async (req, res) => {
+          console.log(`🔵 (routes/shortlist.js) /act/:id/increment-shortlist START at ${new Date().toISOString()}`, { });
+
   const { userId, updateTimesShortlisted } = req.body;
   const actId = req.params.id;
 
@@ -80,6 +118,8 @@ router.patch('/act/:id/increment-shortlist', async (req, res) => {
 
 // PATCH /api/shortlist/act/:id/decrement-shortlist
 router.patch('/act/:id/decrement-shortlist', async (req, res) => {
+            console.log(`🔵 (routes/shortlist.js) /act/:id/decrement-shortlist START at ${new Date().toISOString()}`, { });
+
   const { userId } = req.body;
   const actId = req.params.id;
 
@@ -107,6 +147,8 @@ router.patch('/act/:id/decrement-shortlist', async (req, res) => {
 
 // Get the current user's shortlisted acts (populated)
 router.get('/user/:userId/shortlisted', async (req, res) => {
+              console.log(`🔵 (routes/shortlist.js) /user/:userId/shortlisted START at ${new Date().toISOString()}`, { });
+
   try {
     const { userId } = req.params;
     if (!userId || userId === 'undefined') {
@@ -131,6 +173,7 @@ const sseNoCompression = (req, res, next) => {
 // Live subscribe to availability updates over SSE
 // Live subscribe to availability updates over SSE
 router.get('/availability/subscribe', sseNoCompression, (req, res) => {
+                console.log(`🔵 (routes/shortlist.js) /availability/subscribe (SSE subscribe) START at ${new Date().toISOString()}`, { });
   console.log('📡 SSE subscribe: /api/shortlist/availability/subscribe');
 
   // Build a dynamic allow-list (keep in sync with server.js CORS)
@@ -189,14 +232,25 @@ router.get('/availability/subscribe', sseNoCompression, (req, res) => {
   });
 });
 
-router.post('/notify-musician', notifyMusician);
-
+router.post('/notify-musician', (req, res, next) => {
+  console.log('🔵 (routes/shortlist.js) /notify-musician triggered at', new Date().toISOString(), {
+    body: req.body,
+  });
+  next(); // continue to the controller
+}, notifyMusician);
 
 // Clear the availability badge (e.g., when Google Calendar webhook signals a decline)
-router.post('/availability/badge/clear', clearAvailabilityBadge);
+router.post('/availability/badge/clear', (req, res, next) => {
+  console.log('🔵 (routes/shortlist.js) /availability/badge/clear triggered at', new Date().toISOString(), {
+    body: req.body,
+  });
+  next(); // continue to the controller
+}, clearAvailabilityBadge);
 
 // Google Calendar push webhook → when you detect a decline, POST here with { actId }
 router.post('/google/notifications', async (req, res) => {
+                  console.log(`🔵 (routes/shortlist.js) /google/notifications START at ${new Date().toISOString()}`, { });
+
   try {
     const { actId, action } = req.body || {};
     if (action === 'declined' && actId) {

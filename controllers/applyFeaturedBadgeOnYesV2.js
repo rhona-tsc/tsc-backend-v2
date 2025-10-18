@@ -11,6 +11,8 @@ import { rebuildAndApplyBadge } from "./availabilityController.js";
 
 // --- tiny debugger for badge state -----------------------------------------
 export async function debugLogBadgeState(actId, label = "badge") {
+   console.log(`🟡 (controllers/applyFeaturedBadgeOnYesV2.js) debugLogBadgeState START at ${new Date().toISOString()}`, {
+ });
   try {
     const doc = await Act.findById(actId).select("availabilityBadge").lean();
     const b = doc?.availabilityBadge || {};
@@ -33,6 +35,8 @@ export async function debugLogBadgeState(actId, label = "badge") {
 
 // --- Local E.164 normalizer -------------------------------------------------
 const normalizePhoneE164_V2 = (raw = "") => {
+   console.log(`🟡 (controllers/applyFeaturedBadgeOnYesV2.js) normalizePhoneE164_V2 START at ${new Date().toISOString()}`, {
+ });
   let s = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
   if (!s) return "";
   if (s.startsWith("+")) return s;
@@ -43,11 +47,14 @@ const normalizePhoneE164_V2 = (raw = "") => {
 
 // --- Apply "Featured Vocalist Available" badge after a YES reply ------------
 export async function applyFeaturedBadgeOnYesV2({
+  
   updated,
   actDoc = null,
   musicianDoc = null,
   fromRaw = "",
 }) {
+   console.log(`🟡 (controllers/applyFeaturedBadgeOnYesV2.js) applyFeaturedBadgeOnYesV2 START at ${new Date().toISOString()}`, {
+ });
   try {
     if (
       !updated ||
@@ -294,6 +301,8 @@ export async function applyFeaturedBadgeOnYesV3({
   musicianDoc = null,
   fromRaw = "",
 }) {
+   console.log(`🟡 (controllers/applyFeaturedBadgeOnYesV2.js) applyFeaturedBadgeOnYesV3 START at ${new Date().toISOString()}`, {
+ });
   try {
     if (
       !updated ||

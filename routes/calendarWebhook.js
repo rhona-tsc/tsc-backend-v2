@@ -12,6 +12,9 @@ const calendar = google.calendar({ version: "v3", auth: oauth2Client });
 
 // POST /api/google/notifications  (your GOOGLE_WEBHOOK_URL)
 router.post("/notifications", async (req, res) => {
+    console.log('✨ (routes/calendarWebhook.js) /notifications triggered at', new Date().toISOString(), {
+    body: req.body,
+  });
   try {
     const resourceState = req.headers["x-goog-resource-state"]; // e.g. "exists", "sync"
     const channelId = req.headers["x-goog-channel-id"];
