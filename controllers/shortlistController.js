@@ -356,19 +356,26 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
         dateISO: selectedDate,
       });
 
-      const msgVars = {
-        1: vocalist.firstName || "",
-        2: new Date(selectedDate).toLocaleDateString("en-GB", {
-          weekday: "long",
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-        }),
-        3: shortAddress,
-        4: fee.toString(),
-        5: vocalist.instrument || "",
-        6: actData.tscName || "",
-      };
+const normalizeTscName = (name = "") =>
+  name.toLowerCase().replace(/\s+/g, "").replace(/[^\w]/g, "");
+
+const msgVars = {
+  1: vocalist.firstName || "",
+  2: new Date(selectedDate).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }),
+  3: shortAddress,
+  4: fee.toString(),
+  5: vocalist.instrument || "",
+  6: actData.tscName || "",
+  7: normalizeTscName(actData.tscName), // ✅ Twilio buttons now get YESfunkroyale
+};
+
+console.log("📨 Twilio msgVars preview:", msgVars);
+
 
       const smsBody = await buildAvailabilitySMS({
         firstName: msgVars[1],
@@ -412,7 +419,6 @@ const waMsg = await client.messages.create({
   to: `whatsapp:${phone}`,
   contentSid: process.env.TWILIO_ENQUIRY_SID,
   contentVariables: JSON.stringify(msgVars),
-  persistentAction: [`${payload}`], // 👈 optional: for Twilio buttons or interactive messages
 });
 
         console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone}), sid=${waMsg.sid}`);

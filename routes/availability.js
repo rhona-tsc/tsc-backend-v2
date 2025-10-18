@@ -41,67 +41,74 @@ router.get("/check-latest", async (req, res) => {
 
 
 
+// ✅ Twilio inbound handler (musician reply to availability request)
 router.post("/twilio/inbound", async (req, res) => {
   console.log(`🟢 (routes/availability.js) /twilio/inbound route START ...`);
   try {
-    const { From, Body, ButtonPayload } = req.body;
+    const { From, ButtonPayload, Body } = req.body;
     const fromPhone = From?.replace(/^whatsapp:/i, "").trim();
+    console.log("📩 Incoming Twilio inbound payload:", { From, ButtonPayload, Body });
 
+    // 🧩 Step 1: Find musician by phone
     const musician = await findPersonByPhone(fromPhone);
     if (!musician) {
       console.warn("❌ No musician found for", fromPhone);
       return res.sendStatus(200);
     }
-
     console.log("✅ Matched musician:", musician.firstName, musician.lastName);
 
-    // 🔍 Parse actId from ButtonPayload (e.g. YES68a5f5f66b1506572e709171)
-const match = ButtonPayload?.match(/YES[_\-]?(.+)/i);
-const tscNameRaw = match?.[1] || "";
-const tscName = tscNameRaw.replace(/_/g, " ").trim();
+    // 🧩 Step 2: Extract tscName from payload like "YESfunkroyale"
+    const match = ButtonPayload?.match(/YES[_\-]?([a-z0-9]+)/i);
+    const tscNameRaw = match?.[1] || "";
+    const tscName = tscNameRaw.trim().toLowerCase();
+    console.log("🎯 Extracted tscName from payload:", tscName);
 
-console.log("🎯 Extracted tscName from payload:", tscName);
-
-// Find act by tscName
-const act = await Act.findOne({ tscName: new RegExp(`^${tscName}$`, "i") }).lean();
-if (!act) {
-  console.warn("⚠️ No act found for tscName:", tscName);
-  return res.sendStatus(200);
-}
-    const actId = match?.[1];
-    const dateISO = new Date().toISOString().slice(0, 10); // fallback if not encoded
-
-    if (!actId) {
-      console.warn("⚠️ No actId found in ButtonPayload:", ButtonPayload);
+    if (!tscName) {
+      console.warn("⚠️ No tscName found in ButtonPayload:", ButtonPayload);
       return res.sendStatus(200);
     }
 
-    // ✅ Update AvailabilityModel
+    // 🧩 Step 3: Find the act by tscName (case-insensitive)
+    const act = await Act.findOne({ tscName: new RegExp(`^${tscName}$`, "i") }).lean();
+    if (!act) {
+      console.warn("⚠️ No act found for tscName:", tscName);
+      return res.sendStatus(200);
+    }
+
+    const actId = act._id;
+    const dateISO = new Date().toISOString().slice(0, 10);
+
+    console.log("🎵 Found act:", { tscName: act.tscName, actId, dateISO });
+
+    // 🧩 Step 4: Update or insert availability record
     await AvailabilityModel.updateOne(
       { actId, phone: fromPhone },
-      { $set: { reply: "yes", repliedAt: new Date() } },
+      {
+        $set: {
+          reply: "yes",
+          repliedAt: new Date(),
+          musicianId: musician._id,
+        },
+      },
       { upsert: true }
     );
+    console.log("🟢 Availability updated for musician:", musician.firstName);
 
-    // ✅ Try to trigger badge rebuild safely
+    // 🧩 Step 5: Rebuild availability badge
     try {
       const badge = await buildBadgeFromAvailability(actId, dateISO);
-
       if (badge) {
         await Act.updateOne({ _id: actId }, { $set: { availabilityBadge: badge } });
-        console.log("🐊 (controllers/availabilityBadgeController.js) Badge updated:", badge.vocalistName);
+        console.log("🐊 Badge updated successfully:", {
+          act: act.tscName,
+          vocalistName: badge.vocalistName,
+          deputies: badge.deputies.map((d) => d.vocalistName),
+        });
       } else {
-        console.warn(`⚠️ No badge could be built for actId=${actId} (no YES replies yet)`);
+        console.warn("⚠️ No badge built (no YES replies yet)");
       }
-
     } catch (badgeErr) {
-      console.error(`🐊 (controllers/availabilityBadgeController.js) Badge build failed for ${actId}:`, badgeErr.message);
-
-      // Optional deeper debug:
-      if (badgeErr.message.includes("Act not found")) {
-        const acts = await Act.find().select("_id tscName name").limit(10).lean();
-        console.warn("🧩 (debug) Showing first 10 Acts for comparison:", acts);
-      }
+      console.error("❌ Error building badge:", badgeErr.message);
     }
 
     res.sendStatus(200);
