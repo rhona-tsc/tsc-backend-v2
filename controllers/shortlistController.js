@@ -61,7 +61,7 @@ export async function buildAvailabilitySMS({
   firstName,
   formattedDate,
   formattedAddress,
-  actName: act?.name || act?.tscName,
+  actName: act?.tscName,
   memberName: `${member?.firstName || ""} ${member?.lastName || ""}`.trim(),
 });
   const shortDate = formatShortDate(formattedDate);
@@ -173,101 +173,86 @@ return { vocalist, phone };}
 
 // handle status callback from Twilio
 // ✅ Handle Twilio Status Callback (WhatsApp delivery)
-export const twilioStatusHandler = async (req, res) => {
-  console.log(`🐠 (controllers/shortlistController.js) twilioStatusHandler called at`, new Date().toISOString(), {
-  body: req.body,
-});
-  try {
-    const { MessageSid: sid, MessageStatus: status, ErrorCode: err, To: to } = req.body;
-    console.log("📡 Twilio status callback:", { sid, status, err, to });
+  export const twilioStatusHandler = async (req, res) => {
+    console.log(`🐠 (controllers/shortlistController.js) twilioStatusHandler called at`, new Date().toISOString(), {
+    body: req.body,
+  });
+    try {
+      const { MessageSid: sid, MessageStatus: status, ErrorCode: err, To: to } = req.body;
+      console.log("📡 Twilio status callback:", { sid, status, err, to });
 
-    // Only act if WA failed (undelivered or invalid destination)
-    const failed = status === "undelivered" && (err === "63024" || err === "63016");
-    if (!failed) return res.status(200).send("OK");
+      // Only act if WA failed (undelivered or invalid destination)
+      const failed = status === "undelivered" && (err === "63024" || err === "63016");
+      if (!failed) return res.status(200).send("OK");
 
-    // Try find the availability record
-    let availability = await Availability.findOne({ "outbound.sid": sid }).lean();
+      // Try find the availability record
+      let availability = await Availability.findOne({ "outbound.sid": sid }).lean();
 
-    // Fallback: match by phone if SID wasn’t yet written
-    if (!availability && to) {
-      const normalized = String(to).replace(/^whatsapp:/i, "");
-      availability = await Availability.findOne({ phone: normalized }).sort({ createdAt: -1 }).lean();
-    }
+      // Fallback: match by phone if SID wasn’t yet written
+      if (!availability && to) {
+        const normalized = String(to).replace(/^whatsapp:/i, "");
+        availability = await Availability.findOne({ phone: normalized }).sort({ createdAt: -1 }).lean();
+      }
 
-    if (!availability) {
-      console.warn("⚠️ No matching availability found for sid or phone:", sid, to);
-      return res.status(200).send("OK");
-    }
+      if (!availability) {
+        console.warn("⚠️ No matching availability found for sid or phone:", sid, to);
+        return res.status(200).send("OK");
+      }
 
-    // Rebuild SMS body
-    const act = await Act.findById(availability.actId).lean();
-    console.log("🧭 County travel debug:", {
-  county: availability.county || "none",
-  useCountyTravelFee: act.useCountyTravelFee,
-  countyFees: act.countyFees,
-  costPerMile: act.costPerMile,
-  useMURates: act.useMURates,
-});
-    const vocalistName = availability.contactName || availability.firstName || "there";
-// Rebuild SMS body from the stored availability data
-// 🧭 Find matching band member
-let member =
-  act.lineups?.flatMap(l => l.bandMembers || [])
-    .find(m =>
-      (m.email && m.email.toLowerCase() === (availability.email || "").toLowerCase()) ||
-      (m.phoneNumber && m.phoneNumber.replace(/\s+/g, "") === (availability.phone || "").replace(/\s+/g, ""))
-    ) || {};
+      // Rebuild SMS body
+      const act = await Act.findById(availability.actId).lean();
+      console.log("🧭 County travel debug:", {
+    county: availability.county || "none",
+    useCountyTravelFee: act.useCountyTravelFee,
+    countyFees: act.countyFees,
+    costPerMile: act.costPerMile,
+    useMURates: act.useMURates,
+  });
 
-// 🧾 Compute base, essential extras, and travel
-const essentialExtras = (member.additionalRoles || [])
-  .filter(r => r.isEssential)
-  .reduce((sum, r) => sum + (r.additionalFee || 0), 0);
+  let travel = 0;
 
-const base = member.fee || 0;
-let travel = 0;
-
-if (act.useCountyTravelFee && act.countyFees) {
-  const countyName = availability.county || ""; // 🌍 stored when derived
-  travel = Number(act.countyFees[countyName]) || 0;
-  console.log("🏞️ County-based travel:", { countyName, travel });
-} else if (act.costPerMile) {
-  console.log("🛣️ costPerMile travel calculation not implemented here");
-} else if (act.useMURates) {
-  console.log("🎼 MU rate fallback active");
-}
-// countyFees or costPerMile or MU rates
-if (act.useCountyTravelFee && act.countyFees) {
-  const countyMatch = Object.entries(act.countyFees).find(([county]) =>
-    availability.formattedAddress?.includes(county)
-  );
-  if (countyMatch) travel = Number(countyMatch[1]) || 0;
-} else if (act.costPerMile && member.postcode) {
-  // (you can later reuse your DistanceCache function for this)
-  travel = 0; // stub until DistanceCache integrated
-}
-
-// 🔧 Build SMS with correct data
-const smsBody = await buildAvailabilitySMS({
-  firstName: member.firstName || availability.contactName || availability.firstName,
-  formattedDate: availability.dateISO,
-  formattedAddress: availability.formattedAddress,
-  act,
-  member,
-  travelOverride: travel,                        // ✅ use the travel you computed
-  dutiesOverride: member.instrument,
-  actNameOverride: act?.name || act?.tscName,
-  countyName: availability.county,               // may be 'Berkshire'
-});
-
-    // Send fallback SMS
-    await sendSMSMessage(to, smsBody);
-    console.log(`📩 SMS fallback sent to ${to}`, { sid });
-  } catch (err) {
-    console.error("❌ Error in Twilio status handler:", err.message);
+  if (act.useCountyTravelFee && act.countyFees) {
+    const countyName = availability.county || ""; // 🌍 stored when derived
+    travel = Number(act.countyFees[countyName]) || 0;
+    console.log("🏞️ County-based travel:", { countyName, travel });
+  } else if (act.costPerMile) {
+    console.log("🛣️ costPerMile travel calculation not implemented here");
+  } else if (act.useMURates) {
+    console.log("🎼 MU rate fallback active");
+  }
+  // countyFees or costPerMile or MU rates
+  if (act.useCountyTravelFee && act.countyFees) {
+    const countyMatch = Object.entries(act.countyFees).find(([county]) =>
+      availability.formattedAddress?.includes(county)
+    );
+    if (countyMatch) travel = Number(countyMatch[1]) || 0;
+  } else if (act.costPerMile && member.postcode) {
+    // (you can later reuse your DistanceCache function for this)
+    travel = 0; // stub until DistanceCache integrated
   }
 
-  res.status(200).send("OK");
-};
+  // 🔧 Build SMS with correct data
+  const smsBody = await buildAvailabilitySMS({
+    firstName: member.firstName || availability.contactName || availability.firstName,
+    formattedDate: availability.dateISO,
+    formattedAddress: availability.formattedAddress,
+    act,
+    member,
+    travelOverride: travel,                        // ✅ use the travel you computed
+    dutiesOverride: member.instrument,
+    actNameOverride: act?.tscName,
+    countyName: availability.county,               // may be 'Berkshire'
+  });
+
+      // Send fallback SMS
+      await sendSMSMessage(to, smsBody);
+      console.log(`📩 SMS fallback sent to ${to}`, { sid });
+    } catch (err) {
+      console.error("❌ Error in Twilio status handler:", err.message);
+    }
+
+    res.status(200).send("OK");
+  };
 
 // ✅ main function
 export const shortlistActAndTriggerAvailability = async (req, res) => {
@@ -336,7 +321,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       console.log("✅ Vocalist identified:", {
         name: `${vocalist.firstName} ${vocalist.lastName}`,
         phone,
-        act: actData.name,
+        act: actData.tscName,
         lineup: lineup.actSize,
       });
 
@@ -382,7 +367,7 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
         3: shortAddress,
         4: fee.toString(),
         5: vocalist.instrument || "",
-        6: actData.name || "",
+        6: actData.tscName || "",
       };
 
       const smsBody = await buildAvailabilitySMS({
@@ -414,13 +399,16 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       });
 
       try {
-        // ✅ Send WhatsApp message
-        const waMsg = await client.messages.create({
-          from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,
-          to: `whatsapp:${phone}`,
-          contentSid: process.env.TWILIO_ENQUIRY_SID,
-          contentVariables: JSON.stringify(msgVars),
-        });
+   // ✅ Send WhatsApp message
+const payload = `YES${actData._id}`; // 👈 embed the current actId dynamically
+
+const waMsg = await client.messages.create({
+  from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,
+  to: `whatsapp:${phone}`,
+  contentSid: process.env.TWILIO_ENQUIRY_SID,
+  contentVariables: JSON.stringify(msgVars),
+  persistentAction: [`${payload}`], // 👈 optional: for Twilio buttons or interactive messages
+});
 
         console.log(`✅ WhatsApp enquiry sent to ${vocalist.firstName} (${phone}), sid=${waMsg.sid}`);
 
@@ -644,7 +632,7 @@ export const shortlistActAndTrack = async (req, res) => {
         '3': req.body.address || 'Not provided', // Location
         '4': fee, // Fee
         '5': musician.instrument || 'Not specified', // Instrument
-        '6': act?.name || ''
+        '6': act?.tscName || ''
       };
   
       // Send WhatsApp message with template
@@ -697,7 +685,7 @@ export const shortlistActAndTrack = async (req, res) => {
           // Broadcast to frontend via SSE -> triggers toast + badge
           const payload = {
             actId: act._id.toString(),
-            actName: act.name,
+            actName: act.tscName,
             musicianName: musician.firstName,
             dateISO: parsedDate.toISOString(),
           };
