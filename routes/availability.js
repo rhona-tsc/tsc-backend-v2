@@ -41,7 +41,7 @@ router.get("/check-latest", async (req, res) => {
 
 
 
-// ✅ Twilio inbound handler (musician reply to availability request)
+// ✅ routes/availability.js
 router.post("/twilio/inbound", async (req, res) => {
   console.log(`🟢 (routes/availability.js) /twilio/inbound route START ...`);
   try {
@@ -57,21 +57,32 @@ router.post("/twilio/inbound", async (req, res) => {
     }
     console.log("✅ Matched musician:", musician.firstName, musician.lastName);
 
-    // 🧩 Step 2: Extract tscName from payload like "YESfunkroyale"
-    const match = ButtonPayload?.match(/YES[_\-]?([a-z0-9]+)/i);
-    const tscNameRaw = match?.[1] || "";
-    const tscName = tscNameRaw.trim().toLowerCase();
-    console.log("🎯 Extracted tscName from payload:", tscName);
+    // 🧩 Step 2: Parse button payload → reply + act key
+    const match = ButtonPayload?.match(/^(YES|NOLOC|UNAVAILABLE)[_\-]?([a-z0-9]+)/i);
+    const replyType = match?.[1]?.toLowerCase(); // yes, noloc, unavailable
+    const tscKey = match?.[2] || "";
 
-    if (!tscName) {
-      console.warn("⚠️ No tscName found in ButtonPayload:", ButtonPayload);
+    if (!replyType || !tscKey) {
+      console.warn("⚠️ Missing replyType or tscKey in payload:", ButtonPayload);
       return res.sendStatus(200);
     }
 
-    // 🧩 Step 3: Find the act by tscName (case-insensitive)
-    const act = await Act.findOne({ tscName: new RegExp(`^${tscName}$`, "i") }).lean();
+    const normalize = (str = "") =>
+      str.toLowerCase().replace(/\s+/g, "").replace(/[^\w]/g, ""); // remove punctuation + spaces
+
+    const normalizedKey = normalize(tscKey);
+    console.log("🎯 Extracted from payload:", { replyType, normalizedKey });
+
+    // 🧩 Step 3: Find act by normalized tscName
+    const allActs = await Act.find({}, { _id: 1, tscName: 1 }).lean();
+    const act = allActs.find((a) => normalize(a.tscName) === normalizedKey);
+
     if (!act) {
-      console.warn("⚠️ No act found for tscName:", tscName);
+      console.warn("⚠️ No act found for normalized key:", normalizedKey);
+      console.log(
+        "🧩 (debug) First 10 acts for reference:",
+        allActs.slice(0, 10).map((a) => a.tscName)
+      );
       return res.sendStatus(200);
     }
 
@@ -80,35 +91,37 @@ router.post("/twilio/inbound", async (req, res) => {
 
     console.log("🎵 Found act:", { tscName: act.tscName, actId, dateISO });
 
-    // 🧩 Step 4: Update or insert availability record
+    // 🧩 Step 4: Update or insert availability
     await AvailabilityModel.updateOne(
       { actId, phone: fromPhone },
       {
         $set: {
-          reply: "yes",
+          reply: replyType,
           repliedAt: new Date(),
           musicianId: musician._id,
         },
       },
       { upsert: true }
     );
-    console.log("🟢 Availability updated for musician:", musician.firstName);
+    console.log(`🟢 Availability updated: ${replyType} for ${musician.firstName}`);
 
-    // 🧩 Step 5: Rebuild availability badge
-    try {
-      const badge = await buildBadgeFromAvailability(actId, dateISO);
-      if (badge) {
-        await Act.updateOne({ _id: actId }, { $set: { availabilityBadge: badge } });
-        console.log("🐊 Badge updated successfully:", {
-          act: act.tscName,
-          vocalistName: badge.vocalistName,
-          deputies: badge.deputies.map((d) => d.vocalistName),
-        });
-      } else {
-        console.warn("⚠️ No badge built (no YES replies yet)");
+    // 🧩 Step 5: Build badge only for YES replies
+    if (replyType === "yes") {
+      try {
+        const badge = await buildBadgeFromAvailability(actId, dateISO);
+        if (badge) {
+          await Act.updateOne({ _id: actId }, { $set: { availabilityBadge: badge } });
+          console.log("🐊 Badge updated successfully:", {
+            act: act.tscName,
+            vocalistName: badge.vocalistName,
+            deputies: badge.deputies.map((d) => d.vocalistName),
+          });
+        } else {
+          console.warn("⚠️ No badge built (no YES replies yet)");
+        }
+      } catch (err) {
+        console.error("❌ Error building badge:", err.message);
       }
-    } catch (badgeErr) {
-      console.error("❌ Error building badge:", badgeErr.message);
     }
 
     res.sendStatus(200);
