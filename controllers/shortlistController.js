@@ -400,7 +400,12 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
 
       try {
    // ✅ Send WhatsApp message
-const payload = `YES${actData._id}`; // 👈 embed the current actId dynamically
+const safeTsc = actData.tscName
+  ?.toLowerCase()
+  ?.replace(/\s+/g, "_")
+  ?.replace(/[^\w\-]/g, ""); // remove special chars
+const payload = `YES_${safeTsc}`;
+
 
 const waMsg = await client.messages.create({
   from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,

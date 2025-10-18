@@ -56,7 +56,18 @@ router.post("/twilio/inbound", async (req, res) => {
     console.log("✅ Matched musician:", musician.firstName, musician.lastName);
 
     // 🔍 Parse actId from ButtonPayload (e.g. YES68a5f5f66b1506572e709171)
-    const match = ButtonPayload?.match(/YES([a-f0-9]{24})/i);
+const match = ButtonPayload?.match(/YES[_\-]?(.+)/i);
+const tscNameRaw = match?.[1] || "";
+const tscName = tscNameRaw.replace(/_/g, " ").trim();
+
+console.log("🎯 Extracted tscName from payload:", tscName);
+
+// Find act by tscName
+const act = await Act.findOne({ tscName: new RegExp(`^${tscName}$`, "i") }).lean();
+if (!act) {
+  console.warn("⚠️ No act found for tscName:", tscName);
+  return res.sendStatus(200);
+}
     const actId = match?.[1];
     const dateISO = new Date().toISOString().slice(0, 10); // fallback if not encoded
 
