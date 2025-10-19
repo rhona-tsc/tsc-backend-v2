@@ -1951,9 +1951,11 @@ if (!person || !hasPhoto) {
   }
 };
 export const twilioInbound = async (req, res) => {
-  console.log(`🟢 (availabilityController.js) twilioInbound START at ${new Date().toISOString()}`);
+  console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
 
   try {
+    console.log("📬 Raw inbound req.body:", req.body);
+
     // Extract inbound WhatsApp payload only
     const bodyText = String(req.body?.Body || "");
     const buttonText = String(req.body?.ButtonText || "");
@@ -1985,21 +1987,31 @@ export const twilioInbound = async (req, res) => {
 
     // Prevent double processing of same SID in DB
     if (inboundSid) {
+      console.log("🔎 Checking for existing inbound SID in DB:", inboundSid);
       const dup = await AvailabilityModel.findOne({ "inbound.sid": inboundSid }).lean();
+      console.log("🔍 Duplicate check result:", !!dup);
       if (dup) {
-        console.log("🪵 Duplicate inbound detected, skipping", inboundSid);
+        console.log("🪵 Duplicate inbound detected in DB, skipping:", inboundSid);
         return res.status(200).send("<Response/>");
       }
     }
 
     // Parse reply
     const combinedText = `${buttonText} ${buttonPayload} ${bodyText}`.trim();
+    console.log("🧩 Combined text:", combinedText);
+
     let { reply, enquiryId } = parsePayload(buttonPayload);
+    console.log("🔍 parsePayload output:", { reply, enquiryId });
+
     if (!reply) reply = classifyReply(buttonText) || classifyReply(bodyText) || null;
+    console.log("🤖 Classified reply after fallback:", reply);
+
     if (!reply) {
       console.log("🤷 Unrecognised WhatsApp reply, ignoring:", combinedText);
       return res.status(204).send("<Response/>");
     }
+
+    console.log("🔎 Searching for matching AvailabilityModel document...");
 
     // Find and update corresponding availability row
     let updated = null;
@@ -2018,10 +2030,12 @@ export const twilioInbound = async (req, res) => {
         },
         { new: true }
       );
+      console.log("🧾 Updated via enquiryId match:", updated ? updated._id : "none");
     }
 
     if (!updated) {
       const candidates = normalizeFrom(fromRaw);
+      console.log("🔍 Fallback: normalizeFrom produced:", candidates);
       if (candidates.length) {
         updated = await AvailabilityModel.findOneAndUpdate(
           { phone: { $in: candidates } },
@@ -2037,6 +2051,7 @@ export const twilioInbound = async (req, res) => {
           },
           { sort: { createdAt: -1 }, new: true }
         );
+        console.log("🧾 Updated via phone match:", updated ? updated._id : "none");
       }
     }
 
@@ -2045,16 +2060,37 @@ export const twilioInbound = async (req, res) => {
       return res.status(200).send("<Response/>");
     }
 
+    console.log("✅ Availability row updated:", {
+      id: updated._id,
+      actId: updated.actId,
+      musicianId: updated.musicianId,
+      reply: updated.reply,
+    });
+
     // Load act + resolve musician
     const act = updated.actId ? await Act.findById(updated.actId).lean() : null;
     const musician = updated.musicianId
       ? await Musician.findById(updated.musicianId).lean()
       : null;
 
+    console.log("🎭 Loaded act + musician:", {
+      actFound: !!act,
+      actName: act?.tscName || act?.name,
+      musicianFound: !!musician,
+      musicianName: musician?.firstName || musician?.fullName,
+      musicianEmail: musician?.email,
+    });
+
     // Compute invite + badge
     const toE164 = normalizeToE164(updated.phone || fromRaw);
     const dateISOday = String((updated.dateISO || "").slice(0, 10));
     const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
+
+    console.log("🧮 Derived calendar invite info:", {
+      toE164,
+      dateISOday,
+      emailForInvite,
+    });
 
     // --- YES reply ---
     if (reply === "yes") {
@@ -2068,9 +2104,11 @@ export const twilioInbound = async (req, res) => {
               year: "numeric",
             })
           : "the date discussed";
+        console.log("📅 Formatted date string:", formattedDateString);
 
         // 🗓️ Create calendar invite if possible
         if (emailForInvite && dateISOday && act) {
+          console.log("📨 Attempting to create calendar invite...");
           const desc = [
             `TSC enquiry logged: ${new Date(updated.createdAt || Date.now()).toLocaleString("en-GB")}`,
             `Act: ${act.tscName || act.name}`,
@@ -2091,6 +2129,8 @@ export const twilioInbound = async (req, res) => {
               endTime: `${dateISOday}T23:59:00Z`,
             });
 
+            console.log("📆 createCalendarInvite response:", event);
+
             await AvailabilityModel.updateOne(
               { _id: updated._id },
               {
@@ -2108,30 +2148,40 @@ export const twilioInbound = async (req, res) => {
               eventId: event?.id || event?.data?.id,
             });
           } catch (err) {
-            console.warn("⚠️ Calendar invite failed:", err.message);
+            console.warn("⚠️ Calendar invite failed:", err.message, err.stack);
           }
+        } else {
+          console.log("⏭️ Skipping calendar invite — missing required fields", {
+            emailForInvite,
+            dateISOday,
+            actPresent: !!act,
+          });
         }
 
-        // ✅ WhatsApp confirmation only
+        // ✅ WhatsApp confirmation
+        console.log("📲 Sending confirmation WhatsApp message...");
         await sendWhatsAppText(
           toE164,
           "Super — we’ll send a diary invite to log the enquiry for your records."
         );
+        console.log("✅ WhatsApp confirmation sent.");
 
-        // 🟡 Refresh badge
+        console.log("🟡 Rebuilding availability badge...");
         await rebuildAvailabilityBadge(
           { body: { actId: String(updated.actId), dateISO: updated.dateISO } },
           { json: (r) => console.log("✅ Badge refreshed:", r), status: () => ({ json: () => {} }) }
         );
       } catch (err) {
-        console.error("❌ Error handling YES reply:", err.message);
+        console.error("❌ Error handling YES reply:", err.message, err.stack);
       }
 
+      console.log("✅ [twilioInbound] END (YES branch)");
       return res.status(200).send("<Response/>");
     }
 
     // --- NO / UNAVAILABLE ---
     if (["no", "unavailable"].includes(reply)) {
+      console.log(`🚫 Handling ${reply.toUpperCase()} reply`);
       try {
         await Act.updateOne(
           { _id: updated.actId },
@@ -2147,28 +2197,30 @@ export const twilioInbound = async (req, res) => {
           }
         );
 
-        await sendWhatsAppText(
-          toE164,
-          "Thanks for letting us know — we’ve updated your availability!"
-        );
+        console.log("🧹 Cleared badge for act:", updated.actId);
+
+        await sendWhatsAppText(toE164, "Thanks for letting us know — we’ve updated your availability!");
+        console.log("📲 Confirmation WhatsApp sent for NO/UNAVAILABLE");
 
         if (act && typeof handleLeadNegativeReply === "function") {
+          console.log("🔁 Calling handleLeadNegativeReply...");
           await handleLeadNegativeReply({ act, updated, fromRaw });
         }
 
-        console.log("🏷️ Cleared badge and handled NO/UNAVAILABLE reply");
+        console.log("🏷️ Completed NO/UNAVAILABLE processing");
       } catch (err) {
-        console.error("❌ Error processing NO/UNAVAILABLE:", err.message);
+        console.error("❌ Error processing NO/UNAVAILABLE:", err.message, err.stack);
       }
 
+      console.log("✅ [twilioInbound] END (NO/UNAVAILABLE branch)");
       return res.status(200).send("<Response/>");
     }
 
-    // Fallback
     console.log(`✅ Processed WhatsApp reply: ${reply}`);
+    console.log("✅ [twilioInbound] END (fallback branch)");
     return res.status(200).send("<Response/>");
   } catch (err) {
-    console.error("❌ Error in WhatsApp-only twilioInbound:", err);
+    console.error("❌ Error in twilioInbound:", err.message, err.stack);
     return res.status(200).send("<Response/>");
   }
 };
