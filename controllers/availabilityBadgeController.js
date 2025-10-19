@@ -107,8 +107,10 @@ export async function getAvailabilityBadge(req, res) {
       return res.json({ success: true, updated: false, badge: null });
     }
 
-    await Act.updateOne({ _id: actId }, { $set: { availabilityBadge: badge } });
-
+await Act.updateOne(
+  { _id: actId },
+  { $set: { [`availabilityBadges.${dateISO}`]: badge } }
+);
     console.log(`🐊 getAvailabilityBadge updated`, {
       actId,
       dateISO,

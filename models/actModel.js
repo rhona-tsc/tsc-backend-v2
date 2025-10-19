@@ -340,7 +340,11 @@ musicianProfileImageUpload: { type: String },
       },
     ],
     availabilityByDate: { type: [ActAvailabilitySchema], default: [] },
-availabilityBadge: { type: AvailabilityBadgeSchema, default: () => ({}) },
+availabilityBadges: {
+  type: Map,
+  of: AvailabilityBadgeSchema, // same sub-schema as current one
+  default: {},
+},
   },
   { timestamps: true }
 );
