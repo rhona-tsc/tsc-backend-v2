@@ -589,13 +589,13 @@ const shortAddress = (address || "")
 const existingEnquiry = await AvailabilityModel.findOne({
   actId,
   dateISO,
-  formattedAddress: new RegExp(shortAddress, "i"), // case-insensitive partial match
+  formattedAddress: shortAddress,
 }).lean();
 
 if (existingEnquiry) {
-  console.log("⛔ Availability already triggered for this act/date/address — skipping send");
-
-};
+  console.log("⛔ Already triggered for act/date/address:", existingEnquiry.dateISO, existingEnquiry.formattedAddress);
+  return res.json({ success: true, skipped: true, message: "Duplicate prevented" });
+}
 
 // Continue if no duplicate found
 const act = await Act.findById(actId).lean();
