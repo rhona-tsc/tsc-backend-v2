@@ -6,6 +6,7 @@ import {
   twilioInbound,
   rebuildAndApplyAvailabilityBadge,
   clearavailabilityBadges,
+  shortlistActAndTriggerAvailability,
 } from "../controllers/availabilityController.js";
 import { makeAvailabilityBroadcaster } from "../controllers/availabilityController.js";
 import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYesV2.js";
@@ -220,18 +221,30 @@ router.get("/subscribe", sseNoCompression, (req, res) => {
 /* -------------------------------------------------------------------------- */
 /* 🟢 POST /request – Trigger WhatsApp availability check                     */
 /* -------------------------------------------------------------------------- */
+
 router.post("/request", async (req, res) => {
   console.log(`🟢 (availability.js) /request START at ${new Date().toISOString()}`, req.body);
+
   try {
     const { actId, date, address, lineupId } = req.body;
+
     if (!actId || !date) {
       return res.status(400).json({ success: false, message: "Missing actId/date" });
     }
 
-    // Optional: trigger your Twilio or logic here
     console.log(`📅 Availability request triggered for act=${actId} on ${date}`);
 
-    res.json({ success: true, message: "Availability request received" });
+    // ✅ trigger WhatsApp availability message
+    const result = await shortlistActAndTriggerAvailability({ actId, date, address, lineupId });
+
+    if (result?.success) {
+      console.log(`✅ WhatsApp message sent successfully`, result);
+      res.json({ success: true, message: "WhatsApp request sent", result });
+    } else {
+      console.warn(`⚠️ WhatsApp send failed`, result);
+      res.status(500).json({ success: false, message: "WhatsApp send failed" });
+    }
+
   } catch (err) {
     console.error("❌ (availability.js) /request error:", err);
     res.status(500).json({ success: false, message: err.message });
