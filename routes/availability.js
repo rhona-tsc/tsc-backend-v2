@@ -4,16 +4,12 @@ import AvailabilityModel from "../models/availabilityModel.js";
 import Act from "../models/actModel.js";
 import {
   twilioInbound,
-  rebuildAndApplyBadge,
-  handleLeadNegativeReply,
+  rebuildAndApplyAvailabilityBadge,
   resolveAvailableMusician,
   clearavailabilityBadges,
 } from "../controllers/availabilityController.js";
 import { makeAvailabilityBroadcaster } from "../controllers/availabilityController.js";
 import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYesV2.js";
-import { notifyDeputyOneShot } from "../controllers/availabilityHelpers.js";
-import { findPersonByPhone } from "../utils/findPersonByPhone.js";
-import { buildBadgeFromAvailability } from "../controllers/availabilityBadgesController.js";
 
 const router = express.Router();
 
@@ -77,7 +73,7 @@ router.post("/badges/rebuild", (req, res, next) => {
     { bodyKeys: Object.keys(req.body || {}) }
   );
   next();
-}, rebuildAndApplyBadge);
+}, rebuildAndApplyAvailabilityBadge);
 
 /* -------------------------------------------------------------------------- */
 /* 🟪 GET /resolve-musician                                                   */

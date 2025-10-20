@@ -1319,7 +1319,7 @@ export const twilioInbound = async (req, res) => {
             },
           }
         );
-await rebuildAndApplyBadge(updated.actId, updated.dateISO);
+await rebuildAndApplyAvailabilityBadge(updated.actId, updated.dateISO);
         console.log("🧹 Cleared badge for act:", updated.actId);
 
         await sendWhatsAppText(toE164, "Thanks for letting us know — we’ve updated your availability!");
@@ -1361,7 +1361,7 @@ if (reply === "noloc") {
     );
 
     // Optional: refresh badge + trigger deputies
-    await rebuildAndApplyBadge(updated.actId, updated.dateISO);
+    await rebuildAndApplyAvailabilityBadge(updated.actId, updated.dateISO);
     await handleLeadNegativeReply({ act, updated, fromRaw });
 
     await sendWhatsAppText(

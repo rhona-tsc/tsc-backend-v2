@@ -6,7 +6,7 @@ import {
   resolveMatchedMusicianPhoto,
   debugLogMusicianByPhone,
 } from "./availabilityHelpers.js";
-import { rebuildAndApplyBadge } from "./availabilityController.js";
+import { rebuildAndApplyAvailabilityBadge } from "./availabilityController.js";
 
 
 // --- tiny debugger for badge state -----------------------------------------
@@ -275,7 +275,7 @@ if (match) {
       });
 
       // after updating the availability record
-await rebuildAndApplyBadge(updated.actId, updated.dateISO);
+await rebuildAndApplyAvailabilityBadge(updated.actId, updated.dateISO);
 
       await debugLogBadgeState(act._id, "after DEPUTY YES");
     }
@@ -438,7 +438,7 @@ export async function applyFeaturedBadgeOnYesV3({
       );
 
       // 🔁 refresh after deputy added
-      await rebuildAndApplyBadge(updated.actId, updated.dateISO);
+      await rebuildAndApplyAvailabilityBadge(updated.actId, updated.dateISO);
       console.log("➕ Deputy badge updated:", vocalistName);
     }
 
