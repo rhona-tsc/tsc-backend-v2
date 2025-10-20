@@ -10,6 +10,7 @@ import {
 import { makeAvailabilityBroadcaster } from "../controllers/availabilityController.js";
 import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYesV2.js";
 import { resolveAvailableMusician } from "../controllers/allocationController.js";
+import { getUserShortlist } from "../controllers/shortlistController.js";
 
 const router = express.Router();
 
@@ -42,6 +43,14 @@ router.get("/check-latest", async (req, res) => {
     res.status(500).json({ latestReply: null });
   }
 });
+
+router.get("/user/:userId/shortlisted", (req, res, next) => {
+  console.log(
+    `🟢 (routes/availability.js) /user/:userId/shortlisted START at ${new Date().toISOString()}`,
+    { userId: req.params.userId }
+  );
+  next();
+}, getUserShortlist);
 
 /* -------------------------------------------------------------------------- */
 /* 🟨 POST /twilio/inbound                                                    */
