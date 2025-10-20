@@ -8,7 +8,6 @@ import connectCloudinary from './config/connectCloudinary.js';
 import cloudinary from './config/cloudinary.js';
 import bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
-import shortlistRoutes from "./routes/shortlist.js";
 import router from "./routes/debugRoutes.js";
 import boardBackfillRoutes from "./routes/boardBackfillRoutes.js";
 import invoiceRoutes from "./routes/invoiceRoutes.js";
@@ -37,11 +36,10 @@ import uploadRoutes from "./routes/upload.js";
 import notificationsRoutes from "./routes/notifications.js";
 import newsletterRoutes from './routes/newsletterRoutes.js';
 import { getAvailableActIds } from './controllers/actAvailabilityController.js';
-import { twilioStatusHandler } from './controllers/shortlistController.js';
 import mongoose from "mongoose";
 import { submitActSubmission } from './controllers/actSubmissionController.js';
 import v2Routes from "./routes/v2.js";
-import { twilioInbound } from './controllers/availabilityController.js';
+import { twilioInbound, twilioStatusHandler } from './controllers/availabilityController.js';
 import { handleGoogleWebhook } from './controllers/googleController.js';
 
 // at the top of backend/server.js (after dotenv)
@@ -264,7 +262,6 @@ app.use('/api/musician', musicianRouter);
 app.use('/api/musician/act-v2', actV2Routes);
 
 app.use('/api/cart', cartRouter);
-app.use('/api/shortlist', shortlistRoutes);
 app.use('/api/booking', bookingRoutes);
 
 app.use('/api/google', googleRoutes);
