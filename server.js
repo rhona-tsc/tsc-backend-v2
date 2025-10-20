@@ -348,7 +348,7 @@ app.use((err, req, res, next) => {
 // 🕒 Google Calendar auto-watch refresh (runs daily at 3am UTC)
 // ---------------------------------------------------------------------------
 import cron from 'node-cron';
-import { buildBadgeFromAvailability } from './controllers/availabilityBadgeController.js';
+import { buildBadgeFromAvailability } from './controllers/availabilityBadgesController.js';
 
 let isRegistering = false;
 
