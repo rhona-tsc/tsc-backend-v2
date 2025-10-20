@@ -3,7 +3,6 @@ import express from "express";
 import Act from "../models/actModel.js";
 import User from "../models/userModel.js";
 import {
-  shortlistActAndTrack,
   shortlistActAndTriggerAvailability,
   getUserShortlist,
   notifyMusician,
