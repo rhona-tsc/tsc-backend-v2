@@ -39,7 +39,7 @@ import { getAvailableActIds } from './controllers/actAvailabilityController.js';
 import mongoose from "mongoose";
 import { submitActSubmission } from './controllers/actSubmissionController.js';
 import v2Routes from "./routes/v2.js";
-import { twilioInbound, twilioStatus } from './controllers/availabilityController.js';
+import { rebuildAndApplyAvailabilityBadge, twilioInbound, twilioStatus } from './controllers/availabilityController.js';
 import { handleGoogleWebhook } from './controllers/googleController.js';
 
 // at the top of backend/server.js (after dotenv)
@@ -276,7 +276,7 @@ app.use("/api", boardBackfillRoutes);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use('/api/act-submission', submitActSubmission);
-
+app.post("/api/rebuild-badge", rebuildAndApplyAvailabilityBadge);
 app.use('/api/availability', availabilityRoutes);
 
 // Direct mount
