@@ -449,19 +449,43 @@ return { vocalist, phone };}
 // ✅ main function
 
 export const shortlistActAndTriggerAvailability = async (req, res) => {
-  console.log(`🎯 (shortlistController.js) shortlistActAndTriggerAvailability START at`, new Date().toISOString(), {
-    body: req.body,
-  });
+  console.log(
+    `🎯 (shortlistController.js) shortlistActAndTriggerAvailability START at`,
+    new Date().toISOString(),
+    { body: req.body }
+  );
 
   try {
-    const { userId, actId, selectedDate, selectedAddress, lineupId } = req.body;
-    console.log("📦 Incoming body:", { userId, actId, selectedDate, selectedAddress, lineupId });
+    const body = req.body || {};
+    const {
+      userId,
+      actId,
+      selectedDate,
+      selectedAddress,
+      lineupId,
+      date,
+      address,
+    } = body;
+
+    // Normalise fallback values
+    const effectiveDate = selectedDate || date;
+    const effectiveAddress = selectedAddress || address;
+
+    console.log("📦 Normalised body:", {
+      userId,
+      actId,
+      lineupId,
+      effectiveDate,
+      effectiveAddress,
+    });
 
     if (!userId || !actId) {
-      return res.status(400).json({ success: false, message: "Missing userId or actId" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing userId or actId" });
     }
 
-    const outcode = extractOutcode(selectedAddress);
+    const outcode = extractOutcode(effectiveAddress);
     const resolvedCounty = countyFromOutcode(outcode);
     console.log("🌍 Derived county:", resolvedCounty || "❌ none");
 
@@ -473,10 +497,10 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     // Check if act/date/address combo already exists
     const existingEntry = shortlist.acts.find((entry) => {
       const sameAct = String(entry.actId) === String(actId);
-      const sameDate = entry.dateISO === selectedDate;
+      const sameDate = entry.dateISO === effectiveDate;
       const sameAddr =
         (entry.formattedAddress || "").trim().toLowerCase() ===
-        (selectedAddress || "").trim().toLowerCase();
+        (effectiveAddress || "").trim().toLowerCase();
       return sameAct && sameDate && sameAddr;
     });
 
@@ -485,10 +509,10 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     if (alreadyShortlisted) {
       shortlist.acts = shortlist.acts.filter((entry) => {
         const sameAct = String(entry.actId) === String(actId);
-        const sameDate = entry.dateISO === selectedDate;
+        const sameDate = entry.dateISO === effectiveDate;
         const sameAddr =
           (entry.formattedAddress || "").trim().toLowerCase() ===
-          (selectedAddress || "").trim().toLowerCase();
+          (effectiveAddress || "").trim().toLowerCase();
         return !(sameAct && sameDate && sameAddr);
       });
       console.log("❌ Removed specific act/date/address triple");
@@ -502,7 +526,11 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     }
 
     // ✅ Add new entry
-    shortlist.acts.push({ actId, dateISO: selectedDate, formattedAddress: selectedAddress });
+    shortlist.acts.push({
+      actId,
+      dateISO: effectiveDate,
+      formattedAddress: effectiveAddress,
+    });
     await shortlist.save();
     console.log("✅ Added new act/date/address triple to shortlist");
 
@@ -511,14 +539,16 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
     req.body = {
       actId,
       lineupId,
-      date: selectedDate,
-      address: selectedAddress,
+      date: effectiveDate,
+      address: effectiveAddress,
     };
 
     return await triggerAvailabilityRequest(req, res);
   } catch (err) {
     console.error("❌ shortlistActAndTriggerAvailability error:", err);
-    return res.status(500).json({ success: false, message: err.message || "Server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: err.message || "Server error" });
   }
 };
 
