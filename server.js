@@ -377,16 +377,16 @@ cron.schedule("*/30 * * * *", async () => {
   console.log("🔁 [CRON] Refreshing availability badges...");
   try {
     const upcomingActs = await mongoose.model("Act").find({
-      "availabilityBadge.active": true,
-    }).select("_id availabilityBadge.dateISO");
+      "availabilityBadges.active": true,
+    }).select("_id availabilityBadges.dateISO");
 
     for (const act of upcomingActs) {
-      const dateISO = act.availabilityBadge?.dateISO;
+      const dateISO = act.availabilityBadges?.dateISO;
       if (!dateISO) continue;
 
       const badge = await buildBadgeFromAvailability(act._id, dateISO);
       if (badge) {
-        await mongoose.model("Act").updateOne({ _id: act._id }, { $set: { availabilityBadge: badge } });
+        await mongoose.model("Act").updateOne({ _id: act._id }, { $set: { availabilityBadges: badge } });
         console.log(`✅ Refreshed badge for ${act._id} (${badge.vocalistName})`);
       }
     }

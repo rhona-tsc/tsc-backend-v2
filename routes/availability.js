@@ -4,7 +4,7 @@ import AvailabilityModel from "../models/availabilityModel.js";
 import { resolveAvailableMusician, rebuildAndApplyBadge, handleLeadNegativeReply, twilioInbound } from "../controllers/availabilityController.js";
 import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYesV2.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
-import { buildBadgeFromAvailability } from "../controllers/availabilityBadgeController.js";
+import { buildBadgeFromAvailability } from "../controllers/availabilityBadgesController.js";
 import Act from "../models/actModel.js";
 import { notifyDeputyOneShot } from "../controllers/availabilityHelpers.js";
 

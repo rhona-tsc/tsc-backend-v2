@@ -1,4 +1,4 @@
-// backend/controllers/availabilityBadgeController.js
+// backend/controllers/availabilityBadgesController.js
 import Act from "../models/actModel.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
@@ -7,7 +7,7 @@ import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 /*                        buildBadgeFromAvailability                          */
 /* -------------------------------------------------------------------------- */
 export async function buildBadgeFromAvailability(actId, dateISO) {
-  console.log(`🐊 (controllers/availabilityBadgeController.js) buildBadgeFromAvailability called at`, new Date().toISOString(), { actId, dateISO });
+  console.log(`🐊 (controllers/availabilityBadgesController.js) buildBadgeFromAvailability called at`, new Date().toISOString(), { actId, dateISO });
   const act = await Act.findById(actId).lean();
   if (!act) throw new Error("Act not found");
 
@@ -92,10 +92,10 @@ export async function buildBadgeFromAvailability(actId, dateISO) {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                          getAvailabilityBadge (GET)                        */
+/*                          getavailabilityBadges (GET)                        */
 /* -------------------------------------------------------------------------- */
-export async function getAvailabilityBadge(req, res) {
-  console.log(`🐊 (controllers/availabilityBadgeController.js) getAvailabilityBadge called at`, new Date().toISOString(), {
+export async function getavailabilityBadges(req, res) {
+  console.log(`🐊 (controllers/availabilityBadgesController.js) getavailabilityBadges called at`, new Date().toISOString(), {
     params: req.params,
   });
   try {
@@ -103,22 +103,22 @@ export async function getAvailabilityBadge(req, res) {
     const badge = await buildBadgeFromAvailability(actId, dateISO);
 
     if (!badge) {
-      console.log(`🐊 getAvailabilityBadge: No YES replies`, { actId, dateISO });
+      console.log(`🐊 getavailabilityBadges: No YES replies`, { actId, dateISO });
       return res.json({ success: true, updated: false, badge: null });
     }
 
 await Act.updateOne(
   { _id: actId },
-  { $set: { [`availabilityBadges.${dateISO}`]: badge } }
+  { $set: { [`availabilityBadgess.${dateISO}`]: badge } }
 );
-    console.log(`🐊 getAvailabilityBadge updated`, {
+    console.log(`🐊 getavailabilityBadges updated`, {
       actId,
       dateISO,
       vocalistName: badge.vocalistName,
     });
     res.json({ success: true, updated: true, badge });
   } catch (err) {
-    console.error(`🐊 getAvailabilityBadge error`, err);
+    console.error(`🐊 getavailabilityBadges error`, err);
     res.status(500).json({ success: false, message: err.message || "Server error" });
   }
 }

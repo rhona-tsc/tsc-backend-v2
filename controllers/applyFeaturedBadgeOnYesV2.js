@@ -14,8 +14,8 @@ export async function debugLogBadgeState(actId, label = "badge") {
    console.log(`🟡 (controllers/applyFeaturedBadgeOnYesV2.js) debugLogBadgeState START at ${new Date().toISOString()}`, {
  });
   try {
-    const doc = await Act.findById(actId).select("availabilityBadge").lean();
-    const b = doc?.availabilityBadge || {};
+    const doc = await Act.findById(actId).select("availabilityBadges").lean();
+    const b = doc?.availabilityBadges || {};
     const deps = Array.isArray(b.deputies) ? b.deputies : [];
     console.log(`🔎 ${label}:`, {
       active: !!b.active,
@@ -203,9 +203,9 @@ if (match) {
     };
 
     const commonSet = {
-      "availabilityBadge.dateISO": updated.dateISO || null,
-      "availabilityBadge.address": updated.formattedAddress || "",
-      "availabilityBadge.setAt": new Date(),
+      "availabilityBadges.dateISO": updated.dateISO || null,
+      "availabilityBadges.address": updated.formattedAddress || "",
+      "availabilityBadges.setAt": new Date(),
     };
 
     // 🎤 If lead replies YES → set lead as active
@@ -215,12 +215,12 @@ if (match) {
         {
           $set: {
             ...commonSet,
-            "availabilityBadge.active": true,
-            "availabilityBadge.isDeputy": false,
-            "availabilityBadge.vocalistName":
+            "availabilityBadges.active": true,
+            "availabilityBadges.isDeputy": false,
+            "availabilityBadges.vocalistName":
               vocalistName || (updated?.name || "").trim(),
-            "availabilityBadge.photoUrl": resolvedPhotoUrl || "",
-            "availabilityBadge.musicianId": resolvedMusicianId || "",
+            "availabilityBadges.photoUrl": resolvedPhotoUrl || "",
+            "availabilityBadges.musicianId": resolvedMusicianId || "",
           },
         }
       );
@@ -237,8 +237,8 @@ if (match) {
         {
           $set: {
             ...commonSet,
-            "availabilityBadge.active": false,
-            "availabilityBadge.isDeputy": true,
+            "availabilityBadges.active": false,
+            "availabilityBadges.isDeputy": true,
           },
         }
       );
@@ -248,7 +248,7 @@ if (match) {
         { _id: act._id },
         {
           $pull: {
-            "availabilityBadge.deputies": {
+            "availabilityBadges.deputies": {
               musicianId: deputyRecord.musicianId,
             },
           },
@@ -260,7 +260,7 @@ if (match) {
         { _id: act._id },
         {
           $push: {
-            "availabilityBadge.deputies": {
+            "availabilityBadges.deputies": {
               $each: [deputyRecord],
               $position: 0,
               $slice: 3,
@@ -375,9 +375,9 @@ export async function applyFeaturedBadgeOnYesV3({
 
     // 🧾 3️⃣ Shared update fields
     const baseSet = {
-      "availabilityBadge.dateISO": updated.dateISO || null,
-      "availabilityBadge.address": updated.formattedAddress || "",
-      "availabilityBadge.setAt": new Date(),
+      "availabilityBadges.dateISO": updated.dateISO || null,
+      "availabilityBadges.address": updated.formattedAddress || "",
+      "availabilityBadges.setAt": new Date(),
     };
 
     // 🎤 4️⃣ If lead
@@ -387,12 +387,12 @@ export async function applyFeaturedBadgeOnYesV3({
         {
           $set: {
             ...baseSet,
-            "availabilityBadge.active": true,
-            "availabilityBadge.isDeputy": false,
-            "availabilityBadge.vocalistName": vocalistName,
-            "availabilityBadge.musicianId": musicianId,
-            "availabilityBadge.photoUrl": photoUrl,
-            "availabilityBadge.profileUrl": `${
+            "availabilityBadges.active": true,
+            "availabilityBadges.isDeputy": false,
+            "availabilityBadges.vocalistName": vocalistName,
+            "availabilityBadges.musicianId": musicianId,
+            "availabilityBadges.photoUrl": photoUrl,
+            "availabilityBadges.profileUrl": `${
               process.env.PUBLIC_SITE_URL || "http://localhost:5174"
             }/musician/${musicianId}`,
           },
@@ -418,9 +418,9 @@ export async function applyFeaturedBadgeOnYesV3({
         {
           $set: {
             ...baseSet,
-            "availabilityBadge.isDeputy": true,
+            "availabilityBadges.isDeputy": true,
           },
-          $pull: { "availabilityBadge.deputies": { musicianId } },
+          $pull: { "availabilityBadges.deputies": { musicianId } },
         }
       );
 
@@ -428,7 +428,7 @@ export async function applyFeaturedBadgeOnYesV3({
         { _id: act._id },
         {
           $push: {
-            "availabilityBadge.deputies": {
+            "availabilityBadges.deputies": {
               $each: [deputyRecord],
               $position: 0,
               $slice: 3,

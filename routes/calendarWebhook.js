@@ -68,13 +68,13 @@ router.post("/notifications", async (req, res) => {
         // Clear badge if declined/cancelled
         if (isDecline && doc.actId) {
           await Act.findByIdAndUpdate(doc.actId, {
-            $set: { "availabilityBadge.active": false },
+            $set: { "availabilityBadges.active": false },
             $unset: {
-              "availabilityBadge.vocalistName": "",
-              "availabilityBadge.inPromo": "",
-              "availabilityBadge.dateISO": "",
-              "availabilityBadge.address": "",
-              "availabilityBadge.setAt": "",
+              "availabilityBadges.vocalistName": "",
+              "availabilityBadges.inPromo": "",
+              "availabilityBadges.dateISO": "",
+              "availabilityBadges.address": "",
+              "availabilityBadges.setAt": "",
             },
           });
           console.log("🏷️ Cleared availability badge for act", String(doc.actId));

@@ -44,8 +44,7 @@ function classifyReply(text) {
 
 function getCountyFeeValue(countyFees, countyName) {
   console.log(`🟢 (availabilityController.js) getCountyFeeValue  START at ${new Date().toISOString()}`, {
-    actId: req.query?.actId,
-    dateISO: req.query?.dateISO,});
+   });
   if (!countyFees || !countyName) return undefined;
 
   // Normalized compare: "Berkshire" === "berkshire" === "berk_shire"
@@ -573,8 +572,8 @@ const normalizePhoneE164 = (raw = "") => {
   return v;
 };
 
-export const clearAvailabilityBadge = async (req, res) => {
-   console.log(`🟢 (availabilityController.js) cleadAvailabilityBadge START at ${new Date().toISOString()}`, {
+export const clearavailabilityBadges = async (req, res) => {
+   console.log(`🟢 (availabilityController.js) cleadavailabilityBadges START at ${new Date().toISOString()}`, {
  });
   try {
     const { actId } = req.body;
@@ -582,20 +581,20 @@ export const clearAvailabilityBadge = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing actId" });
 
     await Act.findByIdAndUpdate(actId, {
-      $set: { "availabilityBadge.active": false },
+      $set: { "availabilityBadges.active": false },
       $unset: {
-        "availabilityBadge.vocalistName": "",
-        "availabilityBadge.inPromo": "",
-        "availabilityBadge.dateISO": "",
-        "availabilityBadge.musicianId": "",
-        "availabilityBadge.address": "",
-        "availabilityBadge.setAt": "",
+        "availabilityBadges.vocalistName": "",
+        "availabilityBadges.inPromo": "",
+        "availabilityBadges.dateISO": "",
+        "availabilityBadges.musicianId": "",
+        "availabilityBadges.address": "",
+        "availabilityBadges.setAt": "",
       },
     });
 
     return res.json({ success: true });
   } catch (err) {
-    console.error("❌ clearAvailabilityBadge error", err);
+    console.error("❌ clearavailabilityBadges error", err);
     return res
       .status(500)
       .json({ success: false, message: err?.message || "Server error" });
@@ -836,11 +835,8 @@ const existingEnquiry = await AvailabilityModel.findOne({
 
 if (existingEnquiry) {
   console.log("⛔ Availability already triggered for this act/date/address — skipping send");
-  return res.json({
-    success: false,
-    message: "Availability already triggered for this act/date/address",
-  });
-}
+
+};
 
 // Continue if no duplicate found
 const act = await Act.findById(actId).lean();
@@ -1393,8 +1389,8 @@ function seenInboundOnce(sid) {
 
 
 // Build an availability badge state from Availability rows for a given act/date
-async function buildAvailabilityBadgeFromRows(act, dateISO) {
-   console.log(`🟢 (availabilityController.js) buildAvailabilityBadgeFromRows START at ${new Date().toISOString()}`, {
+async function buildavailabilityBadgesFromRows(act, dateISO) {
+   console.log(`🟢 (availabilityController.js) buildavailabilityBadgesFromRows START at ${new Date().toISOString()}`, {
  });
   if (!act || !dateISO) return null;
   const rows = await AvailabilityModel.find({ actId: act._id, dateISO })
@@ -1453,7 +1449,7 @@ async function buildAvailabilityBadgeFromRows(act, dateISO) {
             inPromo: false,
             deputies: enriched,
             vocalistName: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
-            address: act?.availabilityBadge?.address || "",
+            address: act?.availabilityBadges?.address || "",
             setAt: new Date(),
           };
         }
@@ -1470,7 +1466,7 @@ async function buildAvailabilityBadgeFromRows(act, dateISO) {
           vocalistName: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
           musicianId: bits.musicianId || "",
           photoUrl: bits.photoUrl || "",
-          address: act?.availabilityBadge?.address || "",
+          address: act?.availabilityBadges?.address || "",
           setAt: new Date(),
         };
       }
@@ -1675,7 +1671,7 @@ export async function rebuildAndApplyBadge(actId, dateISO) {
     const act = await Act.findById(actId).lean();
     if (!act) return;
 
-    const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
+    const badge = await buildavailabilityBadgesFromRows(act, dateISO);
 
     // --- NEW: Aggregate deputy replies (up to 3) ---
     const deputies = await AvailabilityModel.find({
@@ -1705,14 +1701,14 @@ export async function rebuildAndApplyBadge(actId, dateISO) {
     // --- Combine lead + deputy badges ---
     if (badge || deputyBadges.length > 0) {
       const combined = {
-        ...(act.availabilityBadge || {}),
+        ...(act.availabilityBadges || {}),
         ...(badge || {}),
         deputies: deputyBadges,
       };
 
       await Act.updateOne(
         { _id: act._id },
-        { $set: { availabilityBadge: combined } }
+        { $set: { availabilityBadges: combined } }
       );
 
       console.log(
@@ -1725,17 +1721,17 @@ export async function rebuildAndApplyBadge(actId, dateISO) {
       await Act.updateOne(
         { _id: act._id },
         {
-          $set: { "availabilityBadge.active": false },
+          $set: { "availabilityBadges.active": false },
           $unset: {
-            "availabilityBadge.vocalistName": "",
-            "availabilityBadge.inPromo": "",
-            "availabilityBadge.isDeputy": "",
-            "availabilityBadge.photoUrl": "",
-            "availabilityBadge.musicianId": "",
-            "availabilityBadge.dateISO": "",
-            "availabilityBadge.address": "",
-            "availabilityBadge.deputies": "",
-            "availabilityBadge.setAt": "",
+            "availabilityBadges.vocalistName": "",
+            "availabilityBadges.inPromo": "",
+            "availabilityBadges.isDeputy": "",
+            "availabilityBadges.photoUrl": "",
+            "availabilityBadges.musicianId": "",
+            "availabilityBadges.dateISO": "",
+            "availabilityBadges.address": "",
+            "availabilityBadges.deputies": "",
+            "availabilityBadges.setAt": "",
           },
         }
       );
@@ -1746,8 +1742,8 @@ export async function rebuildAndApplyBadge(actId, dateISO) {
     console.warn("⚠️ rebuildAndApplyBadge failed:", e?.message || e);
   }
 }
-export const rebuildAvailabilityBadge = async (req, res) => {
-   console.log(`🟢 (availabilityController.js) rebuildAvailabilityBadge START at ${new Date().toISOString()}`, {
+export const rebuildavailabilityBadges = async (req, res) => {
+   console.log(`🟢 (availabilityController.js) rebuildavailabilityBadges START at ${new Date().toISOString()}`, {
  });
   try {
     const { actId, dateISO } = req.body || {};
@@ -1761,8 +1757,8 @@ export const rebuildAvailabilityBadge = async (req, res) => {
     console.log(`🎯 Rebuilding availability badge for Act=${act.tscName || act.name} @ ${dateISO}`);
 
     // 🧩 Initial badge build
-    const preBadge = await buildAvailabilityBadgeFromRows(act, dateISO);
-    console.log("🧩 [BEFORE ENRICHMENT] buildAvailabilityBadgeFromRows result:", preBadge);
+    const preBadge = await buildavailabilityBadgesFromRows(act, dateISO);
+    console.log("🧩 [BEFORE ENRICHMENT] buildavailabilityBadgesFromRows result:", preBadge);
 
     // 🔹 Get availability replies
     const availRows = await AvailabilityModel.find({
@@ -1775,7 +1771,7 @@ export const rebuildAvailabilityBadge = async (req, res) => {
     if (!availRows.length) {
       await Act.updateOne(
         { _id: actId },
-        { $set: { "availabilityBadge.active": false }, $unset: { "availabilityBadge.deputies": "" } }
+        { $set: { "availabilityBadges.active": false }, $unset: { "availabilityBadges.deputies": "" } }
       );
       return res.json({ success: true, updated: false, reason: "No replies found" });
     }
@@ -1785,7 +1781,7 @@ export const rebuildAvailabilityBadge = async (req, res) => {
     if (!yesReplies.length) {
       await Act.updateOne(
         { _id: actId },
-        { $set: { "availabilityBadge.active": false }, $unset: { "availabilityBadge.deputies": "" } }
+        { $set: { "availabilityBadges.active": false }, $unset: { "availabilityBadges.deputies": "" } }
       );
       console.log("⚠️ No YES replies — badge cleared.");
       return res.json({ success: true, updated: false, reason: "No YES replies" });
@@ -1923,15 +1919,15 @@ if (!person || !hasPhoto) {
       { _id: actId },
       {
         $set: {
-          "availabilityBadge.active": true,
-          "availabilityBadge.dateISO": rebuiltBadge.dateISO,
-          "availabilityBadge.setAt": rebuiltBadge.setAt,
-          "availabilityBadge.vocalistName": rebuiltBadge.vocalistName,
-          "availabilityBadge.musicianId": rebuiltBadge.musicianId,
-          "availabilityBadge.photoUrl": rebuiltBadge.photoUrl,
-          "availabilityBadge.profileUrl": rebuiltBadge.profileUrl,
-          "availabilityBadge.isDeputy": rebuiltBadge.isDeputy,
-          "availabilityBadge.deputies": rebuiltBadge.deputies,
+          "availabilityBadges.active": true,
+          "availabilityBadges.dateISO": rebuiltBadge.dateISO,
+          "availabilityBadges.setAt": rebuiltBadge.setAt,
+          "availabilityBadges.vocalistName": rebuiltBadge.vocalistName,
+          "availabilityBadges.musicianId": rebuiltBadge.musicianId,
+          "availabilityBadges.photoUrl": rebuiltBadge.photoUrl,
+          "availabilityBadges.profileUrl": rebuiltBadge.profileUrl,
+          "availabilityBadges.isDeputy": rebuiltBadge.isDeputy,
+          "availabilityBadges.deputies": rebuiltBadge.deputies,
         },
       }
     );
@@ -1946,7 +1942,7 @@ if (!person || !hasPhoto) {
 
     return res.json({ success: true, updated: true, badge: rebuiltBadge });
   } catch (err) {
-    console.error("❌ rebuildAvailabilityBadge error:", err);
+    console.error("❌ rebuildavailabilityBadges error:", err);
     return res.status(500).json({ success: false, message: err?.message || "Server error" });
   }
 };
@@ -2167,7 +2163,7 @@ export const twilioInbound = async (req, res) => {
         console.log("✅ WhatsApp confirmation sent.");
 
         console.log("🟡 Rebuilding availability badge...");
-        await rebuildAvailabilityBadge(
+        await rebuildavailabilityBadges(
           { body: { actId: String(updated.actId), dateISO: updated.dateISO } },
           { json: (r) => console.log("✅ Badge refreshed:", r), status: () => ({ json: () => {} }) }
         );
@@ -2186,13 +2182,13 @@ export const twilioInbound = async (req, res) => {
         await Act.updateOne(
           { _id: updated.actId },
           {
-            $set: { "availabilityBadge.active": false },
+            $set: { "availabilityBadges.active": false },
             $unset: {
-              "availabilityBadge.vocalistName": "",
-              "availabilityBadge.photoUrl": "",
-              "availabilityBadge.musicianId": "",
-              "availabilityBadge.dateISO": "",
-              "availabilityBadge.setAt": "",
+              "availabilityBadges.vocalistName": "",
+              "availabilityBadges.photoUrl": "",
+              "availabilityBadges.musicianId": "",
+              "availabilityBadges.dateISO": "",
+              "availabilityBadges.setAt": "",
             },
           }
         );
@@ -2225,14 +2221,14 @@ if (reply === "noloc") {
     await Act.updateOne(
       { _id: updated.actId },
       {
-        $set: { "availabilityBadge.active": false },
+        $set: { "availabilityBadges.active": false },
         $unset: {
-          "availabilityBadge.vocalistName": "",
-          "availabilityBadge.photoUrl": "",
-          "availabilityBadge.musicianId": "",
-          "availabilityBadge.dateISO": "",
-          "availabilityBadge.setAt": "",
-          "availabilityBadge.address": "",
+          "availabilityBadges.vocalistName": "",
+          "availabilityBadges.photoUrl": "",
+          "availabilityBadges.musicianId": "",
+          "availabilityBadges.dateISO": "",
+          "availabilityBadges.setAt": "",
+          "availabilityBadges.address": "",
         },
       }
     );

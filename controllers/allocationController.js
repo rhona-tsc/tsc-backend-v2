@@ -67,13 +67,13 @@ export const triggerBookingRequests = async (req, res) => {
 
     // 1) Clear the availability badge immediately
     await Act.findByIdAndUpdate(actId, {
-      $set: { "availabilityBadge.active": false },
+      $set: { "availabilityBadges.active": false },
       $unset: {
-        "availabilityBadge.vocalistName": "",
-        "availabilityBadge.inPromo": "",
-        "availabilityBadge.dateISO": "",
-        "availabilityBadge.address": "",
-        "availabilityBadge.setAt": "",
+        "availabilityBadges.vocalistName": "",
+        "availabilityBadges.inPromo": "",
+        "availabilityBadges.dateISO": "",
+        "availabilityBadges.address": "",
+        "availabilityBadges.setAt": "",
       },
     });
 

@@ -10,7 +10,7 @@ import {
 import {
   triggerAvailabilityRequest,
   makeAvailabilityBroadcaster,
-  clearAvailabilityBadge,
+  clearavailabilityBadges,
 } from '../controllers/availabilityController.js';
 
 const router = express.Router();
@@ -245,7 +245,7 @@ router.post('/availability/badge/clear', (req, res, next) => {
     body: req.body,
   });
   next(); // continue to the controller
-}, clearAvailabilityBadge);
+}, clearavailabilityBadges);
 
 // Google Calendar push webhook → when you detect a decline, POST here with { actId }
 router.post('/google/notifications', async (req, res) => {
@@ -255,7 +255,7 @@ router.post('/google/notifications', async (req, res) => {
     const { actId, action } = req.body || {};
     if (action === 'declined' && actId) {
       // Reuse the controller to clear the badge
-      await clearAvailabilityBadge({ body: { actId } }, {
+      await clearavailabilityBadges({ body: { actId } }, {
         status: (c) => ({ json: (o) => res.status(c).json(o) }),
         json: (o) => res.json(o)
       });

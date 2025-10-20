@@ -13,7 +13,7 @@ const AvailabilityDeputySchema = new mongoose.Schema(
   { _id: false }
 );
 
-const AvailabilityBadgeSchema = new mongoose.Schema(
+const availabilityBadgesSchema = new mongoose.Schema(
   {
     active: { type: Boolean, default: false },
     isDeputy: { type: Boolean, default: false },     // for the lead slot when it's a deputy
@@ -342,7 +342,7 @@ musicianProfileImageUpload: { type: String },
     availabilityByDate: { type: [ActAvailabilitySchema], default: [] },
 availabilityBadges: {
   type: Map,
-  of: AvailabilityBadgeSchema, // same sub-schema as current one
+  of: availabilityBadgesSchema, // same sub-schema as current one
   default: {},
 },
   },
