@@ -217,4 +217,77 @@ router.get("/subscribe", sseNoCompression, (req, res) => {
   });
 });
 
+/* -------------------------------------------------------------------------- */
+/* 🟢 POST /request – Trigger WhatsApp availability check                     */
+/* -------------------------------------------------------------------------- */
+router.post("/request", async (req, res) => {
+  console.log(`🟢 (availability.js) /request START at ${new Date().toISOString()}`, req.body);
+  try {
+    const { actId, date, address, lineupId } = req.body;
+    if (!actId || !date) {
+      return res.status(400).json({ success: false, message: "Missing actId/date" });
+    }
+
+    // Optional: trigger your Twilio or logic here
+    console.log(`📅 Availability request triggered for act=${actId} on ${date}`);
+
+    res.json({ success: true, message: "Availability request received" });
+  } catch (err) {
+    console.error("❌ (availability.js) /request error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* 🟡 PATCH /act/:id/increment-shortlist – increment shortlist counter        */
+/* -------------------------------------------------------------------------- */
+router.patch("/act/:id/increment-shortlist", async (req, res) => {
+  console.log(`🟡 (availability.js) /act/:id/increment-shortlist START`, {
+    id: req.params.id,
+    userId: req.body?.userId,
+  });
+
+  try {
+    const actId = req.params.id;
+    if (!actId) return res.status(400).json({ success: false, message: "Missing actId" });
+
+    const updated = await Act.findByIdAndUpdate(
+      actId,
+      { $inc: { timesShortlisted: 1 } },
+      { new: true }
+    ).select("_id name tscName timesShortlisted");
+
+    res.json({ success: true, act: updated });
+  } catch (err) {
+    console.error("❌ increment-shortlist error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* 🔵 PATCH /act/:id/decrement-shortlist – decrement shortlist counter        */
+/* -------------------------------------------------------------------------- */
+router.patch("/act/:id/decrement-shortlist", async (req, res) => {
+  console.log(`🔵 (availability.js) /act/:id/decrement-shortlist START`, {
+    id: req.params.id,
+    userId: req.body?.userId,
+  });
+
+  try {
+    const actId = req.params.id;
+    if (!actId) return res.status(400).json({ success: false, message: "Missing actId" });
+
+    const updated = await Act.findByIdAndUpdate(
+      actId,
+      { $inc: { timesShortlisted: -1 } },
+      { new: true }
+    ).select("_id name tscName timesShortlisted");
+
+    res.json({ success: true, act: updated });
+  } catch (err) {
+    console.error("❌ decrement-shortlist error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 export default router;
