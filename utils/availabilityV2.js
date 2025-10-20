@@ -3,7 +3,7 @@ export async function triggerLeadAvailabilityV2({ actId, lineupId, date, address
       console.log(`🩵 (utils/availabilityV2.js) triggerLeadAvailabilityV2 START at ${new Date().toISOString()}`, { });
 
   try {
-    const res = await fetch("/api/availability-v2/request", {
+    const res = await fetch("/api/shortlist/request", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ actId, lineupId, date, address }),
