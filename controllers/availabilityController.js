@@ -2216,6 +2216,44 @@ await rebuildAndApplyBadge(updated.actId, updated.dateISO);
       return res.status(200).send("<Response/>");
     }
 
+    // --- NOLOC (Not for this location) ---
+if (reply === "noloc") {
+  try {
+    console.log("🚫 Handling NOLOC (Not for this location) reply");
+
+    // Clear badge since lead isn’t doing this location
+    await Act.updateOne(
+      { _id: updated.actId },
+      {
+        $set: { "availabilityBadge.active": false },
+        $unset: {
+          "availabilityBadge.vocalistName": "",
+          "availabilityBadge.photoUrl": "",
+          "availabilityBadge.musicianId": "",
+          "availabilityBadge.dateISO": "",
+          "availabilityBadge.setAt": "",
+          "availabilityBadge.address": "",
+        },
+      }
+    );
+
+    // Optional: refresh badge + trigger deputies
+    await rebuildAndApplyBadge(updated.actId, updated.dateISO);
+    await handleLeadNegativeReply({ act, updated, fromRaw });
+
+    await sendWhatsAppText(
+      normalizeToE164(updated.phone || fromRaw),
+      "Thanks for letting us know — we’ll check with your deputies for this location."
+    );
+
+    console.log("✅ Completed NOLOC processing");
+  } catch (err) {
+    console.error("❌ Error processing NOLOC:", err.message);
+  }
+
+  return res.status(200).send("<Response/>");
+}
+
     console.log(`✅ Processed WhatsApp reply: ${reply}`);
     console.log("✅ [twilioInbound] END (fallback branch)");
     return res.status(200).send("<Response/>");
