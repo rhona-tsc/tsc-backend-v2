@@ -26,7 +26,7 @@ export const sendAvailabilityMessage = async ({ actId, selectedDate, selectedAdd
       from: `whatsapp:${process.env.TWILIO_WA_SENDER}`,
       to: `whatsapp:${vocalist.phone}`,
       body: msg,
-      statusCallback: `${process.env.BACKEND_URL}/api/shortlist/twilio/status`,
+      statusCallback: `${process.env.BACKEND_URL}/api/availability/twilioStatus`,
     });
 
     console.log(`✅ WhatsApp message sent to ${vocalist.phone}`);
