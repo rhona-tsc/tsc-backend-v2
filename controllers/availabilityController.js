@@ -9,6 +9,8 @@ import DeferredAvailability from "../models/deferredAvailabilityModel.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is correct in backend
+import { countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
+import Shortlist from "../models/shortlistModel.js";
 
 const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
 const normCountyKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, "_");
@@ -479,61 +481,51 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       effectiveAddress,
     });
 
-    if (!userId || !actId) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing userId or actId" });
-    }
+if (!actId) {
+  return res
+    .status(400)
+    .json({ success: false, message: "Missing actId" });
+}
 
-    const outcode = extractOutcode(effectiveAddress);
-    const resolvedCounty = countyFromOutcode(outcode);
-    console.log("🌍 Derived county:", resolvedCounty || "❌ none");
+let shortlist = null;
+if (userId) {
+  // 🗂️ Find or create shortlist for logged-in user
+shortlist = await Shortlist.findOne({ userId });
+if (!shortlist) shortlist = await Shortlist.create({ userId, acts: [] });
+  if (!Array.isArray(shortlist.acts)) shortlist.acts = [];
 
-    // 🗂️ Find or create shortlist
-    let shortlist = await Shortlist.findOne({ userId });
-    if (!shortlist) shortlist = await Shortlist.create({ userId, acts: [] });
-    if (!Array.isArray(shortlist.acts)) shortlist.acts = [];
+  // ... existing duplicate check and push logic
+  const existingEntry = shortlist.acts.find((entry) => {
+    const sameAct = String(entry.actId) === String(actId);
+    const sameDate = entry.dateISO === effectiveDate;
+    const sameAddr =
+      (entry.formattedAddress || "").trim().toLowerCase() ===
+      (effectiveAddress || "").trim().toLowerCase();
+    return sameAct && sameDate && sameAddr;
+  });
 
-    // Check if act/date/address combo already exists
-    const existingEntry = shortlist.acts.find((entry) => {
+  const alreadyShortlisted = !!existingEntry;
+  if (alreadyShortlisted) {
+    shortlist.acts = shortlist.acts.filter((entry) => {
       const sameAct = String(entry.actId) === String(actId);
       const sameDate = entry.dateISO === effectiveDate;
       const sameAddr =
         (entry.formattedAddress || "").trim().toLowerCase() ===
         (effectiveAddress || "").trim().toLowerCase();
-      return sameAct && sameDate && sameAddr;
-    });
-
-    const alreadyShortlisted = !!existingEntry;
-
-    if (alreadyShortlisted) {
-      shortlist.acts = shortlist.acts.filter((entry) => {
-        const sameAct = String(entry.actId) === String(actId);
-        const sameDate = entry.dateISO === effectiveDate;
-        const sameAddr =
-          (entry.formattedAddress || "").trim().toLowerCase() ===
-          (effectiveAddress || "").trim().toLowerCase();
-        return !(sameAct && sameDate && sameAddr);
-      });
-      console.log("❌ Removed specific act/date/address triple");
-      await shortlist.save();
-
-      return res.json({
-        success: true,
-        message: "Removed from shortlist",
-        shortlisted: false,
-      });
-    }
-
-    // ✅ Add new entry
-    shortlist.acts.push({
-      actId,
-      dateISO: effectiveDate,
-      formattedAddress: effectiveAddress,
+      return !(sameAct && sameDate && sameAddr);
     });
     await shortlist.save();
-    console.log("✅ Added new act/date/address triple to shortlist");
+    return res.json({ success: true, message: "Removed from shortlist", shortlisted: false });
+  }
 
+  shortlist.acts.push({
+    actId,
+    dateISO: effectiveDate,
+    formattedAddress: effectiveAddress,
+  });
+  await shortlist.save();
+  console.log("✅ Added new act/date/address triple to shortlist");
+}
     // 🔁 Trigger the strong availability logic
     console.log("📣 Delegating to triggerAvailabilityRequest...");
     const mockRes = {
