@@ -451,28 +451,16 @@ return { vocalist, phone };}
 // ✅ main function
 
 export const shortlistActAndTriggerAvailability = async (req, res) => {
-  console.log(
-    `🎯 (shortlistController.js) shortlistActAndTriggerAvailability START at`,
-    new Date().toISOString(),
-    { body: req.body }
-  );
-
   try {
-    const body = req.body || {};
-    const {
-      userId,
-      actId,
-      selectedDate,
-      selectedAddress,
-      lineupId,
-      date,
-      address,
-    } = body;
+    console.log("🎯 (shortlistController.js) shortlistActAndTriggerAvailability START at", new Date().toISOString(), {
+      body: req.body,
+    });
 
-    // Normalise fallback values
-    const effectiveDate = selectedDate || date;
-    const effectiveAddress = selectedAddress || address;
+    const { actId, lineupId = null, date, address, userId } = req.body;
 
+    // 🧩 Normalise input
+    const effectiveDate = date;
+    const effectiveAddress = address;
     console.log("📦 Normalised body:", {
       userId,
       actId,
@@ -481,53 +469,38 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       effectiveAddress,
     });
 
-if (!actId) {
-  return res
-    .status(400)
-    .json({ success: false, message: "Missing actId" });
-}
+    // ✅ Create or update the user's shortlist entry
+    const shortlist = await Shortlist.findOneAndUpdate(
+      { userId },
+      {
+        $addToSet: {
+          acts: {
+            actId,
+            dateISO: effectiveDate,
+            formattedAddress: effectiveAddress,
+          },
+        },
+      },
+      { new: true, upsert: true }
+    );
 
-let shortlist = null;
-if (userId) {
-  // 🗂️ Find or create shortlist for logged-in user
-shortlist = await Shortlist.findOne({ userId });
-if (!shortlist) shortlist = await Shortlist.create({ userId, acts: [] });
-  if (!Array.isArray(shortlist.acts)) shortlist.acts = [];
-
-  // ... existing duplicate check and push logic
-  const existingEntry = shortlist.acts.find((entry) => {
-    const sameAct = String(entry.actId) === String(actId);
-    const sameDate = entry.dateISO === effectiveDate;
-    const sameAddr =
-      (entry.formattedAddress || "").trim().toLowerCase() ===
-      (effectiveAddress || "").trim().toLowerCase();
-    return sameAct && sameDate && sameAddr;
-  });
-
-  const alreadyShortlisted = !!existingEntry;
-  if (alreadyShortlisted) {
-    shortlist.acts = shortlist.acts.filter((entry) => {
-      const sameAct = String(entry.actId) === String(actId);
-      const sameDate = entry.dateISO === effectiveDate;
-      const sameAddr =
-        (entry.formattedAddress || "").trim().toLowerCase() ===
-        (effectiveAddress || "").trim().toLowerCase();
-      return !(sameAct && sameDate && sameAddr);
+    console.log("📝 Shortlist updated:", {
+      userId,
+      actId,
+      totalActs: shortlist.acts.length,
     });
-    await shortlist.save();
-    return res.json({ success: true, message: "Removed from shortlist", shortlisted: false });
-  }
 
-  shortlist.acts.push({
-    actId,
-    dateISO: effectiveDate,
-    formattedAddress: effectiveAddress,
-  });
-  await shortlist.save();
-  console.log("✅ Added new act/date/address triple to shortlist");
-}
-    // 🔁 Trigger the strong availability logic
-    console.log("📣 Delegating to triggerAvailabilityRequest...");
+    // ✅ Prepare mock req/res for triggerAvailabilityRequest
+    const mockReq = {
+      body: {
+        actId,
+        lineupId,
+        date: effectiveDate,
+        address: effectiveAddress,
+      },
+      query: {}, // prevents undefined references in triggerAvailabilityRequest
+    };
+
     const mockRes = {
       status: (code) => ({
         json: (obj) => {
@@ -536,21 +509,19 @@ if (!shortlist) shortlist = await Shortlist.create({ userId, acts: [] });
         },
       }),
       json: (obj) => {
-        console.log("📬 Mock availability response:", obj);
+        console.log(`📬 Mock availability response:`, obj);
         return obj;
       },
     };
 
- const mockReq = {
-  body: {
-    actId,
-    lineupId,
-    date: effectiveDate,
-    address: effectiveAddress,
-  },
-};
+    console.log("📣 Delegating to triggerAvailabilityRequest...");
+    await triggerAvailabilityRequest(mockReq, mockRes);
 
-await triggerAvailabilityRequest(mockReq, mockRes);
+    console.log("✅ WhatsApp message sent successfully", {
+      success: true,
+      message: "Act shortlisted and availability triggered",
+      shortlisted: true,
+    });
 
     return res.json({
       success: true,
@@ -561,7 +532,7 @@ await triggerAvailabilityRequest(mockReq, mockRes);
     console.error("❌ shortlistActAndTriggerAvailability error:", err);
     return res
       .status(500)
-      .json({ success: false, message: err.message || "Server error" });
+      .json({ success: false, message: err?.message || "Server error" });
   }
 };
 
