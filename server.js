@@ -222,14 +222,6 @@ app.post(
   }
 );
 
-// Twilio generic status (kept for backwards compat)
-app.post(
-  "/api/shortlist/twilio/status",
-  express.urlencoded({ extended: false }),
-  twilioStatus
-);
-
-
 app.post('/api/google/webhook', handleGoogleWebhook);
 
 app.post('/api/google/notifications', handleGoogleWebhook);
@@ -248,7 +240,7 @@ app.post(
 
 // Temporary aliases so existing Twilio config keeps working
 app.post("/api/twilio/inbound", express.urlencoded({ extended: false }), twilioInbound);
-app.post("/api/twilio/status", express.urlencoded({ extended: false }), twilioStatusHandler);
+app.post("/api/twilio/status", express.urlencoded({ extended: false }), twilioStatus);
 
 
 startRemindersPoller({ intervalMs: 30000 }); // every 30s
