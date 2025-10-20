@@ -2,12 +2,14 @@
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
 import EnquiryMessage from "../models/EnquiryMessage.js";
-import { sendWhatsAppMessage, sendWAOrSMS } from "../utils/twilioClient.js";
+import { sendWhatsAppMessage, sendWAOrSMS, sendSMSMessage } from "../utils/twilioClient.js";
 import {
   ensureBookingEvent,
   appendLineToEventDescription,
   addAttendeeToEvent,
 } from "./googleController.js";
+import AvailabilityModel from "../models/availabilityModel.js";
+import bookingBoardItem from "../models/bookingBoardItem.js";
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper: firstNameOf                             */
@@ -389,3 +391,181 @@ export const twilioInboundBooking = async (req, res) => {
     return res.status(200).send("<Response/>");
   }
 };
+
+
+// Send the booking-request message to ALL performers in a lineup //whatsapp going to band working
+export async function sendBookingRequestToLineup({ actId, lineupId, date, address }) {
+   console.log(`🟢 (availabilityController.js) sendBookingRequestToLineup START at ${new Date().toISOString()}`, {
+ });
+  const act = await Act.findById(actId).lean();
+  if (!act) { console.warn("sendBookingRequestToLineup: no act", actId); return { sent: 0 }; }
+
+  const dateISO = new Date(date).toISOString().slice(0, 10);
+  const formattedDate = formatWithOrdinal(date);
+  const shortAddr = String(address || "")
+    .split(",").slice(-2).join(",").replace(/,\s*UK$/i, "").trim();
+
+  const allLineups = Array.isArray(act.lineups) ? act.lineups : [];
+  const lineup = lineupId
+    ? (allLineups.find(l =>
+        String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId)
+      ) || allLineups[0]) 
+    : allLineups[0];
+
+  const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+  const contentSid = process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID; // HXcd99249…
+
+  let sent = 0;
+
+  for (const m of members) {
+    const role = String(m?.instrument || "").trim().toLowerCase();
+    if (!role || role === "manager" || role === "admin") continue; // performers only
+
+    // normalise phone → +44…
+    let phone = String(m?.phoneNumber || m?.phone || "").replace(/\s+/g, "");
+    if (!phone && (m?.musicianId || m?._id)) {
+      try {
+        const mus = await Musician.findById(m.musicianId || m._id).select("phone phoneNumber").lean();
+        phone = String(mus?.phone || mus?.phoneNumber || "").replace(/\s+/g, "");
+      } catch {}
+    }
+    if (!phone) continue;
+    if (phone.startsWith("07")) phone = phone.replace(/^0/, "+44");
+    else if (phone.startsWith("44")) phone = `+${phone}`;
+    else if (!phone.startsWith("+")) phone = `+${phone}`;
+
+    // fee = SAME logic as enquiry
+    const finalFee = await _finalFeeForMember({
+      act, lineup, members, member: m, address, dateISO
+    });
+
+    // Build SMS fallback using your enquiry copy builder (so WA+SMS match)
+    const smsBody = buildAvailabilitySMS({
+      firstName: m.firstName || m.name || "",
+      formattedDate,
+      formattedAddress: shortAddr,
+      fee: String(finalFee),
+      duties: m.instrument || "performance",
+      actName: act.tscName || act.name || "the band",
+    });
+
+ // WhatsApp slots 1..6 ONLY – extra keys are NOT sent to Twilio
+    const slots = {
+      "1": m.firstName || m.name || "",
+      "2": formattedDate,
+      "3": shortAddr,
+      "4": String(finalFee),
+      "5": m.instrument || "performance",
+      "6": act.tscName || act.name || "",
+    };
+
+    try {
+      const waRes = await sendWhatsAppMessage({
+        to: `whatsapp:${phone}`,
+        contentSid,           // your instrumentalist booking-request template SID
+        variables: slots,     // <-- pass numbered slots here
+        smsBody,              // webhook can reuse this if WA undelivered
+      });
+
+
+      // Store the outbound SID so /twilio/status can match and send SMS on 63024 etc.
+      await AvailabilityModel.findOneAndUpdate(
+        { actId, dateISO, phone },
+        {
+          $setOnInsert: {
+            enquiryId: Date.now().toString(),
+            actId,
+            lineupId: lineup?._id || lineup?.lineupId || null,
+            phone,
+            duties: m.instrument || "performance",
+            fee: String(finalFee),
+            formattedDate,
+            formattedAddress: shortAddr,
+            reply: null,
+            createdAt: new Date(),
+            actName: act.tscName || act.name || "",
+            contactName: m.firstName || "",
+            musicianName: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
+            dateISO,
+          },
+          $set: {
+            messageSidOut: waRes?.sid || null,
+            contactChannel: "whatsapp",
+            updatedAt: new Date(),
+            "outbound.smsBody": smsBody,
+            "outbound.sid": waRes?.sid || null,
+          },
+        },
+        { upsert: true }
+      );
+
+      sent++;
+      console.log("📣 Booking request sent", { to: phone, duties: m.instrument, fee: finalFee });
+    } catch (e) {
+      // WA failed immediately (e.g., bad variables) → send SMS now
+      console.warn("⚠️ WA send failed, SMS fallback now", { to: phone, err: e?.message || e });
+      try {
+        await sendSMSMessage(phone, smsBody);
+        sent++;
+        console.log("✅ SMS sent (direct fallback)", { to: phone });
+      } catch (smsErr) {
+        console.warn("❌ SMS failed", { to: phone, err: smsErr?.message || smsErr });
+      }
+    }
+  }
+
+  return { sent, members: members.length };
+}
+
+// Resolve the musicianId who replied YES for a given act/date.
+// Returns the most-recent YES row (if any).
+export const resolveAvailableMusician = async (req, res) => {
+   console.log(`🟢 (availabilityController.js) resolveAvailableMusician START at ${new Date().toISOString()}`, {
+ });
+  try {
+    const { actId, dateISO } = req.query || {};
+    if (!actId || !dateISO) {
+      return res
+        .status(400)
+        .json({ success: false, musicianId: null, message: "Missing actId/dateISO" });
+    }
+
+    const row = await AvailabilityModel.findOne({ actId, dateISO, reply: "yes" })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .select({ musicianId: 1 })
+      .lean();
+
+    return res.json({ success: true, musicianId: row?.musicianId || null });
+  } catch (e) {
+    console.error("resolveAvailableMusician error:", e?.message || e);
+    return res
+      .status(500)
+      .json({ success: false, musicianId: null, message: e?.message || "Server error" });
+  }
+};
+
+// ---- Allocation sync with Booking Board ----
+async function refreshAllocationForActDate(actId, dateISO) {
+   console.log(`🟢 (availabilityController.js) refreshAllocationForActDate START at ${new Date().toISOString()}`, {
+ });
+  try {
+    if (!actId || !dateISO) return;
+
+    const [yesCount, pendingCount, noCount] = await Promise.all([
+      AvailabilityModel.countDocuments({ actId, dateISO, reply: "yes" }),
+      AvailabilityModel.countDocuments({ actId, dateISO, reply: null }),
+      AvailabilityModel.countDocuments({ actId, dateISO, reply: { $in: ["no", "unavailable"] } }),
+    ]);
+
+    let status = "in_progress";
+    if (yesCount >= 1 && pendingCount === 0) status = "fully_allocated";
+    if (noCount > 0 && yesCount === 0) status = "gap";
+
+    await bookingBoardItem.updateMany(
+      { actId, eventDateISO: dateISO },
+      { $set: { allocation: { status, lastCheckedAt: new Date() } } }
+    );
+  } catch (e) {
+    console.warn("⚠️ refreshAllocationForActDate failed:", e?.message || e);
+  }
+}
