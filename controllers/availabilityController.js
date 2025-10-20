@@ -2196,7 +2196,7 @@ export const twilioInbound = async (req, res) => {
             },
           }
         );
-
+await rebuildAndApplyBadge(updated.actId, updated.dateISO);
         console.log("🧹 Cleared badge for act:", updated.actId);
 
         await sendWhatsAppText(toE164, "Thanks for letting us know — we’ve updated your availability!");
