@@ -541,14 +541,16 @@ if (!shortlist) shortlist = await Shortlist.create({ userId, acts: [] });
       },
     };
 
-    req.body = {
-      actId,
-      lineupId,
-      date: effectiveDate,
-      address: effectiveAddress,
-    };
+ const mockReq = {
+  body: {
+    actId,
+    lineupId,
+    date: effectiveDate,
+    address: effectiveAddress,
+  },
+};
 
-    await triggerAvailabilityRequest(req, mockRes);
+await triggerAvailabilityRequest(mockReq, mockRes);
 
     return res.json({
       success: true,
