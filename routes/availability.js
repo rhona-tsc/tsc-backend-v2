@@ -5,11 +5,11 @@ import Act from "../models/actModel.js";
 import {
   twilioInbound,
   rebuildAndApplyAvailabilityBadge,
-  resolveAvailableMusician,
   clearavailabilityBadges,
 } from "../controllers/availabilityController.js";
 import { makeAvailabilityBroadcaster } from "../controllers/availabilityController.js";
 import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYesV2.js";
+import { resolveAvailableMusician } from "../controllers/allocationController.js";
 
 const router = express.Router();
 
