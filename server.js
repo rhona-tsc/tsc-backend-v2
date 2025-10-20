@@ -39,7 +39,7 @@ import { getAvailableActIds } from './controllers/actAvailabilityController.js';
 import mongoose from "mongoose";
 import { submitActSubmission } from './controllers/actSubmissionController.js';
 import v2Routes from "./routes/v2.js";
-import { twilioInbound, twilioStatusHandler } from './controllers/availabilityController.js';
+import { twilioInbound, twilioStatus } from './controllers/availabilityController.js';
 import { handleGoogleWebhook } from './controllers/googleController.js';
 
 // at the top of backend/server.js (after dotenv)
@@ -226,7 +226,7 @@ app.post(
 app.post(
   "/api/shortlist/twilio/status",
   express.urlencoded({ extended: false }),
-  twilioStatusHandler
+  twilioStatus
 );
 
 
