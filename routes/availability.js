@@ -234,20 +234,28 @@ router.post("/request", async (req, res) => {
 
     console.log(`📅 Availability request triggered for act=${actId} on ${date}`);
 
-    // ✅ trigger WhatsApp availability message
-    const result = await shortlistActAndTriggerAvailability({ actId, date, address, lineupId });
+    // ✅ Fix: create fake req/res for the controller
+    const fakeReq = { body: { actId, date, address, lineupId } };
+    const fakeRes = {
+      status: (code) => ({
+        json: (obj) => ({ code, ...obj }),
+      }),
+      json: (obj) => obj,
+    };
+
+    const result = await shortlistActAndTriggerAvailability(fakeReq, fakeRes);
 
     if (result?.success) {
       console.log(`✅ WhatsApp message sent successfully`, result);
-      res.json({ success: true, message: "WhatsApp request sent", result });
+      return res.json({ success: true, message: "WhatsApp request sent", result });
     } else {
       console.warn(`⚠️ WhatsApp send failed`, result);
-      res.status(500).json({ success: false, message: "WhatsApp send failed" });
+      return res.status(500).json({ success: false, message: "WhatsApp send failed" });
     }
 
   } catch (err) {
     console.error("❌ (availability.js) /request error:", err);
-    res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
