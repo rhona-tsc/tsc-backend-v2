@@ -536,6 +536,19 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
 
     // 🔁 Trigger the strong availability logic
     console.log("📣 Delegating to triggerAvailabilityRequest...");
+    const mockRes = {
+      status: (code) => ({
+        json: (obj) => {
+          console.log(`📬 Mock availability response [${code}]:`, obj);
+          return obj;
+        },
+      }),
+      json: (obj) => {
+        console.log("📬 Mock availability response:", obj);
+        return obj;
+      },
+    };
+
     req.body = {
       actId,
       lineupId,
@@ -543,7 +556,13 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
       address: effectiveAddress,
     };
 
-    return await triggerAvailabilityRequest(req, res);
+    await triggerAvailabilityRequest(req, mockRes);
+
+    return res.json({
+      success: true,
+      message: "Act shortlisted and availability triggered",
+      shortlisted: true,
+    });
   } catch (err) {
     console.error("❌ shortlistActAndTriggerAvailability error:", err);
     return res
