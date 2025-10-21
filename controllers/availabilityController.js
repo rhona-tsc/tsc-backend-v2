@@ -1288,45 +1288,61 @@ const firstNameOf = (p) => {
 // -------------------- Outbound Trigger --------------------
 
 async function getDeputyDisplayBits(dep) {
-   console.log(`🟢 (availabilityController.js) getDeputyDisplayBits START at ${new Date().toISOString()}`, {
- });
-  // Return { musicianId, photoUrl, profileUrl }
+  console.log(`🟢 (availabilityController.js) getDeputyDisplayBits START at ${new Date().toISOString()}`, {
+    depKeys: Object.keys(dep || {}),
+    depMusicianId: dep?.musicianId,
+    depEmail: dep?.email,
+    depName: `${dep?.firstName || ""} ${dep?.lastName || ""}`.trim(),
+  });
+
   const PUBLIC_SITE_BASE = (process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "http://localhost:5174").replace(/\/$/, "");
+
   try {
-    // Prefer an explicit musicianId if present, else fall back to embedded _id
+    // Prefer an explicit musicianId if present
     const musicianId = (dep?.musicianId && String(dep.musicianId)) || (dep?._id && String(dep._id)) || "";
 
-    // 1) Try to read an image directly from dep (handles both string or {url} shapes)
+    // 1️⃣ Direct photo on deputy
     let photoUrl = getPictureUrlFrom(dep);
+    console.log("📸 Step 1: Direct deputy photoUrl →", photoUrl || "❌ none");
 
-    // 2) If none on the deputy, try by musicianId (strongest lookup)
+    // 2️⃣ Lookup by musicianId
     let mus = null;
     if (!photoUrl && musicianId) {
       mus = await Musician.findById(musicianId)
         .select("musicianProfileImageUpload musicianProfileImage profileImage profilePicture.url photoUrl imageUrl email")
         .lean();
       photoUrl = getPictureUrlFrom(mus || {});
+      console.log("📸 Step 2: Lookup by musicianId →", photoUrl || "❌ none");
     }
 
-    // 3) If still none, try by email on the deputy or by the musician doc’s email (but DO NOT use phone to avoid collisions)
+    // 3️⃣ Lookup by email (deputy email > mus.email)
     if (!photoUrl) {
       const email = dep?.email || dep?.emailAddress || mus?.email || "";
+      console.log("📧 Step 3: Lookup by email →", email || "❌ none");
       if (email) {
         const musByEmail = await Musician.findOne({ email })
-          .select("musicianProfileImageUpload musicianProfileImage profileImage profilePicture.url photoUrl imageUrl _id")
+          .select("musicianProfileImageUpload musicianProfileImage profileImage profilePicture.url photoUrl imageUrl _id email")
           .lean();
         if (musByEmail) {
           photoUrl = getPictureUrlFrom(musByEmail);
-          // If we didn't have a musicianId, populate it now
+          console.log("📸 Step 3 result: Found via email →", photoUrl);
           if (!musicianId && musByEmail._id) {
-            dep.musicianId = musByEmail._id; // non-persistent; used by caller for profile link
+            dep.musicianId = musByEmail._id; // non-persistent enrichment
           }
+        } else {
+          console.warn("⚠️ Step 3: No musician found for email", email);
         }
       }
     }
 
+    // 4️⃣ Build final output
     const resolvedMusicianId = (dep?.musicianId && String(dep.musicianId)) || musicianId || "";
     const profileUrl = resolvedMusicianId ? `${PUBLIC_SITE_BASE}/musician/${resolvedMusicianId}` : "";
+    console.log("🎯 Final getDeputyDisplayBits result:", {
+      resolvedMusicianId,
+      photoUrl,
+      profileUrl,
+    });
 
     return {
       musicianId: resolvedMusicianId,

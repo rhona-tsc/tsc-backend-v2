@@ -5,6 +5,17 @@ import { hashBase36 } from "../utils/hash.js";
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
+function cleanPrivate(obj) {
+  if (!obj || typeof obj !== "object") return {};
+  const cleaned = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v == null) continue; // skip null/undefined
+    // Google Calendar's private properties must be strings
+    cleaned[k] = typeof v === "object" ? JSON.stringify(v) : String(v);
+  }
+  return cleaned;
+}
+
 function makePersonalEventId({ actId, dateISO, email }) {
   console.log(`😈 (controllers/googleController.js) makePersonalEventId called at`, new Date().toISOString(), {
     actId, dateISO, email,
@@ -194,7 +205,7 @@ export async function createCalendarInvite({
     })} – ${address}${fee ? ` (£${fee})` : ""}`;
 
   const privateProps = {
-    ..._cleanPrivate(extendedProperties.private),
+    ...cleanPrivate(extendedProperties.private),
     actId: String(actId),
     dateISO,
     kind: "enquiry_personal",
