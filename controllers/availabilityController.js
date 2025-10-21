@@ -1634,12 +1634,17 @@ export async function pingDeputiesFor(actId, lineupId, dateISO, formattedAddress
 // --- Availability Badge Rebuild Helpers (WhatsApp-only flow) ---
 
 async function buildAvailabilityBadgeFromRows(act, dateISO) {
-  console.log(`🟢 (availabilityController.js) buildAvailabilityBadgeFromRows START at ${new Date().toISOString()}`, {});
+  console.log(`🟢 (availabilityController.js) buildAvailabilityBadgeFromRows START at ${new Date().toISOString()}`);
   if (!act || !dateISO) return null;
 
   const rows = await AvailabilityModel.find({ actId: act._id, dateISO })
     .select({ phone: 1, reply: 1, musicianId: 1, updatedAt: 1 })
     .lean();
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    console.warn("⚠️ No availability rows found for", { actId: act._id, dateISO });
+    return null;
+  }
 
   const replyByPhone = new Map();
   for (const r of rows) {
@@ -1656,29 +1661,33 @@ async function buildAvailabilityBadgeFromRows(act, dateISO) {
     const members = Array.isArray(l.bandMembers) ? l.bandMembers : [];
     for (const m of members) {
       if (!isVocalRoleGlobal(m.instrument)) continue;
+
       const leadPhone = normalizePhoneE164(m.phoneNumber || m.phone || "");
       const leadReply = leadPhone ? replyByPhone.get(leadPhone)?.reply || null : null;
 
-      // ✅ If lead said YES — build badge
+      // ✅ Lead said YES → primary badge
       if (leadReply === "yes") {
         const bits = await getDeputyDisplayBits(m);
-        return {
+        const badgeObj = {
           active: true,
           dateISO,
           isDeputy: false,
           inPromo: !!m.inPromo,
           vocalistName: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
-          musicianId: bits.musicianId || "",
-          photoUrl: bits.photoUrl || "",
+          musicianId: bits?.musicianId || "",
+          photoUrl: bits?.photoUrl || "",
           address: act?.availabilityBadges?.address || "",
           setAt: new Date(),
         };
+        console.log("🎤 Built lead vocalist badge:", badgeObj);
+        return badgeObj;
       }
 
-      // 🚫 If lead said NO — check deputies for YES
+      // 🚫 Lead said NO → look at deputies
       if (leadReply === "no" || leadReply === "unavailable") {
         const deputies = Array.isArray(m.deputies) ? m.deputies : [];
         const yesDeps = [];
+
         for (const d of deputies) {
           const p = normalizePhoneE164(d.phoneNumber || d.phone || "");
           if (!p) continue;
@@ -1686,19 +1695,21 @@ async function buildAvailabilityBadgeFromRows(act, dateISO) {
           if (rep === "yes") yesDeps.push(d);
           if (yesDeps.length >= 3) break;
         }
-        if (yesDeps.length) {
+
+        if (yesDeps.length > 0) {
           const enriched = [];
           for (const d of yesDeps) {
             const bits = await getDeputyDisplayBits(d);
             enriched.push({
               name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-              musicianId: bits.musicianId || "",
-              photoUrl: bits.photoUrl || "",
-              profileUrl: bits.profileUrl || "",
+              musicianId: bits?.musicianId || "",
+              photoUrl: bits?.photoUrl || "",
+              profileUrl: bits?.profileUrl || "",
               setAt: new Date(),
             });
           }
-          return {
+
+          const badgeObj = {
             active: true,
             dateISO,
             isDeputy: true,
@@ -1708,20 +1719,21 @@ async function buildAvailabilityBadgeFromRows(act, dateISO) {
             address: act?.availabilityBadges?.address || "",
             setAt: new Date(),
           };
+          console.log("🎤 Built deputy badge:", badgeObj);
+          return badgeObj;
         }
       }
     }
   }
 
+  console.log("🪶 No badge candidates found — returning null.");
   return null;
 }
-
-// --- Main badge rebuild & apply ---
+  
 export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO) {
   console.log(`🟢 (availabilityController.js) rebuildAndApplyAvailabilityBadge START at ${new Date().toISOString()}`);
 
   try {
-    // Allow both (req,res) form or direct (actId, dateISO)
     const actId = typeof reqOrActId === "object" ? reqOrActId.body?.actId : reqOrActId;
     const dateISO = typeof reqOrActId === "object" ? reqOrActId.body?.dateISO : maybeDateISO;
     if (!actId || !dateISO) return { success: false, message: "Missing actId/dateISO" };
@@ -1731,39 +1743,45 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO)
 
     const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
 
-   // If no badge (no lead/deputies), clear existing
-if (!badge) {
-  await Act.updateOne(
-    { _id: actId },
-    {
-      $set: {
-        availabilityBadges: {
-          active: false,
-          clearedAt: new Date(),
-        },
-      },
-      $unset: {
-        "availabilityBadges.vocalistName": "",
-        "availabilityBadges.inPromo": "",
-        "availabilityBadges.isDeputy": "",
-        "availabilityBadges.photoUrl": "",
-        "availabilityBadges.musicianId": "",
-        "availabilityBadges.dateISO": "",
-        "availabilityBadges.address": "",
-        "availabilityBadges.deputies": "",
-        "availabilityBadges.setAt": "",
-      },
+    // 🧹 If no badge, clear existing
+    if (!badge) {
+      await Act.updateOne(
+        { _id: actId },
+        {
+          $set: {
+            availabilityBadges: {
+              active: false,
+              clearedAt: new Date(),
+            },
+          },
+          $unset: {
+            "availabilityBadges.vocalistName": "",
+            "availabilityBadges.inPromo": "",
+            "availabilityBadges.isDeputy": "",
+            "availabilityBadges.photoUrl": "",
+            "availabilityBadges.musicianId": "",
+            "availabilityBadges.dateISO": "",
+            "availabilityBadges.address": "",
+            "availabilityBadges.deputies": "",
+            "availabilityBadges.setAt": "",
+          },
+        }
+      );
+      console.log(`🧹 Cleared availability badge for ${act.tscName || act.name}`);
+      return { success: true, cleared: true };
     }
-  );
-  console.log(`🧹 Cleared availability badge for ${act.tscName || act.name}`);
-  return { success: true, cleared: true };
-}
 
-    // Save updated badge
+    // 🚧 Guard: ensure badge is a proper object
+    if (typeof badge !== "object" || badge === null || Array.isArray(badge)) {
+      console.warn("⚠️ Skipping badge update — invalid badge format:", badge);
+      return { success: false, message: "Invalid badge format" };
+    }
+
+    // ✅ Apply new badge
     await Act.updateOne({ _id: actId }, { $set: { availabilityBadges: badge } });
     console.log(`✅ Applied availability badge for ${act.tscName || act.name}:`, badge);
 
-    // Send client email (if lead YES)
+    // 📧 Send client email (lead YES only)
     if (!badge.isDeputy) {
       try {
         await sendClientEmail({
@@ -1775,12 +1793,12 @@ if (!badge) {
       } catch (e) {
         console.warn("(availabilityController.js) ⚠️ sendClientEmail failed:", e.message);
       }
-      // Google Calendar invite for lead vocalist (if musicianId present)
+
+      // 📅 Google Calendar invite
       try {
         if (badge?.musicianId) {
-          // Look up lead musician's email
           const musician = await Musician.findById(badge.musicianId).lean();
-          if (musician && musician.email) {
+          if (musician?.email) {
             console.log("(availabilityController.js) 📅 Sending Google Calendar invite...");
             try {
               await createCalendarInvite({
@@ -1811,9 +1829,6 @@ if (!badge) {
     return { success: true, updated: true, badge };
   } catch (err) {
     console.error("❌ rebuildAndApplyAvailabilityBadge error:", err);
-    return { success: false, message: err.message };
+    return { success: false, message: err?.message || "Server error" };
   }
 }
-
-
-  
