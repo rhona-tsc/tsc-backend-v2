@@ -1191,36 +1191,49 @@ export const twilioInbound = async (req, res) => {
       }
     }
 
-    if (!updated) {
-      console.warn("⚠️ No Availability row matched this WhatsApp reply.");
-      return res.status(200).send("<Response/>");
-    }
+   // Load act + resolve musician
+const act = updated.actId ? await Act.findById(updated.actId).lean() : null;
 
-    console.log("✅ Availability row updated:", {
-      id: updated._id,
-      actId: updated.actId,
-      musicianId: updated.musicianId,
-      reply: updated.reply,
-    });
+let musician = null;
 
-    // Load act + resolve musician
-    const act = updated.actId ? await Act.findById(updated.actId).lean() : null;
-    const musician = updated.musicianId
-      ? await Musician.findById(updated.musicianId).lean()
-      : null;
+// First try direct musicianId lookup
+if (updated.musicianId) {
+  musician = await Musician.findById(updated.musicianId).lean();
+}
 
-    console.log("🎭 Loaded act + musician:", {
-      actFound: !!act,
-      actName: act?.tscName || act?.name,
-      musicianFound: !!musician,
-      musicianName: musician?.firstName || musician?.fullName,
-      musicianEmail: musician?.email,
-    });
+// 🔁 Fallback: if missing, lookup by phone number
+if (!musician && updated.phone) {
+  musician = await Musician.findOne({
+    $or: [
+      { phone: updated.phone },
+      { whatsappNumber: updated.phone },
+      { "contact.phone": updated.phone },
+    ],
+  }).lean();
 
-    // Compute invite + badge
-    const toE164 = normalizeToE164(updated.phone || fromRaw);
-    const dateISOday = String((updated.dateISO || "").slice(0, 10));
-    const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
+  if (musician) {
+    console.log("🔁 Fallback musician lookup succeeded:", musician.email);
+    // Backfill missing musicianId for future lookups
+    await AvailabilityModel.updateOne(
+      { _id: updated._id },
+      { $set: { musicianId: musician._id } }
+    );
+  } else {
+    console.warn("⚠️ No musician found for phone", updated.phone);
+  }
+}
+
+console.log("🎭 Loaded act + musician:", {
+  actFound: !!act,
+  actName: act?.tscName || act?.name,
+  musicianFound: !!musician,
+  musicianName: musician?.firstName || musician?.fullName,
+  musicianEmail: musician?.email,
+});
+
+const toE164 = normalizeToE164(updated.phone || fromRaw);
+const dateISOday = String((updated.dateISO || "").slice(0, 10));
+const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
 
     console.log("🧮 Derived calendar invite info:", {
       toE164,
@@ -1303,7 +1316,7 @@ export const twilioInbound = async (req, res) => {
         console.log("✅ WhatsApp confirmation sent.");
 
         console.log("🟡 Rebuilding availability badge...");
-        await rebuildavailabilityBadges(
+        await rebuildAndApplyAvailabilityBadge(
           { body: { actId: String(updated.actId), dateISO: updated.dateISO } },
           { json: (r) => console.log("✅ Badge refreshed:", r), status: () => ({ json: () => {} }) }
         );
