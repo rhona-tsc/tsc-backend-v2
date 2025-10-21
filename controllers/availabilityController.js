@@ -1785,29 +1785,27 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO)
     const dateISO = typeof reqOrActId === "object" ? reqOrActId.body?.dateISO : maybeDateISO;
     if (!actId || !dateISO) return { success: false, message: "Missing actId/dateISO" };
 
- // inside rebuildAndApplyAvailabilityBadge
+    const act = await Act.findById(actId).lean();
+    if (!act) return { success: false, message: "Act not found" };
 
-const act = await Act.findById(actId).lean();
-if (!act) return { success: false, message: "Act not found" };
+    const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
 
-const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
+    // 🧮 Build unique key for this act/date/location combo
+    const shortAddress = (badge?.address || act?.formattedAddress || "unknown")
+      .replace(/\W+/g, "_")
+      .toLowerCase();
 
-// 🧮 Create unique key for this act/date/location combo
-const shortAddress = (badge?.address || act?.formattedAddress || "unknown")
-  .replace(/\W+/g, "_")
-  .toLowerCase();
-const key = `${dateISO}_${shortAddress}`;
-   // 🧹 If no badge, clear existing
-if (!badge) {
+    let key = `${dateISO}_${shortAddress}`;
 
-await Act.updateOne(
-  { _id: actId },
-  { $unset: { [`availabilityBadges.${key}`]: "" } }
-);
-
-  console.log(`🧹 Cleared availability badge for ${act.tscName || act.name}`);
-  return { success: true, cleared: true };
-}
+    // 🧹 If no badge, clear existing for this key
+    if (!badge) {
+      await Act.updateOne(
+        { _id: actId },
+        { $unset: { [`availabilityBadges.${key}`]: "" } }
+      );
+      console.log(`🧹 Cleared availability badge for ${act.tscName || act.name}`);
+      return { success: true, cleared: true };
+    }
 
     // 🚧 Guard: ensure badge is a proper object
     if (typeof badge !== "object" || badge === null || Array.isArray(badge)) {
@@ -1816,11 +1814,11 @@ await Act.updateOne(
     }
 
     // ✅ Apply new badge
-const key = `${dateISO}_${(act.formattedAddress || "unknown").replace(/\W+/g, "_")}`;
-await Act.updateOne(
-  { _id: actId },
-  { $set: { [`availabilityBadges.${key}`]: badge } }
-);    console.log(`✅ Applied availability badge for ${act.tscName || act.name}:`, badge);
+    await Act.updateOne(
+      { _id: actId },
+      { $set: { [`availabilityBadges.${key}`]: badge } }
+    );
+    console.log(`✅ Applied availability badge for ${act.tscName || act.name}:`, badge);
 
     // 📧 Send client email (lead YES only)
     if (!badge.isDeputy) {
@@ -1847,7 +1845,7 @@ await Act.updateOne(
                 dateISO,
                 email: musician.email,
                 summary: `TSC Enquiry: ${act.tscName || act.name}`,
-                description: `You have confirmed availability for performing with ${act.tscName || act.name} on ${dateISO} at a rate of £${badge?.fee || "TBC"}.\n\nIf you become unavailable please inform us by declining the calendar invite.\n\nThank you!`,
+                description: `You have confirmed availability for performing with ${act.tscName || act.name} on ${dateISO}.\n\nIf you become unavailable please inform us by declining the calendar invite.\n\nThank you!`,
                 startTime: new Date(`${dateISO}T17:00:00Z`),
                 endTime: new Date(`${dateISO}T23:00:00Z`),
                 address: act?.eventLocation || "TBC",
