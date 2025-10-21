@@ -475,6 +475,7 @@ function findVocalistPhone(actData, lineupId) {
     name: `${vocalist.firstName} ${vocalist.lastName}`,
     instrument: vocalist.instrument,
     phone,
+    email: vocalist.email,
   });
 
 return { vocalist, phone };}
@@ -968,18 +969,18 @@ export const twilioInbound = async (req, res) => {
       }
     }
 
-   // Load act + resolve musician
-const act = updated.actId ? await Act.findById(updated.actId).lean() : null;
+// Load act + resolve musician
+const act = updated?.actId ? await Act.findById(updated.actId).lean() : null;
 
 let musician = null;
 
 // First try direct musicianId lookup
-if (updated.musicianId) {
+if (updated?.musicianId) {
   musician = await Musician.findById(updated.musicianId).lean();
 }
 
 // 🔁 Fallback: if missing, lookup by phone number
-if (!musician && updated.phone) {
+if (!musician && updated?.phone) {
   musician = await Musician.findOne({
     $or: [
       { phone: updated.phone },
@@ -995,9 +996,30 @@ if (!musician && updated.phone) {
       { _id: updated._id },
       { $set: { musicianId: musician._id } }
     );
-  } else {
-    console.warn("⚠️ No musician found for phone", updated.phone);
   }
+}
+
+// 🧩 NEW fallback: use findVocalistPhone() if still no musician
+if (!musician && act) {
+  const vocalistData = findVocalistPhone(act, updated?.lineupId);
+  if (vocalistData?.vocalist) {
+    console.log("🎙️ Using fallback vocalist from act data:", {
+      name: `${vocalistData.vocalist.firstName} ${vocalistData.vocalist.lastName}`,
+      phone: vocalistData.phone,
+      email: vocalistData.vocalist.email,
+    });
+    musician = {
+      _id: vocalistData.vocalist._id,
+      firstName: vocalistData.vocalist.firstName,
+      lastName: vocalistData.vocalist.lastName,
+      email: vocalistData.vocalist.email,
+      phone: vocalistData.phone,
+    };
+  }
+}
+
+if (!musician) {
+  console.warn("⚠️ No musician found for phone", updated?.phone);
 }
 
 console.log("🎭 Loaded act + musician:", {
