@@ -1058,11 +1058,11 @@ const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
         if (emailForInvite && dateISOday && act) {
           console.log("📨 Attempting to create calendar invite...");
           const desc = [
-            `TSC enquiry logged: ${new Date(updated.createdAt || Date.now()).toLocaleString("en-GB")}`,
+            `TSC enquiry created ${new Date(updated.createdAt || Date.now()).toLocaleString("en-GB")})`,
             `Act: ${act.tscName || act.name}`,
             `Role: ${updated.duties || ""}`,
             `Address: ${updated.formattedAddress || ""}`,
-            `Date: ${formattedDateString}`,
+            `Event Date: ${formattedDateString}`,
           ].join("\n");
 
           try {
@@ -1785,25 +1785,20 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO)
     const dateISO = typeof reqOrActId === "object" ? reqOrActId.body?.dateISO : maybeDateISO;
     if (!actId || !dateISO) return { success: false, message: "Missing actId/dateISO" };
 
-    const act = await Act.findById(actId).lean();
-    if (!act) return { success: false, message: "Act not found" };
+ // inside rebuildAndApplyAvailabilityBadge
 
-    const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
+const act = await Act.findById(actId).lean();
+if (!act) return { success: false, message: "Act not found" };
 
+const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
+
+// 🧮 Create unique key for this act/date/location combo
+const shortAddress = (badge?.address || act?.formattedAddress || "unknown")
+  .replace(/\W+/g, "_")
+  .toLowerCase();
+const key = `${dateISO}_${shortAddress}`;
    // 🧹 If no badge, clear existing
 if (!badge) {
-  const clearedBadge = {
-    active: false,
-    isDeputy: false,
-    vocalistName: "",
-    musicianId: "",
-    inPromo: false,
-    dateISO,
-    address: "",
-    setAt: new Date(),
-    photoUrl: "",
-    deputies: [],
-  };
 
 await Act.updateOne(
   { _id: actId },
