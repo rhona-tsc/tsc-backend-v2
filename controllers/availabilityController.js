@@ -109,9 +109,8 @@ const _waFallbackSent = new Set(); // remember WA SIDs we've already fallen back
 
 // Normalise first-name display so we never fall back to "there" when we actually have a name
 const safeFirst = (s) => {
-  console.log(`🟢 (availabilityController.js) safeFirst START at ${new Date().toISOString()}`, {
-    actId: req.query?.actId,
-    dateISO: req.query?.dateISO, });
+  console.log(`🟢 (availabilityController.js) safeFirst START at ${new Date().toISOString()}`
+  );
   const v = String(s || "").trim();
   return v ? v.split(/\s+/)[0] : "there";
 };
