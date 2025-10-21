@@ -1678,11 +1678,11 @@ export async function pingDeputiesFor(actId, lineupId, dateISO, formattedAddress
 
 // --- Availability Badge Rebuild Helpers (WhatsApp-only flow) ---
 
-async function buildAvailabilityBadgeFromRows(row, act) {
+async function buildAvailabilityBadgeFromRows(act, dateISO) {
   console.log(`🟢 (availabilityController.js) buildAvailabilityBadgeFromRows START at ${new Date().toISOString()}`);
-      const dateISO = row?.dateISO;
-if (!act || !dateISO) return null;
-    const formattedAddress = row?.formattedAddress || row?.address || act?.formattedAddress || "TBC";
+  if (!act || !dateISO) return null;
+
+  const formattedAddress = act?.formattedAddress || "TBC";
 
   const rows = await AvailabilityModel.find({ actId: act._id, dateISO })
     .select({ phone: 1, reply: 1, musicianId: 1, updatedAt: 1 })
@@ -1714,7 +1714,7 @@ if (!act || !dateISO) return null;
 
       // ✅ Lead said YES → primary badge
       if (leadReply === "yes") {
-        const bits = await getDeputyDisplayBits(m)
+        const bits = await getDeputyDisplayBits(m);
         const badgeObj = {
           active: true,
           dateISO,
@@ -1763,7 +1763,7 @@ if (!act || !dateISO) return null;
             inPromo: false,
             deputies: enriched,
             vocalistName: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
-          address: formattedAddress,
+            address: formattedAddress,
             setAt: new Date(),
           };
           console.log("🎤 Built deputy badge:", badgeObj);
