@@ -5,6 +5,9 @@ import { hashBase36 } from "../utils/hash.js";
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
+// 🧠 Throttle map to prevent duplicate rapid invites per email
+const _lastHitByEmail = new Map();
+
 function cleanPrivate(obj) {
   if (!obj || typeof obj !== "object") return {};
   const cleaned = {};

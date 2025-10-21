@@ -1790,33 +1790,29 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO)
 
     const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
 
-    // 🧹 If no badge, clear existing
-    if (!badge) {
-      await Act.updateOne(
-        { _id: actId },
-        {
-          $set: {
-            availabilityBadges: {
-              active: false,
-              clearedAt: new Date(),
-            },
-          },
-          $unset: {
-            "availabilityBadges.vocalistName": "",
-            "availabilityBadges.inPromo": "",
-            "availabilityBadges.isDeputy": "",
-            "availabilityBadges.photoUrl": "",
-            "availabilityBadges.musicianId": "",
-            "availabilityBadges.dateISO": "",
-            "availabilityBadges.address": "",
-            "availabilityBadges.deputies": "",
-            "availabilityBadges.setAt": "",
-          },
-        }
-      );
-      console.log(`🧹 Cleared availability badge for ${act.tscName || act.name}`);
-      return { success: true, cleared: true };
-    }
+   // 🧹 If no badge, clear existing
+if (!badge) {
+  const clearedBadge = {
+    active: false,
+    isDeputy: false,
+    vocalistName: "",
+    musicianId: "",
+    inPromo: false,
+    dateISO,
+    address: "",
+    setAt: new Date(),
+    photoUrl: "",
+    deputies: [],
+  };
+
+await Act.updateOne(
+  { _id: actId },
+  { $unset: { [`availabilityBadges.${key}`]: "" } }
+);
+
+  console.log(`🧹 Cleared availability badge for ${act.tscName || act.name}`);
+  return { success: true, cleared: true };
+}
 
     // 🚧 Guard: ensure badge is a proper object
     if (typeof badge !== "object" || badge === null || Array.isArray(badge)) {
@@ -1825,8 +1821,11 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO)
     }
 
     // ✅ Apply new badge
-    await Act.updateOne({ _id: actId }, { $set: { availabilityBadges: badge } });
-    console.log(`✅ Applied availability badge for ${act.tscName || act.name}:`, badge);
+const key = `${dateISO}_${(act.formattedAddress || "unknown").replace(/\W+/g, "_")}`;
+await Act.updateOne(
+  { _id: actId },
+  { $set: { [`availabilityBadges.${key}`]: badge } }
+);    console.log(`✅ Applied availability badge for ${act.tscName || act.name}:`, badge);
 
     // 📧 Send client email (lead YES only)
     if (!badge.isDeputy) {
