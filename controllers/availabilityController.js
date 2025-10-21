@@ -328,7 +328,14 @@ const NORTHERN_COUNTIES = new Set([
 "ceredigion", "cheshire", "cleveland", "conway", "cumbria", "denbighshire", "derbyshire", "durham", "flintshire", "greater manchester", "gwynedd", "herefordshire", "lancashire", "leicestershire", "lincolnshire", "merseyside", "north humberside", "north yorkshire", "northumberland", "nottinghamshire", "rutland", "shropshire", "south humberside", "south yorkshire", "staffordshire", "tyne and wear", "warwickshire", "west midlands", "west yorkshire", "worcestershire", "wrexham", "rhondda cynon taf", "torfaen", "neath port talbot", "bridgend", "blaenau gwent", "caerphilly", "cardiff", "merthyr tydfil", "newport", "aberdeen city", "aberdeenshire", "angus", "argyll and bute", "clackmannanshire", "dumfries and galloway", "dundee city", "east ayrshire", "east dunbartonshire", "east lothian", "east renfrewshire", "edinburgh", "falkirk", "fife", "glasgow", "highland", "inverclyde", "midlothian", "moray", "na h eileanan siar", "north ayrshire", "north lanarkshire", "orkney islands", "perth and kinross", "renfrewshire", "scottish borders", "shetland islands", "south ayrshire", "south lanarkshire", "stirling", "west dunbartonshire", "west lothian"
 ]);
 
-
+const toE164 = (raw = "") => {
+    let s = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+    if (!s) return "";
+    if (s.startsWith("+")) return s;
+    if (s.startsWith("07")) return s.replace(/^0/, "+44");
+    if (s.startsWith("44")) return `+${s}`;
+    return s;
+  };
 
 // Availability controller: robust travel fetch that supports both API shapes
 const fetchTravel = async (origin, destination, dateISO) => {
@@ -1316,6 +1323,8 @@ async function getDeputyDisplayBits(dep) {
     return { musicianId: fallbackId, photoUrl: "", profileUrl };
   }
 }
+
+
 
 // -------------------- SSE Broadcaster --------------------
 
