@@ -567,35 +567,45 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
 export const triggerAvailabilityRequest = async (req, res) => {
    console.log(`🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`, {
  });
+
   try {
     console.log("🛎 triggerAvailabilityRequest", req.body);
 
-const { actId, lineupId, date, address } = req.body;
-if (!actId || !date || !address) {
-  return res
-    .status(400)
-    .json({ success: false, message: "Missing actId/date/address" });
-}
+    const { actId, lineupId, date, address } = req.body;
+    if (!actId || !date || !address) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing actId/date/address" });
+    }
 
-// 🧩 Guard: prevent duplicate trigger for same act/date/address
-const dateISO = new Date(date).toISOString().slice(0, 10);
-const shortAddress = (address || "")
-  .split(",")
-  .slice(-2)
-  .join(",")
-  .replace(/,\s*UK$/i, "")
-  .trim();
+    // 🧩 Guard: prevent duplicate trigger for same act/date/address
+    const dateISO = new Date(date).toISOString().slice(0, 10);
+    const shortAddress = (address || "")
+      .split(",")
+      .slice(-2)
+      .join(",")
+      .replace(/,\s*UK$/i, "")
+      .trim();
 
-const existingEnquiry = await AvailabilityModel.findOne({
-  actId,
-  dateISO,
-  formattedAddress: shortAddress,
-}).lean();
+    // Move dedupeKey and guard block AFTER variables are defined
+    const dedupeKey = `${actId}_${dateISO}_${shortAddress}`;
+    triggerAvailabilityRequest.activeKeys = triggerAvailabilityRequest.activeKeys || new Set();
+    if (triggerAvailabilityRequest.activeKeys.has(dedupeKey)) {
+      console.log("🧠 Guard: duplicate concurrent trigger prevented for", dedupeKey);
+      return res.json({ success: true, skipped: true, message: "Duplicate concurrent trigger" });
+    }
+    triggerAvailabilityRequest.activeKeys.add(dedupeKey);
 
-if (existingEnquiry) {
-  console.log("⛔ Already triggered for act/date/address:", existingEnquiry.dateISO, existingEnquiry.formattedAddress);
-  return res.json({ success: true, skipped: true, message: "Duplicate prevented" });
-}
+    const existingEnquiry = await AvailabilityModel.findOne({
+      actId,
+      dateISO,
+      formattedAddress: shortAddress,
+    }).lean();
+
+    if (existingEnquiry) {
+      console.log("⛔ Already triggered for act/date/address:", existingEnquiry.dateISO, existingEnquiry.formattedAddress);
+      return res.json({ success: true, skipped: true, message: "Duplicate prevented" });
+    }
 
 // Continue if no duplicate found
 const act = await Act.findById(actId).lean();
@@ -690,13 +700,20 @@ const act = await Act.findById(actId).lean();
     console.log("🚫 Known-unavailable:", [...negatives]);
 console.log("🔁 Already pinged (act/date scoped):", [...alreadyPingedSet]);
     // 2) vocal leads only
-    const vocalLeads = members.filter((m) => isVocalRole(m.instrument));
-    if (!vocalLeads.length) {
-      return res.json({
-        success: true,
-        message: "No vocalists found to notify",
-      });
-    }
+const found = findVocalistPhone(act, lineupId);
+if (!found?.vocalist || !found?.phone) {
+  return res.json({
+    success: true,
+    message: "No vocalist with valid phone found",
+  });
+}
+
+const lead = found.vocalist;
+const phone = found.phone;
+
+const vocals = act.lineups
+  .map((l) => findVocalistPhone(act, l._id))
+  .filter(Boolean);
 
     // 3) fee helper
     const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
@@ -764,289 +781,19 @@ if (!usedCountyRate) {
     // 4) decide who to ping
     let sentCount = 0;
 
- for (const lead of vocalLeads) {
-  const phone = normalizePhone(lead?.phoneNumber || lead?.phone || "");
-  const finalFee = await feeForMember(lead);
+const finalFee = await feeForMember(lead);
 
-
-
-  // If lead already said NO/UNAVAILABLE → go straight to deputies
-  if (negatives.has(phone)) {
-    // ... (your existing deputies block stays as-is)
-    // continue to next lead after deputies logic
-    // continue;
-  }
-
-  // Lead not known-unavailable:
-  if (!phone) {
-    console.warn("⚠️ Lead has no usable phone, skipping.");
-    continue;
-  }
-
-  // ⏸️ Per-phone queue: if this singer already has a pending enquiry in last 3h, defer this one
-const THREE_HOURS = 3 * 60 * 60 * 1000;
-// Scope to this actId + dateISO so a different date isn't blocked
-const recentPending = await AvailabilityModel.findOne({
-  actId,
-  dateISO,
-  phone,
-  reply: null,
-  updatedAt: { $gte: new Date(Date.now() - THREE_HOURS) },
-}).lean();
-
-  if (recentPending) {
-    await DeferredAvailability.create({
-      phone,
-      actId: act._id,
-      dateISO,
-      duties: lead.instrument || "Lead Vocal",
-      fee: String(finalFee),
-      formattedDate,
-      formattedAddress: shortAddress,
-      payload: {
-        to: phone,
-        templateParams: {
-          FirstName: firstNameOf(lead),
-          FormattedDate: formattedDate,
-          FormattedAddress: shortAddress,
-          Fee: String(finalFee),
-          Duties: lead.instrument || "Lead Vocal",
-          ActName: act.tscName || act.name || "the band",
-          MetaActId: String(act._id || ""),
-          MetaISODate: dateISO,
-          MetaAddress: shortAddress,
-        },
-        smsBody:     // (not used for booking confirmations )
-
-          `Hi 8${firstNameOf(lead)}, you've received an enquiry for a gig on ` +
-          `${formattedDate} in ${shortAddress} at a rate of £${String(finalFee)} for ` +
-          `${lead.instrument} duties with ${act.tscName}. Please reply YES / NO.`,
-      },
-    });
-
-    console.log("⏸️ Deferred enquiry due to active pending for this phone.");
-    continue; // don't send now; next lead
-  }
-
-  // Create availability stub for lead (idempotent on actId+dateISO+phone)
-const enquiryId = Date.now().toString();
-const now = new Date();
-
-const availabilityDoc = await AvailabilityModel.findOneAndUpdate(
-  { actId: act._id, dateISO, phone },
-  {
-    $setOnInsert: {
-      enquiryId,
-      actId: act._id,
-      lineupId: lineup?._id || lineup?.lineupId || null,
-      musicianId: lead?.musicianId || lead?._id || null,
-      phone,
-      duties: lead.instrument || "Lead Vocal",
-      formattedDate,
-      formattedAddress: shortAddress,
-      fee: String(finalFee),
-      reply: null,
-      inbound: {},
-      dateISO,
-      createdAt: now,
-      actName: act.tscName || act.name || "",
-      musicianName: `${lead.firstName || ""} ${lead.lastName || ""}`.trim(),
-      contactName: firstNameOf(lead),
-    },
-    $set: { updatedAt: now },
-  },
-  { upsert: true, new: true }
-);
-
-// Cool-down checks (MUST run after availabilityDoc exists)
-const TWO_MIN = 2 * 60 * 1000;
-const last = new Date(availabilityDoc?.updatedAt || 0).getTime();
-const force = String(req.query?.force || req.body?.force || "") === "1";
-
-if (!force && availabilityDoc?.messageSidOut) {
-  if (Date.now() - last < 5 * 1000) {
-    console.log("🛑 Skipping duplicate send (cool-down):", {
-      phone,
-      actId: String(act._id),
-      dateISO,
-    });
-    continue;
-  }
-  if (Date.now() - last < TWO_MIN) {
-    console.log("🛑 Skipping re-send within 2 min window:", {
-      phone,
-      actId: String(act._id),
-      dateISO,
-    });
-    continue;
-  }
+// If lead already said NO/UNAVAILABLE → go straight to deputies
+if (negatives.has(phone)) {
+  console.log("⏭️ Lead already marked unavailable — skip to deputies");
+  // (optional) await handleLeadNegativeReply({ act, updated: {...}, fromRaw: phone });
+  return res.json({ success: true, skipped: true, reason: "lead_unavailable" });
 }
 
-// --- Build unified copy for both WA + SMS ---
-const smsBody = buildAvailabilitySMS({
-  firstName: firstNameOf(lead),
-  formattedDate,
-  formattedAddress: shortAddress,
-  fee: String(finalFee),
-  duties: lead.instrument || "your role",
-  actName: act.tscName || act.name || "the act",
-});
-
-// Use the enquiry template SID you already created
-const contentSid = process.env.TWILIO_ENQUIRY_SID;
-
-// WhatsApp template variables: numbered 1-6
-const variables = {
-  "1": firstNameOf(lead),
-  "2": formattedDate,
-  "3": shortAddress,
-  "4": String(finalFee),
-  "5": lead.instrument || "performance",
-  "6": act.tscName || act.name || "the band",
-};
-
-let sendRes = null;
-try {
-  // 🟢 (availabilityController.js) Try WhatsApp first
-  sendRes = await sendWhatsAppMessage({
-    to: `whatsapp:${phone}`,
-    contentSid,
-    variables,
-    smsBody, // stored for webhook SMS fallback
-  });
-
-  console.log("📣 Availability request (WA) sent", {
-    to: phone,
-    duties: lead.instrument,
-    fee: finalFee,
-    sid: sendRes?.sid,
-  });
-} catch (waErr) {
-  console.warn("⚠️ WA send failed — trying SMS fallback", {
-    to: phone,
-    err: waErr?.message || waErr,
-  });
-
-  // 🧠 SMS cooldown rule: only one pending SMS per musician
-  const pendingSMS = await AvailabilityModel.findOne({
-    phone,
-    contactChannel: "sms",
-    reply: null,
-    createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // within 24h
-  }).lean();
-
-  if (pendingSMS) {
-    console.log("⏸️ Skipping SMS — awaiting reply from earlier enquiry:", {
-      phone,
-      lastSent: pendingSMS.createdAt,
-    });
-    sendRes = { channel: "sms", status: "skipped_pending" };
-  } else {
-    try {
-      await sendSMSMessage(phone, smsBody);
-      sendRes = { channel: "sms", status: "sent" };
-      console.log("✅ SMS fallback sent", { to: phone });
-    } catch (smsErr) {
-      console.warn("❌ SMS fallback also failed", {
-        to: phone,
-        err: smsErr?.message || smsErr,
-      });
-      sendRes = { channel: "none", status: "failed" };
-    }
-  }
-}
-
-// Update DB so webhook / dashboards stay in sync
-await AvailabilityModel.updateOne(
-  { _id: availabilityDoc._id },
-  {
-    $set: {
-      status: sendRes?.status || "queued",
-      messageSidOut: sendRes?.sid || null,
-      contactChannel: sendRes?.channel || "whatsapp",
-      actName: act.tscName || act.name || "",
-      musicianName: `${lead.firstName || ""} ${lead.lastName || ""}`.trim(),
-      contactName: firstNameOf(lead),
-      duties: lead.instrument || "Lead Vocal",
-      fee: String(finalFee),
-      formattedDate,
-      formattedAddress: shortAddress,
-      updatedAt: new Date(),
-    },
-  }
-);
-
-await EnquiryMessage.create({
-  enquiryId,
-  actId: act._id,
-  lineupId: lineup?._id || lineup?.lineupId || null,
-  musicianId: lead._id || null,
-  phone,
-  duties: lead.instrument || "Lead Vocal",
-  fee: String(finalFee),
-  formattedDate,
-  formattedAddress: shortAddress,
-  messageSid: sendRes?.sid || null,
-  status: mapTwilioToEnquiryStatus(sendRes?.status),
-  meta: {
-    actName: act.tscName || act.name,
-    selectedCounty,
-    isNorthernGig: false,
-    MetaActId: String(act._id || ""),
-    MetaISODate: dateISO,
-    MetaAddress: shortAddress,
-  },
-});
-
-  await AvailabilityModel.updateOne(
-    { _id: availabilityDoc._id },
-    {
-      $set: {
-        status: sendRes?.status || "queued",
-        messageSidOut: sendRes?.sid || null,
-        contactChannel: sendRes?.channel || "whatsapp",
-        actName: act.tscName || act.name || "",
-        musicianName: `${lead.firstName || ""} ${lead.lastName || ""}`.trim(),
-        contactName: firstNameOf(lead),
-        duties: lead.instrument || "Lead Vocal",
-        fee: String(finalFee),
-        formattedDate,
-        formattedAddress: shortAddress,
-        updatedAt: new Date(),
-      },
-    }
-  );
-
-  await EnquiryMessage.create({
-    enquiryId,
-    actId: act._id,
-    lineupId: lineup?._id || lineup?.lineupId || null,
-    musicianId: lead._id || null,
-    phone,
-    duties: lead.instrument || "Lead Vocal",
-    fee: String(finalFee),
-    formattedDate,
-    formattedAddress: shortAddress,
-    messageSid: sendRes?.sid || null,
-    status: mapTwilioToEnquiryStatus(sendRes?.status),
-    meta: {
-      actName: act.tscName || act.name,
-selectedCounty,
-      isNorthernGig: false,
-      MetaActId: String(act._id || ""),
-      MetaISODate: dateISO,
-      MetaAddress: shortAddress,
-    },
-  });
-
-  console.log("✅ Lead pinged:", {
-    name: `${lead.firstName || ""} ${lead.lastName || ""}`.trim(),
-    phone,
-    channel: sendRes?.channel,
-    enquiryId,
-  });
-  alreadyPingedSet.add(phone);
-  sentCount++;
+// Lead not known-unavailable:
+if (!phone) {
+  console.warn("⚠️ Lead has no usable phone, skipping.");
+  return res.json({ success: false, message: "No phone for vocalist" });
 }
 
 
@@ -1430,7 +1177,7 @@ if (reply === "noloc") {
 
   return res.status(200).send("<Response/>");
 }
-
+triggerAvailabilityRequest.activeKeys.delete(dedupeKey);
     console.log(`✅ Processed WhatsApp reply: ${reply}`);
     console.log("✅ [twilioInbound] END (fallback branch)");
     return res.status(200).send("<Response/>");
@@ -1835,27 +1582,6 @@ export async function notifyDeputyOneShot({
         },
       }
     );
-
-    // record a row in EnquiryMessage (handy for analytics / auditing)
-    const first = firstNameOf(deputy);
-    const enquiry = await EnquiryMessage.create({
-      enquiryId,
-      actId: act?._id || null,
-      lineupId: lineupId || null,
-      musicianId: deputy?._id || deputy?.musicianId || null,
-      phone: phoneE164,
-      duties,
-      fee: String(finalFee),
-      formattedDate,
-      formattedAddress,
-      messageSid: sendRes?.sid || null,
-      status: mapTwilioToEnquiryStatus(sendRes?.status),
-      meta: {
-        firstName: first,
-        actName: act?.tscName || act?.name || "the band",
-      },
-      templateParams,
-    });
 
     console.log("✅ Deputy pinged");
     return { phone: phoneE164, enquiryId };
