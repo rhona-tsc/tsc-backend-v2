@@ -11,6 +11,8 @@ import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is correct in backend
 import { countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
 import Shortlist from "../models/shortlistModel.js";
+import sendEmail from "../utils/sendEmail.js";
+import User from "../models/userModel.js";
 
 const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
 const normCountyKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, "_");
@@ -41,6 +43,32 @@ function classifyReply(text) {
 
   return null;
 }
+
+/**
+ * Send a client-facing email about act availability.
+ * Falls back to hello@thesupremecollective.co.uk if no client email found.
+ */
+export async function sendClientEmail({ actId, subject, html }) {
+  try {
+    // Optional: look up the act and its linked user
+    const act = await Act.findById(actId).populate("userId", "email").lean();
+    const recipient =
+      act?.userId?.email || process.env.NOTIFY_EMAIL || "hello@thesupremecollective.co.uk";
+
+    console.log(`📧 Sending client availability email to ${recipient}...`);
+    await sendEmail(
+  [recipient, "hello@thesupremecollective.co.uk"],
+  subject,
+  html
+);
+
+    return { success: true };
+  } catch (err) {
+    console.error("❌ sendClientEmail failed:", err.message);
+    return { success: false, error: err.message };
+  }
+}
+
 function parsePayload(payload = "") {
    console.log(`🟢 (availabilityController.js) parsePayload START at ${new Date().toISOString()}`, {
  });
@@ -1954,28 +1982,33 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO)
 
     const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
 
-    // If no badge (no lead/deputies), clear existing
-    if (!badge) {
-      await Act.updateOne(
-        { _id: actId },
-        {
-          $set: { "availabilityBadges.active": false },
-          $unset: {
-            "availabilityBadges.vocalistName": "",
-            "availabilityBadges.inPromo": "",
-            "availabilityBadges.isDeputy": "",
-            "availabilityBadges.photoUrl": "",
-            "availabilityBadges.musicianId": "",
-            "availabilityBadges.dateISO": "",
-            "availabilityBadges.address": "",
-            "availabilityBadges.deputies": "",
-            "availabilityBadges.setAt": "",
-          },
-        }
-      );
-      console.log(`🧹 Cleared availability badge for ${act.tscName || act.name}`);
-      return { success: true, cleared: true };
+   // If no badge (no lead/deputies), clear existing
+if (!badge) {
+  await Act.updateOne(
+    { _id: actId },
+    {
+      $set: {
+        availabilityBadges: {
+          active: false,
+          clearedAt: new Date(),
+        },
+      },
+      $unset: {
+        "availabilityBadges.vocalistName": "",
+        "availabilityBadges.inPromo": "",
+        "availabilityBadges.isDeputy": "",
+        "availabilityBadges.photoUrl": "",
+        "availabilityBadges.musicianId": "",
+        "availabilityBadges.dateISO": "",
+        "availabilityBadges.address": "",
+        "availabilityBadges.deputies": "",
+        "availabilityBadges.setAt": "",
+      },
     }
+  );
+  console.log(`🧹 Cleared availability badge for ${act.tscName || act.name}`);
+  return { success: true, cleared: true };
+}
 
     // Save updated badge
     await Act.updateOne({ _id: actId }, { $set: { availabilityBadges: badge } });
