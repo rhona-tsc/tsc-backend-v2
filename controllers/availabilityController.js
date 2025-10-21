@@ -1325,7 +1325,7 @@ async function getDeputyDisplayBits(dep) {
           .lean();
         if (musByEmail) {
           photoUrl = getPictureUrlFrom(musByEmail);
-          console.log("📸 Step 3 result: Found via email →", photoUrl);
+          console.log("📸 Step 3 result: Found via email →", photoUrl || "❌ none");
           if (!musicianId && musByEmail._id) {
             dep.musicianId = musByEmail._id; // non-persistent enrichment
           }
@@ -1335,9 +1335,16 @@ async function getDeputyDisplayBits(dep) {
       }
     }
 
-    // 4️⃣ Build final output
+    // 4️⃣ Final ID + profile URL
     const resolvedMusicianId = (dep?.musicianId && String(dep.musicianId)) || musicianId || "";
     const profileUrl = resolvedMusicianId ? `${PUBLIC_SITE_BASE}/musician/${resolvedMusicianId}` : "";
+
+    // 🪄 NEW: fallback to profileUrl if photoUrl missing
+    if (!photoUrl && profileUrl) {
+      console.log("🪄 No photo found — using profileUrl as fallback:", profileUrl);
+      photoUrl = profileUrl;
+    }
+
     console.log("🎯 Final getDeputyDisplayBits result:", {
       resolvedMusicianId,
       photoUrl,
@@ -1353,7 +1360,7 @@ async function getDeputyDisplayBits(dep) {
     console.warn("⚠️ getDeputyDisplayBits failed:", e?.message || e);
     const fallbackId = (dep?.musicianId && String(dep.musicianId)) || (dep?._id && String(dep._id)) || "";
     const profileUrl = fallbackId ? `${PUBLIC_SITE_BASE}/musician/${fallbackId}` : "";
-    return { musicianId: fallbackId, photoUrl: "", profileUrl };
+    return { musicianId: fallbackId, photoUrl: profileUrl, profileUrl };
   }
 }
 
@@ -1671,9 +1678,11 @@ export async function pingDeputiesFor(actId, lineupId, dateISO, formattedAddress
 
 // --- Availability Badge Rebuild Helpers (WhatsApp-only flow) ---
 
-async function buildAvailabilityBadgeFromRows(act, dateISO) {
+async function buildAvailabilityBadgeFromRows(row, act) {
   console.log(`🟢 (availabilityController.js) buildAvailabilityBadgeFromRows START at ${new Date().toISOString()}`);
-  if (!act || !dateISO) return null;
+      const dateISO = row?.dateISO;
+if (!act || !dateISO) return null;
+    const formattedAddress = row?.formattedAddress || row?.address || act?.formattedAddress || "TBC";
 
   const rows = await AvailabilityModel.find({ actId: act._id, dateISO })
     .select({ phone: 1, reply: 1, musicianId: 1, updatedAt: 1 })
@@ -1705,7 +1714,7 @@ async function buildAvailabilityBadgeFromRows(act, dateISO) {
 
       // ✅ Lead said YES → primary badge
       if (leadReply === "yes") {
-        const bits = await getDeputyDisplayBits(m);
+        const bits = await getDeputyDisplayBits(m)
         const badgeObj = {
           active: true,
           dateISO,
@@ -1714,7 +1723,7 @@ async function buildAvailabilityBadgeFromRows(act, dateISO) {
           vocalistName: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
           musicianId: bits?.musicianId || "",
           photoUrl: bits?.photoUrl || "",
-          address: act?.availabilityBadges?.address || "",
+          address: formattedAddress,
           setAt: new Date(),
         };
         console.log("🎤 Built lead vocalist badge:", badgeObj);
@@ -1754,7 +1763,7 @@ async function buildAvailabilityBadgeFromRows(act, dateISO) {
             inPromo: false,
             deputies: enriched,
             vocalistName: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
-            address: act?.availabilityBadges?.address || "",
+          address: formattedAddress,
             setAt: new Date(),
           };
           console.log("🎤 Built deputy badge:", badgeObj);
