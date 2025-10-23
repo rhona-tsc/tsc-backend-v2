@@ -14,6 +14,17 @@ import Shortlist from "../models/shortlistModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import User from "../models/userModel.js";
 
+// Debugging: log AvailabilityModel structure at runtime
+console.log("📘 [twilioInbound] AvailabilityModel inspection:");
+if (AvailabilityModel?.schema?.paths) {
+  const fieldNames = Object.keys(AvailabilityModel.schema.paths);
+  console.log("📋 Fields:", fieldNames);
+  console.log("📦 Collection name:", AvailabilityModel.collection?.name);
+  console.log("🧱 Indexes:", AvailabilityModel.schema._indexes);
+} else {
+  console.warn("⚠️ AvailabilityModel missing schema.paths — check import");
+}
+
 const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
 const normCountyKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, "_");
 
@@ -1094,7 +1105,8 @@ export const twilioInbound = async (req, res) => {
           "Super — we’ve sent a diary invite with full details and will update your availability shortly."
         );
         console.log("✅ WhatsApp confirmation sent.");
-
+console.log("🧩 [twilioInbound] AvailabilityModel.findOneAndUpdate payload check:");
+console.dir(updated, { depth: 5 });
         console.log("🟡 Rebuilding availability badge...");
         await rebuildAndApplyAvailabilityBadge(
           { body: { actId: String(updated.actId), dateISO: updated.dateISO } },
