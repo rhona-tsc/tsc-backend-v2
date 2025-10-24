@@ -1582,7 +1582,7 @@ export async function pingDeputiesFor(actId, lineupId, dateISO, formattedAddress
 
 // --- Availability Badge Rebuild Helpers (WhatsApp-only flow) ---
 
-async function buildAvailabilityBadgeFromRows(act, dateISO) {
+export async function buildAvailabilityBadgeFromRows(act, dateISO) {
   console.log(`🟢 (availabilityController.js) buildAvailabilityBadgeFromRows START at ${new Date().toISOString()}`);
   if (!act || !dateISO) return null;
 
