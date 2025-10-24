@@ -1213,7 +1213,7 @@ async function getDeputyDisplayBits(dep) {
     let mus = null;
     if ((!photoUrl || !photoUrl.startsWith("http")) && musicianId) {
       mus = await Musician.findById(musicianId)
-        .select("musicianProfileImageUpload musicianProfileImage profileImage profilePicture.url photoUrl imageUrl email")
+  .select("musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl email")
         .lean();
       photoUrl = getPictureUrlFrom(mus || {});
       console.log("📸 Step 2: Lookup by musicianId →", photoUrl || "❌ none");
@@ -1225,7 +1225,7 @@ async function getDeputyDisplayBits(dep) {
       console.log("📧 Step 3: Lookup by email →", email || "❌ none");
       if (email) {
         const musByEmail = await Musician.findOne({ email })
-          .select("musicianProfileImageUpload musicianProfileImage profileImage profilePicture.url photoUrl imageUrl _id email")
+  .select("musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl _id email")
           .lean();
         if (musByEmail) {
           photoUrl = getPictureUrlFrom(musByEmail);
