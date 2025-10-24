@@ -39,8 +39,11 @@ import { getAvailableActIds } from './controllers/actAvailabilityController.js';
 import mongoose from "mongoose";
 import { submitActSubmission } from './controllers/actSubmissionController.js';
 import v2Routes from "./routes/v2.js";
-import { rebuildAndApplyAvailabilityBadge, twilioInbound, twilioStatus } from './controllers/availabilityController.js';
+import { rebuildAndApplyAvailabilityBadge, twilioInbound, twilioStatus, buildAvailabilityBadgeFromRows } from './controllers/availabilityController.js';
 import { handleGoogleWebhook } from './controllers/googleController.js';
+import cron from "node-cron";
+import Act from "../models/act.js";
+
 
 // at the top of backend/server.js (after dotenv)
 console.log('ENV CHECK:', {
@@ -338,6 +341,7 @@ app.use((err, req, res, next) => {
 // ---------------------------------------------------------------------------
 import cron from 'node-cron';
 import { buildBadgeFromAvailability } from './controllers/availabilityBadgesController.js';
+import AvailabilityModel from './models/availabilityModel.js';
 
 let isRegistering = false;
 
@@ -362,21 +366,34 @@ console.log('🕒 Cron job scheduled: Google Calendar webhook will refresh daily
 
 app.listen(port, () => console.log(`🚀 Server started on PORT: ${port}`));
 
+
 cron.schedule("*/30 * * * *", async () => {
   console.log("🔁 [CRON] Refreshing availability badges...");
   try {
-    const upcomingActs = await mongoose.model("Act").find({
-      "availabilityBadges.active": true,
-    }).select("_id availabilityBadges.dateISO");
+    // ✅ Correct: get all acts (not availability docs)
+    const acts = await Act.find({})
+      .select("_id name tscName formattedAddress availabilityBadges lineups")
+      .lean();
 
-    for (const act of upcomingActs) {
-      const dateISO = act.availabilityBadges?.dateISO;
-      if (!dateISO) continue;
+    for (const act of acts) {
+      const dates = new Set(
+        (Array.isArray(act.availabilityBadges)
+          ? act.availabilityBadges.map((b) => b.dateISO)
+          : [act.availabilityBadges?.dateISO]
+        ).filter(Boolean)
+      );
 
-      const badge = await buildBadgeFromAvailability(act._id, dateISO);
-      if (badge) {
-        await mongoose.model("Act").updateOne({ _id: act._id }, { $set: { availabilityBadges: badge } });
-        console.log(`✅ Refreshed badge for ${act._id} (${badge.vocalistName})`);
+      for (const dateISO of dates) {
+        const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
+        if (badge) {
+          await Act.updateOne(
+            { _id: act._id },
+            { $set: { [`availabilityBadges.${dateISO}`]: badge } }
+          );
+          console.log(`✅ Refreshed badge for ${act.tscName || act.name} (${dateISO})`);
+        } else {
+          console.log(`🪶 No badge data for ${act.tscName || act.name} (${dateISO})`);
+        }
       }
     }
 
