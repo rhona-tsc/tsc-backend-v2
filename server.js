@@ -36,12 +36,10 @@ import uploadRoutes from "./routes/upload.js";
 import notificationsRoutes from "./routes/notifications.js";
 import newsletterRoutes from './routes/newsletterRoutes.js';
 import { getAvailableActIds } from './controllers/actAvailabilityController.js';
-import mongoose from "mongoose";
 import { submitActSubmission } from './controllers/actSubmissionController.js';
 import v2Routes from "./routes/v2.js";
 import { rebuildAndApplyAvailabilityBadge, twilioInbound, twilioStatus, buildAvailabilityBadgeFromRows } from './controllers/availabilityController.js';
 import { handleGoogleWebhook } from './controllers/googleController.js';
-import cron from "node-cron";
 import Act from "../models/act.js";
 
 
