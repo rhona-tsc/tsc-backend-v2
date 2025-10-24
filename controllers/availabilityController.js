@@ -1191,6 +1191,7 @@ const firstNameOf = (p) => {
 };
 // -------------------- Outbound Trigger --------------------
 
+// ✅ Unified version ensuring correct photoUrl vs profileUrl distinction
 async function getDeputyDisplayBits(dep) {
   console.log(`🟢 (availabilityController.js) getDeputyDisplayBits START at ${new Date().toISOString()}`, {
     depKeys: Object.keys(dep || {}),
@@ -1202,16 +1203,15 @@ async function getDeputyDisplayBits(dep) {
   const PUBLIC_SITE_BASE = (process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "http://localhost:5174").replace(/\/$/, "");
 
   try {
-    // Prefer an explicit musicianId if present
     const musicianId = (dep?.musicianId && String(dep.musicianId)) || (dep?._id && String(dep._id)) || "";
 
-    // 1️⃣ Direct photo on deputy
+    // 🎯 Step 1: try direct image on deputy
     let photoUrl = getPictureUrlFrom(dep);
     console.log("📸 Step 1: Direct deputy photoUrl →", photoUrl || "❌ none");
 
-    // 2️⃣ Lookup by musicianId
+    // Step 2: lookup musician by ID if missing
     let mus = null;
-    if (!photoUrl && musicianId) {
+    if ((!photoUrl || !photoUrl.startsWith("http")) && musicianId) {
       mus = await Musician.findById(musicianId)
         .select("musicianProfileImageUpload musicianProfileImage profileImage profilePicture.url photoUrl imageUrl email")
         .lean();
@@ -1219,8 +1219,8 @@ async function getDeputyDisplayBits(dep) {
       console.log("📸 Step 2: Lookup by musicianId →", photoUrl || "❌ none");
     }
 
-    // 3️⃣ Lookup by email (deputy email > mus.email)
-    if (!photoUrl) {
+    // Step 3: lookup by email if still missing
+    if ((!photoUrl || !photoUrl.startsWith("http")) && (dep?.email || mus?.email)) {
       const email = dep?.email || dep?.emailAddress || mus?.email || "";
       console.log("📧 Step 3: Lookup by email →", email || "❌ none");
       if (email) {
@@ -1231,7 +1231,7 @@ async function getDeputyDisplayBits(dep) {
           photoUrl = getPictureUrlFrom(musByEmail);
           console.log("📸 Step 3 result: Found via email →", photoUrl || "❌ none");
           if (!musicianId && musByEmail._id) {
-            dep.musicianId = musByEmail._id; // non-persistent enrichment
+            dep.musicianId = musByEmail._id;
           }
         } else {
           console.warn("⚠️ Step 3: No musician found for email", email);
@@ -1239,14 +1239,13 @@ async function getDeputyDisplayBits(dep) {
       }
     }
 
-    // 4️⃣ Final ID + profile URL
     const resolvedMusicianId = (dep?.musicianId && String(dep.musicianId)) || musicianId || "";
     const profileUrl = resolvedMusicianId ? `${PUBLIC_SITE_BASE}/musician/${resolvedMusicianId}` : "";
 
-    // 🪄 NEW: fallback to profileUrl if photoUrl missing
-    if (!photoUrl && profileUrl) {
-      console.log("🪄 No photo found — using profileUrl as fallback:", profileUrl);
-      photoUrl = profileUrl;
+    // 🪄 Step 4: fallback if no valid image found
+    if (!photoUrl || !photoUrl.startsWith("http")) {
+      photoUrl = assets.Default_Profile_Picture || `${PUBLIC_SITE_BASE}/default-avatar.png`;
+      console.log("🪄 No valid photo found – using fallback image:", photoUrl);
     }
 
     console.log("🎯 Final getDeputyDisplayBits result:", {
@@ -1257,14 +1256,15 @@ async function getDeputyDisplayBits(dep) {
 
     return {
       musicianId: resolvedMusicianId,
-      photoUrl: photoUrl || "",
+      photoUrl,
       profileUrl,
     };
   } catch (e) {
     console.warn("⚠️ getDeputyDisplayBits failed:", e?.message || e);
     const fallbackId = (dep?.musicianId && String(dep.musicianId)) || (dep?._id && String(dep._id)) || "";
     const profileUrl = fallbackId ? `${PUBLIC_SITE_BASE}/musician/${fallbackId}` : "";
-    return { musicianId: fallbackId, photoUrl: profileUrl, profileUrl };
+    const fallbackPhoto = assets.Default_Profile_Picture || `${PUBLIC_SITE_BASE}/default-avatar.png`;
+    return { musicianId: fallbackId, photoUrl: fallbackPhoto, profileUrl };
   }
 }
 
@@ -1582,12 +1582,12 @@ export async function pingDeputiesFor(actId, lineupId, dateISO, formattedAddress
 
 // --- Availability Badge Rebuild Helpers (WhatsApp-only flow) ---
 
+// ✅ buildAvailabilityBadgeFromRows (refined to include both photoUrl & profileUrl)
 export async function buildAvailabilityBadgeFromRows(act, dateISO) {
   console.log(`🟢 (availabilityController.js) buildAvailabilityBadgeFromRows START at ${new Date().toISOString()}`);
   if (!act || !dateISO) return null;
 
   const formattedAddress = act?.formattedAddress || "TBC";
-
   const rows = await AvailabilityModel.find({ actId: act._id, dateISO })
     .select({ phone: 1, reply: 1, musicianId: 1, updatedAt: 1 })
     .lean();
@@ -1627,6 +1627,7 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
           vocalistName: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
           musicianId: bits?.musicianId || "",
           photoUrl: bits?.photoUrl || "",
+          profileUrl: bits?.profileUrl || "",
           address: formattedAddress,
           setAt: new Date(),
         };
