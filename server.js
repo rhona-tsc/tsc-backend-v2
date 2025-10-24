@@ -40,7 +40,6 @@ import { submitActSubmission } from './controllers/actSubmissionController.js';
 import v2Routes from "./routes/v2.js";
 import { rebuildAndApplyAvailabilityBadge, twilioInbound, twilioStatus, buildAvailabilityBadgeFromRows } from './controllers/availabilityController.js';
 import { handleGoogleWebhook } from './controllers/googleController.js';
-import Act from "../models/actModel.js";
 
 
 // at the top of backend/server.js (after dotenv)
@@ -340,6 +339,7 @@ app.use((err, req, res, next) => {
 import cron from 'node-cron';
 import { buildBadgeFromAvailability } from './controllers/availabilityBadgesController.js';
 import AvailabilityModel from './models/availabilityModel.js';
+import actModel from './models/actModel.js';
 
 let isRegistering = false;
 
@@ -384,7 +384,7 @@ cron.schedule("*/30 * * * *", async () => {
       for (const dateISO of dates) {
         const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
         if (badge) {
-          await Act.updateOne(
+          await actModel.updateOne(
             { _id: act._id },
             { $set: { [`availabilityBadges.${dateISO}`]: badge } }
           );
