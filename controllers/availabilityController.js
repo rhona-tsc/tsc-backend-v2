@@ -584,9 +584,9 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
 
 
 export const triggerAvailabilityRequest = async (req, res) => {
-  console.log(`🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`, {});
+  console.log(`🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`);
   try {
-    console.log("🛎 triggerAvailabilityRequest", req.body);
+    console.log("🛎 triggerAvailabilityRequest body:", req.body);
 
     const { actId, lineupId, date, address } = req.body;
     if (!actId || !date || !address) {
@@ -634,9 +634,7 @@ export const triggerAvailabilityRequest = async (req, res) => {
 
     // phone normaliser
     const normalizePhone = (raw = "") => {
-      let v = String(raw || "")
-        .replace(/\s+/g, "")
-        .replace(/^whatsapp:/i, "");
+      let v = String(raw || "").replace(/\s+/g, "").replace(/^whatsapp:/i, "");
       if (!v) return "";
       if (v.startsWith("+")) return v;
       if (v.startsWith("07")) return v.replace(/^0/, "+44");
@@ -644,7 +642,7 @@ export const triggerAvailabilityRequest = async (req, res) => {
       return v;
     };
 
-    // 1) Availability state for this act/date across all contacts
+    // 1️⃣ Existing availability rows
     const prevRows = await AvailabilityModel.find({ actId, dateISO })
       .select({ phone: 1, reply: 1, updatedAt: 1, createdAt: 1 })
       .lean();
@@ -660,24 +658,15 @@ export const triggerAvailabilityRequest = async (req, res) => {
       const rep = String(r.reply || "").toLowerCase();
       if (rep === "yes") repliedYes.set(p, r);
       else if (rep === "no" || rep === "unavailable") repliedNo.set(p, r);
-      else {
-        const existing = pending.get(p);
-        if (!existing) pending.set(p, r);
-        else {
-          const a = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
-          const b = new Date(r.updatedAt || r.createdAt || 0).getTime();
-          if (b > a) pending.set(p, r);
-        }
-      }
+      else pending.set(p, r);
     }
 
     const negatives = new Set([...repliedNo.keys()]);
     const alreadyPingedSet = new Set([...repliedYes.keys(), ...pending.keys(), ...negatives.keys()]);
-
     console.log("🚫 Known-unavailable:", [...negatives]);
-    console.log("🔁 Already pinged (act/date scoped):", [...alreadyPingedSet]);
+    console.log("🔁 Already pinged:", [...alreadyPingedSet]);
 
-    // 2) Vocal lead
+    // 2️⃣ Lead vocalist lookup
     const found = findVocalistPhone(act, lineupId);
     if (!found?.vocalist || !found?.phone) {
       return res.json({
@@ -688,15 +677,25 @@ export const triggerAvailabilityRequest = async (req, res) => {
 
     const lead = found.vocalist;
     const phone = found.phone;
+    const phoneNorm = normalizePhone(phone);
 
-    // 3) fee helper
+    if (negatives.has(phoneNorm)) {
+      console.log("⏭️ Lead already marked unavailable — skipping.");
+      return res.json({ success: true, skipped: true, reason: "lead_unavailable" });
+    }
+
+    if (!phoneNorm) {
+      console.warn("⚠️ Lead has no usable phone, skipping.");
+      return res.json({ success: false, message: "No phone for vocalist" });
+    }
+
+    // 3️⃣ Fee calculation
     const feeForMember = async (member) => {
       const baseFee = Number(member?.fee ?? 0);
       const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
       const membersCount = Math.max(1, (Array.isArray(members) ? members.length : 0) || 1);
       const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
       const base = baseFee > 0 ? baseFee : perHead;
-
       const { county: selectedCounty } = countyFromAddress(address);
       const selectedDate = dateISO;
 
@@ -726,21 +725,9 @@ export const triggerAvailabilityRequest = async (req, res) => {
       return Math.max(0, Math.ceil(Number(base || 0) + Number(travelFee || 0)));
     };
 
-    // 4) Decide who to ping
-    let sentCount = 0;
     const finalFee = await feeForMember(lead);
-    const phoneNorm = normalizePhone(phone);
 
-    if (negatives.has(phoneNorm)) {
-      console.log("⏭️ Lead already marked unavailable — skipping.");
-      return res.json({ success: true, skipped: true, reason: "lead_unavailable" });
-    }
-
-    if (!phoneNorm) {
-      console.warn("⚠️ Lead has no usable phone, skipping.");
-      return res.json({ success: false, message: "No phone for vocalist" });
-    }
-
+    // 4️⃣ Prevent duplicates within short window
     const THREE_HOURS = 3 * 60 * 60 * 1000;
     const recentPending = await AvailabilityModel.findOne({
       actId,
@@ -759,42 +746,43 @@ export const triggerAvailabilityRequest = async (req, res) => {
         fee: String(finalFee),
         formattedDate,
         formattedAddress: shortAddress,
-        payload: {
-          to: phoneNorm,
-          templateParams: {
-            FirstName: firstNameOf(lead),
-            FormattedDate: formattedDate,
-            FormattedAddress: shortAddress,
-            Fee: String(finalFee),
-            Duties: lead.instrument || "Lead Vocal",
-            ActName: act.tscName || act.name || "the band",
-            MetaActId: String(act._id || ""),
-            MetaISODate: dateISO,
-            MetaAddress: shortAddress,
-          },
-          smsBody:
-            `Hi ${firstNameOf(lead)}, you've received an enquiry for a gig on ` +
-            `${formattedDate} in ${shortAddress} at a rate of £${String(finalFee)} for ` +
-            `${lead.instrument} duties with ${act.tscName}. Please reply YES / NO.`,
-        },
+        payload: { to: phoneNorm },
       });
-
-      console.log("⏸️ Deferred enquiry due to active pending for this phone.");
-      return res.json({
-        success: true,
-        deferred: true,
-        message: "Pending enquiry active — deferred send.",
-      });
+      console.log("⏸️ Deferred enquiry due to active pending.");
+      return res.json({ success: true, deferred: true });
     }
 
-    // ✅ Actual WhatsApp/SMS send
-    const smsBody =
-      `Hi ${firstNameOf(lead)}, you've received an enquiry for a gig on ` +
-      `${formattedDate} in ${shortAddress} at a rate of £${String(finalFee)} for ` +
-      `${lead.instrument} duties with ${act.tscName}. Please reply YES / NO.`;
+    // ✅ NEW: CREATE DB RECORD BEFORE SENDING MESSAGE
+    const newAvailability = new AvailabilityModel({
+      actId: act._id,
+      lineupId: lineup?._id || null,
+      musicianId: lead?._id || null,
+      phone: phoneNorm,
+      dateISO,
+      formattedAddress: shortAddress,
+      formattedDate,
+      actName: act?.tscName || act?.name || "",
+      musicianName: `${lead.firstName || ""} ${lead.lastName || ""}`.trim(),
+      duties: lead.instrument || "Lead Vocal",
+      fee: String(finalFee),
+      reply: null,
+      v2: true,
+    });
 
+    await newAvailability.save();
+    console.log("✅ Created AvailabilityModel record:", {
+      id: newAvailability._id,
+      phone: phoneNorm,
+      dateISO,
+      act: act?.tscName || act?.name,
+      fee: finalFee,
+    });
+
+    // 5️⃣ Send WhatsApp
+    const smsBody = `Hi ${firstNameOf(lead)}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${String(finalFee)} for ${lead.instrument} duties with ${act.tscName}. Please reply YES / NO.`;
     const contentSid = process.env.TWILIO_ENQUIRY_SID;
-    console.log("🚀 Attempting to send WhatsApp message to", phoneNorm);
+
+    console.log("🚀 Sending WhatsApp to", phoneNorm);
 
     try {
       const sendRes = await sendWhatsAppMessage({
@@ -810,20 +798,15 @@ export const triggerAvailabilityRequest = async (req, res) => {
         },
         smsBody,
       });
-
-      console.log("✅ WhatsApp send finished:", sendRes);
-      sentCount++;
+      console.log("✅ WhatsApp sent successfully:", sendRes);
+      return res.json({ success: true, sent: 1 });
     } catch (err) {
       console.warn("⚠️ WhatsApp send failed:", err.message);
+      return res.json({ success: false, message: err.message });
     }
 
-    return res.json({
-      success: true,
-      sent: sentCount,
-      note: sentCount === 0 ? "No one pinged (all leads unavailable and no deputy found)." : undefined,
-    });
   } catch (err) {
-    console.error("triggerAvailabilityRequest error:", err);
+    console.error("❌ triggerAvailabilityRequest error:", err);
     return res.status(500).json({ success: false, message: err?.message || "Server error" });
   }
 };
