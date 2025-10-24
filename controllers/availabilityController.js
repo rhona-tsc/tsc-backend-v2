@@ -1241,10 +1241,11 @@ async function getDeputyDisplayBits(dep) {
 
     const resolvedMusicianId = (dep?.musicianId && String(dep.musicianId)) || musicianId || "";
     const profileUrl = resolvedMusicianId ? `${PUBLIC_SITE_BASE}/musician/${resolvedMusicianId}` : "";
+const DEFAULT_PROFILE_PICTURE = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1761313694/profile_placeholder_rcdly4.png";
 
     // 🪄 Step 4: fallback if no valid image found
     if (!photoUrl || !photoUrl.startsWith("http")) {
-      photoUrl = assets.Default_Profile_Picture || `${PUBLIC_SITE_BASE}/default-avatar.png`;
+      photoUrl = DEFAULT_PROFILE_PICTURE;
       console.log("🪄 No valid photo found – using fallback image:", photoUrl);
     }
 

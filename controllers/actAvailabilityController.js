@@ -1,4 +1,4 @@
-// controllers/availabilityController.js
+
 import ActAvailability from "../models/actModel.js";
 
 /* -------------------------------------------------------------------------- */
