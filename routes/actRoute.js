@@ -31,7 +31,10 @@ actRouter.post('/remove', removeAct);
 actRouter.post('/single', singleAct);
 
 // --- V2 Routes ---
-actRouter.get('/v2/acts', getAllActsV2);
+actRouter.get('/v2/acts', (req, res, next) => {
+  console.log("🚀 Route hit: GET /api/v2/acts");
+  next();
+}, getAllActsV2);
 actRouter.get('/v2/acts/:id', getActByIdV2);
 actRouter.post('/v2/acts', createActV2);
 actRouter.put('/v2/acts/:id', updateActV2);

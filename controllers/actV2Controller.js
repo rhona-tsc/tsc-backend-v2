@@ -241,6 +241,17 @@ const parseStatuses = (statusStr = "") => {
 };
 
 export const getAllActsV2 = async (req, res) => {
+  console.log("📡 [getAllActsV2] Filter used:", filter);
+console.log("📦 [getAllActsV2] Returned acts:", acts.length);
+if (acts.length > 0) {
+  console.log("🧾 Sample act data:", {
+    name: acts[0].name,
+    numberOfSets: acts[0].numberOfSets,
+    lengthOfSets: acts[0].lengthOfSets,
+    lineupsCount: acts[0].lineups?.length || 0,
+  });
+}
+
   try {
     const {
       status = "",
