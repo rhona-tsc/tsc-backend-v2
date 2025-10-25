@@ -369,7 +369,7 @@ cron.schedule("*/30 * * * *", async () => {
   console.log("🔁 [CRON] Refreshing availability badges...");
   try {
     // ✅ Correct: get all acts (not availability docs)
-    const acts = await Act.find({})
+    const acts = await actModel.find({})
       .select("_id name tscName formattedAddress availabilityBadges lineups")
       .lean();
 

@@ -190,6 +190,7 @@ export const saveActDraftV2 = async (req, res) => {
 };
 
 // allow-list of safe fields to return
+// Add these fields to ALLOWED_FIELDS
 const ALLOWED_FIELDS = new Set([
   "_id",
   "name",
@@ -200,6 +201,17 @@ const ALLOWED_FIELDS = new Set([
   "updatedAt",
   "status",
   "amendment",
+  // 👇 Add these
+  "numberOfSets",
+  "lengthOfSets",
+  "minimumIntervalLength",
+  "lineups",
+  "extras",
+  "paSystem",
+  "lightingSystem",
+  "base_fee",
+  "bio",
+  "description",
 ]);
 
 const sanitizeFields = (fieldsStr = "") => {
