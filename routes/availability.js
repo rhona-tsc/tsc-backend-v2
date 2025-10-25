@@ -12,6 +12,7 @@ import { makeAvailabilityBroadcaster } from "../controllers/availabilityControll
 import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYesV2.js";
 import { resolveAvailableMusician } from "../controllers/allocationController.js";
 import { getUserShortlist } from "../controllers/shortlistController.js";
+import { getAvailabilityBadge } from "../controllers/availabilityController.js";
 
 const router = express.Router();
 
@@ -134,6 +135,18 @@ router.post("/google/notifications", async (req, res) => {
     res.status(500).json({ ok: false });
   }
 });
+
+/* -------------------------------------------------------------------------- */
+/* 🟦 GET /badge/:actId/:dateISO – fetch a single badge for an act/date        */
+/* -------------------------------------------------------------------------- */
+
+router.get("/badge/:actId/:dateISO", async (req, res, next) => {
+  console.log(
+    `🟦 (routes/availability.js) /badge/:actId/:dateISO START at ${new Date().toISOString()}`,
+    { params: req.params }
+  );
+  next();
+}, getAvailabilityBadge);
 
 /* -------------------------------------------------------------------------- */
 /* 🔴 Live Subscribe (SSE for availability updates)                           */

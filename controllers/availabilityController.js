@@ -13,6 +13,7 @@ import { countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
 import Shortlist from "../models/shortlistModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import User from "../models/userModel.js";
+import { buildAvailabilityBadgeFromRows } from "./availabilityController.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
@@ -1744,5 +1745,34 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO)
   } catch (err) {
     console.error("❌ rebuildAndApplyAvailabilityBadge error:", err);
     return { success: false, message: err?.message || "Server error" };
+  }
+}
+
+
+export async function getAvailabilityBadge(req, res) {
+  try {
+    const { actId, dateISO } = req.params;
+    console.log("🎯 [getAvailabilityBadge] Fetching badge for:", { actId, dateISO });
+
+    if (!actId || !dateISO) {
+      return res.status(400).json({ error: "Missing actId or dateISO" });
+    }
+
+    const act = await Act.findById(actId).select("formattedAddress lineups").lean();
+    if (!act) {
+      return res.status(404).json({ error: "Act not found" });
+    }
+
+    const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
+    if (!badge) {
+      console.log("🪶 No badge found for act/date:", { actId, dateISO });
+      return res.json({ badge: null });
+    }
+
+    console.log("✅ [getAvailabilityBadge] Returning badge:", badge);
+    return res.json({ badge });
+  } catch (err) {
+    console.error("❌ [getAvailabilityBadge] Error:", err);
+    res.status(500).json({ error: err.message });
   }
 }
