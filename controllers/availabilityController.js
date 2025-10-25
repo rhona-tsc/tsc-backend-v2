@@ -13,7 +13,6 @@ import { countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
 import Shortlist from "../models/shortlistModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import User from "../models/userModel.js";
-import { buildAvailabilityBadgeFromRows } from "./availabilityController.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
