@@ -272,9 +272,21 @@ if (acts.length > 0) {
     const pg = Math.max(parseInt(page, 10) || 1, 1);
     const skip = (pg - 1) * lim;
 
-    const projection = sanitizeFields(fields) || {
-      _id: 1, name: 1, tscName: 1, images: 1, coverImage: 1, createdAt: 1, status: 1, amendment: 1,
-    };
+ const projection = sanitizeFields(fields) || {
+  _id: 1,
+  name: 1,
+  tscName: 1,
+  images: 1,
+  coverImage: 1,
+  createdAt: 1,
+  status: 1,
+  amendment: 1,
+  numberOfSets: 1,
+  lengthOfSets: 1,
+  minimumIntervalLength: 1,
+  lineups: 1,
+  genres: 1,
+};
 
     const filter = {};
     if (includeTrashed !== "true") filter.status = { $ne: "trashed" };
