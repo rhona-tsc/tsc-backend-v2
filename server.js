@@ -206,7 +206,7 @@ app.use('/api/musician-login', (req, _res, next) => {
   next();
 }, musicianLoginRouter);
 
-app.use("/api/v2", v2Routes);
+app.use("/api/v2", actV2Routes);
 // Twilio webhook test endpoint
 app.post(
   "/api/shortlist/wh",

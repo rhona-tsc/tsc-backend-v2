@@ -41,7 +41,7 @@ router.put("/reject-pending-changes/:id", rejectPendingChanges);
 router.get("/moderation-count", getModerationCount);
 router.post("/update-status", updateActStatus);
 
-// --- Aliases for backwards compatibility (e.g. /api/v2/acts) ---
+// --- Compatibility alias for /api/v2/acts ---
 router.get("/v2/acts", (req, res, next) => {
   console.log("🚀 Route hit: GET /api/v2/acts", req.query);
   next();
