@@ -42,12 +42,12 @@ router.get("/moderation-count", getModerationCount);
 router.post("/update-status", updateActStatus);
 
 // --- Compatibility alias for /api/v2/acts ---
-router.get("/v2/acts", (req, res, next) => {
+router.get("/acts", (req, res, next) => {
   console.log("🚀 Route hit: GET /api/v2/acts", req.query);
   next();
 }, getAllActsV2);
 
-router.get("/v2/acts/:id", (req, res, next) => {
+router.get("/acts/:id", (req, res, next) => {
   console.log("📡 Route hit: GET /api/v2/acts/:id", req.params.id);
   next();
 }, getActByIdV2);
