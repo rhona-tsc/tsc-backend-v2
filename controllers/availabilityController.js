@@ -2,7 +2,7 @@ import AvailabilityModel from "../models/availabilityModel.js";
 import EnquiryMessage from "../models/EnquiryMessage.js";
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
-import { createCalendarInvite } from "../controllers/googleController.js";
+import { cancelCalendarInvite, createCalendarInvite } from "../controllers/googleController.js";
 import { sendSMSMessage, sendWhatsAppText } from "../utils/twilioClient.js";
 import DeferredAvailability from "../models/deferredAvailabilityModel.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js";
@@ -12,7 +12,6 @@ import { countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
 import Shortlist from "../models/shortlistModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import User from "../models/userModel.js";
-import { cancelCalendarInvite } from "../controller/googleCalendar.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
