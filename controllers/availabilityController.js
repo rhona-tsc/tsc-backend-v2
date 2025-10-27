@@ -1,4 +1,3 @@
-
 import AvailabilityModel from "../models/availabilityModel.js";
 import EnquiryMessage from "../models/EnquiryMessage.js";
 import Act from "../models/actModel.js";
@@ -13,6 +12,8 @@ import { countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
 import Shortlist from "../models/shortlistModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import User from "../models/userModel.js";
+import { cancelCalendarInvite } from "../controller/googleCalendar.js";
+import { notifyDeputyOneShot } from "../controllers/availabilityHelpers.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
@@ -26,13 +27,22 @@ if (AvailabilityModel?.schema?.paths) {
 }
 
 const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
-const normCountyKey = (s) => String(s || "").toLowerCase().replace(/\s+/g, "_");
+const normCountyKey = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .replace(/\s+/g, "_");
 
 function classifyReply(text) {
-    console.log(`🟢 (availabilityController.js) classifyReply  START at ${new Date().toISOString()}`, {
-    actId: req.query?.actId,
-    dateISO: req.query?.dateISO, });
-  const v = String(text || "").trim().toLowerCase();
+  console.log(
+    `🟢 (availabilityController.js) classifyReply  START at ${new Date().toISOString()}`,
+    {
+      actId: req.query?.actId,
+      dateISO: req.query?.dateISO,
+    }
+  );
+  const v = String(text || "")
+    .trim()
+    .toLowerCase();
 
   if (!v) return null;
 
@@ -42,7 +52,8 @@ function classifyReply(text) {
     /\bi am available\b/i.test(v) ||
     /\bi'm available\b/i.test(v) ||
     /\bavailable\b/i.test(v)
-  ) return "yes";
+  )
+    return "yes";
 
   // NO variants
   if (
@@ -50,18 +61,21 @@ function classifyReply(text) {
     /\bi am not available\b/i.test(v) ||
     /\bi'm not available\b/i.test(v) ||
     /\bunavailable\b/i.test(v)
-  ) return "no";
+  )
+    return "no";
 
   return null;
 }
-  const toE164 = (raw = "") => {
-    let s = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
-    if (!s) return "";
-    if (s.startsWith("+")) return s;
-    if (s.startsWith("07")) return s.replace(/^0/, "+44");
-    if (s.startsWith("44")) return `+${s}`;
-    return s;
-  };
+const toE164 = (raw = "") => {
+  let s = String(raw || "")
+    .replace(/^whatsapp:/i, "")
+    .replace(/\s+/g, "");
+  if (!s) return "";
+  if (s.startsWith("+")) return s;
+  if (s.startsWith("07")) return s.replace(/^0/, "+44");
+  if (s.startsWith("44")) return `+${s}`;
+  return s;
+};
 /**
  * Send a client-facing email about act availability.
  * Falls back to hello@thesupremecollective.co.uk if no client email found.
@@ -71,14 +85,16 @@ export async function sendClientEmail({ actId, subject, html }) {
     // Optional: look up the act and its linked user
     const act = await Act.findById(actId).populate("userId", "email").lean();
     const recipient =
-      act?.userId?.email || process.env.NOTIFY_EMAIL || "hello@thesupremecollective.co.uk";
+      act?.userId?.email ||
+      process.env.NOTIFY_EMAIL ||
+      "hello@thesupremecollective.co.uk";
 
     console.log(`📧 Sending client availability email to ${recipient}...`);
     await sendEmail(
-  [recipient, "hello@thesupremecollective.co.uk"],
-  subject,
-  html
-);
+      [recipient, "hello@thesupremecollective.co.uk"],
+      subject,
+      html
+    );
 
     return { success: true };
   } catch (err) {
@@ -88,10 +104,14 @@ export async function sendClientEmail({ actId, subject, html }) {
 }
 
 function parsePayload(payload = "") {
-   console.log(`🟢 (availabilityController.js) parsePayload START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢 (availabilityController.js) parsePayload START at ${new Date().toISOString()}`,
+    {}
+  );
   // Trim, uppercase, and match "YES<id>" / "NOLOC<id>" / "UNAVAILABLE<id>"
-  const match = payload.trim().match(/^(YES|NOLOC|UNAVAILABLE)([A-Za-z0-9]+)?$/i);
+  const match = payload
+    .trim()
+    .match(/^(YES|NOLOC|UNAVAILABLE)([A-Za-z0-9]+)?$/i);
   if (!match) return { reply: null, enquiryId: null };
   return {
     reply: match[1].toLowerCase(),
@@ -99,8 +119,10 @@ function parsePayload(payload = "") {
   };
 }
 const normalizeFrom = (from) => {
-   console.log(`🟢 (availabilityController.js) normalizeFrom START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢 (availabilityController.js) normalizeFrom START at ${new Date().toISOString()}`,
+    {}
+  );
   const v = String(from || "")
     .replace(/^whatsapp:/i, "")
     .trim();
@@ -112,9 +134,14 @@ const normalizeFrom = (from) => {
 };
 // Module-scope E.164 normalizer (also strips "whatsapp:" prefix)
 const normalizeToE164 = (raw = "") => {
-   console.log(`🟢 (availabilityController.js) normalizeToE164 START at ${new Date().toISOString()}`, {
- });
-  let s = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+  console.log(
+    `🟢 (availabilityController.js) normalizeToE164 START at ${new Date().toISOString()}`,
+    {}
+  );
+  let s = String(raw || "")
+    .trim()
+    .replace(/^whatsapp:/i, "")
+    .replace(/\s+/g, "");
   if (!s) return "";
   if (s.startsWith("+")) return s;
   if (s.startsWith("07")) return s.replace(/^0/, "+44");
@@ -122,8 +149,10 @@ const normalizeToE164 = (raw = "") => {
   return s;
 };
 function getCountyFeeValue(countyFees, countyName) {
-  console.log(`🟢 (availabilityController.js) getCountyFeeValue  START at ${new Date().toISOString()}`, {
-   });
+  console.log(
+    `🟢 (availabilityController.js) getCountyFeeValue  START at ${new Date().toISOString()}`,
+    {}
+  );
   if (!countyFees || !countyName) return undefined;
 
   // Normalized compare: "Berkshire" === "berkshire" === "berk_shire"
@@ -155,16 +184,18 @@ const _waFallbackSent = new Set(); // remember WA SIDs we've already fallen back
 
 // Normalise first-name display so we never fall back to "there" when we actually have a name
 const safeFirst = (s) => {
-  console.log(`🟢 (availabilityController.js) safeFirst START at ${new Date().toISOString()}`
+  console.log(
+    `🟢 (availabilityController.js) safeFirst START at ${new Date().toISOString()}`
   );
   const v = String(s || "").trim();
   return v ? v.split(/\s+/)[0] : "there";
 };
 
-
 function extractOutcode(address = "") {
-  console.log(`🟢 (availabilityController.js) extractOutcode  START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢 (availabilityController.js) extractOutcode  START at ${new Date().toISOString()}`,
+    {}
+  );
   // Typical UK outcode patterns e.g. SL6, W1, SW1A, B23
   const s = String(address || "").toUpperCase();
   // Prefer the first token that looks like a postcode piece
@@ -176,14 +207,16 @@ function extractOutcode(address = "") {
 }
 
 function countyFromAddress(address = "") {
-    console.log(`🟢 (availabilityController.js) countyFromAddress START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢 (availabilityController.js) countyFromAddress START at ${new Date().toISOString()}`,
+    {}
+  );
   // pull something like SL6, W1, SW1A from the address
   const outcode = extractOutcode(address).toUpperCase();
   if (!outcode) return { outcode: "", county: "" };
 
   // your export is: export const postcodes = [ { county: [OUTCODES...] } ];
-  const table = Array.isArray(postcodes) ? (postcodes[0] || {}) : (postcodes || {});
+  const table = Array.isArray(postcodes) ? postcodes[0] || {} : postcodes || {};
 
   let found = "";
   for (const [countyKey, list] of Object.entries(table)) {
@@ -199,22 +232,38 @@ function countyFromAddress(address = "") {
 
 // Return obj.profilePicture if it is a valid http(s) URL string; otherwise, empty string
 const getPictureUrlFrom = (obj = {}) => {
-    console.log(`🟢 (availabilityController.js) getPictureUrlFrom START at ${new Date().toISOString()}`, {
- });
-  if (typeof obj.profilePicture === "string" && obj.profilePicture.trim().startsWith("http")) {
+  console.log(
+    `🟢 (availabilityController.js) getPictureUrlFrom START at ${new Date().toISOString()}`,
+    {}
+  );
+  if (
+    typeof obj.profilePicture === "string" &&
+    obj.profilePicture.trim().startsWith("http")
+  ) {
     return obj.profilePicture;
   }
   return "";
 };
 
 // Build the exact SMS text we want for both send-time and fallback - THIS IS THE SMS TO LEAD VOCALISTS TO CHECK AVAILABILITY! (not used for booking confirmations)
-function buildAvailabilitySMS({ firstName, formattedDate, formattedAddress, fee, duties, actName }) {
-    console.log(`🟢 (availabilityController.js) buildAvailabilitySMS START at ${new Date().toISOString()}`, {
- });
-  const feeTxt = String(fee ?? '').replace(/^[£$]/, '');
+function buildAvailabilitySMS({
+  firstName,
+  formattedDate,
+  formattedAddress,
+  fee,
+  duties,
+  actName,
+}) {
+  console.log(
+    `🟢 (availabilityController.js) buildAvailabilitySMS START at ${new Date().toISOString()}`,
+    {}
+  );
+  const feeTxt = String(fee ?? "").replace(/^[£$]/, "");
   return (
     `Hi ${safeFirst(firstName)}, you've received an enquiry for a gig on ` +
-    `${formattedDate || "the date discussed"} in ${formattedAddress || "test 3 the area"} ` +
+    `${formattedDate || "the date discussed"} in ${
+      formattedAddress || "test 3 the area"
+    } ` +
     `at a rate of £${feeTxt || "TBC"} for ${duties || "performance"} duties ` +
     `with ${actName || "the band"}. Please indicate your availability 💫 ` +
     `Reply YES / NO.`
@@ -226,9 +275,18 @@ function buildAvailabilitySMS({ firstName, formattedDate, formattedAddress, fee,
 // Compute a per-member final fee exactly like the enquiry flow:
 // - explicit member.fee if set, else per-head from lineup.base_fee
 // - plus county travel fee (if enabled) OR distance-based travel
-async function _finalFeeForMember({ act, lineup, members, member, address, dateISO }) {
-   console.log(`🟢 (availabilityController.js) _finalFeeForMember START at ${new Date().toISOString()}`, {
- });
+async function _finalFeeForMember({
+  act,
+  lineup,
+  members,
+  member,
+  address,
+  dateISO,
+}) {
+  console.log(
+    `🟢 (availabilityController.js) _finalFeeForMember START at ${new Date().toISOString()}`,
+    {}
+  );
   const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
   const membersCount = Math.max(1, Array.isArray(members) ? members.length : 1);
   const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
@@ -264,27 +322,35 @@ async function _finalFeeForMember({ act, lineup, members, member, address, dateI
 }
 
 const isVocalRoleGlobal = (role = "") => {
-   console.log(`🟢 (availabilityController.js) isVocalRoleGlobal START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢 (availabilityController.js) isVocalRoleGlobal START at ${new Date().toISOString()}`,
+    {}
+  );
   const r = String(role || "").toLowerCase();
   return [
-    "lead male vocal", "lead female vocal", "lead vocal",
-    "vocalist-guitarist", "vocalist-bassist", "mc/rapper",
-    "lead male vocal/rapper", "lead female vocal/rapper",
-    "lead male vocal/rapper & guitarist", "lead female vocal/rapper & guitarist",
+    "lead male vocal",
+    "lead female vocal",
+    "lead vocal",
+    "vocalist-guitarist",
+    "vocalist-bassist",
+    "mc/rapper",
+    "lead male vocal/rapper",
+    "lead female vocal/rapper",
+    "lead male vocal/rapper & guitarist",
+    "lead female vocal/rapper & guitarist",
   ].includes(r);
 };
 
-
-
-
 // --- New helpers for badge rebuilding ---
 
-
 const normalizePhoneE164 = (raw = "") => {
-   console.log(`🟢 (availabilityController.js) normalisePhoneE164 START at ${new Date().toISOString()}`, {
- });
-  let v = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+  console.log(
+    `🟢 (availabilityController.js) normalisePhoneE164 START at ${new Date().toISOString()}`,
+    {}
+  );
+  let v = String(raw || "")
+    .replace(/^whatsapp:/i, "")
+    .replace(/\s+/g, "");
   if (!v) return "";
   if (v.startsWith("+")) return v;
   if (v.startsWith("07")) return v.replace(/^0/, "+44");
@@ -293,8 +359,10 @@ const normalizePhoneE164 = (raw = "") => {
 };
 
 export const clearavailabilityBadges = async (req, res) => {
-   console.log(`🟢 (availabilityController.js) cleadavailabilityBadges START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢 (availabilityController.js) cleadavailabilityBadges START at ${new Date().toISOString()}`,
+    {}
+  );
   try {
     const { actId } = req.body;
     if (!actId)
@@ -321,13 +389,13 @@ export const clearavailabilityBadges = async (req, res) => {
   }
 };
 
-
-
 // -------------------- Utilities --------------------
 
 const mapTwilioToEnquiryStatus = (s) => {
-   console.log(`🟢  (availabilityController.js) mapTwilioToEnquiryStatus START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢  (availabilityController.js) mapTwilioToEnquiryStatus START at ${new Date().toISOString()}`,
+    {}
+  );
   const v = String(s || "").toLowerCase();
   if (v === "accepted" || v === "queued" || v === "scheduled") return "queued";
   if (v === "sending") return "sent";
@@ -339,19 +407,93 @@ const mapTwilioToEnquiryStatus = (s) => {
   return "queued";
 };
 
- const BASE_URL = (process.env.BACKEND_PUBLIC_URL || process.env.BACKEND_URL || process.env.INTERNAL_BASE_URL || "http://localhost:4000").replace(/\/$/, "");
-;
-
+const BASE_URL = (
+  process.env.BACKEND_PUBLIC_URL ||
+  process.env.BACKEND_URL ||
+  process.env.INTERNAL_BASE_URL ||
+  "http://localhost:4000"
+).replace(/\/$/, "");
 const NORTHERN_COUNTIES = new Set([
-"ceredigion", "cheshire", "cleveland", "conway", "cumbria", "denbighshire", "derbyshire", "durham", "flintshire", "greater manchester", "gwynedd", "herefordshire", "lancashire", "leicestershire", "lincolnshire", "merseyside", "north humberside", "north yorkshire", "northumberland", "nottinghamshire", "rutland", "shropshire", "south humberside", "south yorkshire", "staffordshire", "tyne and wear", "warwickshire", "west midlands", "west yorkshire", "worcestershire", "wrexham", "rhondda cynon taf", "torfaen", "neath port talbot", "bridgend", "blaenau gwent", "caerphilly", "cardiff", "merthyr tydfil", "newport", "aberdeen city", "aberdeenshire", "angus", "argyll and bute", "clackmannanshire", "dumfries and galloway", "dundee city", "east ayrshire", "east dunbartonshire", "east lothian", "east renfrewshire", "edinburgh", "falkirk", "fife", "glasgow", "highland", "inverclyde", "midlothian", "moray", "na h eileanan siar", "north ayrshire", "north lanarkshire", "orkney islands", "perth and kinross", "renfrewshire", "scottish borders", "shetland islands", "south ayrshire", "south lanarkshire", "stirling", "west dunbartonshire", "west lothian"
+  "ceredigion",
+  "cheshire",
+  "cleveland",
+  "conway",
+  "cumbria",
+  "denbighshire",
+  "derbyshire",
+  "durham",
+  "flintshire",
+  "greater manchester",
+  "gwynedd",
+  "herefordshire",
+  "lancashire",
+  "leicestershire",
+  "lincolnshire",
+  "merseyside",
+  "north humberside",
+  "north yorkshire",
+  "northumberland",
+  "nottinghamshire",
+  "rutland",
+  "shropshire",
+  "south humberside",
+  "south yorkshire",
+  "staffordshire",
+  "tyne and wear",
+  "warwickshire",
+  "west midlands",
+  "west yorkshire",
+  "worcestershire",
+  "wrexham",
+  "rhondda cynon taf",
+  "torfaen",
+  "neath port talbot",
+  "bridgend",
+  "blaenau gwent",
+  "caerphilly",
+  "cardiff",
+  "merthyr tydfil",
+  "newport",
+  "aberdeen city",
+  "aberdeenshire",
+  "angus",
+  "argyll and bute",
+  "clackmannanshire",
+  "dumfries and galloway",
+  "dundee city",
+  "east ayrshire",
+  "east dunbartonshire",
+  "east lothian",
+  "east renfrewshire",
+  "edinburgh",
+  "falkirk",
+  "fife",
+  "glasgow",
+  "highland",
+  "inverclyde",
+  "midlothian",
+  "moray",
+  "na h eileanan siar",
+  "north ayrshire",
+  "north lanarkshire",
+  "orkney islands",
+  "perth and kinross",
+  "renfrewshire",
+  "scottish borders",
+  "shetland islands",
+  "south ayrshire",
+  "south lanarkshire",
+  "stirling",
+  "west dunbartonshire",
+  "west lothian",
 ]);
-
-
 
 // Availability controller: robust travel fetch that supports both API shapes
 const fetchTravel = async (origin, destination, dateISO) => {
-   console.log(`🟢 (availabilityController.js) fetchTravel START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢 (availabilityController.js) fetchTravel START at ${new Date().toISOString()}`,
+    {}
+  );
   const BASE = (
     process.env.BACKEND_PUBLIC_URL ||
     process.env.BACKEND_URL ||
@@ -359,7 +501,8 @@ const fetchTravel = async (origin, destination, dateISO) => {
     "http://localhost:4000"
   ).replace(/\/+$/, "");
 
-  const url = `${BASE}/api/v2/travel` +
+  const url =
+    `${BASE}/api/v2/travel` +
     `?origin=${encodeURIComponent(origin)}` +
     `&destination=${encodeURIComponent(destination)}` +
     `&date=${encodeURIComponent(dateISO)}`;
@@ -368,7 +511,11 @@ const fetchTravel = async (origin, destination, dateISO) => {
   const text = await res.text();
 
   let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = {};
+  }
 
   if (!res.ok) throw new Error(`travel http ${res.status}`);
 
@@ -377,11 +524,15 @@ const fetchTravel = async (origin, destination, dateISO) => {
   const firstEl = data?.rows?.[0]?.elements?.[0];
 
   // Prefer new shape if present; otherwise build outbound from legacy element
-  const outbound = data?.outbound || (
-    firstEl?.distance && firstEl?.duration
-      ? { distance: firstEl.distance, duration: firstEl.duration, fare: firstEl.fare }
-      : undefined
-  );
+  const outbound =
+    data?.outbound ||
+    (firstEl?.distance && firstEl?.duration
+      ? {
+          distance: firstEl.distance,
+          duration: firstEl.duration,
+          fare: firstEl.fare,
+        }
+      : undefined);
 
   // returnTrip only exists in the new shape
   const returnTrip = data?.returnTrip;
@@ -397,8 +548,10 @@ const computeMemberTravelFee = async ({
   selectedAddress,
   selectedDate,
 }) => {
-   console.log(`🟢 (availabilityController.js) computeMemberTravelFee START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢 (availabilityController.js) computeMemberTravelFee START at ${new Date().toISOString()}`,
+    {}
+  );
   const destination =
     typeof selectedAddress === "string"
       ? selectedAddress
@@ -442,24 +595,31 @@ const computeMemberTravelFee = async ({
   return fuelFee + timeFee + lateFee + tollFee; // per member
 };
 
-
 function findVocalistPhone(actData, lineupId) {
-  console.log(`🐠 (controllers/shortlistController.js) findVocalistPhone called at`, new Date().toISOString(), {
-  lineupId,
-  totalLineups: actData?.lineups?.length || 0,
-});
+  console.log(
+    `🐠 (controllers/shortlistController.js) findVocalistPhone called at`,
+    new Date().toISOString(),
+    {
+      lineupId,
+      totalLineups: actData?.lineups?.length || 0,
+    }
+  );
   if (!actData?.lineups?.length) return null;
 
   // Prefer specified lineupId
   const lineup = lineupId
-    ? actData.lineups.find(l => String(l._id || l.lineupId) === String(lineupId))
+    ? actData.lineups.find(
+        (l) => String(l._id || l.lineupId) === String(lineupId)
+      )
     : actData.lineups[0];
 
   if (!lineup?.bandMembers?.length) return null;
 
   // Find first member with instrument containing "vocal"
-  const vocalist = lineup.bandMembers.find(m =>
-    String(m.instrument || "").toLowerCase().includes("vocal")
+  const vocalist = lineup.bandMembers.find((m) =>
+    String(m.instrument || "")
+      .toLowerCase()
+      .includes("vocal")
   );
 
   if (!vocalist) return null;
@@ -467,7 +627,10 @@ function findVocalistPhone(actData, lineupId) {
   // Safely pick phone fields
   let phone = vocalist.phoneNormalized || vocalist.phoneNumber || "";
   if (!phone && Array.isArray(vocalist.deputies) && vocalist.deputies.length) {
-    phone = vocalist.deputies[0].phoneNormalized || vocalist.deputies[0].phoneNumber || "";
+    phone =
+      vocalist.deputies[0].phoneNormalized ||
+      vocalist.deputies[0].phoneNumber ||
+      "";
   }
 
   // Normalise to E.164 if needed
@@ -489,18 +652,22 @@ function findVocalistPhone(actData, lineupId) {
     email: vocalist.email,
   });
 
-return { vocalist, phone };}
+  return { vocalist, phone };
+}
 
 // handle status callback from Twilio
-
 
 // ✅ main function
 
 export const shortlistActAndTriggerAvailability = async (req, res) => {
   try {
-    console.log("🎯 (shortlistController.js) shortlistActAndTriggerAvailability START at", new Date().toISOString(), {
-      body: req.body,
-    });
+    console.log(
+      "🎯 (shortlistController.js) shortlistActAndTriggerAvailability START at",
+      new Date().toISOString(),
+      {
+        body: req.body,
+      }
+    );
 
     const { actId, lineupId = null, date, address, userId } = req.body;
 
@@ -582,15 +749,18 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
   }
 };
 
-
 export const triggerAvailabilityRequest = async (req, res) => {
-  console.log(`🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`);
+  console.log(
+    `🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`
+  );
   try {
     console.log("🛎 triggerAvailabilityRequest body:", req.body);
 
     const { actId, lineupId, date, address } = req.body;
     if (!actId || !date || !address) {
-      return res.status(400).json({ success: false, message: "Missing actId/date/address" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing actId/date/address" });
     }
 
     // 🧩 Guard: prevent duplicate trigger for same act/date/address
@@ -609,13 +779,22 @@ export const triggerAvailabilityRequest = async (req, res) => {
     }).lean();
 
     if (existingEnquiry) {
-      console.log("⛔ Already triggered for act/date/address:", existingEnquiry.dateISO, existingEnquiry.formattedAddress);
-      return res.json({ success: true, skipped: true, message: "Duplicate prevented" });
+      console.log(
+        "⛔ Already triggered for act/date/address:",
+        existingEnquiry.dateISO,
+        existingEnquiry.formattedAddress
+      );
+      return res.json({
+        success: true,
+        skipped: true,
+        message: "Duplicate prevented",
+      });
     }
 
     // Continue if no duplicate found
     const act = await Act.findById(actId).lean();
-    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
+    if (!act)
+      return res.status(404).json({ success: false, message: "Act not found" });
 
     const formattedDate = formatWithOrdinal(date);
     const { outcode, county: selectedCounty } = countyFromAddress(address);
@@ -630,11 +809,15 @@ export const triggerAvailabilityRequest = async (req, res) => {
         )
       : lineups[0];
 
-    const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+    const members = Array.isArray(lineup?.bandMembers)
+      ? lineup.bandMembers
+      : [];
 
     // phone normaliser
     const normalizePhone = (raw = "") => {
-      let v = String(raw || "").replace(/\s+/g, "").replace(/^whatsapp:/i, "");
+      let v = String(raw || "")
+        .replace(/\s+/g, "")
+        .replace(/^whatsapp:/i, "");
       if (!v) return "";
       if (v.startsWith("+")) return v;
       if (v.startsWith("07")) return v.replace(/^0/, "+44");
@@ -662,7 +845,11 @@ export const triggerAvailabilityRequest = async (req, res) => {
     }
 
     const negatives = new Set([...repliedNo.keys()]);
-    const alreadyPingedSet = new Set([...repliedYes.keys(), ...pending.keys(), ...negatives.keys()]);
+    const alreadyPingedSet = new Set([
+      ...repliedYes.keys(),
+      ...pending.keys(),
+      ...negatives.keys(),
+    ]);
     console.log("🚫 Known-unavailable:", [...negatives]);
     console.log("🔁 Already pinged:", [...alreadyPingedSet]);
 
@@ -681,7 +868,11 @@ export const triggerAvailabilityRequest = async (req, res) => {
 
     if (negatives.has(phoneNorm)) {
       console.log("⏭️ Lead already marked unavailable — skipping.");
-      return res.json({ success: true, skipped: true, reason: "lead_unavailable" });
+      return res.json({
+        success: true,
+        skipped: true,
+        reason: "lead_unavailable",
+      });
     }
 
     if (!phoneNorm) {
@@ -693,8 +884,12 @@ export const triggerAvailabilityRequest = async (req, res) => {
     const feeForMember = async (member) => {
       const baseFee = Number(member?.fee ?? 0);
       const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
-      const membersCount = Math.max(1, (Array.isArray(members) ? members.length : 0) || 1);
-      const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
+      const membersCount = Math.max(
+        1,
+        (Array.isArray(members) ? members.length : 0) || 1
+      );
+      const perHead =
+        lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
       const base = baseFee > 0 ? baseFee : perHead;
       const { county: selectedCounty } = countyFromAddress(address);
       const selectedDate = dateISO;
@@ -779,7 +974,13 @@ export const triggerAvailabilityRequest = async (req, res) => {
     });
 
     // 5️⃣ Send WhatsApp
-    const smsBody = `Hi ${firstNameOf(lead)}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${String(finalFee)} for ${lead.instrument} duties with ${act.tscName}. Please reply YES / NO.`;
+    const smsBody = `Hi ${firstNameOf(
+      lead
+    )}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${String(
+      finalFee
+    )} for ${lead.instrument} duties with ${
+      act.tscName
+    }. Please reply YES / NO.`;
     const contentSid = process.env.TWILIO_ENQUIRY_SID;
 
     console.log("🚀 Sending WhatsApp to", phoneNorm);
@@ -789,12 +990,12 @@ export const triggerAvailabilityRequest = async (req, res) => {
         to: `whatsapp:${phoneNorm}`,
         contentSid,
         variables: {
-          "1": firstNameOf(lead),
-          "2": formattedDate,
-          "3": shortAddress,
-          "4": String(finalFee),
-          "5": lead.instrument || "performance",
-          "6": act.tscName || act.name || "the band",
+          1: firstNameOf(lead),
+          2: formattedDate,
+          3: shortAddress,
+          4: String(finalFee),
+          5: lead.instrument || "performance",
+          6: act.tscName || act.name || "the band",
         },
         smsBody,
       });
@@ -804,38 +1005,41 @@ export const triggerAvailabilityRequest = async (req, res) => {
       console.warn("⚠️ WhatsApp send failed:", err.message);
       return res.json({ success: false, message: err.message });
     }
-
   } catch (err) {
     console.error("❌ triggerAvailabilityRequest error:", err);
-    return res.status(500).json({ success: false, message: err?.message || "Server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: err?.message || "Server error" });
   }
 };
 
-
-  // -------------------- Delivery/Read Receipts --------------------
+// -------------------- Delivery/Read Receipts --------------------
 // module-scope guard so we don't double-fallback on Twilio retries
 export const twilioStatus = async (req, res) => {
-  console.log(`🟢 (availabilityController.js) twilioStatus START at ${new Date().toISOString()}`, {});
+  console.log(
+    `🟢 (availabilityController.js) twilioStatus START at ${new Date().toISOString()}`,
+    {}
+  );
   try {
     const {
       MessageSid,
-      MessageStatus,      // delivered, failed, undelivered, read, sent, queued, etc.
-      SmsStatus,          // sometimes used instead of MessageStatus
-      To,                 // e.g. whatsapp:+447...
-      From,               // your sender e.g. whatsapp:+1555...
+      MessageStatus, // delivered, failed, undelivered, read, sent, queued, etc.
+      SmsStatus, // sometimes used instead of MessageStatus
+      To, // e.g. whatsapp:+447...
+      From, // your sender e.g. whatsapp:+1555...
       ErrorCode,
       ErrorMessage,
     } = req.body || {};
 
     const status = String(
       req.body?.MessageStatus ??
-      req.body?.SmsStatus ??
-      req.body?.message_status ??
-      ""
+        req.body?.SmsStatus ??
+        req.body?.message_status ??
+        ""
     ).toLowerCase();
 
-    const isWA   = /^whatsapp:/i.test(String(From || "")); // channel we used
-    const toAddr = String(To || "");                        // "whatsapp:+44…" OR "+44…"
+    const isWA = /^whatsapp:/i.test(String(From || "")); // channel we used
+    const toAddr = String(To || ""); // "whatsapp:+44…" OR "+44…"
 
     console.log("📡 Twilio status:", {
       sid: MessageSid,
@@ -856,8 +1060,6 @@ export const twilioStatus = async (req, res) => {
   }
 };
 
-
-
 export const twilioInbound = async (req, res) => {
   console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
 
@@ -868,7 +1070,10 @@ export const twilioInbound = async (req, res) => {
     const buttonText = String(req.body?.ButtonText || "");
     const buttonPayload = String(req.body?.ButtonPayload || "");
     const inboundSid = String(req.body?.MessageSid || "");
-    const fromRaw = String(req.body?.WaId || req.body?.From || "").replace(/^whatsapp:/i, "");
+    const fromRaw = String(req.body?.WaId || req.body?.From || "").replace(
+      /^whatsapp:/i,
+      ""
+    );
     const toRaw = String(req.body?.To || "").replace(/^whatsapp:/i, "");
 
     console.log("📩 Incoming WhatsApp message:", {
@@ -880,7 +1085,9 @@ export const twilioInbound = async (req, res) => {
     });
 
     if (seenInboundOnce(inboundSid)) {
-      console.log("🪵 Duplicate inbound — already handled", { MessageSid: inboundSid });
+      console.log("🪵 Duplicate inbound — already handled", {
+        MessageSid: inboundSid,
+      });
       return res.status(200).send("<Response/>");
     }
 
@@ -892,10 +1099,15 @@ export const twilioInbound = async (req, res) => {
 
     if (inboundSid) {
       console.log("🔎 Checking for existing inbound SID in DB:", inboundSid);
-      const dup = await AvailabilityModel.findOne({ "inbound.sid": inboundSid }).lean();
+      const dup = await AvailabilityModel.findOne({
+        "inbound.sid": inboundSid,
+      }).lean();
       console.log("🔍 Duplicate check result:", !!dup);
       if (dup) {
-        console.log("🪵 Duplicate inbound detected in DB, skipping:", inboundSid);
+        console.log(
+          "🪵 Duplicate inbound detected in DB, skipping:",
+          inboundSid
+        );
         return res.status(200).send("<Response/>");
       }
     }
@@ -906,7 +1118,8 @@ export const twilioInbound = async (req, res) => {
     let { reply, enquiryId } = parsePayload(buttonPayload);
     console.log("🔍 parsePayload output:", { reply, enquiryId });
 
-    if (!reply) reply = classifyReply(buttonText) || classifyReply(bodyText) || null;
+    if (!reply)
+      reply = classifyReply(buttonText) || classifyReply(bodyText) || null;
     console.log("🤖 Classified reply after fallback:", reply);
 
     if (!reply) {
@@ -932,7 +1145,10 @@ export const twilioInbound = async (req, res) => {
         },
         { new: true }
       );
-      console.log("🧾 Updated via enquiryId match:", updated ? updated._id : "none");
+      console.log(
+        "🧾 Updated via enquiryId match:",
+        updated ? updated._id : "none"
+      );
     }
 
     if (!updated) {
@@ -953,14 +1169,20 @@ export const twilioInbound = async (req, res) => {
           },
           { sort: { createdAt: -1 }, new: true }
         );
-        console.log("🧾 Updated via phone match:", updated ? updated._id : "none");
+        console.log(
+          "🧾 Updated via phone match:",
+          updated ? updated._id : "none"
+        );
       }
     }
 
-    const act = updated?.actId ? await Act.findById(updated.actId).lean() : null;
+    const act = updated?.actId
+      ? await Act.findById(updated.actId).lean()
+      : null;
     let musician = null;
 
-    if (updated?.musicianId) musician = await Musician.findById(updated.musicianId).lean();
+    if (updated?.musicianId)
+      musician = await Musician.findById(updated.musicianId).lean();
 
     if (!musician && updated?.phone) {
       musician = await Musician.findOne({
@@ -997,7 +1219,8 @@ export const twilioInbound = async (req, res) => {
       }
     }
 
-    if (!musician) console.warn("⚠️ No musician found for phone", updated?.phone);
+    if (!musician)
+      console.warn("⚠️ No musician found for phone", updated?.phone);
 
     console.log("🎭 Loaded act + musician:", {
       actFound: !!act,
@@ -1009,9 +1232,14 @@ export const twilioInbound = async (req, res) => {
 
     const toE164 = normalizeToE164(updated.phone || fromRaw);
     const dateISOday = String((updated.dateISO || "").slice(0, 10));
-    const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
+    const emailForInvite =
+      musician?.email || updated.calendarInviteEmail || null;
 
-    console.log("🧮 Derived calendar invite info:", { toE164, dateISOday, emailForInvite });
+    console.log("🧮 Derived calendar invite info:", {
+      toE164,
+      dateISOday,
+      emailForInvite,
+    });
 
     if (reply === "yes") {
       try {
@@ -1036,12 +1264,14 @@ export const twilioInbound = async (req, res) => {
         if (emailForInvite && dateISOday && act) {
           console.log("📨 Attempting to create calendar invite...");
           const desc = [
-            `TSC enquiry created ${new Date(updated.createdAt || Date.now()).toLocaleString("en-GB")})`,
+            `Event Date: ${formattedDateString}`,
             `Act: ${act.tscName || act.name}`,
             `Role: ${updated.duties || ""}`,
             `Address: ${updated.formattedAddress || "TBC"}`,
             `Fee: £${fee || "TBC"}`,
-            `Event Date: ${formattedDateString}`,
+            `Enquiry logged ${new Date(
+              updated.createdAt || Date.now()
+            ).toLocaleString("en-GB")}`,
           ].join("\n");
 
           const event = await createCalendarInvite({
@@ -1088,17 +1318,23 @@ export const twilioInbound = async (req, res) => {
           "Super — we’ve sent a diary invite with full details and will update your availability shortly."
         );
         console.log("✅ WhatsApp confirmation sent.");
-console.log("🧩 [twilioInbound] AvailabilityModel.findOneAndUpdate payload check:");
-console.dir(updated, { depth: 5 });
+        console.log(
+          "🧩 [twilioInbound] AvailabilityModel.findOneAndUpdate payload check:"
+        );
+        console.dir(updated, { depth: 5 });
         console.log("🟡 Rebuilding availability badge...");
         await rebuildAndApplyAvailabilityBadge(
           { body: { actId: String(updated.actId), dateISO: updated.dateISO } },
           {
             json: (r) => console.log("✅ Badge refreshed response:", r),
-            status: (s) => ({ json: (r) => console.log("✅ Badge status:", s, r) }),
+            status: (s) => ({
+              json: (r) => console.log("✅ Badge status:", s, r),
+            }),
           }
         );
-        console.log("🧩 Badge rebuild complete. Check frontend rendering flow.");
+        console.log(
+          "🧩 Badge rebuild complete. Check frontend rendering flow."
+        );
       } catch (err) {
         console.error("❌ Error handling YES reply:", err.message, err.stack);
       }
@@ -1108,19 +1344,124 @@ console.dir(updated, { depth: 5 });
     }
 
     // --- NO / UNAVAILABLE / NOLOC branches remain unchanged ---
-    // (keep your existing logic here)
+    else if (
+      reply === "unavailable" ||
+      reply === "no" ||
+      reply === "nolocation"
+    ) {
+      try {
+        console.log("🚫 UNAVAILABLE reply received via WhatsApp");
+
+        // 1️⃣ Mark as unavailable in DB
+        if (updated?._id) {
+          await AvailabilityModel.updateOne(
+            { _id: updated._id },
+            {
+              $set: {
+                status: "unavailable",
+                reply: "unavailable",
+                repliedAt: new Date(),
+                calendarStatus: "cancelled",
+              },
+            }
+          );
+          console.log("🧾 Availability status updated to 'unavailable'");
+        } else {
+          console.warn("⚠️ Could not update availability — no record found");
+        }
+
+        // 2️⃣ Cancel existing Google Calendar invite (if any)
+        if (updated?.calendarEventId && emailForInvite) {
+          try {
+            console.log("🗓️ Attempting to cancel Google Calendar invite...");
+            await cancelCalendarInvite(
+              emailForInvite,
+              updated.calendarEventId,
+              updated.dateISO
+            );
+            console.log("✅ Calendar invite cancelled successfully");
+          } catch (cancelErr) {
+            console.error(
+              "❌ Failed to cancel calendar invite:",
+              cancelErr.message
+            );
+          }
+        } else {
+          console.log(
+            "⏭️ No calendarEventId or emailForInvite, skipping cancel"
+          );
+        }
+
+        // 3️⃣ Notify musician
+        await sendWhatsAppText(
+          toE164,
+          "Thanks for letting us know — we've updated your availability in our system."
+        );
+        console.log("📲 Sent WhatsApp confirmation to musician.");
+
+        // 4️⃣ Notify deputies
+        if (act?._id && updated?.lineupId) {
+          try {
+            console.log(
+              "📢 Notifying deputies for act:",
+              act.tscName || act.name
+            );
+            await notifyDeputyOneShot({
+              actId: String(act._id),
+              dateISO: updated.dateISO,
+              lineupId: updated.lineupId,
+              excludePhone: toE164,
+            });
+            console.log("✅ Deputies notified successfully.");
+          } catch (depErr) {
+            console.error("❌ Error notifying deputies:", depErr.message);
+          }
+        }
+
+        // 5️⃣ Rebuild badge so site updates immediately
+        try {
+          console.log("🟡 Rebuilding availability badge...");
+          await rebuildAndApplyAvailabilityBadge(
+            {
+              body: { actId: String(updated.actId), dateISO: updated.dateISO },
+            },
+            {
+              json: (r) => console.log("✅ Badge refreshed:", r),
+              status: (s) => ({
+                json: (r) => console.log("✅ Badge status:", s, r),
+              }),
+            }
+          );
+          console.log("🧩 Badge rebuild complete");
+        } catch (err) {
+          console.error("❌ Badge rebuild error:", err.message);
+        }
+
+        console.log("✅ [twilioInbound] END (UNAVAILABLE branch)");
+        return res.status(200).send("<Response/>");
+      } catch (err) {
+        console.error(
+          "❌ Error handling UNAVAILABLE reply:",
+          err.message,
+          err.stack
+        );
+        return res.status(200).send("<Response/>");
+      }
+    }
   } catch (err) {
     console.error("❌ Error in twilioInbound:", err.message, err.stack);
     return res.status(200).send("<Response/>");
   }
 };
 
-const INBOUND_SEEN = new Map(); 
-const INBOUND_TTL_MS = 10 * 60 * 1000; 
+const INBOUND_SEEN = new Map();
+const INBOUND_TTL_MS = 10 * 60 * 1000;
 
 function seenInboundOnce(sid) {
-   console.log(`🟢 (availabilityController.js) seenInboundOnce START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢 (availabilityController.js) seenInboundOnce START at ${new Date().toISOString()}`,
+    {}
+  );
   if (!sid) return false;
   const now = Date.now();
   for (const [k, t] of INBOUND_SEEN) {
@@ -1131,12 +1472,12 @@ function seenInboundOnce(sid) {
   return false;
 }
 
-
-
 // Format date like "Saturday, 5th Oct 2025"
 const formatWithOrdinal = (dateLike) => {
-   console.log(`🟢 (availabilityController.js) formatWithOrdinal START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢 (availabilityController.js) formatWithOrdinal START at ${new Date().toISOString()}`,
+    {}
+  );
   const d = new Date(dateLike);
   if (isNaN(d)) return String(dateLike);
   const day = d.getDate();
@@ -1157,8 +1498,10 @@ const formatWithOrdinal = (dateLike) => {
 };
 
 const firstNameOf = (p) => {
-   console.log(`🟢 (availabilityController.js) firstNameOf START at ${new Date().toISOString()}`, {
- });
+  console.log(
+    `🟢 (availabilityController.js) firstNameOf START at ${new Date().toISOString()}`,
+    {}
+  );
   if (!p) return "there";
 
   // If it's a string like "Miça Townsend"
@@ -1193,17 +1536,27 @@ const firstNameOf = (p) => {
 
 // ✅ Unified version ensuring correct photoUrl vs profileUrl distinction
 async function getDeputyDisplayBits(dep) {
-  console.log(`🟢 (availabilityController.js) getDeputyDisplayBits START at ${new Date().toISOString()}`, {
-    depKeys: Object.keys(dep || {}),
-    depMusicianId: dep?.musicianId,
-    depEmail: dep?.email,
-    depName: `${dep?.firstName || ""} ${dep?.lastName || ""}`.trim(),
-  });
+  console.log(
+    `🟢 (availabilityController.js) getDeputyDisplayBits START at ${new Date().toISOString()}`,
+    {
+      depKeys: Object.keys(dep || {}),
+      depMusicianId: dep?.musicianId,
+      depEmail: dep?.email,
+      depName: `${dep?.firstName || ""} ${dep?.lastName || ""}`.trim(),
+    }
+  );
 
-  const PUBLIC_SITE_BASE = (process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "http://localhost:5174").replace(/\/$/, "");
+  const PUBLIC_SITE_BASE = (
+    process.env.PUBLIC_SITE_URL ||
+    process.env.FRONTEND_URL ||
+    "http://localhost:5174"
+  ).replace(/\/$/, "");
 
   try {
-    const musicianId = (dep?.musicianId && String(dep.musicianId)) || (dep?._id && String(dep._id)) || "";
+    const musicianId =
+      (dep?.musicianId && String(dep.musicianId)) ||
+      (dep?._id && String(dep._id)) ||
+      "";
 
     // 🎯 Step 1: try direct image on deputy
     let photoUrl = getPictureUrlFrom(dep);
@@ -1213,23 +1566,33 @@ async function getDeputyDisplayBits(dep) {
     let mus = null;
     if ((!photoUrl || !photoUrl.startsWith("http")) && musicianId) {
       mus = await Musician.findById(musicianId)
-  .select("musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl email")
+        .select(
+          "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl email"
+        )
         .lean();
       photoUrl = getPictureUrlFrom(mus || {});
       console.log("📸 Step 2: Lookup by musicianId →", photoUrl || "❌ none");
     }
 
     // Step 3: lookup by email if still missing
-    if ((!photoUrl || !photoUrl.startsWith("http")) && (dep?.email || mus?.email)) {
+    if (
+      (!photoUrl || !photoUrl.startsWith("http")) &&
+      (dep?.email || mus?.email)
+    ) {
       const email = dep?.email || dep?.emailAddress || mus?.email || "";
       console.log("📧 Step 3: Lookup by email →", email || "❌ none");
       if (email) {
         const musByEmail = await Musician.findOne({ email })
-  .select("musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl _id email")
+          .select(
+            "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl _id email"
+          )
           .lean();
         if (musByEmail) {
           photoUrl = getPictureUrlFrom(musByEmail);
-          console.log("📸 Step 3 result: Found via email →", photoUrl || "❌ none");
+          console.log(
+            "📸 Step 3 result: Found via email →",
+            photoUrl || "❌ none"
+          );
           if (!musicianId && musByEmail._id) {
             dep.musicianId = musByEmail._id;
           }
@@ -1239,9 +1602,13 @@ async function getDeputyDisplayBits(dep) {
       }
     }
 
-    const resolvedMusicianId = (dep?.musicianId && String(dep.musicianId)) || musicianId || "";
-    const profileUrl = resolvedMusicianId ? `${PUBLIC_SITE_BASE}/musician/${resolvedMusicianId}` : "";
-const DEFAULT_PROFILE_PICTURE = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1761313694/profile_placeholder_rcdly4.png";
+    const resolvedMusicianId =
+      (dep?.musicianId && String(dep.musicianId)) || musicianId || "";
+    const profileUrl = resolvedMusicianId
+      ? `${PUBLIC_SITE_BASE}/musician/${resolvedMusicianId}`
+      : "";
+    const DEFAULT_PROFILE_PICTURE =
+      "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1761313694/profile_placeholder_rcdly4.png";
 
     // 🪄 Step 4: fallback if no valid image found
     if (!photoUrl || !photoUrl.startsWith("http")) {
@@ -1262,47 +1629,76 @@ const DEFAULT_PROFILE_PICTURE = "https://res.cloudinary.com/dvcgr3fyd/image/uplo
     };
   } catch (e) {
     console.warn("⚠️ getDeputyDisplayBits failed:", e?.message || e);
-    const fallbackId = (dep?.musicianId && String(dep.musicianId)) || (dep?._id && String(dep._id)) || "";
-    const profileUrl = fallbackId ? `${PUBLIC_SITE_BASE}/musician/${fallbackId}` : "";
-    const fallbackPhoto = assets.Default_Profile_Picture || `${PUBLIC_SITE_BASE}/default-avatar.png`;
+    const fallbackId =
+      (dep?.musicianId && String(dep.musicianId)) ||
+      (dep?._id && String(dep._id)) ||
+      "";
+    const profileUrl = fallbackId
+      ? `${PUBLIC_SITE_BASE}/musician/${fallbackId}`
+      : "";
+    const fallbackPhoto =
+      assets.Default_Profile_Picture ||
+      `${PUBLIC_SITE_BASE}/default-avatar.png`;
     return { musicianId: fallbackId, photoUrl: fallbackPhoto, profileUrl };
   }
 }
 
 // -------------------- SSE Broadcaster --------------------
 
-export const makeAvailabilityBroadcaster = (broadcastFn) => (
-  {
-  
+export const makeAvailabilityBroadcaster = (broadcastFn) => ({
   leadYes: ({ actId, actName, musicianName, dateISO }) => {
-    broadcastFn({type: "availability_yes",actId,actName,musicianName,dateISO,});  },
+    broadcastFn({
+      type: "availability_yes",
+      actId,
+      actName,
+      musicianName,
+      dateISO,
+    });
+  },
   deputyYes: ({ actId, actName, musicianName, dateISO }) => {
-    broadcastFn({ type: "availability_deputy_yes", actId,  actName, musicianName,dateISO, });},});
+    broadcastFn({
+      type: "availability_deputy_yes",
+      actId,
+      actName,
+      musicianName,
+      dateISO,
+    });
+  },
+});
 
-    // one-shot WA→SMS for a single deputy
+// one-shot WA→SMS for a single deputy
 export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
   console.log(`🟢 (availabilityController.js) handleLeadNegativeReply START`);
   // 1) Find the lead in the lineup by phone (so we can access their deputies)
-  const leadMatch = findPersonByPhone(act, updated.lineupId, updated.phone || fromRaw);
+  const leadMatch = findPersonByPhone(
+    act,
+    updated.lineupId,
+    updated.phone || fromRaw
+  );
   const leadMember = leadMatch?.parentMember || leadMatch?.person || null;
-  const deputies = Array.isArray(leadMember?.deputies) ? leadMember.deputies : [];
+  const deputies = Array.isArray(leadMember?.deputies)
+    ? leadMember.deputies
+    : [];
 
-  console.log("👥 Deputies for lead:", deputies.map(d => ({
-    name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-    phone: d.phoneNumber || d.phone || ""
-  })));
-
-  // 2) Build normalized phone list for deputies
-  const norm = (v) => (String(v || "")
-    .replace(/^whatsapp:/i, "")
-    .replace(/\s+/g, "")
-    .replace(/^0(?=7)/, "+44")
-    .replace(/^(?=44)/, "+")
+  console.log(
+    "👥 Deputies for lead:",
+    deputies.map((d) => ({
+      name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
+      phone: d.phoneNumber || d.phone || "",
+    }))
   );
 
+  // 2) Build normalized phone list for deputies
+  const norm = (v) =>
+    String(v || "")
+      .replace(/^whatsapp:/i, "")
+      .replace(/\s+/g, "")
+      .replace(/^0(?=7)/, "+44")
+      .replace(/^(?=44)/, "+");
+
   const depPhones = deputies
-    .map(d => ({ obj: d, phone: norm(d.phoneNumber || d.phone || "") }))
-    .filter(x => !!x.phone);
+    .map((d) => ({ obj: d, phone: norm(d.phoneNumber || d.phone || "") }))
+    .filter((x) => !!x.phone);
 
   if (depPhones.length === 0) {
     console.log("ℹ️ No deputy phones to contact.");
@@ -1318,8 +1714,8 @@ export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
     .lean();
 
   const repliedYes = new Map(); // phone -> row
-  const repliedNo  = new Map(); // phone -> row
-  const pending    = new Map(); // phone -> most-recent row (no reply yet)
+  const repliedNo = new Map(); // phone -> row
+  const pending = new Map(); // phone -> most-recent row (no reply yet)
 
   for (const r of prevRows) {
     const p = norm(r.phone);
@@ -1332,7 +1728,10 @@ export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
     } else {
       const prev = pending.get(p);
       const ts = new Date(r.updatedAt || r.createdAt || 0).getTime();
-      if (!prev || ts > new Date(prev.updatedAt || prev.createdAt || 0).getTime()) {
+      if (
+        !prev ||
+        ts > new Date(prev.updatedAt || prev.createdAt || 0).getTime()
+      ) {
         pending.set(p, r);
       }
     }
@@ -1376,7 +1775,8 @@ export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
             $set: {
               status: sendRes?.status || "queued",
               messageSidOut: sendRes?.sid || row?.messageSidOut || null,
-              contactChannel: sendRes?.channel || row?.contactChannel || "whatsapp",
+              contactChannel:
+                sendRes?.channel || row?.contactChannel || "whatsapp",
               updatedAt: new Date(),
             },
           }
@@ -1398,23 +1798,24 @@ export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
       ...activePending.map(({ phone }) => phone),
     ]);
 
-    const candidates = depPhones.filter(({ phone }) =>
-      !repliedNo.has(phone) && !alreadyActive.has(phone)
+    const candidates = depPhones.filter(
+      ({ phone }) => !repliedNo.has(phone) && !alreadyActive.has(phone)
     );
 
     for (const cand of candidates.slice(0, toFill)) {
       try {
-        const { phone: depPhone, enquiryId: depEnquiryId } = await notifyDeputyOneShot({
-          act,
-          lineupId: updated.lineupId,
-          deputy: cand.obj,
-          dateISO: updated.dateISO,
-          formattedDate: updated.formattedDate,
-          formattedAddress: updated.formattedAddress,
-          duties: updated.duties || "Lead Vocal",
-          finalFee: String(updated.fee || "300"),
-          metaActId: updated.actId,
-        });
+        const { phone: depPhone, enquiryId: depEnquiryId } =
+          await notifyDeputyOneShot({
+            act,
+            lineupId: updated.lineupId,
+            deputy: cand.obj,
+            dateISO: updated.dateISO,
+            formattedDate: updated.formattedDate,
+            formattedAddress: updated.formattedAddress,
+            duties: updated.duties || "Lead Vocal",
+            finalFee: String(updated.fee || "300"),
+            metaActId: updated.actId,
+          });
         console.log("✅ Deputy pinged");
         freshPinged++;
       } catch (e) {
@@ -1423,7 +1824,9 @@ export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
     }
   }
 
-  console.log(`✅ Deputies active after lead NO/UNAVAILABLE: yes=${activeYes.length}, pending=${activePending.length}, rePinged=${rePingCount}, newlyPinged=${freshPinged}`);
+  console.log(
+    `✅ Deputies active after lead NO/UNAVAILABLE: yes=${activeYes.length}, pending=${activePending.length}, rePinged=${rePingCount}, newlyPinged=${freshPinged}`
+  );
 
   return {
     activeYes: activeYes.length,
@@ -1446,9 +1849,13 @@ export async function notifyDeputyOneShot({
   console.log(`🟢 (availabilityController.js) notifyDeputyOneShot START`);
   // local helpers
   const maskPhone = (p = "") =>
-    String(p).replace(/^\+?(\d{2})\d+(?=\d{3}$)/, "+$1•••").replace(/(\d{2})$/, "••$1");
+    String(p)
+      .replace(/^\+?(\d{2})\d+(?=\d{3}$)/, "+$1•••")
+      .replace(/(\d{2})$/, "••$1");
   const toE164 = (raw = "") => {
-    let s = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+    let s = String(raw || "")
+      .replace(/^whatsapp:/i, "")
+      .replace(/\s+/g, "");
     if (!s) return "";
     if (s.startsWith("+")) return s;
     if (s.startsWith("07")) return s.replace(/^0/, "+44");
@@ -1462,9 +1869,9 @@ export async function notifyDeputyOneShot({
 
   try {
     // phones
-    const phoneRaw   = deputy?.phoneNumber || deputy?.phone || "";
-    const phoneE164  = toE164(phoneRaw);          // +44…
-    const phoneWA    = toWA(phoneRaw);            // whatsapp:+44…
+    const phoneRaw = deputy?.phoneNumber || deputy?.phone || "";
+    const phoneE164 = toE164(phoneRaw); // +44…
+    const phoneWA = toWA(phoneRaw); // whatsapp:+44…
     if (!phoneE164) {
       console.warn("❌ notifyDeputyOneShot(): Deputy has no usable phone");
       throw new Error("Deputy has no phone");
@@ -1494,7 +1901,9 @@ export async function notifyDeputyOneShot({
           createdAt: new Date(),
           actName: act?.tscName || act?.name || "",
           contactName: firstNameOf(deputy),
-          musicianName: `${deputy?.firstName || ""} ${deputy?.lastName || ""}`.trim(),
+          musicianName: `${deputy?.firstName || ""} ${
+            deputy?.lastName || ""
+          }`.trim(),
         },
         $set: { updatedAt: new Date() },
       },
@@ -1564,7 +1973,13 @@ export async function notifyDeputyOneShot({
   }
 }
 
-export async function pingDeputiesFor(actId, lineupId, dateISO, formattedAddress, duties) {
+export async function pingDeputiesFor(
+  actId,
+  lineupId,
+  dateISO,
+  formattedAddress,
+  duties
+) {
   console.log(`🟢 (availabilityController.js) pingDeputiesFor START`);
   const act = await Act.findById(actId).lean();
   if (!act) return;
@@ -1585,7 +2000,9 @@ export async function pingDeputiesFor(actId, lineupId, dateISO, formattedAddress
 
 // ✅ buildAvailabilityBadgeFromRows (refined to include both photoUrl & profileUrl)
 export async function buildAvailabilityBadgeFromRows(act, dateISO) {
-  console.log(`🟢 (availabilityController.js) buildAvailabilityBadgeFromRows START at ${new Date().toISOString()}`);
+  console.log(
+    `🟢 (availabilityController.js) buildAvailabilityBadgeFromRows START at ${new Date().toISOString()}`
+  );
   if (!act || !dateISO) return null;
 
   const formattedAddress = act?.formattedAddress || "TBC";
@@ -1594,7 +2011,10 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
     .lean();
 
   if (!Array.isArray(rows) || rows.length === 0) {
-    console.warn("⚠️ No availability rows found for", { actId: act._id, dateISO });
+    console.warn("⚠️ No availability rows found for", {
+      actId: act._id,
+      dateISO,
+    });
     return null;
   }
 
@@ -1615,7 +2035,9 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
       if (!isVocalRoleGlobal(m.instrument)) continue;
 
       const leadPhone = normalizePhoneE164(m.phoneNumber || m.phone || "");
-      const leadReply = leadPhone ? replyByPhone.get(leadPhone)?.reply || null : null;
+      const leadReply = leadPhone
+        ? replyByPhone.get(leadPhone)?.reply || null
+        : null;
 
       // ✅ Lead said YES → primary badge
       if (leadReply === "yes") {
@@ -1682,14 +2104,22 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
   console.log("🪶 No badge candidates found — returning null.");
   return null;
 }
-  
-export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO) {
-  console.log(`🟢 (availabilityController.js) rebuildAndApplyAvailabilityBadge START at ${new Date().toISOString()}`);
+
+export async function rebuildAndApplyAvailabilityBadge(
+  reqOrActId,
+  maybeDateISO
+) {
+  console.log(
+    `🟢 (availabilityController.js) rebuildAndApplyAvailabilityBadge START at ${new Date().toISOString()}`
+  );
 
   try {
-    const actId = typeof reqOrActId === "object" ? reqOrActId.body?.actId : reqOrActId;
-    const dateISO = typeof reqOrActId === "object" ? reqOrActId.body?.dateISO : maybeDateISO;
-    if (!actId || !dateISO) return { success: false, message: "Missing actId/dateISO" };
+    const actId =
+      typeof reqOrActId === "object" ? reqOrActId.body?.actId : reqOrActId;
+    const dateISO =
+      typeof reqOrActId === "object" ? reqOrActId.body?.dateISO : maybeDateISO;
+    if (!actId || !dateISO)
+      return { success: false, message: "Missing actId/dateISO" };
 
     const act = await Act.findById(actId).lean();
     if (!act) return { success: false, message: "Act not found" };
@@ -1709,7 +2139,9 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO)
         { _id: actId },
         { $unset: { [`availabilityBadges.${key}`]: "" } }
       );
-      console.log(`🧹 Cleared availability badge for ${act.tscName || act.name}`);
+      console.log(
+        `🧹 Cleared availability badge for ${act.tscName || act.name}`
+      );
       return { success: true, cleared: true };
     }
 
@@ -1724,19 +2156,31 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO)
       { _id: actId },
       { $set: { [`availabilityBadges.${key}`]: badge } }
     );
-    console.log(`✅ Applied availability badge for ${act.tscName || act.name}:`, badge);
+    console.log(
+      `✅ Applied availability badge for ${act.tscName || act.name}:`,
+      badge
+    );
 
     // 📧 Send client email (lead YES only)
     if (!badge.isDeputy) {
       try {
         await sendClientEmail({
           actId,
-          subject: `Good news — ${act?.tscName || act?.name || "The band"} lead vocalist is available`,
-          html: `<p>${badge.vocalistName || "Lead vocalist"} is free for ${dateISO}.</p>`,
+          subject: `Good news — ${
+            act?.tscName || act?.name || "The band"
+          } lead vocalist is available`,
+          html: `<p>${
+            badge.vocalistName || "Lead vocalist"
+          } is free for ${dateISO}.</p>`,
         });
-        console.log("(availabilityController.js) 📧 Client email sent for lead YES.");
+        console.log(
+          "(availabilityController.js) 📧 Client email sent for lead YES."
+        );
       } catch (e) {
-        console.warn("(availabilityController.js) ⚠️ sendClientEmail failed:", e.message);
+        console.warn(
+          "(availabilityController.js) ⚠️ sendClientEmail failed:",
+          e.message
+        );
       }
     }
 
@@ -1747,17 +2191,21 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO)
   }
 }
 
-
 export async function getAvailabilityBadge(req, res) {
   try {
     const { actId, dateISO } = req.params;
-    console.log("🎯 [getAvailabilityBadge] Fetching badge for:", { actId, dateISO });
+    console.log("🎯 [getAvailabilityBadge] Fetching badge for:", {
+      actId,
+      dateISO,
+    });
 
     if (!actId || !dateISO) {
       return res.status(400).json({ error: "Missing actId or dateISO" });
     }
 
-    const act = await Act.findById(actId).select("formattedAddress lineups").lean();
+    const act = await Act.findById(actId)
+      .select("formattedAddress lineups")
+      .lean();
     if (!act) {
       return res.status(404).json({ error: "Act not found" });
     }
