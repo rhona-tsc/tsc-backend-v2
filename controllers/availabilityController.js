@@ -13,7 +13,6 @@ import Shortlist from "../models/shortlistModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import User from "../models/userModel.js";
 import { cancelCalendarInvite } from "../controller/googleCalendar.js";
-import { notifyDeputyOneShot } from "../controllers/availabilityHelpers.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
@@ -1060,6 +1059,144 @@ export const twilioStatus = async (req, res) => {
   }
 };
 
+export async function notifyDeputyOneShot({
+  act,
+  lineupId,
+  deputy,
+  dateISO,
+  formattedDate,
+  formattedAddress,
+  duties,
+  finalFee,
+  metaActId,
+}) {
+  console.log(`🟢 (availabilityController.js) notifyDeputyOneShot START`);
+  // local helpers
+  const maskPhone = (p = "") =>
+    String(p)
+      .replace(/^\+?(\d{2})\d+(?=\d{3}$)/, "+$1•••")
+      .replace(/(\d{2})$/, "••$1");
+  const toE164 = (raw = "") => {
+    let s = String(raw || "")
+      .replace(/^whatsapp:/i, "")
+      .replace(/\s+/g, "");
+    if (!s) return "";
+    if (s.startsWith("+")) return s;
+    if (s.startsWith("07")) return s.replace(/^0/, "+44");
+    if (s.startsWith("44")) return `+${s}`;
+    return s;
+  };
+  const toWA = (raw = "") => {
+    const e164 = toE164(raw);
+    return e164 ? `whatsapp:${e164}` : "";
+  };
+
+  try {
+    // phones
+    const phoneRaw = deputy?.phoneNumber || deputy?.phone || "";
+    const phoneE164 = toE164(phoneRaw); // +44…
+    const phoneWA = toWA(phoneRaw); // whatsapp:+44…
+    if (!phoneE164) {
+      console.warn("❌ notifyDeputyOneShot(): Deputy has no usable phone");
+      throw new Error("Deputy has no phone");
+    }
+
+    // enquiry id
+    const enquiryId = String(Date.now());
+
+    // ensure an Availability stub exists (and capture identity fields)
+    const availabilityDoc = await AvailabilityModel.findOneAndUpdate(
+      { enquiryId },
+      {
+        $setOnInsert: {
+          enquiryId,
+          actId: act?._id || null,
+          lineupId: lineupId || null,
+          musicianId: deputy?.musicianId || deputy?._id || null,
+          phone: phoneE164,
+          duties,
+          formattedDate,
+          formattedAddress,
+          fee: String(finalFee || ""),
+          reply: null,
+          inbound: {},
+          dateISO,
+          calendarInviteEmail: deputy?.email || null,
+          createdAt: new Date(),
+          actName: act?.tscName || act?.name || "",
+          contactName: firstNameOf(deputy),
+          musicianName: `${deputy?.firstName || ""} ${
+            deputy?.lastName || ""
+          }`.trim(),
+        },
+        $set: { updatedAt: new Date() },
+      },
+      { upsert: true, new: true }
+    );
+
+    // WhatsApp template params
+    const templateParams = {
+      FirstName: firstNameOf(deputy),
+      FormattedDate: formattedDate,
+      FormattedAddress: formattedAddress,
+      Fee: String(finalFee),
+      Duties: duties,
+      ActName: act?.tscName || act?.name || "the band",
+      MetaActId: String(metaActId || act?._id || ""),
+      MetaISODate: dateISO,
+      MetaAddress: formattedAddress,
+    };
+    console.log("📦 WhatsApp template params:", templateParams);
+
+    console.log("📤 Sending WhatsApp to deputy…");
+    const sendRes = await sendWhatsAppMessage({
+      to: phoneWA,
+      templateParams,
+    });
+
+    // persist outbound details for webhook lookup
+    await AvailabilityModel.updateOne(
+      { _id: availabilityDoc._id },
+      {
+        $set: {
+          status: sendRes?.status || "queued",
+          messageSidOut: sendRes?.sid || null,
+          contactChannel: sendRes?.channel || "whatsapp",
+          updatedAt: new Date(),
+          "outbound.sid": sendRes?.sid || null,
+        },
+      }
+    );
+
+    // record a row in EnquiryMessage (handy for analytics / auditing)
+    const first = firstNameOf(deputy);
+    const enquiry = await EnquiryMessage.create({
+      enquiryId,
+      actId: act?._id || null,
+      lineupId: lineupId || null,
+      musicianId: deputy?._id || deputy?.musicianId || null,
+      phone: phoneE164,
+      duties,
+      fee: String(finalFee),
+      formattedDate,
+      formattedAddress,
+      messageSid: sendRes?.sid || null,
+      status: mapTwilioToEnquiryStatus(sendRes?.status),
+      meta: {
+        firstName: first,
+        actName: act?.tscName || act?.name || "the band",
+      },
+      templateParams,
+    });
+
+    console.log("✅ Deputy pinged");
+    return { phone: phoneE164, enquiryId };
+  } catch (err) {
+    console.error("⚠️ Failed to notify deputy", err?.message || err);
+    throw err;
+  }
+}
+
 export const twilioInbound = async (req, res) => {
   console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
 
@@ -1835,143 +1972,7 @@ export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
     newlyPinged: freshPinged,
   };
 }
-export async function notifyDeputyOneShot({
-  act,
-  lineupId,
-  deputy,
-  dateISO,
-  formattedDate,
-  formattedAddress,
-  duties,
-  finalFee,
-  metaActId,
-}) {
-  console.log(`🟢 (availabilityController.js) notifyDeputyOneShot START`);
-  // local helpers
-  const maskPhone = (p = "") =>
-    String(p)
-      .replace(/^\+?(\d{2})\d+(?=\d{3}$)/, "+$1•••")
-      .replace(/(\d{2})$/, "••$1");
-  const toE164 = (raw = "") => {
-    let s = String(raw || "")
-      .replace(/^whatsapp:/i, "")
-      .replace(/\s+/g, "");
-    if (!s) return "";
-    if (s.startsWith("+")) return s;
-    if (s.startsWith("07")) return s.replace(/^0/, "+44");
-    if (s.startsWith("44")) return `+${s}`;
-    return s;
-  };
-  const toWA = (raw = "") => {
-    const e164 = toE164(raw);
-    return e164 ? `whatsapp:${e164}` : "";
-  };
 
-  try {
-    // phones
-    const phoneRaw = deputy?.phoneNumber || deputy?.phone || "";
-    const phoneE164 = toE164(phoneRaw); // +44…
-    const phoneWA = toWA(phoneRaw); // whatsapp:+44…
-    if (!phoneE164) {
-      console.warn("❌ notifyDeputyOneShot(): Deputy has no usable phone");
-      throw new Error("Deputy has no phone");
-    }
-
-    // enquiry id
-    const enquiryId = String(Date.now());
-
-    // ensure an Availability stub exists (and capture identity fields)
-    const availabilityDoc = await AvailabilityModel.findOneAndUpdate(
-      { enquiryId },
-      {
-        $setOnInsert: {
-          enquiryId,
-          actId: act?._id || null,
-          lineupId: lineupId || null,
-          musicianId: deputy?.musicianId || deputy?._id || null,
-          phone: phoneE164,
-          duties,
-          formattedDate,
-          formattedAddress,
-          fee: String(finalFee || ""),
-          reply: null,
-          inbound: {},
-          dateISO,
-          calendarInviteEmail: deputy?.email || null,
-          createdAt: new Date(),
-          actName: act?.tscName || act?.name || "",
-          contactName: firstNameOf(deputy),
-          musicianName: `${deputy?.firstName || ""} ${
-            deputy?.lastName || ""
-          }`.trim(),
-        },
-        $set: { updatedAt: new Date() },
-      },
-      { upsert: true, new: true }
-    );
-
-    // WhatsApp template params
-    const templateParams = {
-      FirstName: firstNameOf(deputy),
-      FormattedDate: formattedDate,
-      FormattedAddress: formattedAddress,
-      Fee: String(finalFee),
-      Duties: duties,
-      ActName: act?.tscName || act?.name || "the band",
-      MetaActId: String(metaActId || act?._id || ""),
-      MetaISODate: dateISO,
-      MetaAddress: formattedAddress,
-    };
-    console.log("📦 WhatsApp template params:", templateParams);
-
-    console.log("📤 Sending WhatsApp to deputy…");
-    const sendRes = await sendWhatsAppMessage({
-      to: phoneWA,
-      templateParams,
-    });
-
-    // persist outbound details for webhook lookup
-    await AvailabilityModel.updateOne(
-      { _id: availabilityDoc._id },
-      {
-        $set: {
-          status: sendRes?.status || "queued",
-          messageSidOut: sendRes?.sid || null,
-          contactChannel: sendRes?.channel || "whatsapp",
-          updatedAt: new Date(),
-          "outbound.sid": sendRes?.sid || null,
-        },
-      }
-    );
-
-    // record a row in EnquiryMessage (handy for analytics / auditing)
-    const first = firstNameOf(deputy);
-    const enquiry = await EnquiryMessage.create({
-      enquiryId,
-      actId: act?._id || null,
-      lineupId: lineupId || null,
-      musicianId: deputy?._id || deputy?.musicianId || null,
-      phone: phoneE164,
-      duties,
-      fee: String(finalFee),
-      formattedDate,
-      formattedAddress,
-      messageSid: sendRes?.sid || null,
-      status: mapTwilioToEnquiryStatus(sendRes?.status),
-      meta: {
-        firstName: first,
-        actName: act?.tscName || act?.name || "the band",
-      },
-      templateParams,
-    });
-
-    console.log("✅ Deputy pinged");
-    return { phone: phoneE164, enquiryId };
-  } catch (err) {
-    console.error("⚠️ Failed to notify deputy", err?.message || err);
-    throw err;
-  }
-}
 
 export async function pingDeputiesFor(
   actId,
