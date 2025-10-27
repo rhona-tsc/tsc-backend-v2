@@ -243,6 +243,50 @@ const getPictureUrlFrom = (obj = {}) => {
   return "";
 };
 
+export async function notifyDeputies({ act, lineupId, dateISO, excludePhone }) {
+  console.log("📢 notifyDeputies() START", { act: act?.name, lineupId });
+
+  // Get deputies from act’s lineups
+  const lineup = act?.lineups?.find(l => String(l._id) === String(lineupId));
+  if (!lineup) {
+    console.warn("⚠️ No lineup found for notifyDeputies()");
+    return;
+  }
+
+  const deputies = lineup.bandMembers?.filter(m =>
+    ["lead vocal", "lead female vocal", "male vocal", "vocalist-guitarist"].some(v =>
+      (m.instrument || "").toLowerCase().includes(v)
+    )
+  ) || [];
+
+  const filtered = deputies.filter(d => d.phone && d.phone !== excludePhone);
+
+  if (filtered.length === 0) {
+    console.log("ℹ️ No deputies with valid phone numbers to notify");
+    return;
+  }
+
+  for (const deputy of filtered) {
+    await notifyDeputyOneShot({
+      act,
+      lineupId,
+      deputy,
+      dateISO,
+      formattedDate: new Date(dateISO).toLocaleDateString("en-GB", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      }),
+      formattedAddress: act?.venueAddress || "TBC",
+      duties: "Lead Vocal",
+      finalFee: deputy.fee || null,
+      metaActId: act._id,
+    });
+  }
+
+  console.log("✅ notifyDeputies() finished");
+}
+
 // Build the exact SMS text we want for both send-time and fallback - THIS IS THE SMS TO LEAD VOCALISTS TO CHECK AVAILABILITY! (not used for booking confirmations)
 function buildAvailabilitySMS({
   firstName,
@@ -1542,12 +1586,12 @@ export const twilioInbound = async (req, res) => {
               "📢 Notifying deputies for act:",
               act.tscName || act.name
             );
-            await notifyDeputyOneShot({
-              actId: String(act._id),
-              dateISO: updated.dateISO,
-              lineupId: updated.lineupId,
-              excludePhone: toE164,
-            });
+           await notifyDeputies({
+  act,
+  lineupId: updated.lineupId,
+  dateISO: updated.dateISO,
+  excludePhone: toE164,
+});
             console.log("✅ Deputies notified successfully.");
           } catch (depErr) {
             console.error("❌ Error notifying deputies:", depErr.message);
@@ -1941,17 +1985,12 @@ export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
     for (const cand of candidates.slice(0, toFill)) {
       try {
         const { phone: depPhone, enquiryId: depEnquiryId } =
-          await notifyDeputyOneShot({
-            act,
-            lineupId: updated.lineupId,
-            deputy: cand.obj,
-            dateISO: updated.dateISO,
-            formattedDate: updated.formattedDate,
-            formattedAddress: updated.formattedAddress,
-            duties: updated.duties || "Lead Vocal",
-            finalFee: String(updated.fee || "300"),
-            metaActId: updated.actId,
-          });
+         await notifyDeputies({
+  act,
+  lineupId: updated.lineupId,
+  dateISO: updated.dateISO,
+  excludePhone: toE164,
+});
         console.log("✅ Deputy pinged");
         freshPinged++;
       } catch (e) {
