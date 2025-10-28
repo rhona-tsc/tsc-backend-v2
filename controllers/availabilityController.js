@@ -1231,6 +1231,17 @@ export async function notifyDeputyOneShot({
   duties,
 });
 
+const sendRes = await sendAvailabilityRequest({
+  musician: deputy,
+  act,
+  lineupId,
+  dateISO,
+  formattedDate,
+  formattedAddress,
+  fee: finalFee,
+  duties,
+});
+
     // persist outbound details for webhook lookup
     await AvailabilityModel.updateOne(
       { _id: availabilityDoc._id },
