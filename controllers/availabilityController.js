@@ -2082,19 +2082,21 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
   return null;
 }
 
-const lineupQuotes = actData.lineups.map(l => ({
-  name: `${l.size}-piece (${l.description})`,
-  price: l.base_fee?.[0]?.total_fee_with_margin || l.base_fee?.[0]?.total_fee,
-  description: l.bandMembers.map(b => b.instrument).join(", "),
-}));
+
 
 export async function rebuildAndApplyAvailabilityBadge(
   reqOrActId,
-  maybeDateISO
+  maybeDateISO, act,
 ) {
   console.log(
     `🟢 (availabilityController.js) rebuildAndApplyAvailabilityBadge START at ${new Date().toISOString()}`
   );
+
+  const lineupQuotes = act.lineups?.map(l => ({
+  name: `${l.size}-piece (${l.description || ""})`,
+  price: l.base_fee?.[0]?.total_fee_with_margin || l.base_fee?.[0]?.total_fee || 0,
+  description: l.bandMembers?.map(b => b.instrument).join(", "),
+})) || [];
 
   try {
     const actId =
@@ -2174,33 +2176,33 @@ export async function rebuildAndApplyAvailabilityBadge(
   <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
     <p>Hi ${clientFirstName || "there"},</p>
 
-    <p>Thank you for shortlisting <strong>${actData?.tscName || actData?.name}</strong>!</p>
+    <p>Thank you for shortlisting <strong>${act?.tscName || act?.name}</strong>!</p>
 
     <p>
-      We’re delighted to confirm that <strong>${actData?.tscName || actData?.name}</strong> is available with 
+      We’re delighted to confirm that <strong>${act?.tscName || act?.name}</strong> is available with 
       <strong>${badge?.vocalistName || "their lead vocalist"}</strong>, and they’d love to perform for you and your guests at your event.
     </p>
 
     ${
-      actData?.images?.[0]
-        ? `<img src="${actData.images[0]}" alt="${actData.tscName} band photo" style="width:100%; border-radius:8px; margin:20px 0;" />`
+      act?.images?.[0]
+        ? `<img src="${act.images[0]}" alt="${act.tscName} band photo" style="width:100%; border-radius:8px; margin:20px 0;" />`
         : ""
     }
 
-    <h3 style="color:#111;">🎵 ${actData?.tscName || actData?.name}</h3>
+    <h3 style="color:#111;">🎵 ${act?.tscName || act?.name}</h3>
     <p>
-      <a href="https://www.thesupremecollective.co.uk/act/${actData?._id}" 
+      <a href="https://www.thesupremecollective.co.uk/act/${act?._id}" 
          style="color:#ff6667; text-decoration:none; font-weight:bold;">
          View Profile →
       </a>
     </p>
 
     ${
-      actData?.videos?.length
+      act?.videos?.length
         ? `
         <h4 style="margin-top:20px;">Watch Videos:</h4>
         <ul>
-          ${actData.videos
+          ${act.videos
             .slice(0, 4)
             .map(
               (v) => `
@@ -2231,21 +2233,21 @@ export async function rebuildAndApplyAvailabilityBadge(
     <h4 style="margin-top:25px;">Included in your quote:</h4>
     <ul>
       <li>
-        Up to ${actData?.numberOfSets?.[0]}×${actData?.lengthOfSets?.[0]}-minute
-        or ${actData?.numberOfSets?.[1]}×${actData?.lengthOfSets?.[1]}-minute live sets
+        Up to ${act?.numberOfSets?.[0]}×${act?.lengthOfSets?.[0]}-minute
+        or ${act?.numberOfSets?.[1]}×${act?.lengthOfSets?.[1]}-minute live sets
       </li>
       ${
-        actData?.paSystem
-          ? `<li>A ${paMap[actData.paSystem]} PA system${
-              actData?.lightingSystem
-                ? ` and a ${lightMap[actData.lightingSystem]} lighting setup`
+        act?.paSystem
+          ? `<li>A ${paMap[act.paSystem]} PA system${
+              act?.lightingSystem
+                ? ` and a ${lightMap[act.lightingSystem]} lighting setup`
                 : ""
             }</li>`
           : ""
       }
       <li>The band on site for up to 7 hours or until midnight</li>
       ${
-        Object.entries(actData.extras || {})
+        Object.entries(act.extras || {})
           .filter(([_, v]) => v?.complimentary)
           .map(
             ([key]) =>
@@ -2256,22 +2258,22 @@ export async function rebuildAndApplyAvailabilityBadge(
           .join("")
       }
       ${
-        actData.offRepertoireRequests > 0
+        act.offRepertoireRequests > 0
           ? `<li>${
-              actData.offRepertoireRequests === 1
+              act.offRepertoireRequests === 1
                 ? "One"
-                : actData.offRepertoireRequests
+                : act.offRepertoireRequests
             } additional ‘off-repertoire’ song ${
-              actData.offRepertoireRequests === 1 ? "request" : "requests"
+              act.offRepertoireRequests === 1 ? "request" : "requests"
             } (e.g. first dance or favourites)</li>`
           : ""
       }
       ${
-        actData.setlist === "smallTailoring"
+        act.setlist === "smallTailoring"
           ? `<li>A signature setlist curated by the band — guaranteed crowd-pleasers</li>`
-          : actData.setlist === "mediumTailoring"
+          : act.setlist === "mediumTailoring"
           ? `<li>A collaborative setlist blending your top picks with our favourites</li>`
-          : actData.setlist === "largeTailoring"
+          : act.setlist === "largeTailoring"
           ? `<li>A fully tailored setlist made almost entirely of your requests</li>`
           : ""
       }
@@ -2284,7 +2286,7 @@ export async function rebuildAndApplyAvailabilityBadge(
 
     <h4 style="margin-top:30px;">A bit about the band</h4>
     <p>
-      ${actData?.tscName || "The band"} are a friendly, flexible, and professional group 
+      ${act?.tscName || "The band"} are a friendly, flexible, and professional group 
       known for creating unforgettable party atmospheres. They’re part of 
       <strong>The Supreme Collective</strong> — a hand-picked roster of the UK’s top live musicians.
       So you can book with total peace of mind knowing they’ll deliver a world-class performance every time.
@@ -2296,13 +2298,13 @@ export async function rebuildAndApplyAvailabilityBadge(
 
     <p style="margin-top:20px;">
       If you’d like to go ahead, simply 
-      <a href="https://www.thesupremecollective.co.uk/cart?actId=${actData?._id}&date=${dateISO}&address=${encodeURIComponent(
+      <a href="https://www.thesupremecollective.co.uk/cart?actId=${act?._id}&date=${dateISO}&address=${encodeURIComponent(
   selectedAddress || ""
 )}" 
          style="background-color:#ff6667; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold;">
          Add to Cart →
       </a>
-      to secure ${actData?.tscName || actData?.name} for your event.
+      to secure ${act?.tscName || act?.name} for your event.
     </p>
 
     <p style="color:#555;">
