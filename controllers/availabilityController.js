@@ -2076,6 +2076,22 @@ export async function rebuildAndApplyAvailabilityBadge(
       console.log(
         `🧹 Cleared availability badge for ${act.tscName || act.name}`
       );
+      // ✅ Broadcast badge update via SSE after badge rebuild
+try {
+  if (global.availabilityNotify?.badgeUpdated) {
+    global.availabilityNotify.badgeUpdated({
+      type: "availability_badge_updated",
+      actId: String(updated.actId),
+      actName: act?.tscName || act?.name,
+      dateISO: updated.dateISO,
+    });
+    console.log("📡 SSE broadcasted: availability_badge_updated");
+  } else {
+    console.warn("⚠️ global.availabilityNotify.badgeUpdated not available");
+  }
+} catch (err) {
+  console.error("❌ SSE broadcast failed (badgeUpdated):", err.message);
+}
       return { success: true, cleared: true };
     }
 
