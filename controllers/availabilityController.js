@@ -258,7 +258,13 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone }) {
       (m.instrument || "").toLowerCase().includes(v)
     )
   ) || [];
-
+console.log("👥 Raw deputies in lineup:", JSON.stringify(lineup.bandMembers.map(b => ({
+  name: b.firstName || b.fullName,
+  deputies: b.deputies?.map(d => ({
+    name: `${d.firstName} ${d.lastName}`,
+    phone: d.phoneNumber || d.phone,
+  })),
+})), null, 2));
   const filtered = deputies.filter(d => d.phone && d.phone !== excludePhone);
 
   if (filtered.length === 0) {
@@ -1408,7 +1414,6 @@ export const twilioInbound = async (req, res) => {
             }
           );
 
-          // ✅ Broadcast SSE to frontend
           if (global.availabilityNotify?.leadYes) {
             global.availabilityNotify.leadYes({
               actId: String(updated.actId),
@@ -1445,12 +1450,41 @@ export const twilioInbound = async (req, res) => {
             );
           }
 
+          /* ✅ NEW: Calendar decline fallback lookup */
+          let calendarEventId = updated?.calendarEventId;
+          if (!calendarEventId && updated?.enquiryId) {
+            const existing = await AvailabilityModel.findOne({
+              enquiryId: updated.enquiryId,
+              calendarEventId: { $exists: true, $ne: null },
+            }).lean();
+            if (existing?.calendarEventId) {
+              calendarEventId = existing.calendarEventId;
+              console.log("📆 Fallback found calendarEventId:", calendarEventId);
+            }
+          }
+
+          if (calendarEventId && emailForInvite) {
+            try {
+              console.log("🗓️ Attempting to cancel Google Calendar invite...");
+              await cancelCalendarInvite(emailForInvite, calendarEventId, updated.dateISO);
+              console.log("✅ Calendar invite cancelled successfully");
+            } catch (cancelErr) {
+              console.error("❌ Failed to cancel calendar invite:", cancelErr.message);
+            }
+          } else {
+            console.log("⏭️ No calendarEventId or emailForInvite, skipping cancel", {
+              calendarEventId,
+              emailForInvite,
+            });
+          }
+
           await sendWhatsAppText(
             toE164,
             "Thanks for letting us know — we've updated your availability."
           );
 
           if (act?._id && updated?.lineupId) {
+            console.log("📢 Notifying deputies...");
             await notifyDeputies({
               act,
               lineupId: updated.lineupId,
@@ -1467,7 +1501,6 @@ export const twilioInbound = async (req, res) => {
             }
           );
 
-          // ✅ Broadcast SSE to frontend
           if (global.availabilityNotify?.deputyYes) {
             global.availabilityNotify.deputyYes({
               actId: String(updated.actId),
