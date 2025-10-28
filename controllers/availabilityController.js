@@ -2109,33 +2109,34 @@ export async function rebuildAndApplyAvailabilityBadge(
     let key = `${dateISO}_${shortAddress}`;
 
     // 🧹 If no badge, clear existing for this key
-    if (!badge) {
-      await Act.updateOne(
-        { _id: actId },
-        { $unset: { [`availabilityBadges.${key}`]: "" } }
-      );
-      console.log(
-        `🧹 Cleared availability badge for ${act.tscName || act.name}`
-      );
-      // ✅ Broadcast badge update via SSE after badge rebuild
-try {
-if (global.availabilityNotify?.badgeUpdated && updated) {
-  global.availabilityNotify.badgeUpdated({
-    type: "availability_badge_updated",
-    actId: String(updated.actId),
-    actName: act?.tscName || act?.name,
-    dateISO: updated.dateISO,
-  });
-}
-    console.log("📡 SSE broadcasted: availability_badge_updated");
-  } else {
-    console.warn("⚠️ global.availabilityNotify.badgeUpdated not available");
-  }
-} catch (err) {
-  console.error("❌ SSE broadcast failed (badgeUpdated):", err.message);
-}
-      return { success: true, cleared: true };
+   if (!badge) {
+  await Act.updateOne(
+    { _id: actId },
+    { $unset: { [`availabilityBadges.${key}`]: "" } }
+  );
+  console.log(
+    `🧹 Cleared availability badge for ${act.tscName || act.name}`
+  );
+
+  // ✅ Broadcast badge update via SSE after badge rebuild
+  try {
+    if (global.availabilityNotify?.badgeUpdated) {
+      global.availabilityNotify.badgeUpdated({
+        type: "availability_badge_updated",
+        actId: String(actId),
+        actName: act?.tscName || act?.name,
+        dateISO,
+      });
+      console.log("📡 SSE broadcasted: availability_badge_updated");
+    } else {
+      console.warn("⚠️ global.availabilityNotify.badgeUpdated not available");
     }
+  } catch (err) {
+    console.error("❌ SSE broadcast failed (badgeUpdated):", err.message);
+  }
+
+  return { success: true, cleared: true };
+}
 
     // 🚧 Guard: ensure badge is a proper object
     if (typeof badge !== "object" || badge === null || Array.isArray(badge)) {
