@@ -80,10 +80,9 @@ const toE164 = (raw = "") => {
  */
 export async function sendClientEmail({ actId, subject, html }) {
   try {
-    // Optional: look up the act and its linked user
-    const act = await Act.findById(actId).populate("userId", "email").lean();
+    const act = await Act.findById(actId).lean();
     const recipient =
-      act?.userId?.email ||
+      act?.contactEmail ||
       process.env.NOTIFY_EMAIL ||
       "hello@thesupremecollective.co.uk";
 
@@ -1534,7 +1533,7 @@ const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
 if (global.availabilityNotify?.badgeUpdated) {
   global.availabilityNotify.badgeUpdated({
     type: "availability_badge_updated",
-  actId: String(availability.actId || updated?.actId),
+actId: String(updated?.actId),
     actName: act?.tscName || act?.name,
     dateISO: updated.dateISO,
   });
@@ -2112,7 +2111,7 @@ try {
   if (global.availabilityNotify?.badgeUpdated) {
     global.availabilityNotify.badgeUpdated({
       type: "availability_badge_updated",
-  actId: String(availability.actId || updated?.actId),
+actId: String(updated?.actId),
       actName: act?.tscName || act?.name,
       dateISO: updated.dateISO,
     });
