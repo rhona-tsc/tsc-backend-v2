@@ -74,6 +74,48 @@ const toE164 = (raw = "") => {
   if (s.startsWith("44")) return `+${s}`;
   return s;
 };
+
+
+export async function sendAvailabilityRequest({
+  musician,
+  act,
+  lineupId,
+  dateISO,
+  formattedDate,
+  formattedAddress,
+  fee,
+  duties,
+}) {
+  console.log("📤 sendAvailabilityRequest START", { to: musician?.phone });
+
+  const phone = musician?.phone || musician?.phoneNumber;
+  if (!phone) throw new Error("Missing phone for musician");
+
+  const toE164 = (v = "") =>
+    v.startsWith("+") ? v : v.replace(/^0/, "+44").replace(/^44/, "+44");
+  const phoneNorm = toE164(phone);
+
+  const contentSid = process.env.TWILIO_ENQUIRY_SID;
+
+  return await sendWhatsAppMessage({
+    to: `whatsapp:${phoneNorm}`,
+    contentSid,
+    variables: {
+      1: firstNameOf(musician),
+      2: formattedDate,
+      3: formattedAddress,
+      4: String(fee || "TBC"),
+      5: duties || "performance",
+      6: act?.tscName || act?.name || "the band",
+    },
+    smsBody: `Hi ${firstNameOf(
+      musician
+    )}, you've received an enquiry for a gig on ${formattedDate} in ${formattedAddress} at a rate of £${fee} for ${duties} duties with ${
+      act.tscName
+    }. Please reply YES / NO.`,
+  });
+}
+
 /**
  * Send a client-facing email about act availability.
  * Falls back to hello@thesupremecollective.co.uk if no client email found.
@@ -310,30 +352,7 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone }) {
   console.log("✅ notifyDeputies() finished");
 }
 
-// Build the exact SMS text we want for both send-time and fallback - THIS IS THE SMS TO LEAD VOCALISTS TO CHECK AVAILABILITY! (not used for booking confirmations)
-function buildAvailabilitySMS({
-  firstName,
-  formattedDate,
-  formattedAddress,
-  fee,
-  duties,
-  actName,
-}) {
-  console.log(
-    `🟢 (availabilityController.js) buildAvailabilitySMS START at ${new Date().toISOString()}`,
-    {}
-  );
-  const feeTxt = String(fee ?? "").replace(/^[£$]/, "");
-  return (
-    `Hi ${safeFirst(firstName)}, you've received an enquiry for a gig on ` +
-    `${formattedDate || "the date discussed"} in ${
-      formattedAddress || "test 3 the area"
-    } ` +
-    `at a rate of £${feeTxt || "TBC"} for ${duties || "performance"} duties ` +
-    `with ${actName || "the band"}. Please indicate your availability 💫 ` +
-    `Reply YES / NO.`
-  );
-}
+
 
 // === Booking-request wave (uses the SAME fee logic as enquiries) ===
 
@@ -1038,38 +1057,24 @@ export const triggerAvailabilityRequest = async (req, res) => {
       fee: finalFee,
     });
 
-    // 5️⃣ Send WhatsApp
-    const smsBody = `Hi ${firstNameOf(
-      lead
-    )}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${String(
-      finalFee
-    )} for ${lead.instrument} duties with ${
-      act.tscName
-    }. Please reply YES / NO.`;
-    const contentSid = process.env.TWILIO_ENQUIRY_SID;
-
-    console.log("🚀 Sending WhatsApp to", phoneNorm);
-
-    try {
-      const sendRes = await sendWhatsAppMessage({
-        to: `whatsapp:${phoneNorm}`,
-        contentSid,
-        variables: {
-          1: firstNameOf(lead),
-          2: formattedDate,
-          3: shortAddress,
-          4: String(finalFee),
-          5: lead.instrument || "performance",
-          6: act.tscName || act.name || "the band",
-        },
-        smsBody,
-      });
-      console.log("✅ WhatsApp sent successfully:", sendRes);
-      return res.json({ success: true, sent: 1 });
-    } catch (err) {
-      console.warn("⚠️ WhatsApp send failed:", err.message);
-      return res.json({ success: false, message: err.message });
-    }
+    // 5️⃣ Send WhatsApp (shared helper)
+try {
+  const sendRes = await sendAvailabilityRequest({
+    musician: lead,
+    act,
+    lineupId: lineup?._id,
+    dateISO,
+    formattedDate,
+    formattedAddress: shortAddress,
+    fee: finalFee,
+    duties: lead.instrument || "Lead Vocal",
+  });
+  console.log("✅ WhatsApp sent successfully:", sendRes);
+  return res.json({ success: true, sent: 1 });
+} catch (err) {
+  console.warn("⚠️ WhatsApp send failed:", err.message);
+  return res.json({ success: false, message: err.message });
+}
   } catch (err) {
     console.error("❌ triggerAvailabilityRequest error:", err);
     return res
@@ -1215,10 +1220,16 @@ export async function notifyDeputyOneShot({
     console.log("📦 WhatsApp template params:", templateParams);
 
     console.log("📤 Sending WhatsApp to deputy…");
-    const sendRes = await sendWhatsAppMessage({
-      to: phoneWA,
-      templateParams,
-    });
+ await sendAvailabilityRequest({
+  musician: deputy,
+  act,
+  lineupId,
+  dateISO,
+  formattedDate,
+  formattedAddress,
+  fee: finalFee,
+  duties,
+});
 
     // persist outbound details for webhook lookup
     await AvailabilityModel.updateOne(
@@ -1530,13 +1541,14 @@ const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
           );
 
           // ✅ Broadcast that the *badge* changed (not that a deputy is available)
-if (global.availabilityNotify?.badgeUpdated) {
+if (global.availabilityNotify?.badgeUpdated && updated) {
   global.availabilityNotify.badgeUpdated({
     type: "availability_badge_updated",
-actId: String(updated?.actId),
+    actId: String(updated.actId),
     actName: act?.tscName || act?.name,
     dateISO: updated.dateISO,
   });
+}
   console.log("📡 SSE broadcasted: availability_badge_updated (lead unavailable)");
 
           }
@@ -2108,13 +2120,14 @@ export async function rebuildAndApplyAvailabilityBadge(
       );
       // ✅ Broadcast badge update via SSE after badge rebuild
 try {
-  if (global.availabilityNotify?.badgeUpdated) {
-    global.availabilityNotify.badgeUpdated({
-      type: "availability_badge_updated",
-actId: String(updated?.actId),
-      actName: act?.tscName || act?.name,
-      dateISO: updated.dateISO,
-    });
+if (global.availabilityNotify?.badgeUpdated && updated) {
+  global.availabilityNotify.badgeUpdated({
+    type: "availability_badge_updated",
+    actId: String(updated.actId),
+    actName: act?.tscName || act?.name,
+    dateISO: updated.dateISO,
+  });
+}
     console.log("📡 SSE broadcasted: availability_badge_updated");
   } else {
     console.warn("⚠️ global.availabilityNotify.badgeUpdated not available");
