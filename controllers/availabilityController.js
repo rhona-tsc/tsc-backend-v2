@@ -1713,13 +1713,30 @@ async function getDeputyDisplayBits(dep) {
 // -------------------- SSE Broadcaster --------------------
 
 export const makeAvailabilityBroadcaster = (broadcastFn) => ({
-  badgeUpdated: ({ actId, actName, dateISO, badge }) => {
+  leadYes: ({ actId, actName, musicianName, dateISO }) => {
     broadcastFn({
-      type: "badge_updated",
+      type: "availability_yes",
+      actId,
+      actName,
+      musicianName,
+      dateISO,
+    });
+  },
+  deputyYes: ({ actId, actName, musicianName, dateISO }) => {
+    broadcastFn({
+      type: "availability_deputy_yes",
+      actId,
+      actName,
+      musicianName,
+      dateISO,
+    });
+  },
+  badgeUpdated: ({ actId, actName, dateISO }) => {
+    broadcastFn({
+      type: "availability_badge_updated",
       actId,
       actName,
       dateISO,
-      badge,
     });
   },
 });
