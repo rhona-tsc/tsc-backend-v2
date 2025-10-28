@@ -2166,11 +2166,11 @@ export async function rebuildAndApplyAvailabilityBadge(
     if (!badge.isDeputy) {
       try {
         await sendClientEmail({
-          actId,
-          subject: `Good news — ${
-            act?.tscName || act?.name || "The band"
-          }'s lead vocalist is available`,
-   html = `
+  actId,
+  subject: `Good news — ${
+    act?.tscName || act?.name || "The band"
+  }'s lead vocalist is available`,
+  html: `
   <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
     <p>Hi ${clientFirstName || "there"},</p>
 
@@ -2319,8 +2319,8 @@ export async function rebuildAndApplyAvailabilityBadge(
       <a href="https://www.thesupremecollective.co.uk" style="color:#ff6667;">www.thesupremecollective.co.uk</a>
     </p>
   </div>
-`;
-        });
+`
+});
         console.log(
           "(availabilityController.js) 📧 Client email sent for lead YES."
         );
