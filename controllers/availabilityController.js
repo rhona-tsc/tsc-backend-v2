@@ -1370,7 +1370,7 @@ export const twilioInbound = async (req, res) => {
 
       const toE164 = normalizeToE164(updated.phone || fromRaw);
       const dateISOday = String((updated.dateISO || "").slice(0, 10));
-      if (!musician && act) {
+     if (!musician && act) {
   const vocalist = act.lineups
     ?.find(l => String(l._id) === String(updated.lineupId))
     ?.bandMembers?.find(m => /vocal/i.test(m.instrument || ""));
@@ -1381,7 +1381,7 @@ export const twilioInbound = async (req, res) => {
 }
 
 const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
-}
+
 
       /* -------------------------------------------------------------------------- */
       /* ✅ YES BRANCH                                                             */
@@ -1539,8 +1539,7 @@ if (global.availabilityNotify?.badgeUpdated) {
     dateISO: updated.dateISO,
   });
   console.log("📡 SSE broadcasted: availability_badge_updated (lead unavailable)");
-}
-            console.log("📡 SSE broadcasted: deputyYes");
+
           }
         } catch (err) {
           console.error("❌ Error handling UNAVAILABLE reply:", err);
