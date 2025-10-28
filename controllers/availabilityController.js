@@ -1453,15 +1453,17 @@ const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
             }
           );
 
-          if (global.availabilityNotify?.leadYes) {
-            global.availabilityNotify.leadYes({
-  actId: String(availability.actId || updated?.actId),
-              actName: act?.tscName || act?.name,
-              musicianName: musician?.firstName || "",
-              dateISO: updated.dateISO,
-            });
-            console.log("📡 SSE broadcasted: leadYes");
-          }
+        if (global.availabilityNotify?.leadYes && updated) {
+  global.availabilityNotify.leadYes({
+    actId: String(updated.actId),
+    actName: act?.tscName || act?.name,
+    musicianName: musician?.firstName || updated.musicianName || "",
+    dateISO: updated.dateISO,
+  });
+  console.log("📡 SSE broadcasted: leadYes");
+} else {
+  console.warn("⚠️ global.availabilityNotify.leadYes not available");
+}
         } catch (err) {
           console.error("❌ Error handling YES reply:", err);
         }
@@ -2065,7 +2067,7 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
             isDeputy: true,
             inPromo: false,
             deputies: enriched,
-            vocalistName: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
+            vocalistName: `${m.firstName || ""}`.trim(),
             address: formattedAddress,
             setAt: new Date(),
           };
@@ -2079,6 +2081,12 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
   console.log("🪶 No badge candidates found — returning null.");
   return null;
 }
+
+const lineupQuotes = actData.lineups.map(l => ({
+  name: `${l.size}-piece (${l.description})`,
+  price: l.base_fee?.[0]?.total_fee_with_margin || l.base_fee?.[0]?.total_fee,
+  description: l.bandMembers.map(b => b.instrument).join(", "),
+}));
 
 export async function rebuildAndApplyAvailabilityBadge(
   reqOrActId,
@@ -2161,10 +2169,157 @@ export async function rebuildAndApplyAvailabilityBadge(
           actId,
           subject: `Good news — ${
             act?.tscName || act?.name || "The band"
-          } lead vocalist is available`,
-          html: `<p>${
-            badge.vocalistName || "Lead vocalist"
-          } is free for ${dateISO}.</p>`,
+          }'s lead vocalist is available`,
+   html = `
+  <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
+    <p>Hi ${clientFirstName || "there"},</p>
+
+    <p>Thank you for shortlisting <strong>${actData?.tscName || actData?.name}</strong>!</p>
+
+    <p>
+      We’re delighted to confirm that <strong>${actData?.tscName || actData?.name}</strong> is available with 
+      <strong>${badge?.vocalistName || "their lead vocalist"}</strong>, and they’d love to perform for you and your guests at your event.
+    </p>
+
+    ${
+      actData?.images?.[0]
+        ? `<img src="${actData.images[0]}" alt="${actData.tscName} band photo" style="width:100%; border-radius:8px; margin:20px 0;" />`
+        : ""
+    }
+
+    <h3 style="color:#111;">🎵 ${actData?.tscName || actData?.name}</h3>
+    <p>
+      <a href="https://www.thesupremecollective.co.uk/act/${actData?._id}" 
+         style="color:#ff6667; text-decoration:none; font-weight:bold;">
+         View Profile →
+      </a>
+    </p>
+
+    ${
+      actData?.videos?.length
+        ? `
+        <h4 style="margin-top:20px;">Watch Videos:</h4>
+        <ul>
+          ${actData.videos
+            .slice(0, 4)
+            .map(
+              (v) => `
+              <li>
+                <a href="${v.url}" style="color:#ff6667;">${v.title || "Video"}</a>
+              </li>`
+            )
+            .join("")}
+        </ul>`
+        : ""
+    }
+
+    ${
+      lineupQuotes && lineupQuotes.length
+        ? `
+        <h4 style="margin-top:30px;">Quotes for ${selectedAddress || "your location"}:</h4>
+        <ul>
+          ${lineupQuotes
+            .map(
+              (l) =>
+                `<li>${l.name}: £${l.price} — <em>${l.description}</em></li>`
+            )
+            .join("")}
+        </ul>`
+        : ""
+    }
+
+    <h4 style="margin-top:25px;">Included in your quote:</h4>
+    <ul>
+      <li>
+        Up to ${actData?.numberOfSets?.[0]}×${actData?.lengthOfSets?.[0]}-minute
+        or ${actData?.numberOfSets?.[1]}×${actData?.lengthOfSets?.[1]}-minute live sets
+      </li>
+      ${
+        actData?.paSystem
+          ? `<li>A ${paMap[actData.paSystem]} PA system${
+              actData?.lightingSystem
+                ? ` and a ${lightMap[actData.lightingSystem]} lighting setup`
+                : ""
+            }</li>`
+          : ""
+      }
+      <li>The band on site for up to 7 hours or until midnight</li>
+      ${
+        Object.entries(actData.extras || {})
+          .filter(([_, v]) => v?.complimentary)
+          .map(
+            ([key]) =>
+              `<li>${key
+                .replace(/_/g, " ")
+                .replace(/^\w/, (c) => c.toUpperCase())}</li>`
+          )
+          .join("")
+      }
+      ${
+        actData.offRepertoireRequests > 0
+          ? `<li>${
+              actData.offRepertoireRequests === 1
+                ? "One"
+                : actData.offRepertoireRequests
+            } additional ‘off-repertoire’ song ${
+              actData.offRepertoireRequests === 1 ? "request" : "requests"
+            } (e.g. first dance or favourites)</li>`
+          : ""
+      }
+      ${
+        actData.setlist === "smallTailoring"
+          ? `<li>A signature setlist curated by the band — guaranteed crowd-pleasers</li>`
+          : actData.setlist === "mediumTailoring"
+          ? `<li>A collaborative setlist blending your top picks with our favourites</li>`
+          : actData.setlist === "largeTailoring"
+          ? `<li>A fully tailored setlist made almost entirely of your requests</li>`
+          : ""
+      }
+      ${
+        finalTravelPrice && selectedAddress
+          ? `<li>Travel to ${selectedAddress}</li>`
+          : ""
+      }
+    </ul>
+
+    <h4 style="margin-top:30px;">A bit about the band</h4>
+    <p>
+      ${actData?.tscName || "The band"} are a friendly, flexible, and professional group 
+      known for creating unforgettable party atmospheres. They’re part of 
+      <strong>The Supreme Collective</strong> — a hand-picked roster of the UK’s top live musicians.
+      So you can book with total peace of mind knowing they’ll deliver a world-class performance every time.
+    </p>
+
+    <p>
+      Their repertoire spans genres and decades, giving you plenty of songs to request and customise your night’s soundtrack.
+    </p>
+
+    <p style="margin-top:20px;">
+      If you’d like to go ahead, simply 
+      <a href="https://www.thesupremecollective.co.uk/cart?actId=${actData?._id}&date=${dateISO}&address=${encodeURIComponent(
+  selectedAddress || ""
+)}" 
+         style="background-color:#ff6667; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold;">
+         Add to Cart →
+      </a>
+      to secure ${actData?.tscName || actData?.name} for your event.
+    </p>
+
+    <p style="color:#555;">
+      Please note that we operate on a first-booked-first-served basis — so we recommend securing your band quickly to avoid disappointment.
+    </p>
+
+    <p>
+      If you have any questions, please don’t hesitate to reply — we’re always happy to help.
+    </p>
+
+    <p style="margin-top:25px;">
+      Warmest wishes,<br/>
+      <strong>The Supreme Collective ✨</strong><br/>
+      <a href="https://www.thesupremecollective.co.uk" style="color:#ff6667;">www.thesupremecollective.co.uk</a>
+    </p>
+  </div>
+`;
         });
         console.log(
           "(availabilityController.js) 📧 Client email sent for lead YES."
