@@ -241,7 +241,7 @@ export async function createCalendarInvite({
         calendarId,
         eventId,
         requestBody: patchBody,
-        sendUpdates: "all",
+        sendUpdates: "all", // ✅ ensures Google sends an updated invite
       })
     );
     return { event: patch.data, created: false };
@@ -252,14 +252,15 @@ export async function createCalendarInvite({
     }
   }
 
+  // ✅ Insert new event (with attendee invite)
   const insertBody = {
     id: eventId,
     summary,
     description: [description, detailsLine].filter(Boolean).join("\n"),
     start: { dateTime: start, timeZone: "Europe/London" },
     end: { dateTime: end, timeZone: "Europe/London" },
-attendees: [{ email }],
-sendUpdates: "all",
+    attendees: [{ email: email.toLowerCase() }],
+    sendUpdates: "all", // ✅ sends the invitation
     extendedProperties: { private: privateProps },
     guestsCanModify: false,
     guestsCanInviteOthers: false,
@@ -271,7 +272,7 @@ sendUpdates: "all",
     const ins = await withBackoff(() =>
       cal.events.insert({ calendarId, requestBody: insertBody, sendUpdates: "all" })
     );
-    console.log(`✅ Event created for ${email}:`, ins.data.htmlLink);
+    console.log(`✅ Event created and invite sent to ${email}:`, ins.data.htmlLink);
     return { event: ins.data, created: true };
   } catch (e) {
     console.error("❌ (controllers/googleController.js) createCalendarInvite insert failed:", e.message);
