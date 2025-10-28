@@ -2092,11 +2092,27 @@ export async function rebuildAndApplyAvailabilityBadge(
     `🟢 (availabilityController.js) rebuildAndApplyAvailabilityBadge START at ${new Date().toISOString()}`
   );
 
-  const lineupQuotes = act.lineups?.map(l => ({
-  name: `${l.size}-piece (${l.description || ""})`,
-  price: l.base_fee?.[0]?.total_fee_with_margin || l.base_fee?.[0]?.total_fee || 0,
-  description: l.bandMembers?.map(b => b.instrument).join(", "),
-})) || [];
+const lineupQuotes =
+  act?.lineups?.map((l) => ({
+    name: `${l.size}-piece (${l.description || ""})`,
+    price:
+      l.base_fee?.[0]?.total_fee_with_margin ||
+      l.base_fee?.[0]?.total_fee ||
+      0,
+    description: l.bandMembers?.map((b) => b.instrument).join(", "),
+  })) || [];
+
+const paMap = {
+  smallPa: "small",
+  mediumPa: "medium",
+  largePa: "large",
+};
+
+const lightMap = {
+  smallLight: "small",
+  mediumLight: "medium",
+  largeLight: "large",
+};
 
   try {
     const actId =
