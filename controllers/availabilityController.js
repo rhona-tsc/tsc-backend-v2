@@ -1532,7 +1532,7 @@ const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
             });
           }
 
-          await rebuildAndApplyAvailabilityBadge(
+                  await rebuildAndApplyAvailabilityBadge(
             { body: { actId: String(updated.actId), dateISO: updated.dateISO } },
             {
               json: () => {},
@@ -1541,17 +1541,16 @@ const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
           );
 
           // ✅ Broadcast that the *badge* changed (not that a deputy is available)
-if (global.availabilityNotify?.badgeUpdated && updated) {
-  global.availabilityNotify.badgeUpdated({
-    type: "availability_badge_updated",
-    actId: String(updated.actId),
-    actName: act?.tscName || act?.name,
-    dateISO: updated.dateISO,
-  });
-}
-  console.log("📡 SSE broadcasted: availability_badge_updated (lead unavailable)");
-
+          if (global.availabilityNotify?.badgeUpdated && updated) {
+            global.availabilityNotify.badgeUpdated({
+              type: "availability_badge_updated",
+              actId: String(updated.actId),
+              actName: act?.tscName || act?.name,
+              dateISO: updated.dateISO,
+            });
           }
+
+          console.log("📡 SSE broadcasted: availability_badge_updated (lead unavailable)");
         } catch (err) {
           console.error("❌ Error handling UNAVAILABLE reply:", err);
         }
