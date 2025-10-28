@@ -246,33 +246,51 @@ const getPictureUrlFrom = (obj = {}) => {
 export async function notifyDeputies({ act, lineupId, dateISO, excludePhone }) {
   console.log("📢 notifyDeputies() START", { act: act?.name, lineupId });
 
-  // Get deputies from act’s lineups
+  // 🧩 Find the matching lineup
   const lineup = act?.lineups?.find(l => String(l._id) === String(lineupId));
   if (!lineup) {
     console.warn("⚠️ No lineup found for notifyDeputies()");
     return;
   }
 
-  const deputies = lineup.bandMembers?.filter(m =>
+  // 🧩 Gather vocalists (who have deputies)
+  const vocalists = lineup.bandMembers?.filter(m =>
     ["lead vocal", "lead female vocal", "male vocal", "vocalist-guitarist"].some(v =>
       (m.instrument || "").toLowerCase().includes(v)
     )
   ) || [];
-console.log("👥 Raw deputies in lineup:", JSON.stringify(lineup.bandMembers.map(b => ({
-  name: b.firstName || b.fullName,
-  deputies: b.deputies?.map(d => ({
-    name: `${d.firstName} ${d.lastName}`,
-    phone: d.phoneNumber || d.phone,
-  })),
-})), null, 2));
-  const filtered = deputies.filter(d => d.phone && d.phone !== excludePhone);
 
-  if (filtered.length === 0) {
+  console.log("👥 Raw deputies in lineup:", JSON.stringify(
+    lineup.bandMembers.map(b => ({
+      name: b.firstName || b.fullName,
+      deputies: b.deputies?.map(d => ({
+        name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
+        phone: d.phoneNumber || d.phone,
+      })),
+    })), null, 2)
+  );
+
+  // 🧩 Flatten all deputies
+  const validDeputies = [];
+  for (const vocalist of vocalists) {
+    for (const dep of vocalist.deputies || []) {
+      const rawPhone = dep.phoneNumber || dep.phone;
+      if (!rawPhone) continue;
+      const cleaned = rawPhone.replace(/\s+/g, "");
+      console.log("☎️ Cleaned deputy phone:", cleaned);
+      if (/^\+?\d{10,15}$/.test(cleaned) && cleaned !== excludePhone) {
+        validDeputies.push({ ...dep, phone: cleaned });
+      }
+    }
+  }
+
+  if (validDeputies.length === 0) {
     console.log("ℹ️ No deputies with valid phone numbers to notify");
     return;
   }
 
-  for (const deputy of filtered) {
+  // 🟢 Notify each deputy
+  for (const deputy of validDeputies) {
     await notifyDeputyOneShot({
       act,
       lineupId,
@@ -1352,7 +1370,18 @@ export const twilioInbound = async (req, res) => {
 
       const toE164 = normalizeToE164(updated.phone || fromRaw);
       const dateISOday = String((updated.dateISO || "").slice(0, 10));
-      const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
+      if (!musician && act) {
+  const vocalist = act.lineups
+    ?.find(l => String(l._id) === String(updated.lineupId))
+    ?.bandMembers?.find(m => /vocal/i.test(m.instrument || ""));
+  if (vocalist?.email) {
+    musician = vocalist;
+    console.log("📧 Fallback vocalist email used:", vocalist.email);
+  }
+}
+
+const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
+}
 
       /* -------------------------------------------------------------------------- */
       /* ✅ YES BRANCH                                                             */
@@ -1416,7 +1445,7 @@ export const twilioInbound = async (req, res) => {
 
           if (global.availabilityNotify?.leadYes) {
             global.availabilityNotify.leadYes({
-              actId: String(updated.actId),
+  actId: String(availability.actId || updated?.actId),
               actName: act?.tscName || act?.name,
               musicianName: musician?.firstName || "",
               dateISO: updated.dateISO,
@@ -1501,13 +1530,16 @@ export const twilioInbound = async (req, res) => {
             }
           );
 
-          if (global.availabilityNotify?.deputyYes) {
-            global.availabilityNotify.deputyYes({
-              actId: String(updated.actId),
-              actName: act?.tscName || act?.name,
-              musicianName: musician?.firstName || "",
-              dateISO: updated.dateISO,
-            });
+          // ✅ Broadcast that the *badge* changed (not that a deputy is available)
+if (global.availabilityNotify?.badgeUpdated) {
+  global.availabilityNotify.badgeUpdated({
+    type: "availability_badge_updated",
+  actId: String(availability.actId || updated?.actId),
+    actName: act?.tscName || act?.name,
+    dateISO: updated.dateISO,
+  });
+  console.log("📡 SSE broadcasted: availability_badge_updated (lead unavailable)");
+}
             console.log("📡 SSE broadcasted: deputyYes");
           }
         } catch (err) {
@@ -2081,7 +2113,7 @@ try {
   if (global.availabilityNotify?.badgeUpdated) {
     global.availabilityNotify.badgeUpdated({
       type: "availability_badge_updated",
-      actId: String(updated.actId),
+  actId: String(availability.actId || updated?.actId),
       actName: act?.tscName || act?.name,
       dateISO: updated.dateISO,
     });
