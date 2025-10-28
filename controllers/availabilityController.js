@@ -95,6 +95,32 @@ export async function sendAvailabilityRequest({
     v.startsWith("+") ? v : v.replace(/^0/, "+44").replace(/^44/, "+44");
   const phoneNorm = toE164(phone);
 
+  // ✅ Format date more naturally
+  const formattedDateNice = new Date(dateISO).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }); // e.g. Monday, 22 Mar 2027
+
+  // ✅ Extract postcode or fallback
+  const addressShort =
+    formattedAddress?.match(/([A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2})$/)?.[0] ||
+    formattedAddress ||
+    "TBC";
+
+  // ✅ Format fee safely
+  const feeDisplay =
+    fee && !isNaN(fee) ? `£${Number(fee).toFixed(0)}` : "£TBC";
+
+  // ✅ Format duties (capitalise, etc.)
+  const dutiesClean =
+    duties?.replace(/\bVocal\b/, "Female Vocal") ||
+    duties ||
+    "performance";
+
+  const actName = act?.tscName || act?.name || "the band";
+
   const contentSid = process.env.TWILIO_ENQUIRY_SID;
 
   return await sendWhatsAppMessage({
@@ -102,19 +128,17 @@ export async function sendAvailabilityRequest({
     contentSid,
     variables: {
       1: firstNameOf(musician),
-      2: formattedDate,
-      3: formattedAddress,
-      4: String(fee || "TBC"),
-      5: duties || "performance",
-      6: act?.tscName || act?.name || "the band",
+      2: formattedDateNice,
+      3: formattedAddress || "TBC",
+      4: feeDisplay,
+      5: dutiesClean,
+      6: actName,
     },
     smsBody: `Hi ${firstNameOf(
       musician
-    )}, you've received an enquiry for a gig on ${formattedDate} in ${formattedAddress} at a rate of £${fee} for ${duties} duties with ${
-      act.tscName
-    }. Please reply YES / NO.`,
+    )}, you've received an enquiry for a gig on ${formattedDateNice} in ${addressShort} at a rate of ${feeDisplay} for ${dutiesClean} duties with ${actName}. Please indicate your availability 💫`,
   });
-}
+} 
 
 /**
  * Send a client-facing email about act availability.
@@ -1206,17 +1230,31 @@ export async function notifyDeputyOneShot({
     );
 
     // WhatsApp template params
-    const templateParams = {
-      FirstName: firstNameOf(deputy),
-      FormattedDate: formattedDate,
-      FormattedAddress: formattedAddress,
-      Fee: String(finalFee),
-      Duties: duties,
-      ActName: act?.tscName || act?.name || "the band",
-      MetaActId: String(metaActId || act?._id || ""),
-      MetaISODate: dateISO,
-      MetaAddress: formattedAddress,
-    };
+const formattedDateNice = new Date(dateISO).toLocaleDateString("en-GB", {
+  weekday: "long",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+}); // e.g. "Monday, 22 Mar 2027"
+
+const addressShort =
+  formattedAddress?.match(/([A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2})$/)?.[0] ||
+  formattedAddress ||
+  "TBC";
+
+const dutiesFormatted = duties?.replace("Lead Vocal", "Lead Female Vocal") || duties;
+
+const templateParams = {
+  FirstName: firstNameOf(deputy),
+  FormattedDate: formattedDateNice,
+  FormattedAddress: formattedAddress || "TBC",
+  Fee: finalFee ? `£${finalFee}` : "£TBC",
+  Duties: dutiesFormatted,
+  ActName: act?.tscName || act?.name || "the band",
+  MetaActId: String(metaActId || act?._id || ""),
+  MetaISODate: dateISO,
+  MetaAddress: addressShort,
+};
     console.log("📦 WhatsApp template params:", templateParams);
 
     console.log("📤 Sending WhatsApp to deputy…");
