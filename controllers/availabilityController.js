@@ -184,7 +184,7 @@ const formattedDateNice = `${weekday}, ${day}${suffix} ${month} ${year}`;
 
   // ✅ Format fee safely
 const feeDisplay =
-  Number.isFinite(fee) && fee > 0 ? `£${Math.round(fee)}` : "£TBC";
+  Number.isFinite(fee) && fee > 0 ? `${Math.round(fee)}` : "TBC";
 
   // ✅ Format duties (capitalise, etc.)
   const dutiesClean =
