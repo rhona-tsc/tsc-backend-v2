@@ -1574,6 +1574,38 @@ const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
       /* 🚫 NO / UNAVAILABLE / NOLOC BRANCH                                       */
       /* -------------------------------------------------------------------------- */
       if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
+        // 🗑️ If lead vocalist becomes unavailable, clear their badge
+// 🗑️ If lead vocalist becomes unavailable, clear their badge from the Act document
+try {
+  const actDoc = await Act.findById(updated.actId);
+  if (actDoc?.availabilityBadges) {
+    const dateKey = updated.dateISO.slice(0, 10);
+    if (actDoc.availabilityBadges.has(dateKey)) {
+      actDoc.availabilityBadges.delete(dateKey);
+      await actDoc.save();
+      console.log("🗑️ Cleared availability badge from Act:", {
+        actId: updated.actId,
+        dateISO: dateKey,
+      });
+    } else {
+      console.log("ℹ️ No badge to clear for this date:", dateKey);
+    }
+  }
+
+  // 🛰️ Broadcast badge clear event via SSE
+  if (global.availabilityNotify?.badgeUpdated) {
+    global.availabilityNotify.badgeUpdated({
+      type: "availability_badge_updated",
+      actId: String(updated.actId),
+      actName: act?.tscName || act?.name,
+      dateISO: updated.dateISO,
+      badge: null, // important for frontend clearing
+    });
+  }
+} catch (err) {
+  console.warn("⚠️ Failed to clear availability badge:", err.message);
+}
+
         try {
           console.log("🚫 UNAVAILABLE reply received via WhatsApp");
 
