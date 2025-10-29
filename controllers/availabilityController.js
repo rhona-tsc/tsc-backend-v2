@@ -96,12 +96,24 @@ export async function sendAvailabilityRequest({
   const phoneNorm = toE164(phone);
 
   // ✅ Format date more naturally
-  const formattedDateNice = new Date(dateISO).toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }); // e.g. Monday, 22 Mar 2027
+const dateObj = new Date(dateISO);
+
+const day = dateObj.getDate();
+const suffix =
+  day % 10 === 1 && day !== 11
+    ? "st"
+    : day % 10 === 2 && day !== 12
+    ? "nd"
+    : day % 10 === 3 && day !== 13
+    ? "rd"
+    : "th";
+
+const weekday = dateObj.toLocaleString("en-GB", { weekday: "long" }); // e.g. Tuesday
+const month = dateObj.toLocaleString("en-GB", { month: "long" }); // e.g. March
+const year = dateObj.getFullYear();
+
+const formattedDateNice = `${weekday}, ${day}${suffix} ${month} ${year}`;
+// → "Tuesday, 22nd March 2027"
 
   // ✅ Extract postcode or fallback
   const addressShort =
@@ -111,7 +123,7 @@ export async function sendAvailabilityRequest({
 
   // ✅ Format fee safely
   const feeDisplay =
-    fee && !isNaN(fee) ? `£${Number(fee).toFixed(0)}` : "£TBC";
+    fee && !isNaN(fee) ? `${Number(fee).toFixed(0)}` : "£TBC";
 
   // ✅ Format duties (capitalise, etc.)
   const dutiesClean =
