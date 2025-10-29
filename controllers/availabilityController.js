@@ -1644,14 +1644,15 @@ const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
           );
 
           // ✅ Broadcast that the *badge* changed (not that a deputy is available)
-          if (global.availabilityNotify?.badgeUpdated && updated) {
-            global.availabilityNotify.badgeUpdated({
-              type: "availability_badge_updated",
-              actId: String(updated.actId),
-              actName: act?.tscName || act?.name,
-              dateISO: updated.dateISO,
-            });
-          }
+         if (global.availabilityNotify?.badgeUpdated && updated) {
+  global.availabilityNotify.badgeUpdated({
+    type: "availability_badge_updated",
+    actId: String(updated.actId),
+    actName: act?.tscName || act?.name,
+    dateISO: updated.dateISO,
+    badge: updated.badge || null, // 👈 include badge or explicit null
+  });
+}
 
           console.log("📡 SSE broadcasted: availability_badge_updated (lead unavailable)");
         } catch (err) {
@@ -1875,14 +1876,15 @@ export const makeAvailabilityBroadcaster = (broadcastFn) => ({
       dateISO,
     });
   },
-  badgeUpdated: ({ actId, actName, dateISO }) => {
-    broadcastFn({
-      type: "availability_badge_updated",
-      actId,
-      actName,
-      dateISO,
-    });
-  },
+  badgeUpdated: ({ actId, actName, dateISO, badge = null }) => {
+  broadcastFn({
+    type: "availability_badge_updated",
+    actId,
+    actName,
+    dateISO,
+    badge, // 👈 now explicitly includes badge or null
+  });
+},
 });
 
 // one-shot WA→SMS for a single deputy
@@ -2253,6 +2255,7 @@ const lightMap = {
         actId: String(actId),
         actName: act?.tscName || act?.name,
         dateISO,
+        badge: null, // 👈 explicit null since badge was cleared
       });
       console.log("📡 SSE broadcasted: availability_badge_updated");
     } else {
