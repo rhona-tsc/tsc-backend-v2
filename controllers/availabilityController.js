@@ -1172,171 +1172,112 @@ export async function notifyDeputyOneShot({
   metaActId,
 }) {
   console.log(`🟢 (availabilityController.js) notifyDeputyOneShot START`);
-  // local helpers
-  const maskPhone = (p = "") =>
-    String(p)
-      .replace(/^\+?(\d{2})\d+(?=\d{3}$)/, "+$1•••")
-      .replace(/(\d{2})$/, "••$1");
+
+  // 🛡️ Prevent duplicate notifications per deputy
+  if (globalThis._notifiedOnce?.has?.(deputy?.phone)) {
+    console.log(`⚠️ Skipping duplicate notify to ${deputy?.phone}`);
+    return;
+  }
+  globalThis._notifiedOnce = globalThis._notifiedOnce || new Set();
+  globalThis._notifiedOnce.add(deputy?.phone);
+
+  // Local helpers
   const toE164 = (raw = "") => {
-    let s = String(raw || "")
-      .replace(/^whatsapp:/i, "")
-      .replace(/\s+/g, "");
+    let s = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
     if (!s) return "";
     if (s.startsWith("+")) return s;
     if (s.startsWith("07")) return s.replace(/^0/, "+44");
     if (s.startsWith("44")) return `+${s}`;
     return s;
   };
-  const toWA = (raw = "") => {
-    const e164 = toE164(raw);
-    return e164 ? `whatsapp:${e164}` : "";
-  };
 
   try {
-    // phones
     const phoneRaw = deputy?.phoneNumber || deputy?.phone || "";
-    const phoneE164 = toE164(phoneRaw); // +44…
-    const phoneWA = toWA(phoneRaw); // whatsapp:+44…
-    if (!phoneE164) {
-      console.warn("❌ notifyDeputyOneShot(): Deputy has no usable phone");
-      throw new Error("Deputy has no phone");
-    }
+    const phoneE164 = toE164(phoneRaw);
+    if (!phoneE164) throw new Error("Deputy has no phone");
 
-    // enquiry id
     const enquiryId = String(Date.now());
 
-    // ensure an Availability stub exists (and capture identity fields)
-    const availabilityDoc = await AvailabilityModel.findOneAndUpdate(
-      { enquiryId },
-      {
-        $setOnInsert: {
-          enquiryId,
-          actId: act?._id || null,
-          lineupId: lineupId || null,
-          musicianId: deputy?.musicianId || deputy?._id || null,
-          phone: phoneE164,
-          duties,
-          formattedDate,
-          formattedAddress,
-          fee: String(finalFee || ""),
-          reply: null,
-          inbound: {},
-          dateISO,
-          calendarInviteEmail: deputy?.email || null,
-          createdAt: new Date(),
-          actName: act?.tscName || act?.name || "",
-          contactName: firstNameOf(deputy),
-          musicianName: `${deputy?.firstName || ""} ${
-            deputy?.lastName || ""
-          }`.trim(),
-        },
-        $set: { updatedAt: new Date() },
-      },
-      { upsert: true, new: true }
-    );
+    const safeAddress = formattedAddress || "TBC";
+    const safeFee =
+      finalFee && !isNaN(finalFee)
+        ? `£${Number(finalFee).toFixed(0)}`
+        : typeof finalFee === "string" && finalFee.startsWith("£")
+        ? finalFee
+        : "£TBC";
 
-  // ✅ Format date more naturally
-const dateObj = new Date(dateISO);
+    // 🗓️ Human-friendly date
+    const dateObj = new Date(dateISO);
+    const day = dateObj.getDate();
+    const suffix =
+      day % 10 === 1 && day !== 11
+        ? "st"
+        : day % 10 === 2 && day !== 12
+        ? "nd"
+        : day % 10 === 3 && day !== 13
+        ? "rd"
+        : "th";
+    const weekday = dateObj.toLocaleString("en-GB", { weekday: "long" });
+    const month = dateObj.toLocaleString("en-GB", { month: "long" });
+    const year = dateObj.getFullYear();
+    const formattedDateNice = `${weekday}, ${day}${suffix} ${month} ${year}`;
 
-const day = dateObj.getDate();
-const suffix =
-  day % 10 === 1 && day !== 11
-    ? "st"
-    : day % 10 === 2 && day !== 12
-    ? "nd"
-    : day % 10 === 3 && day !== 13
-    ? "rd"
-    : "th";
+    const addressShort =
+      safeAddress.match(/([A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2})$/)?.[0] ||
+      safeAddress ||
+      "TBC";
 
-const weekday = dateObj.toLocaleString("en-GB", { weekday: "long" }); // e.g. Tuesday
-const month = dateObj.toLocaleString("en-GB", { month: "long" }); // e.g. March
-const year = dateObj.getFullYear();
+    const dutiesFormatted =
+      duties?.replace("Lead Vocal", "Lead Female Vocal") || duties;
 
-const formattedDateNice = `${weekday}, ${day}${suffix} ${month} ${year}`;
-// → "Tuesday, 22nd March 2027"
+    const templateParams = {
+      FirstName: firstNameOf(deputy),
+      FormattedDate: formattedDateNice,
+      FormattedAddress: safeAddress,
+      Fee: safeFee,
+      Duties: dutiesFormatted,
+      ActName: act?.tscName || act?.name || "the band",
+      MetaActId: String(metaActId || act?._id || ""),
+      MetaISODate: dateISO,
+      MetaAddress: addressShort,
+    };
 
-const addressShort =
-  formattedAddress?.match(/([A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2})$/)?.[0] ||
-  formattedAddress ||
-  "TBC";
-
-const dutiesFormatted = duties?.replace("Lead Vocal", "Lead Female Vocal") || duties;
-
-const templateParams = {
-  FirstName: firstNameOf(deputy),
-  FormattedDate: formattedDateNice,
-  FormattedAddress: formattedAddress || "TBC",
-  Fee: finalFee ? `${finalFee}` : "TBC",
-  Duties: dutiesFormatted,
-  ActName: act?.tscName || act?.name || "the band",
-  MetaActId: String(metaActId || act?._id || ""),
-  MetaISODate: dateISO,
-  MetaAddress: addressShort,
-};
     console.log("📦 WhatsApp template params:", templateParams);
 
-    console.log("📤 Sending WhatsApp to deputy…");
- await sendAvailabilityRequest({
-  musician: deputy,
-  act,
-  lineupId,
-  dateISO,
-  formattedDate,
-  formattedAddress,
-  fee: finalFee,
-  duties,
-});
+    // 📨 Send the actual WhatsApp message
+    const sendRes = await sendAvailabilityRequest({
+      musician: deputy,
+      act,
+      lineupId,
+      dateISO,
+      formattedDate,
+      formattedAddress: safeAddress,
+      fee: finalFee,
+      duties,
+    });
 
-const sendRes = await sendAvailabilityRequest({
-  musician: deputy,
-  act,
-  lineupId,
-  dateISO,
-  formattedDate,
-  formattedAddress,
-  fee: finalFee,
-  duties,
-});
-
-    // persist outbound details for webhook lookup
+    // ✅ Persist outbound info
     await AvailabilityModel.updateOne(
-      { _id: availabilityDoc._id },
+      { enquiryId },
       {
         $set: {
+          actId: act?._id || null,
+          lineupId,
+          phone: phoneE164,
           status: sendRes?.status || "queued",
           messageSidOut: sendRes?.sid || null,
           contactChannel: sendRes?.channel || "whatsapp",
           updatedAt: new Date(),
           "outbound.sid": sendRes?.sid || null,
         },
-      }
-    );
-
-    // record a row in EnquiryMessage (handy for analytics / auditing)
-    const first = firstNameOf(deputy);
-    const enquiry = await EnquiryMessage.create({
-      enquiryId,
-      actId: act?._id || null,
-      lineupId: lineupId || null,
-      musicianId: deputy?._id || deputy?.musicianId || null,
-      phone: phoneE164,
-      duties,
-      fee: String(finalFee),
-      formattedDate,
-      formattedAddress,
-      messageSid: sendRes?.sid || null,
-      status: mapTwilioToEnquiryStatus(sendRes?.status),
-      meta: {
-        firstName: first,
-        actName: act?.tscName || act?.name || "the band",
       },
-      templateParams,
-    });
+      { upsert: true }
+    );
 
     console.log("✅ Deputy pinged");
     return { phone: phoneE164, enquiryId };
   } catch (err) {
-    console.error("⚠️ Failed to notify deputy", err?.message || err);
+    console.error("⚠️ Failed to notify deputy:", err?.message || err);
     throw err;
   }
 }
