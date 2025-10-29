@@ -183,8 +183,8 @@ const formattedDateNice = `${weekday}, ${day}${suffix} ${month} ${year}`;
     "TBC";
 
   // ✅ Format fee safely
-  const feeDisplay =
-    fee && !isNaN(fee) ? `${Number(fee).toFixed(0)}` : "£TBC";
+const feeDisplay =
+  Number.isFinite(fee) && fee > 0 ? `£${Math.round(fee)}` : "£TBC";
 
   // ✅ Format duties (capitalise, etc.)
   const dutiesClean =
@@ -1339,17 +1339,16 @@ export async function notifyDeputyOneShot({
       shortAddress,
     });
 
-    // 📨 Send WhatsApp
-    const sendRes = await sendAvailabilityRequest({
-      musician: deputy,
-      act,
-      lineupId,
-      dateISO,
-      formattedDate: formattedDateNice,
-      formattedAddress: shortAddress,
-      fee: finalFee,
-      duties: dutiesFormatted,
-    });
+ // 📨 Send WhatsApp — reuse full address and computed fee
+const sendRes = await sendAvailabilityRequest({
+  musician: deputy,
+  act,
+  lineupId,
+  dateISO,
+  formattedAddress, // ✅ use the full address from the parent (not the short one)
+  fee: finalFee,    // ✅ already computed via computeFinalFeeForMember
+  duties: dutiesFormatted,
+});
 
     // 🧾 Update record with outbound info
     await AvailabilityModel.updateOne(
