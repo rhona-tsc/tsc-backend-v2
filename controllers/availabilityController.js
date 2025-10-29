@@ -442,10 +442,7 @@ async function _finalFeeForMember({
 }
 
 const isVocalRoleGlobal = (role = "") => {
-  console.log(
-    `🟢 (availabilityController.js) isVocalRoleGlobal START at ${new Date().toISOString()}`,
-    {}
-  );
+
   const r = String(role || "").toLowerCase();
   return [
     "lead male vocal",
@@ -464,10 +461,7 @@ const isVocalRoleGlobal = (role = "") => {
 // --- New helpers for badge rebuilding ---
 
 const normalizePhoneE164 = (raw = "") => {
-  console.log(
-    `🟢 (availabilityController.js) normalisePhoneE164 START at ${new Date().toISOString()}`,
-    {}
-  );
+
   let v = String(raw || "")
     .replace(/^whatsapp:/i, "")
     .replace(/\s+/g, "");
@@ -1241,13 +1235,25 @@ export async function notifyDeputyOneShot({
       { upsert: true, new: true }
     );
 
-    // WhatsApp template params
-const formattedDateNice = new Date(dateISO).toLocaleDateString("en-GB", {
-  weekday: "long",
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-}); // e.g. "Monday, 22 Mar 2027"
+  // ✅ Format date more naturally
+const dateObj = new Date(dateISO);
+
+const day = dateObj.getDate();
+const suffix =
+  day % 10 === 1 && day !== 11
+    ? "st"
+    : day % 10 === 2 && day !== 12
+    ? "nd"
+    : day % 10 === 3 && day !== 13
+    ? "rd"
+    : "th";
+
+const weekday = dateObj.toLocaleString("en-GB", { weekday: "long" }); // e.g. Tuesday
+const month = dateObj.toLocaleString("en-GB", { month: "long" }); // e.g. March
+const year = dateObj.getFullYear();
+
+const formattedDateNice = `${weekday}, ${day}${suffix} ${month} ${year}`;
+// → "Tuesday, 22nd March 2027"
 
 const addressShort =
   formattedAddress?.match(/([A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2})$/)?.[0] ||
@@ -1260,7 +1266,7 @@ const templateParams = {
   FirstName: firstNameOf(deputy),
   FormattedDate: formattedDateNice,
   FormattedAddress: formattedAddress || "TBC",
-  Fee: finalFee ? `£${finalFee}` : "£TBC",
+  Fee: finalFee ? `${finalFee}` : "TBC",
   Duties: dutiesFormatted,
   ActName: act?.tscName || act?.name || "the band",
   MetaActId: String(metaActId || act?._id || ""),

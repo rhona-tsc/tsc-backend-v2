@@ -4,20 +4,11 @@
 
 export default async function getTravelV2(origin, destination, dateISO) {
   const startTime = performance.now();
-  console.log(
-    `🚴 (routes/travel.js) getTravelV2 START at`,
-    new Date().toISOString(),
-    { origin, destination, dateISO }
-  );
+  
 
   const BASE_RAW = "https://tsc-backend-v2.onrender.com";
   const BASE = String(BASE_RAW || "").replace(/\/+$/, "");
 
-  if (!/^https?:\/\//i.test(BASE)) {
-    console.warn(
-      `🚴 (routes/travel.js) VITE_BACKEND_URL not set (got: ${BASE_RAW}) — falling back to Render default.`
-    );
-  }
 
   const qs =
     `origin=${encodeURIComponent(origin || "")}` +
@@ -34,16 +25,13 @@ export default async function getTravelV2(origin, destination, dateISO) {
     try {
       data = text ? JSON.parse(text) : {};
     } catch {
-      console.error(
-        `🚴 (routes/travel.js) Non-JSON response (possible proxy/redirect):`,
-        text.slice(0, 80)
-      );
+    
       throw new Error("[travelV2] Non-JSON response");
     }
 
     if (!res.ok) {
       const msg = data?.message || data?.error || text || `HTTP ${res.status}`;
-      console.error(`🚴 (routes/travel.js) ERROR: ${msg}`);
+   
       throw new Error(`[travelV2] ${res.status} ${msg}`);
     }
 
@@ -65,17 +53,9 @@ export default async function getTravelV2(origin, destination, dateISO) {
       1609.34;
 
     const durationMs = (performance.now() - startTime).toFixed(0);
-    console.log(
-      `🚴 (routes/travel.js) getTravelV2 SUCCESS in ${durationMs}ms`,
-      { origin, destination, miles }
-    );
+ 
 
     return { outbound, returnTrip, miles, raw: data };
   } catch (err) {
-    console.error(
-      `🚴 (routes/travel.js) getTravelV2 ERROR:`,
-      err?.message || err
-    );
-    throw err;
-  }
+  }  throw new Error(`[travelV2] Fetch error: ${err.message || err}`);
 }

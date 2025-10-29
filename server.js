@@ -110,7 +110,6 @@ app.set('trust proxy', 1);
 app.use((req, res, next) => {
   res.setHeader('Vary', 'Origin');
   if (req.method !== 'OPTIONS') {
-    console.log(`🌐 CORS: ${req.method} ${req.url} | origin=${req.headers.origin || 'n/a'}`);
   }
   const _end = res.end;
   res.end = function (...args) {
@@ -180,15 +179,7 @@ app.use((req, res, next) => {
         ? color.yellow
         : color.green;
 
-    console.log(
-      `${color.cyan}🚴 (server.js)${color.reset} [${method}] ${req.originalUrl} → ${statusColor}${status}${color.reset} (${duration}ms)`,
-      {
-        ip: req.ip,
-        origin: req.headers.origin || "n/a",
-        userAgent: req.headers["user-agent"] || "unknown",
-        time,
-      }
-    );
+
   });
 
   next();
