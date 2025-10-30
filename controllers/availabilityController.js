@@ -120,7 +120,7 @@ export async function computeFinalFeeForMember(act, member, address, dateISO, li
 /**
  * Returns a friendly "Tuesday, 22nd March 2027" date string
  */
-function formatNiceDate(dateISO) {
+export function formatNiceDate(dateISO) {
   const dateObj = new Date(dateISO);
   const day = dateObj.getDate();
   const suffix =
@@ -2189,35 +2189,32 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
 
 
 
-export async function rebuildAndApplyAvailabilityBadge(
-  reqOrActId,
-  maybeDateISO, act,
-) {
+export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO, act) {
   console.log(
     `🟢 (availabilityController.js) rebuildAndApplyAvailabilityBadge START at ${new Date().toISOString()}`
   );
 
-const lineupQuotes =
-  act?.lineups?.map((l) => ({
-    name: `${l.size}-piece (${l.description || ""})`,
-    price:
-      l.base_fee?.[0]?.total_fee_with_margin ||
-      l.base_fee?.[0]?.total_fee ||
-      0,
-    description: l.bandMembers?.map((b) => b.instrument).join(", "),
-  })) || [];
+  const lineupQuotes =
+    act?.lineups?.map((l) => ({
+      name: `${l.size}-piece (${l.description || ""})`,
+      price:
+        l.base_fee?.[0]?.total_fee_with_margin ||
+        l.base_fee?.[0]?.total_fee ||
+        0,
+      description: l.bandMembers?.map((b) => b.instrument).join(", "),
+    })) || [];
 
-const paMap = {
-  smallPa: "small",
-  mediumPa: "medium",
-  largePa: "large",
-};
+  const paMap = {
+    smallPa: "small",
+    mediumPa: "medium",
+    largePa: "large",
+  };
 
-const lightMap = {
-  smallLight: "small",
-  mediumLight: "medium",
-  largeLight: "large",
-};
+  const lightMap = {
+    smallLight: "small",
+    mediumLight: "medium",
+    largeLight: "large",
+  };
 
   try {
     const actId =
@@ -2227,66 +2224,99 @@ const lightMap = {
     if (!actId || !dateISO)
       return { success: false, message: "Missing actId/dateISO" };
 
-    const act = await Act.findById(actId).lean();
-    if (!act) return { success: false, message: "Act not found" };
+    const actDoc = await Act.findById(actId).lean();
+    if (!actDoc) return { success: false, message: "Act not found" };
 
-    const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
+    let badge = await buildAvailabilityBadgeFromRows(actDoc, dateISO);
 
     // 🧮 Build unique key for this act/date/location combo
-    const shortAddress = (badge?.address || act?.formattedAddress || "unknown")
+    const shortAddress = (badge?.address || actDoc?.formattedAddress || "unknown")
       .replace(/\W+/g, "_")
       .toLowerCase();
 
-    let key = `${dateISO}_${shortAddress}`;
+    const key = `${dateISO}_${shortAddress}`;
 
-    // 🧹 If no badge, clear existing for this key
-   if (!badge) {
-  await Act.updateOne(
-    { _id: actId },
-    { $unset: { [`availabilityBadges.${key}`]: "" } }
-  );
-  console.log(
-    `🧹 Cleared availability badge for ${act.tscName || act.name}`
-  );
+    /* ---------------------------------------------------------------------- */
+    /* 🧹 If no badge, clear existing for this key                            */
+    /* ---------------------------------------------------------------------- */
+    if (!badge) {
+      await Act.updateOne(
+        { _id: actId },
+        { $unset: { [`availabilityBadges.${key}`]: "" } }
+      );
+      console.log(`🧹 Cleared availability badge for ${actDoc.tscName || actDoc.name}`);
 
-  // ✅ Broadcast badge update via SSE after badge rebuild
-  try {
-    if (global.availabilityNotify?.badgeUpdated) {
-      global.availabilityNotify.badgeUpdated({
-        type: "availability_badge_updated",
-        actId: String(actId),
-        actName: act?.tscName || act?.name,
-        dateISO,
-        badge: null, // 👈 explicit null since badge was cleared
-      });
-      console.log("📡 SSE broadcasted: availability_badge_updated");
-    } else {
-      console.warn("⚠️ global.availabilityNotify.badgeUpdated not available");
-    }
-  } catch (err) {
-    console.error("❌ SSE broadcast failed (badgeUpdated):", err.message);
-  }
+      // ✅ Broadcast badge update via SSE
+      try {
+        if (global.availabilityNotify?.badgeUpdated) {
+          global.availabilityNotify.badgeUpdated({
+            type: "availability_badge_updated",
+            actId: String(actId),
+            actName: actDoc?.tscName || actDoc?.name,
+            dateISO,
+            badge: null,
+          });
+          console.log("📡 SSE broadcasted: availability_badge_updated");
+        }
+      } catch (err) {
+        console.error("❌ SSE broadcast failed (badgeUpdated):", err.message);
+      }
 
-  return { success: true, cleared: true };
-}
-
-    // 🚧 Guard: ensure badge is a proper object
-    if (typeof badge !== "object" || badge === null || Array.isArray(badge)) {
-      console.warn("⚠️ Skipping badge update — invalid badge format:", badge);
-      return { success: false, message: "Invalid badge format" };
+      return { success: true, cleared: true };
     }
 
-    // ✅ Apply new badge
+    /* ---------------------------------------------------------------------- */
+    /* 🎤 ENRICH DEPUTIES WITH FULL MUSICIAN DATA                             */
+    /* ---------------------------------------------------------------------- */
+    if (Array.isArray(badge.deputies) && badge.deputies.length > 0) {
+      console.log(`🎤 Enriching ${badge.deputies.length} deputy entries...`);
+      const enrichedDeputies = [];
+
+      for (const dep of badge.deputies) {
+        try {
+          const musicianId =
+            dep.musicianId || dep.musician?._id || dep._id || null;
+          if (!musicianId) continue;
+
+          const musician = await Musician.findById(musicianId).lean();
+          if (!musician) continue;
+
+          enrichedDeputies.push({
+            musicianId: String(musician._id),
+            vocalistName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+            photoUrl:
+              musician.profilePicture ||
+              musician.photoUrl ||
+              "",
+            profileUrl:
+              musician.profileUrl ||
+              `${process.env.PUBLIC_SITE_BASE || "https://meek-biscotti-8d5020.netlify.app"}/musician/${musician._id}`,
+            instrument:
+              musician.instrumentation?.[0] ||
+              musician.primaryInstrument ||
+              "",
+            setAt: dep.setAt || new Date(),
+          });
+        } catch (err) {
+          console.warn("⚠️ Failed to enrich deputy:", dep, err.message);
+        }
+      }
+
+      badge.deputies = enrichedDeputies;
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* ✅ Apply updated badge                                                 */
+    /* ---------------------------------------------------------------------- */
     await Act.updateOne(
       { _id: actId },
       { $set: { [`availabilityBadges.${key}`]: badge } }
     );
-    console.log(
-      `✅ Applied availability badge for ${act.tscName || act.name}:`,
-      badge
-    );
+    console.log(`✅ Applied availability badge for ${actDoc.tscName || actDoc.name}:`, badge);
 
-    // 📧 Send client email (lead YES only)
+    /* ---------------------------------------------------------------------- */
+    /* ✉️ Send client email (lead YES only)                                   */
+    /* ---------------------------------------------------------------------- */
     if (!badge.isDeputy) {
       try {
         await sendClientEmail({
