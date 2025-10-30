@@ -382,33 +382,42 @@ const getPictureUrlFrom = (obj = {}) => {
 };
 
 export async function notifyDeputies({ act, lineupId, dateISO, excludePhone }) {
-  console.log("📢 notifyDeputies() START", { act: act?.name, lineupId });
+  console.log("📢 notifyDeputies() START", { act: act?.name, lineupId, dateISO });
 
-  // 🧩 Find the matching lineup
+  /* -------------------------------------------------------------------------- */
+  /* 🧩 Find lineup + vocalists with deputies                                   */
+  /* -------------------------------------------------------------------------- */
   const lineup = act?.lineups?.find(l => String(l._id) === String(lineupId));
   if (!lineup) {
     console.warn("⚠️ No lineup found for notifyDeputies()");
     return;
   }
 
-  // 🧩 Gather vocalists (who have deputies)
-  const vocalists = lineup.bandMembers?.filter(m =>
-    ["lead vocal", "lead female vocal", "male vocal", "vocalist-guitarist"].some(v =>
-      (m.instrument || "").toLowerCase().includes(v)
-    )
-  ) || [];
+  const vocalists =
+    lineup.bandMembers?.filter(m =>
+      ["lead vocal", "lead female vocal", "male vocal", "vocalist-guitarist"].some(v =>
+        (m.instrument || "").toLowerCase().includes(v)
+      )
+    ) || [];
 
-  console.log("👥 Raw deputies in lineup:", JSON.stringify(
-    lineup.bandMembers.map(b => ({
-      name: b.firstName || b.fullName,
-      deputies: b.deputies?.map(d => ({
-        name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-        phone: d.phoneNumber || d.phone,
+  console.log(
+    "👥 Raw deputies in lineup:",
+    JSON.stringify(
+      lineup.bandMembers.map(b => ({
+        name: b.firstName || b.fullName,
+        deputies: b.deputies?.map(d => ({
+          name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
+          phone: d.phoneNumber || d.phone,
+        })),
       })),
-    })), null, 2)
+      null,
+      2
+    )
   );
 
-  // 🧩 Flatten all deputies
+  /* -------------------------------------------------------------------------- */
+  /* 🧩 Flatten all valid deputies (with phone numbers)                         */
+  /* -------------------------------------------------------------------------- */
   const validDeputies = [];
   for (const vocalist of vocalists) {
     for (const dep of vocalist.deputies || []) {
@@ -416,8 +425,13 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone }) {
       if (!rawPhone) continue;
       const cleaned = rawPhone.replace(/\s+/g, "");
       console.log("☎️ Cleaned deputy phone:", cleaned);
+
       if (/^\+?\d{10,15}$/.test(cleaned) && cleaned !== excludePhone) {
-        validDeputies.push({ ...dep, phone: cleaned });
+        validDeputies.push({
+          ...dep,
+          phone: cleaned,
+          replacing: vocalist, // track who they cover
+        });
       }
     }
   }
@@ -427,23 +441,81 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone }) {
     return;
   }
 
-  // 🟢 Notify each deputy
+  /* -------------------------------------------------------------------------- */
+  /* 🟢 Notify each deputy                                                      */
+  /* -------------------------------------------------------------------------- */
   for (const deputy of validDeputies) {
-    await notifyDeputyOneShot({
-      act,
-      lineupId,
-      deputy,
-      dateISO,
-      formattedDate: new Date(dateISO).toLocaleDateString("en-GB", {
+    try {
+      const { replacing } = deputy;
+
+      // 🧭 Lookup full musician doc for deputy (for name + image)
+      const musician = await Musician.findById(deputy.musicianId).lean();
+
+      // 📍 Address (short 2-part)
+      const shortAddress =
+        act?.formattedAddress ||
+        act?.venueAddress ||
+        "TBC";
+      const prettyAddress =
+        shortAddress?.split(",").slice(0, 2).join(", ").trim() || "TBC";
+
+      // 🗓️ Friendly formatted date
+      const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
         weekday: "long",
         day: "numeric",
         month: "long",
-      }),
-      formattedAddress: act?.venueAddress || "TBC",
-      duties: "Lead Vocal",
-      finalFee: deputy.fee || null,
-      metaActId: act._id,
-    });
+        year: "numeric",
+      });
+
+      // 💰 Compute correct fee (not deputy’s £180 default)
+      let finalFee = "TBC";
+      try {
+        if (act && replacing && lineup && dateISO) {
+          const feeValue = await computeFinalFeeForMember(
+            act,
+            replacing,
+            prettyAddress,
+            dateISO,
+            lineup
+          );
+          finalFee = `£${feeValue}`;
+        }
+      } catch (err) {
+        console.warn("⚠️ Failed to compute fee for deputy:", err.message);
+      }
+
+      // 🎤 Duties
+      const role =
+        replacing?.instrument ||
+        deputy?.role ||
+        "Lead Vocal";
+
+      // 💬 Send WhatsApp message
+      await sendWhatsAppMessage({
+        to: deputy.phone,
+        actData: act,
+        lineup,
+        member: replacing,
+        address: prettyAddress,
+        dateISO,
+        role,
+        templateParams: {
+          1: musician?.firstName || deputy.firstName || "Musician",
+          2: formattedDate,
+          3: prettyAddress,
+          4: finalFee,
+          5: role,
+          6: act?.tscName || act?.name || "The Band",
+        },
+        smsBody: `Availability check for ${act?.tscName || act?.name}`,
+      });
+
+      console.log(
+        `✅ Deputy notified: ${musician?.firstName || deputy.firstName} for ${act?.tscName || act?.name} (${formattedDate})`
+      );
+    } catch (err) {
+      console.error("❌ Failed to notify deputy:", err.message);
+    }
   }
 
   console.log("✅ notifyDeputies() finished");
@@ -1377,10 +1449,9 @@ const sendRes = await sendAvailabilityRequest({
 export const twilioInbound = async (req, res) => {
   console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
 
-  // ✅ Immediately acknowledge Twilio to stop retries
+  // ✅ Immediately acknowledge Twilio to prevent retries
   res.status(200).send("OK");
 
-  // 🧠 Continue heavy work asynchronously
   process.nextTick(async () => {
     try {
       console.log("📬 Raw inbound req.body:", req.body);
@@ -1390,77 +1461,39 @@ export const twilioInbound = async (req, res) => {
       const buttonPayload = String(req.body?.ButtonPayload || "");
       const inboundSid = String(req.body?.MessageSid || "");
       const fromRaw = String(req.body?.WaId || req.body?.From || "").replace(/^whatsapp:/i, "");
-      const toRaw = String(req.body?.To || "").replace(/^whatsapp:/i, "");
 
-      console.log("📩 Incoming WhatsApp message:", {
-        From: fromRaw,
-        Body: bodyText,
-        ButtonText: buttonText,
-        ButtonPayload: buttonPayload,
-        MessageSid: inboundSid,
-      });
+      const noContent = !buttonPayload && !buttonText && !bodyText;
+      if (noContent) return console.log("🪵 Ignoring empty inbound message", { From: fromRaw });
 
       if (seenInboundOnce(inboundSid)) {
         console.log("🪵 Duplicate inbound — already handled", { MessageSid: inboundSid });
         return;
       }
 
-      const noContent = !buttonPayload && !buttonText && !bodyText;
-      if (noContent) {
-        console.log("🪵 Ignoring empty inbound message", { From: fromRaw });
-        return;
-      }
-
-      if (inboundSid) {
-        const dup = await AvailabilityModel.findOne({ "inbound.sid": inboundSid }).lean();
-        if (dup) {
-          console.log("🪵 Duplicate inbound detected in DB, skipping:", inboundSid);
-          return;
-        }
-      }
-
-      const combinedText = `${buttonText} ${buttonPayload} ${bodyText}`.trim();
       let { reply, enquiryId } = parsePayload(buttonPayload);
       if (!reply) reply = classifyReply(buttonText) || classifyReply(bodyText) || null;
-
-      console.log("🤖 Classified reply:", reply);
       if (!reply) return;
 
-      // --- Find matching Availability row ---
+      // --- Find matching availability row ---
       let updated = null;
       if (enquiryId) {
         updated = await AvailabilityModel.findOneAndUpdate(
           { enquiryId },
-          {
-            $set: {
-              reply,
-              repliedAt: new Date(),
-              "inbound.sid": inboundSid,
-              "inbound.body": bodyText,
-              "inbound.buttonText": buttonText,
-              "inbound.buttonPayload": buttonPayload,
-            },
-          },
+          { $set: { reply, repliedAt: new Date(), "inbound.sid": inboundSid } },
           { new: true }
+        );
+      }
+      if (!updated) {
+        updated = await AvailabilityModel.findOneAndUpdate(
+          { phone: normalizeFrom(fromRaw) },
+          { $set: { reply, repliedAt: new Date(), "inbound.sid": inboundSid } },
+          { sort: { createdAt: -1 }, new: true }
         );
       }
 
       if (!updated) {
-        const candidates = normalizeFrom(fromRaw);
-        updated = await AvailabilityModel.findOneAndUpdate(
-          { phone: { $in: candidates } },
-          {
-            $set: {
-              reply,
-              repliedAt: new Date(),
-              "inbound.sid": inboundSid,
-              "inbound.body": bodyText,
-              "inbound.buttonText": buttonText,
-              "inbound.buttonPayload": buttonPayload,
-            },
-          },
-          { sort: { createdAt: -1 }, new: true }
-        );
+        console.warn("⚠️ No matching AvailabilityModel found for inbound reply.");
+        return;
       }
 
       const act = updated?.actId ? await Act.findById(updated.actId).lean() : null;
@@ -1478,189 +1511,172 @@ export const twilioInbound = async (req, res) => {
         }).lean();
       }
 
+      const isDeputy = Boolean(updated.isDeputy || musician?.isDeputy);
+      const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
+      const actId = String(updated.actId);
+      const dateISO = updated.dateISO;
       const toE164 = normalizeToE164(updated.phone || fromRaw);
-      const dateISOday = String((updated.dateISO || "").slice(0, 10));
-     if (!musician && act) {
-  const vocalist = act.lineups
-    ?.find(l => String(l._id) === String(updated.lineupId))
-    ?.bandMembers?.find(m => /vocal/i.test(m.instrument || ""));
-  if (vocalist?.email) {
-    musician = vocalist;
-    console.log("📧 Fallback vocalist email used:", vocalist.email);
-  }
-}
 
-const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
-
-
-      /* -------------------------------------------------------------------------- */
-      /* ✅ YES BRANCH                                                             */
-      /* -------------------------------------------------------------------------- */
+      /* ---------------------------------------------------------------------- */
+      /* ✅ YES BRANCH (Lead or Deputy)                                         */
+      /* ---------------------------------------------------------------------- */
       if (reply === "yes") {
-        try {
-          console.log("✅ YES reply received via WhatsApp");
+        console.log(`✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`);
 
-          if (emailForInvite && dateISOday && act) {
-            const formattedDateString = new Date(dateISOday).toLocaleDateString("en-GB", {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
-              year: "numeric",
-            });
+        // 1️⃣ Create a calendar invite for either lead or deputy
+        if (emailForInvite && act && dateISO) {
+          const formattedDateString = new Date(dateISO).toLocaleDateString("en-GB", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          });
 
-            const fee =
-              updated?.fee ||
-              act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
-              null;
+          const fee =
+            updated?.fee ||
+            act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
+            null;
 
-            const event = await createCalendarInvite({
-              enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
-              actId: String(act._id),
-              dateISO: dateISOday,
-              email: emailForInvite,
-              summary: `TSC: ${act.tscName || act.name} enquiry`,
-              description: [
-                `Event Date: ${formattedDateString}`,
-                `Act: ${act.tscName || act.name}`,
-                `Role: ${updated.duties || ""}`,
-                `Address: ${updated.formattedAddress || "TBC"}`,
-                `Fee: £${fee || "TBC"}`,
-              ].join("\n"),
-              startTime: `${dateISOday}T17:00:00Z`,
-              endTime: `${dateISOday}T23:59:00Z`,
-              fee,
-            });
+          const event = await createCalendarInvite({
+            enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
+            actId,
+            dateISO,
+            email: emailForInvite,
+            summary: `TSC: ${act.tscName || act.name} enquiry`,
+            description: [
+              `Event Date: ${formattedDateString}`,
+              `Act: ${act.tscName || act.name}`,
+              `Role: ${updated.duties || ""}`,
+              `Address: ${updated.formattedAddress || "TBC"}`,
+              `Fee: £${fee || "TBC"}`,
+            ].join("\n"),
+            startTime: `${dateISO}T17:00:00Z`,
+            endTime: `${dateISO}T23:59:00Z`,
+            fee,
+          });
 
-            await AvailabilityModel.updateOne(
-              { _id: updated._id },
-              {
-                $set: {
-                  calendarEventId: event?.id || event?.data?.id || null,
-                  calendarInviteEmail: emailForInvite,
-                  calendarInviteSentAt: new Date(),
-                  calendarStatus: "needsAction",
-                },
-              }
-            );
-          }
-
-          await sendWhatsAppText(toE164, "Super — we’ve sent a diary invite with full details.");
-          await rebuildAndApplyAvailabilityBadge(
-            { body: { actId: String(updated.actId), dateISO: updated.dateISO } },
+          await AvailabilityModel.updateOne(
+            { _id: updated._id },
             {
-              json: () => {},
-              status: () => ({ json: () => {} }),
+              $set: {
+                calendarEventId: event?.id || event?.data?.id || null,
+                calendarInviteEmail: emailForInvite,
+                calendarInviteSentAt: new Date(),
+                calendarStatus: "needsAction",
+              },
             }
           );
-
-        if (global.availabilityNotify?.leadYes && updated) {
-  global.availabilityNotify.leadYes({
-    actId: String(updated.actId),
-    actName: act?.tscName || act?.name,
-    musicianName: musician?.firstName || updated.musicianName || "",
-    dateISO: updated.dateISO,
-  });
-  console.log("📡 SSE broadcasted: leadYes");
-} else {
-  console.warn("⚠️ global.availabilityNotify.leadYes not available");
-}
-        } catch (err) {
-          console.error("❌ Error handling YES reply:", err);
         }
+
+        await sendWhatsAppText(toE164, "Super — we’ve sent a diary invite with full details.");
+
+        // 2️⃣ Mark as available + rebuild badge
+        updated.status = "available";
+        if (isDeputy) updated.isDeputy = true;
+        await updated.save();
+
+        const badgeResult = await rebuildAndApplyAvailabilityBadge(
+          { body: { actId, dateISO } },
+          {
+            json: () => {},
+            status: () => ({ json: () => {} }),
+          }
+        );
+
+        // 3️⃣ Broadcast SSE updates
+        if (global.availabilityNotify) {
+          // 🎯 Deputy availability toast
+          if (isDeputy) {
+            global.availabilityNotify.badgeUpdated({
+              type: "deputy_yes",
+              actId,
+              actName: act?.tscName || act?.name,
+              musicianName: musician?.firstName || updated.musicianName || "Deputy",
+              dateISO,
+              isDeputy: true,
+            });
+            console.log("📡 SSE broadcasted: deputy_yes");
+          }
+
+          // 🎤 Live badge refresh (lead or deputy)
+          if (badgeResult?.badge) {
+            global.availabilityNotify.badgeUpdated({
+              type: "availability_badge_updated",
+              actId,
+              actName: act?.tscName || act?.name,
+              dateISO,
+              badge: badgeResult.badge,
+              isDeputy,
+            });
+            console.log("📡 SSE broadcasted: availability_badge_updated");
+          }
+        }
+
         return;
       }
 
-    /* -------------------------------------------------------------------------- */
-/* 🚫 NO / UNAVAILABLE / NOLOC BRANCH                                       */
-/* -------------------------------------------------------------------------- */
-if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
-  console.log("🚫 UNAVAILABLE reply received via WhatsApp");
+      /* ---------------------------------------------------------------------- */
+      /* 🚫 NO / UNAVAILABLE / NOLOC BRANCH                                     */
+      /* ---------------------------------------------------------------------- */
+      if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
+        console.log("🚫 UNAVAILABLE reply received via WhatsApp");
 
-  // 1) Update musician reply / status immediately
-  if (updated?._id) {
-    await AvailabilityModel.updateOne(
-      { _id: updated._id },
-      {
-        $set: {
-          status: "unavailable",
-          reply: "unavailable",
-          repliedAt: new Date(),
-          calendarStatus: "cancelled",
-        },
-      }
-    );
-  }
+        await AvailabilityModel.updateOne(
+          { _id: updated._id },
+          {
+            $set: {
+              status: "unavailable",
+              reply: "unavailable",
+              repliedAt: new Date(),
+              calendarStatus: "cancelled",
+            },
+          }
+        );
 
-  // 2) Cancel calendar invite if we have one
-  let calendarEventId = updated?.calendarEventId;
-  if (!calendarEventId && updated?.enquiryId) {
-    const existing = await AvailabilityModel.findOne({
-      enquiryId: updated.enquiryId,
-      calendarEventId: { $exists: true, $ne: null },
-    }).lean();
-    if (existing?.calendarEventId) {
-      calendarEventId = existing.calendarEventId;
-      console.log("📆 Fallback found calendarEventId:", calendarEventId);
-    }
-  }
-  if (calendarEventId && emailForInvite) {
-    try {
-      console.log("🗓️ Attempting to cancel Google Calendar invite...");
-      await cancelCalendarInvite(emailForInvite, calendarEventId, updated.dateISO);
-      console.log("✅ Calendar invite cancelled successfully");
-    } catch (cancelErr) {
-      console.error("❌ Failed to cancel calendar invite:", cancelErr.message);
-    }
-  } else {
-    console.log("⏭️ No calendarEventId or emailForInvite, skipping cancel", {
-      calendarEventId,
-      emailForInvite,
-    });
-  }
+        if (updated?.calendarEventId && emailForInvite) {
+          try {
+            await cancelCalendarInvite(emailForInvite, updated.calendarEventId, updated.dateISO);
+            console.log("✅ Calendar invite cancelled successfully");
+          } catch (cancelErr) {
+            console.error("❌ Failed to cancel calendar invite:", cancelErr.message);
+          }
+        }
 
-  // 3) ***Hard delete*** the badge keys from the Act doc (handles both raw and _tbc)
-  try {
-    const dateKey = String(updated.dateISO).slice(0, 10);
-    const unset = {
-      [`availabilityBadges.${dateKey}`]: "",
-      [`availabilityBadges.${dateKey}_tbc`]: "",
-    };
-    const r = await Act.updateOne({ _id: updated.actId }, { $unset: unset });
-    console.log("🗑️ Act badge $unset result:", r);
-  } catch (err) {
-    console.error("❌ Failed to $unset badge keys in Act:", err.message);
-  }
+        // 🗑️ Clear any active badge
+        try {
+          const unset = {
+            [`availabilityBadges.${dateISO}`]: "",
+            [`availabilityBadges.${dateISO}_tbc`]: "",
+          };
+          await Act.updateOne({ _id: actId }, { $unset: unset });
+          console.log("🗑️ Cleared badge keys from Act:", dateISO);
+        } catch (err) {
+          console.error("❌ Failed to $unset badge keys:", err.message);
+        }
 
-  // 4) Notify user + deputies
-  await sendWhatsAppText(
-    toE164,
-    "Thanks for letting us know — we've updated your availability."
-  );
-  if (act?._id && updated?.lineupId) {
-    console.log("📢 Notifying deputies...");
-    await notifyDeputies({
-      act,
-      lineupId: updated.lineupId,
-      dateISO: updated.dateISO,
-      excludePhone: toE164,
-    });
-  }
+        await sendWhatsAppText(toE164, "Thanks for letting us know — we've updated your availability.");
 
-  // 5) Broadcast ONE clean SSE with `badge:null`
-  if (global.availabilityNotify?.badgeUpdated && updated) {
-    global.availabilityNotify.badgeUpdated({
-      type: "availability_badge_updated",
-      actId: String(updated.actId),
-      actName: act?.tscName || act?.name,
-      dateISO: updated.dateISO,
-      badge: null,
-    });
-    console.log("📡 SSE broadcasted: availability_badge_updated (lead unavailable)");
-  }
+        if (act?._id && updated?.lineupId) {
+          await notifyDeputies({
+            act,
+            lineupId: updated.lineupId,
+            dateISO,
+            excludePhone: toE164,
+          });
+        }
 
-  // 6) (Optional) do NOT call rebuildAndApplyAvailabilityBadge again here.
-  //    The badge is gone in DB and we told the front-end to clear it.
-  return;
+        // 🔔 SSE clear badge
+        if (global.availabilityNotify?.badgeUpdated) {
+          global.availabilityNotify.badgeUpdated({
+            type: "availability_badge_updated",
+            actId,
+            actName: act?.tscName || act?.name,
+            dateISO,
+            badge: null,
+          });
+        }
+
+        return;
       }
     } catch (err) {
       console.error("❌ Error in twilioInbound background task:", err);
@@ -2194,27 +2210,8 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO,
     `🟢 (availabilityController.js) rebuildAndApplyAvailabilityBadge START at ${new Date().toISOString()}`
   );
 
-  const lineupQuotes =
-    act?.lineups?.map((l) => ({
-      name: `${l.size}-piece (${l.description || ""})`,
-      price:
-        l.base_fee?.[0]?.total_fee_with_margin ||
-        l.base_fee?.[0]?.total_fee ||
-        0,
-      description: l.bandMembers?.map((b) => b.instrument).join(", "),
-    })) || [];
-
-  const paMap = {
-    smallPa: "small",
-    mediumPa: "medium",
-    largePa: "large",
-  };
-
-  const lightMap = {
-    smallLight: "small",
-    mediumLight: "medium",
-    largeLight: "large",
-  };
+  const paMap = { smallPa: "small", mediumPa: "medium", largePa: "large" };
+  const lightMap = { smallLight: "small", mediumLight: "medium", largeLight: "large" };
 
   try {
     const actId =
@@ -2246,22 +2243,16 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO,
       );
       console.log(`🧹 Cleared availability badge for ${actDoc.tscName || actDoc.name}`);
 
-      // ✅ Broadcast badge update via SSE
-      try {
-        if (global.availabilityNotify?.badgeUpdated) {
-          global.availabilityNotify.badgeUpdated({
-            type: "availability_badge_updated",
-            actId: String(actId),
-            actName: actDoc?.tscName || actDoc?.name,
-            dateISO,
-            badge: null,
-          });
-          console.log("📡 SSE broadcasted: availability_badge_updated");
-        }
-      } catch (err) {
-        console.error("❌ SSE broadcast failed (badgeUpdated):", err.message);
+      if (global.availabilityNotify?.badgeUpdated) {
+        global.availabilityNotify.badgeUpdated({
+          type: "availability_badge_updated",
+          actId: String(actId),
+          actName: actDoc?.tscName || actDoc?.name,
+          dateISO,
+          badge: null,
+        });
+        console.log("📡 SSE broadcasted: availability_badge_updated");
       }
-
       return { success: true, cleared: true };
     }
 
@@ -2284,17 +2275,12 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO,
           enrichedDeputies.push({
             musicianId: String(musician._id),
             vocalistName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
-            photoUrl:
-              musician.profilePicture ||
-              musician.photoUrl ||
-              "",
+            photoUrl: musician.profilePicture || musician.photoUrl || "",
+            profilePicture: musician.profilePicture || musician.photoUrl || "",
             profileUrl:
               musician.profileUrl ||
               `${process.env.PUBLIC_SITE_BASE || "https://meek-biscotti-8d5020.netlify.app"}/musician/${musician._id}`,
-            instrument:
-              musician.instrumentation?.[0] ||
-              musician.primaryInstrument ||
-              "",
+            instrument: musician.instrumentation?.[0] || musician.primaryInstrument || "",
             setAt: dep.setAt || new Date(),
           });
         } catch (err) {
@@ -2303,6 +2289,27 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO,
       }
 
       badge.deputies = enrichedDeputies;
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* 🪄 ENRICH ROOT BADGE (deputy case)                                     */
+    /* ---------------------------------------------------------------------- */
+    if (badge?.isDeputy && badge?.vocalistName && !badge?.photoUrl) {
+      const musician = await Musician.findOne({
+        $or: [
+          { firstName: badge.vocalistName },
+          { "aliases.name": badge.vocalistName },
+        ],
+      }).lean();
+
+      if (musician) {
+        badge.photoUrl = musician.profilePicture || musician.photoUrl || "";
+        badge.profilePicture = musician.profilePicture || musician.photoUrl || "";
+        badge.profileUrl =
+          musician.profileUrl ||
+          `${process.env.PUBLIC_SITE_BASE || "https://meek-biscotti-8d5020.netlify.app"}/musician/${musician._id}`;
+        badge.musicianId = String(musician._id);
+      }
     }
 
     /* ---------------------------------------------------------------------- */
@@ -2319,6 +2326,23 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO,
     /* ---------------------------------------------------------------------- */
     if (!badge.isDeputy) {
       try {
+        // right before sendClientEmail()
+const clientFirstName =
+  badge?.clientFirstName ||
+  actDoc?.clientName ||
+  actDoc?.contactName ||
+  "there";
+
+const selectedAddress =
+  badge?.address ||
+  actDoc?.formattedAddress ||
+  actDoc?.venueAddress ||
+  "TBC";
+
+const finalTravelPrice =
+  badge?.finalTravelPrice ||
+  actDoc?.travelPrice ||
+  null;
         await sendClientEmail({
   actId,
   subject: `Good news — ${
