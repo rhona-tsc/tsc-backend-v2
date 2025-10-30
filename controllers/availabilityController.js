@@ -12,6 +12,7 @@ import { countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
 import Shortlist from "../models/shortlistModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import User from "../models/userModel.js";
+import mongoose from "mongoose";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
@@ -1328,8 +1329,14 @@ export const twilioInbound = async (req, res) => {
         return;
       }
 
-      const act = updated?.actId ? await Act.findById(updated.actId).lean() : null;
-      let musician = updated?.musicianId
+const act =
+  updated?.actId && typeof updated.actId === "string"
+    ? await Act.findById(new mongoose.Types.ObjectId(updated.actId)).lean()
+    : updated?.actId
+    ? await Act.findById(updated.actId).lean()
+    : null;
+    
+    let musician = updated?.musicianId
         ? await Musician.findById(updated.musicianId).lean()
         : null;
 
