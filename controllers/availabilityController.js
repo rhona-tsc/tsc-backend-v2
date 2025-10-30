@@ -1268,7 +1268,7 @@ export async function notifyDeputyOneShot({
       dateISO,
       role: duties,
       templateParams,
-      contentSid: TWILIO_ENQUIRY_SID,
+contentSid: process.env.TWILIO_ENQUIRY_SID,
       smsBody,
     });
 
