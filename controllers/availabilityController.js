@@ -1369,6 +1369,7 @@ if (emailForInvite && act && dateISO) {
     act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
     null;
 
+try {
   const event = await createCalendarInvite({
     enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
     actId,
@@ -1386,10 +1387,13 @@ if (emailForInvite && act && dateISO) {
     endTime: `${dateISO}T23:59:00Z`,
     fee,
   });
-  console.log("📅 Calendar invite sent to lead vocalist:", badge?.musicianEmail || leadEmail);
+
+  console.log("📅 Calendar invite sent to lead vocalist:", emailForInvite, {
+    eventId: event?.id || event?.data?.id,
+  });
 } catch (err) {
   console.error("❌ Calendar invite failed:", err.message);
-  
+}
           await AvailabilityModel.updateOne(
             { _id: updated._id },
             {
