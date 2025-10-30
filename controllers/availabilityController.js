@@ -2175,6 +2175,60 @@ const finalTravelPrice =
   badge?.finalTravelPrice ||
   actDoc?.travelPrice ||
   null;
+
+  // 🧮 Include travel component if available
+let travelFee = 0;
+
+if (act?.travelPrice?.total) {
+  travelFee = act.travelPrice.total;
+} else if (badge?.finalTravelPrice?.total) {
+  travelFee = badge.finalTravelPrice.total;
+} else if (act?.countyFees) {
+  const allFees = Object.values(act.countyFees).filter((v) => typeof v === "number");
+  travelFee = allFees.length ? Math.round(allFees.reduce((a, b) => a + b) / allFees.length) : 0;
+}
+
+// 🎵 Build lineup quotes with full pricing + instrumentation summary
+const lineupQuotes = (act?.lineups || []).map((lineup) => {
+  const lineupName = lineup?.actSize || `${(lineup?.bandMembers || []).length}-piece`;
+
+  const baseFeeArray = Array.isArray(lineup?.base_fee) ? lineup.base_fee : [];
+  let basePrice = baseFeeArray?.[0]?.total_fee || 0;
+
+  // Add essential additional roles
+  (lineup?.bandMembers || []).forEach((member) => {
+    const essentialRoles = (member?.additionalRoles || []).filter(
+      (r) => r.isEssential && typeof r.additionalFee === "number"
+    );
+    basePrice += essentialRoles.reduce((sum, r) => sum + r.additionalFee, 0);
+  });
+
+  // Add 25% margin
+  const displayPrice = basePrice > 0 ? Math.ceil(basePrice / 0.75) : 0;
+
+  // Add travel fee per essential member
+  const memberCount = (lineup?.bandMembers || []).filter((m) => m?.isEssential).length;
+  const totalWithTravel = displayPrice + (travelFee ? travelFee * memberCount : 0);
+
+  // Build instrumentation summary
+  const instruments = (lineup?.bandMembers || [])
+    .filter((m) => m?.isEssential)
+    .map((m) => m?.instrument)
+    .filter(Boolean);
+
+  // Count vocals separately
+  const vocalCount = instruments.filter((i) => i.toLowerCase().includes("vocal")).length;
+  const nonVocalInstruments = instruments.filter((i) => !i.toLowerCase().includes("vocal"));
+
+  const vocalPart = vocalCount > 0 ? `${vocalCount} x vocals` : null;
+  const instrumentList = [vocalPart, ...nonVocalInstruments].filter(Boolean).join(", ");
+
+  return {
+    name: `${lineupName} (${instrumentList})`,
+    price: totalWithTravel || displayPrice || "TBC",
+  };
+});
+
         await sendClientEmail({
   actId,
   subject: `Good news — ${
@@ -2223,20 +2277,22 @@ const finalTravelPrice =
         : ""
     }
 
-    ${
-      lineupQuotes && lineupQuotes.length
-        ? `
-        <h4 style="margin-top:30px;">Quotes for ${selectedAddress || "your location"}:</h4>
-        <ul>
-          ${lineupQuotes
-            .map(
-              (l) =>
-                `<li>${l.name}: £${l.price} — <em>${l.description}</em></li>`
-            )
-            .join("")}
-        </ul>`
-        : ""
-    }
+   ${
+  lineupQuotes?.length
+    ? `
+      <h4 style="margin-top:30px;">Quotes for ${selectedAddress || "your location"}:</h4>
+      <ul style="list-style:none; padding:0; margin:10px 0;">
+        ${lineupQuotes
+          .map(
+            (l) => `
+            <li style="margin-bottom:8px;">
+              ${l.name}: <strong>£${l.price}</strong>
+            </li>`
+          )
+          .join("")}
+      </ul>`
+    : ""
+}
 
     <h4 style="margin-top:25px;">Included in your quote:</h4>
     <ul>
