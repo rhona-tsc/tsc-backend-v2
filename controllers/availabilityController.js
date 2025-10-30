@@ -381,12 +381,9 @@ const getPictureUrlFrom = (obj = {}) => {
   return "";
 };
 
-export async function notifyDeputies({ act, lineupId, dateISO, excludePhone }) {
-  console.log("📢 notifyDeputies() START", { act: act?.name, lineupId, dateISO });
+export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, address }) {
+  console.log("📢 notifyDeputies() START", { act: act?.name, lineupId, address });
 
-  /* -------------------------------------------------------------------------- */
-  /* 🧩 Find lineup + vocalists with deputies                                   */
-  /* -------------------------------------------------------------------------- */
   const lineup = act?.lineups?.find(l => String(l._id) === String(lineupId));
   if (!lineup) {
     console.warn("⚠️ No lineup found for notifyDeputies()");
@@ -400,38 +397,16 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone }) {
       )
     ) || [];
 
-  console.log(
-    "👥 Raw deputies in lineup:",
-    JSON.stringify(
-      lineup.bandMembers.map(b => ({
-        name: b.firstName || b.fullName,
-        deputies: b.deputies?.map(d => ({
-          name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-          phone: d.phoneNumber || d.phone,
-        })),
-      })),
-      null,
-      2
-    )
-  );
-
-  /* -------------------------------------------------------------------------- */
-  /* 🧩 Flatten all valid deputies (with phone numbers)                         */
-  /* -------------------------------------------------------------------------- */
   const validDeputies = [];
   for (const vocalist of vocalists) {
     for (const dep of vocalist.deputies || []) {
       const rawPhone = dep.phoneNumber || dep.phone;
       if (!rawPhone) continue;
       const cleaned = rawPhone.replace(/\s+/g, "");
-      console.log("☎️ Cleaned deputy phone:", cleaned);
-
       if (/^\+?\d{10,15}$/.test(cleaned) && cleaned !== excludePhone) {
-        validDeputies.push({
-          ...dep,
-          phone: cleaned,
-          replacing: vocalist, // track who they cover
-        });
+        // 🧮 Compute final fee per deputy (uses your existing logic)
+        const finalFee = await computeFinalFeeForMember(act, dep, address || act.venueAddress, dateISO, lineup);
+        validDeputies.push({ ...dep, phone: cleaned, finalFee });
       }
     }
   }
@@ -441,81 +416,25 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone }) {
     return;
   }
 
-  /* -------------------------------------------------------------------------- */
-  /* 🟢 Notify each deputy                                                      */
-  /* -------------------------------------------------------------------------- */
   for (const deputy of validDeputies) {
-    try {
-      const { replacing } = deputy;
+    const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
 
-      // 🧭 Lookup full musician doc for deputy (for name + image)
-      const musician = await Musician.findById(deputy.musicianId).lean();
-
-      // 📍 Address (short 2-part)
-      const shortAddress =
-        act?.formattedAddress ||
-        act?.venueAddress ||
-        "TBC";
-      const prettyAddress =
-        shortAddress?.split(",").slice(0, 2).join(", ").trim() || "TBC";
-
-      // 🗓️ Friendly formatted date
-      const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      });
-
-      // 💰 Compute correct fee (not deputy’s £180 default)
-      let finalFee = "TBC";
-      try {
-        if (act && replacing && lineup && dateISO) {
-          const feeValue = await computeFinalFeeForMember(
-            act,
-            replacing,
-            prettyAddress,
-            dateISO,
-            lineup
-          );
-          finalFee = `£${feeValue}`;
-        }
-      } catch (err) {
-        console.warn("⚠️ Failed to compute fee for deputy:", err.message);
-      }
-
-      // 🎤 Duties
-      const role =
-        replacing?.instrument ||
-        deputy?.role ||
-        "Lead Vocal";
-
-      // 💬 Send WhatsApp message
-      await sendWhatsAppMessage({
-        to: deputy.phone,
-        actData: act,
-        lineup,
-        member: replacing,
-        address: prettyAddress,
-        dateISO,
-        role,
-        templateParams: {
-          1: musician?.firstName || deputy.firstName || "Musician",
-          2: formattedDate,
-          3: prettyAddress,
-          4: finalFee,
-          5: role,
-          6: act?.tscName || act?.name || "The Band",
-        },
-        smsBody: `Availability check for ${act?.tscName || act?.name}`,
-      });
-
-      console.log(
-        `✅ Deputy notified: ${musician?.firstName || deputy.firstName} for ${act?.tscName || act?.name} (${formattedDate})`
-      );
-    } catch (err) {
-      console.error("❌ Failed to notify deputy:", err.message);
-    }
+    await notifyDeputyOneShot({
+      act,
+      lineupId,
+      deputy,
+      dateISO,
+      formattedDate,
+      formattedAddress: address || act?.venueAddress || "TBC",
+      duties: "Lead Female Vocal",
+      finalFee: deputy.finalFee,
+      metaActId: act._id,
+    });
   }
 
   console.log("✅ notifyDeputies() finished");
@@ -1298,151 +1217,64 @@ export async function notifyDeputyOneShot({
   lineupId,
   deputy,
   dateISO,
+  formattedDate,
   formattedAddress,
   duties,
+  finalFee,
   metaActId,
 }) {
-  console.log(`🟢 (availabilityController.js) notifyDeputyOneShot START`);
-
-  // 🛡️ Prevent duplicate notifications per runtime
-  globalThis._notifiedOnce = globalThis._notifiedOnce || new Set();
-  if (globalThis._notifiedOnce.has(deputy?.phone)) {
-    console.log(`⚠️ Skipping duplicate notify to ${deputy?.phone} (runtime)`);
-    return;
-  }
-  globalThis._notifiedOnce.add(deputy?.phone);
-
-  const toE164 = (raw = "") => {
-    let s = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
-    if (!s) return "";
-    if (s.startsWith("+")) return s;
-    if (s.startsWith("07")) return s.replace(/^0/, "+44");
-    if (s.startsWith("44")) return `+${s}`;
-    return s;
-  };
+  console.log("📤 notifyDeputyOneShot() START", {
+    deputyName: `${deputy.firstName || ""} ${deputy.lastName || ""}`.trim(),
+    phone: deputy.phone,
+    finalFee,
+    formattedAddress,
+    act: act?.tscName || act?.name,
+  });
 
   try {
-    const phoneRaw = deputy?.phoneNumber || deputy?.phone || "";
-    const phoneE164 = toE164(phoneRaw);
-    if (!phoneE164) throw new Error("Deputy has no phone");
+    // 🧮 Clean + format fee nicely
+    const numericFee = typeof finalFee === "number"
+      ? finalFee
+      : parseFloat(String(finalFee).replace(/[^\d.]/g, "")) || 0;
 
-    // 🧭 Normalise address
-    const shortAddress = (formattedAddress || "TBC")
-      .split(",")
-      .slice(-2)
-      .join(",")
-      .replace(/,\s*UK$/i, "")
-      .trim();
+    const formattedFee = numericFee > 0 ? `£${numericFee}` : "TBC";
 
-    const actName = act?.tscName || act?.name || "the band";
+    // 📍 Clean address
+    const location = formattedAddress && formattedAddress.trim() !== ""
+      ? formattedAddress.split(",").slice(0, 2).join(", ")
+      : act?.venueAddress?.split(",").slice(0, 2).join(", ") || "TBC";
 
-    // 🧩 Duplicate guard in DB — skip if same act/date/address already exists
-    const existing = await AvailabilityModel.findOne({
-      actId: act?._id,
+    // 🧠 Build template parameters
+    const templateParams = {
+      actName: act?.tscName || act?.name || "The Supreme Collective",
+      date: formattedDate || "TBC",
+      location,
+      fee: formattedFee,
+      role: duties || "Lead Vocal",
+    };
+
+    // 📨 Build message text (for SMS fallback or logging)
+    const smsBody = `Hi ${deputy.firstName || deputy.name || "there"}, you've received an enquiry for a gig on ${templateParams.date} in ${templateParams.location} at a rate of ${templateParams.fee} for ${templateParams.role} duties with ${templateParams.actName}. Please indicate your availability 💫`;
+
+    console.log("💬 [notifyDeputyOneShot] smsBody built:", smsBody);
+
+    // ✅ Send via Twilio template
+    await sendWhatsAppMessage({
+      to: deputy.phone,
+      actData: act,
+      lineup: lineupId,
+      member: deputy,
+      address: location,
       dateISO,
-      formattedAddress: shortAddress,
-      phone: phoneE164,
-    }).lean();
-
-    if (existing) {
-      console.log(
-        `⏭️ Skipping deputy ${deputy?.firstName} — already has availability row for`,
-        { actName, dateISO, shortAddress }
-      );
-      return { skipped: true, reason: "duplicate_in_db", phone: phoneE164 };
-    }
-
-    // 🎵 Lookup lineup
-    const lineup = Array.isArray(act?.lineups)
-      ? act.lineups.find(
-          (l) =>
-            l._id?.toString?.() === String(lineupId) ||
-            String(l.lineupId) === String(lineupId)
-        ) || act.lineups[0]
-      : null;
-
-    // 💰 Compute final fee dynamically
-    const finalFee = await computeFinalFeeForMember(
-      act,
-      deputy,
-      shortAddress,
-      dateISO,
-      lineup
-    );
-
-    const safeFee =
-      Number.isFinite(finalFee) && finalFee > 0
-        ? `£${finalFee}`
-        : "£TBC";
-
-    // 🗓️ Friendly date + duties
-    const formattedDateNice = formatNiceDate(dateISO);
-    const dutiesFormatted =
-      duties?.replace("Lead Vocal", "Lead Female Vocal") || duties;
-
-    const enquiryId = `${dateISO}-${actName}-${phoneE164}`;
-
-    // ✅ Save Availability record before sending
-    const newAvailability = new AvailabilityModel({
-      actId: act?._id || null,
-      lineupId: lineup?._id || null,
-      musicianId: deputy?._id || null,
-      phone: phoneE164,
-      dateISO,
-      formattedAddress: shortAddress,
-      formattedDate: formattedDateNice,
-      actName,
-      musicianName: `${deputy.firstName || ""} ${deputy.lastName || ""}`.trim(),
-      duties: dutiesFormatted,
-      fee: String(finalFee || ""),
-      reply: null,
-      enquiryId,
-      isDeputy: true,
-      v2: true,
-      createdAt: new Date(),
+      role: duties,
+      templateParams,
+      contentSid: TWILIO_ENQUIRY_SID,
+      smsBody,
     });
 
-    await newAvailability.save();
-    console.log("🗃️ Saved deputy Availability record:", {
-      id: newAvailability._id,
-      phone: phoneE164,
-      fee: finalFee,
-      dateISO,
-      shortAddress,
-    });
-
- // 📨 Send WhatsApp — reuse full address and computed fee
-const sendRes = await sendAvailabilityRequest({
-  musician: deputy,
-  act,
-  lineupId,
-  dateISO,
-  formattedAddress, // ✅ use the full address from the parent (not the short one)
-  fee: finalFee,    // ✅ already computed via computeFinalFeeForMember
-  duties: dutiesFormatted,
-});
-
-    // 🧾 Update record with outbound info
-    await AvailabilityModel.updateOne(
-      { _id: newAvailability._id },
-      {
-        $set: {
-          status: sendRes?.status || "queued",
-          messageSidOut: sendRes?.sid || null,
-          contactChannel: sendRes?.channel || "whatsapp",
-          updatedAt: new Date(),
-        },
-      }
-    );
-
-    console.log(
-      `✅ Deputy pinged ${deputy?.name} (${safeFee}) for ${actName}, ${shortAddress}`
-    );
-
-    return { phone: phoneE164, fee: finalFee, recordId: newAvailability._id };
+    console.log(`✅ notifyDeputyOneShot sent successfully to ${deputy.phone}`);
   } catch (err) {
-    console.error("⚠️ Failed to notify deputy:", err?.message || err);
-    throw err;
+    console.error("❌ notifyDeputyOneShot() failed:", err.message);
   }
 }
 
@@ -1665,16 +1497,16 @@ export const twilioInbound = async (req, res) => {
           });
         }
 
-        // 🔔 SSE clear badge
-        if (global.availabilityNotify?.badgeUpdated) {
-          global.availabilityNotify.badgeUpdated({
-            type: "availability_badge_updated",
-            actId,
-            actName: act?.tscName || act?.name,
-            dateISO,
-            badge: null,
-          });
-        }
+  // 🔔 SSE clear badge (only if not deputy)
+if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
+  global.availabilityNotify.badgeUpdated({
+    type: "availability_badge_updated",
+    actId,
+    actName: act?.tscName || act?.name,
+    dateISO,
+    badge: null,
+  });
+}
 
         return;
       }
