@@ -1356,37 +1356,40 @@ export const twilioInbound = async (req, res) => {
         console.log(`✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`);
 
         // 1️⃣ Create a calendar invite for either lead or deputy
-        if (emailForInvite && act && dateISO) {
-          const formattedDateString = new Date(dateISO).toLocaleDateString("en-GB", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-            year: "numeric",
-          });
+if (emailForInvite && act && dateISO) {
+  const formattedDateString = new Date(dateISO).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 
-          const fee =
-            updated?.fee ||
-            act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
-            null;
+  const fee =
+    updated?.fee ||
+    act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
+    null;
 
-          const event = await createCalendarInvite({
-            enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
-            actId,
-            dateISO,
-            email: emailForInvite,
-            summary: `TSC: ${act.tscName || act.name} enquiry`,
-            description: [
-              `Event Date: ${formattedDateString}`,
-              `Act: ${act.tscName || act.name}`,
-              `Role: ${updated.duties || ""}`,
-              `Address: ${updated.formattedAddress || "TBC"}`,
-              `Fee: £${fee || "TBC"}`,
-            ].join("\n"),
-            startTime: `${dateISO}T17:00:00Z`,
-            endTime: `${dateISO}T23:59:00Z`,
-            fee,
-          });
-
+  const event = await createCalendarInvite({
+    enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
+    actId,
+    dateISO,
+    email: emailForInvite,
+    summary: `TSC: ${act.tscName || act.name} enquiry`,
+    description: [
+      `Event Date: ${formattedDateString}`,
+      `Act: ${act.tscName || act.name}`,
+      `Role: ${updated.duties || ""}`,
+      `Address: ${updated.formattedAddress || "TBC"}`,
+      `Fee: £${fee || "TBC"}`,
+    ].join("\n"),
+    startTime: `${dateISO}T17:00:00Z`,
+    endTime: `${dateISO}T23:59:00Z`,
+    fee,
+  });
+  console.log("📅 Calendar invite sent to lead vocalist:", badge?.musicianEmail || leadEmail);
+} catch (err) {
+  console.error("❌ Calendar invite failed:", err.message);
+  
           await AvailabilityModel.updateOne(
             { _id: updated._id },
             {
