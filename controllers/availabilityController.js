@@ -1570,126 +1570,97 @@ const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
         return;
       }
 
-      /* -------------------------------------------------------------------------- */
-      /* 🚫 NO / UNAVAILABLE / NOLOC BRANCH                                       */
-      /* -------------------------------------------------------------------------- */
-      if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
-        // 🗑️ If lead vocalist becomes unavailable, clear their badge
-// 🗑️ If lead vocalist becomes unavailable, clear their badge from the Act document
-try {
-  const actDoc = await Act.findById(updated.actId);
-  if (actDoc?.availabilityBadges) {
-    const dateKey = updated.dateISO.slice(0, 10);
-    if (actDoc.availabilityBadges.has(dateKey)) {
-      actDoc.availabilityBadges.delete(dateKey);
-      await actDoc.save();
-      console.log("🗑️ Cleared availability badge from Act:", {
-        actId: updated.actId,
-        dateISO: dateKey,
-      });
-    } else {
-      console.log("ℹ️ No badge to clear for this date:", dateKey);
-    }
+    /* -------------------------------------------------------------------------- */
+/* 🚫 NO / UNAVAILABLE / NOLOC BRANCH                                       */
+/* -------------------------------------------------------------------------- */
+if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
+  console.log("🚫 UNAVAILABLE reply received via WhatsApp");
+
+  // 1) Update musician reply / status immediately
+  if (updated?._id) {
+    await AvailabilityModel.updateOne(
+      { _id: updated._id },
+      {
+        $set: {
+          status: "unavailable",
+          reply: "unavailable",
+          repliedAt: new Date(),
+          calendarStatus: "cancelled",
+        },
+      }
+    );
   }
 
-  // 🛰️ Broadcast badge clear event via SSE
-  if (global.availabilityNotify?.badgeUpdated) {
+  // 2) Cancel calendar invite if we have one
+  let calendarEventId = updated?.calendarEventId;
+  if (!calendarEventId && updated?.enquiryId) {
+    const existing = await AvailabilityModel.findOne({
+      enquiryId: updated.enquiryId,
+      calendarEventId: { $exists: true, $ne: null },
+    }).lean();
+    if (existing?.calendarEventId) {
+      calendarEventId = existing.calendarEventId;
+      console.log("📆 Fallback found calendarEventId:", calendarEventId);
+    }
+  }
+  if (calendarEventId && emailForInvite) {
+    try {
+      console.log("🗓️ Attempting to cancel Google Calendar invite...");
+      await cancelCalendarInvite(emailForInvite, calendarEventId, updated.dateISO);
+      console.log("✅ Calendar invite cancelled successfully");
+    } catch (cancelErr) {
+      console.error("❌ Failed to cancel calendar invite:", cancelErr.message);
+    }
+  } else {
+    console.log("⏭️ No calendarEventId or emailForInvite, skipping cancel", {
+      calendarEventId,
+      emailForInvite,
+    });
+  }
+
+  // 3) ***Hard delete*** the badge keys from the Act doc (handles both raw and _tbc)
+  try {
+    const dateKey = String(updated.dateISO).slice(0, 10);
+    const unset = {
+      [`availabilityBadges.${dateKey}`]: "",
+      [`availabilityBadges.${dateKey}_tbc`]: "",
+    };
+    const r = await Act.updateOne({ _id: updated.actId }, { $unset: unset });
+    console.log("🗑️ Act badge $unset result:", r);
+  } catch (err) {
+    console.error("❌ Failed to $unset badge keys in Act:", err.message);
+  }
+
+  // 4) Notify user + deputies
+  await sendWhatsAppText(
+    toE164,
+    "Thanks for letting us know — we've updated your availability."
+  );
+  if (act?._id && updated?.lineupId) {
+    console.log("📢 Notifying deputies...");
+    await notifyDeputies({
+      act,
+      lineupId: updated.lineupId,
+      dateISO: updated.dateISO,
+      excludePhone: toE164,
+    });
+  }
+
+  // 5) Broadcast ONE clean SSE with `badge:null`
+  if (global.availabilityNotify?.badgeUpdated && updated) {
     global.availabilityNotify.badgeUpdated({
       type: "availability_badge_updated",
       actId: String(updated.actId),
       actName: act?.tscName || act?.name,
       dateISO: updated.dateISO,
-      badge: null, // important for frontend clearing
+      badge: null,
     });
+    console.log("📡 SSE broadcasted: availability_badge_updated (lead unavailable)");
   }
-} catch (err) {
-  console.warn("⚠️ Failed to clear availability badge:", err.message);
-}
 
-        try {
-          console.log("🚫 UNAVAILABLE reply received via WhatsApp");
-
-          if (updated?._id) {
-            await AvailabilityModel.updateOne(
-              { _id: updated._id },
-              {
-                $set: {
-                  status: "unavailable",
-                  reply: "unavailable",
-                  repliedAt: new Date(),
-                  calendarStatus: "cancelled",
-                },
-              }
-            );
-          }
-
-          /* ✅ NEW: Calendar decline fallback lookup */
-          let calendarEventId = updated?.calendarEventId;
-          if (!calendarEventId && updated?.enquiryId) {
-            const existing = await AvailabilityModel.findOne({
-              enquiryId: updated.enquiryId,
-              calendarEventId: { $exists: true, $ne: null },
-            }).lean();
-            if (existing?.calendarEventId) {
-              calendarEventId = existing.calendarEventId;
-              console.log("📆 Fallback found calendarEventId:", calendarEventId);
-            }
-          }
-
-          if (calendarEventId && emailForInvite) {
-            try {
-              console.log("🗓️ Attempting to cancel Google Calendar invite...");
-              await cancelCalendarInvite(emailForInvite, calendarEventId, updated.dateISO);
-              console.log("✅ Calendar invite cancelled successfully");
-            } catch (cancelErr) {
-              console.error("❌ Failed to cancel calendar invite:", cancelErr.message);
-            }
-          } else {
-            console.log("⏭️ No calendarEventId or emailForInvite, skipping cancel", {
-              calendarEventId,
-              emailForInvite,
-            });
-          }
-
-          await sendWhatsAppText(
-            toE164,
-            "Thanks for letting us know — we've updated your availability."
-          );
-
-          if (act?._id && updated?.lineupId) {
-            console.log("📢 Notifying deputies...");
-            await notifyDeputies({
-              act,
-              lineupId: updated.lineupId,
-              dateISO: updated.dateISO,
-              excludePhone: toE164,
-            });
-          }
-
-                  await rebuildAndApplyAvailabilityBadge(
-            { body: { actId: String(updated.actId), dateISO: updated.dateISO } },
-            {
-              json: () => {},
-              status: () => ({ json: () => {} }),
-            }
-          );
-
-          // ✅ Broadcast that the *badge* changed (not that a deputy is available)
-         if (global.availabilityNotify?.badgeUpdated && updated) {
-  global.availabilityNotify.badgeUpdated({
-    type: "availability_badge_updated",
-    actId: String(updated.actId),
-    actName: act?.tscName || act?.name,
-    dateISO: updated.dateISO,
-    badge: updated.badge || null, // 👈 include badge or explicit null
-  });
-}
-
-          console.log("📡 SSE broadcasted: availability_badge_updated (lead unavailable)");
-        } catch (err) {
-          console.error("❌ Error handling UNAVAILABLE reply:", err);
-        }
-        return;
+  // 6) (Optional) do NOT call rebuildAndApplyAvailabilityBadge again here.
+  //    The badge is gone in DB and we told the front-end to clear it.
+  return;
       }
     } catch (err) {
       console.error("❌ Error in twilioInbound background task:", err);
