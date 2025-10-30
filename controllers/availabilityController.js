@@ -78,7 +78,7 @@ const toE164 = (raw = "") => {
 /**
  * Compute a member's total fee (base + travel) given act, member, and address.
  */
-async function computeFinalFeeForMember(act, member, address, dateISO, lineup) {
+export async function computeFinalFeeForMember(act, member, address, dateISO, lineup) {
   const baseFee = Number(member?.fee ?? 0);
   const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
   const membersCount = Math.max(
