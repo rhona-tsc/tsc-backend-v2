@@ -2317,17 +2317,19 @@ const lineupQuotes = (act?.lineups || []).map((lineup) => {
           : ""
       }
       <li>The band on site for up to 7 hours or until midnight</li>
-      ${
-        Object.entries(act.extras || {})
-          .filter(([_, v]) => v?.complimentary)
-          .map(
-            ([key]) =>
-              `<li>${key
-                .replace(/_/g, " ")
-                .replace(/^\w/, (c) => c.toUpperCase())}</li>`
-          )
-          .join("")
-      }
+     ${
+  typeof act?.extras === "object" && Object.keys(act.extras).length
+    ? Object.entries(act.extras)
+        .filter(([_, v]) => v?.complimentary)
+        .map(
+          ([key]) =>
+            `<li>${key
+              .replace(/_/g, " ")
+              .replace(/^\w/, (c) => c.toUpperCase())}</li>`
+        )
+        .join("")
+    : ""
+}
       ${
         act.offRepertoireRequests > 0
           ? `<li>${
