@@ -1329,8 +1329,14 @@ export const twilioInbound = async (req, res) => {
         return;
       }
 
-      const act = updated?.actId ? await Act.findById(updated.actId).lean() : null;
-      let musician = updated?.musicianId
+const act =
+  updated?.actId && typeof updated.actId === "string"
+    ? await Act.findById(new mongoose.Types.ObjectId(updated.actId)).lean()
+    : updated?.actId
+    ? await Act.findById(updated.actId).lean()
+    : null;
+    
+    let musician = updated?.musicianId
         ? await Musician.findById(updated.musicianId).lean()
         : null;
 
@@ -1357,37 +1363,44 @@ export const twilioInbound = async (req, res) => {
         console.log(`✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`);
 
         // 1️⃣ Create a calendar invite for either lead or deputy
-        if (emailForInvite && act && dateISO) {
-          const formattedDateString = new Date(dateISO).toLocaleDateString("en-GB", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-            year: "numeric",
-          });
+if (emailForInvite && act && dateISO) {
+  const formattedDateString = new Date(dateISO).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 
-          const fee =
-            updated?.fee ||
-            act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
-            null;
+  const fee =
+    updated?.fee ||
+    act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
+    null;
 
-          const event = await createCalendarInvite({
-            enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
-            actId,
-            dateISO,
-            email: emailForInvite,
-            summary: `TSC: ${act.tscName || act.name} enquiry`,
-            description: [
-              `Event Date: ${formattedDateString}`,
-              `Act: ${act.tscName || act.name}`,
-              `Role: ${updated.duties || ""}`,
-              `Address: ${updated.formattedAddress || "TBC"}`,
-              `Fee: £${fee || "TBC"}`,
-            ].join("\n"),
-            startTime: `${dateISO}T17:00:00Z`,
-            endTime: `${dateISO}T23:59:00Z`,
-            fee,
-          });
+try {
+  const event = await createCalendarInvite({
+    enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
+    actId,
+    dateISO,
+    email: emailForInvite,
+    summary: `TSC: ${act.tscName || act.name} enquiry`,
+    description: [
+      `Event Date: ${formattedDateString}`,
+      `Act: ${act.tscName || act.name}`,
+      `Role: ${updated.duties || ""}`,
+      `Address: ${updated.formattedAddress || "TBC"}`,
+      `Fee: £${fee || "TBC"}`,
+    ].join("\n"),
+    startTime: `${dateISO}T17:00:00Z`,
+    endTime: `${dateISO}T23:59:00Z`,
+    fee,
+  });
 
+  console.log("📅 Calendar invite sent to lead vocalist:", emailForInvite, {
+    eventId: event?.id || event?.data?.id,
+  });
+} catch (err) {
+  console.error("❌ Calendar invite failed:", err.message);
+}
           await AvailabilityModel.updateOne(
             { _id: updated._id },
             {
@@ -1404,7 +1417,7 @@ export const twilioInbound = async (req, res) => {
         await sendWhatsAppText(toE164, "Super — we’ve sent a diary invite with full details.");
 
         // 2️⃣ Mark as available + rebuild badge
-        updated.status = "available";
+        updated.status = "read";
         if (isDeputy) updated.isDeputy = true;
         await updated.save();
 
@@ -1498,16 +1511,16 @@ export const twilioInbound = async (req, res) => {
           });
         }
 
-        // 🔔 SSE clear badge
-        if (global.availabilityNotify?.badgeUpdated) {
-          global.availabilityNotify.badgeUpdated({
-            type: "availability_badge_updated",
-            actId,
-            actName: act?.tscName || act?.name,
-            dateISO,
-            badge: null,
-          });
-        }
+  // 🔔 SSE clear badge (only if not deputy)
+if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
+  global.availabilityNotify.badgeUpdated({
+    type: "availability_badge_updated",
+    actId,
+    actName: act?.tscName || act?.name,
+    dateISO,
+    badge: null,
+  });
+}
 
         return;
       }
