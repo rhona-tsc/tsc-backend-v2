@@ -1571,7 +1571,7 @@ export const twilioInbound = async (req, res) => {
         await sendWhatsAppText(toE164, "Super — we’ve sent a diary invite with full details.");
 
         // 2️⃣ Mark as available + rebuild badge
-        updated.status = "available";
+        updated.status = "read";
         if (isDeputy) updated.isDeputy = true;
         await updated.save();
 
