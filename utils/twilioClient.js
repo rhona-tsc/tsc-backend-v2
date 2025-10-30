@@ -2,6 +2,9 @@
 import 'dotenv/config';
 import Twilio from 'twilio';
 import AvailabilityModel from "../models/availabilityModel.js";
+import { computeFinalFeeForMember, formatNiceDate } from "../controllers/availabilityController.js";
+import { countyFromAddress } from "../utils/postcodes.js"; // if not already imported
+
 
 const {
   TWILIO_ACCOUNT_SID,            // ACxxxxxxxx...
@@ -116,32 +119,83 @@ export const WA_FALLBACK_CACHE = new Map(); // sid -> { to, smsBody }
  * Send a WhatsApp message via Content Template.
  */
 export async function sendWhatsAppMessage(opts = {}) {
-    console.log(`🩵 (utils/twilioClient.js) sendWhatsAppMessage START at ${new Date().toISOString()}`, { });
+  console.log(`🩵 sendWhatsAppMessage START at ${new Date().toISOString()}`);
 
   const client = getTwilioClient();
-  if (!client) throw new Error('Twilio disabled');
+  if (!client) throw new Error("Twilio disabled");
 
   const {
     to,
+    actData = null,
+    lineup = null,
+    member = null,          // ✅ so we know whose fee to use
+    address = "",
+    dateISO = "",
+    role = "",
     templateParams = {},
     variables = undefined,
     contentSid,
-    smsBody = '',
+    smsBody = "",
   } = opts;
 
   const toE = toE164(to);
-  const fromE = toE164(TWILIO_WA_SENDER || '');
-  if (!toE || !fromE) throw new Error('Missing WA to/from');
+  const fromE = toE164(TWILIO_WA_SENDER || "");
+  if (!toE || !fromE) throw new Error("Missing WA to/from");
 
+  /* -------------------------------------------------------------------------- */
+  /* 🧮 Calculate fee + format address and date                                 */
+  /* -------------------------------------------------------------------------- */
+
+  // 🪶 Get short address (friendly 2-segment format)
+  const shortAddress = address
+    ? address.split(",").slice(0, 2).join(", ").trim()
+    : "TBC";
+
+  // 📅 Nice formatted date (e.g. Tuesday, 22nd March 2027)
+  const formattedDate = dateISO ? formatNiceDate(dateISO) : "TBC";
+
+  // 💰 Calculate final fee using your proven helper
+  let formattedFee = "TBC";
+  try {
+    if (actData && member && address && dateISO && lineup) {
+      const feeValue = await computeFinalFeeForMember(
+        actData,
+        member,
+        address,
+        dateISO,
+        lineup
+      );
+      formattedFee = `£${feeValue}`;
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to compute final fee for member:", err.message);
+  }
+
+  // 🎭 Merge all into content variables
+  const enrichedVars = {
+    actName: actData?.tscName || actData?.name || "TSC Act",
+    date: formattedDate,
+    fee: formattedFee,
+    location: shortAddress,
+    role: role || member?.instrument || "Musician",
+    ...templateParams,
+    ...variables,
+  };
+
+  console.log("📦 Enriched content variables:", enrichedVars);
+
+  /* -------------------------------------------------------------------------- */
+  /* ✉️ Send via Twilio                                                        */
+  /* -------------------------------------------------------------------------- */
   const payload = {
     from: `whatsapp:${fromE}`,
     to: `whatsapp:${toE}`,
     contentSid: contentSid || TWILIO_ENQUIRY_SID,
-    contentVariables: makeContentVariables({ variables, templateParams }),
+    contentVariables: makeContentVariables({ variables: enrichedVars }),
     ...(statusCallback ? { statusCallback } : {}),
   };
 
-  console.log('📤 Twilio WA create()', {
+  console.log("📤 Twilio WA create()", {
     to: payload.to,
     from: payload.from,
     contentSid: payload.contentSid,
@@ -150,14 +204,22 @@ export async function sendWhatsAppMessage(opts = {}) {
 
   const msg = await client.messages.create(payload);
 
-  // 👉 Arm fallback
+  /* -------------------------------------------------------------------------- */
+  /* 💾 Fallback persist (unchanged)                                           */
+  /* -------------------------------------------------------------------------- */
   try {
     const twilioSid = msg?.sid;
     const toE = toE164(to);
     if (twilioSid && toE && smsBody) {
       await AvailabilityModel.updateOne(
         { phone: toE, v2: true },
-        { $set: { "outbound.sid": twilioSid, "outbound.smsBody": smsBody, updatedAt: new Date() } }
+        {
+          $set: {
+            "outbound.sid": twilioSid,
+            "outbound.smsBody": smsBody,
+            updatedAt: new Date(),
+          },
+        }
       );
       WA_FALLBACK_CACHE.set(twilioSid, { to: toE, smsBody });
     }
