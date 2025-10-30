@@ -342,7 +342,7 @@ function extractOutcode(address = "") {
   return o ? o[1] : "";
 }
 
-function countyFromAddress(address = "") {
+export function countyFromAddress(address = "") {
   console.log(
     `🟢 (availabilityController.js) countyFromAddress START at ${new Date().toISOString()}`,
     {}

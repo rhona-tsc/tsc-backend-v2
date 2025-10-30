@@ -3,7 +3,6 @@ import 'dotenv/config';
 import Twilio from 'twilio';
 import AvailabilityModel from "../models/availabilityModel.js";
 import { computeFinalFeeForMember, formatNiceDate } from "../controllers/availabilityController.js";
-import { countyFromAddress } from "../utils/postcodes.js"; // if not already imported
 
 
 const {
