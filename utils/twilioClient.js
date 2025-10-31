@@ -209,19 +209,20 @@ export async function sendWhatsAppMessage(opts = {}) {
   try {
     const twilioSid = msg?.sid;
     const toE = toE164(to);
-    if (twilioSid && toE && smsBody) {
-      await AvailabilityModel.updateOne(
-        { phone: toE, v2: true },
-        {
-          $set: {
-            "outbound.sid": twilioSid,
-            "outbound.smsBody": smsBody,
-            updatedAt: new Date(),
-          },
-        }
-      );
-      WA_FALLBACK_CACHE.set(twilioSid, { to: toE, smsBody });
+// 🧩 Only save fallback text when we are NOT using a Twilio content template
+if (twilioSid && toE && smsBody && !contentSid) {
+  await AvailabilityModel.updateOne(
+    { phone: toE, v2: true },
+    {
+      $set: {
+        "outbound.sid": twilioSid,
+        "outbound.smsBody": smsBody,
+        updatedAt: new Date(),
+      },
     }
+  );
+  WA_FALLBACK_CACHE.set(twilioSid, { to: toE, smsBody });
+}
   } catch (e) {
     console.warn("[twilio] failed to persist WA fallback arm:", e?.message || e);
   }
