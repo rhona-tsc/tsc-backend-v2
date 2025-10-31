@@ -1179,30 +1179,30 @@ export const triggerAvailabilityRequest = async (req, res) => {
       fee: finalFee,
     });
 
-    // 5️⃣ Send WhatsApp (shared helper)
+  // 5️⃣ Send WhatsApp (shared helper)
 try {
+  console.log("📤 [triggerAvailabilityRequest] Sending unified WA message via sendWhatsAppMessage()");
+
+  const smsBody = `Hi ${lead.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${lead.instrument || "Lead Vocal"} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
+
   const sendRes = await sendWhatsAppMessage({
-    musician: lead,
-    act,
-    lineupId: lineup?._id,
+    to: phoneNorm,
+    actData: act,
+    lineup,
+    member: lead,
+    address: shortAddress,
     dateISO,
-    formattedDate,
-    formattedAddress: shortAddress,
-    fee: finalFee,
-    duties: lead.instrument || "Lead Vocal",
+    role: lead.instrument || "Lead Vocal",
+    smsBody,
+    contentSid: process.env.TWILIO_ENQUIRY_SID,
   });
-  console.log("✅ WhatsApp sent successfully:", sendRes);
+
+  console.log("✅ WhatsApp (lead) sent successfully:", sendRes?.sid || sendRes);
   return res.json({ success: true, sent: 1 });
 } catch (err) {
   console.warn("⚠️ WhatsApp send failed:", err.message);
   return res.json({ success: false, message: err.message });
 }
-  } catch (err) {
-    console.error("❌ triggerAvailabilityRequest error:", err);
-    return res
-      .status(500)
-      .json({ success: false, message: err?.message || "Server error" });
-  }
 };
 
 // -------------------- Delivery/Read Receipts --------------------
