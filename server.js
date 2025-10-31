@@ -40,7 +40,11 @@ import { submitActSubmission } from './controllers/actSubmissionController.js';
 import v2Routes from "./routes/v2.js";
 import { rebuildAndApplyAvailabilityBadge, twilioInbound, twilioStatus, buildAvailabilityBadgeFromRows } from './controllers/availabilityController.js';
 import { handleGoogleWebhook } from './controllers/googleController.js';
+import morgan from "morgan";
 
+if (process.env.NODE_ENV !== "production") {
+  app.use(morgan("dev"));
+}
 
 // at the top of backend/server.js (after dotenv)
 console.log('ENV CHECK:', {

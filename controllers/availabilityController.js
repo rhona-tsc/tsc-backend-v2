@@ -179,11 +179,7 @@ export async function sendAvailabilityRequest({
     formattedAddress ||
     "TBC";
 
-  // 💷 Format fee
-  const numericFee = Number(fee);
-  const feeDisplay = Number.isFinite(numericFee) && numericFee > 0
-    ? `£${Math.round(numericFee)}`
-    : "TBC";
+
 
   // 🎤 Duties
   const dutiesClean =
@@ -194,23 +190,30 @@ export async function sendAvailabilityRequest({
   const actName = act?.tscName || act?.name || "the band";
   const contentSid = process.env.TWILIO_ENQUIRY_SID;
 
-  const musicianName = `${musician.firstName || ""} ${musician.lastName || ""}`.trim();
+  // ✅ Clean version – preserves accurate musician name and fee
+const musicianName = `${musician?.firstName || ""} ${musician?.lastName || ""}`.trim() || "there";
 
-  const smsBody = `Hi ${musicianName || "there"}, you've received an enquiry for a gig on ${formattedDateNice} in ${addressShort} at a rate of ${feeDisplay} for ${dutiesClean} duties with ${actName}. Please indicate your availability 💫`;
+// Use exact fee provided in parameter (don’t round, don’t overwrite)
+const feeDisplay =
+  fee && !isNaN(Number(fee))
+    ? (fee.toString().startsWith("£") ? fee : `£${fee}`)
+    : "TBC";
 
-  return await sendWhatsAppMessage({
-    to: `whatsapp:${phoneNorm}`,
-    contentSid,
-    variables: {
-      musicianName,
-      date: formattedDateNice,
-      location: formattedAddress || "TBC",
-      fee: feeDisplay,
-      role: dutiesClean,
-      actName,
-    },
-    smsBody,
-  });
+const smsBody = `Hi ${musicianName}, you've received an enquiry for a gig on ${formattedDateNice} in ${addressShort} at a rate of ${feeDisplay} for ${dutiesClean} duties with ${actName}. Please indicate your availability 💫`;
+
+return await sendWhatsAppMessage({
+  to: `whatsapp:${phoneNorm}`,
+  contentSid,
+  variables: {
+    musicianName,
+    date: formattedDateNice,
+    location: formattedAddress || "TBC",
+    fee: feeDisplay,
+    role: dutiesClean,
+    actName,
+  },
+  smsBody,
+});
 }
 
 /**
