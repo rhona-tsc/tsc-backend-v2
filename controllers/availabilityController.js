@@ -1181,7 +1181,7 @@ export const triggerAvailabilityRequest = async (req, res) => {
 
     // 5️⃣ Send WhatsApp (shared helper)
 try {
-  const sendRes = await sendAvailabilityRequest({
+  const sendRes = await sendWhatsAppMessage({
     musician: lead,
     act,
     lineupId: lineup?._id,
