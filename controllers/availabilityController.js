@@ -1395,23 +1395,25 @@ try {
     fee,
   });
 
-  console.log("📅 Calendar invite sent to lead vocalist:", emailForInvite, {
+  console.log("📅 Calendar invite sent:", emailForInvite, {
     eventId: event?.id || event?.data?.id,
   });
+
+  // ✅ move this INSIDE the try
+  await AvailabilityModel.updateOne(
+    { _id: updated._id },
+    {
+      $set: {
+        calendarEventId: event?.id || event?.data?.id || null,
+        calendarInviteEmail: emailForInvite,
+        calendarInviteSentAt: new Date(),
+        calendarStatus: "needsAction",
+      },
+    }
+  );
 } catch (err) {
   console.error("❌ Calendar invite failed:", err.message);
 }
-          await AvailabilityModel.updateOne(
-            { _id: updated._id },
-            {
-              $set: {
-                calendarEventId: event?.id || event?.data?.id || null,
-                calendarInviteEmail: emailForInvite,
-                calendarInviteSentAt: new Date(),
-                calendarStatus: "needsAction",
-              },
-            }
-          );
         }
 
         await sendWhatsAppText(toE164, "Super — we’ve sent a diary invite with full details.");
