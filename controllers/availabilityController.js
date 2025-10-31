@@ -398,9 +398,22 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
     address,
   });
 
-  const lineup = act?.lineups?.find((l) => String(l._id) === String(lineupId));
+  // ✅ Always have a lineup: use provided one or smallest/first
+  let lineup = act?.lineups?.find((l) => String(l._id) === String(lineupId));
+  if (!lineup && Array.isArray(act?.lineups) && act.lineups.length > 0) {
+    lineup = act.lineups.reduce((smallest, curr) => {
+      const currSize = curr.bandMembers?.filter((m) => m.isEssential).length || 0;
+      const smallSize = smallest.bandMembers?.filter((m) => m.isEssential).length || 0;
+      return currSize < smallSize ? curr : smallest;
+    }, act.lineups[0]);
+    console.log("🧭 [notifyDeputies] No lineupId provided — defaulting to smallest lineup:", {
+      selectedLineupId: lineup?._id,
+      actSize: lineup?.actSize,
+    });
+  }
+
   if (!lineup) {
-    console.warn("⚠️ [notifyDeputies] No lineup found for this act");
+    console.warn(`⚠️ [notifyDeputies] No lineups exist for ${act?.tscName || act?.name}`);
     return;
   }
 
@@ -451,18 +464,9 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
   });
 
   for (const deputy of validDeputies) {
-    console.log("🚀 [notifyDeputies] Sending to deputy:", {
-      deputy: `${deputy.firstName || ""} ${deputy.lastName || ""}`.trim(),
-      phone: deputy.phone,
-      duties: "Lead Female Vocal",
-      finalFee: deputy.finalFee,
-      formattedDate,
-      formattedAddress: address,
-    });
-
     await notifyDeputyOneShot({
       act,
-      lineupId,
+      lineupId: lineup._id,
       deputy,
       dateISO,
       formattedDate,
