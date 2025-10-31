@@ -13,6 +13,7 @@ import Shortlist from "../models/shortlistModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import User from "../models/userModel.js";
 import mongoose from "mongoose";
+import { calculateActPricing } from "./helpers.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
@@ -179,7 +180,12 @@ export async function sendAvailabilityRequest({
     formattedAddress ||
     "TBC";
 
-
+  // 💷 Format fee
+  const numericFee = Number(fee);
+  const feeDisplay =
+    Number.isFinite(numericFee) && numericFee > 0
+      ? `£${Math.round(numericFee)}`
+      : "TBC";
 
   // 🎤 Duties
   const dutiesClean =
@@ -189,33 +195,32 @@ export async function sendAvailabilityRequest({
 
   const actName = act?.tscName || act?.name || "the band";
   const contentSid = process.env.TWILIO_ENQUIRY_SID;
+  const musicianName = `${musician.firstName || ""} ${musician.lastName || ""}`.trim();
 
-  // ✅ Clean version – preserves accurate musician name and fee
-const musicianName = `${musician?.firstName || ""} ${musician?.lastName || ""}`.trim() || "there";
+  // ✅ Ensure the fallback SMS body matches the enriched vars
+  const safeMusicianName = musicianName || "there";
+  const safeFee = feeDisplay || "TBC";
+  const safeRole = dutiesClean || "your role";
+  const safeDate = formattedDateNice;
+  const safeLocation = formattedAddress || addressShort || "TBC";
+  const safeAct = actName || "the band";
 
-// Use exact fee provided in parameter (don’t round, don’t overwrite)
-const feeDisplay =
-  fee && !isNaN(Number(fee))
-    ? (fee.toString().startsWith("£") ? fee : `£${fee}`)
-    : "TBC";
+  const smsBody = `Hi ${safeMusicianName}, you've received an enquiry for a gig on ${safeDate} in ${safeLocation} at a rate of ${safeFee} for ${safeRole} duties with ${safeAct}. Please indicate your availability 💫`;
 
-const smsBody = `Hi ${musicianName}, you've received an enquiry for a gig on ${formattedDateNice} in ${addressShort} at a rate of ${feeDisplay} for ${dutiesClean} duties with ${actName}. Please indicate your availability 💫`;
-
-return await sendWhatsAppMessage({
-  to: `whatsapp:${phoneNorm}`,
-  contentSid,
-  variables: {
-    musicianName,
-    date: formattedDateNice,
-    location: formattedAddress || "TBC",
-    fee: feeDisplay,
-    role: dutiesClean,
-    actName,
-  },
-  smsBody,
-});
+  return await sendWhatsAppMessage({
+    to: `whatsapp:${phoneNorm}`,
+    contentSid,
+    variables: {
+      musicianName: safeMusicianName,
+      date: safeDate,
+      location: safeLocation,
+      fee: safeFee,
+      role: safeRole,
+      actName: safeAct,
+    },
+    smsBody,
+  });
 }
-
 /**
  * Send a client-facing email about act availability.
  * Falls back to hello@thesupremecollective.co.uk if no client email found.
@@ -2259,10 +2264,10 @@ if (!badge.isDeputy) {
     // ✅ URLs should use FRONTEND_URL
     const SITE =
       process.env.FRONTEND_URL ||
-      "https://meek-biscotti-8d5020.netlify.app";
+      "https://meek-biscotti-8d5020.netlify.app/";
 
-    const profileUrl = `${SITE}/act/${actDoc._id}`;
-    const cartUrl = `${SITE}/act/${actDoc._id}?date=${dateISO}&address=${encodeURIComponent(
+    const profileUrl = `${SITE}act/${actDoc._id}`;
+    const cartUrl = `${SITE}act/${actDoc._id}?date=${dateISO}&address=${encodeURIComponent(
       badge?.address || actDoc?.formattedAddress || ""
     )}`;
 
@@ -2335,26 +2340,53 @@ if (!badge.isDeputy) {
     /* ---------------------------------------------------------------------- */
     /* 💰 lineupQuotes with dynamic pricing                                   */
     /* ---------------------------------------------------------------------- */
-    const lineupQuotes = (actDoc.lineups || []).map((lineup) => {
-      const baseFee = lineup.base_fee?.[0]?.total_fee || 0;
+  // 🪄 Improved lineup formatting with dynamic travel inclusion
+const lineupQuotes = await Promise.all(
+  (actDoc.lineups || []).map(async (lu) => {
+    const name =
+      lu?.actSize ||
+      `${(lu?.bandMembers || []).filter((m) => m?.isEssential).length}-Piece`;
 
-      const essentialExtras = (lineup.bandMembers || [])
-        .flatMap((m) =>
-          (m.additionalRoles || []).filter(
-            (r) => r.isEssential && typeof r.additionalFee === "number"
-          )
-        )
-        .reduce((sum, r) => sum + (r.additionalFee || 0), 0);
+    // Replace generic "vocals" with lead female vocal if present
+    const instruments = (lu?.bandMembers || [])
+      .filter((m) => m?.isEssential)
+      .map((m) => {
+        const inst = (m?.instrument || "").toLowerCase();
+        if (inst.includes("vocal")) return "Lead Female Vocal";
+        return m.instrument;
+      })
+      .filter(Boolean);
 
-      const totalFee = baseFee + essentialExtras;
-      const displayFee =
-        totalFee > 0 ? Math.ceil(totalFee / 0.75).toLocaleString() : "TBC";
+    const instrumentList = instruments.join(", ");
 
-      return {
-        name: generateDescription(lineup),
-        price: displayFee,
-      };
-    });
+    // 🎯 Calculate travel-inclusive total using existing backend logic
+    let travelTotal = "";
+    try {
+      const selectedAddress =
+        badge?.address || actDoc?.formattedAddress || "TBC";
+      const selectedDate = badge?.dateISO || new Date().toISOString().slice(0, 10);
+
+      const { total, travelCalculated } = await calculateActPricing(
+        actDoc,
+        "", // selectedCounty optional
+        selectedAddress,
+        selectedDate,
+        lu
+      );
+
+      if (total) {
+        travelTotal = `from £${Math.round(total)}`;
+      }
+    } catch (err) {
+      console.warn("⚠️ Travel-inclusive price calc failed:", err.message);
+    }
+
+    // 💅 Bold the lineup name, normal font for instruments
+    return {
+      html: `<strong>${name}</strong> (${instrumentList}) — ${travelTotal || "price TBC"}`,
+    };
+  })
+);
 
     /* ---------------------------------------------------------------------- */
     /* 🎁 Complimentary extras & tailoring                                    */
@@ -2418,19 +2450,11 @@ if (!badge.isDeputy) {
 
           <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
 
-          ${
-            lineupQuotes.length
-              ? `<h4 style="margin-top:20px;">Lineup options:</h4>
-                 <ul>
-                   ${lineupQuotes
-                     .map(
-                       (l) =>
-                         `<li><strong>${l.name}</strong> — from £${l.price} + travel</li>`
-                     )
-                     .join("")}
-                 </ul>`
-              : ""
-          }
+         ${lineupQuotes.length ? `
+  <h4 style="margin-top:20px;">Lineup options:</h4>
+  <ul>
+    ${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}
+  </ul>` : ""}
 
           <h4 style="margin-top:25px;">Included in your quote:</h4>
           <ul>
@@ -2446,7 +2470,7 @@ if (!badge.isDeputy) {
             <li>Or up to 7 hours on site if earlier arrival is needed</li>
             ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
             ${tailoring ? `<li>${tailoring}</li>` : ""}
-            <li>+ travel</li>
+            <li>& travel</li>
           </ul>
 
           <div style="margin-top:30px;">
