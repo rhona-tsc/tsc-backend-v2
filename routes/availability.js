@@ -6,7 +6,7 @@ import {
   twilioInbound,
   rebuildAndApplyAvailabilityBadge,
   clearavailabilityBadges,
-  shortlistActAndTriggerAvailability,
+  triggerAvailabilityRequest,
 } from "../controllers/availabilityController.js";
 import { makeAvailabilityBroadcaster } from "../controllers/availabilityController.js";
 import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYesV2.js";
@@ -256,7 +256,7 @@ router.post("/request", async (req, res) => {
       json: (obj) => obj,
     };
 
-    const result = await shortlistActAndTriggerAvailability(fakeReq, fakeRes);
+    const result = await triggerAvailabilityRequest(fakeReq, fakeRes);
 
     if (result?.success) {
       console.log(`✅ WhatsApp message sent successfully`, result);

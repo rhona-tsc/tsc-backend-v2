@@ -1,7 +1,7 @@
 // backend/routes/availabilityV2.js
 import express from "express";
-import { shortlistActAndTriggerAvailability } from "../controllers/shortlistController.js";
 import AvailabilityModel from "../models/availabilityModel.js";
+import { triggerAvailabilityRequest } from "../controllers/availabilityController.js";
 
 const router = express.Router();
 
@@ -15,7 +15,7 @@ router.post("/request", (req, res, next) => {
     body: req.body,
   });
   next();
-}, shortlistActAndTriggerAvailability);
+}, triggerAvailabilityRequest);
 
 // Cancel active conversation lock
 router.post("/cancel-active", async (req, res) => {

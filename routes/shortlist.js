@@ -3,10 +3,10 @@ import express from "express";
 import Act from "../models/actModel.js";
 import User from "../models/userModel.js";
 import {
-  shortlistActAndTriggerAvailability,
   getUserShortlist,
   notifyMusician,
 } from "../controllers/shortlistController.js";
+import { triggerAvailabilityRequest } from "../controllers/availabilityController.js";
 
 const router = express.Router();
 
@@ -19,7 +19,7 @@ router.post("/add", (req, res, next) => {
     { body: req.body }
   );
   next();
-}, shortlistActAndTriggerAvailability);
+}, triggerAvailabilityRequest);
 
 /* -------------------------------------------------------------------------- */
 /* 🟢 GET /user/:userId/shortlisted                                           */
