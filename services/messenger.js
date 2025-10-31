@@ -1,7 +1,7 @@
 // services/messenger.ts
 import Twilio from "twilio";
 
-const client = Twilio(process.env.TWILIO_SID, process.env.TWILIO_TOKEN);
+const client = Twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const FROM_WHATSAPP = process.env.TWILIO_WA_SENDER
 const FROM_SMS = process.env.TWILIO_SMS_FROM
 
