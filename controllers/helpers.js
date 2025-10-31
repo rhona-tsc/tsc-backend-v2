@@ -474,3 +474,49 @@ if (isTestAct) {
   console.groupEnd();
   return { total: totalPrice, travelCalculated };
 };
+
+export  const generateDescription = (lineup) => {
+  const count =
+    lineup?.actSize ||
+    (Array.isArray(lineup?.bandMembers) ? lineup.bandMembers.length : 0);
+
+  const instruments = (lineup?.bandMembers || [])
+    .filter((m) => m?.isEssential)
+    .map((m) => m?.instrument)
+    .filter(Boolean);
+
+  instruments.sort((a, b) => {
+    const aLower = a?.toLowerCase?.() || "";
+    const bLower = b?.toLowerCase?.() || "";
+    const isVocal = (str) => str.includes("vocal");
+    const isDrums = (str) => str === "drums";
+    if (isVocal(aLower) && !isVocal(bLower)) return -1;
+    if (!isVocal(aLower) && isVocal(bLower)) return 1;
+    if (isDrums(aLower)) return 1;
+    if (isDrums(bLower)) return -1;
+    return 0;
+  });
+
+  const roles = (lineup?.bandMembers || []).flatMap((member) =>
+    (member?.additionalRoles || [])
+      .filter((r) => r?.isEssential)
+      .map((r) => r?.role || "Unnamed Service")
+  );
+
+  if (count === 0) return "Add a Lineup";
+
+  const formatWithAnd = (arr) => {
+    const unique = [...new Set(arr)];
+    if (unique.length === 0) return "";
+    if (unique.length === 1) return unique[0];
+    if (unique.length === 2) return `${unique[0]} & ${unique[1]}`;
+    return `${unique.slice(0, -1).join(", ")} & ${unique[unique.length - 1]}`;
+  };
+
+  const instrumentsStr = formatWithAnd(instruments);
+  const rolesStr = roles.length
+    ? ` (including ${formatWithAnd(roles)} services)`
+    : "";
+
+  return `${count}: ${instrumentsStr}${rolesStr}`;
+};

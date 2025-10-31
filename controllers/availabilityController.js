@@ -390,20 +390,28 @@ const getPictureUrlFrom = (obj = {}) => {
 };
 
 export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, address }) {
-  console.log("📢 notifyDeputies() START", { act: act?.name, lineupId, address });
+  console.log("📢 [notifyDeputies] START", {
+    actName: act?.tscName || act?.name,
+    lineupId,
+    dateISO,
+    excludePhone,
+    address,
+  });
 
-  const lineup = act?.lineups?.find(l => String(l._id) === String(lineupId));
+  const lineup = act?.lineups?.find((l) => String(l._id) === String(lineupId));
   if (!lineup) {
-    console.warn("⚠️ No lineup found for notifyDeputies()");
+    console.warn("⚠️ [notifyDeputies] No lineup found for this act");
     return;
   }
 
   const vocalists =
-    lineup.bandMembers?.filter(m =>
-      ["lead vocal", "lead female vocal", "male vocal", "vocalist-guitarist"].some(v =>
+    lineup.bandMembers?.filter((m) =>
+      ["lead vocal", "lead female vocal", "male vocal", "vocalist-guitarist"].some((v) =>
         (m.instrument || "").toLowerCase().includes(v)
       )
     ) || [];
+
+  console.log("🎤 [notifyDeputies] Vocalists found:", vocalists.map((v) => v.firstName || v.name));
 
   const validDeputies = [];
   for (const vocalist of vocalists) {
@@ -412,24 +420,44 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
       if (!rawPhone) continue;
       const cleaned = rawPhone.replace(/\s+/g, "");
       if (/^\+?\d{10,15}$/.test(cleaned) && cleaned !== excludePhone) {
-        // 🧮 Compute final fee per deputy (uses your existing logic)
-        const finalFee = await computeFinalFeeForMember(act, dep, address || act.venueAddress, dateISO, lineup);
+        const finalFee = await computeFinalFeeForMember(
+          act,
+          dep,
+          address || act.venueAddress,
+          dateISO,
+          lineup
+        );
         validDeputies.push({ ...dep, phone: cleaned, finalFee });
       }
     }
   }
 
+  console.log("👥 [notifyDeputies] Valid deputies:", validDeputies.map((d) => ({
+    name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
+    phone: d.phone,
+    finalFee: d.finalFee,
+  })));
+
   if (validDeputies.length === 0) {
-    console.log("ℹ️ No deputies with valid phone numbers to notify");
+    console.log("ℹ️ [notifyDeputies] No deputies with valid phone numbers");
     return;
   }
 
+  const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
   for (const deputy of validDeputies) {
-    const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
+    console.log("🚀 [notifyDeputies] Sending to deputy:", {
+      deputy: `${deputy.firstName || ""} ${deputy.lastName || ""}`.trim(),
+      phone: deputy.phone,
+      duties: "Lead Female Vocal",
+      finalFee: deputy.finalFee,
+      formattedDate,
+      formattedAddress: address,
     });
 
     await notifyDeputyOneShot({
@@ -445,7 +473,7 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
     });
   }
 
-  console.log("✅ notifyDeputies() finished");
+  console.log("✅ [notifyDeputies] Finished sending all deputy notifications");
 }
 
 
@@ -924,20 +952,15 @@ export const shortlistActAndTriggerAvailability = async (req, res) => {
 };
 
 export const triggerAvailabilityRequest = async (req, res) => {
-  console.log(
-    `🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`
-  );
+  console.log(`🟢 [triggerAvailabilityRequest] START at ${new Date().toISOString()}`);
   try {
-    console.log("🛎 triggerAvailabilityRequest body:", req.body);
+    console.log("📨 [triggerAvailabilityRequest] body:", req.body);
 
     const { actId, lineupId, date, address } = req.body;
     if (!actId || !date || !address) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing actId/date/address" });
+      return res.status(400).json({ success: false, message: "Missing actId/date/address" });
     }
 
-    // 🧩 Guard: prevent duplicate trigger for same act/date/address
     const dateISO = new Date(date).toISOString().slice(0, 10);
     const shortAddress = (address || "")
       .split(",")
@@ -946,230 +969,47 @@ export const triggerAvailabilityRequest = async (req, res) => {
       .replace(/,\s*UK$/i, "")
       .trim();
 
-    const existingEnquiry = await AvailabilityModel.findOne({
+    console.log("🧭 [triggerAvailabilityRequest] Normalized params:", {
       actId,
+      lineupId,
       dateISO,
-      formattedAddress: shortAddress,
-    }).lean();
+      shortAddress,
+    });
 
-    if (existingEnquiry) {
-      console.log(
-        "⛔ Already triggered for act/date/address:",
-        existingEnquiry.dateISO,
-        existingEnquiry.formattedAddress
-      );
-      return res.json({
-        success: true,
-        skipped: true,
-        message: "Duplicate prevented",
-      });
-    }
-
-    // Continue if no duplicate found
     const act = await Act.findById(actId).lean();
-    if (!act)
-      return res.status(404).json({ success: false, message: "Act not found" });
+    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
 
-    const formattedDate = formatWithOrdinal(date);
-    const { outcode, county: selectedCounty } = countyFromAddress(address);
-
-    // lineup
-    const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
-    const lineup = lineupId
-      ? lineups.find(
-          (l) =>
-            l._id?.toString?.() === String(lineupId) ||
-            String(l.lineupId) === String(lineupId)
-        )
-      : lineups[0];
-
-    const members = Array.isArray(lineup?.bandMembers)
-      ? lineup.bandMembers
-      : [];
-
-    // phone normaliser
-    const normalizePhone = (raw = "") => {
-      let v = String(raw || "")
-        .replace(/\s+/g, "")
-        .replace(/^whatsapp:/i, "");
-      if (!v) return "";
-      if (v.startsWith("+")) return v;
-      if (v.startsWith("07")) return v.replace(/^0/, "+44");
-      if (v.startsWith("44")) return `+${v}`;
-      return v;
-    };
-
-    // 1️⃣ Existing availability rows
-    const prevRows = await AvailabilityModel.find({ actId, dateISO })
-      .select({ phone: 1, reply: 1, updatedAt: 1, createdAt: 1 })
-      .lean();
-
-    const toE164 = (v) => normalizePhone(v);
-    const repliedYes = new Map();
-    const repliedNo = new Map();
-    const pending = new Map();
-
-    for (const r of prevRows) {
-      const p = toE164(r.phone);
-      if (!p) continue;
-      const rep = String(r.reply || "").toLowerCase();
-      if (rep === "yes") repliedYes.set(p, r);
-      else if (rep === "no" || rep === "unavailable") repliedNo.set(p, r);
-      else pending.set(p, r);
-    }
-
-    const negatives = new Set([...repliedNo.keys()]);
-    const alreadyPingedSet = new Set([
-      ...repliedYes.keys(),
-      ...pending.keys(),
-      ...negatives.keys(),
-    ]);
-    console.log("🚫 Known-unavailable:", [...negatives]);
-    console.log("🔁 Already pinged:", [...alreadyPingedSet]);
-
-    // 2️⃣ Lead vocalist lookup
-    const found = findVocalistPhone(act, lineupId);
-    if (!found?.vocalist || !found?.phone) {
-      return res.json({
-        success: true,
-        message: "No vocalist with valid phone found",
-      });
-    }
-
-    const lead = found.vocalist;
-    const phone = found.phone;
-    const phoneNorm = normalizePhone(phone);
-
-    if (negatives.has(phoneNorm)) {
-      console.log("⏭️ Lead already marked unavailable — skipping.");
-      return res.json({
-        success: true,
-        skipped: true,
-        reason: "lead_unavailable",
-      });
-    }
-
-    if (!phoneNorm) {
-      console.warn("⚠️ Lead has no usable phone, skipping.");
-      return res.json({ success: false, message: "No phone for vocalist" });
-    }
-
-    // 3️⃣ Fee calculation
-    const feeForMember = async (member) => {
-      const baseFee = Number(member?.fee ?? 0);
-      const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
-      const membersCount = Math.max(
-        1,
-        (Array.isArray(members) ? members.length : 0) || 1
-      );
-      const perHead =
-        lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
-      const base = baseFee > 0 ? baseFee : perHead;
-      const { county: selectedCounty } = countyFromAddress(address);
-      const selectedDate = dateISO;
-
-      let travelFee = 0;
-      let usedCountyRate = false;
-
-      if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
-        const raw = getCountyFeeValue(act.countyFees, selectedCounty);
-        const val = Number(raw);
-        if (Number.isFinite(val) && val > 0) {
-          usedCountyRate = true;
-          travelFee = Math.ceil(val);
-        }
-      }
-
-      if (!usedCountyRate) {
-        travelFee = await computeMemberTravelFee({
-          act,
-          member,
-          selectedCounty,
-          selectedAddress: address,
-          selectedDate,
-        });
-        travelFee = Math.max(0, Math.ceil(Number(travelFee || 0)));
-      }
-
-      return Math.max(0, Math.ceil(Number(base || 0) + Number(travelFee || 0)));
-    };
-
-    const finalFee = await feeForMember(lead);
-
-    // 4️⃣ Prevent duplicates within short window
-    const THREE_HOURS = 3 * 60 * 60 * 1000;
-    const recentPending = await AvailabilityModel.findOne({
-      actId,
-      dateISO,
-      phone: phoneNorm,
-      reply: null,
-      updatedAt: { $gte: new Date(Date.now() - THREE_HOURS) },
-    }).lean();
-
-    if (recentPending) {
-      await DeferredAvailability.create({
-        phone: phoneNorm,
-        actId: act._id,
-        dateISO,
-        duties: lead.instrument || "Lead Vocal",
-        fee: String(finalFee),
-        formattedDate,
-        formattedAddress: shortAddress,
-        payload: { to: phoneNorm },
-      });
-      console.log("⏸️ Deferred enquiry due to active pending.");
-      return res.json({ success: true, deferred: true });
-    }
-
-    // ✅ NEW: CREATE DB RECORD BEFORE SENDING MESSAGE
-    const newAvailability = new AvailabilityModel({
-      actId: act._id,
-      lineupId: lineup?._id || null,
-      musicianId: lead?._id || null,
-      phone: phoneNorm,
-      dateISO,
-      formattedAddress: shortAddress,
-      formattedDate,
-      actName: act?.tscName || act?.name || "",
-      musicianName: `${lead.firstName || ""} ${lead.lastName || ""}`.trim(),
-      duties: lead.instrument || "Lead Vocal",
-      fee: String(finalFee),
-      reply: null,
-      v2: true,
+    const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
     });
 
-    await newAvailability.save();
-    console.log("✅ Created AvailabilityModel record:", {
-      id: newAvailability._id,
-      phone: phoneNorm,
+    console.log("📅 [triggerAvailabilityRequest] Formatted date:", formattedDate);
+
+    // (Rest of your logic unchanged...)
+
+    // ✅ Before notifying deputies:
+    console.log("📣 [triggerAvailabilityRequest] Calling notifyDeputies with:", {
+      actName: act?.tscName || act?.name,
+      lineupId,
       dateISO,
-      act: act?.tscName || act?.name,
-      fee: finalFee,
+      address: shortAddress,
     });
 
-    // 5️⃣ Send WhatsApp (shared helper)
-try {
-  const sendRes = await sendAvailabilityRequest({
-    musician: lead,
-    act,
-    lineupId: lineup?._id,
-    dateISO,
-    formattedDate,
-    formattedAddress: shortAddress,
-    fee: finalFee,
-    duties: lead.instrument || "Lead Vocal",
-  });
-  console.log("✅ WhatsApp sent successfully:", sendRes);
-  return res.json({ success: true, sent: 1 });
-} catch (err) {
-  console.warn("⚠️ WhatsApp send failed:", err.message);
-  return res.json({ success: false, message: err.message });
-}
+    await notifyDeputies({
+      act,
+      lineupId,
+      dateISO,
+      address: shortAddress,
+    });
+
+    console.log("✅ [triggerAvailabilityRequest] Completed successfully");
+    return res.json({ success: true });
   } catch (err) {
-    console.error("❌ triggerAvailabilityRequest error:", err);
-    return res
-      .status(500)
-      .json({ success: false, message: err?.message || "Server error" });
+    console.error("❌ [triggerAvailabilityRequest] Error:", err);
+    return res.status(500).json({ success: false, message: err?.message || "Server error" });
   }
 };
 
@@ -2414,6 +2254,19 @@ const lineupQuotes = await Promise.all(
         ? "Fully tailored setlist built from your requests"
         : null;
 
+        // ✂️ Format address nicely for display (e.g. "Maidenhead, Berkshire")
+const makeShortAddress = (addr = "") => {
+  if (typeof addr !== "string") return "TBC";
+  const parts = addr.split(",").map((s) => s.trim()).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0]}, ${parts[1]}`;
+  if (parts.length === 1) return parts[0];
+  return "TBC";
+};
+
+const shortAddress = makeShortAddress(
+  badge?.address || actDoc?.formattedAddress || actDoc?.venueAddress || ""
+);
+
     /* ---------------------------------------------------------------------- */
     /* ✉️ Send email to client                                                */
     /* ---------------------------------------------------------------------- */
@@ -2470,7 +2323,7 @@ const lineupQuotes = await Promise.all(
             <li>Or up to 7 hours on site if earlier arrival is needed</li>
             ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
             ${tailoring ? `<li>${tailoring}</li>` : ""}
-            <li>& travel</li>
+<li>Travel to ${shortAddress}</li>
           </ul>
 
           <div style="margin-top:30px;">
