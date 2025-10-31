@@ -2244,155 +2244,241 @@ try {
 } catch (outerErr) {
   console.warn("⚠️ Outer calendar invite block failed:", outerErr.message);
 }
+/* ---------------------------------------------------------------------- */
+/* ✉️ Send client email (lead YES only)                                   */
+/* ---------------------------------------------------------------------- */
+if (!badge.isDeputy) {
+  try {
+    // ✅ Proper client name greeting
+    const clientFirstName =
+      badge?.clientFirstName ||
+      actDoc?.clientName ||
+      actDoc?.contactName ||
+      "there";
+
+    // ✅ URLs should use FRONTEND_URL
+    const SITE =
+      process.env.FRONTEND_URL ||
+      "https://meek-biscotti-8d5020.netlify.app";
+
+    const profileUrl = `${SITE}/act/${actDoc._id}`;
+    const cartUrl = `${SITE}/act/${actDoc._id}?date=${dateISO}&address=${encodeURIComponent(
+      badge?.address || actDoc?.formattedAddress || ""
+    )}`;
+
+    // ✅ Map PA & Lighting size
+    const normKey = (s = "") =>
+      s.toString().toLowerCase().replace(/[^a-z]/g, "");
+    const paMap = { smallpa: "small", mediumpa: "medium", largepa: "large" };
+    const lightMap = {
+      smalllight: "small",
+      mediumlight: "medium",
+      largelight: "large",
+    };
+    const paSize = paMap[normKey(actDoc.paSystem)];
+    const lightSize = lightMap[normKey(actDoc.lightingSystem)];
+
+    // ✅ Lead name & hero image
+    const vocalistFirst =
+      (badge?.vocalistName || "").split(" ")[0] || "our lead vocalist";
+    const heroImg =
+      (Array.isArray(actDoc.profileImage) &&
+        actDoc.profileImage[0]?.url) ||
+      (Array.isArray(actDoc.images) && actDoc.images[0]?.url) ||
+      actDoc.profileImage?.url ||
+      "";
+
+    // ✅ Set durations
+    const setsA = Array.isArray(actDoc.numberOfSets)
+      ? actDoc.numberOfSets
+      : [actDoc.numberOfSets].filter(Boolean);
+    const lensA = Array.isArray(actDoc.lengthOfSets)
+      ? actDoc.lengthOfSets
+      : [actDoc.lengthOfSets].filter(Boolean);
+    const setsLine =
+      setsA.length && lensA.length
+        ? `Up to ${setsA[0]}×${lensA[0]}-minute or ${
+            setsA[1] || setsA[0]
+          }×${lensA[1] || lensA[0]}-minute live sets`
+        : `Up to 3×40-minute or 2×60-minute live sets`;
 
     /* ---------------------------------------------------------------------- */
-    /* ✉️ Send client email (lead YES only)                                   */
+    /* 🪄 generateDescription (same as Act.jsx)                               */
     /* ---------------------------------------------------------------------- */
-    if (!badge.isDeputy) {
-      try {
-        // right before sendClientEmail()
-const clientFirstName =
-  badge?.clientFirstName ||
-  actDoc?.clientName ||
-  actDoc?.contactName ||
-  "there";
+    const generateDescription = (lineup) => {
+      if (!lineup) return "";
+      const members = lineup.bandMembers || [];
+      const essential = members.filter((m) => m.isEssential);
+      const instruments = essential
+        .map((m) => m.instrument)
+        .filter(Boolean);
 
-// helpers
-const SITE = process.env.PUBLIC_SITE_BASE || "https://www.thesupremecollective.co.uk";
-const cartUrl = (id, date, addr) =>
-  `${SITE}/cart?actId=${id}&date=${date}&address=${encodeURIComponent(addr || "")}`;
-
-const normKey = (s="") => s.toString().toLowerCase().replace(/[^a-z]/g,"");
-const paMap = { smallpa: "small", mediumpa: "medium", largepa: "large" };
-const lightMap = { smalllight: "small", mediumlight: "medium", largelight: "large" };
-
-const paSize = paMap[normKey(actDoc.paSystem)];
-const lightSize = lightMap[normKey(actDoc.lightingSystem)];
-const vocalistFirst = (badge?.vocalistName || "").split(" ")[0] || "our lead vocalist";
-
-const selectedAddress =
-  badge?.address || actDoc?.formattedAddress || actDoc?.venueAddress || "TBC";
-
-const profileUrl = `${SITE}/act/${actDoc._id}`;
-const heroImg =
-  (Array.isArray(actDoc.images) && actDoc.images[0]) ||
-  actDoc.profileImage ||
-  "";
-
-// Complimentary extras
-const complimentaryExtras = [];
-if (actDoc?.extras && typeof actDoc.extras === "object") {
-  for (const [k, v] of Object.entries(actDoc.extras)) {
-    if (v && v.complimentary) {
-      complimentaryExtras.push(
-        k.replace(/_/g," ").replace(/\s+/g," ").replace(/^\w/, c => c.toUpperCase())
+      const vocals = instruments.filter((i) =>
+        i.toLowerCase().includes("vocal")
       );
-    }
-  }
-}
+      const others = instruments.filter(
+        (i) => !i.toLowerCase().includes("vocal")
+      );
 
-// Number/length of sets (handles arrays or single values)
-const setsA = Array.isArray(actDoc.numberOfSets) ? actDoc.numberOfSets : [actDoc.numberOfSets].filter(Boolean);
-const lensA = Array.isArray(actDoc.lengthOfSets) ? actDoc.lengthOfSets : [actDoc.lengthOfSets].filter(Boolean);
+      const vocalText = vocals.length
+        ? `${vocals.length}×vocals`
+        : null;
+      const combined = [vocalText, ...others].filter(Boolean).join(", ");
+      const sizeLabel =
+        lineup.lineupSize ||
+        lineup.actSize ||
+        `${essential.length}-Piece`;
 
-const setsLine = (setsA.length && lensA.length)
-  ? `Up to ${setsA[0]}×${lensA[0]}-minute or ${setsA[1] || setsA[0]}×${lensA[1] || lensA[0]}-minute live sets`
-  : `2×60-minute or 3×40-minute live sets`;
+      return `${sizeLabel}${combined ? ` (${combined})` : ""}`;
+    };
 
-// Rough repertoire count (fallback safe)
-const repertoireCount = Array.isArray(actDoc.repertoire) ? actDoc.repertoire.length : (actDoc.repertoireCount || null);
+    /* ---------------------------------------------------------------------- */
+    /* 💰 lineupQuotes with dynamic pricing                                   */
+    /* ---------------------------------------------------------------------- */
+    const lineupQuotes = (actDoc.lineups || []).map((lineup) => {
+      const baseFee = lineup.base_fee?.[0]?.total_fee || 0;
 
-// Off-repertoire requests / tailoring
-const offReq = Number(actDoc.offRepertoireRequests || 0);
-const tailoring =
-  actDoc.setlist === "smallTailoring" ? "Signature setlist curated by the band" :
-  actDoc.setlist === "mediumTailoring" ? "Collaborative setlist (your top picks + band favourites)" :
-  actDoc.setlist === "largeTailoring" ? "Fully tailored setlist built from your requests" : null;
+      const essentialExtras = (lineup.bandMembers || [])
+        .flatMap((m) =>
+          (m.additionalRoles || []).filter(
+            (r) => r.isEssential && typeof r.additionalFee === "number"
+          )
+        )
+        .reduce((sum, r) => sum + (r.additionalFee || 0), 0);
 
-// Simple lineup quotes (names only here — you can keep your price calc if you prefer)
-const lineupQuotes = (actDoc.lineups || []).map(lu => {
-  const name = lu?.actSize || `${(lu?.bandMembers || []).filter(m=>m?.isEssential).length}-piece`;
-  const instruments = (lu?.bandMembers || []).filter(m=>m?.isEssential).map(m=>m.instrument).filter(Boolean);
-  const vocalCount = instruments.filter(i => i.toLowerCase().includes("vocal")).length;
-  const instrumentList = [
-    vocalCount ? `${vocalCount}×vocals` : null,
-    ...instruments.filter(i => !i.toLowerCase().includes("vocal"))
-  ].filter(Boolean).join(", ");
-  return { name: `${name}${instrumentList ? ` (${instrumentList})` : ""}` };
-});
+      const totalFee = baseFee + essentialExtras;
+      const displayFee =
+        totalFee > 0 ? Math.ceil(totalFee / 0.75).toLocaleString() : "TBC";
 
-// send
-await sendClientEmail({
-  actId: String(actId),
-  subject: `Good news — ${actDoc.tscName || actDoc.name}'s lead vocalist is available`,
-  html: `
-  <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
-    <p>Hi ${badge?.clientFirstName || "there"},</p>
+      return {
+        name: generateDescription(lineup),
+        price: displayFee,
+      };
+    });
 
-    <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
-
-    <p>
-      We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with 
-      <strong>${vocalistFirst}</strong>, and they’d love to perform for you and your guests at your event.
-    </p>
-
-    ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
-
-    <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
-    <p style="margin:6px 0 14px; color:#555;">${actDoc.tscDescription || ""}</p>
-
-    <p>
-      <a href="${profileUrl}" style="color:#ff6667; text-decoration:none; font-weight:bold;">View Profile →</a>
-    </p>
-
-    ${lineupQuotes.length ? `
-      <h4 style="margin-top:20px;">Lineup options:</h4>
-      <ul>
-        ${lineupQuotes.map(l => `<li>${l.name}</li>`).join("")}
-      </ul>` : ""}
-
-    <h4 style="margin-top:25px;">Included in your quote:</h4>
-    <ul>
-      <li>${setsLine}</li>
-      ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
-      <li>Band arrival from 5pm and finish by midnight as standard</li>
-      <li>Or up to 7 hours on site if earlier arrival is needed</li>
-      ${repertoireCount ? `<li>Access to ${repertoireCount}+ repertoire songs</li>` : ""}
-      ${complimentaryExtras.map(x => `<li>${x}</li>`).join("")}
-      ${offReq ? `<li>${offReq === 1 ? "One" : offReq} off-repertoire song ${offReq === 1 ? "request" : "requests"} (e.g. first dance)</li>` : ""}
-      ${tailoring ? `<li>${tailoring}</li>` : ""}
-      ${selectedAddress ? `<li>Travel to ${selectedAddress}</li>` : ""}
-    </ul>
-
-    <p style="margin-top:20px;">
-      If you’d like to go ahead, simply
-      <a href="${cartUrl(actDoc._id, dateISO, selectedAddress)}"
-         style="background-color:#ff6667; color:white; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold;">
-         Add to Cart →
-      </a>
-      to secure ${actDoc.tscName || actDoc.name} for your event.
-    </p>
-
-    <p style="color:#555;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
-
-    <p>If you have any questions, just reply — we’re always happy to help.</p>
-
-    <p style="margin-top:25px;">
-      Warmest wishes,<br/>
-      <strong>The Supreme Collective ✨</strong><br/>
-      <a href="${SITE}" style="color:#ff6667;">${SITE.replace(/^https?:\/\//,"")}</a>
-    </p>
-  </div>`
-});
-        console.log(
-          "(availabilityController.js) 📧 Client email sent for lead YES."
-        );
-      } catch (e) {
-        console.warn(
-          "(availabilityController.js) ⚠️ sendClientEmail failed:",
-          e.message
-        );
+    /* ---------------------------------------------------------------------- */
+    /* 🎁 Complimentary extras & tailoring                                    */
+    /* ---------------------------------------------------------------------- */
+    const complimentaryExtras = [];
+    if (actDoc?.extras && typeof actDoc.extras === "object") {
+      for (const [k, v] of Object.entries(actDoc.extras)) {
+        if (v && v.complimentary) {
+          complimentaryExtras.push(
+            k
+              .replace(/_/g, " ")
+              .replace(/\s+/g, " ")
+              .replace(/^\w/, (c) => c.toUpperCase())
+          );
+        }
       }
+    }
+
+    const tailoring =
+      actDoc.setlist === "smallTailoring"
+        ? "Signature setlist curated by the band"
+        : actDoc.setlist === "mediumTailoring"
+        ? "Collaborative setlist (your top picks + band favourites)"
+        : actDoc.setlist === "largeTailoring"
+        ? "Fully tailored setlist built from your requests"
+        : null;
+
+    /* ---------------------------------------------------------------------- */
+    /* ✉️ Send email to client                                                */
+    /* ---------------------------------------------------------------------- */
+    await sendClientEmail({
+      actId: String(actId),
+      subject: `Good news — ${actDoc.tscName || actDoc.name}'s lead vocalist is available`,
+      html: `
+        <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
+          <p>Hi ${clientFirstName},</p>
+
+          <p>Thank you for shortlisting <strong>${
+            actDoc.tscName || actDoc.name
+          }</strong>!</p>
+
+          <p>
+            We’re delighted to confirm that <strong>${
+              actDoc.tscName || actDoc.name
+            }</strong> is available with
+            <strong>${vocalistFirst}</strong>, and they’d love to perform for you and your guests.
+          </p>
+
+          ${
+            heroImg
+              ? `<img src="${heroImg}" alt="${
+                  actDoc.tscName || actDoc.name
+                }" style="width:100%; border-radius:8px; margin:20px 0;" />`
+              : ""
+          }
+
+          <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
+          <p style="margin:6px 0 14px; color:#555;">${
+            actDoc.tscDescription || actDoc.description || ""
+          }</p>
+
+          <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
+
+          ${
+            lineupQuotes.length
+              ? `<h4 style="margin-top:20px;">Lineup options:</h4>
+                 <ul>
+                   ${lineupQuotes
+                     .map(
+                       (l) =>
+                         `<li><strong>${l.name}</strong> — from £${l.price} + travel</li>`
+                     )
+                     .join("")}
+                 </ul>`
+              : ""
+          }
+
+          <h4 style="margin-top:25px;">Included in your quote:</h4>
+          <ul>
+            <li>${setsLine}</li>
+            ${
+              paSize
+                ? `<li>A ${paSize} PA system${
+                    lightSize ? ` and a ${lightSize} lighting setup` : ""
+                  }</li>`
+                : ""
+            }
+            <li>Band arrival from 5pm and finish by midnight as standard</li>
+            <li>Or up to 7 hours on site if earlier arrival is needed</li>
+            ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
+            ${tailoring ? `<li>${tailoring}</li>` : ""}
+            <li>+ travel</li>
+          </ul>
+
+          <div style="margin-top:30px;">
+            <a href="${cartUrl}" 
+              style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">
+              Add to Cart →
+            </a>
+          </div>
+
+          <p style="margin-top:20px; color:#555;">
+            We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.
+          </p>
+
+          <p>If you have any questions, just reply — we’re always happy to help.</p>
+
+          <p style="margin-top:25px;">
+            Warmest wishes,<br/>
+            <strong>The Supreme Collective ✨</strong><br/>
+            <a href="${SITE}" style="color:#ff6667;">${SITE.replace(
+        /^https?:\/\//,
+        ""
+      )}</a>
+          </p>
+        </div>
+      `,
+    });
+
+    console.log("📧 Client email sent (with generateDescription + pricing).");
+  } catch (e) {
+    console.warn("(availabilityController.js) ⚠️ sendClientEmail failed:", e.message);
+  }
+
     }
 
     return { success: true, updated: true, badge };
