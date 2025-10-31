@@ -2339,17 +2339,17 @@ const lineupQuotes = (act?.lineups || []).map((lineup) => {
         .join("")
     : ""
 }
-      ${
-        act.offRepertoireRequests > 0
-          ? `<li>${
-              act.offRepertoireRequests === 1
-                ? "One"
-                : act.offRepertoireRequests
-            } additional ‘off-repertoire’ song ${
-              act.offRepertoireRequests === 1 ? "request" : "requests"
-            } (e.g. first dance or favourites)</li>`
-          : ""
-      }
+    ${
+  Number(act?.offRepertoireRequests || 0) > 0
+    ? `<li>${
+        act.offRepertoireRequests === 1
+          ? "One"
+          : act.offRepertoireRequests
+      } additional ‘off-repertoire’ song ${
+        act.offRepertoireRequests === 1 ? "request" : "requests"
+      } (e.g. first dance or favourites)</li>`
+    : ""
+}
       ${
         act.setlist === "smallTailoring"
           ? `<li>A signature setlist curated by the band — guaranteed crowd-pleasers</li>`
