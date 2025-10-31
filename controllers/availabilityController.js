@@ -2284,14 +2284,24 @@ try {
 /* ---------------------------------------------------------------------- */
 /* ✉️ Send client email (lead YES only)                                   */
 /* ---------------------------------------------------------------------- */
+
+
+
+
 if (!badge.isDeputy) {
   try {
-    // ✅ Proper client name greeting
-    const clientFirstName =
-      badge?.clientFirstName ||
-      actDoc?.clientName ||
-      actDoc?.contactName ||
-      "there";
+   // ✅ Fetch user's first name for personalized greeting
+let clientFirstName = "there";
+try {
+  const shortlistUserId = badge?.userId || actDoc?.userId;
+  if (shortlistUserId) {
+    const user = await import("../models/userModel.js")
+      .then(m => m.default.findById(shortlistUserId).lean());
+    if (user?.firstName) clientFirstName = user.firstName;
+  }
+} catch (e) {
+  console.warn("⚠️ Could not fetch user for greeting:", e.message);
+}
 
     // ✅ URLs should use FRONTEND_URL
     const SITE =
@@ -2398,17 +2408,28 @@ const lineupQuotes = await Promise.all(
         badge?.address || actDoc?.formattedAddress || "TBC";
       const selectedDate = badge?.dateISO || new Date().toISOString().slice(0, 10);
 
-      const { total, travelCalculated } = await calculateActPricing(
-        actDoc,
-        "", // selectedCounty optional
-        selectedAddress,
-        selectedDate,
-        lu
-      );
+   // 🧮 Calculate dynamic price (including travel if possible)
+try {
+  const { county: selectedCounty } = countyFromAddress(selectedAddress);
+  const { total } = await calculateActPricing(
+    actDoc,
+    selectedCounty || "",
+    selectedAddress,
+    selectedDate,
+    lu
+  );
 
-      if (total) {
-        travelTotal = `from £${Math.round(total)}`;
-      }
+  const baseFee =
+    lu?.base_fee?.[0]?.total_fee ||
+    lu?.bandMembers?.reduce((sum, m) => sum + (m?.fee || 0), 0) ||
+    0;
+
+  const totalWithMargin = total || baseFee ? Math.round((total || baseFee) * 1.2) : null;
+  travelTotal = totalWithMargin ? `from £${totalWithMargin}` : "price TBC";
+} catch (err) {
+  console.warn("⚠️ Price calc failed:", err.message);
+  travelTotal = "price TBC";
+}
     } catch (err) {
       console.warn("⚠️ Travel-inclusive price calc failed:", err.message);
     }
