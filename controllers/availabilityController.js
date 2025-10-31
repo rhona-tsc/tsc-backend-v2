@@ -2174,62 +2174,74 @@ console.log(`✅ Applied availability badge for ${actDoc.tscName}:`, badge);
 // 🗓️ NEW — send calendar invite to lead vocalist
 try {
   if (!badge.vocalistEmail && badge.musicianId) {
-  const vocalist = await Musician.findById(badge.musicianId).lean();
-  if (vocalist?.email) badge.vocalistEmail = vocalist.email;
-}
-
- try {
-  const { createCalendarInvite } = await import("./googleController.js");
-
-  // Find the musician for email & instrument details
-  let musician = null;
-  if (badge?.musicianId) {
-    musician = await Musician.findById(badge.musicianId).lean();
+    const vocalist = await Musician.findById(badge.musicianId).lean();
+    if (vocalist?.email) badge.vocalistEmail = vocalist.email;
   }
 
-  const emailForInvite = musician?.email || badge?.vocalistEmail || badge?.email || "hello@thesupremecollective.co.uk";
-  const role = musician?.instrument || "Lead Vocal";
-  const fee = musician?.fee || actDoc?.lineups?.[0]?.bandMembers?.find(m => m.isEssential)?.fee || "TBC";
+  try {
+    const { createCalendarInvite } = await import("./googleController.js");
 
-  const fmtLong = new Date(dateISO).toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+    // Find the musician for email & instrument details
+    let musician = null;
+    if (badge?.musicianId) {
+      musician = await Musician.findById(badge.musicianId).lean();
+    }
 
-  const enquiryLogged = new Date().toLocaleString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+    const emailForInvite =
+      musician?.email ||
+      badge?.vocalistEmail ||
+      badge?.email ||
+      "hello@thesupremecollective.co.uk";
+    const role = musician?.instrument || "Lead Vocal";
+    const fee =
+      musician?.fee ||
+      actDoc?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
+      "TBC";
 
-  await createCalendarInvite({
-    enquiryId: `ENQ_${Date.now()}`,
-    actId,
-    dateISO,
-    email: emailForInvite,
-    summary: `TSC: ${actDoc.tscName || actDoc.name} enquiry`,
-    description: [
-      `Event Date: ${fmtLong}`,
-      `Act: ${actDoc.tscName || actDoc.name}`,
-      `Role: ${role}`,
-      `Address: ${badge?.address || actDoc?.formattedAddress || "TBC"}`,
-      `Fee: £${fee}`,
-      `Enquiry Logged: ${enquiryLogged}`,
-    ].join("\n"),
-    startTime: `${dateISO}T17:00:00Z`,
-    endTime: `${dateISO}T23:59:00Z`,
-    fee: fee === "TBC" ? null : fee,
-  });
+    const fmtLong = new Date(dateISO).toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
 
-  console.log(`✅ Calendar invite created for ${badge?.vocalistName || "Lead"} (${emailForInvite})`);
-} catch (calendarErr) {
-  console.warn("⚠️ createCalendarInvite failed:", calendarErr.message);
+    const enquiryLogged = new Date().toLocaleString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    await createCalendarInvite({
+      enquiryId: `ENQ_${Date.now()}`,
+      actId,
+      dateISO,
+      email: emailForInvite,
+      summary: `TSC: ${actDoc.tscName || actDoc.name} enquiry`,
+      description: [
+        `Event Date: ${fmtLong}`,
+        `Act: ${actDoc.tscName || actDoc.name}`,
+        `Role: ${role}`,
+        `Address: ${badge?.address || actDoc?.formattedAddress || "TBC"}`,
+        `Fee: £${fee}`,
+        `Enquiry Logged: ${enquiryLogged}`,
+      ].join("\n"),
+      startTime: `${dateISO}T17:00:00Z`,
+      endTime: `${dateISO}T23:59:00Z`,
+      fee: fee === "TBC" ? null : fee,
+    });
+
+    console.log(
+      `✅ Calendar invite created for ${badge?.vocalistName || "Lead"} (${emailForInvite})`
+    );
+  } catch (calendarErr) {
+    console.warn("⚠️ createCalendarInvite failed:", calendarErr.message);
+  }
+} catch (outerErr) {
+  console.warn("⚠️ Outer calendar invite block failed:", outerErr.message);
 }
-}
+  }
 
     /* ---------------------------------------------------------------------- */
     /* ✉️ Send client email (lead YES only)                                   */
