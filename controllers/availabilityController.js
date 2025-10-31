@@ -2167,7 +2167,32 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO,
       { _id: actId },
       { $set: { [`availabilityBadges.${key}`]: badge } }
     );
-    console.log(`✅ Applied availability badge for ${actDoc.tscName || actDoc.name}:`, badge);
+console.log(`✅ Applied availability badge for ${actDoc.tscName}:`, badge);
+
+// 🗓️ NEW — send calendar invite to lead vocalist
+try {
+  if (!badge.vocalistEmail && badge.musicianId) {
+  const vocalist = await Musician.findById(badge.musicianId).lean();
+  if (vocalist?.email) badge.vocalistEmail = vocalist.email;
+}
+
+  const { createCalendarInvite } = await import("./googleController.js");
+
+  await createCalendarInvite({
+    actId,
+    dateISO,
+    email: badge?.vocalistEmail || badge?.email || "aundrebarill980@gmail.com", // fallback
+    summary: `${actDoc.tscName || actDoc.name} Enquiry`,
+    description: `Availability confirmed for ${actDoc.tscName || actDoc.name} on ${dateISO}`,
+    startTime: `${dateISO}T17:00:00Z`,
+    endTime: `${dateISO}T23:59:00Z`,
+  });
+
+  console.log(`✅ Calendar invite created for ${badge?.vocalistName || "Lead"} (${badge?.vocalistEmail})`);
+} catch (calendarErr) {
+  console.warn("⚠️ createCalendarInvite failed:", calendarErr.message);
+}
+
 
     /* ---------------------------------------------------------------------- */
     /* ✉️ Send client email (lead YES only)                                   */
@@ -2350,15 +2375,15 @@ const lineupQuotes = (act?.lineups || []).map((lineup) => {
       } (e.g. first dance or favourites)</li>`
     : ""
 }
-      ${
-        act.setlist === "smallTailoring"
-          ? `<li>A signature setlist curated by the band — guaranteed crowd-pleasers</li>`
-          : act.setlist === "mediumTailoring"
-          ? `<li>A collaborative setlist blending your top picks with our favourites</li>`
-          : act.setlist === "largeTailoring"
-          ? `<li>A fully tailored setlist made almost entirely of your requests</li>`
-          : ""
-      }
+   ${
+  (act?.setlist || "") === "smallTailoring"
+    ? `<li>A signature setlist curated by the band — guaranteed crowd-pleasers</li>`
+    : (act?.setlist || "") === "mediumTailoring"
+    ? `<li>A collaborative setlist blending your top picks with our favourites</li>`
+    : (act?.setlist || "") === "largeTailoring"
+    ? `<li>A fully tailored setlist made almost entirely of your requests</li>`
+    : ""
+}
       ${
         finalTravelPrice && selectedAddress
           ? `<li>Travel to ${selectedAddress}</li>`

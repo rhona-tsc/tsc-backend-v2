@@ -114,7 +114,7 @@ app.use((req, res, next) => {
   const _end = res.end;
   res.end = function (...args) {
     const acao = res.getHeader('Access-Control-Allow-Origin');
-    if (acao) console.log(`   ↳ ACAO sent: ${acao}`);
+   // if (acao) console.log(`   ↳ ACAO sent: ${acao}`);
     _end.apply(this, args);
   };
   next();
@@ -150,6 +150,47 @@ cloudinary.config({
   api_secret: process.env.REACT_APP_CLOUDINARY_SECRET_KEY,
 });
 
+/* -------------------------------------------------------------------------- */
+/*                 🌍 Global color-coded route logging middleware              */
+/* -------------------------------------------------------------------------- */
+app.use((req, res, next) => {
+  // 🛑 Skip logging for noisy or cached routes
+  if (
+    req.originalUrl.includes("/api/v2/travel/travel-data") ||
+    req.originalUrl.includes("/api/availability/subscribe")
+  ) {
+    return next();
+  }
+
+  const start = Date.now();
+  const color = {
+    reset: "\x1b[0m",
+    green: "\x1b[32m",
+    yellow: "\x1b[33m",
+    red: "\x1b[31m",
+    cyan: "\x1b[36m",
+  };
+
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    const method = req.method.padEnd(6);
+    const status = res.statusCode;
+    const time = new Date().toISOString();
+
+    if (status === 304) return; // 💤 Skip cache hits too
+
+    let statusColor =
+      status >= 500 ? color.red :
+      status >= 400 ? color.yellow :
+      color.green;
+
+    // console.log(
+    //  `${statusColor}[${method}]${status}${color.reset} ${req.originalUrl} (${duration}ms)`
+   // );
+  });
+
+  next();
+});
 
 /* -------------------------------------------------------------------------- */
 /*                                   Routes                                   */
