@@ -154,9 +154,15 @@ cloudinary.config({
 /*                 🌍 Global color-coded route logging middleware              */
 /* -------------------------------------------------------------------------- */
 app.use((req, res, next) => {
-  const start = Date.now();
+  // 🛑 Skip logging for noisy or cached routes
+  if (
+    req.originalUrl.includes("/api/v2/travel/travel-data") ||
+    req.originalUrl.includes("/api/availability/subscribe")
+  ) {
+    return next();
+  }
 
-  // ANSI color helpers
+  const start = Date.now();
   const color = {
     reset: "\x1b[0m",
     green: "\x1b[32m",
@@ -171,15 +177,16 @@ app.use((req, res, next) => {
     const status = res.statusCode;
     const time = new Date().toISOString();
 
-    // Choose color based on status
+    if (status === 304) return; // 💤 Skip cache hits too
+
     let statusColor =
-      status >= 500
-        ? color.red
-        : status >= 400
-        ? color.yellow
-        : color.green;
+      status >= 500 ? color.red :
+      status >= 400 ? color.yellow :
+      color.green;
 
-
+    console.log(
+      `${statusColor}[${method}]${status}${color.reset} ${req.originalUrl} (${duration}ms)`
+    );
   });
 
   next();
