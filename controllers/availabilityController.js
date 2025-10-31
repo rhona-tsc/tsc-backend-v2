@@ -2241,7 +2241,6 @@ try {
 } catch (outerErr) {
   console.warn("⚠️ Outer calendar invite block failed:", outerErr.message);
 }
-  }
 
     /* ---------------------------------------------------------------------- */
     /* ✉️ Send client email (lead YES only)                                   */
