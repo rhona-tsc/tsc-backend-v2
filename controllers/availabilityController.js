@@ -1007,8 +1007,8 @@ export const triggerAvailabilityRequest = async (req, res) => {
   // 5️⃣ Send WhatsApp (shared helper)
   try {
     console.log("📤 [triggerAvailabilityRequest] Sending unified WA message via sendWhatsAppMessage()");
-console.log("🟦 About to sendWhatsAppText using content SID:", process.env.TWILIO_ENQUIRY_SID);
-const sendRes = await sendWhatsAppText({
+console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
+const sendRes = await sendWhatsAppMessage({
   to: phoneNorm,
   actData: act,
   lineup,
