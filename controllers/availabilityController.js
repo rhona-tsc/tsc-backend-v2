@@ -1007,7 +1007,7 @@ export const triggerAvailabilityRequest = async (req, res) => {
   // 5️⃣ Send WhatsApp (shared helper)
   try {
     console.log("📤 [triggerAvailabilityRequest] Sending unified WA message via sendWhatsAppMessage()");
-
+console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
 const sendRes = await sendWhatsAppMessage({
   to: phoneNorm,
   actData: act,
@@ -1127,8 +1127,9 @@ export async function notifyDeputyOneShot({
     const smsBody = `Hi ${deputy.firstName || deputy.name || "there"}, you've received an enquiry for a gig on ${templateParams.date} in ${templateParams.location} at a rate of ${templateParams.fee} for ${templateParams.role} duties with ${templateParams.actName}. Please indicate your availability 💫`;
 
     console.log("💬 [notifyDeputyOneShot] smsBody built:", smsBody);
-
+console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
     // ✅ Send via Twilio template
+
     await sendWhatsAppMessage({
       to: deputy.phone,
       actData: act,
@@ -1284,6 +1285,7 @@ try {
   console.error("❌ Calendar invite failed:", err.message);
 }
         }
+console.log("🟦 About to sendWhatsAppText using content SID:", process.env.TWILIO_ENQUIRY_SID);
 
         await sendWhatsAppText(toE164, "Super — we’ve sent a diary invite with full details.");
 
@@ -1370,7 +1372,7 @@ try {
         } catch (err) {
           console.error("❌ Failed to $unset badge keys:", err.message);
         }
-
+console.log("🟦 About to sendWhatsaAppText using content SID:", process.env.TWILIO_ENQUIRY_SID);
         await sendWhatsAppText(toE164, "Thanks for letting us know — we've updated your availability.");
 
         if (act?._id && updated?.lineupId) {
@@ -1711,6 +1713,7 @@ export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
     if (Date.now() - last > SIX_HOURS) {
       try {
         console.log("📤 Sending WhatsApp to deputy…");
+        console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
         const sendRes = await sendWhatsAppMessage({
           to: p,
           templateParams: {
