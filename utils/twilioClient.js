@@ -182,7 +182,7 @@ export async function sendWhatsAppMessage(opts = {}) {
   };
 
   console.log("📦 Enriched content variables:", enrichedVars);
-
+console.log("🟦 Using TWILIO_ENQUIRY_SID =", process.env.TWILIO_ENQUIRY_SID);
   /* -------------------------------------------------------------------------- */
   /* ✉️ Send via Twilio                                                        */
   /* -------------------------------------------------------------------------- */
@@ -200,7 +200,7 @@ export async function sendWhatsAppMessage(opts = {}) {
     contentSid: payload.contentSid,
     contentVariables: payload.contentVariables,
   });
-
+console.log("🟦 Final payload Content SID:", payload.contentSid);
   const msg = await client.messages.create(payload);
 
   /* -------------------------------------------------------------------------- */
