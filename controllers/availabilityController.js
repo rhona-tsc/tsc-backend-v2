@@ -1130,18 +1130,17 @@ export async function notifyDeputyOneShot({
 console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
     // ✅ Send via Twilio template
 
-    await sendWhatsAppMessage({
-      to: deputy.phone,
-      actData: act,
-      lineup: lineupId,
-      member: deputy,
-      address: location,
-      dateISO,
-      role: duties,
-      templateParams,
-contentSid: process.env.TWILIO_ENQUIRY_SID,
-      smsBody,
-    });
+ await sendWhatsAppMessage({
+  to: deputy.phone,
+  actData: act,
+  lineup: lineupId,
+  member: deputy, // now fills {{1}}
+  address: location,
+  dateISO,
+  role: duties,
+  contentSid: process.env.TWILIO_ENQUIRY_SID,
+  smsBody,
+});
 
     console.log(`✅ notifyDeputyOneShot sent successfully to ${deputy.phone}`);
   } catch (err) {
