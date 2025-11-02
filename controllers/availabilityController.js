@@ -1007,8 +1007,8 @@ export const triggerAvailabilityRequest = async (req, res) => {
   // 5️⃣ Send WhatsApp (shared helper)
   try {
     console.log("📤 [triggerAvailabilityRequest] Sending unified WA message via sendWhatsAppMessage()");
-console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
-const sendRes = await sendWhatsAppMessage({
+console.log("🟦 About to sendWhatsAppText using content SID:", process.env.TWILIO_ENQUIRY_SID);
+const sendRes = await sendWhatsAppText({
   to: phoneNorm,
   actData: act,
   lineup,
@@ -1130,17 +1130,18 @@ export async function notifyDeputyOneShot({
 console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
     // ✅ Send via Twilio template
 
- await sendWhatsAppMessage({
-  to: deputy.phone,
-  actData: act,
-  lineup: lineupId,
-  member: deputy, // now fills {{1}}
-  address: location,
-  dateISO,
-  role: duties,
-  contentSid: process.env.TWILIO_ENQUIRY_SID,
-  smsBody,
-});
+    await sendWhatsAppMessage({
+      to: deputy.phone,
+      actData: act,
+      lineup: lineupId,
+      member: deputy,
+      address: location,
+      dateISO,
+      role: duties,
+      templateParams,
+contentSid: process.env.TWILIO_ENQUIRY_SID,
+      smsBody,
+    });
 
     console.log(`✅ notifyDeputyOneShot sent successfully to ${deputy.phone}`);
   } catch (err) {
@@ -1284,7 +1285,7 @@ try {
   console.error("❌ Calendar invite failed:", err.message);
 }
         }
-console.log("🟦 About to sendWhatsAppText using content SID:", process.env.TWILIO_ENQUIRY_SID);
+console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
 
         await sendWhatsAppText(toE164, "Super — we’ve sent a diary invite with full details.");
 

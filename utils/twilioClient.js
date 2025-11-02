@@ -190,14 +190,7 @@ console.log("🟦 Using TWILIO_ENQUIRY_SID =", process.env.TWILIO_ENQUIRY_SID);
     from: `whatsapp:${fromE}`,
     to: `whatsapp:${toE}`,
     contentSid: contentSid || TWILIO_ENQUIRY_SID,
-    contentVariables: JSON.stringify({
-      "1": member?.firstName || "Musician",
-      "2": enrichedVars.date,
-      "3": enrichedVars.location,
-      "4": enrichedVars.fee.replace(/[^0-9.]/g, ''), // remove £
-      "5": enrichedVars.role,
-      "6": enrichedVars.actName
-    }),
+    contentVariables: makeContentVariables({ variables: enrichedVars }),
     ...(statusCallback ? { statusCallback } : {}),
   };
 
