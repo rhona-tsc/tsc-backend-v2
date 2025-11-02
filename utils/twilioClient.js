@@ -4,23 +4,21 @@ import Twilio from 'twilio';
 import AvailabilityModel from "../models/availabilityModel.js";
 import { computeFinalFeeForMember, formatNiceDate } from "../controllers/availabilityController.js";
 
-
 const {
-  TWILIO_ACCOUNT_SID,            // ACxxxxxxxx...
-  TWILIO_AUTH_TOKEN,             // (with AC path)
-  TWILIO_API_KEY,                // SKxxxxxxxx... (optional alt path)
-   // secret for SK
+  TWILIO_ACCOUNT_SID,
+  TWILIO_AUTH_TOKEN,
+  TWILIO_API_KEY,
   TWILIO_WA_SENDER,
   TWILIO_SMS_FROM,
   TWILIO_MESSAGING_SERVICE_SID,
-  TWILIO_ENQUIRY_SID,            // default WA template SID
+  TWILIO_ENQUIRY_SID,
   BACKEND_URL,
 } = process.env;
 
 // -------------------- Twilio client (lazy init, never crash app) --------------------
 let _twilioClient = null;
 function getTwilioClient() {
-  console.log(`🩵 (utils/twilioClient.js) getTwilioClient START at ${new Date().toISOString()}`, { });
+  console.log(`🩵 (utils/twilioClient.js) getTwilioClient START at ${new Date().toISOString()}`, {});
   if (_twilioClient) return _twilioClient;
 
   try {
@@ -28,17 +26,16 @@ function getTwilioClient() {
       _twilioClient = Twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
       return _twilioClient;
     }
-    // API Key auth also requires the account SID
     if (TWILIO_API_KEY && TWILIO_API_SECRET && TWILIO_ACCOUNT_SID) {
       _twilioClient = Twilio(TWILIO_API_KEY, TWILIO_API_SECRET, {
         accountSid: TWILIO_ACCOUNT_SID,
       });
       return _twilioClient;
     }
-    console.warn('🔕 Twilio not configured (missing envs). SMS/WA features disabled.');
+    console.warn("🔕 Twilio not configured (missing envs). SMS/WA features disabled.");
     return null;
   } catch (e) {
-    console.warn('🔕 Twilio init error. Disabling Twilio. Reason:', e?.message || e);
+    console.warn("🔕 Twilio init error. Disabling Twilio. Reason:", e?.message || e);
     return null;
   }
 }
@@ -46,69 +43,20 @@ function getTwilioClient() {
 // -------------------- Helpers --------------------
 /** Normalize to E.164 (+44…) and strip any whatsapp: prefix */
 export const toE164 = (raw = '') => {
-    console.log(`🩵 (utils/twilioClient.js) toE164 START at ${new Date().toISOString()}`, { });
-
+  console.log(`🩵 (utils/twilioClient.js) toE164 START at ${new Date().toISOString()}`, {});
   let s = String(raw).replace(/^whatsapp:/i, '').replace(/\s+/g, '');
   if (!s) return '';
   if (s.startsWith('+')) return s;
   if (s.startsWith('07')) return s.replace(/^0/, '+44');
   if (s.startsWith('44')) return `+${s}`;
-  return s; // assume already valid for your region if not UK
+  return s;
 };
 
 /** Only send status callbacks when we have an HTTPS public URL */
-const statusCallback = (BACKEND_URL && /^https:\/\//i.test(BACKEND_URL))
-  ? `${BACKEND_URL.replace(/\/$/, '')}/api/availability/twilio/status`
-  : undefined;
-
-/**
- * Build a minimal, *exact* variables object for a 6-slot template.
- * Returns only "1".."6" keys; NO extra meta keys to avoid 21656.
- */
-const buildVarsFromTemplateParams = (p = {}) => {
-    console.log(`🩵 (utils/twilioClient.js) buildVarsFromTemplateParams START at ${new Date().toISOString()}`, { });
-
-  const pickFee = p.Fee ?? p.fee ?? p.Rate ?? p.rate ?? '';
-  let fee = '';
-  if (pickFee !== undefined && pickFee !== null) {
-    let f = String(pickFee).trim();
-    if (!['tbc', 'undefined', 'null'].includes(f.toLowerCase())) {
-      f = f.replace(/^\s*[£$]/, '').replace(/,/g, '');
-      fee = f;
-    } else {
-      fee = f.toUpperCase();
-    }
-  }
-
-  return {
-    '1': String(p.FirstName ?? ''),
-    '2': String(p.FormattedDate ?? ''),
-    '3': String(p.FormattedAddress ?? ''),
-    '4': String(fee ?? ''),
-    '5': String(p.Duties ?? ''),
-    '6': String(p.ActName ?? ''),
-  };
-};
-
-/**
- * Ensure we send *only* the keys the template expects.
- * If caller passes `variables`, we trust it *as-is* (after stringifying non-null values).
- * Otherwise we derive the standard 6-slot map from `templateParams`.
- */
-const makeContentVariables = ({ variables, templateParams } = {}) => {
-    console.log(`🩵 (utils/twilioClient.js) makeContentVariables START at ${new Date().toISOString()}`, { });
-
-  let obj;
-  if (variables && typeof variables === 'object') {
-    obj = {};
-    for (const [k, v] of Object.entries(variables)) {
-      if (v !== undefined && v !== null) obj[String(k)] = String(v);
-    }
-  } else {
-    obj = buildVarsFromTemplateParams(templateParams);
-  }
-  return JSON.stringify(obj);
-};
+const statusCallback =
+  BACKEND_URL && /^https:\/\//i.test(BACKEND_URL)
+    ? `${BACKEND_URL.replace(/\/$/, '')}/api/availability/twilio/status`
+    : undefined;
 
 // Short-lived cache so the status webhook can send SMS if WA is undelivered
 export const WA_FALLBACK_CACHE = new Map(); // sid -> { to, smsBody }
@@ -127,7 +75,7 @@ export async function sendWhatsAppMessage(opts = {}) {
     to,
     actData = null,
     lineup = null,
-    member = null,          // ✅ so we know whose fee to use
+    member = null,
     address = "",
     dateISO = "",
     role = "",
@@ -145,44 +93,35 @@ export async function sendWhatsAppMessage(opts = {}) {
   /* 🧮 Calculate fee + format address and date                                 */
   /* -------------------------------------------------------------------------- */
 
-  // 🪶 Get short address (friendly 2-segment format)
   const shortAddress = address
     ? address.split(",").slice(0, 2).join(", ").trim()
     : "TBC";
 
-  // 📅 Nice formatted date (e.g. Tuesday, 22nd March 2027)
   const formattedDate = dateISO ? formatNiceDate(dateISO) : "TBC";
 
-  // 💰 Calculate final fee using your proven helper
   let formattedFee = "TBC";
   try {
     if (actData && member && address && dateISO && lineup) {
-      const feeValue = await computeFinalFeeForMember(
-        actData,
-        member,
-        address,
-        dateISO,
-        lineup
-      );
+      const feeValue = await computeFinalFeeForMember(actData, member, address, dateISO, lineup);
       formattedFee = `£${feeValue}`;
     }
   } catch (err) {
     console.warn("⚠️ Failed to compute final fee for member:", err.message);
   }
 
-  // 🎭 Merge all into content variables
+  // 🎭 Merge all into named content variables (for Twilio {{firstName}}, {{date}}, etc.)
   const enrichedVars = {
-    actName: actData?.tscName || actData?.name || "TSC Act",
+    firstName: member?.firstName || member?.name || "Musician",
     date: formattedDate,
-    fee: formattedFee,
     location: shortAddress,
+    fee: formattedFee.replace(/[^0-9.]/g, ''),
     role: role || member?.instrument || "Musician",
-    ...templateParams,
-    ...variables,
+    actName: actData?.tscName || actData?.name || "TSC Act",
   };
 
   console.log("📦 Enriched content variables:", enrichedVars);
-console.log("🟦 Using TWILIO_ENQUIRY_SID =", process.env.TWILIO_ENQUIRY_SID);
+  console.log("🟦 Using TWILIO_ENQUIRY_SID =", process.env.TWILIO_ENQUIRY_SID);
+
   /* -------------------------------------------------------------------------- */
   /* ✉️ Send via Twilio                                                        */
   /* -------------------------------------------------------------------------- */
@@ -190,7 +129,7 @@ console.log("🟦 Using TWILIO_ENQUIRY_SID =", process.env.TWILIO_ENQUIRY_SID);
     from: `whatsapp:${fromE}`,
     to: `whatsapp:${toE}`,
     contentSid: contentSid || TWILIO_ENQUIRY_SID,
-    contentVariables: makeContentVariables({ variables: enrichedVars }),
+    contentVariables: JSON.stringify(enrichedVars),
     ...(statusCallback ? { statusCallback } : {}),
   };
 
@@ -200,7 +139,8 @@ console.log("🟦 Using TWILIO_ENQUIRY_SID =", process.env.TWILIO_ENQUIRY_SID);
     contentSid: payload.contentSid,
     contentVariables: payload.contentVariables,
   });
-console.log("🟦 Final payload Content SID:", payload.contentSid);
+  console.log("🟦 Final payload Content SID:", payload.contentSid);
+
   const msg = await client.messages.create(payload);
 
   /* -------------------------------------------------------------------------- */
@@ -209,20 +149,19 @@ console.log("🟦 Final payload Content SID:", payload.contentSid);
   try {
     const twilioSid = msg?.sid;
     const toE = toE164(to);
-// 🧩 Only save fallback text when we are NOT using a Twilio content template
-if (twilioSid && toE && smsBody && !contentSid) {
-  await AvailabilityModel.updateOne(
-    { phone: toE, v2: true },
-    {
-      $set: {
-        "outbound.sid": twilioSid,
-        "outbound.smsBody": smsBody,
-        updatedAt: new Date(),
-      },
+    if (twilioSid && toE && smsBody && !contentSid) {
+      await AvailabilityModel.updateOne(
+        { phone: toE, v2: true },
+        {
+          $set: {
+            "outbound.sid": twilioSid,
+            "outbound.smsBody": smsBody,
+            updatedAt: new Date(),
+          },
+        }
+      );
+      WA_FALLBACK_CACHE.set(twilioSid, { to: toE, smsBody });
     }
-  );
-  WA_FALLBACK_CACHE.set(twilioSid, { to: toE, smsBody });
-}
   } catch (e) {
     console.warn("[twilio] failed to persist WA fallback arm:", e?.message || e);
   }
@@ -233,16 +172,12 @@ if (twilioSid && toE && smsBody && !contentSid) {
 /**
  * Send a plain SMS (used for fallback or reminders).
  */
-
-
-// --- SMS sender (used for fallback) ---
 export const sendSMSMessage = async (to, body) => {
-    console.log(`🩵 (utils/twilioClient.js) sendSMSMessage START at ${new Date().toISOString()}`, { });
+  console.log(`🩵 (utils/twilioClient.js) sendSMSMessage START at ${new Date().toISOString()}`, {});
 
   const client = getTwilioClient();
-  if (!client) throw new Error('Twilio disabled');
+  if (!client) throw new Error("Twilio disabled");
 
-  // normalise dest to E.164
   let dest = String(to || '').replace(/^whatsapp:/i, '').replace(/\s+/g, '');
   if (!dest.startsWith('+')) {
     if (dest.startsWith('07')) dest = dest.replace(/^0/, '+44');
@@ -266,42 +201,11 @@ export const sendSMSMessage = async (to, body) => {
   return client.messages.create(payload);
 };
 
-
-// *{ export async function sendSMSMessage(to, body) {
-// const client = getTwilioClient();
-// if (!client) throw new Error('Twilio disabled');
-
-//  const toE = toE164(to);
-// if (!toE) throw new Error('Bad SMS destination');
-
-  // const payload = {
-  //  to: toE,
-   // body: String(body || ''),
-   // ...(statusCallback ? { statusCallback } : {}),
-  //};
-
-  //if (TWILIO_MESSAGING_SERVICE_SID) {
-  //  payload.messagingServiceSid = TWILIO_MESSAGING_SERVICE_SID;
-  //} else if (TWILIO_SMS_FROM) {
-  //  payload.from = toE164(TWILIO_SMS_FROM);
-  //} else {
-  //  throw new Error('No SMS sender configured');
-  //}
-
-  //console.log('📤 Twilio SMS create()', {
-  //  to: payload.to,
-  //  via: payload.messagingServiceSid ? 'service' : payload.from,
-  //});
-
-  //const msg = await client.messages.create(payload);
-  //return msg; // { sid, status, ... }
-//}
-
 /**
  * Try WA first; if creation fails, fallback to SMS (requires smsBody).
  */
 export async function sendWAOrSMS(opts = {}) {
-    console.log(`🩵 (utils/twilioClient.js) sendWAOrSMS START at ${new Date().toISOString()}`, { });
+  console.log(`🩵 (utils/twilioClient.js) sendWAOrSMS START at ${new Date().toISOString()}`, {});
 
   const { to, templateParams, variables, contentSid, smsBody = '' } = opts;
 
@@ -320,7 +224,7 @@ export async function sendWAOrSMS(opts = {}) {
  * Send a plain WhatsApp text (no template/content).
  */
 export async function sendWhatsAppText(to, body) {
-    console.log(`🩵 (utils/twilioClient.js) sendWhatsAppText START at ${new Date().toISOString()}`, { });
+  console.log(`🩵 (utils/twilioClient.js) sendWhatsAppText START at ${new Date().toISOString()}`, {});
 
   const client = getTwilioClient();
   if (!client) throw new Error('Twilio disabled');
