@@ -631,49 +631,111 @@ const computeMemberTravelFee = async ({
 }) => {
   console.log(
     `🟢 (availabilityController.js) computeMemberTravelFee START at ${new Date().toISOString()}`,
-    {}
+    { selectedCounty, selectedAddress, memberName: member?.firstName }
   );
-  const destination =
-    typeof selectedAddress === "string"
-      ? selectedAddress
-      : selectedAddress?.postcode || selectedAddress?.address || "";
 
-  const origin = member?.postCode;
-  if (!destination || !origin) return 0;
+  // 🧭 1️⃣ Determine origin (musician postcode)
+  const origin =
+    member?.postCode ||
+    member?.postcode ||
+    member?.post_code ||
+    member?.addressPostcode ||
+    "";
 
-  // Branch 1) County fee per member
+  // 🧭 2️⃣ Determine destination (event address)
+  let destination = "";
+  if (typeof selectedAddress === "string" && selectedAddress.trim() !== "") {
+    destination = selectedAddress.trim();
+  } else if (typeof selectedAddress === "object") {
+    destination =
+      selectedAddress?.postcode ||
+      selectedAddress?.address ||
+      selectedAddress?.formattedAddress ||
+      "";
+  } else {
+    destination =
+      act?.formattedAddress ||
+      act?.venueAddress ||
+      act?.eventAddress ||
+      "";
+  }
+
+  // 🧭 3️⃣ Clean & normalize
+  const cleanOrigin = origin?.trim()?.toUpperCase() || "";
+  const cleanDestination = destination?.trim() || "";
+
+  // 🧩 4️⃣ Guard against missing data
+  if (!cleanOrigin || !cleanDestination || cleanDestination === "TBC") {
+    console.warn("⚠️ computeMemberTravelFee missing valid origin or destination", {
+      origin: cleanOrigin || "(none)",
+      destination: cleanDestination || "(none)",
+    });
+    return 0;
+  }
+
+  // 🧩 5️⃣ Branch 1 — County fee per member
   if (act.useCountyTravelFee && act.countyFees) {
     const key = String(selectedCounty || "").toLowerCase();
     const feePerMember =
       Number(act.countyFees?.[key] ?? act.countyFees?.get?.(key) ?? 0) || 0;
-    return feePerMember; // already per-member
+    console.log(`📍 County-based travel fee (${key}): £${feePerMember}`);
+    return feePerMember;
   }
 
-  // Branch 2) Cost-per-mile
+  // 🧩 6️⃣ Branch 2 — Cost-per-mile
   if (Number(act.costPerMile) > 0) {
-    const data = await fetchTravel(origin, destination, selectedDate);
-    const distanceMeters = data?.outbound?.distance?.value || 0;
-    const distanceMiles = distanceMeters / 1609.34;
-    return distanceMiles * Number(act.costPerMile) * 25; // your existing multiplier
+    try {
+      const data = await fetchTravel(cleanOrigin, cleanDestination, selectedDate);
+      const distanceMeters = data?.outbound?.distance?.value || 0;
+      const distanceMiles = distanceMeters / 1609.34;
+      const fee = distanceMiles * Number(act.costPerMile) * 25; // per-member multiplier
+      console.log(
+        `🚗 Cost-per-mile travel: ${distanceMiles.toFixed(1)}mi @ £${act.costPerMile}/mi → £${fee.toFixed(2)}`
+      );
+      return fee;
+    } catch (err) {
+      console.warn("⚠️ Cost-per-mile fetchTravel failed:", err.message);
+      return 0;
+    }
   }
 
-  // Branch 3) MU-style calc
-  const data = await fetchTravel(origin, destination, selectedDate);
-  const outbound = data?.outbound;
-  const returnTrip = data?.returnTrip;
-  if (!outbound || !returnTrip) return 0;
+  // 🧩 7️⃣ Branch 3 — MU-style calculation
+  try {
+    const data = await fetchTravel(cleanOrigin, cleanDestination, selectedDate);
+    const outbound = data?.outbound;
+    const returnTrip = data?.returnTrip;
 
-  const totalDistanceMiles =
-    (outbound.distance.value + returnTrip.distance.value) / 1609.34;
-  const totalDurationHours =
-    (outbound.duration.value + returnTrip.duration.value) / 3600;
+    if (!outbound || !returnTrip) {
+      console.warn("⚠️ MU-style: Missing outbound/return trip data", {
+        origin: cleanOrigin,
+        destination: cleanDestination,
+      });
+      return 0;
+    }
 
-  const fuelFee = totalDistanceMiles * 0.56;
-  const timeFee = totalDurationHours * 13.23;
-  const lateFee = returnTrip.duration.value / 3600 > 1 ? 136 : 0;
-  const tollFee = (outbound.fare?.value || 0) + (returnTrip.fare?.value || 0);
+    const totalDistanceMiles =
+      (outbound.distance.value + returnTrip.distance.value) / 1609.34;
+    const totalDurationHours =
+      (outbound.duration.value + returnTrip.duration.value) / 3600;
 
-  return fuelFee + timeFee + lateFee + tollFee; // per member
+    const fuelFee = totalDistanceMiles * 0.56; // MU mileage
+    const timeFee = totalDurationHours * 13.23; // MU hourly rate
+    const lateFee = returnTrip.duration.value / 3600 > 1 ? 136 : 0;
+    const tollFee = (outbound.fare?.value || 0) + (returnTrip.fare?.value || 0);
+
+    const total = fuelFee + timeFee + lateFee + tollFee;
+
+    console.log(
+      `🎶 MU-style travel fee: distance=${totalDistanceMiles.toFixed(
+        1
+      )}mi, hours=${totalDurationHours.toFixed(2)}, total=£${total.toFixed(2)}`
+    );
+
+    return total;
+  } catch (err) {
+    console.error("❌ MU-style computeMemberTravelFee failed:", err.message);
+    return 0;
+  }
 };
 
 function findVocalistPhone(actData, lineupId) {
@@ -737,37 +799,74 @@ function findVocalistPhone(actData, lineupId) {
 }
 
 
+// controllers/availabilityController.js
 export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
-  console.log(`🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`);
+  console.log(
+    `🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`
+  );
 
-  // Support both (req, res) and direct call { actId, lineupId, dateISO, ... }
+  // Support both (req, res) and direct object call
   const isExpress = !!maybeRes;
   const body = isExpress ? reqOrArgs.body : reqOrArgs;
   const res = isExpress ? maybeRes : null;
 
   try {
-    const { actId, lineupId, date, dateISO: dISO, address, formattedAddress, clientName, clientEmail, isDeputy = false, deputy = null } = body;
-    const dateISO = dISO || (date ? new Date(date).toISOString().slice(0, 10) : null);
+    const {
+      actId,
+      lineupId,
+      date,
+      dateISO: dISO,
+      address,
+      formattedAddress,
+      clientName,
+      clientEmail,
+      isDeputy = false,
+      deputy = null,
+    } = body;
 
+    const dateISO = dISO || (date ? new Date(date).toISOString().slice(0, 10) : null);
     if (!actId || !dateISO) {
       const msg = "Missing actId or dateISO";
       if (res) return res.status(400).json({ success: false, message: msg });
-      else throw new Error(msg);
+      throw new Error(msg);
     }
 
     const act = await Act.findById(actId).lean();
     if (!act) {
       const msg = "Act not found";
       if (res) return res.status(404).json({ success: false, message: msg });
-      else throw new Error(msg);
+      throw new Error(msg);
     }
 
-    const shortAddress =
-      formattedAddress ||
-      address ||
-      act.formattedAddress ||
-      act.venueAddress ||
-      "TBC";
+    // 🧭 Derive shortAddress exactly like before (Town, County)
+    let shortAddress = "";
+    if (address) {
+      shortAddress = address
+        .split(",")
+        .slice(-2)
+        .join(",")
+        .replace(/,\s*UK$/i, "")
+        .trim();
+    } else if (formattedAddress) {
+      shortAddress = formattedAddress
+        .split(",")
+        .slice(-2)
+        .join(",")
+        .replace(/,\s*UK$/i, "")
+        .trim();
+    } else {
+      shortAddress =
+        act?.formattedAddress
+          ?.split(",")
+          .slice(-2)
+          .join(",")
+          .replace(/,\s*UK$/i, "")
+          .trim() || "TBC";
+    }
+
+    // 🧩 Keep a clean formatted version for display (no slicing)
+    const fullFormattedAddress =
+      formattedAddress || address || act?.formattedAddress || act?.venueAddress || "TBC";
 
     const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
       weekday: "long",
@@ -781,9 +880,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       ? lineups.find((l) => String(l._id) === String(lineupId))
       : lineups[0];
 
-    const members = Array.isArray(lineup?.bandMembers)
-      ? lineup.bandMembers
-      : [];
+    const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
 
     const normalizePhone = (raw = "") => {
       let v = String(raw || "").replace(/\s+/g, "").replace(/^whatsapp:/i, "");
@@ -794,6 +891,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       return v;
     };
 
+    // 🧮 Fee calculation
     const feeForMember = async (member) => {
       const baseFee = Number(member?.fee ?? 0);
       const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
@@ -801,7 +899,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
       const base = baseFee > 0 ? baseFee : perHead;
 
-      const { county: selectedCounty } = countyFromAddress(shortAddress);
+      const { county: selectedCounty } = countyFromAddress(fullFormattedAddress);
       const selectedDate = dateISO;
 
       let travelFee = 0;
@@ -821,7 +919,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           act,
           member,
           selectedCounty,
-          selectedAddress: shortAddress,
+          selectedAddress: fullFormattedAddress,
           selectedDate,
         });
         travelFee = Math.max(0, Math.ceil(Number(travelFee || 0)));
@@ -830,13 +928,51 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       return Math.max(0, Math.ceil(Number(base || 0) + Number(travelFee || 0)));
     };
 
-    // 🎤 Determine recipient
-    const targetMember = isDeputy ? deputy : findVocalistPhone(act, lineupId)?.vocalist;
+    // 🎤 Determine recipient (lead vs deputy)
+    const targetMember = isDeputy
+      ? deputy
+      : findVocalistPhone(act, lineupId)?.vocalist;
+
     if (!targetMember) {
       console.warn("⚠️ No valid member (lead or deputy) found for triggerAvailabilityRequest");
       if (res) return res.json({ success: false, message: "No member found" });
       return { success: false };
     }
+
+// 🧩 Enrich targetMember with full Musician data if possible
+let enrichedMember = { ...targetMember };
+
+try {
+  // Try lookup by musicianId first
+  if (targetMember?.musicianId) {
+    const mus = await Musician.findById(targetMember.musicianId).lean();
+    if (mus) enrichedMember = { ...mus, ...enrichedMember };
+  } else {
+    // Fallback: lookup by normalized phone
+    const cleanPhone = (targetMember.phone || targetMember.phoneNumber || "")
+      .replace(/\s+/g, "")
+      .replace(/^0/, "+44");
+    if (cleanPhone) {
+      const mus = await Musician.findOne({
+        $or: [{ phoneNormalized: cleanPhone }, { phone: cleanPhone }],
+      }).lean();
+      if (mus) enrichedMember = { ...mus, ...enrichedMember };
+    }
+  }
+} catch (err) {
+  console.warn("⚠️ Failed to enrich targetMember:", err.message);
+}
+
+targetMember.email = enrichedMember.email || targetMember.email || null;
+targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
+targetMember.profilePicture =
+  enrichedMember.profilePicture || enrichedMember.photoUrl || targetMember.profilePicture || null;
+
+console.log("🎯 Enriched targetMember:", {
+  name: `${targetMember.firstName} ${targetMember.lastName}`,
+  email: targetMember.email,
+  musicianId: targetMember.musicianId,
+});
 
     const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
     if (!phone) {
@@ -854,7 +990,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       musicianId: targetMember._id || null,
       phone,
       dateISO,
-      formattedAddress: shortAddress,
+      formattedAddress: fullFormattedAddress,
       formattedDate,
       clientName: clientName || "",
       clientEmail: clientEmail || "",
@@ -866,11 +1002,15 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       v2: true,
     });
 
-    console.log(`✅ Availability record created for ${isDeputy ? "deputy" : "lead"} ${targetMember.firstName}`);
+    console.log(
+      `✅ Availability record created for ${isDeputy ? "deputy" : "lead"} ${
+        targetMember.firstName
+      } — ${shortAddress} — £${finalFee}`
+    );
 
+    // 💬 Build WhatsApp message using restored shortAddress
     const role = targetMember.instrument || "Performance";
     const feeStr = finalFee > 0 ? `£${finalFee}` : "TBC";
-
     const msg = `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
 
     await sendWhatsAppMessage({
@@ -893,7 +1033,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       smsBody: msg,
     });
 
-    console.log(`📲 WhatsApp sent to ${phone}`);
+    console.log(
+      `📲 WhatsApp sent successfully to ${targetMember.firstName} (${phone}) — ${shortAddress} — £${feeStr}`
+    );
 
     const result = { success: true, sent: 1 };
     if (res) return res.json(result);
@@ -901,7 +1043,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   } catch (err) {
     console.error("❌ triggerAvailabilityRequest error:", err);
     if (res)
-      return res.status(500).json({ success: false, message: err?.message || "Server error" });
+      return res
+        .status(500)
+        .json({ success: false, message: err?.message || "Server error" });
     return { success: false, error: err.message };
   }
 };
