@@ -101,10 +101,18 @@ export async function sendWhatsAppMessage(opts = {}) {
 
   let formattedFee = "TBC";
   try {
-    if (actData && member && address && dateISO && lineup) {
-      const feeValue = await computeFinalFeeForMember(actData, member, address, dateISO, lineup);
-      formattedFee = `£${feeValue}`;
-    }
+   if (!opts.skipFeeCompute && actData && member && address && dateISO && lineup) {
+  const feeValue = await computeFinalFeeForMember(
+    actData,
+    member,
+    address,
+    dateISO,
+    lineup
+  );
+  formattedFee = `£${feeValue}`;
+} else if (opts.finalFee) {
+  formattedFee = `£${opts.finalFee}`;
+}
   } catch (err) {
     console.warn("⚠️ Failed to compute final fee for member:", err.message);
   }

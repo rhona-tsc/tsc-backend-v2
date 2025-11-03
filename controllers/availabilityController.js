@@ -316,6 +316,14 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
     address,
   });
 
+  const formattedAddress =
+  typeof address === "string"
+    ? address
+    : address?.formattedAddress ||
+      address?.address ||
+      act?.venueAddress ||
+      "TBC";
+
   // ✅ Always have a lineup: use provided one or smallest/first
   let lineup = act?.lineups?.find((l) => String(l._id) === String(lineupId));
   if (!lineup && Array.isArray(act?.lineups) && act.lineups.length > 0) {
@@ -381,20 +389,38 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
     year: "numeric",
   });
 
-  for (const deputy of validDeputies) {
-await notifyDeputyOneShot({
-  act,
-  lineupId: lineup._id,
-  deputy,
-  dateISO,
-  formattedDate,
-  formattedAddress: address || act?.venueAddress || "TBC",
-  duties: "Lead Female Vocal",
-  finalFee: deputy.finalFee,
-  metaActId: act._id,
-  address: address || act?.venueAddress || "TBC", // 🆕 ensure address gets passed
-});
-  }
+for (const deputy of validDeputies) {
+  // 🧾 Log each deputy availability request in DB
+  await AvailabilityModel.create({
+    actId: act._id,
+    lineupId: lineup._id || null,
+    musicianId: deputy._id || null,
+    phone: deputy.phone,
+    dateISO,
+    formattedDate,
+    formattedAddress: formattedAddress || act?.venueAddress || "TBC",
+    actName: act?.tscName || act?.name || "",
+    musicianName: `${deputy.firstName || ""} ${deputy.lastName || ""}`.trim(),
+    duties: "Lead Female Vocal",
+    fee: String(deputy.finalFee || ""),
+    reply: null,
+    v2: true,
+    isDeputy: true, // 🆕 optional flag for clarity
+  });
+
+  // 📤 Send WhatsApp message to deputy
+  await notifyDeputyOneShot({
+    act,
+    lineupId: lineup._id,
+    deputy,
+    dateISO,
+    formattedDate,
+    formattedAddress,
+    duties: "Lead Female Vocal",
+    finalFee: deputy.finalFee,
+    metaActId: act._id,
+  });
+}
 
   console.log("✅ [notifyDeputies] Finished sending all deputy notifications");
 }
@@ -1134,26 +1160,27 @@ export async function notifyDeputyOneShot({
     console.log("💬 [notifyDeputyOneShot] smsBody built:", smsBody);
     console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
 
-    // ✅ Send via Twilio template
-    await sendWhatsAppMessage({
-      to: deputy.phone,
-      actData: act,
-      lineup: lineupId,
-      member: deputy,
-      address: formattedAddress || act?.venueAddress || "TBC",
-      dateISO,
-      role: duties,
-      variables: {
-        firstName: deputy.firstName || deputy.name || "Musician",
-        date: formattedDate,
-        location,
-        fee: formattedFee,
-        role: duties,
-        actName: act?.tscName || act?.name,
-      },
-      contentSid: process.env.TWILIO_ENQUIRY_SID,
-      smsBody,
-    });
+await sendWhatsAppMessage({
+  to: deputy.phone,
+  actData: act,
+  lineup: lineupId,
+  member: deputy,
+  address: formattedAddress || act?.venueAddress || "TBC",
+  dateISO,
+  role: duties,
+  finalFee, // 🆕 pass explicitly
+  skipFeeCompute: true, // 🆕 new flag
+  variables: {
+    firstName: deputy.firstName || deputy.name || "Musician",
+    date: formattedDate,
+    location: formattedAddress || act?.venueAddress || "TBC",
+    fee: `£${finalFee}`,
+    role: duties,
+    actName: act?.tscName || act?.name,
+  },
+  contentSid: process.env.TWILIO_ENQUIRY_SID,
+  smsBody,
+});
 
     console.log(`✅ notifyDeputyOneShot sent successfully to ${deputy.phone}`);
   } catch (err) {
