@@ -1307,6 +1307,23 @@ const act =
 
 const isDeputy = Boolean(updated.isDeputy || musician?.isDeputy);
 
+// 🔍 Ensure we always have musician data (lead or deputy)
+if (!musician && updated?.musicianId) {
+  musician = await Musician.findById(updated.musicianId).lean();
+}
+
+if (!musician && updated?.musicianName) {
+  musician = await Musician.findOne({
+    $or: [
+      { name: updated.musicianName },
+      { firstName: new RegExp(updated.musicianName.split(" ")[0], "i") },
+      { lastName: new RegExp(updated.musicianName.split(" ").slice(-1)[0], "i") },
+    ],
+  })
+    .select("email firstName lastName musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl _id")
+    .lean();
+}
+
 // 🔹 use musician (for deputies) or updated (for lead) directly
 const bits = await getDeputyDisplayBits(
   (musician && musician.toObject ? musician.toObject() : musician) ||
