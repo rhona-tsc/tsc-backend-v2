@@ -309,16 +309,18 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
     lineupId,
     dateISO,
     excludePhone,
-    address,
+    address: address || act?.formattedAddress || act?.venueAddress || "TBC",
   });
 
+  // 🧭 Normalize address
   const formattedAddress =
-  typeof address === "string"
-    ? address
-    : address?.formattedAddress ||
-      address?.address ||
-      act?.venueAddress ||
-      "TBC";
+    typeof address === "string"
+      ? address
+      : address?.formattedAddress ||
+        address?.address ||
+        act?.formattedAddress ||
+        act?.venueAddress ||
+        "TBC";
 
   // ✅ Always have a lineup: use provided one or smallest/first
   let lineup = act?.lineups?.find((l) => String(l._id) === String(lineupId));
@@ -328,7 +330,7 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
       const smallSize = smallest.bandMembers?.filter((m) => m.isEssential).length || 0;
       return currSize < smallSize ? curr : smallest;
     }, act.lineups[0]);
-    console.log("🧭 [notifyDeputies] No lineupId provided — defaulting to smallest lineup:", {
+    console.log("🧭 [notifyDeputies] Defaulting to smallest lineup:", {
       selectedLineupId: lineup?._id,
       actSize: lineup?.actSize,
     });
@@ -339,6 +341,7 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
     return;
   }
 
+  // 🎤 Find vocalists
   const vocalists =
     lineup.bandMembers?.filter((m) =>
       ["lead vocal", "lead female vocal", "male vocal", "vocalist-guitarist"].some((v) =>
@@ -358,7 +361,7 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
         const finalFee = await computeFinalFeeForMember(
           act,
           dep,
-          address || act.venueAddress,
+          formattedAddress,
           dateISO,
           lineup
         );
@@ -385,38 +388,46 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
     year: "numeric",
   });
 
-for (const deputy of validDeputies) {
-  // 🧾 Log each deputy availability request in DB
-  await AvailabilityModel.create({
-    actId: act._id,
-    lineupId: lineup._id || null,
-    musicianId: deputy._id || null,
-    phone: deputy.phone,
-    dateISO,
-    formattedDate,
-    formattedAddress: formattedAddress || act?.venueAddress || "TBC",
-    actName: act?.tscName || act?.name || "",
-    musicianName: `${deputy.firstName || ""} ${deputy.lastName || ""}`.trim(),
-    duties: "Lead Female Vocal",
-    fee: String(deputy.finalFee || ""),
-    reply: null,
-    v2: true,
-    isDeputy: true, // 🆕 optional flag for clarity
-  });
+  // 🚀 Loop through valid deputies
+  for (const deputy of validDeputies) {
+    // 🧾 Log each deputy availability request in DB
+    await AvailabilityModel.create({
+      actId: act._id,
+      lineupId: lineup._id || null,
+      musicianId: deputy._id || null,
+      phone: deputy.phone,
+      dateISO,
+      formattedDate,
+      formattedAddress,
+      actName: act?.tscName || act?.name || "",
+      musicianName: `${deputy.firstName || ""} ${deputy.lastName || ""}`.trim(),
+      duties: "Lead Female Vocal",
+      fee: String(deputy.finalFee || ""),
+      reply: null,
+      v2: true,
+      isDeputy: true,
+    });
 
-  // 📤 Send WhatsApp message to deputy
-  await notifyDeputyOneShot({
-    act,
-    lineupId: lineup._id,
-    deputy,
-    dateISO,
-    formattedDate,
-    formattedAddress,
-    duties: "Lead Female Vocal",
-    finalFee: deputy.finalFee,
-    metaActId: act._id,
-  });
-}
+    console.log("📦 [notifyDeputies] Sending to deputy with data:", {
+      deputyName: `${deputy.firstName || ""} ${deputy.lastName || ""}`.trim(),
+      finalFee: deputy.finalFee,
+      formattedAddress,
+      dateISO,
+    });
+
+    // 📤 Send WhatsApp message to deputy
+    await notifyDeputyOneShot({
+      act,
+      lineupId: lineup._id,
+      deputy,
+      dateISO,
+      formattedDate,
+      formattedAddress,
+      duties: "Lead Female Vocal",
+      finalFee: deputy.finalFee,
+      metaActId: act._id,
+    });
+  }
 
   console.log("✅ [notifyDeputies] Finished sending all deputy notifications");
 }
@@ -1127,7 +1138,7 @@ export async function notifyDeputyOneShot({
   });
 
   try {
-    // 🧮 Clean + format fee nicely
+    // 🧮 Format fee
     const numericFee =
       typeof finalFee === "number"
         ? finalFee
@@ -1135,13 +1146,15 @@ export async function notifyDeputyOneShot({
 
     const formattedFee = numericFee > 0 ? `£${numericFee}` : "TBC";
 
-    // 📍 Clean address
+    // 📍 Resolve address
     const location =
       formattedAddress && formattedAddress.trim() !== ""
         ? formattedAddress.split(",").slice(0, 2).join(", ")
-        : act?.venueAddress?.split(",").slice(0, 2).join(", ") || "TBC";
+        : act?.formattedAddress?.split(",").slice(0, 2).join(", ") ||
+          act?.venueAddress?.split(",").slice(0, 2).join(", ") ||
+          "TBC";
 
-    // 🧠 Build template parameters
+    // 🧠 Template parameters
     const templateParams = {
       actName: act?.tscName || act?.name || "The Supreme Collective",
       date: formattedDate || "TBC",
@@ -1150,33 +1163,32 @@ export async function notifyDeputyOneShot({
       role: duties || "Lead Vocal",
     };
 
-    // 📨 Build message text (for SMS fallback or logging)
+    // 📨 SMS fallback message
     const smsBody = `Hi ${deputy.firstName || deputy.name || "there"}, you've received an enquiry for a gig on ${templateParams.date} in ${templateParams.location} at a rate of ${templateParams.fee} for ${templateParams.role} duties with ${templateParams.actName}. Please indicate your availability 💫`;
 
     console.log("💬 [notifyDeputyOneShot] smsBody built:", smsBody);
-    console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
+    console.log("🟦 Using TWILIO_ENQUIRY_SID:", process.env.TWILIO_ENQUIRY_SID);
 
-await sendWhatsAppMessage({
-  to: deputy.phone,
-  actData: act,
-  lineup: lineupId,
-  member: deputy,
-  address: formattedAddress || act?.venueAddress || "TBC",
-  dateISO,
-  role: duties,
-  finalFee, // 🆕 pass explicitly
-  skipFeeCompute: true, // 🆕 new flag
-  variables: {
-    firstName: deputy.firstName || deputy.name || "Musician",
-    date: formattedDate,
-    location: formattedAddress || act?.venueAddress || "TBC",
-    fee: `£${finalFee}`,
-    role: duties,
-    actName: act?.tscName || act?.name,
-  },
-  contentSid: process.env.TWILIO_ENQUIRY_SID,
-  smsBody,
-});
+    // ✅ Send WhatsApp template message
+    await sendWhatsAppMessage({
+      to: deputy.phone,
+      actData: act,
+      lineup: lineupId,
+      member: deputy,
+      address: formattedAddress || act?.formattedAddress || act?.venueAddress || "TBC",
+      dateISO,
+      role: duties,
+      variables: {
+        firstName: deputy.firstName || deputy.name || "Musician",
+        date: formattedDate,
+        location,
+        fee: formattedFee,
+        role: duties,
+        actName: act?.tscName || act?.name,
+      },
+      contentSid: process.env.TWILIO_ENQUIRY_SID,
+      smsBody,
+    });
 
     console.log(`✅ notifyDeputyOneShot sent successfully to ${deputy.phone}`);
   } catch (err) {
@@ -2194,10 +2206,10 @@ if (!badge.isDeputy) {
     const vocalistFirst =
       (badge?.vocalistName || "").split(" ")[0] || "our lead vocalist";
     const heroImg =
-      (Array.isArray(actDoc.profileImage) &&
-        actDoc.profileImage[0]?.url) ||
+      (Array.isArray(actDoc.coverImage) &&
+        actDoc.coverImage[0]?.url) ||
       (Array.isArray(actDoc.images) && actDoc.images[0]?.url) ||
-      actDoc.profileImage?.url ||
+      actDoc.coverImage?.url ||
       "";
 
     // ✅ Set durations
