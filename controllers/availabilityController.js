@@ -1,7 +1,7 @@
 import AvailabilityModel from "../models/availabilityModel.js";
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
-import { cancelCalendarInvite, createCalendarInvite } from "../controllers/googleController.js";
+import { cancelCalendarInvite } from "../controllers/googleController.js";
 import { sendWhatsAppText } from "../utils/twilioClient.js";
 import DeferredAvailability from "../models/deferredAvailabilityModel.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js";
@@ -10,6 +10,7 @@ import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is co
 import {sendEmail } from "../utils/sendEmail.js";
 import mongoose from "mongoose";
 import calculateActPricing from "../utils/calculateActPricing.js";
+import { createCalendarInvite } from "./googleController.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
@@ -1280,6 +1281,7 @@ const act =
         console.log(`✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`);
 
         // 1️⃣ Create a calendar invite for either lead or deputy
+        console.log("📧 [Calendar Debug] emailForInvite=", emailForInvite, "act=", !!act, "dateISO=", dateISO);
 if (emailForInvite && act && dateISO) {
   const formattedDateString = new Date(dateISO).toLocaleDateString("en-GB", {
     weekday: "long",
@@ -1294,7 +1296,24 @@ if (emailForInvite && act && dateISO) {
     null;
 
 try {
-  const event = await createCalendarInvite({
+  console.log("📅 DEBUG Calendar invite about to run", {
+  emailForInvite,
+  actId,
+  actName: act?.tscName || act?.name,
+  dateISO,
+  hasCreateFn: typeof createCalendarInvite === "function",
+});
+
+  const event = await createCalendarInvite(
+    
+    console.log("📅 DEBUG Calendar invite about to run", {
+  emailForInvite,
+  actId,
+  actName: act?.tscName || act?.name,
+  dateISO,
+  hasCreateFn: typeof createCalendarInvite === "function",
+});
+{
     enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
     actId,
     dateISO,
@@ -2109,6 +2128,13 @@ try {
   }
 
   try {
+    console.log("📅 DEBUG Calendar invite about to run", {
+  emailForInvite,
+  actId,
+  actName: act?.tscName || act?.name,
+  dateISO,
+  hasCreateFn: typeof createCalendarInvite === "function",
+});
     const { createCalendarInvite } = await import("./googleController.js");
 
     // Find the musician for email & instrument details
@@ -2143,7 +2169,16 @@ try {
       minute: "2-digit",
     });
 
-    await createCalendarInvite({
+    await createCalendarInvite(
+      console.log("📅 DEBUG Calendar invite about to run", {
+  emailForInvite,
+  actId,
+  actName: act?.tscName || act?.name,
+  dateISO,
+  hasCreateFn: typeof createCalendarInvite === "function",
+});
+{
+      
       enquiryId: `ENQ_${Date.now()}`,
       actId,
       dateISO,
