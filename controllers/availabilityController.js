@@ -1308,7 +1308,10 @@ const act =
 const isDeputy = Boolean(updated.isDeputy || musician?.isDeputy);
 
 // 🔹 use musician (for deputies) or updated (for lead) directly
-const bits = await getDeputyDisplayBits(musician || updated);
+const bits = await getDeputyDisplayBits(
+  (musician && musician.toObject ? musician.toObject() : musician) ||
+  (updated && updated.toObject ? updated.toObject() : updated)
+);
 const emailForInvite = bits?.resolvedEmail || musician?.email || "hello@thesupremecollective.co.uk";
       const actId = String(updated.actId);
       const dateISO = updated.dateISO;
