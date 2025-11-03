@@ -2531,70 +2531,69 @@ const generateDescription = (lineup) => {
 
   return `${count}-Piece: ${instrumentsStr}${rolesStr}`;
 };
-    /* ---------------------------------------------------------------------- */
-    /* 💰 lineupQuotes with dynamic pricing                                   */
-    /* ---------------------------------------------------------------------- */
-  // 🪄 Improved lineup formatting with dynamic travel inclusion
+   /* ---------------------------------------------------------------------- */
+/* 💰 lineupQuotes with dynamic pricing + console logs                    */
+/* ---------------------------------------------------------------------- */
 const lineupQuotes = await Promise.all(
   (actDoc.lineups || []).map(async (lu) => {
-    const name =
-      lu?.actSize ||
-      `${(lu?.bandMembers || []).filter((m) => m?.isEssential).length}-Piece`;
-
-    // Replace generic "vocals" with lead female vocal if present
-    const instruments = (lu?.bandMembers || [])
-      .filter((m) => m?.isEssential)
-      .map((m) => {
-        const inst = (m?.instrument || "").toLowerCase();
-        if (inst.includes("vocal")) return "Lead Female Vocal";
-        return m.instrument;
-      })
-      .filter(Boolean);
-
-    const instrumentList = instruments.join(", ");
-
-    // 🎯 Calculate travel-inclusive total using existing backend logic
-    let travelTotal = "";
     try {
-      const selectedAddress =
-        badge?.address || actDoc?.formattedAddress || "TBC";
-      const selectedDate = badge?.dateISO || new Date().toISOString().slice(0, 10);
+      const name =
+        lu?.actSize ||
+        `${(lu?.bandMembers || []).filter((m) => m?.isEssential).length}-Piece`;
 
-// 🎯 Calculate travel-inclusive total using existing backend logic
-let travelTotal = "price TBC";
-try {
-  const selectedAddress =
-    badge?.address || actDoc?.formattedAddress || actDoc?.venueAddress || "TBC";
-  const selectedDate = badge?.dateISO || new Date().toISOString().slice(0, 10);
-  const { county: selectedCounty } = countyFromAddress(selectedAddress);
+      // 🎯 Calculate travel-inclusive total using existing backend logic
+      let travelTotal = "price TBC";
+      try {
+        const selectedAddress =
+          badge?.address ||
+          actDoc?.formattedAddress ||
+          actDoc?.venueAddress ||
+          "TBC";
+        const selectedDate = badge?.dateISO || new Date().toISOString().slice(0, 10);
+        const { county: selectedCounty } = countyFromAddress(selectedAddress);
 
-  const { total } = await calculateActPricing(
-    actDoc,
-    selectedCounty,
-    selectedAddress,
-    selectedDate,
-    lu
-  );
+        const { total } = await calculateActPricing(
+          actDoc,
+          selectedCounty,
+          selectedAddress,
+          selectedDate,
+          lu
+        );
 
-  if (total && !isNaN(total)) {
-    const totalWithMargin = Math.round(Number(total) * 1.2);
-    travelTotal = `from £${totalWithMargin.toLocaleString("en-GB")}`;
-  }
-} catch (err) {
-  console.warn("⚠️ Price calc failed:", err.message);
-}
+        console.log("💰 [Pricing Debug]", {
+          lineup: name,
+          selectedAddress,
+          selectedCounty,
+          total,
+        });
+
+        if (total && !isNaN(total)) {
+          const totalWithMargin = Math.round(Number(total) * 1.2);
+          travelTotal = `from £${totalWithMargin.toLocaleString("en-GB")}`;
+        } else {
+          console.warn(`⚠️ No valid total for lineup ${name}`);
+        }
+      } catch (err) {
+        console.warn("⚠️ Price calc failed:", err.message);
+      }
+
+      // 🎸 Format instruments list (not bold)
+      const instruments = (lu?.bandMembers || [])
+        .filter((m) => m?.isEssential)
+        .map((m) => m?.instrument)
+        .filter(Boolean)
+        .join(", ");
+
+      // 💅 Final formatted line
+      return {
+        html: `<strong>${name}</strong>: ${instruments} — <strong>${travelTotal}</strong>`,
+      };
     } catch (err) {
-      console.warn("⚠️ Travel-inclusive price calc failed:", err.message);
+      console.warn("⚠️ Lineup formatting failed:", err.message);
+      return { html: "<em>Lineup unavailable</em>" };
     }
-
-    // 💅 Bold the lineup name, normal font for instruments
-    return {
-        html: `<strong>${generateDescription(lu)}</strong> — ${travelTotal}`,
-
-    };
   })
 );
-
     /* ---------------------------------------------------------------------- */
     /* 🎁 Complimentary extras & tailoring                                    */
     /* ---------------------------------------------------------------------- */
