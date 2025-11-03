@@ -1197,8 +1197,11 @@ const act =
         }).lean();
       }
 
-      const isDeputy = Boolean(updated.isDeputy || musician?.isDeputy);
-      const emailForInvite = musician?.email || updated.calendarInviteEmail || null;
+const isDeputy = Boolean(updated.isDeputy || musician?.isDeputy);
+
+// 🔹 use musician (for deputies) or updated (for lead) directly
+const bits = await getDeputyDisplayBits(musician || updated);
+const emailForInvite = bits?.resolvedEmail || musician?.email || "hello@thesupremecollective.co.uk";
       const actId = String(updated.actId);
       const dateISO = updated.dateISO;
       const toE164 = normalizeToE164(updated.phone || fromRaw);
@@ -1497,7 +1500,6 @@ async function getDeputyDisplayBits(dep) {
       (dep?._id && String(dep._id)) ||
       "";
 
-    // 🎯 Step 1: try direct image on deputy
     let photoUrl = getPictureUrlFrom(dep);
     console.log("📸 Step 1: Direct deputy photoUrl →", photoUrl || "❌ none");
 
@@ -1514,30 +1516,25 @@ async function getDeputyDisplayBits(dep) {
     }
 
     // Step 3: lookup by email if still missing
-    if (
-      (!photoUrl || !photoUrl.startsWith("http")) &&
-      (dep?.email || mus?.email)
-    ) {
-      const email = dep?.email || dep?.emailAddress || mus?.email || "";
-      console.log("📧 Step 3: Lookup by email →", email || "❌ none");
-      if (email) {
-        const musByEmail = await Musician.findOne({ email })
-          .select(
-            "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl _id email"
-          )
-          .lean();
-        if (musByEmail) {
-          photoUrl = getPictureUrlFrom(musByEmail);
-          console.log(
-            "📸 Step 3 result: Found via email →",
-            photoUrl || "❌ none"
-          );
-          if (!musicianId && musByEmail._id) {
-            dep.musicianId = musByEmail._id;
-          }
-        } else {
-          console.warn("⚠️ Step 3: No musician found for email", email);
+    let resolvedEmail = dep?.email || dep?.emailAddress || mus?.email || "";
+    if ((!photoUrl || !photoUrl.startsWith("http")) && resolvedEmail) {
+      console.log("📧 Step 3: Lookup by email →", resolvedEmail || "❌ none");
+
+      const musByEmail = await Musician.findOne({ email: resolvedEmail })
+        .select(
+          "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl _id email"
+        )
+        .lean();
+
+      if (musByEmail) {
+        photoUrl = getPictureUrlFrom(musByEmail);
+        resolvedEmail = musByEmail.email || resolvedEmail;
+        console.log("📸 Step 3 result: Found via email →", photoUrl || "❌ none");
+        if (!musicianId && musByEmail._id) {
+          dep.musicianId = musByEmail._id;
         }
+      } else {
+        console.warn("⚠️ Step 3: No musician found for email", resolvedEmail);
       }
     }
 
@@ -1549,7 +1546,6 @@ async function getDeputyDisplayBits(dep) {
     const DEFAULT_PROFILE_PICTURE =
       "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1761313694/profile_placeholder_rcdly4.png";
 
-    // 🪄 Step 4: fallback if no valid image found
     if (!photoUrl || !photoUrl.startsWith("http")) {
       photoUrl = DEFAULT_PROFILE_PICTURE;
       console.log("🪄 No valid photo found – using fallback image:", photoUrl);
@@ -1557,6 +1553,7 @@ async function getDeputyDisplayBits(dep) {
 
     console.log("🎯 Final getDeputyDisplayBits result:", {
       resolvedMusicianId,
+      resolvedEmail,
       photoUrl,
       profileUrl,
     });
@@ -1565,6 +1562,7 @@ async function getDeputyDisplayBits(dep) {
       musicianId: resolvedMusicianId,
       photoUrl,
       profileUrl,
+      resolvedEmail, // ✅ added for Twilio / Calendar invites
     };
   } catch (e) {
     console.warn("⚠️ getDeputyDisplayBits failed:", e?.message || e);
@@ -1576,12 +1574,15 @@ async function getDeputyDisplayBits(dep) {
       ? `${PUBLIC_SITE_BASE}/musician/${fallbackId}`
       : "";
     const fallbackPhoto =
-      assets.Default_Profile_Picture ||
-      `${PUBLIC_SITE_BASE}/default-avatar.png`;
-    return { musicianId: fallbackId, photoUrl: fallbackPhoto, profileUrl };
+      "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1761313694/profile_placeholder_rcdly4.png";
+    return {
+      musicianId: fallbackId,
+      photoUrl: fallbackPhoto,
+      profileUrl,
+      resolvedEmail: dep?.email || "",
+    };
   }
 }
-
 // -------------------- SSE Broadcaster --------------------
 
 export const makeAvailabilityBroadcaster = (broadcastFn) => ({
