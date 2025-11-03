@@ -1312,8 +1312,15 @@ const bits = await getDeputyDisplayBits(
   (musician && musician.toObject ? musician.toObject() : musician) ||
   (updated && updated.toObject ? updated.toObject() : updated)
 );
-const emailForInvite = bits?.resolvedEmail || musician?.email || "hello@thesupremecollective.co.uk";
-      const actId = String(updated.actId);
+const emailForInvite =
+  bits?.resolvedEmail ||
+  musician?.email ||
+  updated?.musicianEmail ||
+  updated?.email ||
+  "hello@thesupremecollective.co.uk";
+
+console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
+ const actId = String(updated.actId);
       const dateISO = updated.dateISO;
       const toE164 = normalizeToE164(updated.phone || fromRaw);
 
