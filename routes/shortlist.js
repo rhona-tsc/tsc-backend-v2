@@ -4,9 +4,10 @@ import Act from "../models/actModel.js";
 import User from "../models/userModel.js";
 import {
   getUserShortlist,
-  notifyMusician,
 } from "../controllers/shortlistController.js";
 import { triggerAvailabilityRequest } from "../controllers/availabilityController.js";
+
+
 
 const router = express.Router();
 
@@ -103,17 +104,6 @@ router.patch("/act/:id/decrement-shortlist", async (req, res) => {
       .json({ error: "Failed to decrement shortlist counters." });
   }
 });
-
-/* -------------------------------------------------------------------------- */
-/* 🟤 POST /notify-musician                                                   */
-/* -------------------------------------------------------------------------- */
-router.post("/notify-musician", (req, res, next) => {
-  console.log(
-    `🟤 (routes/shortlist.js) /notify-musician START at ${new Date().toISOString()}`,
-    { body: req.body }
-  );
-  next();
-}, notifyMusician);
 
 
 /* -------------------------------------------------------------------------- */
