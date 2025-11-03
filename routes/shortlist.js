@@ -200,16 +200,7 @@ router.patch("/act/:id/decrement-shortlist", async (req, res) => {
   }
 });
 
-/* -------------------------------------------------------------------------- */
-/* 🟤 POST /notify-musician                                                   */
-/* -------------------------------------------------------------------------- */
-router.post("/notify-musician", (req, res, next) => {
-  console.log(
-    `🟤 (routes/shortlist.js) /notify-musician START at ${new Date().toISOString()}`,
-    { body: req.body }
-  );
-  next();
-}, notifyMusician);
+
 
 /* -------------------------------------------------------------------------- */
 /* 🟠 PATCH /update — If date/location added later, trigger availability       */
