@@ -10,10 +10,10 @@ import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is correct in backend
 import { countyFromOutcode } from "../controllers/helpersForCorrectFee.js";
 import Shortlist from "../models/shortlistModel.js";
-import sendEmail from "../utils/sendEmail.js";
+import {sendEmail } from "../utils/sendEmail.js";
 import User from "../models/userModel.js";
 import mongoose from "mongoose";
-import { calculateActPricing } from "./helpers.js";
+import { calculateActPricing } from "../utils/calculateActPricing.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
@@ -988,6 +988,8 @@ export const triggerAvailabilityRequest = async (req, res) => {
       dateISO,
       formattedAddress: shortAddress,
       formattedDate,
+      clientName: enquiry?.clientFirstName || enquiry?.clientName || "",
+  clientEmail: enquiry?.clientEmail || "",
       actName: act?.tscName || act?.name || "",
       musicianName: `${lead.firstName || ""} ${lead.lastName || ""}`.trim(),
       duties: lead.instrument || "Lead Vocal",
@@ -1958,7 +1960,17 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO,
     if (!actDoc) return { success: false, message: "Act not found" };
 
     let badge = await buildAvailabilityBadgeFromRows(actDoc, dateISO);
+// 🧭 Get latest availability record to enrich badge
+const availabilityRecord = await AvailabilityModel.findOne({
+  actId,
+  dateISO,
+}).sort({ createdAt: -1 }).lean();
 
+if (availabilityRecord) {
+  badge.formattedAddress = availabilityRecord.formattedAddress || badge.formattedAddress;
+  badge.clientName = availabilityRecord.clientName || badge.clientName;
+  badge.clientEmail = availabilityRecord.clientEmail || badge.clientEmail;
+}
     // 🧮 Build unique key for this act/date/location combo
     const shortAddress = (badge?.address || actDoc?.formattedAddress || "unknown")
       .replace(/\W+/g, "_")
@@ -2133,19 +2145,6 @@ try {
 
 if (!badge.isDeputy) {
   try {
-   // ✅ Fetch user's first name for personalized greeting
-let clientFirstName = "there";
-try {
-  const shortlistUserId = badge?.userId || actDoc?.userId;
-  if (shortlistUserId) {
-    const user = await import("../models/userModel.js")
-      .then(m => m.default.findById(shortlistUserId).lean());
-    if (user?.firstName) clientFirstName = user.firstName;
-  }
-} catch (e) {
-  console.warn("⚠️ Could not fetch user for greeting:", e.message);
-}
-
     // ✅ URLs should use FRONTEND_URL
     const SITE =
       process.env.FRONTEND_URL ||
@@ -2195,33 +2194,75 @@ try {
     /* ---------------------------------------------------------------------- */
     /* 🪄 generateDescription (same as Act.jsx)                               */
     /* ---------------------------------------------------------------------- */
-    const generateDescription = (lineup) => {
-      if (!lineup) return "";
-      const members = lineup.bandMembers || [];
-      const essential = members.filter((m) => m.isEssential);
-      const instruments = essential
-        .map((m) => m.instrument)
-        .filter(Boolean);
+// 🎯 Calculate travel-inclusive total using existing backend logic
+let travelTotal = "price TBC";
+try {
+  const selectedAddress =
+    badge?.address || actDoc?.formattedAddress || actDoc?.venueAddress || "TBC";
+  const selectedDate = badge?.dateISO || new Date().toISOString().slice(0, 10);
+  const { county: selectedCounty } = countyFromAddress(selectedAddress);
 
-      const vocals = instruments.filter((i) =>
-        i.toLowerCase().includes("vocal")
-      );
-      const others = instruments.filter(
-        (i) => !i.toLowerCase().includes("vocal")
-      );
+  const { total } = await calculateActPricing(
+    actDoc,
+    selectedCounty,
+    selectedAddress,
+    selectedDate,
+    lu
+  );
 
-      const vocalText = vocals.length
-        ? `${vocals.length}×vocals`
-        : null;
-      const combined = [vocalText, ...others].filter(Boolean).join(", ");
-      const sizeLabel =
-        lineup.lineupSize ||
-        lineup.actSize ||
-        `${essential.length}-Piece`;
+  if (total && !isNaN(total)) {
+    const totalWithMargin = Math.round(Number(total) * 1.2);
+    travelTotal = `from £${totalWithMargin.toLocaleString("en-GB")}`;
+  }
+} catch (err) {
+  console.warn("⚠️ Price calc failed:", err.message);
+}
 
-      return `${sizeLabel}${combined ? ` (${combined})` : ""}`;
-    };
 
+const generateDescription = (lineup) => {
+  const count = lineup.actSize || lineup.bandMembers.length;
+
+  const instruments = lineup.bandMembers
+    .filter((m) => m.isEssential)
+    .map((m) => m.instrument)
+    .filter(Boolean);
+
+  instruments.sort((a, b) => {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    const isVocal = (str) => str.includes("vocal");
+    const isDrums = (str) => str === "drums";
+
+    if (isVocal(aLower) && !isVocal(bLower)) return -1;
+    if (!isVocal(aLower) && isVocal(bLower)) return 1;
+    if (isDrums(aLower)) return 1;
+    if (isDrums(bLower)) return -1;
+    return 0;
+  });
+
+  const formatWithAnd = (arr) => {
+    const unique = [...new Set(arr)];
+    if (unique.length === 0) return "";
+    if (unique.length === 1) return unique[0];
+    if (unique.length === 2) return `${unique[0]} & ${unique[1]}`;
+    return `${unique.slice(0, -1).join(", ")} & ${unique[unique.length - 1]}`;
+  };
+
+  const roles = lineup.bandMembers.flatMap((member) =>
+    (member.additionalRoles || [])
+      .filter((r) => r.isEssential)
+      .map((r) => r.role || "Unnamed Service")
+  );
+
+  if (count === 0) return "Add a Lineup";
+
+  const instrumentsStr = formatWithAnd(instruments);
+  const rolesStr = roles.length
+    ? ` (including ${formatWithAnd(roles)} services)`
+    : "";
+
+  return `${count}-Piece: ${instrumentsStr}${rolesStr}`;
+};
     /* ---------------------------------------------------------------------- */
     /* 💰 lineupQuotes with dynamic pricing                                   */
     /* ---------------------------------------------------------------------- */
@@ -2251,27 +2292,28 @@ const lineupQuotes = await Promise.all(
         badge?.address || actDoc?.formattedAddress || "TBC";
       const selectedDate = badge?.dateISO || new Date().toISOString().slice(0, 10);
 
-   // 🧮 Calculate dynamic price (including travel if possible)
+// 🎯 Calculate travel-inclusive total using existing backend logic
+let travelTotal = "price TBC";
 try {
+  const selectedAddress =
+    badge?.address || actDoc?.formattedAddress || actDoc?.venueAddress || "TBC";
+  const selectedDate = badge?.dateISO || new Date().toISOString().slice(0, 10);
   const { county: selectedCounty } = countyFromAddress(selectedAddress);
+
   const { total } = await calculateActPricing(
     actDoc,
-    selectedCounty || "",
+    selectedCounty,
     selectedAddress,
     selectedDate,
     lu
   );
 
-  const baseFee =
-    lu?.base_fee?.[0]?.total_fee ||
-    lu?.bandMembers?.reduce((sum, m) => sum + (m?.fee || 0), 0) ||
-    0;
-
-  const totalWithMargin = total || baseFee ? Math.round((total || baseFee) * 1.2) : null;
-  travelTotal = totalWithMargin ? `from £${totalWithMargin}` : "price TBC";
+  if (total && !isNaN(total)) {
+    const totalWithMargin = Math.round(Number(total) * 1.2);
+    travelTotal = `from £${totalWithMargin.toLocaleString("en-GB")}`;
+  }
 } catch (err) {
   console.warn("⚠️ Price calc failed:", err.message);
-  travelTotal = "price TBC";
 }
     } catch (err) {
       console.warn("⚠️ Travel-inclusive price calc failed:", err.message);
@@ -2279,7 +2321,8 @@ try {
 
     // 💅 Bold the lineup name, normal font for instruments
     return {
-      html: `<strong>${name}</strong> (${instrumentList}) — ${travelTotal || "price TBC"}`,
+        html: `<strong>${generateDescription(lu)}</strong> — ${travelTotal}`,
+
     };
   })
 );
@@ -2310,7 +2353,6 @@ try {
         ? "Fully tailored setlist built from your requests"
         : null;
 
-        // ✂️ Format address nicely for display (e.g. "Maidenhead, Berkshire")
 const makeShortAddress = (addr = "") => {
   if (typeof addr !== "string") return "TBC";
   const parts = addr.split(",").map((s) => s.trim()).filter(Boolean);
@@ -2319,9 +2361,19 @@ const makeShortAddress = (addr = "") => {
   return "TBC";
 };
 
+// 🌍 Prefer formattedAddress from availabilityRecord or badge
 const shortAddress = makeShortAddress(
-  badge?.address || actDoc?.formattedAddress || actDoc?.venueAddress || ""
+  availabilityRecord?.formattedAddress ||
+  badge?.formattedAddress ||
+  actDoc?.formattedAddress ||
+  actDoc?.venueAddress ||
+  ""
 );
+
+const clientFirstName =
+  availabilityRecord?.clientName?.split(" ")[0] ||
+  availabilityRecord?.contactName?.split(" ")[0] ||
+  "there";
 
     /* ---------------------------------------------------------------------- */
     /* ✉️ Send email to client                                                */
@@ -2341,7 +2393,7 @@ const shortAddress = makeShortAddress(
             We’re delighted to confirm that <strong>${
               actDoc.tscName || actDoc.name
             }</strong> is available with
-            <strong>${vocalistFirst}</strong>, and they’d love to perform for you and your guests.
+            <strong>${vocalistFirst}</strong> on lead vocals, and they’d love to perform for you and your guests.
           </p>
 
           ${
@@ -2385,7 +2437,7 @@ const shortAddress = makeShortAddress(
           <div style="margin-top:30px;">
             <a href="${cartUrl}" 
               style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">
-              Add to Cart →
+              Book Now →
             </a>
           </div>
 
