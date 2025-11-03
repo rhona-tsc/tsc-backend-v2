@@ -310,20 +310,31 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
     lineupId,
     dateISO,
     excludePhone,
-    address: address || act?.formattedAddress || act?.venueAddress || "TBC",
+    address,
   });
 
-  // 🧭 Normalize address
-  const formattedAddress =
-    typeof address === "string"
-      ? address
-      : address?.formattedAddress ||
-        address?.address ||
-        act?.formattedAddress ||
-        act?.venueAddress ||
-        "TBC";
+  if (!act) {
+    console.warn("⚠️ No act data passed to notifyDeputies()");
+    return;
+  }
 
-  // ✅ Always have a lineup: use provided one or smallest/first
+  // 🧭 Normalize address (match triggerAvailabilityRequest)
+  const shortAddress = (address || "")
+    .split(",")
+    .slice(-2)
+    .join(",")
+    .replace(/,\s*UK$/i, "")
+    .trim();
+
+  const formattedAddress =
+    shortAddress ||
+    address?.formattedAddress ||
+    address?.address ||
+    act?.formattedAddress ||
+    act?.venueAddress ||
+    "TBC";
+
+  // ✅ Pick lineup (same fallback as before)
   let lineup = act?.lineups?.find((l) => String(l._id) === String(lineupId));
   if (!lineup && Array.isArray(act?.lineups) && act.lineups.length > 0) {
     lineup = act.lineups.reduce((smallest, curr) => {
@@ -342,6 +353,10 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
     return;
   }
 
+  const members = Array.isArray(lineup?.bandMembers)
+    ? lineup.bandMembers
+    : [];
+
   // 🎤 Find vocalists
   const vocalists =
     lineup.bandMembers?.filter((m) =>
@@ -353,19 +368,55 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
   console.log("🎤 [notifyDeputies] Vocalists found:", vocalists.map((v) => v.firstName || v.name));
 
   const validDeputies = [];
+
+  // 🔢 Fee calc — clone from triggerAvailabilityRequest
+  const feeForMember = async (member) => {
+    const baseFee = Number(member?.fee ?? 0);
+    const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
+    const membersCount = Math.max(
+      1,
+      (Array.isArray(members) ? members.length : 0) || 1
+    );
+    const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
+    const base = baseFee > 0 ? baseFee : perHead;
+
+    const { county: selectedCounty } = countyFromAddress(formattedAddress);
+    const selectedDate = dateISO;
+
+    let travelFee = 0;
+    let usedCountyRate = false;
+
+    if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
+      const raw = getCountyFeeValue(act.countyFees, selectedCounty);
+      const val = Number(raw);
+      if (Number.isFinite(val) && val > 0) {
+        usedCountyRate = true;
+        travelFee = Math.ceil(val);
+      }
+    }
+
+    if (!usedCountyRate) {
+      travelFee = await computeMemberTravelFee({
+        act,
+        member,
+        selectedCounty,
+        selectedAddress: formattedAddress,
+        selectedDate,
+      });
+      travelFee = Math.max(0, Math.ceil(Number(travelFee || 0)));
+    }
+
+    return Math.max(0, Math.ceil(Number(base || 0) + Number(travelFee || 0)));
+  };
+
+  // 🎤 Build deputy list with correct fee logic
   for (const vocalist of vocalists) {
     for (const dep of vocalist.deputies || []) {
       const rawPhone = dep.phoneNumber || dep.phone;
       if (!rawPhone) continue;
       const cleaned = rawPhone.replace(/\s+/g, "");
       if (/^\+?\d{10,15}$/.test(cleaned) && cleaned !== excludePhone) {
-        const finalFee = await computeFinalFeeForMember(
-          act,
-          dep,
-          formattedAddress,
-          dateISO,
-          lineup
-        );
+        const finalFee = await feeForMember(vocalist); // ✅ use *lead vocalist’s* fee logic
         validDeputies.push({ ...dep, phone: cleaned, finalFee });
       }
     }
@@ -389,34 +440,26 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
     year: "numeric",
   });
 
-  // 🚀 Loop through valid deputies
+  // 🚀 Send to each deputy
   for (const deputy of validDeputies) {
-    // 🧾 Log each deputy availability request in DB
     await AvailabilityModel.create({
       actId: act._id,
-      lineupId: lineup._id || null,
+      lineupId: lineupId || null,
       musicianId: deputy._id || null,
       phone: deputy.phone,
       dateISO,
       formattedDate,
-      formattedAddress,
+      formattedAddress: formattedAddress || "TBC",
       actName: act?.tscName || act?.name || "",
       musicianName: `${deputy.firstName || ""} ${deputy.lastName || ""}`.trim(),
       duties: "Lead Female Vocal",
-      fee: String(deputy.finalFee || ""),
+      fee: String(deputy.finalFee),
       reply: null,
       v2: true,
-      isDeputy: true,
+      clientName: "Client",
+      clientEmail: "",
     });
 
-    console.log("📦 [notifyDeputies] Sending to deputy with data:", {
-      deputyName: `${deputy.firstName || ""} ${deputy.lastName || ""}`.trim(),
-      finalFee: deputy.finalFee,
-      formattedAddress,
-      dateISO,
-    });
-
-    // 📤 Send WhatsApp message to deputy
     await notifyDeputyOneShot({
       act,
       lineupId: lineup._id,
@@ -425,13 +468,15 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
       formattedDate,
       formattedAddress,
       duties: "Lead Female Vocal",
-      finalFee: deputy.finalFee,
+      fee: String(deputy.finalFee),
       metaActId: act._id,
     });
   }
 
   console.log("✅ [notifyDeputies] Finished sending all deputy notifications");
 }
+  
+
 
 
 
@@ -1321,8 +1366,11 @@ const act =
       /* ---------------------------------------------------------------------- */
       /* ✅ YES BRANCH (Lead or Deputy)                                         */
       /* ---------------------------------------------------------------------- */
+      
       if (reply === "yes") {
         console.log(`✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`);
+
+        const { createCalendarInvite } = await import("./googleController.js");
 
         // 1️⃣ Create a calendar invite for either lead or deputy
         console.log("📧 [Calendar Debug] emailForInvite=", emailForInvite, "act=", !!act, "dateISO=", dateISO);
@@ -2007,6 +2055,35 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
             });
           }
 
+          // 🟣 If this is a deputy badge, try to enrich with full musician data
+if (badge.isDeputy && Array.isArray(badge.deputies) && badge.deputies.length > 0) {
+  const deputy = badge.deputies[0];
+  const cleanPhone = (deputy.phone || deputy.phoneNumber || "")
+    .replace(/\s+/g, "")
+    .replace(/^0/, "+44");
+
+  const deputyMusician = await Musician.findOne({
+    $or: [
+      { phoneNormalized: cleanPhone },
+      { phone: cleanPhone },
+    ],
+  }).lean();
+
+  if (deputyMusician) {
+    badge.badgePhotoUrl =
+      deputyMusician.profilePicture ||
+      deputyMusician.photoUrl ||
+      null;
+    badge.badgeProfilePicture = badge.badgePhotoUrl;
+
+    badge.musicianId = deputyMusician._id;
+    badge.vocalistName =
+      `${deputyMusician.firstName || ""} ${deputyMusician.lastName || ""}`.trim();
+  } else {
+    console.warn("⚠️ No matching musician found for deputy:", cleanPhone);
+  }
+}
+
           const badgeObj = {
             active: true,
             dateISO,
@@ -2091,61 +2168,110 @@ if (availabilityRecord) {
       return { success: true, cleared: true };
     }
 
-    /* ---------------------------------------------------------------------- */
-    /* 🎤 ENRICH DEPUTIES WITH FULL MUSICIAN DATA                             */
-    /* ---------------------------------------------------------------------- */
-    if (Array.isArray(badge.deputies) && badge.deputies.length > 0) {
-      console.log(`🎤 Enriching ${badge.deputies.length} deputy entries...`);
-      const enrichedDeputies = [];
+   /* ---------------------------------------------------------------------- */
+/* 🎤 ENRICH DEPUTIES WITH FULL MUSICIAN DATA                             */
+/* ---------------------------------------------------------------------- */
+if (Array.isArray(badge.deputies) && badge.deputies.length > 0) {
+  console.log(`🎤 Enriching ${badge.deputies.length} deputy entries...`);
+  const enrichedDeputies = [];
 
-      for (const dep of badge.deputies) {
-        try {
-          const musicianId =
-            dep.musicianId || dep.musician?._id || dep._id || null;
-          if (!musicianId) continue;
+  for (const dep of badge.deputies) {
+    try {
+      let musician = null;
 
-          const musician = await Musician.findById(musicianId).lean();
-          if (!musician) continue;
-
-          enrichedDeputies.push({
-            musicianId: String(musician._id),
-            vocalistName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
-            photoUrl: musician.profilePicture || musician.photoUrl || "",
-            profilePicture: musician.profilePicture || musician.photoUrl || "",
-            profileUrl:
-              musician.profileUrl ||
-              `${process.env.PUBLIC_SITE_BASE || "https://meek-biscotti-8d5020.netlify.app"}/musician/${musician._id}`,
-            instrument: musician.instrumentation?.[0] || musician.primaryInstrument || "",
-            setAt: dep.setAt || new Date(),
-          });
-        } catch (err) {
-          console.warn("⚠️ Failed to enrich deputy:", dep, err.message);
-        }
+      // 🧭 1️⃣ Try by musicianId first
+      const musicianId = dep.musicianId || dep.musician?._id || dep._id;
+      if (musicianId) {
+        musician = await Musician.findById(musicianId).lean();
       }
 
-      badge.deputies = enrichedDeputies;
+      // 🧭 2️⃣ Fallback: lookup by normalized phone number
+      if (!musician) {
+        const rawPhone = dep.phone || dep.phoneNumber || "";
+        const cleanPhone = rawPhone
+          .replace(/\s+/g, "")
+          .replace(/^0/, "+44");
+        musician = await Musician.findOne({
+          $or: [
+            { phoneNormalized: cleanPhone },
+            { phone: cleanPhone },
+          ],
+        }).lean();
+      }
+
+      if (!musician) {
+        console.warn("⚠️ No musician found for deputy:", dep.firstName || dep.name);
+        continue;
+      }
+
+      enrichedDeputies.push({
+        musicianId: String(musician._id),
+        vocalistName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+        photoUrl: musician.profilePicture || musician.photoUrl || "",
+        profilePicture: musician.profilePicture || musician.photoUrl || "",
+        profileUrl:
+          musician.profileUrl ||
+          `${process.env.PUBLIC_SITE_BASE || "https://meek-biscotti-8d5020.netlify.app"}/musician/${musician._id}`,
+        instrument: musician.instrumentation?.[0] || musician.primaryInstrument || "",
+        phoneNormalized: musician.phoneNormalized,
+        setAt: dep.setAt || new Date(),
+      });
+    } catch (err) {
+      console.warn("⚠️ Failed to enrich deputy:", dep, err.message);
+    }
+  }
+
+  badge.deputies = enrichedDeputies;
+  console.log("✅ Enriched deputy data attached to badge");
+}
+
+   /* ---------------------------------------------------------------------- */
+/* 🪄 ENRICH ROOT BADGE (deputy case)                                     */
+/* ---------------------------------------------------------------------- */
+if (badge?.isDeputy && !badge?.photoUrl) {
+  try {
+    // Prefer phone lookup over name to avoid ambiguity
+    const dep = badge.deputies?.[0];
+    let musician = null;
+
+    if (dep?.phoneNormalized || dep?.phone || dep?.phoneNumber) {
+      const cleanPhone = (dep.phoneNormalized || dep.phone || dep.phoneNumber || "")
+        .replace(/\s+/g, "")
+        .replace(/^0/, "+44");
+
+      musician = await Musician.findOne({
+        $or: [
+          { phoneNormalized: cleanPhone },
+          { phone: cleanPhone },
+        ],
+      }).lean();
     }
 
-    /* ---------------------------------------------------------------------- */
-    /* 🪄 ENRICH ROOT BADGE (deputy case)                                     */
-    /* ---------------------------------------------------------------------- */
-    if (badge?.isDeputy && badge?.vocalistName && !badge?.photoUrl) {
-      const musician = await Musician.findOne({
+    // Fallback by name if phone lookup fails
+    if (!musician && badge?.vocalistName) {
+      musician = await Musician.findOne({
         $or: [
           { firstName: badge.vocalistName },
           { "aliases.name": badge.vocalistName },
         ],
       }).lean();
-
-      if (musician) {
-        badge.photoUrl = musician.profilePicture || musician.photoUrl || "";
-        badge.profilePicture = musician.profilePicture || musician.photoUrl || "";
-        badge.profileUrl =
-          musician.profileUrl ||
-          `${process.env.PUBLIC_SITE_BASE || "https://meek-biscotti-8d5020.netlify.app"}/musician/${musician._id}`;
-        badge.musicianId = String(musician._id);
-      }
     }
+
+    if (musician) {
+      badge.photoUrl = musician.profilePicture || musician.photoUrl || "";
+      badge.profilePicture = badge.photoUrl;
+      badge.profileUrl =
+        musician.profileUrl ||
+        `${process.env.PUBLIC_SITE_BASE || "https://meek-biscotti-8d5020.netlify.app"}/musician/${musician._id}`;
+      badge.musicianId = String(musician._id);
+      badge.vocalistName =
+        `${musician.firstName || ""} ${musician.lastName || ""}`.trim();
+      badge.phoneNormalized = musician.phoneNormalized;
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to enrich root deputy badge:", err.message);
+  }
+}
 
     /* ---------------------------------------------------------------------- */
     /* ✅ Apply updated badge                                                 */
@@ -2295,8 +2421,13 @@ if (!badge.isDeputy) {
 // 🎯 Calculate travel-inclusive total using existing backend logic
 let travelTotal = "price TBC";
 try {
-  const selectedAddress =
-    badge?.address || actDoc?.formattedAddress || actDoc?.venueAddress || "TBC";
+const selectedAddress =
+  badge?.formattedAddress ||
+  availabilityRecord?.formattedAddress ||
+  badge?.address ||
+  actDoc?.formattedAddress ||
+  actDoc?.venueAddress ||
+  "TBC";
   const selectedDate = badge?.dateISO || new Date().toISOString().slice(0, 10);
   const { county: selectedCounty } = countyFromAddress(selectedAddress);
 

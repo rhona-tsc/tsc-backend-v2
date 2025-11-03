@@ -115,4 +115,31 @@ router.post("/notify-musician", (req, res, next) => {
   next();
 }, notifyMusician);
 
+/* -------------------------------------------------------------------------- */
+/* 🟠 PATCH /update — If date/location added later, trigger availability       */
+/* -------------------------------------------------------------------------- */
+router.patch("/update", async (req, res, next) => {
+  console.log(`🟠 (routes/shortlist.js) /update START at ${new Date().toISOString()}`, {
+    body: req.body,
+  });
+
+  const { actId, dateISO, formattedAddress, userId } = req.body;
+
+  try {
+    // Load existing shortlist record (if you store them)
+    // or just trigger if both fields are now present.
+    if (actId && dateISO && formattedAddress) {
+      console.log("📅 Date and location now present — triggering availability flow...");
+      req.body = { actId, dateISO, formattedAddress, userId };
+      return next();
+    }
+
+    console.log("⚠️ Skipping availability trigger — missing date or address");
+    return res.json({ success: true, message: "No trigger (missing date/address)" });
+  } catch (err) {
+    console.error("❌ (shortlist.js) /update failed:", err);
+    return res.status(500).json({ error: "Failed to update shortlist." });
+  }
+}, triggerAvailabilityRequest);
+
 export default router;
