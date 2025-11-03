@@ -115,17 +115,6 @@ router.post("/notify-musician", (req, res, next) => {
   next();
 }, notifyMusician);
 
-// ✅ routes/shortlist.js
-import express from "express";
-import Act from "../models/actModel.js";
-import User from "../models/userModel.js";
-import {
-  getUserShortlist,
-  notifyMusician,
-} from "../controllers/shortlistController.js";
-import { triggerAvailabilityRequest } from "../controllers/availabilityController.js";
-
-const router = express.Router();
 
 /* -------------------------------------------------------------------------- */
 /* 🟡 POST /add — Add or toggle shortlist + trigger availability              */
