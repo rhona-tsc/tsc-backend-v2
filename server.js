@@ -9,6 +9,7 @@ import cloudinary from './config/cloudinary.js';
 import bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
 import router from "./routes/debugRoutes.js";
+import shortlistRoutes from "./routes/shortlist.js";
 import boardBackfillRoutes from "./routes/boardBackfillRoutes.js";
 import invoiceRoutes from "./routes/invoiceRoutes.js";
 import userRouter from './routes/userRoute.js';
@@ -283,6 +284,8 @@ app.use("/api/notifications", notificationsRoutes);
 app.use('/api/act-submission', submitActSubmission);
 app.post("/api/rebuild-badge", rebuildAndApplyAvailabilityBadge);
 app.use('/api/availability', availabilityRoutes);
+
+app.use("/api/shortlist", shortlistRoutes);
 
 // Direct mount
 app.get("/api/availability/acts-available", async (req, res) => {
