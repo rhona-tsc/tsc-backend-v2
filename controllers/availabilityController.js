@@ -382,17 +382,18 @@ export async function notifyDeputies({ act, lineupId, dateISO, excludePhone, add
   });
 
   for (const deputy of validDeputies) {
-    await notifyDeputyOneShot({
-      act,
-      lineupId: lineup._id,
-      deputy,
-      dateISO,
-      formattedDate,
-      formattedAddress: address || act?.venueAddress || "TBC",
-      duties: "Lead Female Vocal",
-      finalFee: deputy.finalFee,
-      metaActId: act._id,
-    });
+await notifyDeputyOneShot({
+  act,
+  lineupId: lineup._id,
+  deputy,
+  dateISO,
+  formattedDate,
+  formattedAddress: address || act?.venueAddress || "TBC",
+  duties: "Lead Female Vocal",
+  finalFee: deputy.finalFee,
+  metaActId: act._id,
+  address: address || act?.venueAddress || "TBC", // 🆕 ensure address gets passed
+});
   }
 
   console.log("✅ [notifyDeputies] Finished sending all deputy notifications");
@@ -1103,16 +1104,18 @@ export async function notifyDeputyOneShot({
 
   try {
     // 🧮 Clean + format fee nicely
-    const numericFee = typeof finalFee === "number"
-      ? finalFee
-      : parseFloat(String(finalFee).replace(/[^\d.]/g, "")) || 0;
+    const numericFee =
+      typeof finalFee === "number"
+        ? finalFee
+        : parseFloat(String(finalFee).replace(/[^\d.]/g, "")) || 0;
 
     const formattedFee = numericFee > 0 ? `£${numericFee}` : "TBC";
 
     // 📍 Clean address
-    const location = formattedAddress && formattedAddress.trim() !== ""
-      ? formattedAddress.split(",").slice(0, 2).join(", ")
-      : act?.venueAddress?.split(",").slice(0, 2).join(", ") || "TBC";
+    const location =
+      formattedAddress && formattedAddress.trim() !== ""
+        ? formattedAddress.split(",").slice(0, 2).join(", ")
+        : act?.venueAddress?.split(",").slice(0, 2).join(", ") || "TBC";
 
     // 🧠 Build template parameters
     const templateParams = {
@@ -1127,19 +1130,26 @@ export async function notifyDeputyOneShot({
     const smsBody = `Hi ${deputy.firstName || deputy.name || "there"}, you've received an enquiry for a gig on ${templateParams.date} in ${templateParams.location} at a rate of ${templateParams.fee} for ${templateParams.role} duties with ${templateParams.actName}. Please indicate your availability 💫`;
 
     console.log("💬 [notifyDeputyOneShot] smsBody built:", smsBody);
-console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
-    // ✅ Send via Twilio template
+    console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
 
+    // ✅ Send via Twilio template
     await sendWhatsAppMessage({
       to: deputy.phone,
       actData: act,
       lineup: lineupId,
       member: deputy,
-      address: location,
+      address: formattedAddress || act?.venueAddress || "TBC",
       dateISO,
       role: duties,
-      templateParams,
-contentSid: process.env.TWILIO_ENQUIRY_SID,
+      variables: {
+        firstName: deputy.firstName || deputy.name || "Musician",
+        date: formattedDate,
+        location,
+        fee: formattedFee,
+        role: duties,
+        actName: act?.tscName || act?.name,
+      },
+      contentSid: process.env.TWILIO_ENQUIRY_SID,
       smsBody,
     });
 
