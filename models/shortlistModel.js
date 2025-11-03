@@ -6,7 +6,7 @@ const shortlistSchema = new mongoose.Schema(
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     acts: [
       {
-        actId: { type: mongoose.Schema.Types.ObjectId, ref: "Act" },
+        actId: { type: mongoose.Schema.Types.ObjectId, ref: "act" },
         dateISO: { type: String },
         formattedAddress: { type: String },
       },
