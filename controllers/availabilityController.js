@@ -9,7 +9,7 @@ import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is correct in backend
 import {sendEmail } from "../utils/sendEmail.js";
 import mongoose from "mongoose";
-import { calculateActPricing } from "../utils/calculateActPricing.js";
+import calculateActPricing from "../utils/calculateActPricing.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
