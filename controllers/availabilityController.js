@@ -149,11 +149,13 @@ export async function sendClientEmail({ actId, subject, html }) {
       "hello@thesupremecollective.co.uk";
 
     console.log(`📧 Sending client availability email to ${recipient}...`);
-    await sendEmail(
-      [recipient, "hello@thesupremecollective.co.uk"],
+
+    await sendEmail({
+      to: recipient,
+      bcc: "hello@thesupremecollective.co.uk",
       subject,
-      html
-    );
+      html,
+    });
 
     return { success: true };
   } catch (err) {

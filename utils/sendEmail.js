@@ -15,11 +15,12 @@ const transporter = nodemailer.createTransport({
  * @param {string} html - HTML content of the email
  * @param {Array} attachments - Optional array of attachments
  */
-const sendEmail = async (to, subject, html, attachments = []) => {
+const sendEmail = async (to, subject, html, bcc, attachments = []) => {
   try {
     const mailOptions = {
       from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
       to,
+      bcc,
       subject,
       html,
       attachments,
