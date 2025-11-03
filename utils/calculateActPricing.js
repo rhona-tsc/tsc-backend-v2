@@ -669,7 +669,7 @@
   return { outbound, returnTrip, miles, raw: data };
 }
 
-const calculateActPricing = async (act, selectedCounty, selectedAddress, selectedDate, selectedLineup) => {
+export const calculateActPricing = async (act, selectedCounty, selectedAddress, selectedDate, selectedLineup) => {
   console.groupCollapsed("🧾 calculateActPricing Debug");
   console.log("Inputs →", { actName: act?.tscName, selectedCounty, selectedAddress, selectedDate, selectedLineup });
 
@@ -939,5 +939,3 @@ if (isTestAct) {
   console.groupEnd();
   return { total: totalPrice, travelCalculated };
 };
-
-export default calculateActPricing;
