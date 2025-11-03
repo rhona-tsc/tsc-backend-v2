@@ -2284,9 +2284,46 @@ console.log(`✅ Applied availability badge for ${actDoc.tscName}:`, badge);
 
 // 🗓️ NEW — send calendar invite to lead vocalist
 try {
-  if (!badge.vocalistEmail && badge.musicianId) {
-    const vocalist = await Musician.findById(badge.musicianId).lean();
-    if (vocalist?.email) badge.vocalistEmail = vocalist.email;
+  // ✅ Try to enrich badge with email via musicianId or phone
+  let musician = null;
+
+  if (badge?.musicianId) {
+    musician = await Musician.findById(badge.musicianId)
+      .select("email phone phoneNormalized firstName lastName profilePicture photoUrl")
+      .lean();
+  }
+
+  if (!musician && badge?.phoneNormalized) {
+    musician = await Musician.findOne({
+      $or: [
+        { phoneNormalized: badge.phoneNormalized },
+        { phone: badge.phoneNormalized },
+      ],
+    })
+      .select("email firstName lastName profilePicture photoUrl")
+      .lean();
+  }
+
+  // ✅ Final fallback: try to reuse logic from getDeputyDisplayBits (for deputy case)
+  if (!musician && badge?.isDeputy && Array.isArray(badge.deputies) && badge.deputies.length > 0) {
+    const depBits = await getDeputyDisplayBits(badge.deputies[0]);
+    if (depBits?.musicianId) {
+      musician = await Musician.findById(depBits.musicianId)
+        .select("email firstName lastName profilePicture photoUrl")
+        .lean();
+    }
+  }
+
+  const emailForInvite =
+    musician?.email ||
+    badge?.vocalistEmail ||
+    badge?.email ||
+    "hello@thesupremecollective.co.uk";
+
+  if (!musician?.email) {
+    console.warn("⚠️ No musician email found – using fallback:", emailForInvite);
+  } else {
+    console.log("📧 Found musician email for invite:", musician.email);
   }
 
   try {
