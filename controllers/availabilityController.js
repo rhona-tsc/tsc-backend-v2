@@ -2198,33 +2198,32 @@ try {
       minute: "2-digit",
     });
 
-    await createCalendarInvite(
-      console.log("📅 DEBUG Calendar invite about to run", {
+console.log("📅 DEBUG Calendar invite about to run", {
   emailForInvite,
   actId,
-  actName: act?.tscName || act?.name,
+  actName: actDoc?.tscName || actDoc?.name,
   dateISO,
   hasCreateFn: typeof createCalendarInvite === "function",
 });
-{
-      
-      enquiryId: `ENQ_${Date.now()}`,
-      actId,
-      dateISO,
-      email: emailForInvite,
-      summary: `TSC: ${actDoc.tscName || actDoc.name} enquiry`,
-      description: [
-        `Event Date: ${fmtLong}`,
-        `Act: ${actDoc.tscName || actDoc.name}`,
-        `Role: ${role}`,
-        `Address: ${badge?.address || actDoc?.formattedAddress || "TBC"}`,
-        `Fee: £${fee}`,
-        `Enquiry Logged: ${enquiryLogged}`,
-      ].join("\n"),
-      startTime: `${dateISO}T17:00:00Z`,
-      endTime: `${dateISO}T23:59:00Z`,
-      fee: fee === "TBC" ? null : fee,
-    });
+
+await createCalendarInvite({
+  enquiryId: `ENQ_${Date.now()}`,
+  actId,
+  dateISO,
+  email: emailForInvite,
+  summary: `TSC: ${actDoc.tscName || actDoc.name} enquiry`,
+  description: [
+    `Event Date: ${fmtLong}`,
+    `Act: ${actDoc.tscName || actDoc.name}`,
+    `Role: ${role}`,
+    `Address: ${badge?.address || actDoc?.formattedAddress || "TBC"}`,
+    `Fee: £${fee}`,
+    `Enquiry Logged: ${enquiryLogged}`,
+  ].join("\n"),
+  startTime: `${dateISO}T17:00:00Z`,
+  endTime: `${dateISO}T23:59:00Z`,
+  fee: fee === "TBC" ? null : fee,
+});
 
     console.log(
       `✅ Calendar invite created for ${badge?.vocalistName || "Lead"} (${emailForInvite})`
