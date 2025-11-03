@@ -1127,65 +1127,109 @@ export async function notifyDeputyOneShot({
   formattedDate,
   formattedAddress,
   duties,
-  finalFee,
   metaActId,
 }) {
   console.log("📤 notifyDeputyOneShot() START", {
     deputyName: `${deputy.firstName || ""} ${deputy.lastName || ""}`.trim(),
     phone: deputy.phone,
-    finalFee,
-    formattedAddress,
     act: act?.tscName || act?.name,
   });
 
   try {
-    // 🧮 Format fee
-    const numericFee =
-      typeof finalFee === "number"
-        ? finalFee
-        : parseFloat(String(finalFee).replace(/[^\d.]/g, "")) || 0;
+    // 🧠 1️⃣ Normalize and clean address (same logic as triggerAvailabilityRequest)
+    const shortAddress = (formattedAddress || act?.formattedAddress || act?.venueAddress || "")
+      .split(",")
+      .slice(-2)
+      .join(",")
+      .replace(/,\s*UK$/i, "")
+      .trim();
 
-    const formattedFee = numericFee > 0 ? `£${numericFee}` : "TBC";
+    // 🧠 2️⃣ Fee calculation — reuse triggerAvailabilityRequest logic
+    const feeForMember = async (member) => {
+      const lineup = Array.isArray(act?.lineups)
+        ? act.lineups.find(
+            (l) =>
+              l._id?.toString?.() === String(lineupId) ||
+              String(l.lineupId) === String(lineupId)
+          )
+        : null;
+      const members = Array.isArray(lineup?.bandMembers)
+        ? lineup.bandMembers
+        : [];
+      const baseFee = Number(member?.fee ?? 0);
+      const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
+      const membersCount = Math.max(1, members.length || 1);
+      const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
+      const base = baseFee > 0 ? baseFee : perHead;
+      const { county: selectedCounty } = countyFromAddress(shortAddress);
+      const selectedDate = dateISO;
 
-    // 📍 Resolve address
+      let travelFee = 0;
+      let usedCountyRate = false;
+
+      if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
+        const raw = getCountyFeeValue(act.countyFees, selectedCounty);
+        const val = Number(raw);
+        if (Number.isFinite(val) && val > 0) {
+          usedCountyRate = true;
+          travelFee = Math.ceil(val);
+        }
+      }
+
+      if (!usedCountyRate) {
+        travelFee = await computeMemberTravelFee({
+          act,
+          member,
+          selectedCounty,
+          selectedAddress: shortAddress,
+          selectedDate,
+        });
+        travelFee = Math.max(0, Math.ceil(Number(travelFee || 0)));
+      }
+
+      return Math.max(0, Math.ceil(Number(base || 0) + Number(travelFee || 0)));
+    };
+
+    const finalFee = await feeForMember(deputy);
+    const formattedFee = finalFee > 0 ? `£${finalFee}` : "TBC";
+
+    // 🧭 3️⃣ Location fallback
     const location =
-      formattedAddress && formattedAddress.trim() !== ""
-        ? formattedAddress.split(",").slice(0, 2).join(", ")
-        : act?.formattedAddress?.split(",").slice(0, 2).join(", ") ||
-          act?.venueAddress?.split(",").slice(0, 2).join(", ") ||
-          "TBC";
+      shortAddress ||
+      act?.formattedAddress?.split(",").slice(0, 2).join(", ") ||
+      act?.venueAddress?.split(",").slice(0, 2).join(", ") ||
+      "TBC";
 
-    // 🧠 Template parameters
+    // 💬 4️⃣ WhatsApp + SMS message
     const templateParams = {
       actName: act?.tscName || act?.name || "The Supreme Collective",
       date: formattedDate || "TBC",
       location,
       fee: formattedFee,
-      role: duties || "Lead Vocal",
+      role: duties || deputy.instrument || "Musician",
     };
 
-    // 📨 SMS fallback message
     const smsBody = `Hi ${deputy.firstName || deputy.name || "there"}, you've received an enquiry for a gig on ${templateParams.date} in ${templateParams.location} at a rate of ${templateParams.fee} for ${templateParams.role} duties with ${templateParams.actName}. Please indicate your availability 💫`;
 
     console.log("💬 [notifyDeputyOneShot] smsBody built:", smsBody);
     console.log("🟦 Using TWILIO_ENQUIRY_SID:", process.env.TWILIO_ENQUIRY_SID);
 
-    // ✅ Send WhatsApp template message
+    // ✅ Send WhatsApp
     await sendWhatsAppMessage({
       to: deputy.phone,
       actData: act,
       lineup: lineupId,
       member: deputy,
-      address: formattedAddress || act?.formattedAddress || act?.venueAddress || "TBC",
+      address: shortAddress,
       dateISO,
       role: duties,
       variables: {
         firstName: deputy.firstName || deputy.name || "Musician",
-        date: formattedDate,
+        date: templateParams.date,
         location,
         fee: formattedFee,
-        role: duties,
-        actName: act?.tscName || act?.name,
+        role: templateParams.role,
+        actName: templateParams.actName,
       },
       contentSid: process.env.TWILIO_ENQUIRY_SID,
       smsBody,
@@ -1305,14 +1349,6 @@ try {
 });
 
   const event = await createCalendarInvite(
-    
-    console.log("📅 DEBUG Calendar invite about to run", {
-  emailForInvite,
-  actId,
-  actName: act?.tscName || act?.name,
-  dateISO,
-  hasCreateFn: typeof createCalendarInvite === "function",
-});
 {
     enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
     actId,
@@ -2128,13 +2164,6 @@ try {
   }
 
   try {
-    console.log("📅 DEBUG Calendar invite about to run", {
-  emailForInvite,
-  actId,
-  actName: act?.tscName || act?.name,
-  dateISO,
-  hasCreateFn: typeof createCalendarInvite === "function",
-});
     const { createCalendarInvite } = await import("./googleController.js");
 
     // Find the musician for email & instrument details
