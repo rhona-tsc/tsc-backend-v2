@@ -9,7 +9,7 @@ const availabilitySchema = new mongoose.Schema(
     actName: { type: String, default: "" },
 clientName: { type: String, default: "" },
 clientEmail: { type: String, default: "" },
-    actId: { type: mongoose.Schema.Types.ObjectId, ref: "Act" },
+    actId: { type: mongoose.Schema.Types.ObjectId, ref: "act" },
     lineupId: { type: mongoose.Schema.Types.ObjectId, ref: "Lineup" },
     musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician" },
 
