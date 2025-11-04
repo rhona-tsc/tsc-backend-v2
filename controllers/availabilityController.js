@@ -1306,12 +1306,27 @@ export const twilioInbound = async (req, res) => {
         return;
       }
 
-const act =
-  updated?.actId && typeof updated.actId === "string"
-    ? await Act.findById(new mongoose.Types.ObjectId(updated.actId)).lean()
-    : updated?.actId
-    ? await Act.findById(updated.actId).lean()
-    : null;
+// 🧭 Always resolve Act regardless of how actId is stored
+let act = null;
+try {
+  const actIdValue = updated?.actId?._id || updated?.actId;
+  if (actIdValue) {
+    act = await Act.findById(actIdValue).lean();
+  }
+} catch (err) {
+  console.warn("⚠️ Failed to resolve act from updated.actId:", err.message);
+}
+
+if (act) {
+  await notifyDeputies({
+    act,
+    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+    dateISO,
+    excludePhone: toE164,
+  });
+} else {
+  console.warn("⚠️ Skipping notifyDeputies — no act resolved");
+}
     
     let musician = updated?.musicianId
         ? await Musician.findById(updated.musicianId).lean()
