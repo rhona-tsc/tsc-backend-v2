@@ -336,10 +336,24 @@ export async function notifyDeputies({
   // 🧩 Find the lead vocalist (to inherit duties/role)
   const leadVocalist =
     vocalists.find((v) => v.isEssential || /lead/i.test(v.instrument || "")) || vocalists[0];
-  const leadFee =
-    leadVocalist?.fee ||
-    lineup.bandMembers?.find((m) => /vocal/i.test(m.instrument || ""))?.fee ||
-    null;
+
+  // 🧮 Compute *real* lead vocalist fee (includes travel etc.)
+  let leadFee = null;
+  try {
+    leadFee = await _finalFeeForMember({
+      act,
+      lineup,
+      members: lineup.bandMembers,
+      member: leadVocalist,
+      address: formattedAddress,
+      dateISO,
+    });
+    console.log(`💰 Computed full lead fee for ${leadVocalist?.firstName || "Lead"}: £${leadFee}`);
+  } catch (err) {
+    console.warn("⚠️ Failed to compute full lead fee:", err.message);
+    leadFee = leadVocalist?.fee || null;
+  }
+
   const leadDuties = leadVocalist?.instrument || "Lead Vocal";
 
   // 📨 Notify deputies
@@ -348,23 +362,23 @@ export async function notifyDeputies({
       const cleanPhone = (deputy.phoneNumber || deputy.phone || "").replace(/\s+/g, "");
       if (!/^\+?\d{10,15}$/.test(cleanPhone)) continue;
 
-      // 🧮 Compute full fee (base + travel) for this deputy
+      // 🧮 Compute per-deputy total
       let finalFee = leadFee;
       try {
-        const feeValue = await computeFinalFeeForMember(
+        finalFee = await _finalFeeForMember({
           act,
-          deputy,
-          formattedAddress,
+          lineup,
+          members: lineup.bandMembers,
+          member: deputy,
+          address: formattedAddress,
           dateISO,
-          lineup
-        );
-        finalFee = feeValue;
-        console.log(`🧮 Computed total deputy fee for ${deputy.firstName || deputy.name}: £${feeValue}`);
+        });
+        console.log(`🧮 Computed total deputy fee for ${deputy.firstName || deputy.name}: £${finalFee}`);
       } catch (err) {
         console.warn(`⚠️ Failed to compute deputy fee for ${deputy.firstName || deputy.name}:`, err.message);
       }
 
-      // 🚀 Trigger availability message
+      // 🚀 Trigger WhatsApp
       await triggerAvailabilityRequest({
         actId,
         lineupId,
@@ -374,7 +388,7 @@ export async function notifyDeputies({
         clientEmail,
         isDeputy: true,
         deputy: { ...deputy, phone: cleanPhone },
-        inheritedFee: finalFee,
+        inheritedFee: finalFee, // now computed
         inheritedDuties: leadDuties,
       });
     }
@@ -2555,7 +2569,7 @@ const makeShortAddress = (addr = "") => {
 // 🌍 Prefer formattedAddress from availabilityRecord or badge
 const shortAddress = makeShortAddress(
   availabilityRecord?.formattedAddress ||
-  badge?.formattedAddress ||
+  badge?.address ||
   actDoc?.formattedAddress ||
   actDoc?.venueAddress ||
   ""
