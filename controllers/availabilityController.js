@@ -1774,22 +1774,23 @@ export const makeAvailabilityBroadcaster = (broadcastFn) => ({
     });
   },
 
-  deputyYes: ({ actId, actName, musicianName, dateISO, badge }) => {
-    // ✅ Ensure we always have a fallback name
-    let deputyName =
-      musicianName ||
-      badge?.vocalistName ||
-      badge?.deputies?.[0]?.vocalistName ||
-      "Deputy Vocalist";
+deputyYes: ({ actId, actName, musicianName, dateISO, badge }) => {
+  // ✅ Prefer explicit deputy name > deputy array > fallback
+  let deputyName =
+    musicianName ||
+    badge?.deputies?.[0]?.name ||
+    badge?.deputies?.[0]?.vocalistName ||
+    badge?.vocalistName ||
+    "Deputy Vocalist";
 
-    broadcastFn({
-      type: "availability_deputy_yes",
-      actId,
-      actName,
-      musicianName: deputyName,
-      dateISO,
-    });
-  },
+  broadcastFn({
+    type: "availability_deputy_yes",
+    actId,
+    actName,
+    musicianName: deputyName,
+    dateISO,
+  });
+},
 
   badgeUpdated: ({ actId, actName, dateISO, badge = null }) => {
     // 🧩 Ensure badge.deputies has at least one valid name for toasts
