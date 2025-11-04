@@ -316,6 +316,11 @@ export async function notifyDeputies({
 }) {
   console.log(`📢 [notifyDeputies] START — act ${actId}, date ${dateISO}`);
 
+  // Find the lead vocalist in this lineup (first matching entry)
+const leadVocalist = vocalists.find(v => v.isEssential || /lead/i.test(v.instrument || ""));
+const leadFee = leadVocalist?.fee || lineup.bandMembers?.find(m => /vocal/i.test(m.instrument || ""))?.fee || null;
+const leadDuties = leadVocalist?.instrument || "Lead Vocal";
+
   const act = await Act.findById(actId).lean();
   if (!act) {
     console.warn("⚠️ No act found for notifyDeputies()");
@@ -344,9 +349,11 @@ export async function notifyDeputies({
         formattedAddress,
         clientName,
         clientEmail,
-        isDeputy: true,
-        deputy: { ...deputy, phone: cleanPhone },
-      });
+         isDeputy: true,
+  deputy: { ...deputy, phone: cleanPhone },
+  inheritedFee: leadFee,
+  inheritedDuties: leadDuties,
+});
     }
   }
 
@@ -1088,7 +1095,9 @@ console.log("🎯 Enriched targetMember:", {
       return { success: false };
     }
 
-    const finalFee = await feeForMember(targetMember);
+const finalFee = body?.inheritedFee
+  ? Number(body.inheritedFee)
+  : await feeForMember(targetMember);
 
     // 🛑 Prevent duplicate enquiry sends for same act/date/location
 const normalizedPhone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
@@ -1125,7 +1134,7 @@ if (alreadyReplied) {
       clientEmail: clientEmail || "",
       actName: act?.tscName || act?.name || "",
       musicianName: `${targetMember.firstName || ""} ${targetMember.lastName || ""}`.trim(),
-      duties: targetMember.instrument || "Performance",
+duties: body?.inheritedDuties || targetMember.instrument || "Performance",
       fee: String(finalFee),
       reply: null,
       v2: true,
@@ -1138,7 +1147,7 @@ if (alreadyReplied) {
     );
 
     // 💬 Build WhatsApp message using restored shortAddress
-    const role = targetMember.instrument || "Performance";
+const role = body?.inheritedDuties || targetMember.instrument || "Performance";
     const feeStr = finalFee > 0 ? `£${finalFee}` : "TBC";
     const msg = `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
 
@@ -1356,6 +1365,18 @@ console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
       const dateISO = updated.dateISO;
       const toE164 = normalizeToE164(updated.phone || fromRaw);
 
+        // 🧭 Always resolve Act regardless of how actId is stored
+  let act = null;
+  try {
+    const actIdValue = updated?.actId?._id || updated?.actId;
+    if (actIdValue) {
+      act = await Act.findById(actIdValue).lean();
+      console.log("📡 Act resolved for notifyDeputies:", act?.tscName || act?.name);
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to resolve act from updated.actId:", err.message);
+  }
+
       /* ---------------------------------------------------------------------- */
       /* ✅ YES BRANCH (Lead or Deputy)                                         */
       /* ---------------------------------------------------------------------- */
@@ -1505,17 +1526,7 @@ if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
     }
   }
 
-  // 🧭 Always resolve Act regardless of how actId is stored
-  let act = null;
-  try {
-    const actIdValue = updated?.actId?._id || updated?.actId;
-    if (actIdValue) {
-      act = await Act.findById(actIdValue).lean();
-      console.log("📡 Act resolved for notifyDeputies:", act?.tscName || act?.name);
-    }
-  } catch (err) {
-    console.warn("⚠️ Failed to resolve act from updated.actId:", err.message);
-  }
+
 
   // 🗑️ Clear any active badge
   try {
