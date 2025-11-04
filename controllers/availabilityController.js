@@ -1525,14 +1525,15 @@ console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.
 console.log("🟦 About to sendWhatsaAppText using content SID:", process.env.TWILIO_ENQUIRY_SID);
         await sendWhatsAppText(toE164, "Thanks for letting us know — we've updated your availability.");
 
-        if (act?._id && updated?.lineupId) {
-          await notifyDeputies({
-            act,
-            lineupId: updated.lineupId,
-            dateISO,
-            excludePhone: toE164,
-          });
-        }
+       // ✅ Always notify deputies for this act/date if lineupId is missing
+if (act?._id) {
+  await notifyDeputies({
+    act,
+    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+    dateISO,
+    excludePhone: toE164,
+  });
+}
 
   // 🔔 SSE clear badge (only if not deputy)
 if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
