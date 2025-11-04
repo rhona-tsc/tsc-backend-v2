@@ -1306,28 +1306,6 @@ export const twilioInbound = async (req, res) => {
         return;
       }
 
-// 🧭 Always resolve Act regardless of how actId is stored
-let act = null;
-try {
-  const actIdValue = updated?.actId?._id || updated?.actId;
-  if (actIdValue) {
-    act = await Act.findById(actIdValue).lean();
-  }
-} catch (err) {
-  console.warn("⚠️ Failed to resolve act from updated.actId:", err.message);
-}
-
-if (act) {
-  await notifyDeputies({
-    act,
-    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
-    dateISO,
-    excludePhone: toE164,
-  });
-} else {
-  console.warn("⚠️ Skipping notifyDeputies — no act resolved");
-}
-    
     let musician = updated?.musicianId
         ? await Musician.findById(updated.musicianId).lean()
         : null;
@@ -1499,69 +1477,86 @@ console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.
         return;
       }
 
-      /* ---------------------------------------------------------------------- */
-      /* 🚫 NO / UNAVAILABLE / NOLOC BRANCH                                     */
-      /* ---------------------------------------------------------------------- */
-      if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
-        console.log("🚫 UNAVAILABLE reply received via WhatsApp");
 
-        await AvailabilityModel.updateOne(
-          { _id: updated._id },
-          {
-            $set: {
-              status: "unavailable",
-              reply: "unavailable",
-              repliedAt: new Date(),
-              calendarStatus: "cancelled",
-            },
-          }
-        );
+/* ---------------------------------------------------------------------- */
+/* 🚫 NO / UNAVAILABLE / NOLOC BRANCH                                     */
+/* ---------------------------------------------------------------------- */
+if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
+  console.log("🚫 UNAVAILABLE reply received via WhatsApp");
 
-        if (updated?.calendarEventId && emailForInvite) {
-          try {
-            await cancelCalendarInvite(emailForInvite, updated.calendarEventId, updated.dateISO);
-            console.log("✅ Calendar invite cancelled successfully");
-          } catch (cancelErr) {
-            console.error("❌ Failed to cancel calendar invite:", cancelErr.message);
-          }
-        }
+  await AvailabilityModel.updateOne(
+    { _id: updated._id },
+    {
+      $set: {
+        status: "unavailable",
+        reply: "unavailable",
+        repliedAt: new Date(),
+        calendarStatus: "cancelled",
+      },
+    }
+  );
 
-        // 🗑️ Clear any active badge
-        try {
-          const unset = {
-            [`availabilityBadges.${dateISO}`]: "",
-            [`availabilityBadges.${dateISO}_tbc`]: "",
-          };
-          await Act.updateOne({ _id: actId }, { $unset: unset });
-          console.log("🗑️ Cleared badge keys from Act:", dateISO);
-        } catch (err) {
-          console.error("❌ Failed to $unset badge keys:", err.message);
-        }
-console.log("🟦 About to sendWhatsaAppText using content SID:", process.env.TWILIO_ENQUIRY_SID);
-        await sendWhatsAppText(toE164, "Thanks for letting us know — we've updated your availability.");
+  if (updated?.calendarEventId && emailForInvite) {
+    try {
+      await cancelCalendarInvite(emailForInvite, updated.calendarEventId, updated.dateISO);
+      console.log("✅ Calendar invite cancelled successfully");
+    } catch (cancelErr) {
+      console.error("❌ Failed to cancel calendar invite:", cancelErr.message);
+    }
+  }
 
-       // ✅ Always notify deputies for this act/date if lineupId is missing
-if (act?._id) {
-  await notifyDeputies({
-    act,
-    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
-    dateISO,
-    excludePhone: toE164,
-  });
-}
+  // 🧭 Always resolve Act regardless of how actId is stored
+  let act = null;
+  try {
+    const actIdValue = updated?.actId?._id || updated?.actId;
+    if (actIdValue) {
+      act = await Act.findById(actIdValue).lean();
+      console.log("📡 Act resolved for notifyDeputies:", act?.tscName || act?.name);
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to resolve act from updated.actId:", err.message);
+  }
+
+  // 🗑️ Clear any active badge
+  try {
+    const unset = {
+      [`availabilityBadges.${dateISO}`]: "",
+      [`availabilityBadges.${dateISO}_tbc`]: "",
+    };
+    await Act.updateOne({ _id: actId }, { $unset: unset });
+    console.log("🗑️ Cleared badge keys from Act:", dateISO);
+  } catch (err) {
+    console.error("❌ Failed to $unset badge keys:", err.message);
+  }
+
+  console.log("🟦 About to sendWhatsaAppText using content SID:", process.env.TWILIO_ENQUIRY_SID);
+  await sendWhatsAppText(toE164, "Thanks for letting us know — we've updated your availability.");
+
+  // ✅ Trigger deputy messages *after* lead confirmation & badge clear
+  if (act?._id) {
+    console.log("📢 Triggering deputy notifications for", act?.tscName || act?.name, "—", dateISO);
+    await notifyDeputies({
+      act,
+      lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+      dateISO,
+      excludePhone: toE164,
+    });
+  } else {
+    console.warn("⚠️ Skipping notifyDeputies — no act resolved");
+  }
 
   // 🔔 SSE clear badge (only if not deputy)
-if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
-  global.availabilityNotify.badgeUpdated({
-    type: "availability_badge_updated",
-    actId,
-    actName: act?.tscName || act?.name,
-    dateISO,
-    badge: null,
-  });
-}
+  if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
+    global.availabilityNotify.badgeUpdated({
+      type: "availability_badge_updated",
+      actId,
+      actName: act?.tscName || act?.name,
+      dateISO,
+      badge: null,
+    });
+  }
 
-        return;
+  return;
       }
     } catch (err) {
       console.error("❌ Error in twilioInbound background task:", err);
