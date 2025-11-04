@@ -1533,15 +1533,17 @@ if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
   await sendWhatsAppText(toE164, "Thanks for letting us know — we've updated your availability.");
 
   // ✅ Trigger deputy messages *after* lead confirmation & badge clear
-  if (act?._id) {
-    console.log("📢 Triggering deputy notifications for", act?.tscName || act?.name, "—", dateISO);
-    await notifyDeputies({
-      act,
-      lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
-      dateISO,
-      excludePhone: toE164,
-    });
-  } else {
+ if (act?._id) {
+  console.log("📢 Triggering deputy notifications for", act?.tscName || act?.name, "—", dateISO);
+  await notifyDeputies({
+    actId: act._id,
+    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+    dateISO,
+    formattedAddress: updated.formattedAddress || act.formattedAddress || "TBC",
+    clientName: updated.clientName || "",
+    clientEmail: updated.clientEmail || "",
+  });
+} else {
     console.warn("⚠️ Skipping notifyDeputies — no act resolved");
   }
 
