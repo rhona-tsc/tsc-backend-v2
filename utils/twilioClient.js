@@ -99,30 +99,46 @@ export async function sendWhatsAppMessage(opts = {}) {
 
   const formattedDate = dateISO ? formatNiceDate(dateISO) : "TBC";
 
+  // 🪙 Respect upstream variables.fee or opts.finalFee first
   let formattedFee = "TBC";
-  try {
-   if (!opts.skipFeeCompute && actData && member && address && dateISO && lineup) {
-  const feeValue = await computeFinalFeeForMember(
-    actData,
-    member,
-    address,
-    dateISO,
+
+  if (variables?.fee) {
+    formattedFee = variables.fee; // trust inherited fee (e.g. £300)
+    console.log(`🪙 Using inherited fee from variables: ${formattedFee}`);
+  } else if (opts.finalFee) {
+    formattedFee = `£${opts.finalFee}`;
+    console.log(`🪙 Using finalFee override: ${formattedFee}`);
+  } else if (
+    !opts.skipFeeCompute &&
+    actData &&
+    member &&
+    address &&
+    dateISO &&
     lineup
-  );
-  formattedFee = `£${feeValue}`;
-} else if (opts.finalFee) {
-  formattedFee = `£${opts.finalFee}`;
-}
-  } catch (err) {
-    console.warn("⚠️ Failed to compute final fee for member:", err.message);
+  ) {
+    try {
+      const feeValue = await computeFinalFeeForMember(
+        actData,
+        member,
+        address,
+        dateISO,
+        lineup
+      );
+      formattedFee = `£${feeValue}`;
+      console.log(`🧮 Computed fallback fee: ${formattedFee}`);
+    } catch (err) {
+      console.warn("⚠️ Failed to compute final fee for member:", err.message);
+    }
   }
 
-  // 🎭 Merge all into named content variables (for Twilio {{firstName}}, {{date}}, etc.)
+  /* -------------------------------------------------------------------------- */
+  /* 🎭 Merge all into named content variables (for Twilio {{firstName}}, etc.) */
+  /* -------------------------------------------------------------------------- */
   const enrichedVars = {
     firstName: member?.firstName || member?.name || "Musician",
     date: formattedDate,
     location: shortAddress,
-    fee: formattedFee.replace(/[^0-9.]/g, ''),
+    fee: formattedFee.replace(/[^0-9.]/g, ""), // Twilio expects raw number (no £)
     role: role || member?.instrument || "Musician",
     actName: actData?.tscName || actData?.name || "TSC Act",
   };
