@@ -1568,36 +1568,67 @@ console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.
           }
         );
 
-        // 3️⃣ Broadcast SSE updates
-        if (global.availabilityNotify) {
-          // 🎯 Deputy availability toast
-          if (isDeputy) {
-            global.availabilityNotify.badgeUpdated({
-              type: "deputy_yes",
-              actId,
-              actName: act?.tscName || act?.name,
-musicianName:
-  `${musician?.firstName || updated?.musicianName || updated?.name || "Deputy"} ${
-    musician?.lastName || ""
-  }`.trim(),              dateISO,
-              isDeputy: true,
-            });
-            console.log("📡 SSE broadcasted: deputy_yes");
-          }
+       // 3️⃣ Broadcast SSE updates
+if (global.availabilityNotify) {
+  // 🩷 Deputy branch
+  if (isDeputy) {
+    // Try to get the *real* deputy name
+    let deputyName =
+      updated?.musicianName ||
+      updated?.name ||
+      musician?.firstName ||
+      bits?.resolvedEmail?.split("@")[0] || // fallback from email
+      "Deputy Vocalist";
 
-          // 🎤 Live badge refresh (lead or deputy)
-          if (badgeResult?.badge) {
-            global.availabilityNotify.badgeUpdated({
-              type: "availability_badge_updated",
-              actId,
-              actName: act?.tscName || act?.name,
-              dateISO,
-              badge: badgeResult.badge,
-              isDeputy,
-            });
-            console.log("📡 SSE broadcasted: availability_badge_updated");
-          }
-        }
+    // If we have deputies in the rebuilt badge, prefer that
+    if (badgeResult?.badge?.deputies?.length) {
+      const d = badgeResult.badge.deputies[0];
+      deputyName = d?.vocalistName || d?.name || deputyName;
+    }
+
+    global.availabilityNotify.badgeUpdated({
+      type: "deputy_yes",
+      actId,
+      actName: act?.tscName || act?.name,
+      musicianName: deputyName,
+      dateISO,
+      isDeputy: true,
+    });
+
+    console.log("📡 SSE broadcasted: deputy_yes →", deputyName);
+  }
+
+  // ⭐ Lead branch
+  if (!isDeputy) {
+    const leadName =
+      musician?.firstName ||
+      updated?.musicianName ||
+      updated?.name ||
+      "Lead Vocalist";
+    global.availabilityNotify.badgeUpdated({
+      type: "leadYes",
+      actId,
+      actName: act?.tscName || act?.name,
+      musicianName: leadName,
+      dateISO,
+      isDeputy: false,
+    });
+    console.log("📡 SSE broadcasted: leadYes →", leadName);
+  }
+
+  // 🎤 Live badge refresh (lead or deputy)
+  if (badgeResult?.badge) {
+    global.availabilityNotify.badgeUpdated({
+      type: "availability_badge_updated",
+      actId,
+      actName: act?.tscName || act?.name,
+      dateISO,
+      badge: badgeResult.badge,
+      isDeputy,
+    });
+    console.log("📡 SSE broadcasted: availability_badge_updated");
+  }
+}
 
         return;
       }
@@ -1799,13 +1830,21 @@ export const makeAvailabilityBroadcaster = (broadcastFn) => ({
   },
 
 deputyYes: ({ actId, actName, musicianName, dateISO, badge }) => {
-  // ✅ Prefer deputy name over vocalistName
   const deputyName =
     musicianName ||
-    badge?.deputies?.[0]?.name ||
     badge?.deputies?.[0]?.vocalistName ||
+    badge?.deputies?.[0]?.name ||
     badge?.vocalistName ||
     "Deputy Vocalist";
+
+  broadcastFn({
+    type: "availability_deputy_yes",
+    actId,
+    actName,
+    musicianName: deputyName,
+    dateISO,
+  });
+},
 
   broadcastFn({
     type: "availability_deputy_yes",
