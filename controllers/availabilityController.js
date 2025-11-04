@@ -12,6 +12,7 @@ import mongoose from "mongoose";
 import calculateActPricing from "../utils/calculateActPricing.js";
 import { createCalendarInvite } from "./googleController.js";
 import { sendClientEmail } from "../utils/sendClientEmail.js";
+import userModel from "../models/userModel.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
@@ -2067,6 +2068,26 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO,
     `🟢 (availabilityController.js) rebuildAndApplyAvailabilityBadge START at ${new Date().toISOString()}`
   );
 
+  const userId =
+  typeof reqOrActId === "object"
+    ? reqOrActId.body?.userId || reqOrActId.body?.user?._id
+    : null;
+
+let clientEmailFromDB = null;
+if (userId) {
+  try {
+    const userDoc = await userModel.findById(userId).select("email firstName surname").lean();
+    if (userDoc?.email) {
+      clientEmailFromDB = userDoc.email;
+      console.log(`📧 Resolved client email from userId ${userId}: ${clientEmailFromDB}`);
+    } else {
+      console.warn(`⚠️ No email found for user ${userId}`);
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to lookup user email:", err.message);
+  }
+}
+
   const paMap = { smallPa: "small", mediumPa: "medium", largePa: "large" };
   const lightMap = { smallLight: "small", mediumLight: "medium", largeLight: "large" };
 
@@ -2091,7 +2112,7 @@ const availabilityRecord = await AvailabilityModel.findOne({
 if (availabilityRecord) {
   badge.formattedAddress = availabilityRecord.formattedAddress || badge.formattedAddress;
   badge.clientName = availabilityRecord.clientName || badge.clientName;
-  badge.clientEmail = availabilityRecord.clientEmail || badge.clientEmail;
+  badge.clientEmail = availabilityRecord.clientEmail || badge.clientEmail || clientEmailFromDB;
 }
     // 🧮 Build unique key for this act/date/location combo
     const shortAddress = (badge?.address || actDoc?.formattedAddress || "unknown")
