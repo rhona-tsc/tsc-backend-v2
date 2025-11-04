@@ -884,16 +884,51 @@ async function getDeputyDisplayBits(dep) {
     let photoUrl = getPictureUrlFrom(dep);
     console.log("📸 Step 1: Direct deputy photoUrl →", photoUrl || "❌ none");
 
-    // Step 2: lookup musician by ID if missing
+    // Step 2: lookup musician by ID
     let mus = null;
     if ((!photoUrl || !photoUrl.startsWith("http")) && musicianId) {
       mus = await Musician.findById(musicianId)
         .select(
-          "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl email"
+          "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl email phoneNormalized"
         )
         .lean();
       photoUrl = getPictureUrlFrom(mus || {});
       console.log("📸 Step 2: Lookup by musicianId →", photoUrl || "❌ none");
+    }
+
+    // 🆕 Step 2.5: lookup by normalized phone if still missing
+    if ((!photoUrl || !photoUrl.startsWith("http")) && !mus) {
+      const phone =
+        dep.phoneNormalized ||
+        dep.phoneNumber ||
+        dep.phone ||
+        (mus?.phoneNormalized ?? null);
+      if (phone) {
+        const normalizedPhone = phone
+          .replace(/\s+/g, "")
+          .replace(/^(\+44|44|0)/, "+44");
+        console.log("📞 Step 2.5: Lookup by phoneNormalized →", normalizedPhone);
+        const musByPhone = await Musician.findOne({
+          $or: [
+            { phoneNormalized: normalizedPhone },
+            { phone: normalizedPhone },
+            { phoneNumber: normalizedPhone },
+          ],
+        })
+          .select(
+            "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl _id email phoneNormalized"
+          )
+          .lean();
+
+        if (musByPhone) {
+          photoUrl = getPictureUrlFrom(musByPhone);
+          mus = musByPhone;
+          console.log("📸 Step 2.5 result: Found via phone →", photoUrl || "❌ none");
+          if (!musicianId && musByPhone._id) dep.musicianId = musByPhone._id;
+        } else {
+          console.warn("⚠️ Step 2.5: No musician found for phone", normalizedPhone);
+        }
+      }
     }
 
     // Step 3: lookup by email if still missing
