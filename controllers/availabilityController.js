@@ -338,24 +338,40 @@ export async function notifyDeputies({
   const leadVocalist =
     vocalists.find((v) => v.isEssential || /lead/i.test(v.instrument || "")) || vocalists[0];
 
-  // 🧮 Compute *real* lead vocalist fee (includes travel etc.)
-  let leadFee = null;
+  const leadDuties = leadVocalist?.instrument || "Lead Vocal";
+
+  // 💾 Try to find the lead's previously-sent fee in AvailabilityModel
+  let inheritedFee = null;
   try {
-    leadFee = await _finalFeeForMember({
-      act,
-      lineup,
-      members: lineup.bandMembers,
-      member: leadVocalist,
-      address: formattedAddress,
+    const existingLeadAvailability = await AvailabilityModel.findOne({
+      actId,
       dateISO,
-    });
-    console.log(`💰 Computed full lead fee for ${leadVocalist?.firstName || "Lead"}: £${leadFee}`);
+      duties: { $regex: "lead", $options: "i" },
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (existingLeadAvailability?.fee) {
+      inheritedFee = Number(existingLeadAvailability.fee);
+      console.log(`💾 Found existing lead availability fee: £${inheritedFee}`);
+    }
   } catch (err) {
-    console.warn("⚠️ Failed to compute full lead fee:", err.message);
-    leadFee = leadVocalist?.fee || null;
+    console.warn("⚠️ Could not find existing lead availability record:", err.message);
   }
 
-  const leadDuties = leadVocalist?.instrument || "Lead Vocal";
+  // 🧮 Fallbacks if we didn’t find the fee in AvailabilityModel
+  if (!inheritedFee) {
+    inheritedFee = Number(leadVocalist?.fee) || 0;
+
+    if (!inheritedFee && act?.lineups?.length) {
+      const leadFromAct = act.lineups
+        .flatMap((l) => l.bandMembers || [])
+        .find((m) => /lead/i.test(m.instrument || ""));
+      inheritedFee = Number(leadFromAct?.fee) || 0;
+    }
+
+    console.log(`💾 Fallback inherited fee from act data: £${inheritedFee}`);
+  }
 
   // 📨 Notify deputies
   for (const vocalist of vocalists) {
@@ -363,23 +379,9 @@ export async function notifyDeputies({
       const cleanPhone = (deputy.phoneNumber || deputy.phone || "").replace(/\s+/g, "");
       if (!/^\+?\d{10,15}$/.test(cleanPhone)) continue;
 
-      // 🧮 Compute per-deputy total
-      let finalFee = leadFee;
-      try {
-        finalFee = await _finalFeeForMember({
-          act,
-          lineup,
-          members: lineup.bandMembers,
-          member: deputy,
-          address: formattedAddress,
-          dateISO,
-        });
-        console.log(`🧮 Computed total deputy fee for ${deputy.firstName || deputy.name}: £${finalFee}`);
-      } catch (err) {
-        console.warn(`⚠️ Failed to compute deputy fee for ${deputy.firstName || deputy.name}:`, err.message);
-      }
+      console.log(`🎯 Sending deputy enquiry to ${deputy.firstName || deputy.name} — inherited fee £${inheritedFee}`);
 
-      // 🚀 Trigger WhatsApp
+      // 🚀 Trigger WhatsApp using inherited fee
       await triggerAvailabilityRequest({
         actId,
         lineupId,
@@ -389,8 +391,7 @@ export async function notifyDeputies({
         clientEmail,
         isDeputy: true,
         deputy: { ...deputy, phone: cleanPhone },
-        inheritedFee: finalFee, // now computed
-         finalFee,  
+        inheritedFee,
         inheritedDuties: leadDuties,
       });
     }
@@ -1733,28 +1734,49 @@ export const makeAvailabilityBroadcaster = (broadcastFn) => ({
       type: "availability_yes",
       actId,
       actName,
-      musicianName,
+      musicianName: musicianName || "Lead Vocalist",
       dateISO,
     });
   },
-  deputyYes: ({ actId, actName, musicianName, dateISO }) => {
+
+  deputyYes: ({ actId, actName, musicianName, dateISO, badge }) => {
+    // ✅ Ensure we always have a fallback name
+    let deputyName =
+      musicianName ||
+      badge?.vocalistName ||
+      badge?.deputies?.[0]?.vocalistName ||
+      "Deputy Vocalist";
+
     broadcastFn({
       type: "availability_deputy_yes",
       actId,
       actName,
-      musicianName,
+      musicianName: deputyName,
       dateISO,
     });
   },
+
   badgeUpdated: ({ actId, actName, dateISO, badge = null }) => {
-  broadcastFn({
-    type: "availability_badge_updated",
-    actId,
-    actName,
-    dateISO,
-    badge, // 👈 now explicitly includes badge or null
-  });
-},
+    // 🧩 Ensure badge.deputies has at least one valid name for toasts
+    if (badge?.isDeputy && (!badge.deputies || !badge.deputies.length)) {
+      badge.deputies = [
+        {
+          vocalistName:
+            badge.vocalistName || "Deputy Vocalist",
+          musicianId: badge.musicianId || null,
+          phoneNormalized: badge.phoneNormalized || null,
+        },
+      ];
+    }
+
+    broadcastFn({
+      type: "availability_badge_updated",
+      actId,
+      actName,
+      dateISO,
+      badge,
+    });
+  },
 });
 
 // one-shot WA→SMS for a single deputy
