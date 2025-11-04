@@ -1227,7 +1227,7 @@ const role = body?.inheritedDuties || targetMember.instrument || "Performance";
         firstName: targetMember.firstName || "Musician",
         date: formattedDate,
         location: shortAddress,
-  fee: body?.inheritedFee || finalFee,  // ✅ use the one actually in `body`
+  fee: String(body?.inheritedFee || finalFee),  // ✅ use the one actually in `body`
         role,
         actName: act.tscName || act.name,
       },
