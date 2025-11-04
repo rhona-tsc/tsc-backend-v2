@@ -1090,6 +1090,28 @@ console.log("🎯 Enriched targetMember:", {
 
     const finalFee = await feeForMember(targetMember);
 
+    // 🛑 Prevent duplicate enquiry sends for same act/date/location
+const normalizedPhone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
+
+const alreadyReplied = await AvailabilityModel.exists({
+  actId,
+  phone: normalizedPhone,
+  dateISO,
+  reply: { $in: ["yes", "no", "unavailable"] },
+  formattedAddress: { $regex: fullFormattedAddress.slice(0, 20), $options: "i" },
+});
+
+if (alreadyReplied) {
+  console.log(
+    `🟡 Skipping ${targetMember.firstName || "musician"} — already replied to a ${act.tscName || act.name
+    } enquiry on ${dateISO}`
+  );
+
+  const result = { success: false, message: "Duplicate enquiry prevented" };
+  if (res) return res.json(result);
+  return result;
+}
+
     // ✅ Create availability record
     await AvailabilityModel.create({
       actId,
