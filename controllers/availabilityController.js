@@ -11,6 +11,7 @@ import {sendEmail } from "../utils/sendEmail.js";
 import mongoose from "mongoose";
 import calculateActPricing from "../utils/calculateActPricing.js";
 import { createCalendarInvite } from "./googleController.js";
+import { sendClientEmail } from "../utils/sendClientEmail.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
@@ -2358,8 +2359,8 @@ await createCalendarInvite({
 
 
 
-if (!badge.isDeputy) {
-  try {
+if (!badge?.isDeputy || badge?.isLead) {
+    try {
     // ✅ URLs should use FRONTEND_URL
     const SITE =
       process.env.FRONTEND_URL ||
@@ -2597,6 +2598,13 @@ const clientFirstName =
     /* ---------------------------------------------------------------------- */
     /* ✉️ Send email to client                                                */
     /* ---------------------------------------------------------------------- */
+
+    console.log("📧 About to send client email:", {
+  isDeputy: badge.isDeputy,
+  clientEmail: availabilityRecord?.clientEmail,
+  clientName: availabilityRecord?.clientName,
+});
+
     await sendClientEmail({
       actId: String(actId),
       subject: `Good news — ${actDoc.tscName || actDoc.name}'s lead vocalist is available`,
