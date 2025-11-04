@@ -2141,13 +2141,14 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
           const enriched = [];
           for (const d of yesDeps) {
             const bits = await getDeputyDisplayBits(d);
-            enriched.push({
-              name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-              musicianId: bits?.musicianId || "",
-              photoUrl: bits?.photoUrl || "",
-              profileUrl: bits?.profileUrl || "",
-              setAt: new Date(),
-            });
+           enriched.push({
+  name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
+  musicianId: bits?.resolvedMusicianId || bits?.musicianId || "",
+  photoUrl: bits?.photoUrl || "",
+  profileUrl: bits?.profileUrl || "",
+  resolvedVia: "getDeputyDisplayBits",
+  setAt: new Date(),
+});
           }
 
           // ✅ Construct the deputy badge safely
@@ -2163,6 +2164,7 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
           };
 
           console.log("🎤 Built deputy badge:", badgeObj);
+          // 🧠 No enrichDeputyData needed — fully resolved via getDeputyDisplayBits
           return badgeObj;
         }
       }
@@ -2275,57 +2277,54 @@ if (!badge) {
 /* 🎤 ENRICH DEPUTIES WITH FULL MUSICIAN DATA                             */
 /* ---------------------------------------------------------------------- */
 if (Array.isArray(badge.deputies) && badge.deputies.length > 0) {
-  console.log(`🎤 Enriching ${badge.deputies.length} deputy entries...`);
-  const enrichedDeputies = [];
+  // 🧠 Skip redundant enrichment if badge was built via getDeputyDisplayBits
+  if (badge.deputies.some(d => d.resolvedVia === "getDeputyDisplayBits")) {
+    console.log("🧠 Skipping deputy enrichment — badge already resolved via getDeputyDisplayBits");
+  } else {
+    console.log(`🎤 Enriching ${badge.deputies.length} deputy entries (legacy fallback)...`);
+    const enrichedDeputies = [];
 
-  for (const dep of badge.deputies) {
-    try {
-      let musician = null;
+    for (const dep of badge.deputies) {
+      try {
+        let musician = null;
+        const musicianId = dep.musicianId || dep.musician?._id || dep._id;
+        if (musicianId) musician = await Musician.findById(musicianId).lean();
 
-      // 🧭 1️⃣ Try by musicianId first
-      const musicianId = dep.musicianId || dep.musician?._id || dep._id;
-      if (musicianId) {
-        musician = await Musician.findById(musicianId).lean();
+        if (!musician && (dep.phone || dep.phoneNumber)) {
+          const cleanPhone = (dep.phone || dep.phoneNumber)
+            .replace(/\s+/g, "")
+            .replace(/^0/, "+44");
+          musician = await Musician.findOne({
+            $or: [{ phoneNormalized: cleanPhone }, { phone: cleanPhone }],
+          }).lean();
+        }
+
+        if (musician) {
+          enrichedDeputies.push({
+            ...dep,
+            musicianId: String(musician._id),
+            vocalistName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+            photoUrl: musician.profilePicture || musician.photoUrl || dep.photoUrl || "",
+            profileUrl:
+              musician.profileUrl ||
+              `${process.env.PUBLIC_SITE_BASE || "https://meek-biscotti-8d5020.netlify.app"}/musician/${musician._id}`,
+            instrument: musician.instrumentation?.[0] || musician.primaryInstrument || dep.instrument || "",
+            phoneNormalized: musician.phoneNormalized || dep.phoneNormalized,
+            setAt: dep.setAt || new Date(),
+          });
+        } else {
+          enrichedDeputies.push(dep); // ✅ preserve existing deputy data
+          console.warn("⚠️ No musician found for deputy:", dep.name);
+        }
+      } catch (err) {
+        console.warn("⚠️ Failed to enrich deputy:", dep.name, err.message);
+        enrichedDeputies.push(dep);
       }
-
-      // 🧭 2️⃣ Fallback: lookup by normalized phone number
-      if (!musician) {
-        const rawPhone = dep.phone || dep.phoneNumber || "";
-        const cleanPhone = rawPhone
-          .replace(/\s+/g, "")
-          .replace(/^0/, "+44");
-        musician = await Musician.findOne({
-          $or: [
-            { phoneNormalized: cleanPhone },
-            { phone: cleanPhone },
-          ],
-        }).lean();
-      }
-
-      if (!musician) {
-        console.warn("⚠️ No musician found for deputy:", dep.firstName || dep.name);
-        continue;
-      }
-
-      enrichedDeputies.push({
-        musicianId: String(musician._id),
-        vocalistName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
-        photoUrl: musician.profilePicture || musician.photoUrl || "",
-        profilePicture: musician.profilePicture || musician.photoUrl || "",
-        profileUrl:
-          musician.profileUrl ||
-          `${process.env.PUBLIC_SITE_BASE || "https://meek-biscotti-8d5020.netlify.app"}/musician/${musician._id}`,
-        instrument: musician.instrumentation?.[0] || musician.primaryInstrument || "",
-        phoneNormalized: musician.phoneNormalized,
-        setAt: dep.setAt || new Date(),
-      });
-    } catch (err) {
-      console.warn("⚠️ Failed to enrich deputy:", dep, err.message);
     }
-  }
 
-  badge.deputies = enrichedDeputies;
-  console.log("✅ Enriched deputy data attached to badge");
+    badge.deputies = enrichedDeputies;
+    console.log("✅ Deputy data preserved/enriched where possible");
+  }
 }
 
    /* ---------------------------------------------------------------------- */
