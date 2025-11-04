@@ -1576,8 +1576,10 @@ console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.
               type: "deputy_yes",
               actId,
               actName: act?.tscName || act?.name,
-              musicianName: musician?.firstName || updated.musicianName || "Deputy",
-              dateISO,
+musicianName:
+  `${musician?.firstName || updated?.musicianName || updated?.name || "Deputy"} ${
+    musician?.lastName || ""
+  }`.trim(),              dateISO,
               isDeputy: true,
             });
             console.log("📡 SSE broadcasted: deputy_yes");
@@ -1661,7 +1663,15 @@ if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
   }
 
   // 🔔 SSE clear badge (only if not deputy)
-  if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
+// 🔔 SSE clear badge (only if lead, and no other active availabilities)
+if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
+  const stillActive = await AvailabilityModel.exists({
+    actId,
+    dateISO,
+    reply: "yes",
+  });
+
+  if (!stillActive) {
     global.availabilityNotify.badgeUpdated({
       type: "availability_badge_updated",
       actId,
@@ -1669,7 +1679,11 @@ if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
       dateISO,
       badge: null,
     });
+    console.log("📡 Cleared badge — no remaining active availabilities.");
+  } else {
+    console.log("🟡 Skipped badge clear — deputies still marked available.");
   }
+}
 
   return;
       }
@@ -1775,8 +1789,8 @@ export const makeAvailabilityBroadcaster = (broadcastFn) => ({
   },
 
 deputyYes: ({ actId, actName, musicianName, dateISO, badge }) => {
-  // ✅ Prefer explicit deputy name > deputy array > fallback
-  let deputyName =
+  // ✅ Prefer deputy name over vocalistName
+  const deputyName =
     musicianName ||
     badge?.deputies?.[0]?.name ||
     badge?.deputies?.[0]?.vocalistName ||
@@ -1787,7 +1801,7 @@ deputyYes: ({ actId, actName, musicianName, dateISO, badge }) => {
     type: "availability_deputy_yes",
     actId,
     actName,
-    musicianName: deputyName,
+    musicianName: deputyName, // ✅ correct field
     dateISO,
   });
 },
@@ -2181,25 +2195,37 @@ if (availabilityRecord) {
     /* ---------------------------------------------------------------------- */
     /* 🧹 If no badge, clear existing for this key                            */
     /* ---------------------------------------------------------------------- */
-    if (!badge) {
-      await Act.updateOne(
-        { _id: actId },
-        { $unset: { [`availabilityBadges.${key}`]: "" } }
-      );
-      console.log(`🧹 Cleared availability badge for ${actDoc.tscName || actDoc.name}`);
+ if (!badge) {
+  // 🧭 Double-check that no "yes" availability rows still exist
+  const stillActive = await AvailabilityModel.exists({
+    actId,
+    dateISO,
+    reply: "yes",
+  });
 
-      if (global.availabilityNotify?.badgeUpdated) {
-        global.availabilityNotify.badgeUpdated({
-          type: "availability_badge_updated",
-          actId: String(actId),
-          actName: actDoc?.tscName || actDoc?.name,
-          dateISO,
-          badge: null,
-        });
-        console.log("📡 SSE broadcasted: availability_badge_updated");
-      }
-      return { success: true, cleared: true };
-    }
+  if (stillActive) {
+    console.log("🟡 Skipped badge clear — active 'yes' availabilities still present");
+    return { success: true, skipped: true };
+  }
+
+  await Act.updateOne(
+    { _id: actId },
+    { $unset: { [`availabilityBadges.${key}`]: "" } }
+  );
+  console.log(`🧹 Cleared availability badge for ${actDoc.tscName || actDoc.name}`);
+
+  if (global.availabilityNotify?.badgeUpdated) {
+    global.availabilityNotify.badgeUpdated({
+      type: "availability_badge_updated",
+      actId: String(actId),
+      actName: actDoc?.tscName || actDoc?.name,
+      dateISO,
+      badge: null,
+    });
+    console.log("📡 SSE broadcasted: availability_badge_updated");
+  }
+  return { success: true, cleared: true };
+}
 
    /* ---------------------------------------------------------------------- */
 /* 🎤 ENRICH DEPUTIES WITH FULL MUSICIAN DATA                             */
