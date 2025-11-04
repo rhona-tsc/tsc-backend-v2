@@ -11,7 +11,6 @@ import {sendEmail } from "../utils/sendEmail.js";
 import mongoose from "mongoose";
 import calculateActPricing from "../utils/calculateActPricing.js";
 import { createCalendarInvite } from "./googleController.js";
-import { sendClientEmail } from "../utils/sendClientEmail.js";
 import userModel from "../models/userModel.js";
 
 // Debugging: log AvailabilityModel structure at runtime
