@@ -1651,6 +1651,35 @@ if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
       },
     }
   );
+// 🗓️ Cancel calendar invite on NO / UNAVAILABLE if eventId not found yet
+try {
+  const { cancelCalendarInvite } = await import("./googleController.js");
+
+  if (!updated?.calendarEventId && emailForInvite) {
+    const existing = await AvailabilityModel.findOne({
+      actId: act?._id || updated.actId,
+      dateISO: updated.dateISO,
+      phone: updated.phone,
+    })
+      .select("calendarEventId musicianEmail")
+      .lean();
+
+    if (existing?.calendarEventId) {
+      console.log("🗓️ Found existing calendar event to cancel:", existing.calendarEventId);
+      await cancelCalendarInvite({
+        eventId: existing.calendarEventId,
+        actId: act?._id || updated.actId,
+        dateISO: updated.dateISO,
+        email: emailForInvite,
+      });
+      console.log("✅ Calendar invite cancelled successfully via fallback lookup");
+    } else {
+      console.warn("⚠️ No calendarEventId found to cancel for this musician/date.");
+    }
+  }
+} catch (err) {
+  console.error("❌ Fallback cancelCalendarInvite failed:", err.message);
+}
 
   if (updated?.calendarEventId && emailForInvite) {
     try {
