@@ -316,7 +316,6 @@ export async function notifyDeputies({
 }) {
   console.log(`📢 [notifyDeputies] START — act ${actId}, date ${dateISO}`);
 
-
   const act = await Act.findById(actId).lean();
   if (!act) {
     console.warn("⚠️ No act found for notifyDeputies()");
@@ -329,20 +328,43 @@ export async function notifyDeputies({
     return;
   }
 
+  // 🎤 Identify all vocalists
   const vocalists = lineup.bandMembers?.filter((m) =>
     ["vocal", "vocalist"].some((v) => (m.instrument || "").toLowerCase().includes(v))
   );
 
-    // Find the lead vocalist in this lineup (first matching entry)
-const leadVocalist = vocalists.find(v => v.isEssential || /lead/i.test(v.instrument || ""));
-const leadFee = leadVocalist?.fee || lineup.bandMembers?.find(m => /vocal/i.test(m.instrument || ""))?.fee || null;
-const leadDuties = leadVocalist?.instrument || "Lead Vocal";
+  // 🧩 Find the lead vocalist (to inherit duties/role)
+  const leadVocalist =
+    vocalists.find((v) => v.isEssential || /lead/i.test(v.instrument || "")) || vocalists[0];
+  const leadFee =
+    leadVocalist?.fee ||
+    lineup.bandMembers?.find((m) => /vocal/i.test(m.instrument || ""))?.fee ||
+    null;
+  const leadDuties = leadVocalist?.instrument || "Lead Vocal";
 
+  // 📨 Notify deputies
   for (const vocalist of vocalists) {
     for (const deputy of vocalist.deputies || []) {
       const cleanPhone = (deputy.phoneNumber || deputy.phone || "").replace(/\s+/g, "");
       if (!/^\+?\d{10,15}$/.test(cleanPhone)) continue;
 
+      // 🧮 Compute full fee (base + travel) for this deputy
+      let finalFee = leadFee;
+      try {
+        const feeValue = await computeFinalFeeForMember(
+          act,
+          deputy,
+          formattedAddress,
+          dateISO,
+          lineup
+        );
+        finalFee = feeValue;
+        console.log(`🧮 Computed total deputy fee for ${deputy.firstName || deputy.name}: £${feeValue}`);
+      } catch (err) {
+        console.warn(`⚠️ Failed to compute deputy fee for ${deputy.firstName || deputy.name}:`, err.message);
+      }
+
+      // 🚀 Trigger availability message
       await triggerAvailabilityRequest({
         actId,
         lineupId,
@@ -350,11 +372,11 @@ const leadDuties = leadVocalist?.instrument || "Lead Vocal";
         formattedAddress,
         clientName,
         clientEmail,
-         isDeputy: true,
-  deputy: { ...deputy, phone: cleanPhone },
-  inheritedFee: leadFee,
-  inheritedDuties: leadDuties,
-});
+        isDeputy: true,
+        deputy: { ...deputy, phone: cleanPhone },
+        inheritedFee: finalFee,
+        inheritedDuties: leadDuties,
+      });
     }
   }
 
@@ -1441,6 +1463,7 @@ try {
     startTime: `${dateISO}T17:00:00Z`,
     endTime: `${dateISO}T23:59:00Z`,
     fee,
+    
   });
 
   console.log("📅 Calendar invite sent:", emailForInvite, {
@@ -1929,7 +1952,6 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
 
   const allLineups = Array.isArray(act.lineups) ? act.lineups : [];
 
-  // 🟢 Check each lineup for vocalists
   for (const l of allLineups) {
     const members = Array.isArray(l.bandMembers) ? l.bandMembers : [];
 
@@ -1960,7 +1982,7 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
         return badgeObj;
       }
 
-      // 🚫 Lead said NO/UNAVAILABLE/NONE → look at deputies
+      // 🚫 Lead said NO/UNAVAILABLE → look at deputies
       if (!leadReply || leadReply === "no" || leadReply === "unavailable") {
         const deputies = Array.isArray(m.deputies) ? m.deputies : [];
         const yesDeps = [];
@@ -1986,45 +2008,18 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
             });
           }
 
-          // 🟣 If this is a deputy badge, try to enrich with full musician data
-if (badge.isDeputy && Array.isArray(badge.deputies) && badge.deputies.length > 0) {
-  const deputy = badge.deputies[0];
-  const cleanPhone = (deputy.phone || deputy.phoneNumber || "")
-    .replace(/\s+/g, "")
-    .replace(/^0/, "+44");
-
-  const deputyMusician = await Musician.findOne({
-    $or: [
-      { phoneNormalized: cleanPhone },
-      { phone: cleanPhone },
-    ],
-  }).lean();
-
-  if (deputyMusician) {
-    badge.badgePhotoUrl =
-      deputyMusician.profilePicture ||
-      deputyMusician.photoUrl ||
-      null;
-    badge.badgeProfilePicture = badge.badgePhotoUrl;
-
-    badge.musicianId = deputyMusician._id;
-    badge.vocalistName =
-      `${deputyMusician.firstName || ""} ${deputyMusician.lastName || ""}`.trim();
-  } else {
-    console.warn("⚠️ No matching musician found for deputy:", cleanPhone);
-  }
-}
-
+          // ✅ Construct the deputy badge safely
           const badgeObj = {
             active: true,
             dateISO,
             isDeputy: true,
             inPromo: false,
             deputies: enriched,
-            vocalistName: `${m.firstName || ""}`.trim(), // lead name (for context)
+            vocalistName: `${m.firstName || ""}`.trim(),
             address: formattedAddress,
             setAt: new Date(),
           };
+
           console.log("🎤 Built deputy badge:", badgeObj);
           return badgeObj;
         }

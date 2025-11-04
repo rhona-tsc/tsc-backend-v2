@@ -202,10 +202,7 @@ export async function createCalendarInvite({
   const start = startTime || `${dateISO}T17:00:00.000Z`;
   const end = endTime || `${dateISO}T23:59:00.000Z`;
 
-  const detailsLine =
-    `• ${new Date(dateISO).toLocaleDateString("en-GB", {
-      weekday: "short", day: "numeric", month: "short", year: "numeric",
-    })} – ${address}${fee ? ` (£${fee})` : ""}`;
+
 
   const privateProps = {
     ...cleanPrivate(extendedProperties.private),
@@ -224,7 +221,6 @@ export async function createCalendarInvite({
     const existingDesc = ev.description || "";
     const lines = new Set(existingDesc.split(/\r?\n/).map(l => l.trim()).filter(Boolean));
     if (description) lines.add(description.trim());
-    lines.add(detailsLine);
     const mergedDesc = Array.from(lines).join("\n");
     const attendees = [{ email: email.toLowerCase() }];
 
@@ -256,7 +252,7 @@ export async function createCalendarInvite({
   const insertBody = {
     id: eventId,
     summary,
-    description: [description, detailsLine].filter(Boolean).join("\n"),
+    description: [description].filter(Boolean).join("\n"),
     start: { dateTime: start, timeZone: "Europe/London" },
     end: { dateTime: end, timeZone: "Europe/London" },
     attendees: [{ email: email.toLowerCase() }],
