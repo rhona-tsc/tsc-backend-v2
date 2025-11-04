@@ -2,6 +2,7 @@
 import { google } from 'googleapis';
 import { v4 as uuidv4 } from 'uuid';
 import { hashBase36 } from "../utils/hash.js";
+import AvailabilityModel from '../models/availabilityModel.js';
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
@@ -240,7 +241,20 @@ export async function createCalendarInvite({
         sendUpdates: "all", // ✅ ensures Google sends an updated invite
       })
     );
+    // ✅ Save or update calendarEventId on the corresponding availability record
+try {
+  const eventIdToSave = patch?.data?.id || eventId;
+  await AvailabilityModel.updateOne(
+    { actId, dateISO, email: email.toLowerCase() },
+    { $set: { calendarEventId: eventIdToSave } }
+  );
+  console.log("💾 Stored calendarEventId:", eventIdToSave, "for", email);
+} catch (err) {
+  console.warn("⚠️ Failed to store calendarEventId:", err.message);
+}
+
     return { event: patch.data, created: false };
+
   } catch (e) {
     if (e?.code !== 404) {
       console.error("❌ (controllers/googleController.js) createCalendarInvite fetch error:", e.message);
@@ -269,7 +283,19 @@ export async function createCalendarInvite({
       cal.events.insert({ calendarId, requestBody: insertBody, sendUpdates: "all" })
     );
     console.log(`✅ Event created and invite sent to ${email}:`, ins.data.htmlLink);
+    // ✅ Persist new event ID to AvailabilityModel
+try {
+  const eventIdToSave = ins?.data?.id || eventId;
+  await AvailabilityModel.updateOne(
+    { actId, dateISO, email: email.toLowerCase() },
+    { $set: { calendarEventId: eventIdToSave } }
+  );
+  console.log("💾 Stored new calendarEventId:", eventIdToSave, "for", email);
+} catch (err) {
+  console.warn("⚠️ Failed to store new calendarEventId:", err.message);
+}
     return { event: ins.data, created: true };
+    
   } catch (e) {
     console.error("❌ (controllers/googleController.js) createCalendarInvite insert failed:", e.message);
     throw e;
@@ -446,7 +472,7 @@ export const addAttendeeToEvent = async ({ eventId, email }) => {
 };
 
 export async function cancelCalendarInvite({ eventId, actId, dateISO, email }) {
-  console.log(`😈 (controllers/googleController.js) cancelCalendarInvite called at`, new Date().toISOString(), {
+  console.log(`🗓️ (utils/twilioClient.js) cancelCalendarInvite called at`, new Date().toISOString(), {
     eventId, actId, dateISO, email,
   });
 
@@ -493,5 +519,9 @@ export async function cancelCalendarInvite({ eventId, actId, dateISO, email }) {
     eventId: target.id,
     requestBody: { status: "cancelled" },
     sendUpdates: "all",
-  });
+    
+    
+  }
+);
+  console.log("✅ Google Calendar event cancelled:", target?.summary || eventId);
 }

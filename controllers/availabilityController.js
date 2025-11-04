@@ -1623,8 +1623,18 @@ if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
 
   if (updated?.calendarEventId && emailForInvite) {
     try {
-      await cancelCalendarInvite(emailForInvite, updated.calendarEventId, updated.dateISO);
-      console.log("✅ Calendar invite cancelled successfully");
+      console.log("🗓️ Attempting cancelCalendarInvite with:", {
+  eventId: updated.calendarEventId,
+  actId: act?._id || updated.actId,
+  dateISO: updated.dateISO,
+  email: emailForInvite,
+});
+await cancelCalendarInvite({
+  eventId: updated.calendarEventId,
+  actId: act?._id || updated.actId,
+  dateISO: updated.dateISO,
+  email: emailForInvite,
+});      console.log("✅ Calendar invite cancelled successfully");
     } catch (cancelErr) {
       console.error("❌ Failed to cancel calendar invite:", cancelErr.message);
     }
@@ -2195,8 +2205,11 @@ if (availabilityRecord) {
     /* ---------------------------------------------------------------------- */
     /* 🧹 If no badge, clear existing for this key                            */
     /* ---------------------------------------------------------------------- */
- if (!badge) {
-  // 🧭 Double-check that no "yes" availability rows still exist
+if (!badge) {
+  // 🧭 Wait briefly to allow deputy availability writes to complete
+  await new Promise(r => setTimeout(r, 600));
+
+  // 🔁 Recheck for active availabilities
   const stillActive = await AvailabilityModel.exists({
     actId,
     dateISO,
@@ -2204,7 +2217,7 @@ if (availabilityRecord) {
   });
 
   if (stillActive) {
-    console.log("🟡 Skipped badge clear — active 'yes' availabilities still present");
+    console.log("🟡 Skipped badge clear — active 'yes' availabilities still present (after recheck)");
     return { success: true, skipped: true };
   }
 
