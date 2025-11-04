@@ -422,7 +422,20 @@ async function _finalFeeForMember({
   const membersCount = Math.max(1, Array.isArray(members) ? members.length : 1);
   const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
   const base = Number(member?.fee ?? 0) > 0 ? Number(member.fee) : perHead;
-
+// 🧩 If deputy fee missing, inherit from matching essential member (e.g. same instrument)
+ if ((!member?.fee || Number(member.fee) === 0) && Array.isArray(lineup.bandMembers)) {
+   const matching = lineup.bandMembers.find(
+     m =>
+       m.isEssential &&
+       m.instrument &&
+       member?.instrument &&
+       m.instrument.toLowerCase() === member.instrument.toLowerCase()
+   );
+   if (matching?.fee) {
+     console.log(`🎯 Inheriting fee £${matching.fee} from ${matching.instrument}`);
+     base = Number(matching.fee);
+   }
+ }
   const { county: selectedCounty } = countyFromAddress(address);
 
   // County-rate (if enabled) wins; otherwise distance-based
