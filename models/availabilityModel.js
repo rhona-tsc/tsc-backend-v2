@@ -77,7 +77,7 @@ phone: {
   { timestamps: true }
 );
 
-availabilitySchema.index({ actId: 1, dateISO: 1, phone: 1, v2: 1, email: 1});
+availabilitySchema.index({ actId: 1, dateISO: 1, phone: 1, v2: 1, email: 1, phoneNormalized: 1, enquiryId: 1 }, { unique: true });
 
 const AvailabilityModel = mongoose.model("Availability", availabilitySchema);
 export default AvailabilityModel;

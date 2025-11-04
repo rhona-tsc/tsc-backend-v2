@@ -1846,14 +1846,6 @@ deputyYes: ({ actId, actName, musicianName, dateISO, badge }) => {
   });
 },
 
-  broadcastFn({
-    type: "availability_deputy_yes",
-    actId,
-    actName,
-    musicianName: deputyName, // ✅ correct field
-    dateISO,
-  });
-},
 
   badgeUpdated: ({ actId, actName, dateISO, badge = null }) => {
     // 🧩 Ensure badge.deputies has at least one valid name for toasts

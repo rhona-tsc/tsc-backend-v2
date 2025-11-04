@@ -3,6 +3,7 @@ import { google } from 'googleapis';
 import { v4 as uuidv4 } from 'uuid';
 import { hashBase36 } from "../utils/hash.js";
 import AvailabilityModel from '../models/availabilityModel.js';
+import { toE164 } from '../utils/twilioClient.js';
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
@@ -244,10 +245,24 @@ export async function createCalendarInvite({
     // ✅ Save or update calendarEventId on the corresponding availability record
 try {
   const eventIdToSave = patch?.data?.id || eventId;
-  await AvailabilityModel.updateOne(
-    { actId, dateISO, email: email.toLowerCase() },
-    { $set: { calendarEventId: eventIdToSave } }
-  );
+await AvailabilityModel.updateOne(
+  {
+    actId,
+    dateISO,
+    $or: [
+      { email: email.toLowerCase() },
+      { calendarInviteEmail: email.toLowerCase() },
+    ],
+  },
+  {
+    $set: {
+      calendarEventId: eventIdToSave,
+      calendarInviteEmail: email.toLowerCase(),
+      calendarInviteSentAt: new Date(),
+      calendarStatus: "needsAction",
+    },
+  }
+);
   console.log("💾 Stored calendarEventId:", eventIdToSave, "for", email);
 } catch (err) {
   console.warn("⚠️ Failed to store calendarEventId:", err.message);
@@ -287,9 +302,24 @@ try {
 try {
   const eventIdToSave = ins?.data?.id || eventId;
   await AvailabilityModel.updateOne(
-    { actId, dateISO, email: email.toLowerCase() },
-    { $set: { calendarEventId: eventIdToSave } }
-  );
+  {
+    actId,
+    dateISO,
+    $or: [
+      { email: email.toLowerCase() },
+      { calendarInviteEmail: email.toLowerCase() },
+    ],
+  },
+  {
+    $set: {
+      calendarEventId: eventIdToSave,
+      calendarInviteEmail: email.toLowerCase(),
+      calendarInviteSentAt: new Date(),
+      calendarStatus: "needsAction",
+    },
+  }
+
+);
   console.log("💾 Stored new calendarEventId:", eventIdToSave, "for", email);
 } catch (err) {
   console.warn("⚠️ Failed to store new calendarEventId:", err.message);
