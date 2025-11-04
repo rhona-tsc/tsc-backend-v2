@@ -316,10 +316,6 @@ export async function notifyDeputies({
 }) {
   console.log(`📢 [notifyDeputies] START — act ${actId}, date ${dateISO}`);
 
-  // Find the lead vocalist in this lineup (first matching entry)
-const leadVocalist = vocalists.find(v => v.isEssential || /lead/i.test(v.instrument || ""));
-const leadFee = leadVocalist?.fee || lineup.bandMembers?.find(m => /vocal/i.test(m.instrument || ""))?.fee || null;
-const leadDuties = leadVocalist?.instrument || "Lead Vocal";
 
   const act = await Act.findById(actId).lean();
   if (!act) {
@@ -336,6 +332,11 @@ const leadDuties = leadVocalist?.instrument || "Lead Vocal";
   const vocalists = lineup.bandMembers?.filter((m) =>
     ["vocal", "vocalist"].some((v) => (m.instrument || "").toLowerCase().includes(v))
   );
+
+    // Find the lead vocalist in this lineup (first matching entry)
+const leadVocalist = vocalists.find(v => v.isEssential || /lead/i.test(v.instrument || ""));
+const leadFee = leadVocalist?.fee || lineup.bandMembers?.find(m => /vocal/i.test(m.instrument || ""))?.fee || null;
+const leadDuties = leadVocalist?.instrument || "Lead Vocal";
 
   for (const vocalist of vocalists) {
     for (const deputy of vocalist.deputies || []) {
