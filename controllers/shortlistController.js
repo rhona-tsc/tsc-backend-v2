@@ -9,7 +9,7 @@ export const getUserShortlist = async (req, res) => {
   try {
     const { userId } = req.params;
     // Query the Shortlist collection for user's shortlisted acts
-    const shortlist = await Shortlist.find({ userId }).populate("acts.actId", null, "Act");
+    const shortlist = await Shortlist.find({ userId }).populate("acts.actId", null, "act");
 
     const acts = (shortlist || [])
       .map((a) => a.actId)

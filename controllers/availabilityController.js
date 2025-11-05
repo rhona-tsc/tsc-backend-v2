@@ -808,6 +808,7 @@ function findVocalistPhone(actData, lineupId) {
       totalLineups: actData?.lineups?.length || 0,
     }
   );
+
   if (!actData?.lineups?.length) return null;
 
   // Prefer specified lineupId
@@ -819,29 +820,46 @@ function findVocalistPhone(actData, lineupId) {
 
   if (!lineup?.bandMembers?.length) return null;
 
-  // Find first member with instrument containing "vocal"
+  // 🎤 Step 1: Find the lead vocalist (or first vocalist)
   const vocalist = lineup.bandMembers.find((m) =>
-    String(m.instrument || "")
-      .toLowerCase()
-      .includes("vocal")
+    String(m.instrument || "").toLowerCase().includes("vocal")
   );
 
-  if (!vocalist) return null;
-
-  // Safely pick phone fields
-  let phone = vocalist.phoneNormalized || vocalist.phoneNumber || "";
-  if (!phone && Array.isArray(vocalist.deputies) && vocalist.deputies.length) {
-    phone =
-      vocalist.deputies[0].phoneNormalized ||
-      vocalist.deputies[0].phoneNumber ||
-      "";
+  if (!vocalist) {
+    console.warn("⚠️ No vocalist found in lineup", lineupId);
+    return null;
   }
 
-  // Normalise to E.164 if needed
+  // 🎤 Step 2: Try to get a direct phone number
+  let phone =
+    vocalist.phoneNormalized ||
+    vocalist.phoneNumber ||
+    vocalist.phone ||
+    "";
+
+  // 🎤 Step 3: If no phone for lead, check deputies
+  if (!phone && Array.isArray(vocalist.deputies) && vocalist.deputies.length) {
+    const deputyWithPhone = vocalist.deputies.find(
+      (d) => d.phoneNormalized || d.phoneNumber || d.phone
+    );
+
+    if (deputyWithPhone) {
+      phone =
+        deputyWithPhone.phoneNormalized ||
+        deputyWithPhone.phoneNumber ||
+        deputyWithPhone.phone ||
+        "";
+      console.log(
+        `🎯 Using deputy phone (${deputyWithPhone.firstName || deputyWithPhone.name}) for ${vocalist.firstName}`
+      );
+    }
+  }
+
+  // 🎤 Step 4: Normalize to E.164 if needed
   phone = toE164(phone);
 
   if (!phone) {
-    console.warn("⚠️ No valid phone found for vocalist:", {
+    console.warn("⚠️ No valid phone found for vocalist or deputies:", {
       vocalist: `${vocalist.firstName} ${vocalist.lastName}`,
       lineup: lineup.actSize,
       act: actData.tscName || actData.name,
@@ -849,7 +867,7 @@ function findVocalistPhone(actData, lineupId) {
     return null;
   }
 
-  console.log("🎤 Lead vocalist found:", {
+  console.log("🎤 Lead vocalist found (with deputy fallback):", {
     name: `${vocalist.firstName} ${vocalist.lastName}`,
     instrument: vocalist.instrument,
     phone,

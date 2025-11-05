@@ -155,6 +155,8 @@ async function computeMemberMessageFee({ act, lineup, member, address, dateISO }
     dateISO,
   });
 
+  
+
   if (!member || !lineup) {
     console.warn(`💰 computeMemberMessageFee missing member or lineup`);
     return 0;
@@ -171,8 +173,23 @@ async function computeMemberMessageFee({ act, lineup, member, address, dateISO }
     console.warn(`💰 computeMemberMessageFee no matching lineup member`, { name: member?.firstName });
   }
 
-  const base = Number(fullMember?.fee ?? member?.fee ?? 0);
-  const essentialExtras = (fullMember?.additionalRoles || [])
+// Try fee from lineup → from act lineup fallback → from member
+let base =
+  Number(fullMember?.fee) ||
+  Number(member?.fee) ||
+  0;
+
+if (!base && act?.lineups?.length) {
+  const lineupFromAct = act.lineups.find(l => l._id?.toString() === lineup._id?.toString());
+  if (lineupFromAct) {
+    const actMember = lineupFromAct.bandMembers?.find(
+      m => m.email?.toLowerCase() === member?.email?.toLowerCase()
+    );
+    if (actMember?.fee) base = Number(actMember.fee);
+  }
+}
+
+const essentialExtras = (fullMember?.additionalRoles || [])
     .filter((r) => r.isEssential)
     .reduce((sum, r) => sum + Number(r.additionalFee || 0), 0);
 
