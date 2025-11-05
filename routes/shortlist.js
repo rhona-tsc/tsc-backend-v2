@@ -205,29 +205,57 @@ router.patch("/act/:id/decrement-shortlist", async (req, res) => {
 /* -------------------------------------------------------------------------- */
 /* 🟠 PATCH /update — If date/location added later, trigger availability       */
 /* -------------------------------------------------------------------------- */
-router.patch("/update", async (req, res, next) => {
-  console.log(`🟠 (routes/shortlist.js) /update START at ${new Date().toISOString()}`, {
-    body: req.body,
+// controllers/shortlistController.js
+import Shortlist from "../models/shortlistModel.js";
+
+export const getUserShortlist = async (req, res) => {
+  console.log(`🐠 (controllers/shortlistController.js) getUserShortlist called`, {
+    userId: req.params.userId,
   });
 
-  const { actId, dateISO, formattedAddress, userId } = req.body;
-
   try {
-    // Load existing shortlist record (if you store them)
-    // or just trigger if both fields are now present.
-    if (actId && dateISO && formattedAddress) {
-      console.log("📅 Date and location now present — triggering availability flow...");
-      req.body = { actId, dateISO, formattedAddress, userId };
-      return next();
-    }
+    const { userId } = req.params;
+    // Query the Shortlist collection for user's shortlisted acts
+    const shortlist = await Shortlist.find({ userId }).populate("acts.actId", null, "act");
 
-    console.log("⚠️ Skipping availability trigger — missing date or address");
-    return res.json({ success: true, message: "No trigger (missing date/address)" });
+    const acts = (shortlist || [])
+      .map((a) => a.actId)
+      .filter(Boolean);
+
+    res.json({ success: true, acts });
   } catch (err) {
-    console.error("❌ (shortlist.js) /update failed:", err);
-    return res.status(500).json({ error: "Failed to update shortlist." });
+    console.error("❌ getUserShortlist error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
-}, triggerAvailabilityRequest);
+};
 
+export const updateShortlistItem = async (req, res) => {
+  try {
+    const { actId, userId, dateISO, selectedAddress } = req.body;
+    console.log("📦 [updateShortlistItem] Payload:", req.body);
+
+    if (!actId || !userId)
+      return res.status(400).json({ success: false, message: "Missing actId or userId" });
+
+    const updateData = {};
+    if (dateISO) updateData.dateISO = dateISO;
+    if (selectedAddress) updateData.selectedAddress = selectedAddress;
+
+    const result = await Shortlist.findOneAndUpdate(
+      { actId, userId },
+      { $set: updateData },
+      { new: true }
+    );
+
+    if (!result)
+      return res.status(404).json({ success: false, message: "Shortlist item not found" });
+
+    console.log("✅ [updateShortlistItem] Updated:", result._id);
+    res.json({ success: true, updated: true, shortlist: result });
+  } catch (err) {
+    console.error("❌ [updateShortlistItem] Error:", err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 export default router;
