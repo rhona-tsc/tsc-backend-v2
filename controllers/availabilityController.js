@@ -803,10 +803,7 @@ function findVocalistPhone(actData, lineupId) {
   console.log(
     `🐠 (controllers/shortlistController.js) findVocalistPhone called at`,
     new Date().toISOString(),
-    {
-      lineupId,
-      totalLineups: actData?.lineups?.length || 0,
-    }
+    { lineupId, totalLineups: actData?.lineups?.length || 0 }
   );
 
   if (!actData?.lineups?.length) return null;
@@ -829,13 +826,6 @@ function findVocalistPhone(actData, lineupId) {
     console.warn("⚠️ No vocalist found in lineup", lineupId);
     return null;
   }
-
-  // ✅ Return the full bandMember object, not just minimal info
-return {
-  vocalist,
-  phone:
-    toE164(vocalist.phoneNormalized || vocalist.phoneNumber || vocalist.phone || ""),
-};
 
   // 🎤 Step 2: Try to get a direct phone number
   let phone =
@@ -877,10 +867,12 @@ return {
   console.log("🎤 Lead vocalist found (with deputy fallback):", {
     name: `${vocalist.firstName} ${vocalist.lastName}`,
     instrument: vocalist.instrument,
+    fee: vocalist.fee,
     phone,
     email: vocalist.email,
   });
 
+  // ✅ Return full object
   return { vocalist, phone };
 }
 
