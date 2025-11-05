@@ -1180,22 +1180,38 @@ console.log("🎯 Enriched targetMember:", {
       return { success: false };
     }
 
-// 💰 Respect inheritedFee if passed in (e.g. deputies inherit lead's fee)
 let finalFee;
 
-if (body?.inheritedFee !== undefined && body?.inheritedFee !== null) {
-  const inherited = String(body.inheritedFee).replace(/[^\d.]/g, "");
-  const parsed = parseFloat(inherited);
-  if (!isNaN(parsed) && parsed > 0) {
-    finalFee = Math.round(parsed);
-    console.log(`🪙 Using inheritedFee from lead: £${finalFee}`);
+if (isDeputy) {
+  // 🪙 Deputies inherit from lead
+  if (body?.inheritedFee) {
+    const parsed = parseFloat(String(body.inheritedFee).replace(/[^\d.]/g, ""));
+    if (!isNaN(parsed) && parsed > 0) {
+      finalFee = Math.round(parsed);
+      console.log(`🪙 Using inheritedFee from lead: £${finalFee}`);
+    } else {
+      console.warn("⚠️ Invalid inheritedFee format, falling back to 0");
+      finalFee = 0;
+    }
   } else {
-    console.warn("⚠️ Invalid inheritedFee format, falling back to feeForMember()");
-    finalFee = await feeForMember(targetMember);
+    console.warn("⚠️ No inheritedFee provided for deputy, setting to 0");
+    finalFee = 0;
   }
 } else {
-  finalFee = await feeForMember(targetMember);
+  // 🎤 Lead vocalist — compute full rate or read from musician doc
+  const musicianDoc = await Musician.findById(targetMember.musicianId).lean();
+  const musicianFee = Number(musicianDoc?.fee || 0);
+  const computed = await feeForMember(targetMember);
+
+  finalFee = musicianFee > 0 ? musicianFee + computed.travel : computed.total;
+
+  console.log("💰 Lead fee breakdown:", {
+    musicianFee,
+    travel: computed.travel,
+    total: finalFee,
+  });
 }
+
 
     // 🛑 Prevent duplicate enquiry sends for same act/date/location
 const normalizedPhone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
