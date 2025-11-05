@@ -830,6 +830,13 @@ function findVocalistPhone(actData, lineupId) {
     return null;
   }
 
+  // ✅ Return the full bandMember object, not just minimal info
+return {
+  vocalist,
+  phone:
+    toE164(vocalist.phoneNormalized || vocalist.phoneNumber || vocalist.phone || ""),
+};
+
   // 🎤 Step 2: Try to get a direct phone number
   let phone =
     vocalist.phoneNormalized ||
