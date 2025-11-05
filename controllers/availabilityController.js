@@ -1511,6 +1511,21 @@ try {
   hasCreateFn: typeof createCalendarInvite === "function",
 });
 
+// 🧹 Cancel any existing calendar event before re-creating a new one
+if (updated?.calendarEventId && emailForInvite) {
+  try {
+    console.log("🗓️ Cancelling old calendar event before new YES invite");
+    await cancelCalendarInvite({
+      eventId: updated.calendarEventId,
+      actId: act?._id || updated.actId,
+      dateISO: updated.dateISO,
+      email: emailForInvite,
+    });
+  } catch (err) {
+    console.warn("⚠️ Failed to cancel old calendar event:", err.message);
+  }
+}
+
   const event = await createCalendarInvite(
 {
     enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
@@ -1553,7 +1568,7 @@ try {
         }
 console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
 
-        await sendWhatsAppText(toE164, "Super — we’ve sent a diary invite with full details.");
+        await sendWhatsAppText(toE164, "Super — we’ll send a diary invite to log the enquiry for your records.");
 
         // 2️⃣ Mark as available + rebuild badge
         updated.status = "read";
@@ -2166,35 +2181,34 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
           if (yesDeps.length >= 3) break;
         }
 
-        if (yesDeps.length > 0) {
-          const enriched = [];
-          for (const d of yesDeps) {
-            const bits = await getDeputyDisplayBits(d);
-           enriched.push({
-  name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-  musicianId: bits?.resolvedMusicianId || bits?.musicianId || "",
-  photoUrl: bits?.photoUrl || "",
-  profileUrl: bits?.profileUrl || "",
-  resolvedVia: "getDeputyDisplayBits",
-  setAt: new Date(),
-});
-          }
+      if (yesDeps.length > 0) {
+  const enriched = [];
+  for (const d of yesDeps) {
+    const bits = await getDeputyDisplayBits(d);
+    enriched.push({
+      name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
+      musicianId: bits?.resolvedMusicianId || bits?.musicianId || "",
+      photoUrl: bits?.photoUrl || "",
+      profileUrl: bits?.profileUrl || "",
+      resolvedVia: "getDeputyDisplayBits",
+      setAt: new Date(),
+    });
+  }
 
-          // ✅ Construct the deputy badge safely
-          const badgeObj = {
-            active: true,
-            dateISO,
-            isDeputy: true,
-            inPromo: false,
-            deputies: enriched,
-            vocalistName: `${m.firstName || ""}`.trim(),
-            address: formattedAddress,
-            setAt: new Date(),
-          };
+  const badgeObj = {
+    active: true,
+    dateISO,
+    isDeputy: true,
+    inPromo: false,
+    deputies: enriched.slice(0, 3), // ✅ allow up to 3
+    vocalistName: `${m.firstName || ""}`.trim(),
+    address: formattedAddress,
+    setAt: new Date(),
+  };
 
-          console.log("🎤 Built deputy badge:", badgeObj);
-          // 🧠 No enrichDeputyData needed — fully resolved via getDeputyDisplayBits
-          return badgeObj;
+  console.log("🎤 Built deputy badge:", badgeObj);
+  return badgeObj;
+
         }
       }
     }
