@@ -12,6 +12,7 @@ import mongoose from "mongoose";
 import calculateActPricing from "../utils/calculateActPricing.js";
 import { createCalendarInvite } from "./googleController.js";
 import userModel from "../models/userModel.js";
+import { computeMemberMessageFee } from "./helpersForCorrectFee.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
@@ -1093,42 +1094,21 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       return v;
     };
 
-    // 🧮 Fee calculation
-    const feeForMember = async (member) => {
-      const baseFee = Number(member?.fee ?? 0);
-      const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
-      const membersCount = Math.max(1, members.length || 1);
-      const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
-      const base = baseFee > 0 ? baseFee : perHead;
-
-      const { county: selectedCounty } = countyFromAddress(fullFormattedAddress);
-      const selectedDate = dateISO;
-
-      let travelFee = 0;
-      let usedCountyRate = false;
-
-      if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
-        const raw = getCountyFeeValue(act.countyFees, selectedCounty);
-        const val = Number(raw);
-        if (Number.isFinite(val) && val > 0) {
-          usedCountyRate = true;
-          travelFee = Math.ceil(val);
-        }
-      }
-
-      if (!usedCountyRate) {
-        travelFee = await computeMemberTravelFee({
-          act,
-          member,
-          selectedCounty,
-          selectedAddress: fullFormattedAddress,
-          selectedDate,
-        });
-        travelFee = Math.max(0, Math.ceil(Number(travelFee || 0)));
-      }
-
-      return Math.max(0, Math.ceil(Number(base || 0) + Number(travelFee || 0)));
-    };
+   // 🧮 Fee calculation using unified helper
+const feeForMember = async (member) => {
+  try {
+    return await computeMemberMessageFee({
+      act,
+      lineup,
+      member,
+      address: fullFormattedAddress,
+      dateISO,
+    });
+  } catch (err) {
+    console.warn("⚠️ computeMemberMessageFee failed, falling back to member.fee", err.message);
+    return Number(member?.fee || 0);
+  }
+};
 
     // 🎤 Determine recipient (lead vs deputy)
     const targetMember = isDeputy
