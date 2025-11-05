@@ -239,16 +239,25 @@ router.post("/request", async (req, res) => {
   console.log(`🟢 (availability.js) /request START at ${new Date().toISOString()}`, req.body);
 
   try {
-    const { actId, date, address, lineupId } = req.body;
+   const {
+  actId,
+  date,
+  address,
+  lineupId,
+  selectedDate,
+  selectedAddress,
+} = req.body;
 
-    if (!actId || !date) {
-      return res.status(400).json({ success: false, message: "Missing actId/date" });
-    }
+const finalDate = date || selectedDate;
+const finalAddress = address || selectedAddress;
 
-    console.log(`📅 Availability request triggered for act=${actId} on ${date}`);
+if (!actId || !finalDate) {
+  return res.status(400).json({ success: false, message: "Missing actId/date" });
+}
 
-    // ✅ Fix: create fake req/res for the controller
-    const fakeReq = { body: { actId, date, address, lineupId } };
+console.log(`📅 Availability request triggered for act=${actId} on ${finalDate}`);
+
+const fakeReq = { body: { actId, date: finalDate, address: finalAddress, lineupId } };
     const fakeRes = {
       status: (code) => ({
         json: (obj) => ({ code, ...obj }),
