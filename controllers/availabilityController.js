@@ -1221,6 +1221,21 @@ duties: body?.inheritedDuties || targetMember.instrument || "Performance",
       v2: true,
     });
 
+    // 🩵 Broadcast SSE immediately when enquiry sent (so UI knows who it's for)
+if (global.availabilityNotify?.badgeUpdated) {
+  const musicianName = `${targetMember.firstName || ""} ${targetMember.lastName || ""}`.trim() || "Vocalist";
+  global.availabilityNotify.badgeUpdated({
+    type: "availability_badge_updated",
+    actId,
+    actName: act?.tscName || act?.name,
+    dateISO,
+    musicianName,  // ✅ send the correct name to SSE broadcaster
+    badge: null,   // no badge yet — UI will know it’s a new enquiry
+    isDeputy: isDeputy,
+  });
+  console.log("📡 SSE broadcasted: availability_badge_updated (new enquiry)", musicianName);
+}
+
     console.log(
       `✅ Availability record created for ${isDeputy ? "deputy" : "lead"} ${
         targetMember.firstName
@@ -1600,14 +1615,14 @@ if (global.availabilityNotify) {
       updated?.musicianName ||
       updated?.name ||
       "Lead Vocalist";
-    global.availabilityNotify.badgeUpdated({
-      type: "leadYes",
-      actId,
-      actName: act?.tscName || act?.name,
-      musicianName: leadName,
-      dateISO,
-      isDeputy: false,
-    });
+  global.availabilityNotify.badgeUpdated({
+  type: "leadYes",
+  actId,
+  actName: act?.tscName || act?.name,
+  musicianName: musician?.firstName || updated?.musicianName || "Lead Vocalist",
+  dateISO,
+  isDeputy: false,
+});
     console.log("📡 SSE broadcasted: leadYes →", leadName);
   }
 
