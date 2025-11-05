@@ -1021,11 +1021,8 @@ async function getDeputyDisplayBits(dep) {
 
 // controllers/availabilityController.js
 export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
-  console.log(
-    `🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`
-  );
+  console.log(`🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`);
 
-  // Support both (req, res) and direct object call
   const isExpress = !!maybeRes;
   const body = isExpress ? reqOrArgs.body : reqOrArgs;
   const res = isExpress ? maybeRes : null;
@@ -1045,61 +1042,22 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     } = body;
 
     const dateISO = dISO || (date ? new Date(date).toISOString().slice(0, 10) : null);
-    if (!actId || !dateISO) {
-      const msg = "Missing actId or dateISO";
-      if (res) return res.status(400).json({ success: false, message: msg });
-      throw new Error(msg);
-    }
+    if (!actId || !dateISO) throw new Error("Missing actId or dateISO");
 
     const act = await Act.findById(actId).lean();
-    if (!act) {
-      const msg = "Act not found";
-      if (res) return res.status(404).json({ success: false, message: msg });
-      throw new Error(msg);
-    }
+    if (!act) throw new Error("Act not found");
 
-    // 🧭 Derive shortAddress exactly like before (Town, County)
-    let shortAddress = "";
-    if (address) {
-      shortAddress = address
-        .split(",")
-        .slice(-2)
-        .join(",")
-        .replace(/,\s*UK$/i, "")
-        .trim();
-    } else if (formattedAddress) {
-      shortAddress = formattedAddress
-        .split(",")
-        .slice(-2)
-        .join(",")
-        .replace(/,\s*UK$/i, "")
-        .trim();
-    } else {
-      shortAddress =
-        act?.formattedAddress
-          ?.split(",")
-          .slice(-2)
-          .join(",")
-          .replace(/,\s*UK$/i, "")
-          .trim() || "TBC";
-    }
-
-    // 🧩 Keep a clean formatted version for display (no slicing)
-    const fullFormattedAddress =
-      formattedAddress || address || act?.formattedAddress || act?.venueAddress || "TBC";
+    // 🧭 Short + full address
+    let shortAddress = formattedAddress || address || act?.formattedAddress || "TBC";
+    shortAddress = shortAddress.split(",").slice(-2).join(",").replace(/,\s*UK$/i, "").trim();
+    const fullFormattedAddress = formattedAddress || address || act?.formattedAddress || act?.venueAddress || "TBC";
 
     const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
+      weekday: "long", day: "numeric", month: "long", year: "numeric"
     });
 
     const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
-    const lineup = lineupId
-      ? lineups.find((l) => String(l._id) === String(lineupId))
-      : lineups[0];
-
+    const lineup = lineupId ? lineups.find(l => String(l._id) === String(lineupId)) : lineups[0];
     const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
 
     const normalizePhone = (raw = "") => {
@@ -1111,172 +1069,102 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       return v;
     };
 
-   // 🧮 Fee calculation using unified helper
-const feeForMember = async (member) => {
-  try {
-    return await computeMemberMessageFee({
-      act,
-      lineup,
-      member,
-      address: fullFormattedAddress,
-      dateISO,
-    });
-  } catch (err) {
-    console.warn("⚠️ computeMemberMessageFee failed, falling back to member.fee", err.message);
-    return Number(member?.fee || 0);
-  }
-};
+    // 🧮 Fee calculation (restored 4 Nov logic)
+    const feeForMember = async (member) => {
+      const baseFee = Number(member?.fee ?? 0);
+      const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
+      const membersCount = Math.max(1, members.length || 1);
+      const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
+      const base = baseFee > 0 ? baseFee : perHead;
 
-    // 🎤 Determine recipient (lead vs deputy)
-    const targetMember = isDeputy
-      ? deputy
-      : findVocalistPhone(act, lineupId)?.vocalist;
+      const { county: selectedCounty } = countyFromAddress(fullFormattedAddress);
+      const selectedDate = dateISO;
+      let travelFee = 0, usedCountyRate = false;
 
-    if (!targetMember) {
-      console.warn("⚠️ No valid member (lead or deputy) found for triggerAvailabilityRequest");
-      if (res) return res.json({ success: false, message: "No member found" });
-      return { success: false };
-    }
+      if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
+        const raw = getCountyFeeValue(act.countyFees, selectedCounty);
+        const val = Number(raw);
+        if (Number.isFinite(val) && val > 0) {
+          usedCountyRate = true;
+          travelFee = Math.ceil(val);
+        }
+      }
 
-// 🧩 Enrich targetMember with full Musician data if possible
-let enrichedMember = { ...targetMember };
+      if (!usedCountyRate) {
+        travelFee = await computeMemberTravelFee({
+          act, member, selectedCounty,
+          selectedAddress: fullFormattedAddress,
+          selectedDate,
+        });
+        travelFee = Math.max(0, Math.ceil(Number(travelFee || 0)));
+      }
 
-try {
-  // Try lookup by musicianId first
-  if (targetMember?.musicianId) {
-    const mus = await Musician.findById(targetMember.musicianId).lean();
-    if (mus) enrichedMember = { ...mus, ...enrichedMember };
-  } else {
-    // Fallback: lookup by normalized phone
-    const cleanPhone = (targetMember.phone || targetMember.phoneNumber || "")
-      .replace(/\s+/g, "")
-      .replace(/^0/, "+44");
-    if (cleanPhone) {
-      const mus = await Musician.findOne({
-        $or: [{ phoneNormalized: cleanPhone }, { phone: cleanPhone }],
-      }).lean();
-      if (mus) enrichedMember = { ...mus, ...enrichedMember };
-    }
-  }
-} catch (err) {
-  console.warn("⚠️ Failed to enrich targetMember:", err.message);
-}
+      return Math.max(0, Math.ceil(Number(base || 0) + Number(travelFee || 0)));
+    };
 
-targetMember.email = enrichedMember.email || targetMember.email || null;
-targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
-targetMember.profilePicture =
-  enrichedMember.profilePicture || enrichedMember.photoUrl || targetMember.profilePicture || null;
+    // 🎤 Determine recipient
+    const targetMember = isDeputy ? deputy : findVocalistPhone(act, lineupId)?.vocalist;
+    if (!targetMember) throw new Error("No valid member found");
 
-console.log("🎯 Enriched targetMember:", {
-  name: `${targetMember.firstName} ${targetMember.lastName}`,
-  email: targetMember.email,
-  musicianId: targetMember.musicianId,
-});
+    // 🧩 Enrich with Musician data (keep your new logic)
+    let enrichedMember = { ...targetMember };
+    try {
+      if (targetMember?.musicianId) {
+        const mus = await Musician.findById(targetMember.musicianId).lean();
+        if (mus) enrichedMember = { ...mus, ...enrichedMember };
+      } else {
+        const cleanPhone = (targetMember.phone || targetMember.phoneNumber || "")
+          .replace(/\s+/g, "").replace(/^0/, "+44");
+        if (cleanPhone) {
+          const mus = await Musician.findOne({
+            $or: [{ phoneNormalized: cleanPhone }, { phone: cleanPhone }],
+          }).lean();
+          if (mus) enrichedMember = { ...mus, ...enrichedMember };
+        }
+      }
+    } catch (err) { console.warn("⚠️ Enrich failed:", err.message); }
+
+    targetMember.email = enrichedMember.email || targetMember.email || null;
+    targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
 
     const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
-    if (!phone) {
-      console.warn("⚠️ No phone number available for member");
-      if (res) return res.json({ success: false, message: "Missing phone" });
-      return { success: false };
-    }
+    if (!phone) throw new Error("Missing phone");
 
-let finalFee;
-
-if (isDeputy) {
-  // 🪙 Deputies inherit from lead
-  if (body?.inheritedFee) {
-    const parsed = parseFloat(String(body.inheritedFee).replace(/[^\d.]/g, ""));
-    if (!isNaN(parsed) && parsed > 0) {
-      finalFee = Math.round(parsed);
-      console.log(`🪙 Using inheritedFee from lead: £${finalFee}`);
+    // 💰 Restore £370-style fee logic
+    let finalFee;
+    if (body?.inheritedFee !== undefined && body?.inheritedFee !== null) {
+      const inherited = String(body.inheritedFee).replace(/[^\d.]/g, "");
+      const parsed = parseFloat(inherited);
+      if (!isNaN(parsed) && parsed > 0) {
+        finalFee = Math.round(parsed);
+        console.log(`🪙 Using inheritedFee from lead: £${finalFee}`);
+      } else {
+        console.warn("⚠️ Invalid inheritedFee format, falling back to feeForMember()");
+        finalFee = await feeForMember(targetMember);
+      }
     } else {
-      console.warn("⚠️ Invalid inheritedFee format, falling back to 0");
-      finalFee = 0;
+      finalFee = await feeForMember(targetMember);
     }
-  } else {
-    console.warn("⚠️ No inheritedFee provided for deputy, setting to 0");
-    finalFee = 0;
-  }
-} else {
-  // 🎤 Lead vocalist — compute full rate or read from musician doc
-  const musicianDoc = await Musician.findById(targetMember.musicianId).lean();
-  const musicianFee = Number(musicianDoc?.fee || 0);
-  const computed = await feeForMember(targetMember);
-
-  finalFee = musicianFee > 0 ? musicianFee + computed.travel : computed.total;
-
-  console.log("💰 Lead fee breakdown:", {
-    musicianFee,
-    travel: computed.travel,
-    total: finalFee,
-  });
-}
-
-
-    // 🛑 Prevent duplicate enquiry sends for same act/date/location
-const normalizedPhone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
-
-const alreadyReplied = await AvailabilityModel.exists({
-  actId,
-  phone: normalizedPhone,
-  dateISO,
-  reply: { $in: ["yes", "no", "unavailable"] },
-  formattedAddress: { $regex: fullFormattedAddress.slice(0, 20), $options: "i" },
-});
-
-if (alreadyReplied) {
-  console.log(
-    `🟡 Skipping ${targetMember.firstName || "musician"} — already replied to a ${act.tscName || act.name
-    } enquiry on ${dateISO}`
-  );
-
-  const result = { success: false, message: "Duplicate enquiry prevented" };
-  if (res) return res.json(result);
-  return result;
-}
 
     // ✅ Create availability record
     await AvailabilityModel.create({
-      actId,
-      lineupId,
+      actId, lineupId,
       musicianId: targetMember._id || null,
-      phone,
-      dateISO,
+      phone, dateISO,
       formattedAddress: fullFormattedAddress,
       formattedDate,
-      clientName: clientName || "",
-      clientEmail: clientEmail || "",
+      clientName: clientName || "", clientEmail: clientEmail || "",
       actName: act?.tscName || act?.name || "",
       musicianName: `${targetMember.firstName || ""} ${targetMember.lastName || ""}`.trim(),
-duties: body?.inheritedDuties || targetMember.instrument || "Performance",
+      duties: body?.inheritedDuties || targetMember.instrument || "Performance",
       fee: String(finalFee),
-      reply: null,
-      v2: true,
+      reply: null, v2: true,
     });
 
-    // 🩵 Broadcast SSE immediately when enquiry sent (so UI knows who it's for)
-if (global.availabilityNotify?.badgeUpdated) {
-  const musicianName = `${targetMember.firstName || ""} ${targetMember.lastName || ""}`.trim() || "Vocalist";
-  global.availabilityNotify.badgeUpdated({
-    type: "availability_badge_updated",
-    actId,
-    actName: act?.tscName || act?.name,
-    dateISO,
-    musicianName,  // ✅ send the correct name to SSE broadcaster
-    badge: null,   // no badge yet — UI will know it’s a new enquiry
-    isDeputy: isDeputy,
-  });
-  console.log("📡 SSE broadcasted: availability_badge_updated (new enquiry)", musicianName);
-}
+    console.log(`✅ Availability record created — £${finalFee}`);
 
-    console.log(
-      `✅ Availability record created for ${isDeputy ? "deputy" : "lead"} ${
-        targetMember.firstName
-      } — ${shortAddress} — £${finalFee}`
-    );
-
-    // 💬 Build WhatsApp message using restored shortAddress
-const role = body?.inheritedDuties || targetMember.instrument || "Performance";
+    // 💬 Send WhatsApp
+    const role = body?.inheritedDuties || targetMember.instrument || "Performance";
     const feeStr = finalFee > 0 ? `£${finalFee}` : "TBC";
     const msg = `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
 
@@ -1292,7 +1180,7 @@ const role = body?.inheritedDuties || targetMember.instrument || "Performance";
         firstName: targetMember.firstName || "Musician",
         date: formattedDate,
         location: shortAddress,
-  fee: String(body?.inheritedFee || finalFee),  // ✅ use the one actually in `body`
+        fee: String(body?.inheritedFee || finalFee),
         role,
         actName: act.tscName || act.name,
       },
@@ -1300,19 +1188,13 @@ const role = body?.inheritedDuties || targetMember.instrument || "Performance";
       smsBody: msg,
     });
 
-    console.log(
-      `📲 WhatsApp sent successfully to ${targetMember.firstName} (${phone}) — ${shortAddress} — £${feeStr}`
-    );
+    console.log(`📲 WhatsApp sent successfully — £${feeStr}`);
+    if (res) return res.json({ success: true, sent: 1 });
+    return { success: true, sent: 1 };
 
-    const result = { success: true, sent: 1 };
-    if (res) return res.json(result);
-    return result;
   } catch (err) {
     console.error("❌ triggerAvailabilityRequest error:", err);
-    if (res)
-      return res
-        .status(500)
-        .json({ success: false, message: err?.message || "Server error" });
+    if (res) return res.status(500).json({ success: false, message: err.message });
     return { success: false, error: err.message };
   }
 };
