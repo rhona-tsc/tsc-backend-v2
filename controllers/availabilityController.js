@@ -1754,37 +1754,34 @@ await notifyDeputies({
   clientEmail: updated.clientEmail || "",
   skipDuplicateCheck: true, // ✅ ensures Twilio still sends cancellation follow-ups
 });
-// 📨 Send cancellation email to LEAD (to mirror calendar cancellation)
+// 📨 Send cancellation email to lead
 try {
-  const leadEmail = emailForInvite; // resolved earlier from bits/musician/updated
-  if (leadEmail && /@/.test(leadEmail)) {
-    const { sendEmail } = await import("../utils/sendEmail.js");
-    const subject = `❌ ${act?.tscName || act?.name}: Diary invite cancelled for ${new Date(dateISO).toLocaleDateString("en-GB")}`;
-    const html = `
-      <p>Hi ${musician?.firstName || updated?.musicianName || "there"},</p>
-      <p>You've marked yourself <b>unavailable</b> for:</p>
-      <ul>
-        <li><b>Act:</b> ${act?.tscName || act?.name}</li>
-        <li><b>Date:</b> ${new Date(dateISO).toLocaleDateString("en-GB")}</li>
-        <li><b>Location:</b> ${updated?.formattedAddress || "TBC"}</li>
-      </ul>
-      <p>The diary invite for this enquiry has been cancelled.</p>
-      <p>If this is a mistake, reply <b>YES</b> to the WhatsApp message to re‑confirm.</p>
-    `;
+  const { sendEmail } = await import("../utils/sendEmail.js");
+  const subject = `❌ ${act?.tscName || act?.name}: Diary Invite Cancelled for ${new Date(dateISO).toLocaleDateString("en-GB")}`;
+  const html = `
+    <p><strong>${updated?.musicianName || musician?.firstName || "Lead Musician"}</strong>,</p>
+    <p>Your diary invite for <b>${act?.tscName || act?.name}</b> on <b>${new Date(dateISO).toLocaleDateString("en-GB")}</b> has been cancelled.</p>
+    <p>If your availability changes, you can reply "Yes" to the WhatsApp message to re-confirm.</p>
+    <br/>
+    <p>– The Supreme Collective Team</p>
+  `;
 
+  const leadEmail = emailForInvite?.trim();
+  const recipients = [leadEmail].filter(e => e && e.includes("@"));
+
+  if (recipients.length === 0) {
+    console.warn("⚠️ No valid recipients for cancellation email.", { leadEmail });
+  } else {
     await sendEmail({
-      to: [leadEmail],
+      to: recipients,
       bcc: ["hello@thesupremecollective.co.uk"],
       subject,
       html,
     });
-
-    console.log("📧 Cancellation email sent to lead:", leadEmail);
-  } else {
-    console.warn("⚠️ No valid lead email to send cancellation.", { leadEmail });
+    console.log("📧 Cancellation email sent to:", recipients);
   }
 } catch (emailErr) {
-  console.error("❌ Failed to send cancellation email to lead:", emailErr.message);
+  console.error("❌ Failed to send cancellation email:", emailErr.message);
 }
 
 } else {
