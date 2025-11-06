@@ -13,6 +13,7 @@ import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYe
 import { resolveAvailableMusician } from "../controllers/allocationController.js";
 import { getUserShortlist } from "../controllers/shortlistController.js";
 import { getAvailabilityBadge } from "../controllers/availabilityController.js";
+import User from "../models/userModel.js";
 
 const router = express.Router();
 
@@ -289,6 +290,18 @@ router.patch("/act/:id/increment-shortlist", async (req, res) => {
     id: req.params.id,
     userId: req.body?.userId,
   });
+   const { userId, clientEmail } = req.body;
+  let email = clientEmail;
+
+  if (!email && userId) {
+    const user = await User.findById(userId).select("email").lean();
+    if (user?.email) email = user.email;
+  }
+
+  if (!email) {
+    console.warn("⚠️ Missing client email for shortlist increment");
+  }
+
 
   try {
     const actId = req.params.id;
