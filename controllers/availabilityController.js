@@ -2244,8 +2244,10 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO,
   console.log(
     `🟢 (availabilityController.js) rebuildAndApplyAvailabilityBadge START at ${new Date().toISOString()}`
   );
-console.log("🎯 [rebuildAndApplyAvailabilityBadge] called with:", req.body);
-
+console.log(
+  "🎯 [rebuildAndApplyAvailabilityBadge] called with:",
+  typeof reqOrActId === "object" && reqOrActId.body ? reqOrActId.body : reqOrActId
+);
   const userId =
   typeof reqOrActId === "object"
     ? reqOrActId.body?.userId || reqOrActId.body?.user?._id
