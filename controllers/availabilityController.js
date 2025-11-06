@@ -1204,6 +1204,23 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       finalFee,
     });
 
+    // 🛡️ Prevent duplicate messages
+const existing = await AvailabilityModel.findOne({
+  actId,
+  dateISO,
+  phone: normalizePhone(targetMember.phone || targetMember.phoneNumber),
+  v2: true,
+}).lean();
+
+if (existing) {
+  console.log(
+    `⚠️ Duplicate availability request detected — skipping WhatsApp send`,
+    { actId, dateISO, phone: existing.phone }
+  );
+  if (res) return res.json({ success: true, sent: 0, skipped: "duplicate" });
+  return { success: true, sent: 0, skipped: "duplicate" };
+}
+
     // ✅ Create availability record
     await AvailabilityModel.create({
       actId,
