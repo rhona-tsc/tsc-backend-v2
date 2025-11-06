@@ -17,8 +17,23 @@ const transporter = nodemailer.createTransport({
  */
 const sendEmail = async (to, subject, html, bcc, attachments = []) => {
   try {
-    const recipients = Array.isArray(to) ? to.filter(e => e && e.includes("@")) : (to && to.includes("@") ? [to] : []);
-    const bccList = Array.isArray(bcc) ? bcc.filter(e => e && e.includes("@")) : (bcc && bcc.includes("@") ? [bcc] : []);
+    // 🧹 Defensive coercion to prevent `.includes` TypeError
+    const safeTo = Array.isArray(to)
+      ? to
+      : typeof to === "string"
+      ? [to]
+      : [];
+
+    const safeBcc = Array.isArray(bcc)
+      ? bcc
+      : typeof bcc === "string"
+      ? [bcc]
+      : [];
+
+    // Filter out invalid addresses
+    const recipients = safeTo.filter(e => typeof e === "string" && e.includes("@"));
+    const bccList = safeBcc.filter(e => typeof e === "string" && e.includes("@"));
+
     if (recipients.length === 0 && bccList.length === 0) {
       console.warn("⚠️ No valid email recipients found. Skipping sendEmail.");
       return { success: false, error: "No valid recipients" };
@@ -34,7 +49,7 @@ const sendEmail = async (to, subject, html, bcc, attachments = []) => {
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`✅ Email sent to ${to}`);
+    console.log(`✅ Email sent to ${recipients.join(", ")}`);
     return { success: true };
   } catch (err) {
     console.error("❌ Email send failed:", err);
