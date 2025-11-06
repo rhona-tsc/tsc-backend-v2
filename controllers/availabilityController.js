@@ -1754,6 +1754,39 @@ await notifyDeputies({
   clientEmail: updated.clientEmail || "",
   skipDuplicateCheck: true, // ✅ ensures Twilio still sends cancellation follow-ups
 });
+// 📨 Send cancellation email to LEAD (to mirror calendar cancellation)
+try {
+  const leadEmail = emailForInvite; // resolved earlier from bits/musician/updated
+  if (leadEmail && /@/.test(leadEmail)) {
+    const { sendEmail } = await import("../utils/sendEmail.js");
+    const subject = `❌ ${act?.tscName || act?.name}: Diary invite cancelled for ${new Date(dateISO).toLocaleDateString("en-GB")}`;
+    const html = `
+      <p>Hi ${musician?.firstName || updated?.musicianName || "there"},</p>
+      <p>You've marked yourself <b>unavailable</b> for:</p>
+      <ul>
+        <li><b>Act:</b> ${act?.tscName || act?.name}</li>
+        <li><b>Date:</b> ${new Date(dateISO).toLocaleDateString("en-GB")}</li>
+        <li><b>Location:</b> ${updated?.formattedAddress || "TBC"}</li>
+      </ul>
+      <p>The diary invite for this enquiry has been cancelled.</p>
+      <p>If this is a mistake, reply <b>YES</b> to the WhatsApp message to re‑confirm.</p>
+    `;
+
+    await sendEmail({
+      to: [leadEmail],
+      bcc: ["hello@thesupremecollective.co.uk"],
+      subject,
+      html,
+    });
+
+    console.log("📧 Cancellation email sent to lead:", leadEmail);
+  } else {
+    console.warn("⚠️ No valid lead email to send cancellation.", { leadEmail });
+  }
+} catch (emailErr) {
+  console.error("❌ Failed to send cancellation email to lead:", emailErr.message);
+}
+
 } else {
     console.warn("⚠️ Skipping notifyDeputies — no act resolved");
   }
