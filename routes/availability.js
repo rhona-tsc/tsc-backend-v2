@@ -283,6 +283,7 @@ const fakeReq = { body: { actId, date: finalDate, address: finalAddress } };
 /* -------------------------------------------------------------------------- */
 /* 🟡 PATCH /act/:id/increment-shortlist – increment shortlist counter        */
 /* -------------------------------------------------------------------------- */
+
 router.patch("/act/:id/increment-shortlist", async (req, res) => {
   console.log(`🟡 (availability.js) /act/:id/increment-shortlist START`, {
     id: req.params.id,
@@ -291,20 +292,51 @@ router.patch("/act/:id/increment-shortlist", async (req, res) => {
 
   try {
     const actId = req.params.id;
-    if (!actId) return res.status(400).json({ success: false, message: "Missing actId" });
+    if (!actId)
+      return res.status(400).json({ success: false, message: "Missing actId" });
 
+    // 🧮 Increment timesShortlisted
     const updated = await Act.findByIdAndUpdate(
       actId,
       { $inc: { timesShortlisted: 1 } },
       { new: true }
     ).select("_id name tscName timesShortlisted");
 
+    console.log(
+      `✅ Shortlist incremented for act: ${updated?.tscName || updated?.name}`
+    );
+
+    // 🟢 Trigger WhatsApp availability request (non-blocking)
+    try {
+      const { selectedDate, selectedAddress, clientEmail, userId } = req.body;
+      const dateISO =
+        selectedDate || new Date().toISOString().slice(0, 10);
+      const address = selectedAddress || "TBC";
+
+      console.log("📤 Triggering WhatsApp availability request...");
+      await triggerAvailabilityRequest({
+        actId,
+        date: dateISO,
+        address,
+        formattedAddress: address,
+        clientEmail: clientEmail || "",
+        userId,
+      });
+      console.log("✅ Availability request triggered successfully");
+    } catch (whErr) {
+      console.warn("⚠️ WhatsApp availability request failed:", whErr.message);
+    }
+
+    // 🩵 Respond to client
     res.json({ success: true, act: updated });
   } catch (err) {
     console.error("❌ increment-shortlist error:", err);
-    res.status(500).json({ success: false, message: err.message });
+    res
+      .status(500)
+      .json({ success: false, message: err.message });
   }
 });
+
 
 /* -------------------------------------------------------------------------- */
 /* 🔵 PATCH /act/:id/decrement-shortlist – decrement shortlist counter        */
