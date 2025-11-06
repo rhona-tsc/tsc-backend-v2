@@ -1042,6 +1042,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       isDeputy = false,
       deputy = null,
       inheritedFee = null, // 🔹 optional
+      skipDuplicateCheck = false,
     } = body;
 
     const dateISO = dISO || (date ? new Date(date).toISOString().slice(0, 10) : null);
@@ -1206,7 +1207,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       finalFee,
     });
 
-    // 🛡️ Prevent duplicate messages
+   // 🛡️ Prevent duplicate messages (unless skipDuplicateCheck = true)
 const existing = await AvailabilityModel.findOne({
   actId,
   dateISO,
@@ -1214,9 +1215,9 @@ const existing = await AvailabilityModel.findOne({
   v2: true,
 }).lean();
 
-if (existing && !body.skipDuplicateCheck) {
+if (existing && !skipDuplicateCheck) { // ✅ use the flag here
   console.log(
-    `⚠️ Duplicate availability request detected — skipping WhatsApp send`,
+    "⚠️ Duplicate availability request detected — skipping WhatsApp send",
     { actId, dateISO, phone: existing.phone }
   );
   if (res) return res.json({ success: true, sent: 0, skipped: "duplicate" });
