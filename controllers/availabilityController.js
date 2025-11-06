@@ -1030,7 +1030,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   try {
     const {
       actId,
-      lineupId,
+      lineupId,               // now optional
       date,
       dateISO: dISO,
       address,
@@ -1047,7 +1047,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const act = await Act.findById(actId).lean();
     if (!act) throw new Error("Act not found");
 
-    // 🧭 Short + full address
+    // 🧭 Address setup
     let shortAddress = formattedAddress || address || act?.formattedAddress || "TBC";
     shortAddress = shortAddress.split(",").slice(-2).join(",").replace(/,\s*UK$/i, "").trim();
     const fullFormattedAddress = formattedAddress || address || act?.formattedAddress || act?.venueAddress || "TBC";
@@ -1056,8 +1056,14 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       weekday: "long", day: "numeric", month: "long", year: "numeric"
     });
 
+    // 🎵 Lineup handling (defaults safely if lineupId missing)
     const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
-    const lineup = lineupId ? lineups.find(l => String(l._id) === String(lineupId)) : lineups[0];
+    const lineup =
+      lineupId
+        ? lineups.find((l) => String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId))
+        : lineups[0];
+
+    if (!lineup) console.warn("⚠️ No valid lineup found — defaulting to first available or skipping lineup-specific logic.");
     const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
 
     const normalizePhone = (raw = "") => {
@@ -1102,11 +1108,14 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       return Math.max(0, Math.ceil(Number(base || 0) + Number(travelFee || 0)));
     };
 
-    // 🎤 Determine recipient
-    const targetMember = isDeputy ? deputy : findVocalistPhone(act, lineupId)?.vocalist;
+    // 🎤 Recipient
+    const targetMember = isDeputy
+      ? deputy
+      : findVocalistPhone(act, lineup?._id || lineupId)?.vocalist;
+
     if (!targetMember) throw new Error("No valid member found");
 
-    // 🧩 Enrich with Musician data (keep your new logic)
+    // 🧩 Enrich with Musician data
     let enrichedMember = { ...targetMember };
     try {
       if (targetMember?.musicianId) {
@@ -1122,7 +1131,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           if (mus) enrichedMember = { ...mus, ...enrichedMember };
         }
       }
-    } catch (err) { console.warn("⚠️ Enrich failed:", err.message); }
+    } catch (err) {
+      console.warn("⚠️ Enrich failed:", err.message);
+    }
 
     targetMember.email = enrichedMember.email || targetMember.email || null;
     targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
@@ -1130,7 +1141,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
     if (!phone) throw new Error("Missing phone");
 
-    // 💰 Restore £370-style fee logic
+    // 💰 Fee logic
     let finalFee;
     if (body?.inheritedFee !== undefined && body?.inheritedFee !== null) {
       const inherited = String(body.inheritedFee).replace(/[^\d.]/g, "");
@@ -1146,19 +1157,31 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       finalFee = await feeForMember(targetMember);
     }
 
+    console.log("🐛 triggerAvailabilityRequest progress checkpoint", {
+      actId,
+      isDeputy,
+      targetMember: targetMember?.firstName,
+      phone: targetMember?.phone,
+      finalFee,
+    });
+
     // ✅ Create availability record
     await AvailabilityModel.create({
-      actId, lineupId,
+      actId,
+      lineupId: lineup?._id || null,
       musicianId: targetMember._id || null,
-      phone, dateISO,
+      phone,
+      dateISO,
       formattedAddress: fullFormattedAddress,
       formattedDate,
-      clientName: clientName || "", clientEmail: clientEmail || "",
+      clientName: clientName || "",
+      clientEmail: clientEmail || "",
       actName: act?.tscName || act?.name || "",
       musicianName: `${targetMember.firstName || ""} ${targetMember.lastName || ""}`.trim(),
       duties: body?.inheritedDuties || targetMember.instrument || "Performance",
       fee: String(finalFee),
-      reply: null, v2: true,
+      reply: null,
+      v2: true,
     });
 
     console.log(`✅ Availability record created — £${finalFee}`);
@@ -1168,10 +1191,11 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const feeStr = finalFee > 0 ? `£${finalFee}` : "TBC";
     const msg = `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
 
+    console.log("🐛 About to call sendWhatsAppMessage()");
     await sendWhatsAppMessage({
       to: phone,
       actData: act,
-      lineup,
+      lineup: lineup || {},
       member: targetMember,
       address: shortAddress,
       dateISO,

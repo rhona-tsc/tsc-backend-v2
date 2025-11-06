@@ -243,7 +243,6 @@ router.post("/request", async (req, res) => {
   actId,
   date,
   address,
-  lineupId,
   selectedDate,
   selectedAddress,
 } = req.body;
@@ -257,7 +256,7 @@ if (!actId || !finalDate) {
 
 console.log(`📅 Availability request triggered for act=${actId} on ${finalDate}`);
 
-const fakeReq = { body: { actId, date: finalDate, address: finalAddress, lineupId } };
+const fakeReq = { body: { actId, date: finalDate, address: finalAddress } };
     const fakeRes = {
       status: (code) => ({
         json: (obj) => ({ code, ...obj }),
