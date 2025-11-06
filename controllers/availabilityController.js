@@ -1030,7 +1030,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   try {
     const {
       actId,
-      lineupId,               // now optional
+      lineupId, // optional
       date,
       dateISO: dISO,
       address,
@@ -1039,6 +1039,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       clientEmail,
       isDeputy = false,
       deputy = null,
+      inheritedFee = null, // 🔹 optional
     } = body;
 
     const dateISO = dISO || (date ? new Date(date).toISOString().slice(0, 10) : null);
@@ -1053,19 +1054,31 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const fullFormattedAddress = formattedAddress || address || act?.formattedAddress || act?.venueAddress || "TBC";
 
     const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
-      weekday: "long", day: "numeric", month: "long", year: "numeric"
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
     });
 
-    // 🎵 Lineup handling (defaults safely if lineupId missing)
+    // 🎵 Lineup handling (defaults safely)
     const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
-    const lineup =
-      lineupId
-        ? lineups.find((l) => String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId))
-        : lineups[0];
+    const lineup = lineupId
+      ? lineups.find(
+          (l) =>
+            String(l._id) === String(lineupId) ||
+            String(l.lineupId) === String(lineupId)
+        )
+      : lineups[0];
 
-    if (!lineup) console.warn("⚠️ No valid lineup found — defaulting to first available or skipping lineup-specific logic.");
-    const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+    if (!lineup)
+      console.warn(
+        "⚠️ No valid lineup found — defaulting to first available or skipping lineup-specific logic."
+      );
+    const members = Array.isArray(lineup?.bandMembers)
+      ? lineup.bandMembers
+      : [];
 
+    // 🔢 Normalise phone
     const normalizePhone = (raw = "") => {
       let v = String(raw || "").replace(/\s+/g, "").replace(/^whatsapp:/i, "");
       if (!v) return "";
@@ -1075,40 +1088,62 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       return v;
     };
 
-    // 🧮 Fee calculation (restored 4 Nov logic)
+    // 💰 Fee calculation helper
     const feeForMember = async (member) => {
       const baseFee = Number(member?.fee ?? 0);
-      const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
-      const membersCount = Math.max(1, members.length || 1);
-      const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
-      const base = baseFee > 0 ? baseFee : perHead;
 
+      // 🧩 Sum essential additional roles
+      const essentialExtras = Array.isArray(member?.additionalRoles)
+        ? member.additionalRoles
+            .filter((r) => r?.isEssential && Number(r?.additionalFee) > 0)
+            .reduce((sum, r) => sum + Number(r.additionalFee), 0)
+        : 0;
+
+      // 🧭 Determine travel fee
       const { county: selectedCounty } = countyFromAddress(fullFormattedAddress);
       const selectedDate = dateISO;
-      let travelFee = 0, usedCountyRate = false;
+      let travelFee = 0;
+      let travelSource = "none";
 
       if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
         const raw = getCountyFeeValue(act.countyFees, selectedCounty);
         const val = Number(raw);
         if (Number.isFinite(val) && val > 0) {
-          usedCountyRate = true;
           travelFee = Math.ceil(val);
+          travelSource = "county";
         }
       }
 
-      if (!usedCountyRate) {
-        travelFee = await computeMemberTravelFee({
-          act, member, selectedCounty,
+      // fallback: compute travel if no valid county rate
+      if (travelSource === "none") {
+        const computed = await computeMemberTravelFee({
+          act,
+          member,
+          selectedCounty,
           selectedAddress: fullFormattedAddress,
           selectedDate,
         });
-        travelFee = Math.max(0, Math.ceil(Number(travelFee || 0)));
+        travelFee = Math.max(0, Math.ceil(Number(computed || 0)));
+        travelSource = "computed";
       }
 
-      return Math.max(0, Math.ceil(Number(base || 0) + Number(travelFee || 0)));
+      const total = baseFee + essentialExtras + travelFee;
+
+      console.log("💷 [Fee Breakdown]", {
+        memberName: `${member.firstName || ""} ${member.lastName || ""}`.trim(),
+        instrument: member.instrument,
+        baseFee,
+        essentialExtras,
+        selectedCounty,
+        travelSource,
+        travelFee,
+        total,
+      });
+
+      return total;
     };
 
-    // 🎤 Recipient
+    // 🎤 Determine recipient
     const targetMember = isDeputy
       ? deputy
       : findVocalistPhone(act, lineup?._id || lineupId)?.vocalist;
@@ -1123,7 +1158,8 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         if (mus) enrichedMember = { ...mus, ...enrichedMember };
       } else {
         const cleanPhone = (targetMember.phone || targetMember.phoneNumber || "")
-          .replace(/\s+/g, "").replace(/^0/, "+44");
+          .replace(/\s+/g, "")
+          .replace(/^0/, "+44");
         if (cleanPhone) {
           const mus = await Musician.findOne({
             $or: [{ phoneNormalized: cleanPhone }, { phone: cleanPhone }],
@@ -1135,25 +1171,28 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       console.warn("⚠️ Enrich failed:", err.message);
     }
 
-    targetMember.email = enrichedMember.email || targetMember.email || null;
-    targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
+    targetMember.email =
+      enrichedMember.email || targetMember.email || null;
+    targetMember.musicianId =
+      enrichedMember._id || targetMember.musicianId || null;
 
-    const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
+    const phone = normalizePhone(
+      targetMember.phone || targetMember.phoneNumber
+    );
     if (!phone) throw new Error("Missing phone");
 
-    // 💰 Fee logic
+    // 🧮 Final Fee Logic
     let finalFee;
-    if (body?.inheritedFee !== undefined && body?.inheritedFee !== null) {
-      const inherited = String(body.inheritedFee).replace(/[^\d.]/g, "");
-      const parsed = parseFloat(inherited);
-      if (!isNaN(parsed) && parsed > 0) {
-        finalFee = Math.round(parsed);
-        console.log(`🪙 Using inheritedFee from lead: £${finalFee}`);
-      } else {
-        console.warn("⚠️ Invalid inheritedFee format, falling back to feeForMember()");
-        finalFee = await feeForMember(targetMember);
-      }
+
+    if (isDeputy && inheritedFee) {
+      // Deputies use inherited fee from lead
+      const parsed = parseFloat(
+        String(inheritedFee).replace(/[^\d.]/g, "")
+      );
+      finalFee = !isNaN(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+      console.log(`🪙 Deputy inherited lead fee: £${finalFee}`);
     } else {
+      // Leads and normal members use computed fee
       finalFee = await feeForMember(targetMember);
     }
 
@@ -1177,8 +1216,11 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       clientName: clientName || "",
       clientEmail: clientEmail || "",
       actName: act?.tscName || act?.name || "",
-      musicianName: `${targetMember.firstName || ""} ${targetMember.lastName || ""}`.trim(),
-      duties: body?.inheritedDuties || targetMember.instrument || "Performance",
+      musicianName: `${targetMember.firstName || ""} ${
+        targetMember.lastName || ""
+      }`.trim(),
+      duties:
+        body?.inheritedDuties || targetMember.instrument || "Performance",
       fee: String(finalFee),
       reply: null,
       v2: true,
@@ -1187,9 +1229,14 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     console.log(`✅ Availability record created — £${finalFee}`);
 
     // 💬 Send WhatsApp
-    const role = body?.inheritedDuties || targetMember.instrument || "Performance";
+    const role =
+      body?.inheritedDuties || targetMember.instrument || "Performance";
     const feeStr = finalFee > 0 ? `£${finalFee}` : "TBC";
-    const msg = `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
+    const msg = `Hi ${
+      targetMember.firstName || "there"
+    }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${
+      act.tscName || act.name
+    }. Please indicate your availability 💫`;
 
     console.log("🐛 About to call sendWhatsAppMessage()");
     await sendWhatsAppMessage({
@@ -1204,7 +1251,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         firstName: targetMember.firstName || "Musician",
         date: formattedDate,
         location: shortAddress,
-        fee: String(body?.inheritedFee || finalFee),
+        fee: String(finalFee),
         role,
         actName: act.tscName || act.name,
       },
@@ -1215,10 +1262,12 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     console.log(`📲 WhatsApp sent successfully — £${feeStr}`);
     if (res) return res.json({ success: true, sent: 1 });
     return { success: true, sent: 1 };
-
   } catch (err) {
     console.error("❌ triggerAvailabilityRequest error:", err);
-    if (res) return res.status(500).json({ success: false, message: err.message });
+    if (res)
+      return res
+        .status(500)
+        .json({ success: false, message: err.message });
     return { success: false, error: err.message };
   }
 };
