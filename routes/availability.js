@@ -319,26 +319,41 @@ router.patch("/act/:id/increment-shortlist", async (req, res) => {
       `✅ Shortlist incremented for act: ${updated?.tscName || updated?.name}`
     );
 
-    // 🟢 Trigger WhatsApp availability request (non-blocking)
-    try {
-      const { selectedDate, selectedAddress, clientEmail, userId } = req.body;
-      const dateISO =
-        selectedDate || new Date().toISOString().slice(0, 10);
-      const address = selectedAddress || "TBC";
+   // 🟢 Trigger WhatsApp availability request (non-blocking)
+try {
+  const {
+    selectedDate,
+    selectedAddress,
+    clientEmail,
+    userId
+  } = req.body || {};
 
-      console.log("📤 Triggering WhatsApp availability request...");
-      await triggerAvailabilityRequest({
-        actId,
-        date: dateISO,
-        address,
-        formattedAddress: address,
-        clientEmail: clientEmail || "",
-        userId,
-      });
-      console.log("✅ Availability request triggered successfully");
-    } catch (whErr) {
-      console.warn("⚠️ WhatsApp availability request failed:", whErr.message);
-    }
+  const actId = req.params.id;
+  const dateISO = selectedDate || new Date().toISOString().slice(0, 10);
+  const address = selectedAddress || "TBC";
+  const safeEmail = clientEmail || "hello@thesupremecollective.co.uk";
+
+  console.log("📤 Triggering WhatsApp availability request with:", {
+    actId,
+    dateISO,
+    address,
+    safeEmail,
+    userId,
+  });
+
+  await triggerAvailabilityRequest({
+    actId,
+    date: dateISO,
+    address,
+    formattedAddress: address,
+    clientEmail: safeEmail,
+    userId,
+  });
+
+  console.log("✅ Availability request triggered successfully");
+} catch (whErr) {
+  console.warn("⚠️ WhatsApp availability request failed:", whErr.message);
+}
 
     // 🩵 Respond to client
     res.json({ success: true, act: updated });
