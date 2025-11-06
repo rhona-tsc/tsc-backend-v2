@@ -315,6 +315,7 @@ export async function notifyDeputies({
   formattedAddress,
   clientName,
   clientEmail,
+  skipDuplicateCheck = false,
 }) {
   console.log(`📢 [notifyDeputies] START — act ${actId}, date ${dateISO}`);
 
@@ -384,17 +385,18 @@ export async function notifyDeputies({
 
       // 🚀 Trigger WhatsApp using inherited fee
       await triggerAvailabilityRequest({
-        actId,
-        lineupId,
-        dateISO,
-        formattedAddress,
-        clientName,
-        clientEmail,
-        isDeputy: true,
-        deputy: { ...deputy, phone: cleanPhone },
-        inheritedFee,
-        inheritedDuties: leadDuties,
-      });
+  actId,
+  lineupId,
+  dateISO,
+  formattedAddress,
+  clientName,
+  clientEmail,
+  isDeputy: true,
+  deputy: { ...deputy, phone: cleanPhone },
+  inheritedFee,
+  inheritedDuties: leadDuties,
+  skipDuplicateCheck, // ✅ propagate flag
+});
     }
   }
 
@@ -1212,7 +1214,7 @@ const existing = await AvailabilityModel.findOne({
   v2: true,
 }).lean();
 
-if (existing) {
+if (existing && !body.skipDuplicateCheck) {
   console.log(
     `⚠️ Duplicate availability request detected — skipping WhatsApp send`,
     { actId, dateISO, phone: existing.phone }
@@ -1742,14 +1744,15 @@ await cancelCalendarInvite({
   // ✅ Trigger deputy messages *after* lead confirmation & badge clear
  if (act?._id) {
   console.log("📢 Triggering deputy notifications for", act?.tscName || act?.name, "—", dateISO);
-  await notifyDeputies({
-    actId: act._id,
-    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
-    dateISO,
-    formattedAddress: updated.formattedAddress || act.formattedAddress || "TBC",
-    clientName: updated.clientName || "",
-    clientEmail: updated.clientEmail || "",
-  });
+await notifyDeputies({
+  actId: act._id,
+  lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+  dateISO,
+  formattedAddress: updated.formattedAddress || act.formattedAddress || "TBC",
+  clientName: updated.clientName || "",
+  clientEmail: updated.clientEmail || "",
+  skipDuplicateCheck: true, // ✅ ensures Twilio still sends cancellation follow-ups
+});
 } else {
     console.warn("⚠️ Skipping notifyDeputies — no act resolved");
   }
@@ -2133,6 +2136,13 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
     return null;
   }
 
+  console.log("🎤 [Badge Builder] availRows:", rows.map(r => ({
+  name: r.musicianName,
+  reply: r.reply,
+  repliedAt: r.repliedAt,
+  isDeputy: r.isDeputy
+})));
+
   const replyByPhone = new Map();
   for (const r of rows) {
     const p = normalizePhoneE164(r.phone);
@@ -2175,49 +2185,51 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
         return badgeObj;
       }
 
-      // 🚫 Lead said NO/UNAVAILABLE → look at deputies
-      if (!leadReply || leadReply === "no" || leadReply === "unavailable") {
-        const deputies = Array.isArray(m.deputies) ? m.deputies : [];
-        const yesDeps = [];
+     // 🚫 Lead said NO/UNAVAILABLE → look at deputies
+if (!leadReply || leadReply === "no" || leadReply === "unavailable") {
+  const deputies = Array.isArray(m.deputies) ? m.deputies : [];
+  const yesDeps = [];
 
-        for (const d of deputies) {
-          const p = normalizePhoneE164(d.phoneNumber || d.phone || "");
-          if (!p) continue;
-          const rep = replyByPhone.get(p)?.reply || null;
-          if (rep === "yes") yesDeps.push(d);
-          if (yesDeps.length >= 3) break;
-        }
-
-      if (yesDeps.length > 0) {
-  const enriched = [];
-  for (const d of yesDeps) {
-    const bits = await getDeputyDisplayBits(d);
-    enriched.push({
-      name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-      musicianId: bits?.resolvedMusicianId || bits?.musicianId || "",
-      photoUrl: bits?.photoUrl || "",
-      profileUrl: bits?.profileUrl || "",
-      resolvedVia: "getDeputyDisplayBits",
-      setAt: new Date(),
-    });
+  for (const d of deputies) {
+    const p = normalizePhoneE164(d.phoneNumber || d.phone || "");
+    if (!p) continue;
+    const rep = replyByPhone.get(p)?.reply || null;
+    if (rep === "yes") yesDeps.push(d);
+    if (yesDeps.length >= 3) break;
   }
 
-  const badgeObj = {
-    active: true,
-    dateISO,
-    isDeputy: true,
-    inPromo: false,
-    deputies: enriched.slice(0, 3), // ✅ allow up to 3
-    vocalistName: `${m.firstName || ""}`.trim(),
-    address: formattedAddress,
-    setAt: new Date(),
-  };
+  // 🧠 pick the most recent deputy who replied "yes"
+  const activeDeputy = yesDeps
+    .filter(d => d.reply === "yes" || replyByPhone.get(normalizePhoneE164(d.phone || d.phoneNumber))?.reply === "yes")
+    .sort((a, b) => new Date(b.repliedAt || b.updatedAt || 0) - new Date(a.repliedAt || a.updatedAt || 0))[0];
 
-  console.log("🎤 Built deputy badge:", badgeObj);
-  return badgeObj;
+  if (activeDeputy) {
+    const bits = await getDeputyDisplayBits(activeDeputy);
+    const badgeObj = {
+      active: true,
+      dateISO,
+      isDeputy: true,
+      inPromo: false,
+      deputies: [
+        {
+          name: `${activeDeputy.firstName || ""} ${activeDeputy.lastName || ""}`.trim(),
+          musicianId: bits?.resolvedMusicianId || bits?.musicianId || "",
+          photoUrl: bits?.photoUrl || "",
+          profileUrl: bits?.profileUrl || "",
+          resolvedVia: "getDeputyDisplayBits",
+          repliedAt: activeDeputy.repliedAt || new Date(),
+          setAt: new Date(),
+        },
+      ],
+      vocalistName: `${m.firstName || ""}`.trim(),
+      address: formattedAddress,
+      setAt: new Date(),
+    };
 
-        }
-      }
+    console.log("🎤 Built deputy badge (latest YES):", badgeObj);
+    return badgeObj;
+  }
+}
     }
   }
 
@@ -2231,6 +2243,7 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO,
   console.log(
     `🟢 (availabilityController.js) rebuildAndApplyAvailabilityBadge START at ${new Date().toISOString()}`
   );
+console.log("🎯 [rebuildAndApplyAvailabilityBadge] called with:", req.body);
 
   const userId =
   typeof reqOrActId === "object"
@@ -2320,6 +2333,7 @@ if (!badge) {
     });
     console.log("📡 SSE broadcasted: availability_badge_updated");
   }
+  console.log("🎯 [rebuildAndApplyAvailabilityBadge] returning badge:", badge);
   return { success: true, cleared: true };
 }
 
