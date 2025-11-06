@@ -1822,12 +1822,12 @@ if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
 
   return;
       }
-    } catch (err) {
+     } catch (err) {
       console.error("❌ Error in twilioInbound background task:", err);
     }
-  }  )
-  });
-};
+  })(); // ✅ invoke async IIFE here
+}); // ✅ closes setImmediate
+}; // ✅ closes twilioInbound
 
 const INBOUND_SEEN = new Map();
 const INBOUND_TTL_MS = 10 * 60 * 1000;
