@@ -1596,10 +1596,17 @@ if (global.availabilityNotify) {
       "Deputy Vocalist";
 
     // If we have deputies in the rebuilt badge, prefer that
-    if (badgeResult?.badge?.deputies?.length) {
-      const d = badgeResult.badge.deputies[0];
-      deputyName = d?.vocalistName || d?.name || deputyName;
-    }
+  if (badgeResult?.badge?.deputies?.length) {
+  // Sort by repliedAt or setAt (descending)
+  const sorted = [...badgeResult.badge.deputies].sort((a, b) =>
+    new Date(b.repliedAt || b.setAt || 0) - new Date(a.repliedAt || a.setAt || 0)
+  );
+  const latestDeputy = sorted[0];
+  deputyName =
+    latestDeputy?.vocalistName ||
+    latestDeputy?.name ||
+    deputyName;
+}
 
     global.availabilityNotify.badgeUpdated({
       type: "deputy_yes",
