@@ -1374,8 +1374,8 @@ export const twilioInbound = async (req, res) => {
 
   // ✅ Immediately acknowledge Twilio to prevent retries
   res.status(200).send("OK");
-
-  process.nextTick(async () => {
+  
+  setImmediate(async () => {
     try {
       console.log("📬 Raw inbound req.body:", req.body);
 
@@ -1713,6 +1713,7 @@ try {
   console.error("❌ Fallback cancelCalendarInvite failed:", err.message);
 }
 
+
   if (updated?.calendarEventId && emailForInvite) {
     try {
       console.log("🗓️ Attempting cancelCalendarInvite with:", {
@@ -1773,27 +1774,24 @@ try {
     <p>– The Supreme Collective Team</p>
   `;
 
-  const leadEmail = emailForInvite?.trim();
+  const leadEmail = (emailForInvite || "").trim();
   const recipients = [leadEmail].filter(e => e && e.includes("@"));
 
-  if (recipients.length === 0) {
-    console.warn("⚠️ No valid recipients for cancellation email.", { leadEmail });
-  } else {
+  if (recipients.length > 0) {
+    console.log("📧 Preparing to send cancellation email:", recipients);
     await sendEmail({
       to: recipients,
       bcc: ["hello@thesupremecollective.co.uk"],
       subject,
       html,
     });
-    console.log(`✅ Cancellation email sent successfully to: ${emailForInvite}`);
+    console.log(`✅ Cancellation email sent successfully to: ${recipients.join(", ")}`);
+  } else {
+    console.warn("⚠️ Skipping cancellation email — no valid recipients found.");
   }
 } catch (emailErr) {
   console.error("❌ Failed to send cancellation email:", emailErr.message);
 }
-
-} else {
-    console.warn("⚠️ Skipping notifyDeputies — no act resolved");
-  }
 
   // 🔔 SSE clear badge (only if not deputy)
 // 🔔 SSE clear badge (only if lead, and no other active availabilities)
@@ -1820,11 +1818,11 @@ if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
 
   return;
       }
-    } catch (err) {
+   } catch (err) {
       console.error("❌ Error in twilioInbound background task:", err);
     }
-  });
-};
+  }); // end setImmediate
+}; // end twilioInbound
 
 const INBOUND_SEEN = new Map();
 const INBOUND_TTL_MS = 10 * 60 * 1000;
