@@ -1481,6 +1481,13 @@ console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
     console.warn("⚠️ Failed to resolve act from updated.actId:", err.message);
   }
 
+      // ──────────────────────────────────────────────────────────────
+      console.log("──────────────────────────────────────────────");
+      console.log(`📩 Twilio Inbound (${reply?.toUpperCase?.() || "UNKNOWN"}) for ${act?.tscName || "Unknown Act"}`);
+      console.log(`👤 ${musician?.firstName || updated?.musicianName || "Unknown Musician"}`);
+      console.log(`📅 ${updated?.dateISO || "Unknown Date"}`);
+      console.log(`📧 ${emailForInvite}`);
+      console.log("──────────────────────────────────────────────");
       /* ---------------------------------------------------------------------- */
       /* ✅ YES BRANCH (Lead or Deputy)                                         */
       /* ---------------------------------------------------------------------- */
@@ -1699,7 +1706,7 @@ try {
       });
       console.log("✅ Calendar invite cancelled successfully via fallback lookup");
     } else {
-      console.warn("⚠️ No calendarEventId found to cancel for this musician/date.");
+      console.warn(`⚠️ No calendarEventId found to cancel for ${musician?.firstName || updated?.musicianName || "musician"} on ${dateISO}`);
     }
   }
 } catch (err) {
@@ -1778,7 +1785,7 @@ try {
       subject,
       html,
     });
-    console.log("📧 Cancellation email sent to:", recipients);
+    console.log(`✅ Cancellation email sent successfully to: ${emailForInvite}`);
   }
 } catch (emailErr) {
   console.error("❌ Failed to send cancellation email:", emailErr.message);
