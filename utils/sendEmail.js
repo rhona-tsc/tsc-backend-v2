@@ -17,10 +17,17 @@ const transporter = nodemailer.createTransport({
  */
 const sendEmail = async (to, subject, html, bcc, attachments = []) => {
   try {
+    const recipients = Array.isArray(to) ? to.filter(e => e && e.includes("@")) : (to && to.includes("@") ? [to] : []);
+    const bccList = Array.isArray(bcc) ? bcc.filter(e => e && e.includes("@")) : (bcc && bcc.includes("@") ? [bcc] : []);
+    if (recipients.length === 0 && bccList.length === 0) {
+      console.warn("⚠️ No valid email recipients found. Skipping sendEmail.");
+      return { success: false, error: "No valid recipients" };
+    }
+
     const mailOptions = {
       from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
-      to,
-      bcc,
+      to: recipients,
+      bcc: bccList,
       subject,
       html,
       attachments,
