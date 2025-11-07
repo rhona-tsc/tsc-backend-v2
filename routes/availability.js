@@ -292,17 +292,24 @@ router.patch("/act/:id/increment-shortlist", async (req, res) => {
   });
 
   const { userId, clientEmail, clientName } = req.body;
-  let email = clientEmail;
-  let name = clientName;
+// ✅ Always prefer DB lookup if userId is provided
+let email = clientEmail;
+let name = clientName;
 
-  // 🔎 If frontend didn't send client info, fetch from DB
-  if ((!email || !name) && userId) {
+if (userId) {
+  try {
     const user = await User.findById(userId).select("email firstName surname").lean();
     if (user) {
-      if (!email && user.email) email = user.email;
-      if (!name && user.firstName) name = user.firstName;
+      email = user.email || email || "hello@thesupremecollective.co.uk";
+      name = user.firstName || name || "there";
+      console.log(`📧 Enriched from DB: ${name} <${email}>`);
+    } else {
+      console.warn(`⚠️ No user found for ID: ${userId}`);
     }
+  } catch (err) {
+    console.warn("⚠️ Failed to enrich user from DB:", err.message);
   }
+}
 
   if (!email) {
     console.warn("⚠️ Missing client email for shortlist increment, using fallback");
