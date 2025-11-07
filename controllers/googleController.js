@@ -268,7 +268,8 @@ await AvailabilityModel.updateOne(
   console.warn("⚠️ Failed to store calendarEventId:", err.message);
 }
 
-    return { event: patch.data, created: false };
+return patch.data;
+
 
   } catch (e) {
     if (e?.code !== 404) {
@@ -324,7 +325,7 @@ try {
 } catch (err) {
   console.warn("⚠️ Failed to store new calendarEventId:", err.message);
 }
-    return { event: ins.data, created: true };
+return ins.data;
     
   } catch (e) {
     console.error("❌ (controllers/googleController.js) createCalendarInvite insert failed:", e.message);
