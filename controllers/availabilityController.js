@@ -2461,17 +2461,32 @@ console.log(
 let clientEmailFromDB = null;
 if (userId) {
   try {
-    const userDoc = await userModel.findById(userId).select("email firstName surname").lean();
+    const userDoc = await userModel
+      .findById(userId)
+      .select("email firstName surname")
+      .lean();
+
     if (userDoc?.email) {
       clientEmailFromDB = userDoc.email;
       console.log(`📧 Resolved client email from userId ${userId}: ${clientEmailFromDB}`);
     } else {
       console.warn(`⚠️ No email found for user ${userId}`);
     }
+
+    // 🟢 Add this console log here
+    console.log("👤 User lookup summary:", {
+      userId,
+      firstName: userDoc?.firstName,
+      surname: userDoc?.surname,
+      email: userDoc?.email,
+    });
+
   } catch (err) {
     console.warn("⚠️ Failed to lookup user email:", err.message);
   }
 }
+
+
 
   const paMap = { smallPa: "small", mediumPa: "medium", largePa: "large" };
   const lightMap = { smallLight: "small", mediumLight: "medium", largeLight: "large" };
