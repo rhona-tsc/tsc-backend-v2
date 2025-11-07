@@ -308,6 +308,7 @@ const getPictureUrlFrom = (obj = {}) => {
   return "";
 };
 
+
 export async function notifyDeputies({
   actId,
   lineupId,
@@ -349,7 +350,7 @@ export async function notifyDeputies({
 
     if (totalVocalists > 0 && allUnavailable >= totalVocalists) {
       console.log(`🚫 All vocalists marked unavailable for ${dateISO}. Skipping deputy messages.`);
-      return; // ✅ prevents re-trigger when Kedesha replies unavailable
+      return;
     }
   }
 
@@ -403,28 +404,22 @@ export async function notifyDeputies({
     console.log(`💾 Fallback inherited fee from act data: £${inheritedFee}`);
   }
 
+  // ✅ Get already-contacted or unavailable numbers for this date
+  const existingPhones = await AvailabilityModel.distinct("phone", {
+    actId,
+    dateISO,
+    reply: { $in: ["yes", "unavailable"] },
+  });
+  const existingSet = new Set(existingPhones.map((p) => p.replace(/\s+/g, "")));
+
   // 📨 Notify deputies (only if not already sent / not unavailable)
   for (const vocalist of vocalists) {
     for (const deputy of vocalist.deputies || []) {
       const cleanPhone = (deputy.phoneNumber || deputy.phone || "").replace(/\s+/g, "");
       if (!/^\+?\d{10,15}$/.test(cleanPhone)) continue;
+      if (existingSet.has(cleanPhone)) continue; // ✅ Skip already contacted/unavailable
 
-      // 🛡️ Skip if deputy already replied or marked unavailable
-      const existing = await AvailabilityModel.findOne({
-        actId,
-        dateISO,
-        "deputy.phone": cleanPhone,
-        reply: { $in: ["yes", "unavailable", "no"] },
-      }).lean();
-
-      if (existing) {
-        console.log(`⏭️ Skipping ${deputy.firstName || deputy.name} — already replied (${existing.reply})`);
-        continue;
-      }
-
-      console.log(
-        `🎯 Sending deputy enquiry to ${deputy.firstName || deputy.name} — inherited fee £${inheritedFee}`
-      );
+      console.log(`🎯 Sending deputy enquiry to ${deputy.firstName || deputy.name}`);
 
       await triggerAvailabilityRequest({
         actId,
@@ -437,15 +432,55 @@ export async function notifyDeputies({
         deputy: { ...deputy, phone: cleanPhone },
         inheritedFee,
         inheritedDuties: leadDuties,
-        skipDuplicateCheck, // ✅ propagate flag
+        skipDuplicateCheck,
       });
+
+      existingSet.add(cleanPhone); // mark as contacted
+
+      // ✅ Stop after 3 unique deputies contacted
+      if (existingSet.size >= 3) {
+        console.log("🛑 Limit reached (3 deputies contacted)");
+        return; // exit both loops early
+      }
     }
   }
 
   console.log("✅ [notifyDeputies] Complete");
 }
-  
 
+
+export async function triggerNextDeputy({ actId, lineupId, dateISO, excludePhones }) {
+  const act = await Act.findById(actId).lean();
+  if (!act) return console.warn("⚠️ No act found for triggerNextDeputy");
+  const lineup = act.lineups?.find(l => String(l._id) === String(lineupId));
+  if (!lineup) return console.warn("⚠️ No lineup found for triggerNextDeputy");
+
+  // ✅ Only trigger deputies not in excludePhones
+  const allVocalists = lineup.bandMembers?.filter(m =>
+    ["vocal", "vocalist"].some(v => (m.instrument || "").toLowerCase().includes(v))
+  ) || [];
+
+  for (const vocalist of allVocalists) {
+    const remaining = (vocalist.deputies || []).filter(d =>
+      !excludePhones.includes((d.phoneNumber || d.phone || "").replace(/\s+/g, ""))
+    );
+
+    if (remaining.length > 0) {
+      console.log("📨 Triggering next deputy:", remaining[0].name);
+      await notifyDeputies({
+        actId,
+        lineupId,
+        dateISO,
+        formattedAddress: "TBC",
+        clientName: "Auto-triggered",
+        clientEmail: "hello@thesupremecollective.co.uk",
+        skipDuplicateCheck: true,
+        customDeputyList: [remaining[0]], // optional override param
+      });
+      break;
+    }
+  }
+}
 
 
 
@@ -1780,36 +1815,45 @@ if (global.availabilityNotify) {
           );
 
           // ✅ Only trigger deputy notifications if YES / NOLOC / NOLOCATION
-          const shouldTriggerDeputies =
-            reply === "yes" || reply === "noloc" || reply === "nolocation";
+        // ✅ Revised logic: always trigger deputies when LEAD replies unavailable
+const shouldTriggerDeputies =
+  (!isDeputy && ["unavailable", "no", "noloc", "nolocation", "yes"].includes(reply));
 
-          if (act?._id && shouldTriggerDeputies) {
-            console.log(
-              "📢 Triggering deputy notifications for",
-              act?.tscName || act?.name,
-              "—",
-              dateISO
-            );
+if (act?._id && shouldTriggerDeputies) {
+  console.log(
+    `📢 Triggering deputy notifications for ${act?.tscName || act?.name} — ${dateISO}`
+  );
 
-            await notifyDeputies({
-              actId: act._id,
-              lineupId:
-                updated.lineupId || act.lineups?.[0]?._id || null,
-              dateISO,
-              formattedAddress:
-                updated.formattedAddress ||
-                act.formattedAddress ||
-                "TBC",
-              clientName: updated.clientName || "",
-              clientEmail: updated.clientEmail || "",
-              skipDuplicateCheck: true,
-              skipIfUnavailable: true, // ✅ add this flag
-            });
-          } else {
-            console.log(
-              "🚫 Skipping notifyDeputies — reply was 'unavailable' (avoid re-trigger)."
-            );
-          }
+  await notifyDeputies({
+    actId: act._id,
+    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+    dateISO,
+    formattedAddress:
+      updated.formattedAddress || act.formattedAddress || "TBC",
+    clientName: updated.clientName || "",
+    clientEmail: updated.clientEmail || "",
+    skipDuplicateCheck: true,
+    skipIfUnavailable: true, // ✅ deputies won't be re-asked
+  });
+} else if (isDeputy && reply === "unavailable") {
+  console.log("📨 Deputy unavailable — trigger next deputy in queue");
+
+  const { triggerNextDeputy } = await import("./notifyDeputiesHelpers.js");
+  await triggerNextDeputy({
+    actId: act._id,
+    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+    dateISO,
+    excludePhones: [
+      updated.phone,
+      updated.whatsappNumber,
+      ...await AvailabilityModel.distinct("phone", {
+        actId,
+        dateISO,
+        reply: { $in: ["unavailable", "yes"] },
+      }),
+    ],
+  });
+}
 
           // 📨 Cancellation email
           try {
