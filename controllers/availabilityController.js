@@ -1207,7 +1207,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       finalFee,
     });
 
-   // 🛡️ Prevent duplicate messages (unless skipDuplicateCheck = true)
+// 🛡️ Prevent re-sending to musicians who already replied
 const existing = await AvailabilityModel.findOne({
   actId,
   dateISO,
@@ -1215,7 +1215,27 @@ const existing = await AvailabilityModel.findOne({
   v2: true,
 }).lean();
 
-if (existing && !skipDuplicateCheck) { // ✅ use the flag here
+// 🧠 Skip if already sent AND (a) duplicate check off OR (b) replied unavailable/no
+if (
+  existing &&
+  !skipDuplicateCheck &&
+  ["unavailable", "no"].includes(existing.reply)
+) {
+  console.log(
+    "🚫 Skipping availability request — musician already marked unavailable/no reply",
+    { actId, dateISO, phone: existing.phone, reply: existing.reply }
+  );
+  if (res)
+    return res.json({
+      success: true,
+      sent: 0,
+      skipped: existing.reply,
+    });
+  return { success: true, sent: 0, skipped: existing.reply };
+}
+
+// 🧩 Fallback — skip true duplicates (already has an active record)
+if (existing && !skipDuplicateCheck) {
   console.log(
     "⚠️ Duplicate availability request detected — skipping WhatsApp send",
     { actId, dateISO, phone: existing.phone }
