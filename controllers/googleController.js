@@ -290,43 +290,58 @@ const insertBody = {
 };
 
   console.log(`🆕 (controllers/googleController.js) createCalendarInvite INSERT new event`, { eventId, email });
-  try {
-    const ins = await withBackoff(() =>
+
+let ins;
+
+try {
+  // 🧩 Primary attempt with custom eventId
+  ins = await withBackoff(() =>
+    cal.events.insert({ calendarId, requestBody: insertBody, sendUpdates: "all" })
+  );
+  console.log(`✅ Event created and invite sent to ${email}:`, ins.data.htmlLink);
+
+} catch (err) {
+  // 🛟 Fallback if Google rejects the custom ID
+  if (String(err.message).includes("Invalid resource id")) {
+    console.warn("⚠️ Invalid eventId — retrying without custom ID");
+    delete insertBody.id; // remove our custom eventId
+    ins = await withBackoff(() =>
       cal.events.insert({ calendarId, requestBody: insertBody, sendUpdates: "all" })
     );
-    console.log(`✅ Event created and invite sent to ${email}:`, ins.data.htmlLink);
-    // ✅ Persist new event ID to AvailabilityModel
+    console.log("✅ Retried successfully with Google-generated ID:", ins.data.id);
+  } else {
+    console.error("❌ (controllers/googleController.js) createCalendarInvite insert failed:", err.message);
+    throw err;
+  }
+}
+
+// ✅ Persist new event ID to AvailabilityModel
 try {
   const eventIdToSave = ins?.data?.id || eventId;
   await AvailabilityModel.updateOne(
-  {
-    actId,
-    dateISO,
-    $or: [
-      { email: email.toLowerCase() },
-      { calendarInviteEmail: email.toLowerCase() },
-    ],
-  },
-  {
-    $set: {
-      calendarEventId: eventIdToSave,
-      calendarInviteEmail: email.toLowerCase(),
-      calendarInviteSentAt: new Date(),
-      calendarStatus: "needsAction",
+    {
+      actId,
+      dateISO,
+      $or: [
+        { email: email.toLowerCase() },
+        { calendarInviteEmail: email.toLowerCase() },
+      ],
     },
-  }
-
-);
+    {
+      $set: {
+        calendarEventId: eventIdToSave,
+        calendarInviteEmail: email.toLowerCase(),
+        calendarInviteSentAt: new Date(),
+        calendarStatus: "needsAction",
+      },
+    }
+  );
   console.log("💾 Stored new calendarEventId:", eventIdToSave, "for", email);
 } catch (err) {
   console.warn("⚠️ Failed to store new calendarEventId:", err.message);
 }
-return ins.data;
 
-  } catch (e) {
-    console.error("❌ (controllers/googleController.js) createCalendarInvite insert failed:", e.message);
-    throw e;
-  }
+return ins.data;
 }
 
 export async function updateCalendarEvent({ eventId, ensureAttendees = [] }) {
