@@ -290,17 +290,26 @@ router.patch("/act/:id/increment-shortlist", async (req, res) => {
     id: req.params.id,
     userId: req.body?.userId,
   });
-   const { userId, clientEmail } = req.body;
-  let email = clientEmail;
 
-  if (!email && userId) {
-    const user = await User.findById(userId).select("email").lean();
-    if (user?.email) email = user.email;
+  const { userId, clientEmail, clientName } = req.body;
+  let email = clientEmail;
+  let name = clientName;
+
+  // 🔎 If frontend didn't send client info, fetch from DB
+  if ((!email || !name) && userId) {
+    const user = await User.findById(userId).select("email firstName surname").lean();
+    if (user) {
+      if (!email && user.email) email = user.email;
+      if (!name && user.firstName) name = user.firstName;
+    }
   }
 
   if (!email) {
-    console.warn("⚠️ Missing client email for shortlist increment");
+    console.warn("⚠️ Missing client email for shortlist increment, using fallback");
+    email = "hello@thesupremecollective.co.uk";
   }
+
+  if (!name) name = "there";
 
 
   try {
