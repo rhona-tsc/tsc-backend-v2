@@ -21,24 +21,13 @@ function cleanPrivate(obj) {
   return cleaned;
 }
 
-function makePersonalEventId({ actId, dateISO, email }) {
-  console.log(`😈 (controllers/googleController.js) makePersonalEventId called at`, new Date().toISOString(), {
-    actId, dateISO, email,
-  });
-
-  const act  = String(actId ?? "0").toLowerCase();
-  const date = String(dateISO ?? "0").replace(/[^0-9]/g, "");
-  const mail = String(email ?? "").toLowerCase();
-  let token = hashBase36(mail);
-
-  const toAllowed = (s) =>
-    s.toLowerCase()
-      .replace(/[wxyz]/g, "v")
-      .replace(/[^a-v0-9]/g, "");
-
-  const id = toAllowed(`enq${date}${act}${token}`);
-  const padded = (id.length < 5) ? (id + "enqvv").slice(0, 5) : id;
-  return padded.slice(0, 100);
+function makePersonalEventId({ email, dateISO }) {
+  if (!email || !dateISO)
+    throw new Error("makePersonalEventId requires email and dateISO");
+  const normEmail = email.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const normDate = dateISO.replace(/-/g, "");
+  // 👇 shared per vocalist/date
+  return `tsc_${normEmail}_${normDate}`;
 }
 
 export const oauth2Client = new google.auth.OAuth2(
@@ -200,7 +189,7 @@ export async function createCalendarInvite({
     console.warn("⚠️ Falling back to 'primary' calendar due to lookup error:", err.message);
   }
 
-  const eventId = makePersonalEventId({ actId, dateISO, email });
+const eventId = makePersonalEventId({ email, dateISO }); // 👈 shared per vocalist/date
   const start = startTime || `${dateISO}T17:00:00.000Z`;
   const end = endTime || `${dateISO}T23:59:00.000Z`;
 
@@ -217,81 +206,76 @@ export async function createCalendarInvite({
 
   await throttlePerRecipient(email);
 
-  try {
-    const getRes = await withBackoff(() => cal.events.get({ calendarId, eventId }));
-    const ev = getRes.data || {};
-    const existingDesc = ev.description || "";
-    const lines = new Set(existingDesc.split(/\r?\n/).map(l => l.trim()).filter(Boolean));
-    if (description) lines.add(description.trim());
-    const mergedDesc = Array.from(lines).join("\n");
-    const attendees = [{ email: email.toLowerCase() }];
-
-    const patchBody = {
-      summary: ev.summary || summary,
-      description: mergedDesc,
-      attendees,
-      extendedProperties: { private: { ...(ev.extendedProperties?.private || {}), ...privateProps } },
-    };
-
-    console.log(`🩹 (controllers/googleController.js) createCalendarInvite PATCH existing`, { eventId, email });
-    const patch = await withBackoff(() =>
-      cal.events.patch({
-        calendarId,
-        eventId,
-        requestBody: patchBody,
-        sendUpdates: "all", // ✅ ensures Google sends an updated invite
-      })
-    );
-    // ✅ Save or update calendarEventId on the corresponding availability record
 try {
-  const eventIdToSave = patch?.data?.id || eventId;
-await AvailabilityModel.updateOne(
-  {
-    actId,
-    dateISO,
-    $or: [
-      { email: email.toLowerCase() },
-      { calendarInviteEmail: email.toLowerCase() },
-    ],
-  },
-  {
-    $set: {
-      calendarEventId: eventIdToSave,
-      calendarInviteEmail: email.toLowerCase(),
-      calendarInviteSentAt: new Date(),
-      calendarStatus: "needsAction",
+  const getRes = await withBackoff(() => cal.events.get({ calendarId, eventId }));
+  const ev = getRes.data || {};
+
+  // 🧠 Merge description lines so multiple enquiries appear together
+  const lines = new Set(
+    (ev.description || "")
+      .split(/\r?\n/)
+      .concat(description)
+      .filter(Boolean)
+  );
+  const mergedDesc = Array.from(lines).join("\n");
+
+  // 🧩 Ensure attendee list (single vocalist)
+  const attendees = [{ email: email.toLowerCase() }];
+
+  const patchBody = {
+    summary: ev.summary || summary,
+    description: mergedDesc,
+    attendees,
+    extendedProperties: {
+      private: { ...(ev.extendedProperties?.private || {}), ...privateProps },
     },
-  }
-);
-  console.log("💾 Stored calendarEventId:", eventIdToSave, "for", email);
-} catch (err) {
-  console.warn("⚠️ Failed to store calendarEventId:", err.message);
+  };
+
+  console.log("🔁 Patching shared event for vocalist/date:", eventId);
+  const patch = await withBackoff(() =>
+    cal.events.patch({
+      calendarId,
+      eventId,
+      requestBody: patchBody,
+      sendUpdates: "all",
+    })
+  );
+
+  await AvailabilityModel.updateMany(
+    {
+      dateISO,
+      musicianEmail: email.toLowerCase(),
+    },
+    {
+      $set: {
+        calendarEventId: patch.data.id,
+        calendarInviteEmail: email.toLowerCase(),
+        calendarInviteSentAt: new Date(),
+        calendarStatus: "needsAction",
+      },
+    }
+  );
+  console.log("💾 Shared calendarEventId stored:", patch.data.id);
+
+  return patch.data;
+} catch (e) {
+  if (e?.code !== 404) throw e;
 }
 
-return patch.data;
-
-
-  } catch (e) {
-    if (e?.code !== 404) {
-      console.error("❌ (controllers/googleController.js) createCalendarInvite fetch error:", e.message);
-      throw e;
-    }
-  }
-
   // ✅ Insert new event (with attendee invite)
-  const insertBody = {
-    id: eventId,
-    summary,
-    description: [description].filter(Boolean).join("\n"),
-    start: { dateTime: start, timeZone: "Europe/London" },
-    end: { dateTime: end, timeZone: "Europe/London" },
-    attendees: [{ email: email.toLowerCase() }],
-    sendUpdates: "all", // ✅ sends the invitation
-    extendedProperties: { private: privateProps },
-    guestsCanModify: false,
-    guestsCanInviteOthers: false,
-    guestsCanSeeOtherGuests: false,
-  };
+const insertBody = {
+  id: eventId,
+  summary,
+  description: description,
+  start: { dateTime: start, timeZone: "Europe/London" },
+  end: { dateTime: end, timeZone: "Europe/London" },
+  attendees: [{ email: email.toLowerCase() }],
+  sendUpdates: "all",
+  extendedProperties: { private: privateProps },
+  guestsCanModify: false,
+  guestsCanInviteOthers: false,
+  guestsCanSeeOtherGuests: false,
+};
 
   console.log(`🆕 (controllers/googleController.js) createCalendarInvite INSERT new event`, { eventId, email });
   try {
@@ -326,7 +310,7 @@ try {
   console.warn("⚠️ Failed to store new calendarEventId:", err.message);
 }
 return ins.data;
-    
+
   } catch (e) {
     console.error("❌ (controllers/googleController.js) createCalendarInvite insert failed:", e.message);
     throw e;
@@ -502,57 +486,23 @@ export const addAttendeeToEvent = async ({ eventId, email }) => {
   }
 };
 
-export async function cancelCalendarInvite({ eventId, actId, dateISO, email }) {
-  console.log(`🗓️ (utils/twilioClient.js) cancelCalendarInvite called at`, new Date().toISOString(), {
-    eventId, actId, dateISO, email,
-  });
-
-  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+export async function cancelCalendarInvite({ eventId, dateISO, email }) {
+  console.log("🗓️ cancelCalendarInvite called:", { eventId, dateISO, email });
+  const cal = google.calendar({ version: "v3", auth: oauth2Client });
   const calendarId = "primary";
 
-  if (eventId) {
-    return calendar.events.patch({
+  // 🧩 Shared ID fallback
+  const sharedId = eventId || makePersonalEventId({ email, dateISO });
+
+  try {
+    await cal.events.patch({
       calendarId,
-      eventId,
-      requestBody: { status: "cancelled"}, // cancels & notifies
+      eventId: sharedId,
+      requestBody: { status: "cancelled" },
       sendUpdates: "all",
     });
+    console.log("✅ Cancelled shared calendar event:", sharedId);
+  } catch (err) {
+    console.warn("⚠️ Shared event not found for cancel:", sharedId, err.message);
   }
-
-  // Otherwise find the per-musician enquiry event for that day + act
-  if (!actId || !dateISO || !email) return null;
-
-  const dayStart = new Date(`${dateISO}T00:00:00.000Z`).toISOString();
-  const dayEnd   = new Date(`${dateISO}T23:59:59.000Z`).toISOString();
-
-  const { data } = await calendar.events.list({
-    calendarId,
-    timeMin: dayStart,
-    timeMax: dayEnd,
-    singleEvents: true,
-    q: "TSC: Enquiry",
-    maxResults: 100,
-  });
-
-  const items = data.items || [];
-  const target = items.find(ev => {
-    const priv = ev.extendedProperties?.private || {};
-    const matchesPriv = String(priv.actId||"") === String(actId)
-                     && String(priv.dateISO||"").slice(0,10) === String(dateISO).slice(0,10);
-    const hasThisAttendee = (ev.attendees||[]).some(a => (a.email||"").toLowerCase() === String(email).toLowerCase());
-    return matchesPriv && hasThisAttendee;
-  });
-
-  if (!target) return null;
-
-  return calendar.events.patch({
-    calendarId,
-    eventId: target.id,
-    requestBody: { status: "cancelled" },
-    sendUpdates: "all",
-    
-    
-  }
-);
-  console.log("✅ Google Calendar event cancelled:", target?.summary || eventId);
 }

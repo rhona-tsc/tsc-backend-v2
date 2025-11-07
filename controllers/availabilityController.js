@@ -1693,17 +1693,34 @@ if (global.availabilityNotify) {
 if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
   console.log("🚫 UNAVAILABLE reply received via WhatsApp");
 
-  await AvailabilityModel.updateOne(
-    { _id: updated._id },
-    {
-      $set: {
-        status: "unavailable",
-        reply: "unavailable",
-        repliedAt: new Date(),
-        calendarStatus: "cancelled",
-      },
-    }
-  );
+await AvailabilityModel.updateMany(
+  {
+    musicianEmail: emailForInvite.toLowerCase(),
+    dateISO: updated.dateISO,
+  },
+  {
+    $set: {
+      status: "unavailable",
+      reply: "unavailable",
+      repliedAt: new Date(),
+      calendarStatus: "cancelled",
+    },
+  }
+);
+console.log(
+  `🚫 Marked all enquiries for ${emailForInvite} on ${updated.dateISO} as unavailable`
+);
+
+// Then cancel the shared event
+try {
+  await cancelCalendarInvite({
+    eventId: updated.calendarEventId,
+    dateISO: updated.dateISO,
+    email: emailForInvite,
+  });
+} catch (err) {
+  console.error("❌ Failed to cancel shared event:", err.message);
+}
 // 🗓️ Cancel calendar invite on NO / UNAVAILABLE if eventId not found yet
 try {
   const { cancelCalendarInvite } = await import("./googleController.js");
