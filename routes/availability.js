@@ -350,14 +350,14 @@ try {
     userId,
   });
 
-  await triggerAvailabilityRequest({
-    actId,
-    date: dateISO,
-    address,
-    formattedAddress: address,
-    clientEmail: safeEmail,
-    userId,
-  });
+ await triggerAvailabilityRequest({
+  actId,
+  dateISO,       
+  address,
+  formattedAddress: address,
+  clientEmail: safeEmail,
+  userId,
+});
 
   console.log("✅ Availability request triggered successfully");
 } catch (whErr) {
