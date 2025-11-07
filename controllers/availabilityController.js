@@ -405,24 +405,38 @@ if (skipIfUnavailable) {
     console.log(`💾 Fallback inherited fee from act data: £${inheritedFee}`);
   }
 
-  // ✅ Get already-contacted or unavailable numbers for this date
+// 🧹 Exclude lead vocalist’s phone/email from the existing set
+const leadMember = act.lineups
+  ?.flatMap(l => l.bandMembers || [])
+  ?.find(m => m.isEssential || /lead/i.test(m.instrument || ""));
+
+const leadPhone = (leadMember?.phone || leadMember?.phoneNumber || "").replace(/\s+/g, "");
+const leadEmail = (leadMember?.email || "").toLowerCase();
+
+// ✅ Get already-contacted or unavailable numbers for this date + location
 const existingPhonesAgg = await AvailabilityModel.aggregate([
   {
     $match: {
       actId,
       dateISO,
+      formattedAddress: formattedAddress || "TBC",
       reply: { $in: ["yes", "unavailable"] },
     },
   },
-  {
-    $group: {
-      _id: "$phone",
-    },
-  },
+  { $group: { _id: "$phone" } },
 ]);
 
-const existingPhones = existingPhonesAgg.map((p) => p._id).filter(Boolean);
-const existingSet = new Set(existingPhones.map((p) => p.replace(/\s+/g, "")));
+// 🧩 Build deduplication set, excluding the lead by phone/email
+const existingPhones = existingPhonesAgg
+  .map(p => p._id)
+  .filter(p => {
+    const cleaned = (p || "").replace(/\s+/g, "");
+    return cleaned && cleaned !== leadPhone && cleaned !== leadEmail;
+  });
+
+const existingSet = new Set(existingPhones.map(p => p.replace(/\s+/g, "")));
+
+console.log(`🧮 Found ${existingSet.size} existing availability records for this act/date/location`);
 
   // 📨 Notify deputies (only if not already sent / not unavailable)
   for (const vocalist of vocalists) {
