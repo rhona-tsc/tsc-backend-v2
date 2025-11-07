@@ -1728,192 +1728,174 @@ if (global.availabilityNotify) {
         return;
       }
 
+ // 🚫 NO / UNAVAILABLE / NOLOC BRANCH
+        if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
+          console.log("🚫 UNAVAILABLE reply received via WhatsApp");
 
-/* ---------------------------------------------------------------------- */
-/* 🚫 NO / UNAVAILABLE / NOLOC BRANCH                                     */
-/* ---------------------------------------------------------------------- */
-if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
-  console.log("🚫 UNAVAILABLE reply received via WhatsApp");
+          await AvailabilityModel.updateMany(
+            {
+              musicianEmail: emailForInvite.toLowerCase(),
+              dateISO: updated.dateISO,
+            },
+            {
+              $set: {
+                status: "unavailable",
+                reply: "unavailable",
+                repliedAt: new Date(),
+                calendarStatus: "cancelled",
+              },
+            }
+          );
 
-await AvailabilityModel.updateMany(
-  {
-    musicianEmail: emailForInvite.toLowerCase(),
-    dateISO: updated.dateISO,
-  },
-  {
-    $set: {
-      status: "unavailable",
-      reply: "unavailable",
-      repliedAt: new Date(),
-      calendarStatus: "cancelled",
-    },
-  }
-);
-console.log(
-  `🚫 Marked all enquiries for ${emailForInvite} on ${updated.dateISO} as unavailable`
-);
+          console.log(
+            `🚫 Marked all enquiries for ${emailForInvite} on ${updated.dateISO} as unavailable`
+          );
 
-// Then cancel the shared event
-try {
-  await cancelCalendarInvite({
-    eventId: updated.calendarEventId,
-    dateISO: updated.dateISO,
-    email: emailForInvite,
-  });
-} catch (err) {
-  console.error("❌ Failed to cancel shared event:", err.message);
-}
-// 🗓️ Cancel calendar invite on NO / UNAVAILABLE if eventId not found yet
-try {
-  const { cancelCalendarInvite } = await import("./googleController.js");
+          // 🗓️ Cancel the shared event
+          try {
+            await cancelCalendarInvite({
+              eventId: updated.calendarEventId,
+              dateISO: updated.dateISO,
+              email: emailForInvite,
+            });
+          } catch (err) {
+            console.error("❌ Failed to cancel shared event:", err.message);
+          }
 
-  if (!updated?.calendarEventId && emailForInvite) {
-    const existing = await AvailabilityModel.findOne({
-      actId: act?._id || updated.actId,
-      dateISO: updated.dateISO,
-      phone: updated.phone,
-    })
-      .select("calendarEventId musicianEmail")
-      .lean();
+          // 🗑️ Clear any active badge
+          try {
+            const unset = {
+              [`availabilityBadges.${dateISO}`]: "",
+              [`availabilityBadges.${dateISO}_tbc`]: "",
+            };
+            await Act.updateOne({ _id: actId }, { $unset: unset });
+            console.log("🗑️ Cleared badge keys from Act:", dateISO);
+          } catch (err) {
+            console.error("❌ Failed to $unset badge keys:", err.message);
+          }
 
-    if (existing?.calendarEventId) {
-      console.log("🗓️ Found existing calendar event to cancel:", existing.calendarEventId);
-      await cancelCalendarInvite({
-        eventId: existing.calendarEventId,
-        actId: act?._id || updated.actId,
-        dateISO: updated.dateISO,
-        email: emailForInvite,
-      });
-      console.log("✅ Calendar invite cancelled successfully via fallback lookup");
-    } else {
-      console.warn(`⚠️ No calendarEventId found to cancel for ${musician?.firstName || updated?.musicianName || "musician"} on ${dateISO}`);
-    }
-  }
-} catch (err) {
-  console.error("❌ Fallback cancelCalendarInvite failed:", err.message);
-}
+          await sendWhatsAppText(
+            toE164,
+            "Thanks for letting us know — we've updated your availability."
+          );
 
-  if (updated?.calendarEventId && emailForInvite) {
-    try {
-      console.log("🗓️ Attempting cancelCalendarInvite with:", {
-  eventId: updated.calendarEventId,
-  actId: act?._id || updated.actId,
-  dateISO: updated.dateISO,
-  email: emailForInvite,
-});
-await cancelCalendarInvite({
-  eventId: updated.calendarEventId,
-  actId: act?._id || updated.actId,
-  dateISO: updated.dateISO,
-  email: emailForInvite,
-});      console.log("✅ Calendar invite cancelled successfully");
-    } catch (cancelErr) {
-      console.error("❌ Failed to cancel calendar invite:", cancelErr.message);
-    }
-  }
+          // ✅ Only trigger deputy notifications if YES / NOLOC / NOLOCATION
+          const shouldTriggerDeputies =
+            reply === "yes" || reply === "noloc" || reply === "nolocation";
 
+          if (act?._id && shouldTriggerDeputies) {
+            console.log(
+              "📢 Triggering deputy notifications for",
+              act?.tscName || act?.name,
+              "—",
+              dateISO
+            );
 
+            await notifyDeputies({
+              actId: act._id,
+              lineupId:
+                updated.lineupId || act.lineups?.[0]?._id || null,
+              dateISO,
+              formattedAddress:
+                updated.formattedAddress ||
+                act.formattedAddress ||
+                "TBC",
+              clientName: updated.clientName || "",
+              clientEmail: updated.clientEmail || "",
+              skipDuplicateCheck: true,
+              skipIfUnavailable: true, // ✅ add this flag
+            });
+          } else {
+            console.log(
+              "🚫 Skipping notifyDeputies — reply was 'unavailable' (avoid re-trigger)."
+            );
+          }
 
-  // 🗑️ Clear any active badge
-  try {
-    const unset = {
-      [`availabilityBadges.${dateISO}`]: "",
-      [`availabilityBadges.${dateISO}_tbc`]: "",
-    };
-    await Act.updateOne({ _id: actId }, { $unset: unset });
-    console.log("🗑️ Cleared badge keys from Act:", dateISO);
-  } catch (err) {
-    console.error("❌ Failed to $unset badge keys:", err.message);
-  }
+          // 📨 Cancellation email
+          try {
+            const { sendEmail } = await import("../utils/sendEmail.js");
+            const subject = `❌ ${
+              act?.tscName || act?.name
+            }: Diary Invite Cancelled for ${new Date(
+              dateISO
+            ).toLocaleDateString("en-GB")}`;
+            const html = `
+              <p><strong>${updated?.musicianName || musician?.firstName || "Lead Musician"}</strong>,</p>
+              <p>Your diary invite for <b>${act?.tscName || act?.name}</b> on <b>${new Date(
+              dateISO
+            ).toLocaleDateString("en-GB")}</b> has been cancelled.</p>
+              <p>If your availability changes, reply "Yes" to the WhatsApp message to re-confirm.</p>
+              <br/>
+              <p>– The Supreme Collective Team</p>
+            `;
 
-  console.log("🟦 About to sendWhatsaAppText using content SID:", process.env.TWILIO_ENQUIRY_SID);
-  await sendWhatsAppText(toE164, "Thanks for letting us know — we've updated your availability.");
+            const leadEmail = (emailForInvite || "").trim();
+            const recipients = [leadEmail].filter(
+              (e) => e && e.includes("@")
+            );
 
+            if (recipients.length > 0) {
+              console.log(
+                "📧 Preparing to send cancellation email:",
+                recipients
+              );
+              await sendEmail({
+                to: recipients,
+                bcc: ["hello@thesupremecollective.co.uk"],
+                subject,
+                html,
+              });
+              console.log(
+                `✅ Cancellation email sent successfully to: ${recipients.join(
+                  ", "
+                )}`
+              );
+            } else {
+              console.warn(
+                "⚠️ Skipping cancellation email — no valid recipients found."
+              );
+            }
+          } catch (emailErr) {
+            console.error(
+              "❌ Failed to send cancellation email:",
+              emailErr.message
+            );
+          }
 
-// ✅ Only trigger deputy availability checks if the reply was YES or NOLOCATION,
-//    NOT for "unavailable" — prevents re-sending messages to the same vocalist.
-const shouldTriggerDeputies =
-  reply === "yes" || reply === "noloc" || reply === "nolocation";
+          // 🔔 SSE clear badge
+          if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
+            const stillActive = await AvailabilityModel.exists({
+              actId,
+              dateISO,
+              reply: "yes",
+            });
 
-if (act?._id && shouldTriggerDeputies) {
-  console.log("📢 Triggering deputy notifications for", act?.tscName || act?.name, "—", dateISO);
-  await notifyDeputies({
-    actId: act._id,
-    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
-    dateISO,
-    formattedAddress: updated.formattedAddress || act.formattedAddress || "TBC",
-    clientName: updated.clientName || "",
-    clientEmail: updated.clientEmail || "",
-    skipDuplicateCheck: true,
-  });
-} else {
-  console.log("🚫 Skipping notifyDeputies — reply was 'unavailable' (avoid re-trigger).");
-}
-// 📨 Send cancellation email to lead
-try {
-  const { sendEmail } = await import("../utils/sendEmail.js");
-  const subject = `❌ ${act?.tscName || act?.name}: Diary Invite Cancelled for ${new Date(dateISO).toLocaleDateString("en-GB")}`;
-  const html = `
-    <p><strong>${updated?.musicianName || musician?.firstName || "Lead Musician"}</strong>,</p>
-    <p>Your diary invite for <b>${act?.tscName || act?.name}</b> on <b>${new Date(dateISO).toLocaleDateString("en-GB")}</b> has been cancelled.</p>
-    <p>If your availability changes, you can reply "Yes" to the WhatsApp message to re-confirm.</p>
-    <br/>
-    <p>– The Supreme Collective Team</p>
-  `;
+            if (!stillActive) {
+              global.availabilityNotify.badgeUpdated({
+                type: "availability_badge_updated",
+                actId,
+                actName: act?.tscName || act?.name,
+                dateISO,
+                badge: null,
+              });
+              console.log(
+                "📡 Cleared badge — no remaining active availabilities."
+              );
+            } else {
+              console.log(
+                "🟡 Skipped badge clear — deputies still marked available."
+              );
+            }
+          }
 
-  const leadEmail = (emailForInvite || "").trim();
-  const recipients = [leadEmail].filter(e => e && e.includes("@"));
+          return;
+        } // ← closes unavailable branch
 
-  if (recipients.length > 0) {
-    console.log("📧 Preparing to send cancellation email:", recipients);
-    await sendEmail({
-      to: recipients,
-      bcc: ["hello@thesupremecollective.co.uk"],
-      subject,
-      html,
-    });
-    console.log(`✅ Cancellation email sent successfully to: ${recipients.join(", ")}`);
-  } else {
-    console.warn("⚠️ Skipping cancellation email — no valid recipients found.");
-  }
-} catch (emailErr) {
-  console.error("❌ Failed to send cancellation email:", emailErr.message);
-}
-
-} else {
-    console.warn("⚠️ Skipping notifyDeputies — no act resolved");
-  }
-
-  // 🔔 SSE clear badge (only if not deputy)
-// 🔔 SSE clear badge (only if lead, and no other active availabilities)
-if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
-  const stillActive = await AvailabilityModel.exists({
-    actId,
-    dateISO,
-    reply: "yes",
-  });
-
-  if (!stillActive) {
-    global.availabilityNotify.badgeUpdated({
-      type: "availability_badge_updated",
-      actId,
-      actName: act?.tscName || act?.name,
-      dateISO,
-      badge: null,
-    });
-    console.log("📡 Cleared badge — no remaining active availabilities.");
-  } else {
-    console.log("🟡 Skipped badge clear — deputies still marked available.");
-  }
-}
-
-  return;
+      } catch (err) {
+        console.error("❌ Error in twilioInbound background task:", err);
       }
-     } catch (err) {
-      console.error("❌ Error in twilioInbound background task:", err);
-    }
-  })(); // ✅ invoke async IIFE here
-}); // ✅ closes setImmediate
+    })(); // ✅ closes async IIFE
+  }); // ✅ closes setImmediate
 }; // ✅ closes twilioInbound
 
 const INBOUND_SEEN = new Map();
