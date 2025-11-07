@@ -2488,6 +2488,33 @@ if (userId) {
     if (!actDoc) return { success: false, message: "Act not found" };
 
     let badge = await buildAvailabilityBadgeFromRows(actDoc, dateISO);
+    // 🧠 Recover client details from availability entries (ensures Good News email goes to real client)
+let clientEmail = "hello@thesupremecollective.co.uk";
+let clientName = "there";
+
+const availRows = await AvailabilityModel.find({ actId, dateISO }).lean();
+const anyWithClient = availRows.find(
+  (r) => r.clientEmail && r.clientEmail !== "hello@thesupremecollective.co.uk"
+);
+
+if (anyWithClient) {
+  clientEmail = anyWithClient.clientEmail;
+  clientName = anyWithClient.clientName || "there";
+  console.log("📧 Recovered client details from AvailabilityModel:", {
+    clientEmail,
+    clientName,
+  });
+} else if (clientEmailFromDB) {
+  clientEmail = clientEmailFromDB;
+  console.log("📧 Using clientEmailFromDB:", clientEmail);
+} else {
+  console.warn("⚠️ No client details found — using fallback email.");
+}
+
+// 🔄 Attach recovered details directly onto badge
+badge.clientEmail = badge.clientEmail || clientEmail;
+badge.clientName = badge.clientName || clientName;
+
 // 🧭 Get latest availability record to enrich badge
 const availabilityRecord = await AvailabilityModel.findOne({
   actId,
@@ -3018,15 +3045,17 @@ const clientFirstName =
     /* ✉️ Send email to client                                                */
     /* ---------------------------------------------------------------------- */
 
-    console.log("📧 About to send client email:", {
+ console.log("📧 About to send client email:", {
   isDeputy: badge.isDeputy,
-  clientEmail: availabilityRecord?.clientEmail,
-  clientName: availabilityRecord?.clientName,
+  clientEmail: badge.clientEmail,
+  clientName: badge.clientName,
 });
 
-    await sendClientEmail({
-      actId: String(actId),
-      subject: `Good news — ${actDoc.tscName || actDoc.name}'s lead vocalist is available`,
+await sendClientEmail({
+  actId: String(actId),
+  subject: `Good news — ${actDoc.tscName || actDoc.name}'s lead vocalist is available`,
+  to: badge.clientEmail,
+  name: badge.clientName,
       html: `
         <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
           <p>Hi ${clientFirstName},</p>
