@@ -1148,6 +1148,32 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       skipDuplicateCheck = false,
     } = body;
 
+    // 🧭 Enrich clientName/email if not provided but userId is available
+let resolvedClientName = clientName || "";
+let resolvedClientEmail = clientEmail || "";
+
+const userId =
+  body?.userId || body?.user?._id || body?.user?._id || body?.userIdFromToken;
+
+if (!resolvedClientEmail && userId) {
+  try {
+    const userDoc = await userModel
+      .findById(userId)
+      .select("firstName surname email")
+      .lean();
+
+    if (userDoc) {
+      resolvedClientName = `${userDoc.firstName || ""} ${
+        userDoc.surname || ""
+      }`.trim();
+      resolvedClientEmail = userDoc.email || "";
+      console.log(`📧 Enriched client details from userId: ${resolvedClientName} <${resolvedClientEmail}>`);
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to enrich client from userId:", err.message);
+  }
+}
+
     const dateISO = dISO || (date ? new Date(date).toISOString().slice(0, 10) : null);
     if (!actId || !dateISO) throw new Error("Missing actId or dateISO");
 
@@ -1356,8 +1382,8 @@ if (existing && !skipDuplicateCheck) {
       dateISO,
       formattedAddress: fullFormattedAddress,
       formattedDate,
-      clientName: clientName || "",
-      clientEmail: clientEmail || "",
+      clientName: resolvedClientName || "",
+clientEmail: resolvedClientEmail || "",
       actName: act?.tscName || act?.name || "",
       musicianName: `${targetMember.firstName || ""} ${
         targetMember.lastName || ""
