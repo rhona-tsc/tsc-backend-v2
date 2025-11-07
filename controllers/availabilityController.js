@@ -334,25 +334,26 @@ export async function notifyDeputies({
     return;
   }
 
-  // 🧠 Optional: if all vocalists already unavailable, bail out early
-  if (skipIfUnavailable) {
-    const allUnavailable = await AvailabilityModel.countDocuments({
-      actId,
-      dateISO,
-      reply: { $in: ["unavailable", "no"] },
-    });
+  // 🧠 Only skip if *all* deputies have already been asked or declined,
+// but allow first deputy round to trigger after a lead "unavailable"
+if (skipIfUnavailable) {
+  const unavailableCount = await AvailabilityModel.countDocuments({
+    actId,
+    dateISO,
+    reply: { $in: ["unavailable", "no"] },
+  });
 
-    const totalVocalists = await AvailabilityModel.countDocuments({
-      actId,
-      dateISO,
-      duties: { $regex: "vocal", $options: "i" },
-    });
+  const totalDeputies = await AvailabilityModel.countDocuments({
+    actId,
+    dateISO,
+    isDeputy: true,
+  });
 
-    if (totalVocalists > 0 && allUnavailable >= totalVocalists) {
-      console.log(`🚫 All vocalists marked unavailable for ${dateISO}. Skipping deputy messages.`);
-      return;
-    }
+  if (totalDeputies > 0 && unavailableCount >= totalDeputies) {
+    console.log(`🚫 All deputies already unavailable for ${dateISO}. Skipping further messages.`);
+    return;
   }
+}
 
   // 🎤 Identify all vocalists in this lineup
   const vocalists = lineup.bandMembers?.filter((m) =>
@@ -1833,7 +1834,7 @@ if (act?._id && shouldTriggerDeputies) {
     clientName: updated.clientName || "",
     clientEmail: updated.clientEmail || "",
     skipDuplicateCheck: true,
-    skipIfUnavailable: true, // ✅ deputies won't be re-asked
+    skipIfUnavailable: false 
   });
 } else if (isDeputy && reply === "unavailable") {
   console.log("📨 Deputy unavailable — trigger next deputy in queue");
