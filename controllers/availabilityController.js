@@ -406,12 +406,23 @@ if (skipIfUnavailable) {
   }
 
   // ✅ Get already-contacted or unavailable numbers for this date
-  const existingPhones = await AvailabilityModel.distinct("phone", {
-    actId,
-    dateISO,
-    reply: { $in: ["yes", "unavailable"] },
-  });
-  const existingSet = new Set(existingPhones.map((p) => p.replace(/\s+/g, "")));
+const existingPhonesAgg = await AvailabilityModel.aggregate([
+  {
+    $match: {
+      actId,
+      dateISO,
+      reply: { $in: ["yes", "unavailable"] },
+    },
+  },
+  {
+    $group: {
+      _id: "$phone",
+    },
+  },
+]);
+
+const existingPhones = existingPhonesAgg.map((p) => p._id).filter(Boolean);
+const existingSet = new Set(existingPhones.map((p) => p.replace(/\s+/g, "")));
 
   // 📨 Notify deputies (only if not already sent / not unavailable)
   for (const vocalist of vocalists) {
