@@ -316,9 +316,11 @@ export async function notifyDeputies({
   clientName,
   clientEmail,
   skipDuplicateCheck = false,
+  skipIfUnavailable = true, // 🆕 new flag
 }) {
   console.log(`📢 [notifyDeputies] START — act ${actId}, date ${dateISO}`);
 
+  // 🔹 Basic act lookup
   const act = await Act.findById(actId).lean();
   if (!act) {
     console.warn("⚠️ No act found for notifyDeputies()");
@@ -331,12 +333,37 @@ export async function notifyDeputies({
     return;
   }
 
-  // 🎤 Identify all vocalists
+  // 🧠 Optional: if all vocalists already unavailable, bail out early
+  if (skipIfUnavailable) {
+    const allUnavailable = await AvailabilityModel.countDocuments({
+      actId,
+      dateISO,
+      reply: { $in: ["unavailable", "no"] },
+    });
+
+    const totalVocalists = await AvailabilityModel.countDocuments({
+      actId,
+      dateISO,
+      duties: { $regex: "vocal", $options: "i" },
+    });
+
+    if (totalVocalists > 0 && allUnavailable >= totalVocalists) {
+      console.log(`🚫 All vocalists marked unavailable for ${dateISO}. Skipping deputy messages.`);
+      return; // ✅ prevents re-trigger when Kedesha replies unavailable
+    }
+  }
+
+  // 🎤 Identify all vocalists in this lineup
   const vocalists = lineup.bandMembers?.filter((m) =>
     ["vocal", "vocalist"].some((v) => (m.instrument || "").toLowerCase().includes(v))
   );
 
-  // 🧩 Find the lead vocalist (to inherit duties/role)
+  if (!Array.isArray(vocalists) || vocalists.length === 0) {
+    console.warn("⚠️ No vocalists found in lineup.");
+    return;
+  }
+
+  // 🧩 Find lead vocalist (to inherit duties/role)
   const leadVocalist =
     vocalists.find((v) => v.isEssential || /lead/i.test(v.instrument || "")) || vocalists[0];
 
@@ -349,6 +376,7 @@ export async function notifyDeputies({
       actId,
       dateISO,
       duties: { $regex: "lead", $options: "i" },
+      reply: { $nin: ["unavailable", "no"] }, // 🆕 don’t inherit fee from declined lead
     })
       .sort({ createdAt: -1 })
       .lean();
@@ -361,7 +389,7 @@ export async function notifyDeputies({
     console.warn("⚠️ Could not find existing lead availability record:", err.message);
   }
 
-  // 🧮 Fallbacks if we didn’t find the fee in AvailabilityModel
+  // 🧮 Fallback if we didn’t find the fee
   if (!inheritedFee) {
     inheritedFee = Number(leadVocalist?.fee) || 0;
 
@@ -375,28 +403,42 @@ export async function notifyDeputies({
     console.log(`💾 Fallback inherited fee from act data: £${inheritedFee}`);
   }
 
-  // 📨 Notify deputies
+  // 📨 Notify deputies (only if not already sent / not unavailable)
   for (const vocalist of vocalists) {
     for (const deputy of vocalist.deputies || []) {
       const cleanPhone = (deputy.phoneNumber || deputy.phone || "").replace(/\s+/g, "");
       if (!/^\+?\d{10,15}$/.test(cleanPhone)) continue;
 
-      console.log(`🎯 Sending deputy enquiry to ${deputy.firstName || deputy.name} — inherited fee £${inheritedFee}`);
+      // 🛡️ Skip if deputy already replied or marked unavailable
+      const existing = await AvailabilityModel.findOne({
+        actId,
+        dateISO,
+        "deputy.phone": cleanPhone,
+        reply: { $in: ["yes", "unavailable", "no"] },
+      }).lean();
 
-      // 🚀 Trigger WhatsApp using inherited fee
+      if (existing) {
+        console.log(`⏭️ Skipping ${deputy.firstName || deputy.name} — already replied (${existing.reply})`);
+        continue;
+      }
+
+      console.log(
+        `🎯 Sending deputy enquiry to ${deputy.firstName || deputy.name} — inherited fee £${inheritedFee}`
+      );
+
       await triggerAvailabilityRequest({
-  actId,
-  lineupId,
-  dateISO,
-  formattedAddress,
-  clientName,
-  clientEmail,
-  isDeputy: true,
-  deputy: { ...deputy, phone: cleanPhone },
-  inheritedFee,
-  inheritedDuties: leadDuties,
-  skipDuplicateCheck, // ✅ propagate flag
-});
+        actId,
+        lineupId,
+        dateISO,
+        formattedAddress,
+        clientName,
+        clientEmail,
+        isDeputy: true,
+        deputy: { ...deputy, phone: cleanPhone },
+        inheritedFee,
+        inheritedDuties: leadDuties,
+        skipDuplicateCheck, // ✅ propagate flag
+      });
     }
   }
 
@@ -1787,18 +1829,26 @@ await cancelCalendarInvite({
   console.log("🟦 About to sendWhatsaAppText using content SID:", process.env.TWILIO_ENQUIRY_SID);
   await sendWhatsAppText(toE164, "Thanks for letting us know — we've updated your availability.");
 
-  // ✅ Trigger deputy messages *after* lead confirmation & badge clear
- if (act?._id) {
+
+// ✅ Only trigger deputy availability checks if the reply was YES or NOLOCATION,
+//    NOT for "unavailable" — prevents re-sending messages to the same vocalist.
+const shouldTriggerDeputies =
+  reply === "yes" || reply === "noloc" || reply === "nolocation";
+
+if (act?._id && shouldTriggerDeputies) {
   console.log("📢 Triggering deputy notifications for", act?.tscName || act?.name, "—", dateISO);
-await notifyDeputies({
-  actId: act._id,
-  lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
-  dateISO,
-  formattedAddress: updated.formattedAddress || act.formattedAddress || "TBC",
-  clientName: updated.clientName || "",
-  clientEmail: updated.clientEmail || "",
-  skipDuplicateCheck: true, // ✅ ensures Twilio still sends cancellation follow-ups
-});
+  await notifyDeputies({
+    actId: act._id,
+    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+    dateISO,
+    formattedAddress: updated.formattedAddress || act.formattedAddress || "TBC",
+    clientName: updated.clientName || "",
+    clientEmail: updated.clientEmail || "",
+    skipDuplicateCheck: true,
+  });
+} else {
+  console.log("🚫 Skipping notifyDeputies — reply was 'unavailable' (avoid re-trigger).");
+}
 // 📨 Send cancellation email to lead
 try {
   const { sendEmail } = await import("../utils/sendEmail.js");
