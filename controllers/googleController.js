@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { hashBase36 } from "../utils/hash.js";
 import AvailabilityModel from '../models/availabilityModel.js';
 import { toE164 } from '../utils/twilioClient.js';
+import crypto from "crypto";
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
@@ -21,13 +22,24 @@ function cleanPrivate(obj) {
   return cleaned;
 }
 
+
 function makePersonalEventId({ email, dateISO }) {
   if (!email || !dateISO)
     throw new Error("makePersonalEventId requires email and dateISO");
-  const normEmail = email.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  // Normalize and trim the email for readability (first 10–15 chars)
+  const normEmail = email.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 15);
   const normDate = dateISO.replace(/-/g, "");
-  // 👇 shared per vocalist/date
-  return `tsc_${normEmail}_${normDate}`;
+
+  // Add a short hash to guarantee uniqueness and meet Google ID rules
+  const hash = crypto
+    .createHash("md5")
+    .update(email + dateISO)
+    .digest("hex")
+    .slice(0, 6);
+
+  // ✅ Google-safe eventId: alphanumeric, under 64 chars, deterministic per email+date
+  return `tsc_${normEmail}_${hash}_${normDate}`;
 }
 
 export const oauth2Client = new google.auth.OAuth2(
