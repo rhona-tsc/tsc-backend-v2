@@ -142,15 +142,32 @@ export function formatNiceDate(dateISO) {
  * Send a client-facing email about act availability.
  * Falls back to hello@thesupremecollective.co.uk if no client email found.
  */
-export async function sendClientEmail({ actId, subject, html }) {
+export async function sendClientEmail({ actId, to, name, subject, html }) {
   try {
     const act = await Act.findById(actId).lean();
+
+    // 🧠 Priority order:
+    // 1️⃣ explicitly provided `to` (from badge/client)
+    // 2️⃣ act.contactEmail
+    // 3️⃣ NOTIFY_EMAIL (env var)
+    // 4️⃣ fallback (hello@)
     const recipient =
-      act?.contactEmail ||
+      (to && to !== "hello@thesupremecollective.co.uk") ? to :
+      (act?.contactEmail && act.contactEmail !== "hello@thesupremecollective.co.uk") ? act.contactEmail :
       process.env.NOTIFY_EMAIL ||
       "hello@thesupremecollective.co.uk";
 
-    console.log(`📧 Sending client availability email to ${recipient}...`);
+    console.log("📧 [sendClientEmail Debug]", {
+      providedTo: to,
+      resolvedRecipient: recipient,
+      actContactEmail: act?.contactEmail,
+      clientName: name,
+    });
+
+    if (!recipient || recipient === "hello@thesupremecollective.co.uk") {
+      console.warn("⚠️ No valid client recipient found, skipping sendEmail");
+      return { success: false, skipped: true };
+    }
 
     await sendEmail({
       to: recipient,
@@ -159,6 +176,7 @@ export async function sendClientEmail({ actId, subject, html }) {
       html,
     });
 
+    console.log(`✅ Client availability email successfully sent to ${recipient}`);
     return { success: true };
   } catch (err) {
     console.error("❌ sendClientEmail failed:", err.message);
