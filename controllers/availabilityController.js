@@ -146,11 +146,6 @@ export async function sendClientEmail({ actId, to, name, subject, html }) {
   try {
     const act = await Act.findById(actId).lean();
 
-    // 🧠 Priority order:
-    // 1️⃣ explicitly provided `to` (from badge/client)
-    // 2️⃣ act.contactEmail
-    // 3️⃣ NOTIFY_EMAIL (env var)
-    // 4️⃣ fallback (hello@)
     const recipient =
       (to && to !== "hello@thesupremecollective.co.uk") ? to :
       (act?.contactEmail && act.contactEmail !== "hello@thesupremecollective.co.uk") ? act.contactEmail :
@@ -169,12 +164,13 @@ export async function sendClientEmail({ actId, to, name, subject, html }) {
       return { success: false, skipped: true };
     }
 
-    await sendEmail({
-      to: recipient,
-      bcc: "hello@thesupremecollective.co.uk",
+    // ✅ Correct positional call
+    await sendEmail(
+      recipient,
       subject,
       html,
-    });
+      "hello@thesupremecollective.co.uk"
+    );
 
     console.log(`✅ Client availability email successfully sent to ${recipient}`);
     return { success: true };
