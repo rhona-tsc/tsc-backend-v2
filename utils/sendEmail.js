@@ -1,61 +1,48 @@
-import nodemailer from "nodemailer";
+import Act from "../models/actModel.js";
+import { sendEmail } from "../utils/sendEmail.js"; // adjust import if needed
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS,
-  },
-});
-
-/**
- * Send an email using the configured transporter
- * @param {string|string[]} to - Recipient email(s)
- * @param {string} subject - Email subject
- * @param {string} html - HTML content of the email
- * @param {Array} attachments - Optional array of attachments
- */
-const sendEmail = async (to, subject, html, bcc, attachments = []) => {
+export async function sendClientEmail({ actId, subject, html, to, clientEmail, bcc }) {
   try {
-    // 🧹 Defensive coercion to prevent `.includes` TypeError
-    const safeTo = Array.isArray(to)
-      ? to
-      : typeof to === "string"
-      ? [to]
-      : [];
+    const act = await Act.findById(actId).lean();
 
-    const safeBcc = Array.isArray(bcc)
-      ? bcc
-      : typeof bcc === "string"
-      ? [bcc]
-      : [];
+    // ✅ Resolve recipient hierarchy
+    const recipient =
+      to ||
+      clientEmail ||
+      act?.contactEmail ||
+      process.env.NOTIFY_EMAIL ||
+      "hello@thesupremecollective.co.uk";
 
-    // Filter out invalid addresses
-    const recipients = safeTo.filter(e => typeof e === "string" && e.includes("@"));
-    const bccList = safeBcc.filter(e => typeof e === "string" && e.includes("@"));
-
-    if (recipients.length === 0 && bccList.length === 0) {
-      console.warn("⚠️ No valid email recipients found. Skipping sendEmail.");
-      return { success: false, error: "No valid recipients" };
+    // ✅ Defensive validation
+    if (!recipient || typeof recipient !== "string" || !recipient.includes("@")) {
+      console.warn("⚠️ No valid recipient email found — skipping sendEmail.");
+      return { success: false, reason: "invalid_recipient" };
     }
 
-    const mailOptions = {
-      from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
-      to: recipients,
-      bcc: bccList,
+    console.log("📧 [sendClientEmail Debug]", {
+      actId,
+      providedTo: to,
+      resolvedRecipient: recipient,
+      actContactEmail: act?.contactEmail,
+    });
+
+    // ✅ Correct call signature
+    const result = await sendEmail(
+      recipient,
       subject,
       html,
-      attachments,
-    };
+      bcc || "hello@thesupremecollective.co.uk"
+    );
 
-    await transporter.sendMail(mailOptions);
-    console.log(`✅ Email sent to ${recipients.join(", ")}`);
-    return { success: true };
+    if (result.success) {
+      console.log(`✅ Client email sent to ${recipient}`);
+      return { success: true, to: recipient };
+    } else {
+      console.warn("⚠️ sendEmail returned failure:", result.error);
+      return { success: false, error: result.error };
+    }
   } catch (err) {
-    console.error("❌ Email send failed:", err);
-    return { success: false, error: err };
+    console.error("❌ sendClientEmail failed:", err.message);
+    return { success: false, error: err.message };
   }
-};
-
-export default sendEmail;
-export { sendEmail };
+}
