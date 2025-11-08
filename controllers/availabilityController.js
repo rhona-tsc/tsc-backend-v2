@@ -2464,6 +2464,12 @@ export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO,
   console.log(
     `🟢 (availabilityController.js) rebuildAndApplyAvailabilityBadge START at ${new Date().toISOString()}`
   );
+
+  console.log("📨 Input snapshot:", {
+   reqType: typeof reqOrActId,
+   body: typeof reqOrActId === "object" ? reqOrActId.body : null,
+   maybeDateISO,
+ });
 console.log(
   "🎯 [rebuildAndApplyAvailabilityBadge] called with:",
   typeof reqOrActId === "object" && reqOrActId.body ? reqOrActId.body : reqOrActId
@@ -2526,10 +2532,14 @@ const availRows = await AvailabilityModel.find({ actId, dateISO }).lean();
 const anyWithClient = availRows.find(
   (r) => r.clientEmail && r.clientEmail !== "hello@thesupremecollective.co.uk"
 );
+ console.log("📊 AvailabilityModel rows found:", availRows.length);
+ console.log("📊 Example row client fields:", availRows[0]?.clientEmail, availRows[0]?.clientName);
 
 if (anyWithClient) {
   clientEmail = anyWithClient.clientEmail;
   clientName = anyWithClient.clientName || "there";
+     console.log("✅ Recovered client details from DB:", { clientEmail, clientName });
+
   console.log("📧 Recovered client details from AvailabilityModel:", {
     clientEmail,
     clientName,
@@ -2537,6 +2547,8 @@ if (anyWithClient) {
 } else if (clientEmailFromDB) {
   clientEmail = clientEmailFromDB;
   console.log("📧 Using clientEmailFromDB:", clientEmail);
+     console.log("✅ Using clientEmailFromDB fallback:", clientEmailFromDB);
+
 } else {
   console.warn("⚠️ No client details found — using fallback email.");
 }

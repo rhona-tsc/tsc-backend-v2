@@ -295,6 +295,7 @@ router.patch("/act/:id/increment-shortlist", async (req, res) => {
 // ✅ Always prefer DB lookup if userId is provided
 let email = clientEmail;
 let name = clientName;
+ console.log("📥 Incoming shortlist payload:", { userId, clientEmail, clientName });
 
 if (userId) {
   try {
@@ -302,6 +303,7 @@ if (userId) {
     if (user) {
       email = user.email || email || "hello@thesupremecollective.co.uk";
       name = user.firstName || name || "there";
+      console.log("📧 Enriched from DB →", { name, email });
       console.log(`📧 Enriched from DB: ${name} <${email}>`);
     } else {
       console.warn(`⚠️ No user found for ID: ${userId}`);
@@ -310,6 +312,14 @@ if (userId) {
     console.warn("⚠️ Failed to enrich user from DB:", err.message);
   }
 }
+console.log("📦 Final shortlist values before triggerAvailabilityRequest:", {
+   actId: req.params.id,
+   date: req.body.selectedDate,
+   address: req.body.selectedAddress,
+   userId,
+   email,
+   name,
+ });
 
   if (!email) {
     console.warn("⚠️ Missing client email for shortlist increment, using fallback");
@@ -342,12 +352,15 @@ try {
   const dateISO = selectedDate || new Date().toISOString().slice(0, 10);
   const address = selectedAddress || "TBC";
 
-  console.log("📤 Triggering WhatsApp availability request with:", {
-    actId,
-    dateISO,
-    address,
-    userId,
-  });
+console.log("📤 Triggering WhatsApp availability request with enriched client data:", {
+     actId,
+     dateISO,
+     address,
+     userId,
+     clientEmail: email,
+     clientName: name,
+   });
+
 
  await triggerAvailabilityRequest({
   actId,
