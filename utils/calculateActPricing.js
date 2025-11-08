@@ -917,10 +917,16 @@ if (isTestAct) {
       if (!postCode || !destination) continue;
 
       const { outbound, returnTrip } = await getTravelV2(postCode, destination, selectedDate);
-      if (!outbound || !returnTrip) continue;
-
-      const totalDistanceMiles = (outbound.distance.value + returnTrip.distance.value) / 1609.34;
-      const totalDurationHours = (outbound.duration.value + returnTrip.duration.value) / 3600;
+if (!outbound) {
+  console.warn(`⚠️ No outbound route for ${m.firstName} (${postCode} → ${destination})`);
+  continue;
+}
+const totalDistanceMiles =
+  ((outbound.distance?.value || 0) + (returnTrip?.distance?.value || outbound.distance?.value || 0)) /
+  1609.34;
+const totalDurationHours =
+  ((outbound.duration?.value || 0) + (returnTrip?.duration?.value || outbound.duration?.value || 0)) /
+  3600;     
       const fuelFee = totalDistanceMiles * 0.56;
       const timeFee = totalDurationHours * 13.23;
       const lateFee = (returnTrip.duration.value / 3600) > 1 ? 136 : 0;

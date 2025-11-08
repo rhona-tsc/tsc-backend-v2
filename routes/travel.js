@@ -1,14 +1,13 @@
-// frontend/src/pages/utils/travelV2.js
-// Single, hardened helper used by the store + admin to fetch travel data
-// Forces an ABSOLUTE backend base so calls never hit the Netlify origin.
-
 export default async function getTravelV2(origin, destination, dateISO) {
+
+  if (!origin || !destination || destination === "TBC") {
+  console.warn("[travelV2] Skipping travel calc: missing or TBC destination");
+  return { outbound: null, returnTrip: null, miles: 0, raw: {} };
+}
   const startTime = performance.now();
-  
 
   const BASE_RAW = "https://tsc-backend-v2.onrender.com";
   const BASE = String(BASE_RAW || "").replace(/\/+$/, "");
-
 
   const qs =
     `origin=${encodeURIComponent(origin || "")}` +
@@ -25,17 +24,15 @@ export default async function getTravelV2(origin, destination, dateISO) {
     try {
       data = text ? JSON.parse(text) : {};
     } catch {
-    
       throw new Error("[travelV2] Non-JSON response");
     }
 
     if (!res.ok) {
       const msg = data?.message || data?.error || text || `HTTP ${res.status}`;
-   
       throw new Error(`[travelV2] ${res.status} ${msg}`);
     }
 
-    // Normalize both the **new** shape and the Google Matrix legacy shape
+    // ✅ Normalize both new & legacy shapes
     const firstEl = data?.rows?.[0]?.elements?.[0];
     const outbound =
       data?.outbound ||
@@ -53,9 +50,11 @@ export default async function getTravelV2(origin, destination, dateISO) {
       1609.34;
 
     const durationMs = (performance.now() - startTime).toFixed(0);
- 
+    console.log(`🧭 [travelV2] Success ${miles.toFixed(1)}mi in ${durationMs}ms`);
 
     return { outbound, returnTrip, miles, raw: data };
   } catch (err) {
-  }  throw new Error(`[travelV2] Fetch error: ${err.message || err}`);
+    console.warn("⚠️ [travelV2] Fetch failed:", err.message || err);
+    throw new Error(`[travelV2] Fetch error: ${err.message || err}`);
+  }
 }

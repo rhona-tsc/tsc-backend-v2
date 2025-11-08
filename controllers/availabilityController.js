@@ -2899,29 +2899,42 @@ if (!badge?.isDeputy || badge?.isLead) {
     /* 🪄 generateDescription (same as Act.jsx)                               */
     /* ---------------------------------------------------------------------- */
 // 🎯 Calculate travel-inclusive total using existing backend logic
+// 🎯 Calculate travel-inclusive total using smallest lineup as reference
 let travelTotal = "price TBC";
 try {
-const selectedAddress =
-  badge?.formattedAddress ||
-  availabilityRecord?.formattedAddress ||
-  badge?.address ||
-  actDoc?.formattedAddress ||
-  actDoc?.venueAddress ||
-  "TBC";
+  const selectedAddress =
+    badge?.formattedAddress ||
+    availabilityRecord?.formattedAddress ||
+    badge?.address ||
+    actDoc?.formattedAddress ||
+    actDoc?.venueAddress ||
+    "TBC";
+
   const selectedDate = badge?.dateISO || new Date().toISOString().slice(0, 10);
   const { county: selectedCounty } = countyFromAddress(selectedAddress);
 
-  const { total } = await calculateActPricing(
-    actDoc,
-    selectedCounty,
-    selectedAddress,
-    selectedDate,
-    lu
-  );
+  // pick the smallest lineup by band size
+  const smallestLineup =
+    (actDoc.lineups || [])
+      .map((l) => ({
+        ...l,
+        count: (l.bandMembers || []).filter((m) => m.isEssential).length,
+      }))
+      .sort((a, b) => a.count - b.count)[0] || null;
 
-  if (total && !isNaN(total)) {
-    const totalWithMargin = Math.round(Number(total) * 1.2);
-    travelTotal = `from £${totalWithMargin.toLocaleString("en-GB")}`;
+  if (smallestLineup) {
+    const { total } = await calculateActPricing(
+      actDoc,
+      selectedCounty,
+      selectedAddress,
+      selectedDate,
+      smallestLineup
+    );
+
+    if (total && !isNaN(total)) {
+      const totalWithMargin = Math.round(Number(total) * 1.2);
+      travelTotal = `from £${totalWithMargin.toLocaleString("en-GB")}`;
+    }
   }
 } catch (err) {
   console.warn("⚠️ Price calc failed:", err.message);
