@@ -337,23 +337,15 @@ if (userId) {
 
    // 🟢 Trigger WhatsApp availability request (non-blocking)
 try {
-  const {
-    selectedDate,
-    selectedAddress,
-    clientEmail,
-    userId
-  } = req.body || {};
-
+ const { selectedDate, selectedAddress } = req.body || {};
   const actId = req.params.id;
   const dateISO = selectedDate || new Date().toISOString().slice(0, 10);
   const address = selectedAddress || "TBC";
-  const safeEmail = clientEmail || "hello@thesupremecollective.co.uk";
 
   console.log("📤 Triggering WhatsApp availability request with:", {
     actId,
     dateISO,
     address,
-    safeEmail,
     userId,
   });
 
@@ -362,8 +354,9 @@ try {
   dateISO,       
   address,
   formattedAddress: address,
-  clientEmail: safeEmail,
-  userId,
+  clientEmail: email,
+ clientName: name,
+ userId,
 });
 
   console.log("✅ Availability request triggered successfully");

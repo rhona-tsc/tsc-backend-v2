@@ -1724,6 +1724,7 @@ if (updated?.calendarEventId && emailForInvite) {
     eventId: event?.id || event?.data?.id,
   });
 
+  
   // ✅ move this INSIDE the try
   await AvailabilityModel.updateOne(
     { _id: updated._id },
