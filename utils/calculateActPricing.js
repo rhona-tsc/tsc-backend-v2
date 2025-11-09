@@ -676,12 +676,12 @@ const getValidPostcode = (p) => {
 }
 
 const calculateActPricing = async (act, selectedCounty, selectedAddress, selectedDate, selectedLineup) => {
-  console.groupCollapsed("🧾 calculateActPricing Debug");
+console.log("🧾 calculateActPricing Debug — start");
   console.log("Inputs →", { actName: act?.tscName, selectedCounty, selectedAddress, selectedDate, selectedLineup });
 
   if (!act || !selectedLineup) {
     console.warn("⚠️ Missing act or lineup");
-    console.groupEnd();
+  //  console.groupEnd();
     return { total: 0, travelCalculated: false };
   }
 
@@ -890,7 +890,7 @@ if (isTestAct) {
   if (!travelCalculated && (!selectedAddress || !selectedDate)) {
     const totalPrice = Math.ceil(fee / 0.75);
         console.log("⚠️ No travel data → base + margin only", totalPrice);
-    console.groupEnd();
+ //   console.groupEnd();
 
     return { total: totalPrice, travelCalculated: false };
   }
@@ -916,6 +916,17 @@ console.log("📍 Travel route debug:", {
   lineup: smallestLineup?.lineupName || smallestLineup?.actSize || "Unknown lineup",
   date: selectedDate,
 });
+
+console.log("📍 TravelV2 route check:", {
+  musician: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
+  origin: postCode || "❌ MISSING",
+  destination: destination || "❌ MISSING",
+  act: act.tscName || act.name,
+  lineup: smallestLineup?.lineupName || smallestLineup?.actSize || "Unknown lineup",
+  date: selectedDate,
+});
+
+
       const { miles } = await getTravelV2(postCode, destination, selectedDate);
       const cost = (miles || 0) * Number(act.costPerMile) * 25;
             console.log(`🛣️ ${m.firstName} travel: ${miles} miles × £${act.costPerMile}/mi × 25 →`, cost);
@@ -959,7 +970,7 @@ const totalDurationHours =
   // Gross with 25% margin
   const totalPrice = Math.ceil((fee + travelFee) / 0.75);
  console.log("✅ Final:", { fee, travelFee, marginApplied: 0.25, totalPrice, travelCalculated });
-  console.groupEnd();
+ // console.groupEnd();
   return { total: totalPrice, travelCalculated };
 };
 
