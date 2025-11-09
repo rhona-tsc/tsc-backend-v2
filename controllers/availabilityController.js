@@ -2939,10 +2939,9 @@ try {
       smallestLineup
     );
 
-    if (total && !isNaN(total)) {
-      const totalWithMargin = Math.round(Number(total) * 1.2);
-      travelTotal = `from £${totalWithMargin.toLocaleString("en-GB")}`;
-    }
+   if (total && !isNaN(total)) {
+  travelTotal = `from £${Math.round(Number(total)).toLocaleString("en-GB")}`;
+}
   }
 } catch (err) {
   console.warn("⚠️ Price calc failed:", err.message);
@@ -3031,7 +3030,7 @@ const lineupQuotes = await Promise.all(
 
         if (total && !isNaN(total)) {
           const totalWithMargin = Math.round(Number(total) * 1.2);
-          travelTotal = `from £${totalWithMargin.toLocaleString("en-GB")}`;
+          travelTotal = `£${totalWithMargin.toLocaleString("en-GB")}`;
         } else {
           console.warn(`⚠️ No valid total for lineup ${name}`);
         }
