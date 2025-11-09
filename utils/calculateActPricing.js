@@ -645,6 +645,12 @@
   },
 ];
 
+// 🧭 Utility: extract valid postcode string
+const getValidPostcode = (p) => {
+  const m = String(p || "").toUpperCase().match(/[A-Z]{1,2}\d{1,2}[A-Z]?\s*\d[A-Z]{2}/);
+  return m ? m[0].replace(/\s+/g, "") : "";
+};
+
 
  async function getTravelV2(origin, destination, dateISO) {
   const BASE_RAW =
@@ -892,13 +898,24 @@ if (isTestAct) {
   // Cost-per-mile path
   if (!travelCalculated && Number(act.costPerMile) > 0) {
     for (const m of travelEligibleMembers) {
-      const postCode = m.postCode;
-      const destination =
-        typeof selectedAddress === "string"
-          ? selectedAddress
-          : selectedAddress?.postcode || selectedAddress?.address || "";
-      if (!postCode || !destination) continue;
+const postCode = getValidPostcode(m.postCode || m?.address || "");
+const destination =
+  typeof selectedAddress === "string"
+    ? selectedAddress
+    : selectedAddress?.postcode || selectedAddress?.address || "";
+if (!postCode || !destination) {
+  console.warn(`⚠️ Skipping travel for ${m.firstName}: missing origin or destination`, { postCode, destination });
+  continue;
+}      
 
+console.log("📍 Travel route debug:", {
+  musician: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
+  origin: postCode,
+  destination,
+  act: act.tscName || act.name,
+  lineup: smallestLineup?.lineupName || smallestLineup?.actSize || "Unknown lineup",
+  date: selectedDate,
+});
       const { miles } = await getTravelV2(postCode, destination, selectedDate);
       const cost = (miles || 0) * Number(act.costPerMile) * 25;
             console.log(`🛣️ ${m.firstName} travel: ${miles} miles × £${act.costPerMile}/mi × 25 →`, cost);
@@ -909,7 +926,7 @@ if (isTestAct) {
   } else if (!travelCalculated) {
     // MU rate path
     for (const m of travelEligibleMembers) {
-      const postCode = m.postCode;
+const postCode = getValidPostcode(m.postCode || m?.address || "");
       const destination =
         typeof selectedAddress === "string"
           ? selectedAddress
