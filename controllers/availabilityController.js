@@ -2583,12 +2583,12 @@ console.log("📍 Final badge address before saving:", badge.address);
 
     const key = `${dateISO}_${shortAddress}`;
 
-    /* ---------------------------------------------------------------------- */
-    /* 🧹 If no badge, clear existing for this key                            */
-    /* ---------------------------------------------------------------------- */
+  /* ---------------------------------------------------------------------- */
+/* 🧹 If no badge, clear existing for this key (with delayed null broadcast) */
+/* ---------------------------------------------------------------------- */
 if (!badge) {
   // 🧭 Wait briefly to allow deputy availability writes to complete
-  await new Promise(r => setTimeout(r, 600));
+  await new Promise((r) => setTimeout(r, 600));
 
   // 🔁 Recheck for active availabilities
   const stillActive = await AvailabilityModel.exists({
@@ -2598,26 +2598,33 @@ if (!badge) {
   });
 
   if (stillActive) {
-    console.log("🟡 Skipped badge clear — active 'yes' availabilities still present (after recheck)");
+    console.log(
+      "🟡 Skipped badge clear — active 'yes' availabilities still present (after recheck)"
+    );
     return { success: true, skipped: true };
   }
 
+  // 🧹 Remove old badge from DB
   await Act.updateOne(
     { _id: actId },
     { $unset: { [`availabilityBadges.${key}`]: "" } }
   );
   console.log(`🧹 Cleared availability badge for ${actDoc.tscName || actDoc.name}`);
 
+  // 🚦 Delay the SSE null broadcast to avoid race with rebuild
   if (global.availabilityNotify?.badgeUpdated) {
-    global.availabilityNotify.badgeUpdated({
-      type: "availability_badge_updated",
-      actId: String(actId),
-      actName: actDoc?.tscName || actDoc?.name,
-      dateISO,
-      badge: null,
-    });
-    console.log("📡 SSE broadcasted: availability_badge_updated");
+    setTimeout(() => {
+      global.availabilityNotify.badgeUpdated({
+        type: "availability_badge_updated",
+        actId: String(actId),
+        actName: actDoc?.tscName || actDoc?.name,
+        dateISO,
+        badge: null,
+      });
+      console.log("📡 SSE broadcasted: availability_badge_updated (delayed null)");
+    }, 1000); // 1 second delay ensures rebuild has time to apply new badge
   }
+
   console.log("🎯 [rebuildAndApplyAvailabilityBadge] returning badge:", badge);
   return { success: true, cleared: true };
 }
