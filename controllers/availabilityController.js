@@ -1394,6 +1394,8 @@ if (existing && !skipDuplicateCheck) {
       musicianId: targetMember._id || null,
       phone,
       dateISO,
+        address: fullFormattedAddress,              // ✅ added
+
       formattedAddress: fullFormattedAddress,
       formattedDate,
       clientName: resolvedClientName || "",
@@ -2564,10 +2566,16 @@ const availabilityRecord = await AvailabilityModel.findOne({
 }).sort({ createdAt: -1 }).lean();
 
 if (availabilityRecord) {
-  badge.formattedAddress = availabilityRecord.formattedAddress || badge.formattedAddress;
-  badge.clientName = availabilityRecord.clientName || badge.clientName;
+badge.address =
+  badge.formattedAddress ||
+  availabilityRecord?.formattedAddress ||
+  badge.address ||
+  actDoc?.formattedAddress ||
+  actDoc?.venueAddress ||
+  "TBC";  badge.clientName = availabilityRecord.clientName || badge.clientName;
   badge.clientEmail = availabilityRecord.clientEmail || badge.clientEmail || clientEmailFromDB;
 }
+console.log("📍 Final badge address before saving:", badge.address);
     // 🧮 Build unique key for this act/date/location combo
     const shortAddress = (badge?.address || actDoc?.formattedAddress || "unknown")
       .replace(/\W+/g, "_")
