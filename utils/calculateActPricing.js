@@ -967,11 +967,17 @@ const totalDurationHours =
     travelCalculated = true;
   }
 
-  // Gross with 25% margin
-  const totalPrice = Math.ceil((fee + travelFee) / 0.75);
- console.log("✅ Final:", { fee, travelFee, marginApplied: 0.25, totalPrice, travelCalculated });
- // console.groupEnd();
-  return { total: totalPrice, travelCalculated };
+// ✅ Apply single 33% uplift only (total, not double)
+const totalPrice = Math.round((fee + travelFee) * 1.33);
+console.log("✅ Final (single uplift 33%)", {
+  fee,
+  travelFee,
+  marginApplied: "33%",
+  totalPrice,
+  travelCalculated,
+});
+return { total: totalPrice, travelCalculated };
+
 };
 
 export default calculateActPricing;

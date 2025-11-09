@@ -3029,8 +3029,7 @@ const lineupQuotes = await Promise.all(
         });
 
         if (total && !isNaN(total)) {
-          const totalWithMargin = Math.round(Number(total) * 1.2);
-          travelTotal = `£${totalWithMargin.toLocaleString("en-GB")}`;
+          travelTotal = `£${Math.round(Number(total)).toLocaleString("en-GB")}`;
         } else {
           console.warn(`⚠️ No valid total for lineup ${name}`);
         }
