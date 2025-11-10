@@ -2493,38 +2493,64 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
           return p && replyByPhone.get(p)?.reply === "yes";
         });
 
-        if (yesDeps.length > 0) {
-          // sort by last reply timestamp if available
-          const activeDeputy = yesDeps.sort(
-            (a, b) =>
-              new Date(b.repliedAt || b.updatedAt || 0) -
-              new Date(a.repliedAt || a.updatedAt || 0)
-          )[0];
+       // 🚫 Lead said NO/UNAVAILABLE → pick most recent deputy YES
+if (!leadReply || leadReply === "no" || leadReply === "unavailable") {
+  const deputies = Array.isArray(m.deputies) ? m.deputies : [];
+  const yesDeps = deputies.filter((d) => {
+    const p = normalizePhoneE164(d.phoneNumber || d.phone || "");
+    return p && replyByPhone.get(p)?.reply === "yes";
+  });
 
-          const bits = await getDeputyDisplayBits(activeDeputy);
-          const badgeObj = {
-            active: true,
-            dateISO,
-            isDeputy: true,
-            inPromo: false,
-            vocalistName: `${m.firstName || ""}`.trim(),
-            musicianId: bits?.resolvedMusicianId || bits?.musicianId || "",
-            photoUrl: bits?.photoUrl || "",
-            profileUrl: bits?.profileUrl || "",
-            address: formattedAddress,
-            setAt: new Date(),
-            deputies: yesDeps.map((d) => ({
-              isDeputy: true,
-              name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-              musicianId: d.musicianId || "",
-              photoUrl: d.photoUrl || "",
-              profileUrl: d.profileUrl || "",
-              setAt: new Date(),
-            })),
-          };
+  if (yesDeps.length > 0) {
+    // sort by most recent reply timestamp
+    const activeDeputy = yesDeps.sort(
+      (a, b) =>
+        new Date(b.repliedAt || b.updatedAt || 0) -
+        new Date(a.repliedAt || a.updatedAt || 0)
+    )[0];
 
-          console.log("🎤 Built deputy badge (YES replies):", badgeObj);
-          return badgeObj;
+    const activeBits = await getDeputyDisplayBits(activeDeputy);
+
+    // 🔁 Enrich *all* YES deputies with photo/profile
+    const enrichedDeputies = await Promise.all(
+      yesDeps.map(async (d) => {
+        const depBits = await getDeputyDisplayBits(d);
+        return {
+          isDeputy: true,
+          name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
+          musicianId:
+            depBits?.resolvedMusicianId || depBits?.musicianId || d.musicianId || "",
+          photoUrl: depBits?.photoUrl || "",
+          profileUrl: depBits?.profileUrl || "",
+          setAt: new Date(),
+        };
+      })
+    );
+
+    const badgeObj = {
+      active: true,
+      dateISO,
+      isDeputy: true,
+      inPromo: false,
+      // ✅ show deputy’s real name, not the lead’s
+      vocalistName:
+        `${activeDeputy.firstName || ""} ${activeDeputy.lastName || ""}`.trim(),
+      musicianId:
+        activeBits?.resolvedMusicianId ||
+        activeBits?.musicianId ||
+        activeDeputy.musicianId ||
+        "",
+      photoUrl: activeBits?.photoUrl || "",
+      profileUrl: activeBits?.profileUrl || "",
+      address: formattedAddress,
+      setAt: new Date(),
+      deputies: enrichedDeputies,
+    };
+
+    console.log("🎤 Built deputy badge (YES replies):", badgeObj);
+    return badgeObj;
+  }
+
         }
       }
     }
@@ -2629,6 +2655,14 @@ let clientEmail = "hello@thesupremecollective.co.uk";
 let clientName = "there";
 
 const availRows = await AvailabilityModel.find({ actId, dateISO }).lean();
+// 🧩 Ensure no badge builds if lead is unavailable or all leads said "no"
+const leadRows = availRows.filter(r => !r.isDeputy);
+const anyLeadYes = leadRows.some(r => r.reply === "yes");
+if (!anyLeadYes) {
+  console.log(`⏭️ Skipping badge build — no lead 'yes' replies for ${dateISO}`);
+  return null; // ✅ Forces rebuildAndApplyAvailabilityBadge() to clear
+}
+
 const anyWithClient = availRows.find(
   (r) => r.clientEmail && r.clientEmail !== "hello@thesupremecollective.co.uk"
 );
@@ -2839,8 +2873,6 @@ if (badge?.isDeputy && !badge?.photoUrl) {
       { $set: { [`availabilityBadges.${key}`]: badge } }
     );
 console.log(`✅ Applied availability badge for ${actDoc.tscName}:`, badge);
-
-
 
 // 🗓️ NEW — send calendar invite to lead vocalist
 try {
@@ -3317,7 +3349,12 @@ await sendClientEmail({
       process.env.FRONTEND_URL ||
       "https://meek-biscotti-8d5020.netlify.app/";
 
+    const depEmailProfileUrl = `${SITE}act/${actDoc._id}`;
+    const depEmailCartUrl = `${SITE}act/${actDoc._id}?date=${dateISO}&address=${encodeURIComponent(
+      badge?.address || actDoc?.formattedAddress || ""
+    )}`;
 
+  
     // ✅ Map PA & Lighting size
     const normKey = (s = "") =>
       s.toString().toLowerCase().replace(/[^a-z]/g, "");
@@ -3718,12 +3755,6 @@ const clientFirstName =
     console.warn("⚠️ sendClientEmail (deputy) failed:", e.message);
   }
 }
-
-console.log("🎯 Final badge flow complete:", {
-  isDeputy: badge.isDeputy,
-  clientEmail: badge.clientEmail,
-  hasDeputyEmailBlock: typeof sendClientEmail === "function",
-});
 
     return { success: true, updated: true, badge };
   } catch (err) {
