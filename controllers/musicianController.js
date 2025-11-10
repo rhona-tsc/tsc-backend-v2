@@ -866,10 +866,20 @@ try {
       });
     }
 
-    console.log("✅ Deputy registration complete.");
-    return res
-      .status(201)
-      .json({ success: true, message: "Deputy submitted for approval" });
+ console.log("✅ Deputy registration complete.");
+
+// ✅ Determine final saved musician reference (either updated or created)
+const finalMusician = newMusician?._id
+  ? await musicianModel.findById(newMusician._id)
+      .select("_id firstName lastName profilePicture status email")
+      .lean()
+  : null;
+
+return res.status(201).json({
+  success: true,
+  message: "Deputy submitted for approval",
+  musician: finalMusician,
+});
   } catch (err) {
     console.error("❌ Deputy registration error:", err);
     console.error("❌ Full error stack:", err.stack);
