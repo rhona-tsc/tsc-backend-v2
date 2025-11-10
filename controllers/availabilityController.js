@@ -2675,9 +2675,11 @@ badge.address =
 }
 console.log("📍 Final badge address before saving:", badge.address);
     // 🧮 Build unique key for this act/date/location combo
-    const shortAddress = (badge?.address || actDoc?.formattedAddress || "unknown")
-      .replace(/\W+/g, "_")
-      .toLowerCase();
+const shortAddress = (badge?.address || actDoc?.formattedAddress || "unknown")
+  .replace(/\b(united_kingdom|uk)\b/g, "")   // 🧽 remove trailing country name
+  .replace(/\W+/g, "_")
+  .replace(/^_|_$/g, "")
+  .toLowerCase();
 
     const key = `${dateISO}_${shortAddress}`;
 
@@ -3581,7 +3583,7 @@ const clientFirstName =
 
  await sendClientEmail({
   actId: String(actId),
-  subject: `Good news — ${actDoc.tscName || actDoc.name} is still available to perform with ${deputyName}`,
+  subject: `${deputyName} is raring to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
   to: badge.clientEmail,
   name: badge.clientName,
   html: `
@@ -3592,8 +3594,8 @@ const clientFirstName =
 
       <p>
         The band's regular lead vocalist isn’t available for your date, but we’re delighted to confirm that 
-        <strong>${deputyName}</strong> — one of our trusted deputy vocalists — is available to perform instead. 
-        They perform regularly with ${actDoc.tscName || actDoc.name} and are raring to seamlessly step in and deliver a 5-star performance for your big day.
+        <strong>${deputyName}</strong> — one of the band's trusted deputy vocalists — is available to perform instead. 
+        ${deputyName} performs regularly with ${actDoc.tscName || actDoc.name} and is ready to seamlessly step in and deliver a 5-star performance for your big day.
       </p>
 
       ${
