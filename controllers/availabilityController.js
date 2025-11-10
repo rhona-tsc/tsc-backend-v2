@@ -1327,20 +1327,57 @@ if (!resolvedClientEmail && userId) {
     );
     if (!phone) throw new Error("Missing phone");
 
-    // 🧮 Final Fee Logic
-    let finalFee;
+  // 🧮 Final Fee Logic
+let finalFee;
 
-    if (isDeputy && inheritedFee) {
-      // Deputies use inherited fee from lead
-      const parsed = parseFloat(
-        String(inheritedFee).replace(/[^\d.]/g, "")
-      );
-      finalFee = !isNaN(parsed) && parsed > 0 ? Math.round(parsed) : 0;
-      console.log(`🪙 Deputy inherited lead fee: £${finalFee}`);
-    } else {
-      // Leads and normal members use computed fee
-      finalFee = await feeForMember(targetMember);
+if (isDeputy && inheritedFee) {
+  // 🪙 Deputies inherit lead total INCLUDING travel fee
+  const parsed = parseFloat(String(inheritedFee).replace(/[^\d.]/g, "")) || 0;
+  let inheritedTotal = parsed;
+
+  // 🧭 If the inherited fee seems like a base-only rate (too low),
+  // recalc the travel fee for this act/date/location
+  if (inheritedTotal < 350) {
+    console.log("🧭 Inherited fee seems base-only — adding travel component for deputy");
+
+    const { county: selectedCounty } = countyFromAddress(fullFormattedAddress);
+    const selectedDate = dateISO;
+
+    // Compute travel fee same way as leads
+    let travelFee = 0;
+    let travelSource = "none";
+
+    if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
+      const raw = getCountyFeeValue(act.countyFees, selectedCounty);
+      const val = Number(raw);
+      if (Number.isFinite(val) && val > 0) {
+        travelFee = Math.ceil(val);
+        travelSource = "county";
+      }
     }
+
+    if (travelSource === "none") {
+      const computed = await computeMemberTravelFee({
+        act,
+        member: deputy,
+        selectedCounty,
+        selectedAddress: fullFormattedAddress,
+        selectedDate,
+      });
+      travelFee = Math.max(0, Math.ceil(Number(computed || 0)));
+      travelSource = "computed";
+    }
+
+    inheritedTotal += travelFee;
+    console.log("💷 Deputy travel applied:", { travelFee, travelSource, inheritedTotal });
+  }
+
+  finalFee = Math.round(inheritedTotal);
+  console.log(`🪙 Deputy inherited total (incl. travel): £${finalFee}`);
+} else {
+  // Leads and normal members use computed fee
+  finalFee = await feeForMember(targetMember);
+}
 
     console.log("🐛 triggerAvailabilityRequest progress checkpoint", {
       actId,
