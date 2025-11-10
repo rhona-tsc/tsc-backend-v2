@@ -2840,6 +2840,9 @@ if (badge?.isDeputy && !badge?.photoUrl) {
     );
 console.log(`✅ Applied availability badge for ${actDoc.tscName}:`, badge);
 
+await act.save();
+
+
 // 🗓️ NEW — send calendar invite to lead vocalist
 try {
   // ✅ Try to enrich badge with email via musicianId or phone
@@ -3716,6 +3719,12 @@ const clientFirstName =
     console.warn("⚠️ sendClientEmail (deputy) failed:", e.message);
   }
 }
+
+console.log("🎯 Final badge flow complete:", {
+  isDeputy: badge.isDeputy,
+  clientEmail: badge.clientEmail,
+  hasDeputyEmailBlock: typeof sendClientEmail === "function",
+});
 
     return { success: true, updated: true, badge };
   } catch (err) {
