@@ -2037,6 +2037,20 @@ if (act?._id && shouldTriggerDeputies) {
               );
             }
           }
+          // 🚫 Ensure lead badge stays cleared even if deputies respond later
+await Act.updateOne(
+  { _id: actId },
+  {
+    $unset: {
+      [`availabilityBadges.${dateISO}`]: "",
+      [`availabilityBadges.${dateISO}_tbc`]: "",
+    },
+    $set: {
+      [`availabilityBadgesMeta.${dateISO}.lockedByLeadUnavailable`]: true,
+    },
+  }
+);
+console.log("🔒 Lead marked UNAVAILABLE — badge locked for date:", dateISO);
 
           return;
         } // ← closes unavailable branch
@@ -2584,6 +2598,12 @@ if (userId) {
 
     const actDoc = await Act.findById(actId).lean();
     if (!actDoc) return { success: false, message: "Act not found" };
+
+    // 🚫 Skip rebuild if lead marked unavailable
+if (actDoc?.availabilityBadgesMeta?.[dateISO]?.lockedByLeadUnavailable) {
+  console.log(`⏭️ Skipping rebuild — lead unavailable lock active for ${dateISO}`);
+  return { success: true, skipped: true, reason: "lead_unavailable_lock" };
+}
 
     let badge = await buildAvailabilityBadgeFromRows(actDoc, dateISO);
     // 🧠 Recover client details from availability entries (ensures Good News email goes to real client)
