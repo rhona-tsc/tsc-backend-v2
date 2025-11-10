@@ -70,6 +70,7 @@ const ALLOWED_HOSTS = new Set([
   'meek-biscotti-8d5020.netlify.app', // preview site
   'tsc2025-admin-portal.netlify.app',
   'tsc-backend-v2.onrender.com',
+  'tscadmin.netlify.app', 
   'www.thesupremecollective.co.uk',
   'api.thesupremecollective.co.uk',
 ]);
