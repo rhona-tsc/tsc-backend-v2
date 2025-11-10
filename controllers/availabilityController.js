@@ -2840,7 +2840,6 @@ if (badge?.isDeputy && !badge?.photoUrl) {
     );
 console.log(`✅ Applied availability badge for ${actDoc.tscName}:`, badge);
 
-await act.save();
 
 
 // 🗓️ NEW — send calendar invite to lead vocalist
