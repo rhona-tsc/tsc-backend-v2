@@ -2649,6 +2649,11 @@ if (!activeLead) {
   return { success: true, skipped: true, reason: "no_active_lead" };
 }
 
+if (actDoc?.availabilityBadgesMeta?.[dateISO]?.lockedByLeadUnavailable) {
+  console.log(`⏭️ Skipping rebuild — lead unavailable lock active for ${dateISO}`);
+  return { success: true, skipped: true, reason: "lead_unavailable_lock" };
+}
+
     let badge = await buildAvailabilityBadgeFromRows(actDoc, dateISO);
     // 🧠 Recover client details from availability entries (ensures Good News email goes to real client)
 let clientEmail = "hello@thesupremecollective.co.uk";
@@ -3781,6 +3786,13 @@ export async function getAvailabilityBadge(req, res) {
     if (!act) {
       return res.status(404).json({ error: "Act not found" });
     }
+
+    // 🚫 Skip rebuild if lead marked unavailable
+const actDoc = await Act.findById(actId).lean();
+if (actDoc?.availabilityBadgesMeta?.[dateISO]?.lockedByLeadUnavailable) {
+  console.log(`⏭️ Skipping rebuild — lead unavailable lock active for ${dateISO}`);
+  return { success: true, skipped: true, reason: "lead_unavailable_lock" };
+}
 
     const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
     if (!badge) {
