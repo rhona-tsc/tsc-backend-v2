@@ -2426,9 +2426,33 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
         ? replyByPhone.get(leadPhone)?.reply || null
         : null;
 
-      // ✅ Lead said YES → lead badge
+       // ✅ Lead said YES → build lead badge and attach deputies if any
       if (leadReply === "yes") {
         const bits = await getDeputyDisplayBits(m);
+
+        // find deputies with YES replies
+        const deputies = Array.isArray(m.deputies) ? m.deputies : [];
+        const yesDeps = deputies.filter((d) => {
+          const p = normalizePhoneE164(d.phone || d.phoneNumber || "");
+          return p && replyByPhone.get(p)?.reply === "yes";
+        });
+
+        // map deputies into compact badge format
+        const deputyBadges = await Promise.all(
+          yesDeps.map(async (d) => {
+            const depBits = await getDeputyDisplayBits(d);
+            return {
+              isDeputy: true,
+              name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
+              vocalistName: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
+              musicianId: depBits?.resolvedMusicianId || depBits?.musicianId || "",
+              photoUrl: depBits?.photoUrl || "",
+              profileUrl: depBits?.profileUrl || "",
+              setAt: new Date(),
+            };
+          })
+        );
+
         const badgeObj = {
           active: true,
           dateISO,
@@ -2440,56 +2464,55 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
           profileUrl: bits?.profileUrl || "",
           address: formattedAddress,
           setAt: new Date(),
+          deputies: deputyBadges, // ✅ include all YES deputies
         };
-        console.log("🎤 Built lead vocalist badge:", badgeObj);
+
+        console.log("🎤 Built lead badge with deputies:", badgeObj);
         return badgeObj;
       }
 
-     // 🚫 Lead said NO/UNAVAILABLE → look at deputies
-if (!leadReply || leadReply === "no" || leadReply === "unavailable") {
-  const deputies = Array.isArray(m.deputies) ? m.deputies : [];
-  const yesDeps = [];
+      // 🚫 Lead said NO/UNAVAILABLE → pick most recent deputy YES
+      if (!leadReply || leadReply === "no" || leadReply === "unavailable") {
+        const deputies = Array.isArray(m.deputies) ? m.deputies : [];
+        const yesDeps = deputies.filter((d) => {
+          const p = normalizePhoneE164(d.phoneNumber || d.phone || "");
+          return p && replyByPhone.get(p)?.reply === "yes";
+        });
 
-  for (const d of deputies) {
-    const p = normalizePhoneE164(d.phoneNumber || d.phone || "");
-    if (!p) continue;
-    const rep = replyByPhone.get(p)?.reply || null;
-    if (rep === "yes") yesDeps.push(d);
-    if (yesDeps.length >= 3) break;
-  }
+        if (yesDeps.length > 0) {
+          // sort by last reply timestamp if available
+          const activeDeputy = yesDeps.sort(
+            (a, b) =>
+              new Date(b.repliedAt || b.updatedAt || 0) -
+              new Date(a.repliedAt || a.updatedAt || 0)
+          )[0];
 
-  // 🧠 pick the most recent deputy who replied "yes"
-  const activeDeputy = yesDeps
-    .filter(d => d.reply === "yes" || replyByPhone.get(normalizePhoneE164(d.phone || d.phoneNumber))?.reply === "yes")
-    .sort((a, b) => new Date(b.repliedAt || b.updatedAt || 0) - new Date(a.repliedAt || a.updatedAt || 0))[0];
+          const bits = await getDeputyDisplayBits(activeDeputy);
+          const badgeObj = {
+            active: true,
+            dateISO,
+            isDeputy: true,
+            inPromo: false,
+            vocalistName: `${m.firstName || ""}`.trim(),
+            musicianId: bits?.resolvedMusicianId || bits?.musicianId || "",
+            photoUrl: bits?.photoUrl || "",
+            profileUrl: bits?.profileUrl || "",
+            address: formattedAddress,
+            setAt: new Date(),
+            deputies: yesDeps.map((d) => ({
+              isDeputy: true,
+              name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
+              musicianId: d.musicianId || "",
+              photoUrl: d.photoUrl || "",
+              profileUrl: d.profileUrl || "",
+              setAt: new Date(),
+            })),
+          };
 
-  if (activeDeputy) {
-    const bits = await getDeputyDisplayBits(activeDeputy);
-    const badgeObj = {
-      active: true,
-      dateISO,
-      isDeputy: true,
-      inPromo: false,
-      deputies: [
-        {
-          name: `${activeDeputy.firstName || ""} ${activeDeputy.lastName || ""}`.trim(),
-          musicianId: bits?.resolvedMusicianId || bits?.musicianId || "",
-          photoUrl: bits?.photoUrl || "",
-          profileUrl: bits?.profileUrl || "",
-          resolvedVia: "getDeputyDisplayBits",
-          repliedAt: activeDeputy.repliedAt || new Date(),
-          setAt: new Date(),
-        },
-      ],
-      vocalistName: `${m.firstName || ""}`.trim(),
-      address: formattedAddress,
-      setAt: new Date(),
-    };
-
-    console.log("🎤 Built deputy badge (latest YES):", badgeObj);
-    return badgeObj;
-  }
-}
+          console.log("🎤 Built deputy badge (YES replies):", badgeObj);
+          return badgeObj;
+        }
+      }
     }
   }
 
