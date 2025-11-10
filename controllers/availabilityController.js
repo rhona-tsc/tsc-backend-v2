@@ -3315,15 +3315,6 @@ await sendClientEmail({
       process.env.FRONTEND_URL ||
       "https://meek-biscotti-8d5020.netlify.app/";
 
-    const profileUrl = `${SITE}act/${actDoc._id}`;
-    const cartUrl = `${SITE}act/${actDoc._id}?date=${dateISO}&address=${encodeURIComponent(
-      badge?.address || actDoc?.formattedAddress || ""
-    )}`;
-
-      const profileUrl = `${SITE}act/${actDoc._id}`;
-    const cartUrl = `${SITE}act/${actDoc._id}?date=${dateISO}&address=${encodeURIComponent(
-      badge?.address || actDoc?.formattedAddress || ""
-    )}`;
 
     // ✅ Map PA & Lighting size
     const normKey = (s = "") =>
