@@ -3700,7 +3700,7 @@ const clientFirstName =
             actDoc.tscDescription || actDoc.description || ""
           }</p>
 
-          <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
+<p><a href="${deputyProfileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
 
            ${lineupQuotes.length ? `
   <h4 style="margin-top:20px;">Lineup options:</h4>
