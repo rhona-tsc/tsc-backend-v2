@@ -3726,7 +3726,7 @@ const clientFirstName =
           </ul>
 
           <div style="margin-top:30px;">
-            <a href="${cartUrl}" 
+            <a href="${depEmailCartUrl}" 
               style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">
               Book Now →
             </a>
