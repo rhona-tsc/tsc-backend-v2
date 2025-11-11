@@ -3670,30 +3670,22 @@ const clientFirstName =
           : ""
       }
 
-      ${
-        deputyRepertoire?.length
-          ? `
       <div style="margin-top:25px;">
-       <p style="margin-top:20px;">
-  <a href="${deputyProfileUrl}" style="color:#ff6667; font-weight:600;">
-    View ${deputyName}’s full repertoire and media →
-  </a>
-</p>
-        <p style="color:#555;">
+        <p>
+          You can view ${deputyName}’s full repertoire and media on their profile below:
+        </p>
+        <p style="margin-top:10px;">
+          <a href="${deputyProfileUrl}" style="color:#ff6667; font-weight:600;">
+            View ${deputyName}’s full profile →
+          </a>
+           <p style="color:#555;">
           Please kindly note that the band's repertoire will reflect ${deputyName}'s, ensuring a consistent and high-quality performance. 
           If there are songs from the band's original repertoire you'd love to have performed, 
           please add these in your <strong>song suggestions</strong> upon booking or via the Event Sheet later on — 
           ${deputyName} will do their utmost to accommodate your requests.
         </p>
-        <ul style="columns:2; -webkit-columns:2; -moz-columns:2; list-style-type:none; padding:0; margin-top:10px;">
-          ${deputyRepertoire
-            .slice(0, 10)
-            .map((song) => `<li style="margin-bottom:4px;">${song}</li>`)
-            .join("")}
-        </ul>
-      </div>`
-          : ""
-      }
+        </p>
+      </div>
 
           ${
             heroImg
