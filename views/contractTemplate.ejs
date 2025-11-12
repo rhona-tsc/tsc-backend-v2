@@ -54,7 +54,7 @@
   </style>
 </head>
 <body>
-  <img src="<%= logoUrl %>" alt="The Supreme Collective Logo" class="header-logo" />
+  <img src="https://res.cloudinary.com/dvcgr3fyd/image/upload/v1762950219/4_tt3cay.png" alt="The Supreme Collective Logo" class="header-logo" />
   <div class="title">THE <span style="color:#ff6667">CONTRACT</span></div>
 
     <div class="contract-section" aria-label="Booking contract terms">
@@ -127,9 +127,37 @@
             var instrumentsArr = getInstrumentList(it.bandMembers);
             var instrumentsStr = instrumentsArr.length ? instrumentsArr.join(", ").replace(/, ([^,]*)$/, ' & $1') : "";
           %>
-          <% if (it.lineupLabel) { %>
-            <span> — <%= it.lineupLabel %><% if (instrumentsStr) { %> (<%= instrumentsStr %>)<% } %></span>
-          <% } %>
+         <%
+  const size = it.actSize || (it.bandMembers?.length || 0);
+  const essentialInstruments = it.bandMembers?.filter(m => m.isEssential).map(m => m.instrument).filter(Boolean) || [];
+
+  const orderedInstruments = essentialInstruments.sort((a, b) => {
+    const aL = a.toLowerCase();
+    const bL = b.toLowerCase();
+    const isVocal = s => s.includes("vocal");
+    const isDrums = s => s === "drums";
+    if (isVocal(aL) && !isVocal(bL)) return -1;
+    if (!isVocal(aL) && isVocal(bL)) return 1;
+    if (isDrums(aL)) return 1;
+    if (isDrums(bL)) return -1;
+    return 0;
+  });
+
+  const formatWithAnd = (arr) => {
+    const unique = [...new Set(arr)];
+    if (unique.length === 0) return "";
+    if (unique.length === 1) return unique[0];
+    if (unique.length === 2) return `${unique[0]} & ${unique[1]}`;
+    return `${unique.slice(0, -1).join(", ")} & ${unique[unique.length - 1]}`;
+  };
+
+  const roles = it.bandMembers?.flatMap(m =>
+    (m.additionalRoles || []).filter(r => r.isEssential).map(r => r.role)
+  ) || [];
+
+  const description = `${size}-Piece: ${formatWithAnd(orderedInstruments)}${roles.length ? ` (including ${formatWithAnd(roles)} services)` : ""}`;
+%>
+<span><%= description %></span>
         </div>
 
         <% if (Number(it.quantity||0) > 1) { %>
