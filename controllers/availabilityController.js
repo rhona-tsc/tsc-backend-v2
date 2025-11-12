@@ -330,136 +330,82 @@ export async function notifyDeputies({
   formattedAddress,
   clientName,
   clientEmail,
+  slotIndex = null,          // 👈 NEW — only trigger for the vocalist slot that went unavailable
   skipDuplicateCheck = false,
-  skipIfUnavailable = true, // 🆕 new flag
+  skipIfUnavailable = true,
 }) {
-  console.log(`📢 [notifyDeputies] START — act ${actId}, date ${dateISO}`);
+  console.log(`📢 [notifyDeputies] START — act ${actId}, date ${dateISO}, slotIndex ${slotIndex}`);
 
-  // 🔹 Basic act lookup
+  // 🔹 Lookup act + lineup
   const act = await Act.findById(actId).lean();
-  if (!act) {
-    console.warn("⚠️ No act found for notifyDeputies()");
-    return;
-  }
-
+  if (!act) return console.warn("⚠️ No act found for notifyDeputies()");
   const lineup = act?.lineups?.find((l) => String(l._id) === String(lineupId));
-  if (!lineup) {
-    console.warn("⚠️ No lineup found for notifyDeputies()");
-    return;
-  }
+  if (!lineup) return console.warn("⚠️ No lineup found for notifyDeputies()");
 
-  // 🧠 Only skip if *all* deputies have already been asked or declined,
-// but allow first deputy round to trigger after a lead "unavailable"
-if (skipIfUnavailable) {
-  const unavailableCount = await AvailabilityModel.countDocuments({
-    actId,
-    dateISO,
-    reply: { $in: ["unavailable", "no"] },
-  });
-
-  const totalDeputies = await AvailabilityModel.countDocuments({
-    actId,
-    dateISO,
-    isDeputy: true,
-  });
-
-  if (totalDeputies > 0 && unavailableCount >= totalDeputies) {
-    console.log(`🚫 All deputies already unavailable for ${dateISO}. Skipping further messages.`);
-    return;
-  }
-}
-
-  // 🎤 Identify all vocalists in this lineup
+  // 🎤 Identify all vocalists
   const vocalists = lineup.bandMembers?.filter((m) =>
     ["vocal", "vocalist"].some((v) => (m.instrument || "").toLowerCase().includes(v))
-  );
+  ) || [];
 
-  if (!Array.isArray(vocalists) || vocalists.length === 0) {
-    console.warn("⚠️ No vocalists found in lineup.");
-    return;
-  }
+  if (!vocalists.length) return console.warn("⚠️ No vocalists found in lineup.");
 
-  // 🧩 Find lead vocalist (to inherit duties/role)
-  const leadVocalist =
-    vocalists.find((v) => v.isEssential || /lead/i.test(v.instrument || "")) || vocalists[0];
+  // 🧩 Determine which vocalist(s) to target
+  const targetVocalists =
+    slotIndex !== null && vocalists[slotIndex]
+      ? [vocalists[slotIndex]]
+      : vocalists;
 
-  const leadDuties = leadVocalist?.instrument || "Lead Vocal";
+  console.log(`🎯 Targeting ${targetVocalists.length} vocalist(s) for deputy notification.`);
 
-  // 💾 Try to find the lead's previously-sent fee in AvailabilityModel
+  // 🧩 Find corresponding lead availability for inherited fee
   let inheritedFee = null;
   try {
-    const existingLeadAvailability = await AvailabilityModel.findOne({
+    const leadAvailability = await AvailabilityModel.findOne({
       actId,
       dateISO,
-      duties: { $regex: "lead", $options: "i" },
-      reply: { $nin: ["unavailable", "no"] }, // 🆕 don’t inherit fee from declined lead
+      isDeputy: { $ne: true },
+      ...(slotIndex !== null ? { slotIndex } : {}),
+      reply: { $nin: ["unavailable", "no"] },
     })
       .sort({ createdAt: -1 })
       .lean();
 
-    if (existingLeadAvailability?.fee) {
-      inheritedFee = Number(existingLeadAvailability.fee);
-      console.log(`💾 Found existing lead availability fee: £${inheritedFee}`);
+    if (leadAvailability?.fee) {
+      inheritedFee = Number(leadAvailability.fee);
+      console.log(`💾 Found existing lead fee: £${inheritedFee}`);
     }
   } catch (err) {
-    console.warn("⚠️ Could not find existing lead availability record:", err.message);
+    console.warn("⚠️ Could not fetch lead fee:", err.message);
   }
 
-  // 🧮 Fallback if we didn’t find the fee
-  if (!inheritedFee) {
-    inheritedFee = Number(leadVocalist?.fee) || 0;
-
-    if (!inheritedFee && act?.lineups?.length) {
-      const leadFromAct = act.lineups
-        .flatMap((l) => l.bandMembers || [])
-        .find((m) => /lead/i.test(m.instrument || ""));
-      inheritedFee = Number(leadFromAct?.fee) || 0;
-    }
-
-    console.log(`💾 Fallback inherited fee from act data: £${inheritedFee}`);
+  if (!inheritedFee && targetVocalists[0]?.fee) {
+    inheritedFee = Number(targetVocalists[0].fee);
+    console.log(`💾 Fallback fee from act data: £${inheritedFee}`);
   }
 
-// 🧹 Exclude lead vocalist’s phone/email from the existing set
-const leadMember = act.lineups
-  ?.flatMap(l => l.bandMembers || [])
-  ?.find(m => m.isEssential || /lead/i.test(m.instrument || ""));
-
-const leadPhone = (leadMember?.phone || leadMember?.phoneNumber || "").replace(/\s+/g, "");
-const leadEmail = (leadMember?.email || "").toLowerCase();
-
-// ✅ Get already-contacted or unavailable numbers for this date + location
-const existingPhonesAgg = await AvailabilityModel.aggregate([
-  {
-    $match: {
-      actId,
-      dateISO,
-      formattedAddress: formattedAddress || "TBC",
-      reply: { $in: ["yes", "unavailable"] },
+  // 🧮 Build exclusion list of already-contacted / unavailable phones
+  const existingPhonesAgg = await AvailabilityModel.aggregate([
+    {
+      $match: {
+        actId,
+        dateISO,
+        reply: { $in: ["yes", "unavailable"] },
+      },
     },
-  },
-  { $group: { _id: "$phone" } },
-]);
+    { $group: { _id: "$phone" } },
+  ]);
+  const existingSet = new Set(existingPhonesAgg.map((p) => (p._id || "").replace(/\s+/g, "")));
 
-// 🧩 Build deduplication set, excluding the lead by phone/email
-const existingPhones = existingPhonesAgg
-  .map(p => p._id)
-  .filter(p => {
-    const cleaned = (p || "").replace(/\s+/g, "");
-    return cleaned && cleaned !== leadPhone && cleaned !== leadEmail;
-  });
+  // 🧱 Limit tracking per slot
+  let totalSent = 0;
 
-const existingSet = new Set(existingPhones.map(p => p.replace(/\s+/g, "")));
-
-console.log(`🧮 Found ${existingSet.size} existing availability records for this act/date/location`);
-
-  // 📨 Notify deputies (only if not already sent / not unavailable)
-  for (const vocalist of vocalists) {
+  for (const vocalist of targetVocalists) {
     for (const deputy of vocalist.deputies || []) {
       const cleanPhone = (deputy.phoneNumber || deputy.phone || "").replace(/\s+/g, "");
       if (!/^\+?\d{10,15}$/.test(cleanPhone)) continue;
-      if (existingSet.has(cleanPhone)) continue; // ✅ Skip already contacted/unavailable
+      if (existingSet.has(cleanPhone)) continue;
 
-      console.log(`🎯 Sending deputy enquiry to ${deputy.firstName || deputy.name}`);
+      console.log(`🎯 Sending deputy enquiry to ${deputy.firstName || deputy.name} (slot ${slotIndex ?? "?"})`);
 
       await triggerAvailabilityRequest({
         actId,
@@ -471,55 +417,96 @@ console.log(`🧮 Found ${existingSet.size} existing availability records for th
         isDeputy: true,
         deputy: { ...deputy, phone: cleanPhone },
         inheritedFee,
-        inheritedDuties: leadDuties,
+        inheritedDuties: vocalist.instrument || "Vocalist",
         skipDuplicateCheck,
       });
 
-      existingSet.add(cleanPhone); // mark as contacted
-
-      // ✅ Stop after 3 unique deputies contacted
-      if (existingSet.size >= 3) {
+      existingSet.add(cleanPhone);
+      totalSent++;
+      if (totalSent >= 3) {
         console.log("🛑 Limit reached (3 deputies contacted)");
-        return; // exit both loops early
+        return;
       }
     }
   }
 
-  console.log("✅ [notifyDeputies] Complete");
+  console.log(`✅ [notifyDeputies] Complete — deputies contacted: ${totalSent}`);
 }
 
 
-export async function triggerNextDeputy({ actId, lineupId, dateISO, excludePhones }) {
+export async function triggerNextDeputy({
+  actId,
+  lineupId,
+  dateISO,
+  excludePhones = [],
+  slotIndex = null, // 🆕 added for per-slot progression
+}) {
+  console.log("🎯 [triggerNextDeputy] START", { actId, dateISO, slotIndex });
+
   const act = await Act.findById(actId).lean();
   if (!act) return console.warn("⚠️ No act found for triggerNextDeputy");
-  const lineup = act.lineups?.find(l => String(l._id) === String(lineupId));
-  if (!lineup) return console.warn("⚠️ No lineup found for triggerNextDeputy");
 
-  // ✅ Only trigger deputies not in excludePhones
-  const allVocalists = lineup.bandMembers?.filter(m =>
-    ["vocal", "vocalist"].some(v => (m.instrument || "").toLowerCase().includes(v))
-  ) || [];
+  const lineup = act.lineups?.find((l) => String(l._id) === String(lineupId));
+  if (!lineup)
+    return console.warn("⚠️ No lineup found for triggerNextDeputy");
 
-  for (const vocalist of allVocalists) {
-    const remaining = (vocalist.deputies || []).filter(d =>
-      !excludePhones.includes((d.phoneNumber || d.phone || "").replace(/\s+/g, ""))
+  // 🧩 Identify vocalists in this lineup
+  const allVocalists =
+    lineup.bandMembers?.filter((m) =>
+      ["vocal", "vocalist"].some((v) =>
+        (m.instrument || "").toLowerCase().includes(v)
+      )
+    ) || [];
+
+  if (!allVocalists.length)
+    return console.warn("⚠️ No vocalists found for triggerNextDeputy");
+
+  // 🎤 Pick correct vocalist slot (default to 0 if unspecified)
+  const vocalist =
+    typeof slotIndex === "number"
+      ? allVocalists[slotIndex] || allVocalists[0]
+      : allVocalists[0];
+
+  if (!vocalist)
+    return console.warn("⚠️ No vocalist found for slotIndex", slotIndex);
+
+  console.log(
+    `🎤 Slot ${slotIndex}: evaluating deputies for ${vocalist.firstName || vocalist.name}`
+  );
+
+  // 🧹 Filter deputies that haven’t been contacted yet
+  const remaining = (vocalist.deputies || []).filter((d) => {
+    const phone = (d.phoneNumber || d.phone || "").replace(/\s+/g, "");
+    return phone && !excludePhones.includes(phone);
+  });
+
+  if (!remaining.length) {
+    console.log(
+      `🚫 No remaining deputies to trigger for vocalist slot ${slotIndex}`
     );
-
-    if (remaining.length > 0) {
-      console.log("📨 Triggering next deputy:", remaining[0].name);
-      await notifyDeputies({
-        actId,
-        lineupId,
-        dateISO,
-        formattedAddress: "TBC",
-        clientName: "Auto-triggered",
-        clientEmail: "hello@thesupremecollective.co.uk",
-        skipDuplicateCheck: true,
-        customDeputyList: [remaining[0]], // optional override param
-      });
-      break;
-    }
+    return;
   }
+
+  const nextDeputy = remaining[0];
+  console.log(
+    `📨 Triggering next deputy for slot ${slotIndex}: ${nextDeputy.name}`
+  );
+
+  // 🧠 Notify this deputy only (pass along slotIndex)
+  await notifyDeputies({
+    actId,
+    lineupId,
+    dateISO,
+    formattedAddress: "TBC",
+    clientName: "Auto-triggered",
+    clientEmail: "hello@thesupremecollective.co.uk",
+    skipDuplicateCheck: true,
+    skipIfUnavailable: false,
+    customDeputyList: [nextDeputy],
+    slotIndex, // 🆕 ensures deputies triggered for correct slot only
+  });
+
+  console.log(`✅ [triggerNextDeputy] Deputy triggered for slot ${slotIndex}`);
 }
 
 
@@ -1289,6 +1276,100 @@ if (!resolvedClientEmail && userId) {
       return total;
     };
 
+    // 🎤 MULTI-VOCALIST HANDLING — NEW
+const vocalists = members.filter((m) =>
+  (m.instrument || "").toLowerCase().includes("vocal")
+);
+
+if (!isDeputy && vocalists.length > 1) {
+  console.log(`🎤 Multi-vocalist lineup detected (${vocalists.length})`);
+
+  const results = [];
+  for (let i = 0; i < vocalists.length; i++) {
+    const vMember = vocalists[i];
+    const slotIndex = i; // track slot 0, 1, etc.
+    const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
+
+    if (!phone) {
+      console.warn(`⚠️ Skipping vocalist ${vMember.firstName} — no phone number`);
+      continue;
+    }
+
+    // 🧩 Enrich each vocalist with Musician data if possible
+    let enriched = { ...vMember };
+    try {
+      if (vMember?.musicianId) {
+        const mus = await Musician.findById(vMember.musicianId).lean();
+        if (mus) enriched = { ...mus, ...enriched };
+      }
+    } catch (err) {
+      console.warn(`⚠️ Failed to enrich vocalist ${vMember.firstName}:`, err.message);
+    }
+
+    const finalFee = await feeForMember(vMember);
+    const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+
+    // ✅ Create availability record for this vocalist slot
+    await AvailabilityModel.create({
+      actId,
+      lineupId: lineup?._id || null,
+      musicianId: vMember._id || null,
+      phone,
+      dateISO,
+      address: fullFormattedAddress,
+      formattedAddress: fullFormattedAddress,
+      formattedDate,
+      clientName: resolvedClientName || "",
+      clientEmail: resolvedClientEmail || "",
+      actName: act?.tscName || act?.name || "",
+      musicianName: `${vMember.firstName || ""} ${vMember.lastName || ""}`.trim(),
+      duties: vMember.instrument || "Vocalist",
+      fee: String(finalFee),
+      reply: null,
+      v2: true,
+  slotIndex: body.slotIndex ?? 0, // 🆕 ensures correct vocalist slot tracking
+    });
+
+    const msg = `Hi ${
+      vMember.firstName || "there"
+    }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${vMember.instrument} duties with ${
+      act.tscName || act.name
+    }. Please indicate your availability 💫`;
+
+    await sendWhatsAppMessage({
+      to: phone,
+      actData: act,
+      lineup: lineup || {},
+      member: vMember,
+      address: shortAddress,
+      dateISO,
+      role: vMember.instrument,
+      variables: {
+        firstName: vMember.firstName || "Musician",
+        date: formattedDate,
+        location: shortAddress,
+        fee: String(finalFee),
+        role: vMember.instrument,
+        actName: act.tscName || act.name,
+      },
+      contentSid: process.env.TWILIO_ENQUIRY_SID,
+      smsBody: msg,
+    });
+
+    console.log(`📲 WhatsApp sent to vocalist ${vMember.firstName} (${slotIndex})`);
+    results.push({ name: vMember.firstName, slotIndex, phone });
+  }
+
+  console.log(`✅ Multi-vocalist availability triggered for:`, results);
+  if (res) return res.json({ success: true, sent: results.length, details: results });
+  return { success: true, sent: results.length, details: results };
+}
+
     // 🎤 Determine recipient
     const targetMember = isDeputy
       ? deputy
@@ -1446,6 +1527,8 @@ clientEmail: resolvedClientEmail || "",
       fee: String(finalFee),
       reply: null,
       v2: true,
+        slotIndex: body.slotIndex ?? 0, // 🆕 ensures correct vocalist slot tracking
+
     });
 
     console.log(`✅ Availability record created — £${finalFee}`);
@@ -1621,6 +1704,10 @@ export const twilioInbound = async (req, res) => {
         console.warn("⚠️ No matching AvailabilityModel found for inbound reply.");
         return;
       }
+
+      // 🧩 Debug + ensure slotIndex is available for deputy notifications
+const slotIndex = typeof updated.slotIndex === "number" ? updated.slotIndex : null;
+console.log("🎯 [twilioInbound] Matched slotIndex:", slotIndex);
 
     let musician = updated?.musicianId
         ? await Musician.findById(updated.musicianId).lean()
@@ -1930,17 +2017,19 @@ if (act?._id && shouldTriggerDeputies) {
     `📢 Triggering deputy notifications for ${act?.tscName || act?.name} — ${dateISO}`
   );
 
-  await notifyDeputies({
-    actId: act._id,
-    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
-    dateISO,
-    formattedAddress:
-      updated.formattedAddress || act.formattedAddress || "TBC",
-    clientName: updated.clientName || "",
-    clientEmail: updated.clientEmail || "",
-    skipDuplicateCheck: true,
-    skipIfUnavailable: false 
-  });
+await notifyDeputies({
+  actId: act._id,
+  lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+  dateISO,
+  formattedAddress:
+    updated.formattedAddress || act.formattedAddress || "TBC",
+  clientName: updated.clientName || "",
+  clientEmail: updated.clientEmail || "",
+  slotIndex, // 👈 use the explicitly extracted one for clarity
+  skipDuplicateCheck: true,
+  skipIfUnavailable: false,
+});
+console.log("📤 notifyDeputies triggered with slotIndex:", slotIndex);
 } else if (isDeputy && reply === "unavailable") {
   console.log("📨 Deputy unavailable — trigger next deputy in queue");
 
@@ -3637,7 +3726,7 @@ const clientFirstName =
         deputyProfileUrl || deputyPhotoUrl
           ? `
       <div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
-        <h3 style="color:#111; margin-bottom:10px;">🎤 Meet ${deputyName}</h3>
+        <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyName}</h3>
         ${
           deputyPhotoUrl
             ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />`
@@ -3671,18 +3760,15 @@ const clientFirstName =
       }
 
       <div style="margin-top:25px;">
-        <p>
-          You can view ${deputyName}’s full repertoire and media on their profile below:
-        </p>
         <p style="margin-top:10px;">
           <a href="${deputyProfileUrl}" style="color:#ff6667; font-weight:600;">
-            View ${deputyName}’s full profile →
+            View ${deputyName}’s full profile and repertoire →
           </a>
            <p style="color:#555;">
           Please kindly note that the band's repertoire will reflect ${deputyName}'s, ensuring a consistent and high-quality performance. 
           If there are songs from the band's original repertoire you'd love to have performed, 
           please add these in your <strong>song suggestions</strong> upon booking or via the Event Sheet later on — 
-          ${deputyName} will do their utmost to accommodate your requests.
+          ${deputyName} and the band will do their utmost to accommodate your requests.
         </p>
         </p>
       </div>
