@@ -842,6 +842,11 @@ export const createCheckoutSession = async (req, res) => {
       ? actsSummary.map((it) => ({
           ...it,
           performance: normalizePerf(it.performance || performanceTimes),
+          // ensure selected vocalist is carried through
+     selectedVocalist: it.selectedVocalist || null,
+     selectedVocalistName: it.selectedVocalist
+   ? await lookupMusicianName(it.selectedVocalist.musicianId)
+   : null,
         }))
       : [];
 
