@@ -29,6 +29,24 @@ import { logStart } from "../utils/logger.js";
 
 import { sendSMSMessage, sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
 
+/**
+ * Lookup a musician’s full name by ID.
+ * Returns "Unknown Musician" if not found or on error.
+ */
+export async function lookupMusicianName(musicianId) {
+  try {
+    if (!musicianId) return null;
+    const m = await Musician.findById(musicianId).lean();
+    if (!m) return "Unknown Musician";
+
+    const fn = m.firstName || "";
+    const ln = m.lastName || "";
+    return `${fn} ${ln}`.trim() || "Musician";
+  } catch (err) {
+    console.warn("⚠️ lookupMusicianName failed:", err);
+    return "Unknown Musician";
+  }
+}
 
 // bookingController.js (top-level, near other consts)
 const GOOGLE_REVIEW_URL = process.env.GOOGLE_REVIEW_URL || "https://g.page/r/CUYlq-https://www.google.com/search?q=the+supreme+collective&oq=the+supreme&gs_lcrp=EgZjaHJvbWUqBggAEEUYOzIGCAAQRRg7MgYIARBFGDkyBggCEEUYOzIGCAMQRRg7MgYIBBBFGEEyBggFEEUYQTIGCAYQRRhBMgYIBxBFGD3SAQgxMjU5ajBqMagCALACAA&sourceid=chrome&ie=UTF-8&sei=3c_baMnlI4_vhbIPiOS9yQE#lrd=0x751df2ff4f2e30d:0xb1f44d25caa515eb,1,,,,"; // <- put your real review link
@@ -838,17 +856,29 @@ export const createCheckoutSession = async (req, res) => {
         : {}
     );
 
-    const actsSummaryWithPerf = Array.isArray(actsSummary)
-      ? actsSummary.map((it) => ({
+const actsSummaryWithPerf = Array.isArray(actsSummary)
+  ? await Promise.all(
+      actsSummary.map(async (it) => {
+        const selectedVocalist = it.selectedVocalist || null;
+
+        let selectedVocalistName = null;
+        if (selectedVocalist?.musicianId) {
+          selectedVocalistName = await lookupMusicianName(
+            selectedVocalist.musicianId
+          );
+        }
+
+        return {
           ...it,
           performance: normalizePerf(it.performance || performanceTimes),
-          // ensure selected vocalist is carried through
-     selectedVocalist: it.selectedVocalist || null,
-     selectedVocalistName: it.selectedVocalist
-   ? await lookupMusicianName(it.selectedVocalist.musicianId)
-   : null,
-        }))
-      : [];
+
+          // carry over vocalist info
+          selectedVocalist,
+          selectedVocalistName,
+        };
+      })
+    )
+  : [];
 
     const bookingId = makeBookingId(date, customer?.lastName || "TSC");
 
