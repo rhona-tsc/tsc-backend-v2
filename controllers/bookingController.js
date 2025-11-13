@@ -461,8 +461,7 @@ function daysUntil(dateStr) {
 function calcDeposit(totalGross) {
     console.log(`🐣 (controllers/bookingController.js) calcDeposit called at`, new Date().toISOString(), { totalGross });
   if (!totalGross || totalGross <= 0) return 0;
-  return Math.ceil((totalGross - 50) * 0.2) + 50;
-}
+return Math.round(Number(totalGross) * 0.25);}
 
 const makeBookingId = (dateStr = new Date().toISOString(), lastName = 'TSC') => {
   console.log(`🐣 (controllers/bookingController.js) makeBookingId called at`, new Date().toISOString(), { dateStr, lastName });
