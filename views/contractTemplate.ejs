@@ -158,6 +158,22 @@
   const description = `${size}-Piece: ${formatWithAnd(orderedInstruments)}${roles.length ? ` (including ${formatWithAnd(roles)} services)` : ""}`;
 %>
 <span><%= description %></span>
+
+        <% 
+          // Determine if lineup has any vocalists
+          const hasVocalists =
+            Array.isArray(it.bandMembers) &&
+            it.bandMembers.some(m => (m.instrument || "").toLowerCase().includes("vocal"));
+
+          // Determine if a chosen vocalist exists (from PlaceBooking selectedVocalist snapshot)
+          const sv = it.selectedVocalist;
+        %>
+
+        <% if (sv && hasVocalists) { %>
+          <div style="margin-top:4px; font-size:13px; color:#444;">
+            Vocalist selected: <%= sv.firstName %> <%= sv.lastNameInitial %>.
+          </div>
+        <% } %>
         </div>
 
         <% if (Number(it.quantity||0) > 1) { %>
