@@ -747,6 +747,22 @@ export const createCheckoutSession = async (req, res) => {
       userEmail,
     });
 
+    // Detect test acts
+const isTestActName = (name = "") => {
+  const n = name.toLowerCase();
+  return (
+    n.includes("test dancefloor magic") ||
+    n.includes("test soul allegiance") ||
+    n.includes("test motown magic")
+  );
+};
+
+// Detect test act lineup in Stripe-friendly item name
+const extractActName = (fullName = "") => {
+  // Example: "Booking: Test Dancefloor Magic - 4-Piece"
+  return fullName.replace("Booking:", "").split("-")[0].trim();
+};
+
     const safeItems = cartDetails
       .map((it) => ({
         name: String(it?.name || "").trim(),
@@ -761,6 +777,18 @@ export const createCheckoutSession = async (req, res) => {
           Number.isFinite(it.quantity) &&
           it.quantity > 0
       );
+
+      // 🔧 Force minimum 50p for test acts
+safeItems.forEach((it) => {
+  const actName = extractActName(it.name);
+
+  if (isTestActName(actName)) {
+    if (it.price < 0.50) {
+      console.log("⚠️ Test act uplift: price", it.price, "→ 0.50");
+      it.price = 0.50; // Convert to 50p
+    }
+  }
+});
 
     if (safeItems.length === 0) {
       return res.status(400).json({ error: "No payable items found in cartDetails." });
