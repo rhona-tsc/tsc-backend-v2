@@ -798,8 +798,8 @@ const isTestAct =
   looksTrue(act?.isTest) || looksTrue(act?.actData?.isTest);
 
 if (isTestAct) {
-  console.log("🧪 Test act detected → forcing price £0.30");
-  return { total: 0.3, travelCalculated: false, forcedTestPrice: true };
+  console.log("🧪 Test act detected → forcing price £0.50");
+  return { total: 0.5, travelCalculated: false, forcedTestPrice: true };
 }
 
     console.log("🎸 Using lineup:", smallestLineup?.actSize, smallestLineup?.bandMembers?.length, "members");
