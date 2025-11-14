@@ -3732,11 +3732,7 @@ const clientFirstName =
             ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />`
             : ""
         }
-        ${
-          deputyProfileUrl
-            ? `<p><a href="${deputyProfileUrl}" style="color:#ff6667; font-weight:600;">View ${deputyName}'s full profile →</a></p>`
-            : ""
-        }
+        
       </div>`
           : ""
       }
