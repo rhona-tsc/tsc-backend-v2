@@ -28,6 +28,7 @@ import { postcodes } from "../utils/postcodes.js";
 import { logStart } from "../utils/logger.js";
 import { setSharedIVR } from "../utils/proxySetup.js";
 import { sendSMSMessage, sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
+import userModel from '../models/userModel.js';
 
 /**
  * Lookup a musician’s full name by ID.
@@ -1977,11 +1978,16 @@ export const completeBookingV2 = async (req, res) => {
     // -----------------------------------------------------
 // 🔥  Clear cart on successful payment
 // -----------------------------------------------------
+// Clear user's cart in DB
 try {
-  await Cart.deleteMany({ userId: booking.userId });
-  console.log("🛒 Cart cleared for user:", booking.userId);
-} catch (cartErr) {
-  console.error("❌ Failed to clear cart:", cartErr);
+  await userModel.updateOne(
+    { _id: booking.userId },
+    { $set: { cartData: {} } }
+  );
+  console.log("🛒 User cartData cleared:", booking.userId);
+} catch (dbErr) {
+  console.error("❌ Failed to clear user cartData:", dbErr);
+}sole.error("❌ Failed to clear cart:", cartErr);
 }
 
     // -----------------------------------------------------
