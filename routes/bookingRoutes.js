@@ -80,6 +80,27 @@ router.get("/booking/:id", async (req, res) => {
 });
 
 /* -------------------------------------------------------------------------- */
+/*              GET /booking/by-ref/:bookingId                                */
+/* -------------------------------------------------------------------------- */
+router.get("/booking/by-ref/:bookingId", async (req, res) => {
+  console.log(`✅ (routes/bookingRoutes.js) GET /api/booking/by-ref/:bookingId called at`, 
+    new Date().toISOString(), 
+    { bookingId: req.params.bookingId }
+  );
+
+  try {
+    const booking = await Booking.findOne({ bookingId: req.params.bookingId });
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+    res.json(booking);
+  } catch (err) {
+    console.error("❌ booking by-ref error:", err);
+    res.status(500).json({ message: "Failed to fetch booking by ref" });
+  }
+});
+
+/* -------------------------------------------------------------------------- */
 /*              GET /booking/user/:userId                                     */
 /* -------------------------------------------------------------------------- */
 router.get("/booking/user/:userId", async (req, res) => {

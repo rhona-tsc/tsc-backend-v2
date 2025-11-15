@@ -26,7 +26,7 @@ import axios from "axios";
 import { differenceInCalendarDays, startOfDay, subDays } from "date-fns";
 import { postcodes } from "../utils/postcodes.js";
 import { logStart } from "../utils/logger.js";
-
+import { setSharedIVR } from "..utils/proxySetup.js";
 import { sendSMSMessage, sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
 
 /**
@@ -877,6 +877,7 @@ if (!Number.isFinite(chargeGross) || chargeGross < 0.50) {
         },
       ],
       metadata: {
+        booking_ref: bookingId, 
         booking_mode: finalMode,
         gross_total_major: String(grossTotal),
         deposit_major: String(depositGross),
@@ -1963,7 +1964,7 @@ export const completeBookingV2 = async (req, res) => {
     // 🧾 Retrieve Stripe session
     const stripe = await import("stripe").then(m => new m.default(process.env.STRIPE_SECRET_KEY));
     const session = await stripe.checkout.sessions.retrieve(session_id, { expand: ["payment_intent"] });
-    const bookingRef = session?.metadata?.bookingRef || session?.metadata?.ref || "UNKNOWN";
+    const bookingRef = session?.metadata?.booking_ref;
 
     // 🧮 Fetch the booking document
     const booking = await Booking.findOne({ bookingRef });
