@@ -1970,8 +1970,10 @@ export const completeBookingV2 = async (req, res) => {
     const bookingRef = session?.metadata?.booking_ref;
 
     // 🧮 Fetch the booking document
-    const booking = await Booking.findOne({ bookingRef });
-    if (!booking) throw new Error(`Booking not found for ref ${bookingRef}`);
+const booking = await Booking.findOne({ bookingId: bookingRef });
+if (!booking) {
+  throw new Error(`Booking not found for bookingId ${bookingRef}`);
+}
 
    console.log("✅ Booking found:", bookingRef);
 
