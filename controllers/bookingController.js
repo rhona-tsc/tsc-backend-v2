@@ -861,6 +861,9 @@ if (!Number.isFinite(chargeGross) || chargeGross < 0.50) {
       cancel_url,
     });
 
+        const bookingId = makeBookingId(date, customer?.lastName || "TSC");
+
+
     const session = await stripeInstance.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -928,7 +931,6 @@ const actsSummaryWithPerf = Array.isArray(actsSummary)
     )
   : [];
 
-    const bookingId = makeBookingId(date, customer?.lastName || "TSC");
 
     // ✅ Adjust deposit logic for full payments
     const fixedDeposit = finalMode === "full" ? 0 : depositGross;
@@ -1971,6 +1973,16 @@ export const completeBookingV2 = async (req, res) => {
     if (!booking) throw new Error(`Booking not found for ref ${bookingRef}`);
 
     console.log("✅ Booking found:", bookingRef);
+
+    // -----------------------------------------------------
+// 🔥  Clear cart on successful payment
+// -----------------------------------------------------
+try {
+  await Cart.deleteMany({ userId: booking.userId });
+  console.log("🛒 Cart cleared for user:", booking.userId);
+} catch (cartErr) {
+  console.error("❌ Failed to clear cart:", cartErr);
+}
 
     // -----------------------------------------------------
     // 1️⃣ Send WhatsApp confirmation to client + musicians
