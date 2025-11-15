@@ -26,7 +26,7 @@ import axios from "axios";
 import { differenceInCalendarDays, startOfDay, subDays } from "date-fns";
 import { postcodes } from "../utils/postcodes.js";
 import { logStart } from "../utils/logger.js";
-import { setSharedIVR } from "..utils/proxySetup.js";
+import { setSharedIVR } from "../utils/proxySetup.js";
 import { sendSMSMessage, sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
 
 /**
