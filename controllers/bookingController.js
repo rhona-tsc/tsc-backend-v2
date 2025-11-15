@@ -794,18 +794,37 @@ safeItems.forEach((it) => {
       return res.status(400).json({ error: "No payable items found in cartDetails." });
     }
 
-    const grossTotal = safeItems.reduce((sum, it) => sum + it.price * it.quantity, 0);
-    const depositGross = calcDeposit(grossTotal);
+// After applying test-act uplifts on safeItems:
+let grossTotal = safeItems.reduce((sum, it) => sum + it.price * it.quantity, 0);
+
+// ⛑️ Safety: ensure grossTotal is never below 0.50 for test acts
+const isTestBooking = safeItems.some(it =>
+  isTestActName(extractActName(it.name))
+);
+
+if (isTestBooking && grossTotal < 0.50) {
+  console.log("⚠️ Uplifting grossTotal", grossTotal, "→ 0.50 minimum");
+  grossTotal = 0.50;   // ✔️ Now allowed
+}
+
+let depositGross = calcDeposit(grossTotal);
+
+// Stripe min charge 50p
+if (isTestBooking && depositGross < 0.50) {
+  console.log("⚠️ Uplifting deposit", depositGross, "→ 0.50 minimum");
+  depositGross = 0.50;
+}
 
     const dte = daysUntil(date);
     const requiresFull = dte != null && dte <= 28;
     const clientHint = paymentMode === "full" || paymentMode === "deposit" ? paymentMode : null;
     const finalMode = requiresFull ? "full" : clientHint || "deposit";
-    const chargeGross = finalMode === "full" ? grossTotal : depositGross;
+const chargeGross = finalMode === "full" ? grossTotal : depositGross;
 
-    if (!Number.isFinite(chargeGross) || chargeGross <= 0) {
-      return res.status(400).json({ error: "Calculated charge amount is invalid." });
-    }
+// Stripe hard safety rule:
+if (!Number.isFinite(chargeGross) || chargeGross < 0.50) {
+  return res.status(400).json({ error: "Calculated charge amount is invalid." });
+}
 
     const pretty = (n) =>
       Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
