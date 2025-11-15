@@ -1973,27 +1973,25 @@ export const completeBookingV2 = async (req, res) => {
     const booking = await Booking.findOne({ bookingRef });
     if (!booking) throw new Error(`Booking not found for ref ${bookingRef}`);
 
-    console.log("✅ Booking found:", bookingRef);
+   console.log("✅ Booking found:", bookingRef);
 
-    // -----------------------------------------------------
+// -----------------------------------------------------
 // 🔥  Clear cart on successful payment
 // -----------------------------------------------------
-// Clear user's cart in DB
 try {
   await userModel.updateOne(
     { _id: booking.userId },
     { $set: { cartData: {} } }
   );
   console.log("🛒 User cartData cleared:", booking.userId);
-} catch (dbErr) {
-  console.error("❌ Failed to clear user cartData:", dbErr);
-}sole.error("❌ Failed to clear cart:", cartErr);
+} catch (cartErr) {
+  console.error("❌ Failed to clear cart:", cartErr);
 }
 
-    // -----------------------------------------------------
-    // 1️⃣ Send WhatsApp confirmation to client + musicians
-    // -----------------------------------------------------
-    try {
+// -----------------------------------------------------
+// 1️⃣ Send WhatsApp confirmation to client + musicians
+// -----------------------------------------------------
+try {
       // Send WhatsApp to client (management)
       await sendWhatsAppMessage({
         to: booking.clientPhone,
