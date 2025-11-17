@@ -179,7 +179,7 @@ export async function sendBookingRequestsToLineup(booking) {
     const musician = await Musician.findById(m.musicianId).lean();
     if (!musician) continue;
 
-    const phone = formatE164(musician.phone || musician.phoneNumber);
+    const phone = normalize(musician.phone || musician.phoneNumber);
     if (!phone) continue;
 
     const feeUsed = m.feeUsed || booking.feePerMember || "TBC";
