@@ -31,7 +31,7 @@ import { sendSMSMessage, sendWhatsAppMessage } from "../utils/twilioClient.js"; 
 import userModel from '../models/userModel.js';
 import { sendBookingConfirmationToLeadVocalist, sendBookingRequestsToLineup } from './booking/helpers.js';
 import { createSharedBookingEvent } from '../utils/createSharedBookingEvent.js';
-import { formatE164 } from "../utils/phone.js";
+import { formatE164 } from "../utils/phoneUtils.js";
 import { sendBookingRequestToLineup } from "./availabilityController.js";
 
 
