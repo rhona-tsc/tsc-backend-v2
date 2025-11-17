@@ -10,6 +10,7 @@ import {
 } from "./googleController.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import bookingBoardItem from "../models/bookingBoardItem.js";
+import { createSharedBookingEvent } from "../utils/createSharedBookingEvent.js";
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper: firstNameOf                             */
