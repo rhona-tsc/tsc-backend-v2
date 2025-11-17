@@ -132,14 +132,6 @@ export async function sendBookingConfirmationToLeadVocalist(booking) {
 }
 
 
-const LEAD_VOX_ROLES = [
-  "lead vocal",
-  "lead vocalist",
-  "male lead vocal",
-  "female lead vocal",
-  "vocalist-guitarist",
-  "vocalist",
-];
 
 export async function sendBookingRequestsToLineup(booking) {
   console.log("🎸 sendBookingRequestsToLineup START", {
