@@ -2312,14 +2312,6 @@ export const completeBookingV2 = async (req, res) => {
   }
 };
 
-/********************************************************************
- * Helper
- ********************************************************************/
-function formatE164(phone) {
-  if (!phone) return null;
-  if (phone.startsWith("+")) return phone;
-  return `+44${phone.replace(/^0/, "")}`;
-}
 
 
 // ---------------- exports ----------------
