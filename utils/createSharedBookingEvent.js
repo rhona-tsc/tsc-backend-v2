@@ -1,6 +1,6 @@
 import { google } from "googleapis";
 import Booking from "../models/bookingModel.js";
-import { oauth2Client } from "./googleClient.js";
+import { oauth2Client } from "../controllers/googleClient.js";
 
 export async function createSharedBookingEvent({ booking }) {
   if (!booking) throw new Error("No booking passed to createSharedBookingEvent");
