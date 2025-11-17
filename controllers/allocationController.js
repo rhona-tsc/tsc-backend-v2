@@ -32,7 +32,7 @@ const firstNameOf = (p) => {
 /* -------------------------------------------------------------------------- */
 /*                               Helper: sanitizeFee                          */
 /* -------------------------------------------------------------------------- */
-const sanitizeFee = (v) => {
+export const sanitizeFee = (v) => {
   console.log(`🦚 (controllers/allocationController.js) sanitizeFee called at`, new Date().toISOString(), { v });
   const s = String(v ?? "").trim();
   if (!s) return "TBC";
