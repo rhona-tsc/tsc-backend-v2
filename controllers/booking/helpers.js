@@ -2,7 +2,7 @@ import Musician from "../../models/musicianModel.js";
 import Act from "../../models/actModel.js";
 import AvailabilityModel from "../../models/availabilityModel.js";
 import { sendWhatsAppMessage } from "../../utils/twilioClient.js";
-import { formatE164 } from "../../utils/phoneUtils.js";
+import { normalize } from "../../utils/phoneUtils.js";
 
 const LEAD_VOX_ROLES = [
   "lead vocal",
@@ -55,7 +55,7 @@ export async function sendBookingConfirmationToLeadVocalist(booking) {
     return;
   }
 
-  const phone = formatE164(musician.phone || musician.phoneNumber);
+  const phone = normalize(musician.phone || musician.phoneNumber);
   if (!phone) {
     console.warn("❌ Lead vocalist has no valid phone");
     return;
