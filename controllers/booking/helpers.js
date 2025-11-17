@@ -131,11 +131,6 @@ export async function sendBookingConfirmationToLeadVocalist(booking) {
   console.log("🧹 Cleared availability badges for this vocalist");
 }
 
-import Act from "../../../models/actModel.js";
-import Musician from "../../../models/musicianModel.js";
-import AvailabilityModel from "../../../models/availabilityModel.js";
-import { sendWhatsAppMessage } from "../../../utils/twilioClient.js";
-import { formatE164 } from "../../../utils/phoneUtils.js";
 
 const LEAD_VOX_ROLES = [
   "lead vocal",
