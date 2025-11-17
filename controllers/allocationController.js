@@ -211,186 +211,383 @@ const parseBookingPayload = (payload) => {
 /*                            twilioInboundBooking                            */
 /* -------------------------------------------------------------------------- */
 export const twilioInboundBooking = async (req, res) => {
-  console.log(`🦚 (controllers/allocationController.js) twilioInboundBooking called at`, new Date().toISOString(), {
+  console.log(`🦚 twilioInboundBooking v4 called`, {
+    ts: new Date().toISOString(),
     body: req.body,
   });
-  try {
-    const bodyText = String(req.body?.Body || "");
-    const buttonText = String(req.body?.ButtonText || "");
-    const buttonPayload = String(req.body?.ButtonPayload || "");
-    const inboundSid = String(req.body?.MessageSid || "");
-    const fromRaw = String(req.body?.From || req.body?.WaId || "");
 
-    console.log(`🦚 twilioInboundBooking inbound`, {
-      From: fromRaw, Body: bodyText, ButtonText: buttonText, ButtonPayload: buttonPayload, MessageSid: inboundSid,
+  // ---------------------------------------------------------
+  // Helper: interpret YES / NO / NOLOC
+  // ---------------------------------------------------------
+  function interpretReply(raw) {
+    if (!raw) return null;
+    const low = raw.toLowerCase().trim();
+
+    if (low === "yes") return "YES";            // Yes, book me in
+    if (low === "no") return "NO_BOOKED";       // I'm already booked
+    if (low === "noloc" || low === "no loc") return "NO_LOC"; // No thanks (location)
+    return null;
+  }
+
+  try {
+    // ---------------------------------------------------------
+    // Extract incoming fields from Twilio webhook
+    // ---------------------------------------------------------
+    const bodyText      = String(req.body?.Body || "");
+    const buttonText    = String(req.body?.ButtonText || "");
+    const buttonPayload = String(req.body?.ButtonPayload || "");
+    const fromRaw       = String(req.body?.From || req.body?.WaId || "");
+
+    console.log("🦚 inbound payload", {
+      fromRaw,
+      bodyText,
+      buttonText,
+      buttonPayload,
     });
 
-    let { reply, bookingId } = parseBookingPayload(buttonPayload);
-    if (!reply) {
-      const low = (buttonText || bodyText).toLowerCase();
-      if (low.includes("yes")) reply = "yes";
-      else if (low.includes("no")) reply = "no";
-    }
-    if (!bookingId) {
-      const m = (bodyText.match(/YESBOOK_(\S+)/i) || bodyText.match(/NOBOOK_(\S+)/i));
-      if (m) bookingId = m[1];
+    // ---------------------------------------------------------
+    // 1️⃣ Determine musician reply type
+    // ---------------------------------------------------------
+    const rawReply = buttonPayload || buttonText || bodyText || "";
+    const replyType = interpretReply(rawReply);
+
+    console.log("🦚 replyType detected:", replyType);
+
+    if (!replyType) {
+      console.warn("⚠️ Could not interpret reply; ignoring");
+      return res.status(200).send("<Response/>");
     }
 
+    // ---------------------------------------------------------
+    // 2️⃣ Extract bookingId from YESBOOK_xxx or NOBOOK_xxx
+    // ---------------------------------------------------------
+    let bookingId = null;
+
+    const bookingMatch =
+      bodyText.match(/YESBOOK_(\S+)/i) ||
+      bodyText.match(/NOBOOK_(\S+)/i);
+
+    if (bookingMatch) {
+      bookingId = bookingMatch[1];
+    }
+
+    // ---------------------------------------------------------
+    // 3️⃣ Fetch the pending EnquiryMessage row
+    // ---------------------------------------------------------
     let msg = null;
-    if (!bookingId) {
-      const variants = normalizeFrom(fromRaw);
-      msg = await EnquiryMessage.findOne({
-        phone: { $in: variants },
-        "meta.kind": "booking",
-        $or: [{ reply: null }, { reply: { $exists: false } }],
-      })
-        .sort({ updatedAt: -1, createdAt: -1 })
-        .lean();
 
-      if (!msg) {
-        console.warn("🦚 No bookingId and no pending message matched by phone");
-        return res.status(200).send("<Response/>");
-      }
-
-      await EnquiryMessage.updateOne(
-        { _id: msg._id },
-        {
-          $set: {
-            reply: reply || "yes",
-            repliedAt: new Date(),
-            status: "read",
-            "calendar.calendarStatus": "needsAction",
-          },
-        }
-      );
-    } else {
+    if (bookingId) {
       msg = await EnquiryMessage.findOneAndUpdate(
         { enquiryId: bookingId },
         {
           $set: {
-            reply: reply || "yes",
+            reply: replyType,
             repliedAt: new Date(),
+            deliveryStatus: "read",
             status: "read",
             "calendar.calendarStatus": "needsAction",
           },
         },
         { new: true }
       );
+    } else {
+      // Fallback matching by phone (last unanswered request)
+      const variants = normalizeFrom(fromRaw);
 
-      if (!msg) {
-        console.warn("🦚 Booking message not found", { bookingId });
-        return res.status(200).send("<Response/>");
-      }
+      msg = await EnquiryMessage.findOneAndUpdate(
+        {
+          phone: { $in: variants },
+          "meta.kind": "booking",
+          $or: [{ reply: null }, { reply: { $exists: false } }],
+        },
+        {
+          $set: {
+            reply: replyType,
+            repliedAt: new Date(),
+            deliveryStatus: "read",
+            status: "read",
+            "calendar.calendarStatus": "needsAction",
+          },
+        },
+        { new: true }
+      );
     }
 
-    if (reply === "yes") {
-      console.log("🦚 twilioInboundBooking YES branch");
-      const phoneVariants = normalizeFrom(fromRaw);
-      let email = msg.calendar?.attendeeEmail || null;
-
-      if (!email) {
-        const act = await Act.findById(msg.actId).lean();
-        const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
-        const l = lineups.find(x =>
-          (x._id?.toString?.() === String(msg.lineupId)) || (String(x.lineupId) === String(msg.lineupId))
-        ) || lineups[0];
-        const members = Array.isArray(l?.bandMembers) ? l.bandMembers : [];
-        const match = members.find(m => {
-          const mPhones = normalizeFrom(m.phoneNumber || m.phone);
-          return mPhones.some(p => phoneVariants.includes(p));
-        });
-        email = match?.email || null;
-      }
-
-      const eventId = msg.calendar?.eventId;
-      if (eventId && email) {
-        await addAttendeeToEvent({ eventId, email });
-        await EnquiryMessage.updateOne({ _id: msg._id }, { $set: { "calendar.attendeeEmail": email } });
-        console.log("🦚 Added attendee to booking event", { email });
-      } else {
-        console.warn("🦚 Missing eventId or email for YES branch", { eventId, email });
-      }
+    if (!msg) {
+      console.warn("🦚 No matching EnquiryMessage found for this reply");
+      return res.status(200).send("<Response/>");
     }
 
-    if (reply === "no") {
-      console.log("🦚 twilioInboundBooking NO branch");
-      const act = await Act.findById(msg.actId).lean();
-      const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
-      const l = lineups.find(x =>
-        (x._id?.toString?.() === String(msg.lineupId)) || (String(x.lineupId) === String(msg.lineupId))
-      ) || lineups[0];
-      const members = Array.isArray(l?.bandMembers) ? l.bandMembers : [];
-      const current = members.find(m => {
-        const mPhones = normalizeFrom(m.phoneNumber || m.phone);
-        return mPhones.some(p => normalizeFrom(msg.phone).includes(p));
-      });
-      const deputies = Array.isArray(current?.deputies) ? current.deputies : [];
-      const nextDep = deputies.find(d => d.phoneNumber || d.phone);
+    console.log("🦚 matched EnquiryMessage:", msg._id);
 
-      if (nextDep) {
-        const raw = (nextDep.phoneNumber || nextDep.phone).replace(/\s+/g, "");
-        const phone =
-          raw.startsWith("+") ? raw :
-          raw.startsWith("0") ? raw.replace(/^0/, "+44") :
-          raw.startsWith("44") ? `+${raw}` : raw;
+    // ---------------------------------------------------------
+    // 4️⃣ YES — ACCEPTED
+    // ---------------------------------------------------------
+  if (replyType === "YES") {
+  console.log("🟢 YES — musician accepts the gig");
 
-        const newBookingId = `${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+  // 👍 Ensure shared event exists
+  const booking = await Booking.findOne({ bookingRef: msg.enquiryId }).lean();
+  const eventId =
+    booking?.calendarEventId ||
+    (await createSharedBookingEvent({ booking }));
 
-        await EnquiryMessage.create({
-          actId: msg.actId,
-          lineupId: msg.lineupId,
-          enquiryId: newBookingId,
-          phone,
-          duties: current?.instrument || "",
-          fee: msg.fee,
-          formattedDate: msg.formattedDate,
-          formattedAddress: msg.formattedAddress,
-          meta: {
-            actName: msg.meta?.actName,
-            MetaActId: msg.meta?.MetaActId,
-            MetaISODate: msg.meta?.MetaISODate,
-            MetaAddress: msg.meta?.MetaAddress,
-            kind: "booking",
-          },
-          calendar: {
-            eventId: msg.calendar?.eventId,
-            calendarStatus: "needsAction",
-          },
-        });
+  // ✔ determine their email
+  const phoneVariants = normalizeFrom(fromRaw);
+  let email = msg.calendar?.attendeeEmail || null;
 
-        const smsBody =
-          `Hi ${firstNameOf(nextDep)}, ${msg.formattedDate} in ${msg.formattedAddress} ` +
-          `with ${msg.meta?.actName || "the band"} for ${current?.instrument || "performance"} ` +
-          `at £${sanitizeFee(msg.fee)}. Reply YES or NO. 🤍 TSC`;
+  if (!email) {
+    const act = await Act.findById(msg.actId).lean();
+    const lineup =
+      (act.lineups || []).find(x => String(x._id) === String(msg.lineupId))
+      || act.lineups[0];
 
-        await sendWhatsAppMessage({
-          to: phone,
-          templateParams: {
-            FirstName: firstNameOf(nextDep),
-            FormattedDate: msg.formattedDate,
-            FormattedAddress: msg.formattedAddress,
-            Fee: sanitizeFee(msg.fee),
-            Duties: current?.instrument || "performance",
-            ActName: msg.meta?.actName || "the band",
-          },
-          smsBody,
-        });
+    const members = lineup.bandMembers || [];
+    const match = members.find(m =>
+      normalizeFrom(m.phoneNumber || m.phone)
+        .some(p => phoneVariants.includes(p))
+    );
 
-        console.log("🦚 Escalated booking to deputy", {
-          name: `${nextDep.firstName || ""} ${nextDep.lastName || ""}`.trim(),
-          phone,
-        });
-      } else {
-        console.log("🦚 No deputy found; stopping escalation");
+    email = match?.email || null;
+  }
+
+  // ✔ Add attendee to the shared event
+  if (eventId && email) {
+    await addAttendeeToEvent({ eventId, email });
+
+    await EnquiryMessage.updateOne(
+      { _id: msg._id },
+      {
+        $set: {
+          "calendar.attendeeEmail": email,
+          "calendar.eventId": eventId,
+        }
       }
+    );
+  }
+
+  // Mark musician YES
+  await AvailabilityModel.updateOne(
+    { phone: msg.phone, actId: msg.actId, dateISO: msg.meta?.MetaISODate },
+    { $set: { reply: "yes", updatedAt: new Date() } }
+  );
+
+  return res.status(200).send("<Response/>");
+}
+
+    // ---------------------------------------------------------
+    // 5️⃣ NO_BOOKED — I'm already booked elsewhere
+    // ---------------------------------------------------------
+    if (replyType === "NO_BOOKED") {
+      console.log("🔴 NO_BOOKED — musician is unavailable globally for this date");
+
+      // Mark unavailable for ALL acts on this date
+      await AvailabilityModel.updateMany(
+        {
+          musicianId: msg.musicianId,
+          dateISO: msg.meta?.MetaISODate,
+        },
+        {
+          $set: {
+            reply: "unavailable",
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      // Escalate to deputy
+      await escalateToNextDeputy(msg);
+
+      return res.status(200).send("<Response/>");
+    }
+
+    // ---------------------------------------------------------
+    // 6️⃣ NO_LOC — decline just this one enquiry
+    // ---------------------------------------------------------
+    if (replyType === "NO_LOC") {
+      console.log("🟠 NO_LOC — decline this booking only");
+
+      await EnquiryMessage.updateOne(
+        { _id: msg._id },
+        { $set: { reply: "no", updatedAt: new Date() } }
+      );
+
+      // Escalate to next deputy
+      await escalateToNextDeputy(msg);
+
+      return res.status(200).send("<Response/>");
     }
 
     return res.status(200).send("<Response/>");
+
   } catch (err) {
-    console.error(`🦚 twilioInboundBooking error`, err);
+    console.error("❌ twilioInboundBooking v4 ERROR:", err);
     return res.status(200).send("<Response/>");
   }
 };
+
+export async function escalateToNextDeputy(msg) {
+  try {
+    console.log("🟡 escalateToNextDeputy v2 → starting", {
+      msgId: msg._id,
+      phone: msg.phone,
+      actId: msg.actId,
+      lineupId: msg.lineupId,
+    });
+
+    // ---------------------------------------------------
+    // 1. Load act + lineup + members
+    // ---------------------------------------------------
+    const act = await Act.findById(msg.actId).lean();
+    if (!act) {
+      console.warn("❗ escalateToNextDeputy: act missing");
+      return false;
+    }
+
+    const lineup =
+      act.lineups?.find(
+        (l) =>
+          String(l._id) === String(msg.lineupId) ||
+          String(l.lineupId) === String(msg.lineupId)
+      ) || act.lineups?.[0];
+
+    if (!lineup) {
+      console.warn("❗ escalateToNextDeputy: lineup missing");
+      return false;
+    }
+
+    const members = lineup.bandMembers || [];
+
+    // Identify the current musician in the lineup
+    const current = members.find((m) => {
+      const phones = normalizeFrom(m.phoneNumber || m.phone);
+      return phones.includes(msg.phone);
+    });
+
+    if (!current) {
+      console.warn("❗ escalateToNextDeputy: could not match current musician by phone");
+      return false;
+    }
+
+    const deputies = current.deputies || [];
+    if (!deputies.length) {
+      console.log("ℹ️ No deputies — stopping escalation");
+      return false;
+    }
+
+    // ---------------------------------------------------
+    // 2. Find the FIRST deputy who hasn’t been contacted yet
+    // ---------------------------------------------------
+    const contactedPhones = await EnquiryMessage.distinct("phone", {
+      actId: msg.actId,
+      lineupId: msg.lineupId,
+      "meta.MetaISODate": msg.meta?.MetaISODate,
+    });
+
+    let nextDep = deputies.find((d) => {
+      const raw = (d.phoneNumber || d.phone || "").replace(/\s+/g, "");
+      const norm =
+        raw.startsWith("+") ? raw :
+        raw.startsWith("0") ? raw.replace(/^0/, "+44") :
+        raw.startsWith("44") ? `+${raw}` : `+${raw}`;
+
+      return !contactedPhones.includes(norm);
+    });
+
+    if (!nextDep) {
+      console.log("ℹ️ All deputies have already been contacted. Stopping.");
+      return false;
+    }
+
+    // ---------------------------------------------------
+    // 3. Format deputy phone
+    // ---------------------------------------------------
+    let raw = (nextDep.phoneNumber || nextDep.phone || "").replace(/\s+/g, "");
+    let phone =
+      raw.startsWith("+") ? raw :
+      raw.startsWith("0") ? raw.replace(/^0/, "+44") :
+      raw.startsWith("44") ? `+${raw}` : `+${raw}`;
+
+    // ---------------------------------------------------
+    // 4. Create new EnquiryMessage for this deputy
+    // ---------------------------------------------------
+    const newBookingId = `${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 7)}`;
+
+    const created = await EnquiryMessage.create({
+      actId: msg.actId,
+      lineupId: msg.lineupId,
+      musicianId: nextDep.musicianId || nextDep._id || null,
+      enquiryId: newBookingId,
+      phone,
+      duties: msg.duties,
+      fee: msg.fee,
+      formattedDate: msg.formattedDate,
+      formattedAddress: msg.formattedAddress,
+      meta: {
+        actName: msg.meta?.actName,
+        MetaActId: msg.meta?.MetaActId,
+        MetaISODate: msg.meta?.MetaISODate,
+        MetaAddress: msg.meta?.MetaAddress,
+        kind: "booking",
+      },
+      calendar: {
+        eventId: msg.calendar?.eventId,
+        calendarStatus: "needsAction",
+      },
+      deliveryStatus: "queued",
+      status: "queued",
+    });
+
+    console.log("🟢 Created new deputy EnquiryMessage", {
+      messageId: created._id,
+      phone,
+    });
+
+    // ---------------------------------------------------
+    // 5. Send WhatsApp booking request
+    // ---------------------------------------------------
+    const smsBody =
+      `Hi ${firstNameOf(nextDep)}, ${msg.formattedDate} in ${msg.formattedAddress} ` +
+      `with ${msg.meta?.actName || "the band"} for ${msg.duties || "performance"} ` +
+      `at £${sanitizeFee(msg.fee)}. Reply YES or NO. 🤍 TSC`;
+
+    const wa = await sendWhatsAppMessage({
+      to: `whatsapp:${phone}`,
+      contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+      variables: {
+        "1": firstNameOf(nextDep),
+        "2": msg.formattedDate,
+        "3": msg.formattedAddress,
+        "4": sanitizeFee(msg.fee),
+        "5": msg.duties || "performance",
+        "6": msg.meta?.actName || "the band",
+      },
+      smsBody,
+    });
+
+    await EnquiryMessage.updateOne(
+      { _id: created._id },
+      { $set: { messageSid: wa?.sid || null, deliveryStatus: "sent" } }
+    );
+
+    // ---------------------------------------------------
+    // 6. Mark previous message auto-escalated
+    // ---------------------------------------------------
+    await EnquiryMessage.updateOne(
+      { _id: msg._id },
+      { $set: { autoEscalatedAt: new Date() } }
+    );
+
+    console.log("🟢 Escalation complete → new deputy contacted");
+    return true;
+
+  } catch (err) {
+    console.error("❌ escalateToNextDeputy v2 ERROR:", err);
+    return false;
+  }
+}
 
 
 // Send the booking-request message to ALL performers in a lineup //whatsapp going to band working

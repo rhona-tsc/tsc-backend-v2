@@ -42,6 +42,10 @@ import v2Routes from "./routes/v2.js";
 import { rebuildAndApplyAvailabilityBadge, twilioInbound, twilioStatus, buildAvailabilityBadgeFromRows } from './controllers/availabilityController.js';
 import { handleGoogleWebhook } from './controllers/googleController.js';
 import morgan from "morgan";
+import cron from "node-cron";
+import { runChaseAndEscalation } from "./cron/chaseAndEscalate.js";
+
+
 
 if (process.env.NODE_ENV !== "production") {
   app.use(morgan("dev"));
@@ -56,6 +60,12 @@ console.log('ENV CHECK:', {
 
 const app = express();
 const port = process.env.PORT || 4000;
+
+
+cron.schedule("0 * * * *", async () => {
+  await runChaseAndEscalation();
+});
+
 
 /* -------------------------------------------------------------------------- */
 /*                                 CORS FIRST                                 */

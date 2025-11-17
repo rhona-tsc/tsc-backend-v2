@@ -29,6 +29,8 @@ import { logStart } from "../utils/logger.js";
 import { setSharedIVR } from "../utils/proxySetup.js";
 import { sendSMSMessage, sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
 import userModel from '../models/userModel.js';
+import { sendBookingConfirmationToLeadVocalist, sendBookingRequestsToLineup } from './booking/helpers.js';
+import { createSharedBookingEvent } from '../utils/createSharedBookingEvent.js';
 
 /**
  * Lookup a musician’s full name by ID.
@@ -1949,153 +1951,363 @@ export const ensureEmergencyContact = async (req, res) => {
   }
 };
 
+// helpers inside bookingController.js
 
+import Act from "../models/actModel.js";
+import AvailabilityModel from "../models/availabilityModel.js";
+import Musician from "../models/musicianModel.js";
+import Booking from "../models/bookingModel.js";
+import userModel from "../models/userModel.js";
+import { sendWhatsAppMessage } from "../utils/twilioClient.js";
+import { formatE164 } from "../utils/phone.js";
+import { sendBookingRequestToLineup } from "./availabilityController.js";
+import { createSharedBookingEvent } from "../utils/createSharedBookingEvent.js";
+import puppeteer from "puppeteer"; // if not already imported
+
+// Small date helper
+function toDateISO(d) {
+  return new Date(d).toISOString().slice(0, 10);
+}
+
+/**
+ * 2️⃣ + 3️⃣
+ * Send booking confirmation to the **lead vocalist**
+ * and mark them unavailable / clear badges.
+ */
+async function confirmLeadVocalistForBooking(booking) {
+  const actSummary = Array.isArray(booking.actsSummary)
+    ? booking.actsSummary[0]
+    : null;
+
+  const chosen = actSummary?.chosenVocalists?.[0];
+  if (!chosen?.musicianId) {
+    console.warn("🎤 No chosen lead vocalist on booking", { bookingId: booking.bookingId });
+    return;
+  }
+
+  const musician = await Musician.findById(chosen.musicianId).lean();
+  if (!musician) {
+    console.warn("🎤 Lead vocalist musician not found", { musicianId: chosen.musicianId });
+    return;
+  }
+
+  const phone = formatE164(musician.phone || musician.phoneNumber);
+  if (!phone) {
+    console.warn("🎤 Lead vocalist has no valid phone", { musicianId: chosen.musicianId });
+  }
+
+  const actName =
+    actSummary?.actName ||
+    booking.actName ||
+    "Your Act";
+
+  const venueAddress =
+    booking.venueAddress ||
+    booking.venue ||
+    "Venue";
+
+  const eventDateISO = toDateISO(booking.date);
+  const formattedDate = new Date(booking.date).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+
+  // 2️⃣ WhatsApp to lead vocalist (confirmed booking)
+  if (phone) {
+    try {
+      const contentSid =
+        process.env.TWILIO_VOCALIST_BOOKING_CONFIRMATION_SID ||
+        process.env.TWILIO_BOOKING_CONFIRMATION_SID; // fallback
+
+      await sendWhatsAppMessage({
+        to: phone,
+        contentSid,
+        variables: {
+          1: musician.firstName || "there",
+          2: formattedDate,
+          3: venueAddress,
+          4: actName,
+        },
+      });
+
+      console.log("📣 Lead vocalist confirmation WA sent", {
+        to: phone,
+        musicianId: musician._id,
+        bookingId: booking.bookingId,
+      });
+    } catch (err) {
+      console.warn("⚠️ Failed to send lead vocalist WA:", err.message);
+    }
+  }
+
+  // 3️⃣ Mark vocalist unavailable for that date in AvailabilityModel
+  try {
+    await AvailabilityModel.updateMany(
+      {
+        musicianId: musician._id,
+        dateISO: eventDateISO,
+      },
+      {
+        $set: {
+          reply: "yes",
+          updatedAt: new Date(),
+        },
+      }
+    );
+  } catch (err) {
+    console.warn("⚠️ Failed to mark vocalist unavailable in AvailabilityModel:", err.message);
+  }
+
+  // 3️⃣ Clear availability badges for this vocalist on this date across all acts
+  try {
+    await Act.updateMany(
+      {
+        "availabilityBadges.vocalistId": musician._id,
+        "availabilityBadges.dateISO": eventDateISO,
+      },
+      {
+        $set: { "availabilityBadges.active": false },
+        $unset: {
+          "availabilityBadges.vocalistName": "",
+          "availabilityBadges.inPromo": "",
+          "availabilityBadges.dateISO": "",
+          "availabilityBadges.address": "",
+          "availabilityBadges.setAt": "",
+        },
+      }
+    );
+    console.log("🧼 Cleared availability badges for vocalist", {
+      vocalistId: musician._id,
+      eventDateISO,
+    });
+  } catch (err) {
+    console.warn("⚠️ Failed to clear availability badges:", err.message);
+  }
+}
+
+/**
+ * 4️⃣ Trigger musician booking requests for the lineup
+ * This uses your existing sendBookingRequestToLineup helper.
+ */
+async function sendBookingRequestsToLineupFromBooking(booking) {
+  if (!booking.act || !booking.lineupId || !booking.date) {
+    console.warn("🎻 Cannot send booking requests – missing act/lineup/date", {
+      act: booking.act,
+      lineupId: booking.lineupId,
+      date: booking.date,
+    });
+    return;
+  }
+
+  const dateISO = toDateISO(booking.date);
+  const address = booking.venueAddress || booking.venue || "";
+
+  await sendBookingRequestToLineup({
+    actId: booking.act,
+    lineupId: booking.lineupId,
+    date: dateISO,
+    address,
+  });
+
+  console.log("📣 Booking requests triggered to lineup", {
+    actId: booking.act,
+    lineupId: booking.lineupId,
+    dateISO,
+  });
+}
+
+/********************************************************************************************
+ * COMPLETE BOOKING V2 — Fully Refactored
+ * --------------------------------------------------------
+ * - Correct lookup by bookingId (NOT bookingRef)
+ * - Idempotent (won’t double-send WA / email / contracts)
+ * - Normalised booking fields (actName, eventDateISO, venueAddress)
+ * - Clean steps with centralised error logging
+ ********************************************************************************************/
 
 export const completeBookingV2 = async (req, res) => {
-  console.log(`🐣 (controllers/bookingController.js) completeBookingV2 called at`, new Date().toISOString(), {
+  const { session_id } = req.query;
+
+  console.log(`🐣 completeBookingV2 called`, {
     query: req.query,
+    timestamp: new Date().toISOString(),
   });
-    const { session_id } = req.query;
+
   if (!session_id) {
-    console.warn("[completeBookingV2] ❌ Missing session_id");
-    return res.status(400).json({ success: false, message: "Missing session_id" });
+    return res
+      .status(400)
+      .json({ success: false, message: "Missing session_id" });
   }
 
   try {
-    console.log("[completeBookingV2] ▶ start", { session_id });
+    // ------------------------------------------------
+    // 0️⃣ Retrieve Stripe session
+    // ------------------------------------------------
+    const stripe = await import("stripe").then(
+      (m) => new m.default(process.env.STRIPE_SECRET_KEY)
+    );
+    const session = await stripe.checkout.sessions.retrieve(session_id, {
+      expand: ["payment_intent"],
+    });
 
-    // 🧾 Retrieve Stripe session
-    const stripe = await import("stripe").then(m => new m.default(process.env.STRIPE_SECRET_KEY));
-    const session = await stripe.checkout.sessions.retrieve(session_id, { expand: ["payment_intent"] });
     const bookingRef = session?.metadata?.booking_ref;
+    if (!bookingRef) {
+      throw new Error("Stripe session missing booking_ref metadata");
+    }
 
-    // 🧮 Fetch the booking document
-const booking = await Booking.findOne({ bookingId: bookingRef });
-if (!booking) {
-  throw new Error(`Booking not found for bookingId ${bookingRef}`);
-}
+    // ------------------------------------------------
+    // 1️⃣ Fetch booking by bookingId
+    // ------------------------------------------------
+    const booking = await Booking.findOne({ bookingId: bookingRef }).lean();
+    if (!booking) {
+      throw new Error(`Booking not found for bookingId ${bookingRef}`);
+    }
 
-   console.log("✅ Booking found:", bookingRef);
+    console.log("✅ Booking found:", bookingRef);
 
-// -----------------------------------------------------
-// 🔥  Clear cart on successful payment
-// -----------------------------------------------------
-try {
-  await userModel.updateOne(
-    { _id: booking.userId },
-    { $set: { cartData: {} } }
-  );
-  console.log("🛒 User cartData cleared:", booking.userId);
-} catch (cartErr) {
-  console.error("❌ Failed to clear cart:", cartErr);
-}
+    // ------------------------------------------------
+    // 1.5️⃣ Idempotency guard — prevents double-processing
+    // ------------------------------------------------
+    if (booking.checkoutCompleted) {
+      console.log(
+        "🟢 Booking already completed — skipping duplicate processing"
+      );
+      return res.json({ success: true, bookingRef });
+    }
 
-// -----------------------------------------------------
-// 1️⃣ Send WhatsApp confirmation to client + musicians
-// -----------------------------------------------------
-try {
-      // Send WhatsApp to client (management)
-      await sendWhatsAppMessage({
-        to: booking.clientPhone,
-        contentSid: process.env.TWILIO_BOOKING_CONFIRMATION_SID,
-        variables: {
-          1: booking.clientName || "Client",
-          2: new Date(booking.eventDateISO).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric" }),
-          3: booking.venueAddress || "Venue",
-          4: booking.totalFee?.toFixed(2) || "0.00",
-          5: "performance",
-          6: booking.actName || "Your Band",
+    const amountMajor = (session.amount_total || 0) / 100;
+
+    await Booking.updateOne(
+      { bookingId: bookingRef },
+      {
+        $set: {
+          checkoutCompleted: true,
+          payment: true,
+          sessionId: session_id,
+          amount: amountMajor,
         },
-      });
-      console.log("📤 WhatsApp sent to client:", booking.clientPhone);
-    } catch (waErr) {
-      console.warn("⚠️ WhatsApp to client failed, sending SMS fallback:", waErr.message);
-      if (booking.clientPhone)
-        await sendSMSMessage(booking.clientPhone, `Your booking ${booking.actName} is confirmed for ${booking.venueAddress}. Ref: ${bookingRef}`);
+      }
+    );
+
+    // ------------------------------------------------
+    // Normalised safe fields
+    // ------------------------------------------------
+    const actName =
+      booking.actsSummary?.[0]?.actName ||
+      booking.actName ||
+      "Your Act";
+
+    const venueAddress =
+      booking.venueAddress ||
+      booking.venue ||
+      "Venue";
+
+    const eventDateISO = toDateISO(booking.date);
+
+    // ------------------------------------------------
+    // 5️⃣ Ensure ONE shared calendar event exists
+    // ------------------------------------------------
+    const sharedEventId = await createSharedBookingEvent({ booking });
+    console.log("📅 Shared booking event:", sharedEventId);
+
+    // ------------------------------------------------
+    // 2️⃣ + 3️⃣ Lead vocalist confirm + mark unavailable + clear badges
+    // ------------------------------------------------
+    try {
+      await confirmLeadVocalistForBooking(booking);
+    } catch (err) {
+      console.warn(
+        "⚠️ confirmLeadVocalistForBooking failed (non-fatal):",
+        err.message
+      );
     }
 
-    // Send WhatsApp to each musician (and SMS fallback)
-    for (const m of booking.bookedMusicians || []) {
-      const phone = m.phone?.startsWith("+") ? m.phone : `+44${m.phone?.replace(/^0/, "")}`;
-      const feeUsed = m.feeUsed || booking.feePerMember || "N/A";
-
-      try {
-        await sendWhatsAppMessage({
-          to: phone,
-          contentSid: process.env.TWILIO_BOOKING_REQUEST_SID,
-          variables: {
-            1: m.firstName || m.name || "Musician",
-            2: new Date(booking.eventDateISO).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric" }),
-            3: booking.venueAddress || "",
-            4: m.duties || "",
-            5: booking.actName || "",
-            6: String(feeUsed),
-          },
-        });
-        console.log("📣 Booking-request (WA) sent", { to: phone, duties: m.duties, feeUsed });
-      } catch (waErr) {
-        console.warn("⚠️ WA failed, trying SMS fallback:", waErr.message);
-        if (phone)
-          await sendSMSMessage(phone, `Booking confirmed for ${booking.actName} on ${booking.eventDateISO} at ${booking.venueAddress}. Fee: £${feeUsed}`);
-      }
-
-      // 📅 Calendar invite (per musician)
-      try {
-        if (m.email && booking.actId && booking.eventDateISO) {
-          await createCalendarInvite({
-            actId: booking.actId,
-            dateISO: booking.eventDateISO,
-            email: m.email,
-            summary: `TSC: Confirmed Booking (${booking.actName})`,
-            description: `Confirmed performance at ${booking.venueAddress}`,
-            extendedProperties: { line: `Confirmed booking ${booking.actName} – ${booking.venueAddress}` },
-          });
-        } else {
-          console.warn("⚠️ Skipping calendar invite — missing email or date", {
-            email: m.email,
-            dateISO: booking.eventDateISO,
-          });
-        }
-      } catch (calErr) {
-        console.warn("⚠️ Calendar invite failed:", calErr.message);
-      }
+    // ------------------------------------------------
+    // 4️⃣ Trigger booking requests to full lineup
+    // ------------------------------------------------
+    try {
+      await sendBookingRequestsToLineupFromBooking(booking);
+    } catch (err) {
+      console.warn(
+        "⚠️ sendBookingRequestsToLineupFromBooking failed (non-fatal):",
+        err.message
+      );
     }
 
-    // -----------------------------------------------------
-    // 2️⃣ Generate & email contract
-    // -----------------------------------------------------
+    // ------------------------------------------------
+    // 6️⃣ Contract PDF Generation + Email
+    // ------------------------------------------------
     try {
       const browser = await puppeteer.launch({
-        headless: true,
-        executablePath: puppeteer.executablePath(), // ✅ Render-safe
+        headless: "new",
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+        ],
       });
+
       const page = await browser.newPage();
-      await page.setContent(`<html><body><h1>Contract for ${booking.actName}</h1><p>Booking Ref: ${bookingRef}</p></body></html>`);
+      await page.setContent(`
+        <html>
+        <body>
+          <h1>Contract for ${actName}</h1>
+          <p>Booking Ref: ${bookingRef}</p>
+          <p>Event Date: ${eventDateISO}</p>
+          <p>Venue: ${venueAddress}</p>
+        </body>
+        </html>
+      `);
+
       const pdfBuffer = await page.pdf({ format: "A4" });
       await browser.close();
 
-      // upload + email logic here (your existing nodemailer + cloudinary upload)
-      console.log("📄 Contract PDF generated for", bookingRef);
-    } catch (pdfErr) {
-      console.error("❌ PDF/email step failed:", pdfErr.message);
+      console.log("📄 Contract generated:", bookingRef);
+
+      // TODO: upload pdfBuffer to Cloudinary and email to client
+      // await uploadAndEmailContract(pdfBuffer, booking);
+
+    } catch (err) {
+      console.error("❌ Contract generation failed:", err.message);
     }
 
-    // -----------------------------------------------------
-    // 3️⃣ BookingBoard update (if applicable)
-    // -----------------------------------------------------
+    // ------------------------------------------------
+    // 7️⃣ Clear the user's cart
+    // ------------------------------------------------
     try {
-      // existing upsertBoardRowFromBooking(bookingRef, actId, eventDateISO)
-      console.log("📋 Booking board updated OK:", { bookingRef });
-    } catch (boardErr) {
-      console.warn("⚠️ BookingBoard update failed:", boardErr.message);
+      if (booking.userId) {
+        await userModel.updateOne(
+          { _id: booking.userId },
+          { $set: { cartData: {} } }
+        );
+        console.log("🛒 User cart cleared:", booking.userId);
+      }
+    } catch (err) {
+      console.error("❌ Failed to clear cartData:", err);
     }
+
+    // (Optional) Booking board update / additional side effects here
 
     return res.json({ success: true, bookingRef });
   } catch (err) {
-    console.error("[completeBookingV2] FATAL:", err);
-    return res.status(500).json({ success: false, message: err.message });
+    console.error("❌ completeBookingV2 FATAL:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: err.message });
   }
 };
+
+/********************************************************************
+ * Helper
+ ********************************************************************/
+function formatE164(phone) {
+  if (!phone) return null;
+  if (phone.startsWith("+")) return phone;
+  return `+44${phone.replace(/^0/, "")}`;
+}
 
 
 // ---------------- exports ----------------

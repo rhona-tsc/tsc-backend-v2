@@ -45,7 +45,8 @@ const enquiryMessageSchema = new mongoose.Schema(
       enum: ["yes", "no", "unavailable"],
     },
     repliedAt: { type: Date },
-
+chaseSentAt: { type: Date, default: null },
+autoEscalatedAt: { type: Date, default: null },
     // Metadata for matching / diagnostics
     meta: {
       actName: String,
