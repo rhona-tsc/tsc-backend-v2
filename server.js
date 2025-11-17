@@ -44,7 +44,7 @@ import { handleGoogleWebhook } from './controllers/googleController.js';
 import morgan from "morgan";
 import cron from "node-cron";
 import { runChaseAndEscalation } from "./cron/chaseAndEscalate.js";
-
+import actModel from './models/actModel.js';
 
 
 if (process.env.NODE_ENV !== "production") {
@@ -355,10 +355,7 @@ app.use((err, req, res, next) => {
 // ---------------------------------------------------------------------------
 // 🕒 Google Calendar auto-watch refresh (runs daily at 3am UTC)
 // ---------------------------------------------------------------------------
-import cron from 'node-cron';
-import { buildBadgeFromAvailability } from './controllers/availabilityBadgesController.js';
-import AvailabilityModel from './models/availabilityModel.js';
-import actModel from './models/actModel.js';
+
 
 let isRegistering = false;
 
