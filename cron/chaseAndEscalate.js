@@ -2,7 +2,7 @@
 import EnquiryMessage from "../models/EnquiryMessage.js";
 import { sendWhatsAppMessage, sendSMSMessage } from "../utils/twilioClient.js";
 import { escalateToNextDeputy_v2 as escalateToNextDeputy } from "../controllers/allocationController.js";
-import { sanitizeFee, firstNameOf } from "../utils/helpers.js";
+import { sanitizeFee } from "../controllers/allocationController.js";
 
 export const runChaseAndEscalation = async () => {
   console.log("⏱️ Running chase + escalation cron", new Date().toISOString());
