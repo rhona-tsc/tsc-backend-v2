@@ -31,6 +31,9 @@ import { sendSMSMessage, sendWhatsAppMessage } from "../utils/twilioClient.js"; 
 import userModel from '../models/userModel.js';
 import { sendBookingConfirmationToLeadVocalist, sendBookingRequestsToLineup } from './booking/helpers.js';
 import { createSharedBookingEvent } from '../utils/createSharedBookingEvent.js';
+import { formatE164 } from "../utils/phone.js";
+import { sendBookingRequestToLineup } from "./availabilityController.js";
+
 
 /**
  * Lookup a musician’s full name by ID.
@@ -1972,16 +1975,6 @@ export const ensureEmergencyContact = async (req, res) => {
 
 // helpers inside bookingController.js
 
-import Act from "../models/actModel.js";
-import AvailabilityModel from "../models/availabilityModel.js";
-import Musician from "../models/musicianModel.js";
-import Booking from "../models/bookingModel.js";
-import userModel from "../models/userModel.js";
-import { sendWhatsAppMessage } from "../utils/twilioClient.js";
-import { formatE164 } from "../utils/phone.js";
-import { sendBookingRequestToLineup } from "./availabilityController.js";
-import { createSharedBookingEvent } from "../utils/createSharedBookingEvent.js";
-import puppeteer from "puppeteer"; // if not already imported
 
 // Small date helper
 function toDateISO(d) {
