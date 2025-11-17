@@ -3,26 +3,44 @@ import userModel from "../models/userModel.js"
 
 // add acts to user cart
 const addToCart = async (req, res) => {
-    try {
-      const { actId, lineupId, selectedExtras = [] } = req.body;
-      const userData = await userModel.findById(req.body.userId);
-      let cartData = userData.cartData || {};
+  try {
+    const {
+      userId,
+      actId,
+      lineupId,
+      selectedExtras = [],
+      selectedAfternoonSets = [],
+      songSuggestions = [],
+      performance = {},
+      dismissedExtras = []
+    } = req.body;
 
-      if (!cartData[actId]) cartData[actId] = {};
-
-      cartData[actId][lineupId] = {
-        quantity: 1,
-        selectedExtras,
-      };
-
-      await userModel.findByIdAndUpdate(req.body.userId, { cartData });
-
-      res.json({ success: true, message: "Added To Cart" });
-    } catch (error) {
-      console.log(error);
-      res.json({ success: false, message: error.message });
+    const userData = await userModel.findById(userId);
+    if (!userData) {
+      return res.json({ success: false, message: "User not found" });
     }
-  };
+
+    let cartData = userData.cartData || {};
+
+    if (!cartData[actId]) cartData[actId] = {};
+
+    cartData[actId][lineupId] = {
+      quantity: 1,
+      selectedExtras,
+      selectedAfternoonSets,
+      songSuggestions,
+      dismissedExtras,
+      performance,
+    };
+
+    await userModel.findByIdAndUpdate(userId, { cartData });
+
+    res.json({ success: true, message: "Added To Cart" });
+  } catch (error) {
+    console.log(error);
+    res.json({ success: false, message: error.message });
+  }
+};
 
 // update user cart
 const updateCart = async (req, res) => {
