@@ -65,6 +65,25 @@ const firstNameOf = (p = {}) => {
   return "";
 };
 
+export async function launchBrowser() {
+  const executablePath = await puppeteer
+    .executablePath()
+    .catch(() => null);
+
+  return puppeteer.launch({
+    executablePath,           // <-- required for Render
+    headless: true,           // <-- "new" causes issues
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--single-process",
+      "--no-zygote",
+    ],
+  });
+}
+
 // (optional) tiny helper to mirror contactRouting -> eventSheet.emergencyContact
 function mirrorEmergencyContact(contactRouting = {}) {
   console.log(`🐣 (controllers/bookingController.js) mirrorEmergencyContact called at`, new Date().toISOString(), { contactRouting });
@@ -1116,7 +1135,7 @@ const completeBooking = async (req, res) => {
     let pdfBuffer;
     try {
       console.log("[completeBooking] ▶ puppeteer launch");
-      const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+      const browser = await launchBrowser({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: 'load' });
       pdfBuffer = await page.pdf({ format: 'A4' });
@@ -2240,7 +2259,7 @@ export const completeBookingV2 = async (req, res) => {
     // 6️⃣ Contract PDF Generation + Email
     // ------------------------------------------------
     try {
-      const browser = await puppeteer.launch({
+      const browser = await launchBrowser({
         headless: "new",
         args: [
           "--no-sandbox",
