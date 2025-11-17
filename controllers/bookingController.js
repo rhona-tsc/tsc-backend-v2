@@ -32,7 +32,6 @@ import userModel from '../models/userModel.js';
 import { sendBookingConfirmationToLeadVocalist, sendBookingRequestsToLineup } from './booking/helpers.js';
 import { createSharedBookingEvent } from '../utils/createSharedBookingEvent.js';
 import { normalize } from "../utils/phoneUtils.js";
-import { sendBookingRequestToLineup } from "./availabilityController.js";
 
 
 /**
@@ -2101,7 +2100,7 @@ async function confirmLeadVocalistForBooking(booking) {
 
 /**
  * 4️⃣ Trigger musician booking requests for the lineup
- * This uses your existing sendBookingRequestToLineup helper.
+ * This uses your existing sendBookingRequestsToLineup helper.
  */
 async function sendBookingRequestsToLineupFromBooking(booking) {
   if (!booking.act || !booking.lineupId || !booking.date) {
@@ -2116,7 +2115,7 @@ async function sendBookingRequestsToLineupFromBooking(booking) {
   const dateISO = toDateISO(booking.date);
   const address = booking.venueAddress || booking.venue || "";
 
-  await sendBookingRequestToLineup({
+  await sendBookingRequestsToLineup({
     actId: booking.act,
     lineupId: booking.lineupId,
     date: dateISO,
