@@ -1618,7 +1618,7 @@ export const createBooking = async (req, res) => {
   });
   try {
     const {
-      act,            // actId
+      actId,            // actId
       date,           // event date (ISO)
       venue,
       fee,            // gross £ for the act (what client owes in total)
@@ -1636,7 +1636,7 @@ export const createBooking = async (req, res) => {
       contactRouting,
     } = req.body;
 
-    if (!act || !date || !venue || !fee || !bandLineup?.length) {
+    if (!actId || !date || !venue || !fee || !bandLineup?.length) {
       return res.status(400).json({ success: false, message: "Missing required fields." });
     }
 
@@ -1684,7 +1684,7 @@ const actsSummaryPatched = Array.isArray(req.body.actsSummary)
 
     // ── Create and save booking ────────────────────────────────────────────────
 const newBooking = new Booking({
-  act,
+  actId,
   date: eventDate,
   venue,
   fee,
@@ -1693,7 +1693,7 @@ const newBooking = new Booking({
   clientName,
   clientEmail,
   clientPhone,
-  chosenVocalists: act.chosenVocalists || [],
+  chosenVocalists: actId.chosenVocalists || [],
 
   // ✅ use normalized block, not the raw input
   performanceTimes: normalizedPerf || undefined,
@@ -1762,7 +1762,7 @@ const newBooking = new Booking({
     } catch (e) { console.warn("⚠️ client confirm (createBooking) failed:", e?.message || e); }
 
     try {
-      const actId   = newBooking?.act;
+      const actId   = newBooking?.actId;
       const lineupId= lineupId || newBooking?.lineupId;
       const dateISO = new Date(newBooking?.date).toISOString().slice(0,10);
       const shortAddress = (newBooking?.venue || "").split(',').slice(-2).join(',').replace(/,\s*UK$/i, '').trim();
@@ -1773,7 +1773,7 @@ const newBooking = new Booking({
     try {
       await upsertCalendarForConfirmedBooking({
         booking: newBooking,
-        actId: act,
+        actId: actId,
         lineupId: lineupId || null,
         bandLineup,
         venue,
@@ -1790,7 +1790,7 @@ const newBooking = new Booking({
           `${backendUrl || process.env.BACKEND_URL || ""}/api/invoices/schedule-balance`,
           {
             bookingId: newBooking.bookingId || String(newBooking._id),
-            actId: act,
+            actId: actId,
             customerId: null, // fill if you map clients to Stripe Customers
             eventDateISO: eventDate.toISOString(),
             currency: "GBP",
