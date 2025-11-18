@@ -13,22 +13,29 @@ export async function createSharedBookingEvent({ booking }) {
   const cal = google.calendar({ version: "v3", auth: oauth2Client });
   const calendarId = "primary";
 
-  const start = booking.eventDateISO + "T17:00:00"; // default start time
-  const end   = booking.eventDateISO + "T23:59:00";
+  // 🔥 FIX — use correct bookingId
+  const bookingRef = booking.bookingId;
+
+  // 🔥 FIX — compute eventDateISO safely
+  const eventDateISO = new Date(booking.date).toISOString().slice(0, 10);
+
+  // 🔥 FIX — always build valid ISO dateTime strings
+  const start = `${eventDateISO}T17:00:00`;
+  const end   = `${eventDateISO}T23:59:00`;
 
   const event = {
-    summary: `TSC: Enquiry for ${booking.actName}`,
-    description: `Booking reference ${booking.bookingRef}\n${booking.venueAddress}`,
+    summary: `TSC: Enquiry for ${booking.actName || "Act"}`,
+    description: `Booking reference ${bookingRef}\n${booking.venueAddress || booking.venue || ""}`,
     start: { dateTime: start, timeZone: "Europe/London" },
     end:   { dateTime: end,   timeZone: "Europe/London" },
     extendedProperties: {
       private: {
-        bookingRef: booking.bookingRef,
+        bookingRef,
         actId: String(booking.actId),
-        eventDateISO: booking.eventDateISO,
+        eventDateISO,
       },
     },
-    attendees: []  // musicians will be added later
+    attendees: []
   };
 
   const created = await cal.events.insert({
@@ -38,7 +45,6 @@ export async function createSharedBookingEvent({ booking }) {
 
   const eventId = created.data.id;
 
-  // Persist event ID into Booking
   await Booking.updateOne(
     { _id: booking._id },
     { $set: { calendarEventId: eventId } }

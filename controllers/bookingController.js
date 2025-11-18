@@ -2215,7 +2215,8 @@ export const completeBookingV2 = async (req, res) => {
       booking.venue ||
       "Venue";
 
-    const eventDateISO = toDateISO(booking.date);
+const eventDateISO = toDateISO(booking.date);
+booking.eventDateISO = eventDateISO;
 
     // ------------------------------------------------
     // 5️⃣ Ensure ONE shared calendar event exists
