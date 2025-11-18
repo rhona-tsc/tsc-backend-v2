@@ -1002,8 +1002,8 @@ export async function uploadAndEmailContract(pdfBuffer, booking) {
   console.log("📤 [Contract] Starting uploadAndEmailContract...");
 
   const bookingRef = booking.bookingId || booking.bookingRef;
-  const clientEmail = booking.customer?.email || booking.clientEmail;
-  const clientName = booking.customer?.name || booking.clientName || "Client";
+  const clientEmail = booking.customer?.email || booking.userEmail;
+  const clientName = booking.customer?.name || booking.userAddress.userFirstName || "Client";
 
   if (!clientEmail) {
     console.warn("⚠️ [Contract] No client email found — aborting email send.");
