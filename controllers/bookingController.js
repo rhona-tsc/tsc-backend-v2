@@ -33,6 +33,7 @@ import { sendBookingConfirmationToLeadVocalist, sendBookingRequestsToLineup } fr
 import { updateOrCreateBookingEvent } from '../utils/updateOrCreateBookingEvent.js';
 import { normalize } from "../utils/phoneUtils.js";
 import chromium from "@sparticuz/chromium";
+import { sendContractEmail } from "./helpers/sendContractEmail.js";
 
 /**
  * Lookup a musician’s full name by ID.
@@ -2311,15 +2312,18 @@ export const completeBookingV2 = async (req, res) => {
     const bookingRef = session?.metadata?.booking_ref;
     if (!bookingRef) throw new Error("Stripe session missing booking_ref metadata");
 
-    // 1️⃣ Load booking
-    const booking = await Booking.findOne({ bookingId: bookingRef });
-    if (!booking) throw new Error(`Booking not found for bookingId ${bookingRef}`);
+    // 1️⃣ FETCH BOOKING
+const booking = await Booking.findOne({ bookingId: bookingRef });
+if (!booking) throw new Error(`Booking not found for bookingId ${bookingRef}`);
 
-    console.log("🎯 Booking loaded:", {
-      bookingId: booking.bookingId,
-      userEmail: booking?.userAddress?.email,
-      actSummaryCount: booking?.actsSummary?.length || 0,
-    });
+// 🔥 PATCH booking so all downstream logic works
+booking.act = booking.act || booking?.actsSummary?.[0]?.actId || null;
+booking.lineupId = booking.lineupId || booking?.actsSummary?.[0]?.lineupId || null;
+
+console.log("Resolved actId/lineupId:", {
+  actId: booking.act,
+  lineupId: booking.lineupId
+});
 
     // 2️⃣ Resolve act + lineup
     const actId =
@@ -2435,15 +2439,12 @@ export const completeBookingV2 = async (req, res) => {
         }
 
         // SEND EMAIL
-        try {
-          await sendContractEmail({
-            booking,
-            pdfBuffer,
-          });
-          console.log("📧 Email sent successfully");
-        } catch (emailErr) {
-          console.error("✖ Contract email failed:", emailErr);
-        }
+      try {
+  await sendContractEmail({ booking });
+  console.log("📧 Contract email sent + PDF uploaded");
+} catch (e) {
+  console.error("❌ Contract email failed:", e.message || e);
+}
 
         console.log(`🎉 completeBookingV2 DONE in ${Date.now() - t0}ms`);
         return res.send('<h2>Your booking has been confirmed and the contract emailed to you.</h2>');
