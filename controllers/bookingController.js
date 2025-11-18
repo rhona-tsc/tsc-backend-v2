@@ -34,7 +34,6 @@ import { updateOrCreateBookingEvent } from '../utils/updateOrCreateBookingEvent.
 import { normalize } from "../utils/phoneUtils.js";
 import chromium from "@sparticuz/chromium";
 
-
 /**
  * Lookup a musician’s full name by ID.
  * Returns "Unknown Musician" if not found or on error.
@@ -996,6 +995,116 @@ cloudinary.config({
   api_key: process.env.REACT_APP_CLOUDINARY_API_KEY,
   api_secret: process.env.REACT_APP_CLOUDINARY_API_SECRET,
 });
+
+
+
+export async function uploadAndEmailContract(pdfBuffer, booking) {
+  console.log("📤 [Contract] Starting uploadAndEmailContract...");
+
+  const bookingRef = booking.bookingId || booking.bookingRef;
+  const clientEmail = booking.customer?.email || booking.clientEmail;
+  const clientName = booking.customer?.name || booking.clientName || "Client";
+
+  if (!clientEmail) {
+    console.warn("⚠️ [Contract] No client email found — aborting email send.");
+    return { uploaded: false, emailed: false };
+  }
+
+  try {
+    console.log("☁️ [Contract] Uploading contract to Cloudinary...");
+
+    const upload = await cloudinary.uploader.upload_stream(
+      {
+        folder: "contracts",
+        public_id: `contract_${bookingRef}`,
+        resource_type: "raw",
+        format: "pdf",
+      },
+      (err, result) => {
+        if (err) {
+          console.error("❌ [Contract] Cloudinary upload err:", err);
+          throw err;
+        }
+        return result;
+      }
+    );
+
+    // We must pipe the buffer into the upload_stream
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "contracts",
+        public_id: `contract_${bookingRef}`,
+        resource_type: "raw",
+        format: "pdf",
+      },
+      async (error, result) => {
+        if (error) {
+          console.error("❌ [Contract] Upload failed:", error);
+          return;
+        }
+
+        console.log("✅ [Contract] Uploaded to Cloudinary:", result.secure_url);
+
+        // Now email it
+        await emailContractToClient({
+          pdfUrl: result.secure_url,
+          bookingRef,
+          clientEmail,
+          clientName,
+        });
+      }
+    );
+
+    stream.end(pdfBuffer);
+
+    return { uploaded: true, emailed: true };
+  } catch (err) {
+    console.error("❌ [Contract] uploadAndEmailContract fatal:", err);
+    return { uploaded: false, emailed: false, error: err.message };
+  }
+}
+
+async function emailContractToClient({ pdfUrl, bookingRef, clientEmail, clientName }) {
+  console.log("📧 [Email] Preparing to send contract email...", {
+    pdfUrl,
+    bookingRef,
+    clientEmail,
+  });
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: false,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    const mailOptions = {
+      from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
+      to: clientEmail,
+      subject: `Your Booking Contract – Ref ${bookingRef}`,
+      html: `
+        <p>Hi ${clientName},</p>
+        <p>Your contract is ready. You can download it using the link below:</p>
+        <p><a href="${pdfUrl}">Download Contract PDF</a></p>
+        <p>Thank you,<br/>The Supreme Collective Team</p>
+      `,
+    };
+
+    console.log("📨 [Email] Sending email via SMTP...");
+
+    const info = await transporter.sendMail(mailOptions);
+
+    console.log("✅ [Email] Email sent:", info.messageId);
+    return info;
+  } catch (err) {
+    console.error("❌ [Email] Failed to send email:", err);
+    throw err;
+  }
+}
 
 const completeBooking = async (req, res) => {
  console.log(`🐣 (controllers/bookingController.js) completeBooking called at`, new Date().toISOString(), {
@@ -2271,9 +2380,9 @@ console.log("📅 Booking event updated:", sharedEventId);
 
       console.log("📄 Contract generated:", bookingRef);
 
-      // TODO: upload pdfBuffer to Cloudinary and email to client
-      // await uploadAndEmailContract(pdfBuffer, booking);
-
+console.log("📧 Starting contract upload/email...");
+await uploadAndEmailContract(pdfBuffer, booking);
+console.log("📧 Contract upload/email finished");
     } catch (err) {
       console.error("❌ Contract generation failed:", err.message);
     }
