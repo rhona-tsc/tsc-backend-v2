@@ -10,11 +10,12 @@ import BookingBoardItem from "../../models/bookingBoardItem.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+
 export async function sendContractEmail({ booking }) {
   if (!booking) throw new Error("Missing booking");
   if (!booking?.userAddress?.email) throw new Error("Missing client email");
 
-  const templatePath = path.join(__dirname, "..", "views", "contractTemplate.ejs");
+const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
 
   // 1️⃣ Render HTML
   const html = await ejs.renderFile(templatePath, {

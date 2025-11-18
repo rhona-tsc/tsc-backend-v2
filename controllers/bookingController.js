@@ -2380,7 +2380,7 @@ console.log("Resolved actId/lineupId:", {
     // ------------------------------------------------
     // 7️⃣ CONTRACT GENERATION
     // ------------------------------------------------
-    const templatePath = path.join(__dirname, '..', 'views', 'contractTemplate.ejs');
+const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
     let html;
 
     try {
