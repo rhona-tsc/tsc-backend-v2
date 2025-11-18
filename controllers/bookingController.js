@@ -30,10 +30,9 @@ import { setSharedIVR } from "../utils/proxySetup.js";
 import { sendSMSMessage, sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
 import userModel from '../models/userModel.js';
 import { sendBookingConfirmationToLeadVocalist, sendBookingRequestsToLineup } from './booking/helpers.js';
-import { createSharedBookingEvent } from '../utils/createSharedBookingEvent.js';
+import { updateOrCreateBookingEvent } from '../utils/updateOrCreateBookingEvent.js';
 import { normalize } from "../utils/phoneUtils.js";
 import chromium from "@sparticuz/chromium";
-import { updateOrCreateBookingEvent } from '../utils/updateOrCreateBookingEvent.js';
 
 
 /**

@@ -10,7 +10,8 @@ import {
 } from "./googleController.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import bookingBoardItem from "../models/bookingBoardItem.js";
-import { createSharedBookingEvent } from "../utils/createSharedBookingEvent.js";
+import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
+import Booking from "../models/bookingModel.js";
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper: firstNameOf                             */
@@ -331,7 +332,7 @@ export const twilioInboundBooking = async (req, res) => {
   const booking = await Booking.findOne({ bookingRef: msg.enquiryId }).lean();
   const eventId =
     booking?.calendarEventId ||
-    (await createSharedBookingEvent({ booking }));
+    (await updateOrCreateBookingEvent({ booking }));
 
   // ✔ determine their email
   const phoneVariants = normalizeFrom(fromRaw);
