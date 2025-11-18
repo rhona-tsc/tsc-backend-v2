@@ -2259,13 +2259,15 @@ async function sendBookingRequestsToLineupFromBooking(booking) {
 
   const dateISO = toDateISO(booking.date);
   const address = booking.venueAddress || booking.venue || "";
+  const calendarBooking = {
+  ...(typeof booking.toObject === "function" ? booking.toObject() : booking),
+  act: booking.act,
+  lineupId: booking.lineupId,
+  date: booking.date,
+  eventDateISO: booking.eventDateISO,
+};
 
-  await sendBookingRequestsToLineup({
-    actId: booking.act,
-    lineupId: booking.lineupId,
-    date: dateISO,
-    address,
-  });
+ await sendBookingRequestsToLineup(calendarBooking);
 
   console.log("📣 Booking requests triggered to lineup", {
     actId: booking.act,
@@ -2320,6 +2322,17 @@ if (!booking) throw new Error(`Booking not found for bookingId ${bookingRef}`);
 booking.act = booking.act || booking?.actsSummary?.[0]?.actId || null;
 booking.lineupId = booking.lineupId || booking?.actsSummary?.[0]?.lineupId || null;
 
+// ------------------------------
+// Fix missing event date fields
+// ------------------------------
+booking.date = booking.date || booking.eventDate || booking?.actsSummary?.[0]?.date || null;
+
+if (booking.date) {
+  booking.eventDateISO = toDateISO(booking.date);
+} else {
+  console.warn("❌ Booking has no date for calendar");
+}
+
 console.log("Resolved actId/lineupId:", {
   actId: booking.act,
   lineupId: booking.lineupId
@@ -2355,9 +2368,18 @@ console.log("Resolved actId/lineupId:", {
       }
     );
 
+    // Ensure final booking object passed to calendar is fully patched
+const calendarBooking = {
+  ...(typeof booking.toObject === "function" ? booking.toObject() : booking),
+  act: booking.act,
+  lineupId: booking.lineupId,
+  date: booking.date,
+  eventDateISO: booking.eventDateISO,
+};
+
     // 4️⃣ Calendar event
     try {
-      const eventId = await updateOrCreateBookingEvent({ booking });
+      const eventId = await updateOrCreateBookingEvent({ booking: calendarBooking  });
       console.log("📅 Booking calendar event updated:", eventId);
     } catch (e) {
       console.warn("⚠️ Calendar event failed:", e?.message);
@@ -2372,7 +2394,7 @@ console.log("Resolved actId/lineupId:", {
 
     // 6️⃣ Send lineup requests
     try {
-      await sendBookingRequestsToLineupFromBooking(booking);
+await sendBookingRequestsToLineupFromBooking(calendarBooking);
     } catch (e) {
       console.warn("⚠️ sendBookingRequestsToLineupFromBooking failed:", e?.message);
     }
