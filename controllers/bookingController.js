@@ -32,6 +32,8 @@ import userModel from '../models/userModel.js';
 import { sendBookingConfirmationToLeadVocalist, sendBookingRequestsToLineup } from './booking/helpers.js';
 import { createSharedBookingEvent } from '../utils/createSharedBookingEvent.js';
 import { normalize } from "../utils/phoneUtils.js";
+import chromium from "@sparticuz/chromium";
+import { updateOrCreateBookingEvent } from '../utils/updateOrCreateBookingEvent.js';
 
 
 /**
@@ -67,22 +69,13 @@ const firstNameOf = (p = {}) => {
   return "";
 };
 
-export async function launchBrowser() {
-  const executablePath = await puppeteer
-    .executablePath()
-    .catch(() => null);
 
-  return puppeteer.launch({
-    executablePath,           // <-- required for Render
-    headless: true,           // <-- "new" causes issues
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--single-process",
-      "--no-zygote",
-    ],
+export async function launchBrowser() {
+  return await puppeteer.launch({
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),  // <-- note: this IS async
+    headless: chromium.headless
   });
 }
 
@@ -2221,8 +2214,8 @@ booking.eventDateISO = eventDateISO;
     // ------------------------------------------------
     // 5️⃣ Ensure ONE shared calendar event exists
     // ------------------------------------------------
-    const sharedEventId = await createSharedBookingEvent({ booking });
-    console.log("📅 Shared booking event:", sharedEventId);
+ const sharedEventId = await updateOrCreateBookingEvent({ booking });
+console.log("📅 Booking event updated:", sharedEventId);
 
     // ------------------------------------------------
     // 2️⃣ + 3️⃣ Lead vocalist confirm + mark unavailable + clear badges
