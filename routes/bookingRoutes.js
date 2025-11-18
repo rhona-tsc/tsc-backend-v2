@@ -82,7 +82,7 @@ router.get("/booking/:id", async (req, res) => {
 /* -------------------------------------------------------------------------- */
 /*              GET /booking/by-ref/:bookingId                                */
 /* -------------------------------------------------------------------------- */
-router.get("/booking/by-ref/:bookingId", async (req, res) => {
+router.get("/by-ref/:bookingId", async (req, res) => {
   console.log(`✅ (routes/bookingRoutes.js) GET /api/booking/by-ref/:bookingId called at`, 
     new Date().toISOString(), 
     { bookingId: req.params.bookingId }

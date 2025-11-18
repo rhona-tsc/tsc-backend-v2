@@ -1435,23 +1435,30 @@ const userBookings = async (req, res) => {
 };
 
 export const getBookingByRef = async (req, res) => {
-  console.log(`🐣 (controllers/bookingController.js) getBookingByRef called at`, new Date().toISOString(), {
-    params: req.params,
-  });
+  console.log(`🐣 (controllers/bookingController.js) getBookingByRef called at`, 
+    new Date().toISOString(), { params: req.params }
+  );
+
   try {
-    const { ref } = req.params;
-    if (!ref) return res.status(400).json({ success:false, message:"Missing ref" });
+    const { bookingId } = req.params;
+    if (!bookingId) return res.status(400).json({ success: false, message: "Missing bookingId" });
 
-    let booking = await Booking.findOne({ bookingId: ref });
-    if (!booking && ref.match(/^[0-9a-fA-F]{24}$/)) {
-      booking = await Booking.findById(ref);
+    // First try by bookingId string
+    let booking = await Booking.findOne({ bookingId }).lean();
+
+    // If not found & bookingId looks like a MongoID → fallback
+    if (!booking && /^[0-9a-fA-F]{24}$/.test(bookingId)) {
+      booking = await Booking.findById(bookingId).lean();
     }
-    if (!booking) return res.status(404).json({ success:false, message:"Not found" });
 
-    res.json({ success:true, booking });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ success:false, message:"Server error" });
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+
+    return res.json({ success: true, booking });
+  } catch (err) {
+    console.error("getBookingByRef error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
