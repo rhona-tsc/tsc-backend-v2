@@ -2300,7 +2300,7 @@ export const completeBookingV2 = async (req, res) => {
   const t0 = Date.now();
 
   try {
-    // 0️⃣ STRIPE SESSION
+    // 0️⃣ Load Stripe Session
     const stripe = await import("stripe").then(
       (m) => new m.default(process.env.STRIPE_SECRET_KEY)
     );
@@ -2311,17 +2311,17 @@ export const completeBookingV2 = async (req, res) => {
     const bookingRef = session?.metadata?.booking_ref;
     if (!bookingRef) throw new Error("Stripe session missing booking_ref metadata");
 
-    // 1️⃣ FETCH BOOKING
+    // 1️⃣ Load booking
     const booking = await Booking.findOne({ bookingId: bookingRef });
     if (!booking) throw new Error(`Booking not found for bookingId ${bookingRef}`);
 
     console.log("🎯 Booking loaded:", {
       bookingId: booking.bookingId,
       userEmail: booking?.userAddress?.email,
-      actSummary: booking?.actsSummary?.length || 0
+      actSummaryCount: booking?.actsSummary?.length || 0,
     });
 
-    // 2️⃣ RESOLVE ACT + LINEUP
+    // 2️⃣ Resolve act + lineup
     const actId =
       booking.act ||
       booking?.actsSummary?.[0]?.actId ||
@@ -2334,57 +2334,51 @@ export const completeBookingV2 = async (req, res) => {
 
     console.log("Resolved actId/lineupId:", { actId, lineupId });
 
-    // 3️⃣ IDEMPOTENCY
+    // 3️⃣ Idempotency
     if (booking.checkoutCompleted) {
       return res.json({ success: true, bookingRef });
     }
 
-    // Mark completed
+    // Mark paid
     await Booking.updateOne(
       { bookingId: bookingRef },
-      { $set: { checkoutCompleted: true, payment: true, sessionId: session_id } }
+      {
+        $set: {
+          checkoutCompleted: true,
+          payment: true,
+          sessionId: session_id,
+        },
+      }
     );
 
-    // -------------------------------------------
-    // NEW LOGIC (CALENDAR + VOCALIST CONFIRMATION)
-    // -------------------------------------------
-
-    const actName =
-      booking?.actsSummary?.[0]?.actName ||
-      booking?.actName ||
-      "Your Act";
-
-    const venueAddress =
-      booking.venueAddress || booking.venue || "Venue";
-
-    const eventDateISO = toDateISO(booking.date);
-    booking.eventDateISO = eventDateISO;
-
+    // 4️⃣ Calendar event
     try {
       const eventId = await updateOrCreateBookingEvent({ booking });
       console.log("📅 Booking calendar event updated:", eventId);
     } catch (e) {
-      console.warn("⚠️ Calendar event failed:", e?.message || e);
+      console.warn("⚠️ Calendar event failed:", e?.message);
     }
 
+    // 5️⃣ Lead vocalist confirmation
     try {
       await confirmLeadVocalistForBooking(booking);
     } catch (e) {
       console.warn("⚠️ confirmLeadVocalistForBooking failed:", e?.message);
     }
 
+    // 6️⃣ Send lineup requests
     try {
       await sendBookingRequestsToLineupFromBooking(booking);
     } catch (e) {
       console.warn("⚠️ sendBookingRequestsToLineupFromBooking failed:", e?.message);
     }
 
-    // -----------------------------------------------------------
-    // 4️⃣ CONTRACT TEMPLATE (EJS)
-    // -----------------------------------------------------------
+    // ------------------------------------------------
+    // 7️⃣ CONTRACT GENERATION
+    // ------------------------------------------------
     const templatePath = path.join(__dirname, '..', 'views', 'contractTemplate.ejs');
-
     let html;
+
     try {
       html = await ejs.renderFile(templatePath, {
         bookingId: booking.bookingId,
@@ -2395,79 +2389,70 @@ export const completeBookingV2 = async (req, res) => {
         signatureUrl: booking.signatureUrl,
         logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
       });
+      console.log("[completeBookingV2] ✓ EJS rendered", { htmlLen: html?.length || 0 });
     } catch (e) {
-      console.error("❌ EJS render failed:", e?.message);
-      return res.status(500).json({ message: "Failed to render contract." });
+      console.error('✖ EJS render failed:', e?.message);
+      return res.status(500).json({ message: 'Failed to render contract.' });
     }
 
-    // -----------------------------------------------------------
-    // 5️⃣ GENERATE PDF
-    // -----------------------------------------------------------
+    // PDF
     let pdfBuffer;
     try {
-      const browser = await launchBrowser({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+      const browser = await launchBrowser({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      });
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'load' });
-      pdfBuffer = await page.pdf({ format: 'A4' });
+      await page.setContent(html, { waitUntil: "load" });
+      pdfBuffer = await page.pdf({ format: "A4" });
       await browser.close();
-      console.log("📄 PDF generated:", pdfBuffer.length);
+      console.log("📄 Contract PDF generated");
     } catch (e) {
-      console.error("❌ PDF generation failed:", e?.message);
-      return res.status(500).json({ message: "Failed to create contract PDF." });
+      console.error("✖ PDF generation failed:", e?.message);
+      return res.status(500).json({ message: "PDF creation failed." });
     }
 
-    // -----------------------------------------------------------
-    // 6️⃣ CLOUDINARY UPLOAD (stream)
-    // -----------------------------------------------------------
+    // -------------------------------
+    // Cloudinary Upload
+    // -------------------------------
     const { PassThrough } = await import("stream");
-    const stream = new PassThrough();
-    stream.end(pdfBuffer);
+    const bufferStream = new PassThrough();
+    bufferStream.end(pdfBuffer);
 
-    console.log("📤 Uploading contract to Cloudinary...");
+    const cloudStream = cloudinary.uploader.upload_stream(
+      { resource_type: "raw", public_id: `contracts/${booking.bookingId}` },
+      async (error, result) => {
+        if (error) {
+          console.error("✖ Cloudinary upload failed:", error);
+        }
 
-    const uploadResult = await new Promise((resolve) => {
-      const upload = cloudinary.uploader.upload_stream(
-        {
-          resource_type: "raw",
-          public_id: `contracts/${booking.bookingId}`,
-        },
-        (error, result) => resolve({ error, result })
-      );
-      stream.pipe(upload);
-    });
+        if (result?.secure_url) {
+          booking.pdfUrl = result.secure_url;
+          await booking.save();
+          console.log("✓ Contract saved at", booking.pdfUrl);
+        } else {
+          console.warn("⚠ No secure_url returned from Cloudinary");
+        }
 
-    if (uploadResult.error) {
-      console.warn("⚠️ Cloudinary upload failed:", uploadResult.error);
-    } else {
-      console.log("☁️ Uploaded:", uploadResult.result.secure_url);
-      booking.pdfUrl = uploadResult.result.secure_url;
-      await booking.save();
+        // SEND EMAIL
+        try {
+          await sendContractEmail({
+            booking,
+            pdfBuffer,
+          });
+          console.log("📧 Email sent successfully");
+        } catch (emailErr) {
+          console.error("✖ Contract email failed:", emailErr);
+        }
 
-      // Mirror onto booking board
-      try {
-        await BookingBoardItem.updateOne(
-          { bookingRef: booking.bookingId },
-          { $set: { contractUrl: booking.pdfUrl, pdfUrl: booking.pdfUrl } },
-          { upsert: true }
-        );
-      } catch (e) {
-        console.warn("⚠️ Board mirror failed:", e?.message);
+        console.log(`🎉 completeBookingV2 DONE in ${Date.now() - t0}ms`);
+        return res.send('<h2>Your booking has been confirmed and the contract emailed to you.</h2>');
       }
-    }
+    );
 
-    // -----------------------------------------------------------
-    // 7️⃣ SEND EMAIL (via old proven system)
-    // -----------------------------------------------------------
-    try {
-      await sendClientBookingConfirmation({ booking, pdfBuffer });
-      console.log("📧 Confirmation email sent!");
-    } catch (e) {
-      console.error("❌ Email send failed:", e?.message || e);
-    }
+    bufferStream.pipe(cloudStream);
 
-    // -----------------------------------------------------------
-    // 8️⃣ CLEAR CART
-    // -----------------------------------------------------------
+    // 8️⃣ Clear cart
     try {
       if (booking.userId) {
         await userModel.updateOne(
@@ -2476,11 +2461,8 @@ export const completeBookingV2 = async (req, res) => {
         );
       }
     } catch (e) {
-      console.warn("⚠️ Failed to clear cart:", e?.message);
+      console.warn("⚠ Failed to clear cart:", e?.message);
     }
-
-    console.log(`🎉 completeBookingV2 DONE in ${Date.now() - t0}ms`);
-    return res.json({ success: true, bookingRef });
 
   } catch (err) {
     console.error("❌ completeBookingV2 FATAL:", err);
