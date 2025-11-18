@@ -1499,13 +1499,16 @@ const updateStatus = async (req,res) => {
 
 
 const manualCreateBooking = async (req, res) => {
-  console.log(`🐣 (controllers/bookingController.js) manualCreateBooking called at`, new Date().toISOString(), {
+  console.log(`🐣 manualCreateBooking called`, {
     body: req.body,
   });
+
   try {
     const {
+      act,
       actId,
       lineup,
+      lineupId,
       eventDate,
       venue,
       clientName,
@@ -1514,40 +1517,66 @@ const manualCreateBooking = async (req, res) => {
       feeDetails,
       notes,
       contactRouting,
-
-      // ⬇️ NEW: allow admins to pass these when creating manually
       performanceTimes,
       actsSummary,
     } = req.body;
 
-    const act = await Act.findById(actId);
-    if (!act) {
-      return res.status(404).json({ success: false, message: "Act not found" });
+    // ------------------------------
+    // 1️⃣ Resolve act + lineup ID
+    // ------------------------------
+    const resolvedActId =
+      act ||
+      actId ||
+      req.body?.actsSummary?.[0]?.actId ||
+      null;
+
+    const resolvedLineupId =
+      lineupId ||
+      req.body?.actsSummary?.[0]?.lineupId ||
+      null;
+
+    // Load act AFTER determining the correct actId
+    const actDoc = await Act.findById(resolvedActId).lean();
+    if (!actDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Act not found",
+      });
     }
 
-    // ⬇️ normalize perf & patch items (mirrors the other flows)
-    const normalizedPerf = (performanceTimes && typeof performanceTimes === 'object')
-      ? {
-          arrivalTime: performanceTimes.arrivalTime || undefined,
-          setupAndSoundcheckedBy: performanceTimes.setupAndSoundcheckedBy || undefined,
-          startTime: performanceTimes.startTime || undefined,
-          finishTime: performanceTimes.finishTime || undefined,
-          finishDayOffset: Number(performanceTimes.finishDayOffset || 0) || 0,
-          paLightsFinishTime: performanceTimes.paLightsFinishTime || undefined,
-          paLightsFinishDayOffset: Number(performanceTimes.paLightsFinishDayOffset || 0) || 0,
-        }
-      : null;
+    // ------------------------------
+    // 2️⃣ Normalise performance block
+    // ------------------------------
+    const normalizedPerf =
+      performanceTimes && typeof performanceTimes === "object"
+        ? {
+            arrivalTime: performanceTimes.arrivalTime || "",
+            setupAndSoundcheckedBy:
+              performanceTimes.setupAndSoundcheckedBy || "",
+            startTime: performanceTimes.startTime || "",
+            finishTime: performanceTimes.finishTime || "",
+            finishDayOffset:
+              Number(performanceTimes.finishDayOffset || 0) || 0,
+            paLightsFinishTime:
+              performanceTimes.paLightsFinishTime || "",
+            paLightsFinishDayOffset:
+              Number(performanceTimes.paLightsFinishDayOffset || 0) || 0,
+          }
+        : null;
 
     const actsSummaryPatched = Array.isArray(actsSummary)
-      ? actsSummary.map(it => ({
+      ? actsSummary.map((it) => ({
           ...it,
           performance: it.performance || normalizedPerf || undefined,
         }))
       : [];
 
+    // ------------------------------
+    // 3️⃣ Create booking doc
+    // ------------------------------
     const newBooking = new Booking({
-      act: actId,
-      lineup,
+      act: resolvedActId,
+      lineupId: resolvedLineupId,
       eventDate,
       venue,
       clientName,
@@ -1558,25 +1587,25 @@ const manualCreateBooking = async (req, res) => {
       createdManually: true,
       status: "confirmed",
 
-      // ✅ store the normalized block + patched items
       performanceTimes: normalizedPerf || undefined,
       actsSummary: actsSummaryPatched.length ? actsSummaryPatched : undefined,
     });
 
-    newBooking.bookingId = newBooking.bookingId || makeBookingRef({
-      date: eventDate,
-      clientName,
-      userAddress: newBooking.userAddress,
-    });
+    newBooking.bookingId =
+      newBooking.bookingId ||
+      makeBookingRef({
+        date: eventDate,
+        clientName,
+        userAddress: newBooking.userAddress,
+      });
 
- 
-
-    // Optional: wire in IVR/call forwarding data if provided
+    // ------------------------------
+    // 4️⃣ Contact routing mirror
+    // ------------------------------
     if (contactRouting) {
       const cr = normalizeContactRouting(contactRouting);
       if (cr) {
         newBooking.contactRouting = cr;
-        // Mirror minimal emergency info for client-facing event sheet
         newBooking.eventSheet = newBooking.eventSheet || {};
         newBooking.eventSheet.emergencyContact = buildEmergencyMirror(cr);
       }
@@ -1584,30 +1613,38 @@ const manualCreateBooking = async (req, res) => {
 
     await newBooking.save();
 
-    // ✅ board upsert
+    // ------------------------------
+    // 5️⃣ Board + calendar sync
+    // ------------------------------
     try {
       await upsertBoardRowFromBooking(newBooking);
     } catch (e) {
-      console.warn('⚠️ upsertBoardRowFromBooking failed (manualCreateBooking):', e?.message || e);
+      console.warn("⚠️ Board update failed:", e.message);
     }
 
-    // 🔹 calendar sync for manual confirmed
     try {
       await upsertCalendarForConfirmedBooking({
         booking: newBooking,
-        actId,
-        lineupId: lineup?._id || lineup?.lineupId || null,
-        bandLineup: [], // unknown here
-        venue
+        actId: resolvedActId,
+        lineupId: resolvedLineupId,
+        bandLineup: [],
+        venue,
       });
     } catch (e) {
-      console.warn('⚠️ Calendar sync (manual) failed:', e?.message || e);
+      console.warn("⚠️ Calendar sync failed:", e.message);
     }
 
-    res.status(201).json({ success: true, message: "Booking created", booking: newBooking });
+    return res.status(201).json({
+      success: true,
+      message: "Booking created",
+      booking: newBooking,
+    });
   } catch (err) {
     console.error("Manual booking error:", err);
-    res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
 
@@ -1618,7 +1655,7 @@ export const createBooking = async (req, res) => {
   });
   try {
     const {
-      actId,            // actId
+      act,            // actId
       date,           // event date (ISO)
       venue,
       fee,            // gross £ for the act (what client owes in total)
@@ -1636,7 +1673,7 @@ export const createBooking = async (req, res) => {
       contactRouting,
     } = req.body;
 
-    if (!actId || !date || !venue || !fee || !bandLineup?.length) {
+    if (!act || !date || !venue || !fee || !bandLineup?.length) {
       return res.status(400).json({ success: false, message: "Missing required fields." });
     }
 
@@ -1684,7 +1721,7 @@ const actsSummaryPatched = Array.isArray(req.body.actsSummary)
 
     // ── Create and save booking ────────────────────────────────────────────────
 const newBooking = new Booking({
-  actId,
+  act,
   date: eventDate,
   venue,
   fee,
@@ -1693,8 +1730,7 @@ const newBooking = new Booking({
   clientName,
   clientEmail,
   clientPhone,
-  chosenVocalists: actId.chosenVocalists || [],
-
+chosenVocalists: [],
   // ✅ use normalized block, not the raw input
   performanceTimes: normalizedPerf || undefined,
 
@@ -1773,7 +1809,7 @@ const newBooking = new Booking({
     try {
       await upsertCalendarForConfirmedBooking({
         booking: newBooking,
-        actId: actId,
+        actId: act,
         lineupId: lineupId || null,
         bandLineup,
         venue,
@@ -1790,7 +1826,7 @@ const newBooking = new Booking({
           `${backendUrl || process.env.BACKEND_URL || ""}/api/invoices/schedule-balance`,
           {
             bookingId: newBooking.bookingId || String(newBooking._id),
-            actId: actId,
+            actId: act,
             customerId: null, // fill if you map clients to Stripe Customers
             eventDateISO: eventDate.toISOString(),
             currency: "GBP",
@@ -2248,15 +2284,10 @@ export const completeBookingV2 = async (req, res) => {
   });
 
   if (!session_id) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Missing session_id" });
+    return res.status(400).json({ success: false, message: "Missing session_id" });
   }
 
   try {
-    // ------------------------------------------------
-    // 0️⃣ Retrieve Stripe session
-    // ------------------------------------------------
     const stripe = await import("stripe").then(
       (m) => new m.default(process.env.STRIPE_SECRET_KEY)
     );
@@ -2265,14 +2296,27 @@ export const completeBookingV2 = async (req, res) => {
     });
 
     const bookingRef = session?.metadata?.booking_ref;
-    if (!bookingRef) {
-      throw new Error("Stripe session missing booking_ref metadata");
+    if (!bookingRef) throw new Error("Stripe session missing booking_ref metadata");
+
+    // 1️⃣ Fetch booking
+    const booking = await Booking.findOne({ bookingId: bookingRef }).lean();
+    if (!booking) {
+      throw new Error(`Booking not found for bookingId ${bookingRef}`);
     }
 
-    // ------------------------------------------------
-    // 1️⃣ Fetch booking by bookingId
-    // ------------------------------------------------
-    const booking = await Booking.findOne({ bookingId: bookingRef }).lean();
+    // 🆕 2️⃣ Resolve actId + lineupId cleanly
+    const actId =
+      booking.act ||
+      booking?.actsSummary?.[0]?.actId ||
+      null;
+
+    const lineupId =
+      booking.lineupId ||
+      booking?.actsSummary?.[0]?.lineupId ||
+      null;
+
+    console.log("Resolved actId/lineupId:", { actId, lineupId });
+
     if (!booking) {
       throw new Error(`Booking not found for bookingId ${bookingRef}`);
     }
