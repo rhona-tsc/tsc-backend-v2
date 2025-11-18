@@ -2275,6 +2275,9 @@ async function sendBookingRequestsToLineupFromBooking(booking) {
  * - Clean steps with centralised error logging
  ********************************************************************************************/
 
+// -----------------------------------------------------------
+//  COMPLETE BOOKING V2 (MERGED WITH OLD CONTRACT + EMAIL FLOW)
+// -----------------------------------------------------------
 export const completeBookingV2 = async (req, res) => {
   const { session_id } = req.query;
 
@@ -2287,7 +2290,10 @@ export const completeBookingV2 = async (req, res) => {
     return res.status(400).json({ success: false, message: "Missing session_id" });
   }
 
+  const t0 = Date.now();
+
   try {
+    // 0️⃣ STRIPE SESSION
     const stripe = await import("stripe").then(
       (m) => new m.default(process.env.STRIPE_SECRET_KEY)
     );
@@ -2298,13 +2304,17 @@ export const completeBookingV2 = async (req, res) => {
     const bookingRef = session?.metadata?.booking_ref;
     if (!bookingRef) throw new Error("Stripe session missing booking_ref metadata");
 
-    // 1️⃣ Fetch booking
-    const booking = await Booking.findOne({ bookingId: bookingRef }).lean();
-    if (!booking) {
-      throw new Error(`Booking not found for bookingId ${bookingRef}`);
-    }
+    // 1️⃣ FETCH BOOKING
+    const booking = await Booking.findOne({ bookingId: bookingRef });
+    if (!booking) throw new Error(`Booking not found for bookingId ${bookingRef}`);
 
-    // 🆕 2️⃣ Resolve actId + lineupId cleanly
+    console.log("🎯 Booking loaded:", {
+      bookingId: booking.bookingId,
+      userEmail: booking?.userAddress?.email,
+      actSummary: booking?.actsSummary?.length || 0
+    });
+
+    // 2️⃣ RESOLVE ACT + LINEUP
     const actId =
       booking.act ||
       booking?.actsSummary?.[0]?.actId ||
@@ -2317,143 +2327,157 @@ export const completeBookingV2 = async (req, res) => {
 
     console.log("Resolved actId/lineupId:", { actId, lineupId });
 
-    if (!booking) {
-      throw new Error(`Booking not found for bookingId ${bookingRef}`);
-    }
-
-    console.log("✅ Booking found:", bookingRef);
-
-    // ------------------------------------------------
-    // 1.5️⃣ Idempotency guard — prevents double-processing
-    // ------------------------------------------------
+    // 3️⃣ IDEMPOTENCY
     if (booking.checkoutCompleted) {
-      console.log(
-        "🟢 Booking already completed — skipping duplicate processing"
-      );
       return res.json({ success: true, bookingRef });
     }
 
-    const amountMajor = (session.amount_total || 0) / 100;
-
+    // Mark completed
     await Booking.updateOne(
       { bookingId: bookingRef },
-      {
-        $set: {
-          checkoutCompleted: true,
-          payment: true,
-          sessionId: session_id,
-          amount: amountMajor,
-        },
-      }
+      { $set: { checkoutCompleted: true, payment: true, sessionId: session_id } }
     );
 
-    // ------------------------------------------------
-    // Normalised safe fields
-    // ------------------------------------------------
+    // -------------------------------------------
+    // NEW LOGIC (CALENDAR + VOCALIST CONFIRMATION)
+    // -------------------------------------------
+
     const actName =
-      booking.actsSummary?.[0]?.actName ||
-      booking.actName ||
+      booking?.actsSummary?.[0]?.actName ||
+      booking?.actName ||
       "Your Act";
 
     const venueAddress =
-      booking.venueAddress ||
-      booking.venue ||
-      "Venue";
+      booking.venueAddress || booking.venue || "Venue";
 
-const eventDateISO = toDateISO(booking.date);
-booking.eventDateISO = eventDateISO;
+    const eventDateISO = toDateISO(booking.date);
+    booking.eventDateISO = eventDateISO;
 
-    // ------------------------------------------------
-    // 5️⃣ Ensure ONE shared calendar event exists
-    // ------------------------------------------------
- const sharedEventId = await updateOrCreateBookingEvent({ booking });
-console.log("📅 Booking event updated:", sharedEventId);
+    try {
+      const eventId = await updateOrCreateBookingEvent({ booking });
+      console.log("📅 Booking calendar event updated:", eventId);
+    } catch (e) {
+      console.warn("⚠️ Calendar event failed:", e?.message || e);
+    }
 
-    // ------------------------------------------------
-    // 2️⃣ + 3️⃣ Lead vocalist confirm + mark unavailable + clear badges
-    // ------------------------------------------------
     try {
       await confirmLeadVocalistForBooking(booking);
-    } catch (err) {
-      console.warn(
-        "⚠️ confirmLeadVocalistForBooking failed (non-fatal):",
-        err.message
-      );
+    } catch (e) {
+      console.warn("⚠️ confirmLeadVocalistForBooking failed:", e?.message);
     }
 
-    // ------------------------------------------------
-    // 4️⃣ Trigger booking requests to full lineup
-    // ------------------------------------------------
     try {
       await sendBookingRequestsToLineupFromBooking(booking);
-    } catch (err) {
-      console.warn(
-        "⚠️ sendBookingRequestsToLineupFromBooking failed (non-fatal):",
-        err.message
-      );
+    } catch (e) {
+      console.warn("⚠️ sendBookingRequestsToLineupFromBooking failed:", e?.message);
     }
 
-    // ------------------------------------------------
-    // 6️⃣ Contract PDF Generation + Email
-    // ------------------------------------------------
+    // -----------------------------------------------------------
+    // 4️⃣ CONTRACT TEMPLATE (EJS)
+    // -----------------------------------------------------------
+    const templatePath = path.join(__dirname, '..', 'views', 'contractTemplate.ejs');
+
+    let html;
     try {
-      const browser = await launchBrowser({
-        headless: "new",
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-        ],
+      html = await ejs.renderFile(templatePath, {
+        bookingId: booking.bookingId,
+        userAddress: booking.userAddress,
+        actsSummary: booking.actsSummary,
+        total: booking.totals?.fullAmount ?? booking.amount,
+        deposit: booking.totals?.depositAmount ?? booking.amount,
+        signatureUrl: booking.signatureUrl,
+        logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
       });
-
-      const page = await browser.newPage();
-      await page.setContent(`
-        <html>
-        <body>
-          <h1>Contract for ${actName}</h1>
-          <p>Booking Ref: ${bookingRef}</p>
-          <p>Event Date: ${eventDateISO}</p>
-          <p>Venue: ${venueAddress}</p>
-        </body>
-        </html>
-      `);
-
-      const pdfBuffer = await page.pdf({ format: "A4" });
-      await browser.close();
-
-      console.log("📄 Contract generated:", bookingRef);
-
-console.log("📧 Starting contract upload/email...");
-await uploadAndEmailContract(pdfBuffer, booking);
-console.log("📧 Contract upload/email finished");
-    } catch (err) {
-      console.error("❌ Contract generation failed:", err.message);
+    } catch (e) {
+      console.error("❌ EJS render failed:", e?.message);
+      return res.status(500).json({ message: "Failed to render contract." });
     }
 
-    // ------------------------------------------------
-    // 7️⃣ Clear the user's cart
-    // ------------------------------------------------
+    // -----------------------------------------------------------
+    // 5️⃣ GENERATE PDF
+    // -----------------------------------------------------------
+    let pdfBuffer;
+    try {
+      const browser = await launchBrowser({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'load' });
+      pdfBuffer = await page.pdf({ format: 'A4' });
+      await browser.close();
+      console.log("📄 PDF generated:", pdfBuffer.length);
+    } catch (e) {
+      console.error("❌ PDF generation failed:", e?.message);
+      return res.status(500).json({ message: "Failed to create contract PDF." });
+    }
+
+    // -----------------------------------------------------------
+    // 6️⃣ CLOUDINARY UPLOAD (stream)
+    // -----------------------------------------------------------
+    const { PassThrough } = await import("stream");
+    const stream = new PassThrough();
+    stream.end(pdfBuffer);
+
+    console.log("📤 Uploading contract to Cloudinary...");
+
+    const uploadResult = await new Promise((resolve) => {
+      const upload = cloudinary.uploader.upload_stream(
+        {
+          resource_type: "raw",
+          public_id: `contracts/${booking.bookingId}`,
+        },
+        (error, result) => resolve({ error, result })
+      );
+      stream.pipe(upload);
+    });
+
+    if (uploadResult.error) {
+      console.warn("⚠️ Cloudinary upload failed:", uploadResult.error);
+    } else {
+      console.log("☁️ Uploaded:", uploadResult.result.secure_url);
+      booking.pdfUrl = uploadResult.result.secure_url;
+      await booking.save();
+
+      // Mirror onto booking board
+      try {
+        await BookingBoardItem.updateOne(
+          { bookingRef: booking.bookingId },
+          { $set: { contractUrl: booking.pdfUrl, pdfUrl: booking.pdfUrl } },
+          { upsert: true }
+        );
+      } catch (e) {
+        console.warn("⚠️ Board mirror failed:", e?.message);
+      }
+    }
+
+    // -----------------------------------------------------------
+    // 7️⃣ SEND EMAIL (via old proven system)
+    // -----------------------------------------------------------
+    try {
+      await sendClientBookingConfirmation({ booking, pdfBuffer });
+      console.log("📧 Confirmation email sent!");
+    } catch (e) {
+      console.error("❌ Email send failed:", e?.message || e);
+    }
+
+    // -----------------------------------------------------------
+    // 8️⃣ CLEAR CART
+    // -----------------------------------------------------------
     try {
       if (booking.userId) {
         await userModel.updateOne(
           { _id: booking.userId },
           { $set: { cartData: {} } }
         );
-        console.log("🛒 User cart cleared:", booking.userId);
       }
-    } catch (err) {
-      console.error("❌ Failed to clear cartData:", err);
+    } catch (e) {
+      console.warn("⚠️ Failed to clear cart:", e?.message);
     }
 
-    // (Optional) Booking board update / additional side effects here
-
+    console.log(`🎉 completeBookingV2 DONE in ${Date.now() - t0}ms`);
     return res.json({ success: true, bookingRef });
+
   } catch (err) {
     console.error("❌ completeBookingV2 FATAL:", err);
-    return res
-      .status(500)
-      .json({ success: false, message: err.message });
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 
