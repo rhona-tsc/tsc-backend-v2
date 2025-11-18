@@ -4,9 +4,9 @@ import ejs from "ejs";
 import { fileURLToPath } from "url";
 import cloudinary from "cloudinary";
 import { launchBrowser } from "../bookingController.js";
-import { resolveSignatureGifPath } from "../../utils/signaturePath.js";
-import transporter from "../../config/emailTransporter.js";
-import BookingBoardItem from "../../models/bookingBoardModel.js";
+import { resolveSignatureGifPath } from "../bookingController.js";
+import { transporter } from "../bookingController.js";
+import BookingBoardItem from "../../models/bookingBoardItem.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
