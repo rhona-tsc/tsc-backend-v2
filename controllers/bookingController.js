@@ -116,7 +116,7 @@ export const transporter = nodemailer.createTransport({
 
 
 // Resolve the signature GIF on disk (frontend during dev; allow override via env)
-function resolveSignatureGifPath() {
+export function resolveSignatureGifPath() {
     console.log(`🐣 (controllers/bookingController.js) resolveSignatureGifPath called at`, new Date().toISOString());
   // 1) explicit override (e.g. when deployed and assets live elsewhere)
   if (process.env.SIGNATURE_GIF_PATH && fs.existsSync(process.env.SIGNATURE_GIF_PATH)) {
