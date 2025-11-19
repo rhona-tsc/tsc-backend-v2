@@ -1408,6 +1408,30 @@ if (!isDeputy && vocalists.length > 1) {
     );
     if (!phone) throw new Error("Missing phone");
 
+    // 🔐 UNIVERSAL DUPLICATE GUARD (prevents all double sends)
+const existingAny = await AvailabilityModel.findOne({
+  actId,
+  dateISO,
+  phone,
+  v2: true,
+}).lean();
+
+if (existingAny && !skipDuplicateCheck) {
+  console.log("🚫 Strong duplicate guard — already requested availability", {
+    actId,
+    dateISO,
+    phone,
+  });
+
+  if (res) return res.json({
+    success: true,
+    sent: 0,
+    skipped: "duplicate-strong",
+  });
+
+  return { success: true, sent: 0, skipped: "duplicate-strong" };
+}
+
   // 🧮 Final Fee Logic
 let finalFee;
 
@@ -1876,13 +1900,13 @@ console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.
         if (isDeputy) updated.isDeputy = true;
         await updated.save();
 
-await rebuildAndApplyAvailabilityBadge(
+const badgeResult = await rebuildAndApplyAvailabilityBadge(
   { body: { actId, dateISO }, __fromYesFlow: true },
-          {
-            json: () => {},
-            status: () => ({ json: () => {} }),
-          }
-        );
+  {
+    json: () => {},
+    status: () => ({ json: () => {} }),
+  }
+);
 
        // 3️⃣ Broadcast SSE updates
 if (global.availabilityNotify) {
@@ -1940,17 +1964,18 @@ if (global.availabilityNotify) {
   }
 
   // 🎤 Live badge refresh (lead or deputy)
-  if (badgeResult?.badge) {
-    global.availabilityNotify.badgeUpdated({
-      type: "availability_badge_updated",
-      actId,
-      actName: act?.tscName || act?.name,
-      dateISO,
-      badge: badgeResult.badge,
-      isDeputy,
-    });
-    console.log("📡 SSE broadcasted: availability_badge_updated");
-  }
+if (badgeResult?.badge) {
+  global.availabilityNotify.badgeUpdated({
+    type: "availability_badge_updated",
+    actId,
+    actName: act?.tscName || act?.name,
+    dateISO,
+    badge: badgeResult.badge,
+    isDeputy,
+  });
+
+  console.log("📡 SSE broadcasted: availability_badge_updated");
+}
 }
 
         return;
