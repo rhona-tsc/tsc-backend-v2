@@ -11,9 +11,10 @@ import BookingBoardItem from "../../models/bookingBoardItem.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 
-export async function sendContractEmail({ booking }) {
+export async function sendContractEmail({ booking, pdfBuffer }) {
   if (!booking) throw new Error("Missing booking");
   if (!booking?.userAddress?.email) throw new Error("Missing client email");
+  if (!pdfBuffer) throw new Error("Missing pdfBuffer");
 
 const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
 
@@ -28,15 +29,6 @@ const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
     logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
   });
 
-  // 2️⃣ Generate PDF
-  const browser = await launchBrowser({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-  const page = await browser.newPage();
-  await page.setContent(html, { waitUntil: "load" });
-  const pdfBuffer = await page.pdf({ format: "A4" });
-  await browser.close();
 
   // 3️⃣ Upload PDF to Cloudinary
   const pdfUrl = await new Promise((resolve, reject) => {

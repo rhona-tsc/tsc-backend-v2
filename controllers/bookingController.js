@@ -2462,7 +2462,14 @@ const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
 
         // SEND EMAIL
       try {
-  await sendContractEmail({ booking });
+        if (!booking?.userAddress?.email) {
+  console.error("❌ No client email on booking, cannot send contract email", {
+    bookingId: booking.bookingId,
+    userAddress: booking.userAddress
+  });
+} else {
+await sendContractEmail({ booking, pdfBuffer });
+}
   console.log("📧 Contract email sent + PDF uploaded");
 } catch (e) {
   console.error("❌ Contract email failed:", e.message || e);
