@@ -2315,30 +2315,17 @@ export const completeBookingV2 = async (req, res) => {
     if (!bookingRef) throw new Error("Stripe session missing booking_ref metadata");
 
     // 1️⃣ FETCH BOOKING
-const booking = await Booking.findOne({ bookingId: bookingRef });
-if (!booking) throw new Error(`Booking not found for bookingId ${bookingRef}`);
+    const booking = await Booking.findOne({ bookingId: bookingRef });
+    if (!booking) throw new Error(`Booking not found for bookingId ${bookingRef}`);
 
-// 🔥 PATCH booking so all downstream logic works
-booking.act = booking.act || booking?.actsSummary?.[0]?.actId || null;
-booking.lineupId = booking.lineupId || booking?.actsSummary?.[0]?.lineupId || null;
+    // Patch booking
+    booking.act = booking.act || booking?.actsSummary?.[0]?.actId || null;
+    booking.lineupId = booking.lineupId || booking?.actsSummary?.[0]?.lineupId || null;
 
-// ------------------------------
-// Fix missing event date fields
-// ------------------------------
-booking.date = booking.date || booking.eventDate || booking?.actsSummary?.[0]?.date || null;
+    booking.date = booking.date || booking.eventDate || booking?.actsSummary?.[0]?.date || null;
+    if (booking.date) booking.eventDateISO = toDateISO(booking.date);
 
-if (booking.date) {
-  booking.eventDateISO = toDateISO(booking.date);
-} else {
-  console.warn("❌ Booking has no date for calendar");
-}
-
-console.log("Resolved actId/lineupId:", {
-  actId: booking.act,
-  lineupId: booking.lineupId
-});
-
-    // 2️⃣ Resolve act + lineup
+    // 2️⃣ Resolve identifiers
     const actId =
       booking.act ||
       booking?.actsSummary?.[0]?.actId ||
@@ -2356,7 +2343,7 @@ console.log("Resolved actId/lineupId:", {
       return res.json({ success: true, bookingRef });
     }
 
-    // Mark paid
+    // 4️⃣ Mark paid
     await Booking.updateOne(
       { bookingId: bookingRef },
       {
@@ -2368,43 +2355,42 @@ console.log("Resolved actId/lineupId:", {
       }
     );
 
-    // Ensure final booking object passed to calendar is fully patched
-const calendarBooking = {
-  ...(typeof booking.toObject === "function" ? booking.toObject() : booking),
-  act: booking.act,
-  lineupId: booking.lineupId,
-  date: booking.date,
-  eventDateISO: booking.eventDateISO,
-};
+    const calendarBooking = {
+      ...(typeof booking.toObject === "function" ? booking.toObject() : booking),
+      act: booking.act,
+      lineupId: booking.lineupId,
+      date: booking.date,
+      eventDateISO: booking.eventDateISO,
+    };
 
-    // 4️⃣ Calendar event
+    // 5️⃣ Calendar event
     try {
-      const eventId = await updateOrCreateBookingEvent({ booking: calendarBooking  });
+      const eventId = await updateOrCreateBookingEvent({ booking: calendarBooking });
       console.log("📅 Booking calendar event updated:", eventId);
     } catch (e) {
       console.warn("⚠️ Calendar event failed:", e?.message);
     }
 
-    // 5️⃣ Lead vocalist confirmation
+    // 6️⃣ Lead vocalist confirmation
     try {
       await confirmLeadVocalistForBooking(booking);
     } catch (e) {
       console.warn("⚠️ confirmLeadVocalistForBooking failed:", e?.message);
     }
 
-    // 6️⃣ Send lineup requests
+    // 7️⃣ Send lineup requests
     try {
-await sendBookingRequestsToLineupFromBooking(calendarBooking);
+      await sendBookingRequestsToLineupFromBooking(calendarBooking);
     } catch (e) {
       console.warn("⚠️ sendBookingRequestsToLineupFromBooking failed:", e?.message);
     }
 
     // ------------------------------------------------
-    // 7️⃣ CONTRACT GENERATION
+    // 8️⃣ CONTRACT GENERATION – EJS
     // ------------------------------------------------
-const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
-    let html;
+    const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
 
+    let html;
     try {
       html = await ejs.renderFile(templatePath, {
         bookingId: booking.bookingId,
@@ -2417,12 +2403,14 @@ const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
       });
       console.log("[completeBookingV2] ✓ EJS rendered", { htmlLen: html?.length || 0 });
     } catch (e) {
-      console.error('✖ EJS render failed:', e?.message);
-      return res.status(500).json({ message: 'Failed to render contract.' });
+      console.error("✖ EJS render failed:", e?.message);
+      return res.status(500).json({ message: "Failed to render contract." });
     }
 
-    // PDF
-    let pdfBuffer;
+    // ------------------------------------------------
+    // 9️⃣ CONTRACT PDF (unified generatedPdf)
+    // ------------------------------------------------
+    let generatedPdf;
     try {
       const browser = await launchBrowser({
         headless: true,
@@ -2430,7 +2418,9 @@ const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
       });
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: "load" });
-      pdfBuffer = await page.pdf({ format: "A4" });
+
+      generatedPdf = await page.pdf({ format: "A4" });
+
       await browser.close();
       console.log("📄 Contract PDF generated");
     } catch (e) {
@@ -2438,12 +2428,12 @@ const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
       return res.status(500).json({ message: "PDF creation failed." });
     }
 
-    // -------------------------------
-    // Cloudinary Upload
-    // -------------------------------
+    // ------------------------------------------------
+    // 🔟 UPLOAD PDF + SEND EMAIL (single pipeline)
+    // ------------------------------------------------
     const { PassThrough } = await import("stream");
     const bufferStream = new PassThrough();
-    bufferStream.end(pdfBuffer);
+    bufferStream.end(generatedPdf);
 
     const cloudStream = cloudinary.uploader.upload_stream(
       { resource_type: "raw", public_id: `contracts/${booking.bookingId}` },
@@ -2461,28 +2451,28 @@ const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
         }
 
         // SEND EMAIL
-      try {
-        if (!booking?.userAddress?.email) {
-  console.error("❌ No client email on booking, cannot send contract email", {
-    bookingId: booking.bookingId,
-    userAddress: booking.userAddress
-  });
-} else {
-await sendContractEmail({ booking, pdfBuffer });
-}
-  console.log("📧 Contract email sent + PDF uploaded");
-} catch (e) {
-  console.error("❌ Contract email failed:", e.message || e);
-}
+        try {
+          if (!booking?.userAddress?.email) {
+            console.error("❌ No client email on booking — cannot send contract email");
+          } else {
+            await sendContractEmail({
+              booking,
+              pdfBuffer: generatedPdf, // unified
+            });
+          }
+          console.log("📧 Contract email sent + PDF uploaded");
+        } catch (e) {
+          console.error("❌ Contract email failed:", e.message || e);
+        }
 
         console.log(`🎉 completeBookingV2 DONE in ${Date.now() - t0}ms`);
-        return res.send('<h2>Your booking has been confirmed and the contract emailed to you.</h2>');
+        return res.send("<h2>Your booking has been confirmed and the contract emailed to you.</h2>");
       }
     );
 
     bufferStream.pipe(cloudStream);
 
-    // 8️⃣ Clear cart
+    // 1️⃣1️⃣ Clear cart
     try {
       if (booking.userId) {
         await userModel.updateOne(
