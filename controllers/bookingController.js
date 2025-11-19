@@ -2079,18 +2079,33 @@ arrivalTime: (booking?.performanceTimes?.arrivalTime || booking.arrivalTime || "
 }
 
 export const ensureEmergencyContact = async (req, res) => {
- console.log(`🐣 (controllers/bookingController.js) ensureEmergencyContact called at`, new Date().toISOString(), {
-    params: req.params,
-  });
+  console.log(`🐣 (controllers/bookingController.js) ensureEmergencyContact called at`,
+    new Date().toISOString(),
+    { params: req.params }
+  );
+
   try {
-    const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, message: "Missing id" });
+    const rawId = String(req.params.id || "").trim();
+    if (!rawId) {
+      return res.status(400).json({ success: false, message: "Missing id" });
+    }
 
-    const q = /^[0-9a-f]{24}$/i.test(id) ? { _id: id } : { bookingId: id };
-    const book = await Booking.findOne(q);
-    if (!book) return res.status(404).json({ success: false, message: "Booking not found" });
+    // REAL ObjectId validation
+    const looksLikeObjectId =
+      mongoose.Types.ObjectId.isValid(rawId) &&
+      String(new mongoose.Types.ObjectId(rawId)) === rawId;
 
-    // If already present, just ensure the mirror exists and return
+    // Select the correct query
+    const query = looksLikeObjectId
+      ? { _id: rawId }
+      : { bookingId: rawId };
+
+    const book = await Booking.findOne(query);
+    if (!book) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+
+    // If already present, just mirror to eventSheet
     if (book?.contactRouting?.ivrCode && book?.contactRouting?.proxyNumber) {
       book.eventSheet = book.eventSheet || {};
       book.eventSheet.emergencyContact = mirrorEmergencyContact(book.contactRouting);
@@ -2098,7 +2113,6 @@ export const ensureEmergencyContact = async (req, res) => {
       return res.json({ success: true, booking: book });
     }
 
-    // Need a Twilio shared number configured
     if (!process.env.TWILIO_SHARED_IVR_NUMBER) {
       return res.status(500).json({
         success: false,
@@ -2106,8 +2120,8 @@ export const ensureEmergencyContact = async (req, res) => {
       });
     }
 
-    // Generate and persist IVR details
-    setSharedIVR(book);          // sets contactRouting + mirrors to eventSheet
+    // Create + attach emergency contact data
+    setSharedIVR(book);
     await book.save();
 
     return res.json({ success: true, booking: book });

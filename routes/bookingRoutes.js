@@ -67,11 +67,29 @@ router.get("/user/:userId", async (req, res) => {
 /*              GET /booking/:id                                              */
 /* -------------------------------------------------------------------------- */
 router.get("/booking/:id", async (req, res) => {
-  console.log(`✅ (routes/bookingRoutes.js) GET /api/booking/booking/:id called at`, new Date().toISOString(), {
-    id: req.params.id,
-  });
+  console.log(`GET /api/booking/booking/:id called`, { id: req.params.id });
+
+  const id = req.params.id.trim();
+
   try {
-    const booking = await Booking.findById(req.params.id);
+    // Helper: is valid ObjectId?
+    const isObjectId = mongoose.Types.ObjectId.isValid(id) &&
+      String(new mongoose.Types.ObjectId(id)) === id;
+
+    let booking;
+
+    if (isObjectId) {
+      // Try using _id
+      booking = await Booking.findById(id);
+    } else {
+      // Try using bookingId
+      booking = await Booking.findOne({ bookingId: id });
+    }
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
     res.json(booking);
   } catch (err) {
     console.error("❌ booking/:id fetch error:", err);
