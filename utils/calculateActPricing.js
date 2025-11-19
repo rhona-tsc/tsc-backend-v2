@@ -967,12 +967,12 @@ const totalDurationHours =
     travelCalculated = true;
   }
 
-// ✅ Apply single 33% uplift only (total, not double)
-const totalPrice = Math.round((fee + travelFee) * 1.33);
-console.log("✅ Final (single uplift 33%)", {
+// ✅ Apply single 25% uplift only (total, not double)
+const totalPrice = Math.round((fee + travelFee) * 1.25);
+console.log("✅ Final (single uplift25%)", {
   fee,
   travelFee,
-  marginApplied: "33%",
+  marginApplied: "25%",
   totalPrice,
   travelCalculated,
 });
