@@ -128,7 +128,7 @@
             var instrumentsStr = instrumentsArr.length ? instrumentsArr.join(", ").replace(/, ([^,]*)$/, ' & $1') : "";
           %>
          <%
-  const size = it.actSize || (it.bandMembers?.length || 0);
+  const size = it.lineupLabel || it.actSize || (it.bandMembers?.length || 0);
   const essentialInstruments = it.bandMembers?.filter(m => m.isEssential).map(m => m.instrument).filter(Boolean) || [];
 
   const orderedInstruments = essentialInstruments.sort((a, b) => {
