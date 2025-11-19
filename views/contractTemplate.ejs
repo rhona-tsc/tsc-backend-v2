@@ -155,8 +155,50 @@
     (m.additionalRoles || []).filter(r => r.isEssential).map(r => r.role)
   ) || [];
 
-  const description = `${size}-Piece: ${formatWithAnd(orderedInstruments)}${roles.length ? ` (including ${formatWithAnd(roles)} services)` : ""}`;
+<%
+  const size = it.lineupLabel || it.actSize || (it.bandMembers?.length || 0);
+
+  const essentialInstruments = it.bandMembers
+    ?.filter(m => m.isEssential)
+    .map(m => m.instrument)
+    .filter(Boolean) || [];
+
+  const orderedInstruments = essentialInstruments.sort((a, b) => {
+    const aL = a.toLowerCase();
+    const bL = b.toLowerCase();
+    const isVocal = s => s.includes("vocal");
+    const isDrums = s => s === "drums";
+
+    if (isVocal(aL) && !isVocal(bL)) return -1;
+    if (!isVocal(aL) && isVocal(bL)) return 1;
+
+    if (isDrums(aL)) return 1;
+    if (isDrums(bL)) return -1;
+
+    return 0;
+  });
+
+  const formatWithAnd = (arr) => {
+    const unique = [...new Set(arr)];
+    if (unique.length === 0) return "";
+    if (unique.length === 1) return unique[0];
+    if (unique.length === 2) return `${unique[0]} & ${unique[1]}`;
+    return `${unique.slice(0, -1).join(", ")} & ${unique[unique.length - 1]}`;
+  };
+
+  const roles = it.bandMembers?.flatMap(m =>
+    (m.additionalRoles || [])
+      .filter(r => r.isEssential)
+      .map(r => r.role)
+  ) || [];
+
+  const pieceLabel = `${size}-Piece`;
+  const instrumentList = formatWithAnd(orderedInstruments);
+  const rolesList = roles.length ? ` (including ${formatWithAnd(roles)} services)` : "";
+
+  const description = `${pieceLabel}: ${instrumentList}${rolesList}`;
 %>
+<span><%= description %></span>%>
 <span><%= description %></span>
 
         <% 
