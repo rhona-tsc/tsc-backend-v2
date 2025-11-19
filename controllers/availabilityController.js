@@ -1876,8 +1876,8 @@ console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.
         if (isDeputy) updated.isDeputy = true;
         await updated.save();
 
-        const badgeResult = await rebuildAndApplyAvailabilityBadge(
-          { body: { actId, dateISO } },
+await rebuildAndApplyAvailabilityBadge(
+  { body: { actId, dateISO }, __fromYesFlow: true },
           {
             json: () => {},
             status: () => ({ json: () => {} }),
@@ -2010,7 +2010,7 @@ if (global.availabilityNotify) {
           // ✅ Only trigger deputy notifications if YES / NOLOC / NOLOCATION
         // ✅ Revised logic: always trigger deputies when LEAD replies unavailable
 const shouldTriggerDeputies =
-  (!isDeputy && ["unavailable", "no", "noloc", "nolocation", "yes"].includes(reply));
+  (!isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply));
 
 if (act?._id && shouldTriggerDeputies) {
   console.log(
@@ -2127,18 +2127,21 @@ console.log("📤 notifyDeputies triggered with slotIndex:", slotIndex);
             }
           }
           // 🚫 Ensure lead badge stays cleared even if deputies respond later
-await Act.updateOne(
-  { _id: actId },
-  {
-    $unset: {
-      [`availabilityBadges.${dateISO}`]: "",
-      [`availabilityBadges.${dateISO}_tbc`]: "",
-    },
-    $set: {
-      [`availabilityBadgesMeta.${dateISO}.lockedByLeadUnavailable`]: true,
-    },
-  }
-);
+const update = {
+  $unset: {
+    [`availabilityBadges.${dateISO}`]: "",
+    [`availabilityBadges.${dateISO}_tbc`]: "",
+  },
+};
+
+// 🔒 Only set lock when reply is truly unavailable
+if (!isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply)) {
+  update.$set = {
+    [`availabilityBadgesMeta.${dateISO}.lockedByLeadUnavailable`]: true,
+  };
+}
+
+await Act.updateOne({ _id: actId }, update);
 console.log("🔒 Lead marked UNAVAILABLE — badge locked for date:", dateISO);
 
           return;
@@ -2710,7 +2713,7 @@ const activeLead = await AvailabilityModel.exists({
   reply: "yes",
 });
 
-if (!activeLead) {
+if (!activeLead && !reqOrActId.__fromYesFlow) {
   console.log(`⏭️ Skipping rebuild — no active lead availability found for ${dateISO}`);
   return { success: true, skipped: true, reason: "no_active_lead" };
 }
