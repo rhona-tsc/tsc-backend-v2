@@ -676,8 +676,6 @@ const getValidPostcode = (p) => {
 }
 
 const calculateActPricing = async (act, selectedCounty, selectedAddress, selectedDate, selectedLineup) => {
-console.log("🧾 calculateActPricing Debug — start");
-  console.log("Inputs →", { actName: act?.tscName, selectedCounty, selectedAddress, selectedDate, selectedLineup });
 
   if (!act || !selectedLineup) {
     console.warn("⚠️ Missing act or lineup");

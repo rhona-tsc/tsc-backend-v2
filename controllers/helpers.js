@@ -205,9 +205,6 @@ export async function releaseLockAndProcessNext(phone) {
 }
 
 export const calculateActPricing = async (act, selectedCounty, selectedAddress, selectedDate, selectedLineup) => {
-  console.groupCollapsed("🧾 calculateActPricing Debug");
-  console.log("Inputs →", { actName: act?.tscName, selectedCounty, selectedAddress, selectedDate, selectedLineup });
-
   if (!act || !selectedLineup) {
     console.warn("⚠️ Missing act or lineup");
     console.groupEnd();

@@ -18,7 +18,6 @@ const {
 // -------------------- Twilio client (lazy init, never crash app) --------------------
 let _twilioClient = null;
 function getTwilioClient() {
-  console.log(`🩵 (utils/twilioClient.js) getTwilioClient START at ${new Date().toISOString()}`, {});
   if (_twilioClient) return _twilioClient;
 
   try {
@@ -43,7 +42,6 @@ function getTwilioClient() {
 // -------------------- Helpers --------------------
 /** Normalize to E.164 (+44…) and strip any whatsapp: prefix */
 export const toE164 = (raw = '') => {
-  console.log(`🩵 (utils/twilioClient.js) toE164 START at ${new Date().toISOString()}`, {});
   let s = String(raw).replace(/^whatsapp:/i, '').replace(/\s+/g, '');
   if (!s) return '';
   if (s.startsWith('+')) return s;
@@ -66,7 +64,6 @@ export const WA_FALLBACK_CACHE = new Map(); // sid -> { to, smsBody }
  * Send a WhatsApp message via Content Template.
  */
 export async function sendWhatsAppMessage(opts = {}) {
-  console.log(`🩵 sendWhatsAppMessage START at ${new Date().toISOString()}`);
 
   const client = getTwilioClient();
   if (!client) throw new Error("Twilio disabled");
@@ -104,10 +101,8 @@ export async function sendWhatsAppMessage(opts = {}) {
 
   if (variables?.fee) {
     formattedFee = variables.fee; // trust inherited fee (e.g. £300)
-    console.log(`🪙 Using inherited fee from variables: ${formattedFee}`);
   } else if (opts.finalFee) {
     formattedFee = `£${opts.finalFee}`;
-    console.log(`🪙 Using finalFee override: ${formattedFee}`);
   } else if (
     !opts.skipFeeCompute &&
     actData &&
@@ -143,8 +138,6 @@ export async function sendWhatsAppMessage(opts = {}) {
     actName: actData?.tscName || actData?.name || "TSC Act",
   };
 
-  console.log("📦 Enriched content variables:", enrichedVars);
-  console.log("🟦 Using TWILIO_ENQUIRY_SID =", process.env.TWILIO_ENQUIRY_SID);
 
   /* -------------------------------------------------------------------------- */
   /* ✉️ Send via Twilio                                                        */
@@ -156,14 +149,6 @@ export async function sendWhatsAppMessage(opts = {}) {
     contentVariables: JSON.stringify(enrichedVars),
     ...(statusCallback ? { statusCallback } : {}),
   };
-
-  console.log("📤 Twilio WA create()", {
-    to: payload.to,
-    from: payload.from,
-    contentSid: payload.contentSid,
-    contentVariables: payload.contentVariables,
-  });
-  console.log("🟦 Final payload Content SID:", payload.contentSid);
 
   const msg = await client.messages.create(payload);
 

@@ -986,7 +986,6 @@ async function getDeputyDisplayBits(dep) {
   console.log(
     `🟢 (availabilityController.js) getDeputyDisplayBits START at ${new Date().toISOString()}`,
     {
-      depKeys: Object.keys(dep || {}),
       depMusicianId: dep?.musicianId,
       depEmail: dep?.email,
       depName: `${dep?.firstName || ""} ${dep?.lastName || ""}`.trim(),
@@ -1127,7 +1126,6 @@ async function getDeputyDisplayBits(dep) {
 
 // controllers/availabilityController.js
 export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
-  console.log(`🟢 (availabilityController.js) triggerAvailabilityRequest START at ${new Date().toISOString()}`);
 
   const isExpress = !!maybeRes;
   const body = isExpress ? reqOrArgs.body : reqOrArgs;
@@ -1262,17 +1260,6 @@ if (!resolvedClientEmail && userId) {
 
       const total = baseFee + essentialExtras + travelFee;
 
-      console.log("💷 [Fee Breakdown]", {
-        memberName: `${member.firstName || ""} ${member.lastName || ""}`.trim(),
-        instrument: member.instrument,
-        baseFee,
-        essentialExtras,
-        selectedCounty,
-        travelSource,
-        travelFee,
-        total,
-      });
-
       return total;
     };
 
@@ -1282,7 +1269,6 @@ const vocalists = members.filter((m) =>
 );
 
 if (!isDeputy && vocalists.length > 1) {
-  console.log(`🎤 Multi-vocalist lineup detected (${vocalists.length})`);
 
   const results = [];
   for (let i = 0; i < vocalists.length; i++) {
@@ -1361,7 +1347,6 @@ if (!isDeputy && vocalists.length > 1) {
       smsBody: msg,
     });
 
-    console.log(`📲 WhatsApp sent to vocalist ${vMember.firstName} (${slotIndex})`);
     results.push({ name: vMember.firstName, slotIndex, phone });
   }
 
@@ -1747,7 +1732,7 @@ console.log("🎯 [twilioInbound] Matched slotIndex:", slotIndex);
         }).lean();
       }
 
-const isDeputy = Boolean(updated.isDeputy || musician?.isDeputy);
+const isDeputy = false;
 
 // 🔍 Ensure we always have musician data (lead or deputy)
 if (!musician && updated?.musicianId) {
@@ -2755,7 +2740,7 @@ let clientName = "there";
 
 const availRows = await AvailabilityModel.find({ actId, dateISO }).lean();
 // 🧩 Ensure no badge builds if lead is unavailable or all leads said "no"
-const leadRows = availRows.filter(r => !r.isDeputy);
+const leadRows = availRows.filter(r => r.isDeputy !== true);
 const anyLeadYes = leadRows.some(r => r.reply === "yes");
 if (!anyLeadYes) {
   console.log(`⏭️ Skipping badge build — no lead 'yes' replies for ${dateISO}`);
