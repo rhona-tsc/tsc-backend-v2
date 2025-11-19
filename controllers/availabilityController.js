@@ -2518,132 +2518,109 @@ export async function buildAvailabilityBadgeFromRows(act, dateISO) {
 
   const allLineups = Array.isArray(act.lineups) ? act.lineups : [];
 
-  for (const l of allLineups) {
-    const members = Array.isArray(l.bandMembers) ? l.bandMembers : [];
+// NEW: accumulate slots instead of returning early
+const slots = [];
 
-    for (const m of members) {
-      if (!isVocalRoleGlobal(m.instrument)) continue;
+for (const l of allLineups) {
+  const members = Array.isArray(l.bandMembers) ? l.bandMembers : [];
 
-      const leadPhone = normalizePhoneE164(m.phoneNumber || m.phone || "");
-      const leadReply = leadPhone
-        ? replyByPhone.get(leadPhone)?.reply || null
-        : null;
+  for (let slotIndex = 0; slotIndex < members.length; slotIndex++) {
+    const m = members[slotIndex];
+    if (!isVocalRoleGlobal(m.instrument)) continue;
 
-       // ✅ Lead said YES → build lead badge and attach deputies if any
-      if (leadReply === "yes") {
-        const bits = await getDeputyDisplayBits(m);
+    const leadPhone = normalizePhoneE164(m.phoneNumber || m.phone || "");
+    const leadReply = leadPhone ? replyByPhone.get(leadPhone)?.reply || null : null;
 
-        // find deputies with YES replies
-        const deputies = Array.isArray(m.deputies) ? m.deputies : [];
-        const yesDeps = deputies.filter((d) => {
-          const p = normalizePhoneE164(d.phone || d.phoneNumber || "");
-          return p && replyByPhone.get(p)?.reply === "yes";
-        });
+    const deps = Array.isArray(m.deputies) ? m.deputies : [];
+    const yesDeps = deps.filter(d => {
+      const p = normalizePhoneE164(d.phone || d.phoneNumber || "");
+      return p && replyByPhone.get(p)?.reply === "yes";
+    });
 
-        // map deputies into compact badge format
-        const deputyBadges = await Promise.all(
-          yesDeps.map(async (d) => {
-            const depBits = await getDeputyDisplayBits(d);
-            return {
-              isDeputy: true,
-              name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-              vocalistName: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-              musicianId: depBits?.resolvedMusicianId || depBits?.musicianId || "",
-              photoUrl: depBits?.photoUrl || "",
-              profileUrl: depBits?.profileUrl || "",
-              setAt: new Date(),
-            };
-          })
-        );
+    // LEAD REPLIED YES
+    if (leadReply === "yes") {
+      const bits = await getDeputyDisplayBits(m);
+      const deputyBadges = await Promise.all(
+        yesDeps.map(async d => {
+          const depBits = await getDeputyDisplayBits(d);
+          return {
+            isDeputy: true,
+            vocalistName: `${d.firstName || ""} ${d.lastName || ""}`,
+            musicianId: depBits?.musicianId || "",
+            photoUrl: depBits?.photoUrl || "",
+            profileUrl: depBits?.profileUrl || "",
+            setAt: new Date(),
+          };
+        })
+      );
 
-        const badgeObj = {
-          active: true,
-          dateISO,
-          isDeputy: false,
-          inPromo: !!m.inPromo,
-          vocalistName: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
-          musicianId: bits?.musicianId || "",
-          photoUrl: bits?.photoUrl || "",
-          profileUrl: bits?.profileUrl || "",
-          address: formattedAddress,
-          setAt: new Date(),
-          deputies: deputyBadges, // ✅ include all YES deputies
-        };
+      slots.push({
+        slotIndex,
+        isDeputy: false,
+        vocalistName: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
+        musicianId: bits?.musicianId || "",
+        photoUrl: bits?.photoUrl || "",
+        profileUrl: bits?.profileUrl || "",
+        deputies: deputyBadges,
+        setAt: new Date(),
+      });
 
-        console.log("🎤 Built lead badge with deputies:", badgeObj);
-        return badgeObj;
-      }
-
-      // 🚫 Lead said NO/UNAVAILABLE → pick most recent deputy YES
-      if (!leadReply || leadReply === "no" || leadReply === "unavailable") {
-        const deputies = Array.isArray(m.deputies) ? m.deputies : [];
-        const yesDeps = deputies.filter((d) => {
-          const p = normalizePhoneE164(d.phoneNumber || d.phone || "");
-          return p && replyByPhone.get(p)?.reply === "yes";
-        });
-
-       // 🚫 Lead said NO/UNAVAILABLE → pick most recent deputy YES
-if (!leadReply || leadReply === "no" || leadReply === "unavailable") {
-  const deputies = Array.isArray(m.deputies) ? m.deputies : [];
-  const yesDeps = deputies.filter((d) => {
-    const p = normalizePhoneE164(d.phoneNumber || d.phone || "");
-    return p && replyByPhone.get(p)?.reply === "yes";
-  });
-
-  if (yesDeps.length > 0) {
-    // sort by most recent reply timestamp
-    const activeDeputy = yesDeps.sort(
-      (a, b) =>
-        new Date(b.repliedAt || b.updatedAt || 0) -
-        new Date(a.repliedAt || a.updatedAt || 0)
-    )[0];
-
-    const activeBits = await getDeputyDisplayBits(activeDeputy);
-
-    // 🔁 Enrich *all* YES deputies with photo/profile
-    const enrichedDeputies = await Promise.all(
-      yesDeps.map(async (d) => {
-        const depBits = await getDeputyDisplayBits(d);
-        return {
-          isDeputy: true,
-          name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-          musicianId:
-            depBits?.resolvedMusicianId || depBits?.musicianId || d.musicianId || "",
-          photoUrl: depBits?.photoUrl || "",
-          profileUrl: depBits?.profileUrl || "",
-          setAt: new Date(),
-        };
-      })
-    );
-
-    const badgeObj = {
-      active: true,
-      dateISO,
-      isDeputy: true,
-      inPromo: false,
-      // ✅ show deputy’s real name, not the lead’s
-      vocalistName:
-        `${activeDeputy.firstName || ""} ${activeDeputy.lastName || ""}`.trim(),
-      musicianId:
-        activeBits?.resolvedMusicianId ||
-        activeBits?.musicianId ||
-        activeDeputy.musicianId ||
-        "",
-      photoUrl: activeBits?.photoUrl || "",
-      profileUrl: activeBits?.profileUrl || "",
-      address: formattedAddress,
-      setAt: new Date(),
-      deputies: enrichedDeputies,
-    };
-
-    console.log("🎤 Built deputy badge (YES replies):", badgeObj);
-    return badgeObj;
-  }
-
-        }
-      }
+      continue; // 👈 don't return — continue building other slots
     }
+
+    // LEAD NO — choose deputy
+    if (yesDeps.length > 0) {
+      const sorted = yesDeps.sort(
+        (a, b) =>
+          new Date(b.repliedAt || b.updatedAt || 0) -
+          new Date(a.repliedAt || a.updatedAt || 0)
+      );
+      const activeDeputy = sorted[0];
+      const depBits = await getDeputyDisplayBits(activeDeputy);
+
+      const enrichedDeps = await Promise.all(
+        yesDeps.map(async d => {
+          const depBits2 = await getDeputyDisplayBits(d);
+          return {
+            isDeputy: true,
+            vocalistName: `${d.firstName || ""} ${d.lastName || ""}`,
+            musicianId: depBits2?.musicianId || "",
+            photoUrl: depBits2?.photoUrl || "",
+            profileUrl: depBits2?.profileUrl || "",
+            setAt: new Date(),
+          };
+        })
+      );
+
+      slots.push({
+        slotIndex,
+        isDeputy: true,
+        vocalistName: `${activeDeputy.firstName || ""} ${activeDeputy.lastName || ""}`,
+        musicianId: depBits?.musicianId || "",
+        photoUrl: depBits?.photoUrl || "",
+        profileUrl: depBits?.profileUrl || "",
+        deputies: enrichedDeps,
+        setAt: new Date(),
+      });
+
+      continue;
+    }
+
+    // NO LEAD OR DEPUTY AVAILABLE
+    // push nothing
   }
+}
+
+// If no slots, return null
+if (slots.length === 0) return null;
+
+// NEW return format:
+return {
+  dateISO,
+  address: formattedAddress,
+  active: true,
+  slots
+};
 
   console.log("🪶 No badge candidates found — returning null.");
   return null;
