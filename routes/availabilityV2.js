@@ -1,21 +1,12 @@
 // backend/routes/availabilityV2.js
 import express from "express";
 import AvailabilityModel from "../models/availabilityModel.js";
-import { triggerAvailabilityRequest } from "../controllers/availabilityController.js";
 
 const router = express.Router();
 
 /* -------------------------------------------------------------------------- */
 /* 💖 AVAILABILITY V2 ROUTES WITH ROUTE-LEVEL LOGGING                         */
 /* -------------------------------------------------------------------------- */
-
-// Trigger new availability request
-router.post("/request", (req, res, next) => {
-  console.log('💖 (routes/availabilityV2) /request triggered at', new Date().toISOString(), {
-    body: req.body,
-  });
-  next();
-}, triggerAvailabilityRequest);
 
 // Cancel active conversation lock
 router.post("/cancel-active", async (req, res) => {

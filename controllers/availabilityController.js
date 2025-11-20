@@ -1305,28 +1305,30 @@ if (!isDeputy && vocalists.length > 1) {
 
     const finalFee = await feeForMember(vMember);
 
-    await AvailabilityModel.create({
-      actId,
-      lineupId: lineup?._id || null,
-musicianId: enriched._id || vMember.musicianId || null,
-musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
-photoUrl: enriched.photoUrl || enriched.profilePicture || "",
-      phone,
-      dateISO,
-      address: fullFormattedAddress,
-      formattedAddress: fullFormattedAddress,
-      formattedDate,
-      clientName: resolvedClientName || "",
-      clientEmail: resolvedClientEmail || "",
-      actName: act?.tscName || act?.name || "",
-      musicianName: `${vMember.firstName || ""} ${vMember.lastName || ""}`.trim(),
-      duties: vMember.instrument || "Vocalist",
-      fee: String(finalFee),
-      reply: null,
-      v2: true,
-      enquiryId,
-      slotIndex: slotIndexForThis,
-    });
+await AvailabilityModel.create({
+  actId,
+  lineupId: lineup?._id || null,
+
+  // 🔥 FIX: FULL MUSICIAN DATA STORED
+  musicianId: enriched._id || enriched.musicianId || vMember.musicianId || null,
+  musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
+  photoUrl: enriched.photoUrl || enriched.profilePicture || "",
+
+  phone,
+  dateISO,
+  address: fullFormattedAddress,
+  formattedAddress: fullFormattedAddress,
+  formattedDate,
+  clientName: resolvedClientName || "",
+  clientEmail: resolvedClientEmail || "",
+  actName: act?.tscName || act?.name || "",
+  duties: vMember.instrument || "Vocalist",
+  fee: String(finalFee),
+  reply: null,
+  v2: true,
+  enquiryId,
+  slotIndex: slotIndexForThis,
+});
 
     const msg = `Hi ${
       vMember.firstName || "there"
@@ -1525,7 +1527,7 @@ if (existing && !skipDuplicateCheck) {
     await AvailabilityModel.create({
       actId,
       lineupId: lineup?._id || null,
-musicianId: enrichedMember._id || targetMember.musicianId || null,
+musicianId: enrichedMember._id || enrichedMember.musicianId || targetMember.musicianId || null,
 musicianName: `${enrichedMember.firstName || targetMember.firstName || ""} ${enrichedMember.lastName || targetMember.lastName || ""}`.trim(),
 photoUrl: enrichedMember.photoUrl || enrichedMember.profilePicture || "",
       phone,

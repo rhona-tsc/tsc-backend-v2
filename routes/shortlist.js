@@ -11,16 +11,6 @@ import { triggerAvailabilityRequest } from "../controllers/availabilityControlle
 
 const router = express.Router();
 
-/* -------------------------------------------------------------------------- */
-/* 🟡 POST /add — Add or toggle shortlist + trigger availability              */
-/* -------------------------------------------------------------------------- */
-router.post("/add", (req, res, next) => {
-  console.log(
-    `🟡 (routes/shortlist.js) /add START at ${new Date().toISOString()}`,
-    { body: req.body }
-  );
-  next();
-}, triggerAvailabilityRequest);
 
 /* -------------------------------------------------------------------------- */
 /* 🟢 GET /user/:userId/shortlisted                                           */
