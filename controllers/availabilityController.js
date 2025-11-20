@@ -1345,13 +1345,19 @@ if (!isDeputy && vocalists.length > 1) {
     }
 
     const finalFee = await feeForMember(vMember);
+console.log("🎤 Multi vocalist save:", {
+  slotIndex: slotIndexForThis,
+  vMember_id: vMember?.musicianId,
+  enriched_id: enriched?._id,
+  finalMusicianId: enriched?._id || vMember?.musicianId
+});
 
 await AvailabilityModel.create({
   actId,
   lineupId: lineup?._id || null,
 
   // 🔥 FIX: FULL MUSICIAN DATA STORED
-  musicianId: enriched._id || enriched.musicianId || vMember.musicianId || null,
+musicianId: enriched._id || vMember.musicianId || enriched.musicianId,
   musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
   photoUrl: enriched.photoUrl || enriched.profilePicture || "",
 
