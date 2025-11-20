@@ -2639,6 +2639,8 @@ export async function buildAvailabilityBadgeFromRows({
   const rows = await AvailabilityModel.find({
     actId,
     dateISO,
+      reply: { $in: ["yes", "no", "unavailable", null] },
+
     v2: true,
   })
     .select("musicianId slotIndex reply updatedAt isDeputy")
@@ -2695,7 +2697,7 @@ export async function buildAvailabilityBadgeFromRows({
     slots.push({
       slotIndex: Number(slotKey),
       isDeputy: !!leadRow?.isDeputy,
-      vocalistName: "", // can be enriched later if you want name here
+vocalistName: displayBits.resolvedName || "",
       musicianId: displayBits.musicianId || "",
       photoUrl: displayBits.photoUrl,
       profileUrl: displayBits.profileUrl,
