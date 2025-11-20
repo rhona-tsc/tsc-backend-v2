@@ -2752,8 +2752,11 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
   /* ------------------------------------------------------------------ */
   /* 🟦 3. BUILD RAW BADGE + LOG RESULT                                  */
   /* ------------------------------------------------------------------ */
-  let badge = await buildAvailabilityBadgeFromRows(actDoc, dateISO);
-
+let badge = await buildAvailabilityBadgeFromRows({
+  actId,
+  dateISO,
+  hasLineups: actDoc?.hasLineups ?? true,
+});
   console.log("🎨 Raw badge returned from buildAvailabilityBadgeFromRows:", badge);
 
   /* ------------------------------------------------------------------ */
