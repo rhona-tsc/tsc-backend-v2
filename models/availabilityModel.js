@@ -97,6 +97,7 @@ const availabilitySchema = new mongoose.Schema(
 availabilitySchema.index(
   {
     actId: 1,
+    
     lineupId: 1,
     dateISO: 1,
     phone: 1,

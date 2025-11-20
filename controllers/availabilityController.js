@@ -211,10 +211,7 @@ const normalizeFrom = (from) => {
 };
 // Module-scope E.164 normalizer (also strips "whatsapp:" prefix)
 const normalizeToE164 = (raw = "") => {
-  console.log(
-    `🟢 (availabilityController.js) normalizeToE164 START at ${new Date().toISOString()}`,
-    {}
-  );
+
   let s = String(raw || "")
     .trim()
     .replace(/^whatsapp:/i, "")
@@ -983,14 +980,7 @@ function findVocalistPhone(actData, lineupId) {
 }
 
 async function getDeputyDisplayBits(dep) {
-  console.log(
-    `🟢 (availabilityController.js) getDeputyDisplayBits START at ${new Date().toISOString()}`,
-    {
-      depMusicianId: dep?.musicianId,
-      depEmail: dep?.email,
-      depName: `${dep?.firstName || ""} ${dep?.lastName || ""}`.trim(),
-    }
-  );
+
 
   const PUBLIC_SITE_BASE = (
     process.env.PUBLIC_SITE_URL ||
@@ -1147,6 +1137,25 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       skipDuplicateCheck = false,
     } = body;
 
+    const enquiryId =
+  body.enquiryId ||
+  body.shortlistId ||
+  body.requestId ||
+  body.parentKey ||
+  null;
+
+if (!enquiryId) {
+  console.warn("⚠️ No enquiryId provided — slotIndex grouping may fail");
+}
+
+// Get how many availability rows already belong to this enquiry
+const existingForEnquiry = enquiryId
+  ? await AvailabilityModel.find({ enquiryId }).lean()
+  : [];
+
+// Next slotIndex
+const slotIndex = existingForEnquiry.length;
+
     // 🧭 Enrich clientName/email if not provided but userId is available
 let resolvedClientName = clientName || "";
 let resolvedClientEmail = clientEmail || "";
@@ -1271,17 +1280,19 @@ const vocalists = members.filter((m) =>
 if (!isDeputy && vocalists.length > 1) {
 
   const results = [];
+
   for (let i = 0; i < vocalists.length; i++) {
     const vMember = vocalists[i];
-    const slotIndex = i; // track slot 0, 1, etc.
-    const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
 
+    // slotIndex based on enquiry + vocalist order
+    const slotIndexForThis = slotIndex + i;
+
+    const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
     if (!phone) {
       console.warn(`⚠️ Skipping vocalist ${vMember.firstName} — no phone number`);
       continue;
     }
 
-    // 🧩 Enrich each vocalist with Musician data if possible
     let enriched = { ...vMember };
     try {
       if (vMember?.musicianId) {
@@ -1293,14 +1304,7 @@ if (!isDeputy && vocalists.length > 1) {
     }
 
     const finalFee = await feeForMember(vMember);
-    const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
 
-    // ✅ Create availability record for this vocalist slot
     await AvailabilityModel.create({
       actId,
       lineupId: lineup?._id || null,
@@ -1318,7 +1322,8 @@ if (!isDeputy && vocalists.length > 1) {
       fee: String(finalFee),
       reply: null,
       v2: true,
-  slotIndex: body.slotIndex ?? 0, // 🆕 ensures correct vocalist slot tracking
+      enquiryId,
+      slotIndex: slotIndexForThis,
     });
 
     const msg = `Hi ${
@@ -1672,7 +1677,6 @@ export const twilioInbound = async (req, res) => {
   setImmediate( () => {
     (async () => {
     try {
-      console.log("📬 Raw inbound req.body:", req.body);
 
       const bodyText = String(req.body?.Body || "");
       const buttonText = String(req.body?.ButtonText || "");
@@ -1812,13 +1816,7 @@ if (emailForInvite && act && dateISO) {
     null;
 
 try {
-  console.log("📅 DEBUG Calendar invite about to run", {
-  emailForInvite,
-  actId,
-  actName: act?.tscName || act?.name,
-  dateISO,
-  hasCreateFn: typeof createCalendarInvite === "function",
-});
+;
 
 // 🧹 Cancel any existing calendar event before re-creating a new one
 if (updated?.calendarEventId && emailForInvite) {

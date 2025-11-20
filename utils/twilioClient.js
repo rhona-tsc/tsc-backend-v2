@@ -233,7 +233,6 @@ export async function sendWAOrSMS(opts = {}) {
  * Send a plain WhatsApp text (no template/content).
  */
 export async function sendWhatsAppText(to, body) {
-  console.log(`🩵 (utils/twilioClient.js) sendWhatsAppText START at ${new Date().toISOString()}`, {});
 
   const client = getTwilioClient();
   if (!client) throw new Error('Twilio disabled');
@@ -249,7 +248,6 @@ export async function sendWhatsAppText(to, body) {
     ...(statusCallback ? { statusCallback } : {}),
   };
 
-  console.log('📤 Twilio WA text create()', { to: payload.to });
   return client.messages.create(payload);
 }
 

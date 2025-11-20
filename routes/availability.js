@@ -340,6 +340,7 @@ try {
 
  await triggerAvailabilityRequest({
   actId,
+  enquiryId: enquiry._id || enquiry.key || generatedKey,
   dateISO,       
   address,
   formattedAddress: address,
