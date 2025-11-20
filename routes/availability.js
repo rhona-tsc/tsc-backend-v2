@@ -335,13 +335,14 @@ try {
   const actId = req.params.id;
   const dateISO = selectedDate || new Date().toISOString().slice(0, 10);
   const address = selectedAddress || "TBC";
+const enquiryId = `${actId}_${dateISO}_${address}`.replace(/\s+/g, "_");
 
 
 
  await triggerAvailabilityRequest({
   actId,
-  enquiryId: enquiry._id || enquiry.key || generatedKey,
-  dateISO,       
+  enquiryId,
+    dateISO,       
   address,
   formattedAddress: address,
   clientEmail: email,
