@@ -2249,7 +2249,8 @@ console.log("📤 notifyDeputies triggered with slotIndex:", slotIndex);
               dateISO,
               reply: "yes",
             });
-            }
+
+            
           }
           // 🚫 Ensure lead badge stays cleared even if deputies respond later
 const update = {
