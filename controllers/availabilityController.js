@@ -1368,7 +1368,7 @@ await AvailabilityModel.create({
   reply: null,
   v2: true,
   enquiryId,
-  slotIndex: slotIndexForThis,
+slotIndex: isDeputy ? 0 : slotIndexForThis,
 });
 
     const msg = `Hi ${
@@ -1397,7 +1397,7 @@ await AvailabilityModel.create({
       smsBody: msg,
     });
 
-    results.push({ name: vMember.firstName, slotIndex, phone });
+results.push({ name: vMember.firstName, slotIndex: slotIndexForThis, phone });
   }
 
   console.log(`✅ Multi-vocalist availability triggered for:`, results);
@@ -1586,7 +1586,6 @@ clientEmail: resolvedClientEmail || "",
       fee: String(finalFee),
       reply: null,
       v2: true,
-        slotIndex: body.slotIndex ?? 0, // 🆕 ensures correct vocalist slot tracking
 
     });
 
