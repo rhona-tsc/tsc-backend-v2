@@ -2701,10 +2701,6 @@ vocalistName: displayBits.resolvedName || "",
 }
 
 
-
-/** ---------------------------------------------------------------------- */
-/**  🔧 REBUILD & APPLY AVAILABILITY BADGE — WITH DEBUG ANCHORS            */
-/** ---------------------------------------------------------------------- */
 export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
   console.log("🟦 rebuildAndApplyAvailabilityBadge START", { actId, dateISO });
 
@@ -2715,8 +2711,6 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     });
     return null;
   }
-
-
 
   /* ------------------------------------------------------------------ */
   /* 🟦 2. FETCH ACT + LOG SUMMARY                                       */
@@ -2733,15 +2727,15 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
 
   if (!actDoc) return { success: false, message: "Act not found" };
 
-
   /* ------------------------------------------------------------------ */
   /* 🟦 3. BUILD RAW BADGE + LOG RESULT                                  */
   /* ------------------------------------------------------------------ */
-let badge = await buildAvailabilityBadgeFromRows({
-  actId,
-  dateISO,
-  hasLineups: actDoc?.hasLineups ?? true,
-});
+  let badge = await buildAvailabilityBadgeFromRows({
+    actId,
+    dateISO,
+    hasLineups: actDoc?.hasLineups ?? true,
+  });
+
   console.log("🎨 Raw badge returned from buildAvailabilityBadgeFromRows:", badge);
 
   /* ------------------------------------------------------------------ */
@@ -2756,7 +2750,6 @@ let badge = await buildAvailabilityBadgeFromRows({
     slotIndex: r.slotIndex,
     updatedAt: r.updatedAt
   })));
-
 
   /* ------------------------------------------------------------------ */
   /* 🟡 If no badge, attempt to clear + broadcast null                   */
@@ -2787,15 +2780,11 @@ let badge = await buildAvailabilityBadgeFromRows({
       stillActive
     });
 
-
-    }
-
-    return { success: true, cleared: true };
+    return { success: true, cleared: true }; // ← this must be INSIDE the if-block
   }
 
-
   /* ------------------------------------------------------------------ */
-  /* 🟦 5. BEFORE SAVING: LOG FINAL BADGE (key, address, photo, slots)   */
+  /* 🟦 5. BEFORE SAVING                                                 */
   /* ------------------------------------------------------------------ */
   const shortAddress = (badge?.address || actDoc?.formattedAddress || "unknown")
     .replace(/\b(united_kingdom|uk)\b/gi, "")
@@ -2814,7 +2803,6 @@ let badge = await buildAvailabilityBadgeFromRows({
     profileUrl: badge?.profileUrl
   });
 
-
   /* ------------------------------------------------------------------ */
   /* 🟩 SAVE BADGE TO ACT                                                */
   /* ------------------------------------------------------------------ */
@@ -2825,16 +2813,15 @@ let badge = await buildAvailabilityBadgeFromRows({
 
   console.log(`✅ Applied badge for ${actDoc.tscName || actDoc.name}`);
 
-
   /* ------------------------------------------------------------------ */
-  /* 🟦 6. SSE BROADCAST LOG                                             */
+  /* 🟦 6. SSE BROADCAST                                                 */
   /* ------------------------------------------------------------------ */
   if (global.availabilityNotify?.badgeUpdated) {
     console.log("📡 SSE badgeUpdated fired:", {
       actId,
       dateISO,
       slots: badge?.slots?.length,
-      badgeIsNull: badge === null
+      badgeIsNull: false
     });
 
     global.availabilityNotify.badgeUpdated({
@@ -2846,10 +2833,8 @@ let badge = await buildAvailabilityBadgeFromRows({
     });
   }
 
-
-  return { success: true, updated: true, badge };
+  return { success: true, updated: true, badge }; // ← now back inside function
 }
-
 export async function getAvailabilityBadge(req, res) {
   try {
     const { actId, dateISO } = req.params;
