@@ -117,12 +117,27 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use((req, res, next) => {
-  // If Origin is whitelisted, cors() will already have set ACAO; we just ensure ACAC is present
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   next();
 });
-app.options('*', cors(corsOptions)); // generic preflight
-app.options('/api/musician-login/*', cors(corsOptions), (_req, res) => res.sendStatus(204)); // explicit preflight for login
+
+// 🔥 MUST go here — before app.options('*')
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    res.header('Access-Control-Allow-Headers',
+      'Content-Type, Authorization, token, X-Requested-With, x-eventsheet-client, x-requested-with'
+    );
+    res.header('Access-Control-Allow-Credentials', 'true');
+    return res.sendStatus(204);
+  }
+  next();
+});
+
+// ⬇️ THESE must come AFTER the override
+app.options('*', cors(corsOptions));
+app.options('/api/musician-login/*', cors(corsOptions), (_req, res) => res.sendStatus(204));
 
 // Render/Cloudflare often sit behind proxies
 app.set('trust proxy', 1);
@@ -150,16 +165,6 @@ app.get('/debug/base', (_req, res) => {
   });
 });
 
-app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, token, X-Requested-With, x-eventsheet-client, x-requested-with');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    return res.sendStatus(204);
-  }
-  next();
-});
 /* -------------------------------------------------------------------------- */
 /*                          Standard app middleware                            */
 /* -------------------------------------------------------------------------- */
