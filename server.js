@@ -1,58 +1,63 @@
-
 // backend/server.js
-import express from 'express';
-import cors from 'cors';
-import 'dotenv/config';
-import connectDB from './config/mongodb.js';
-import connectCloudinary from './config/connectCloudinary.js';
-import cloudinary from './config/cloudinary.js';
-import bodyParser from 'body-parser';
-import cookieParser from 'cookie-parser';
+import express from "express";
+import cors from "cors";
+import "dotenv/config";
+import bodyParser from "body-parser";
+import cookieParser from "cookie-parser";
+import morgan from "morgan";
+import cron from "node-cron";
+
+import connectDB from "./config/mongodb.js";
+import connectCloudinary from "./config/connectCloudinary.js";
+import cloudinary from "./config/cloudinary.js";
+
 import router from "./routes/debugRoutes.js";
 import shortlistRoutes from "./routes/shortlist.js";
 import boardBackfillRoutes from "./routes/boardBackfillRoutes.js";
 import invoiceRoutes from "./routes/invoiceRoutes.js";
-import userRouter from './routes/userRoute.js';
-import musicianRouter from './routes/musicianRoute.js';
-import actV2Routes from './routes/actV2Routes.js';
-import cartRouter from './routes/cartRoute.js';
-import bookingRoutes from './routes/bookingRoutes.js';
-import googleRoutes from './routes/google.js';
-import calendarWebhook from './routes/calendarWebhook.js';
-import authRoutes from './routes/authRoutes.js';
+import userRouter from "./routes/userRoute.js";
+import musicianRouter from "./routes/musicianRoute.js";
+import actV2Routes from "./routes/actV2Routes.js";
+import cartRouter from "./routes/cartRoute.js";
+import bookingRoutes from "./routes/bookingRoutes.js";
+import googleRoutes from "./routes/google.js";
+import calendarWebhook from "./routes/calendarWebhook.js";
+import authRoutes from "./routes/authRoutes.js";
 import moderationRoutes from "./routes/moderationRoutes.js";
-import userRoute from './routes/userRoute.js';
+import userRoute from "./routes/userRoute.js";
 import debugRoutes from "./routes/debug.js";
-import { watchCalendar } from './controllers/googleController.js';
-import musicianLoginRouter from './routes/musicianLoginRoute.js';
+import musicianLoginRouter from "./routes/musicianLoginRoute.js";
 import allocationRoutes from "./routes/allocationRoutes.js";
-import availabilityRoutes from './routes/availability.js';
+import availabilityRoutes from "./routes/availability.js";
 import paymentsRouter from "./routes/payments.js";
 import musicianRoutes from "./routes/musicianRoute.js";
-import accountRouter from './routes/accountRoute.js';
+import accountRouter from "./routes/accountRoute.js";
 import voiceIvr from "./routes/voiceIvr.js";
 import bookingBoardRoutes from "./routes/bookingBoardRoutes.js";
-import { startRemindersPoller } from "./services/remindersQueue.js";
 import uploadRoutes from "./routes/upload.js";
 import notificationsRoutes from "./routes/notifications.js";
-import newsletterRoutes from './routes/newsletterRoutes.js';
-import { getAvailableActIds } from './controllers/actAvailabilityController.js';
-import { submitActSubmission } from './controllers/actSubmissionController.js';
+import newsletterRoutes from "./routes/newsletterRoutes.js";
 import v2Routes from "./routes/v2.js";
-import { rebuildAndApplyAvailabilityBadge, twilioInbound, twilioStatus, buildAvailabilityBadgeFromRows } from './controllers/availabilityController.js';
-import { handleGoogleWebhook } from './controllers/googleController.js';
-import morgan from "morgan";
-import cron from "node-cron";
+
+import {
+  watchCalendar,
+  handleGoogleWebhook,
+} from "./controllers/googleController.js";
+import {
+  rebuildAndApplyAvailabilityBadge,
+  twilioInbound,
+  twilioStatus,
+  buildAvailabilityBadgeFromRows,
+} from "./controllers/availabilityController.js";
+import { getAvailableActIds } from "./controllers/actAvailabilityController.js";
+import { submitActSubmission } from "./controllers/actSubmissionController.js";
+
+import { startRemindersPoller } from "./services/remindersQueue.js";
 import { runChaseAndEscalation } from "./cron/chaseAndEscalate.js";
-import actModel from './models/actModel.js';
+import actModel from "./models/actModel.js";
 
-
-if (process.env.NODE_ENV !== "production") {
-  app.use(morgan("dev"));
-}
-
-// at the top of backend/server.js (after dotenv)
-console.log('ENV CHECK:', {
+// Simple env debug
+console.log("ENV CHECK:", {
   INTERNAL_BASE_URL: process.env.INTERNAL_BASE_URL,
   BACKEND_PUBLIC_URL: process.env.BACKEND_PUBLIC_URL,
   BACKEND_URL: process.env.BACKEND_URL,
@@ -61,44 +66,42 @@ console.log('ENV CHECK:', {
 const app = express();
 const port = process.env.PORT || 4000;
 
-
-cron.schedule("0 * * * *", async () => {
-  await runChaseAndEscalation();
-});
-
-
 /* -------------------------------------------------------------------------- */
-/*                                 CORS FIRST                                 */
+/*                               CORS (VERY TOP)                              */
 /* -------------------------------------------------------------------------- */
 
+app.set("trust proxy", 1); // Render/Cloudflare
 
-// Host-based allowlist (safer than full-origin string matching)
+// Host-based allowlist
 const ALLOWED_HOSTS = new Set([
-  'localhost:5173',
-  'localhost:5174',
-  'tsc2025.netlify.app',
-  'meek-biscotti-8d5020.netlify.app',
-  'tsc2025-admin-portal.netlify.app',
-  'tsc-backend-v2.onrender.com',
+  "localhost:5173",
+  "localhost:5174",
 
-  // 🔥 Add this line:
-  'tsc2025.onrender.com',
+  // Public marketing site + admin portal
+  "www.thesupremecollective.co.uk",
+  "admin.thesupremecollective.co.uk",
+  "api.thesupremecollective.co.uk",
 
-  'tscadmin.netlify.app',
-  'www.thesupremecollective.co.uk',
-  'api.thesupremecollective.co.uk',
-  'admin.thesupremecollective.co.uk',
+  // Deploys
+  "tsc2025.netlify.app",
+  "tsc2025-admin-portal.netlify.app",
+  "tscadmin.netlify.app",
+  "tsc-backend-v2.onrender.com",
+  "tsc2025.onrender.com",
+
+  // extra preview
+  "meek-biscotti-8d5020.netlify.app",
 ]);
 
 function isAllowedOrigin(origin) {
-  if (!origin) return true; // allow same-origin / curl
+  if (!origin) return true; // same-origin / curl
   try {
     const { host, protocol } = new URL(origin);
     if (!/^https?:$/.test(protocol)) return false;
     return (
       ALLOWED_HOSTS.has(host) ||
-      host.endsWith('.netlify.app') || // allow other Netlify previews if needed
-      host.includes('localhost')
+      host.endsWith(".netlify.app") ||
+      host.includes("localhost")
     );
   } catch {
     return false;
@@ -107,72 +110,66 @@ function isAllowedOrigin(origin) {
 
 const corsOptions = {
   origin(origin, cb) {
-    isAllowedOrigin(origin) ? cb(null, true) : cb(new Error(`CORS blocked origin: ${origin}`));
+    return isAllowedOrigin(origin)
+      ? cb(null, true)
+      : cb(new Error(`CORS blocked origin: ${origin}`));
   },
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'token', 'X-Requested-With', "x-eventsheet-client", "x-requested-with"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "token",
+    "X-Requested-With",
+    "x-eventsheet-client",
+    "x-requested-with",
+  ],
   credentials: true,
   optionsSuccessStatus: 204,
 };
 
+// 1️⃣ Apply CORS globally
 app.use(cors(corsOptions));
+
+// 2️⃣ Ensure credentials header is always present
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Vary", "Origin");
   next();
 });
 
-// 🔥 MUST go here — before app.options('*')
+// 3️⃣ Explicit preflight handler (so Render/Cloudflare can't interfere)
 app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.header('Access-Control-Allow-Headers',
-      'Content-Type, Authorization, token, X-Requested-With, x-eventsheet-client, x-requested-with'
+  if (req.method === "OPTIONS") {
+    const origin = req.headers.origin;
+    if (origin && isAllowedOrigin(origin)) {
+      res.header("Access-Control-Allow-Origin", origin);
+    }
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
     );
-    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, token, X-Requested-With, x-eventsheet-client, x-requested-with"
+    );
+    res.header("Access-Control-Allow-Credentials", "true");
     return res.sendStatus(204);
   }
   next();
-});
-
-// ⬇️ THESE must come AFTER the override
-app.options('*', cors(corsOptions));
-app.options('/api/musician-login/*', cors(corsOptions), (_req, res) => res.sendStatus(204));
-
-// Render/Cloudflare often sit behind proxies
-app.set('trust proxy', 1);
-
-// tiny debug and cache-variance
-app.use((req, res, next) => {
-  res.setHeader('Vary', 'Origin');
-  if (req.method !== 'OPTIONS') {
-  }
-  const _end = res.end;
-  res.end = function (...args) {
-    const acao = res.getHeader('Access-Control-Allow-Origin');
-   // if (acao) console.log(`   ↳ ACAO sent: ${acao}`);
-    _end.apply(this, args);
-  };
-  next();
-});
-
-app.get('/debug/base', (_req, res) => {
-  res.json({
-    INTERNAL_BASE_URL: process.env.INTERNAL_BASE_URL || null,
-    BACKEND_PUBLIC_URL: process.env.BACKEND_PUBLIC_URL || null,
-    BACKEND_URL: process.env.BACKEND_URL || null,
-    time: new Date().toISOString(),
-  });
 });
 
 /* -------------------------------------------------------------------------- */
 /*                          Standard app middleware                            */
 /* -------------------------------------------------------------------------- */
 
+if (process.env.NODE_ENV !== "production") {
+  app.use(morgan("dev"));
+}
+
 app.use(cookieParser());
-app.use(express.json({ limit: '100mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '100mb' }));
-app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+app.use(express.json({ limit: "100mb" }));
+app.use(bodyParser.urlencoded({ extended: true, limit: "100mb" }));
+app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
 /* -------------------------------------------------------------------------- */
 /*                         DB + Cloudinary boot/config                         */
@@ -189,8 +186,9 @@ cloudinary.config({
 /* -------------------------------------------------------------------------- */
 /*                 🌍 Global color-coded route logging middleware              */
 /* -------------------------------------------------------------------------- */
+
 app.use((req, res, next) => {
-  // 🛑 Skip logging for noisy or cached routes
+  // Skip noisy routes
   if (
     req.originalUrl.includes("/api/v2/travel/travel-data") ||
     req.originalUrl.includes("/api/availability/subscribe")
@@ -204,43 +202,60 @@ app.use((req, res, next) => {
     green: "\x1b[32m",
     yellow: "\x1b[33m",
     red: "\x1b[31m",
-    cyan: "\x1b[36m",
   };
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     const method = req.method.padEnd(6);
     const status = res.statusCode;
-    const time = new Date().toISOString();
 
-    if (status === 304) return; // 💤 Skip cache hits too
+    if (status === 304) return;
 
     let statusColor =
-      status >= 500 ? color.red :
-      status >= 400 ? color.yellow :
-      color.green;
+      status >= 500 ? color.red : status >= 400 ? color.yellow : color.green;
 
+    // Uncomment if you want visible logs again:
     // console.log(
-    //  `${statusColor}[${method}]${status}${color.reset} ${req.originalUrl} (${duration}ms)`
-   // );
+    //   `${statusColor}[${method}]${status}${color.reset} ${req.originalUrl} (${duration}ms)`
+    // );
   });
 
   next();
 });
 
 /* -------------------------------------------------------------------------- */
+/*                                   Debug                                    */
+/* -------------------------------------------------------------------------- */
+
+app.get("/debug/base", (_req, res) => {
+  res.json({
+    INTERNAL_BASE_URL: process.env.INTERNAL_BASE_URL || null,
+    BACKEND_PUBLIC_URL: process.env.BACKEND_PUBLIC_URL || null,
+    BACKEND_URL: process.env.BACKEND_URL || null,
+    time: new Date().toISOString(),
+  });
+});
+
+/* -------------------------------------------------------------------------- */
 /*                                   Routes                                   */
 /* -------------------------------------------------------------------------- */
 
-// Put musician-login behind the global CORS (already applied above)
-app.use('/api/musician-login', (req, _res, next) => {
-  if (req.method !== 'OPTIONS') {
-    console.log('🎯 hit /api/musician-login', { method: req.method, origin: req.headers.origin });
-  }
-  next();
-}, musicianLoginRouter);
+// Login API (with extra logging)
+app.use(
+  "/api/musician-login",
+  (req, _res, next) => {
+    if (req.method !== "OPTIONS") {
+      console.log("🎯 hit /api/musician-login", {
+        method: req.method,
+        origin: req.headers.origin,
+      });
+    }
+    next();
+  },
+  musicianLoginRouter
+);
 
-// put v2Routes ABOVE actV2Routes so its endpoints fire first
+// v2 routes BEFORE actV2Routes
 app.use("/api/v2", v2Routes);
 app.use("/api/v2", actV2Routes);
 
@@ -259,66 +274,74 @@ app.post(
   }
 );
 
-app.post('/api/google/webhook', handleGoogleWebhook);
+app.post("/api/google/webhook", handleGoogleWebhook);
+app.post("/api/google/notifications", handleGoogleWebhook);
 
-app.post('/api/google/notifications', handleGoogleWebhook);
-
-// ✅ Legacy alias for old Twilio webhook
+// Legacy alias for old Twilio webhook
 app.post(
   "/api/shortlist/twilio/inbound",
   express.urlencoded({ extended: false }),
   (req, res) => {
-    console.log("🟡 Legacy alias hit — forwarding to /api/availability/twilio/inbound");
-    req.url = "/api/availability/twilio/inbound"; // rewrite path
-    app.handle(req, res); // forward internally
+    console.log(
+      "🟡 Legacy alias hit — forwarding to /api/availability/twilio/inbound"
+    );
+    req.url = "/api/availability/twilio/inbound";
+    app.handle(req, res);
   }
 );
 
+// Twilio status/inbound
+app.post(
+  "/api/twilio/inbound",
+  express.urlencoded({ extended: false }),
+  twilioInbound
+);
+app.post(
+  "/api/twilio/status",
+  express.urlencoded({ extended: false }),
+  twilioStatus
+);
 
-// Temporary aliases so existing Twilio config keeps working
-app.post("/api/twilio/inbound", express.urlencoded({ extended: false }), twilioInbound);
-app.post("/api/twilio/status", express.urlencoded({ extended: false }), twilioStatus);
+// Start reminders queue
+startRemindersPoller({ intervalMs: 30000 });
 
-
-startRemindersPoller({ intervalMs: 30000 }); // every 30s
-
-// Main API mounts
-app.use('/api/user', userRouter);
+// Main API mounts (kept compatible with your existing paths)
+app.use("/api/user", userRouter);
 app.use("/api", userRoute);
-app.use('/api/acts', userRouter);
+app.use("/api/acts", userRouter);
 
-app.use('/api/musician', musicianRouter);
-app.use('/api/musician/act-v2', actV2Routes);
+app.use("/api/musician", musicianRouter);
+app.use("/api/musician/act-v2", actV2Routes);
 
-app.use('/api/cart', cartRouter);
-app.use('/api/booking', bookingRoutes);
+app.use("/api/cart", cartRouter);
+app.use("/api/booking", bookingRoutes);
 
-app.use('/api/google', googleRoutes);
-app.use('/api/calendar', calendarWebhook);
+app.use("/api/google", googleRoutes);
+app.use("/api/calendar", calendarWebhook);
 
-app.use('/api/auth', authRoutes);
+app.use("/api/auth", authRoutes);
 app.use("/api/moderation", moderationRoutes);
 
-app.use('/api/act', userRoute);
-app.use('/api/musician/trash-act', actV2Routes);
-app.use('/api', actV2Routes);
-app.use('/api/musician/account', accountRouter);
-app.use('/api/account', accountRouter);
+app.use("/api/act", userRoute);
+app.use("/api/musician/trash-act", actV2Routes);
+app.use("/api", actV2Routes);
+
+app.use("/api/musician/account", accountRouter);
+app.use("/api/account", accountRouter);
 
 app.use("/voice", voiceIvr);
 app.use("/api/board/bookings", bookingBoardRoutes);
-app.use('/api', newsletterRoutes);
+app.use("/api", newsletterRoutes);
 app.use("/debug", debugRoutes);
 app.use("/api", boardBackfillRoutes);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/notifications", notificationsRoutes);
-app.use('/api/act-submission', submitActSubmission);
+app.use("/api/act-submission", submitActSubmission);
 app.post("/api/rebuild-badge", rebuildAndApplyAvailabilityBadge);
-app.use('/api/availability', availabilityRoutes);
-
+app.use("/api/availability", availabilityRoutes);
 app.use("/api/shortlist", shortlistRoutes);
 
-// Direct mount
+// Availability direct mount
 app.get("/api/availability/acts-available", async (req, res) => {
   const date = String(req.query?.date || "").slice(0, 10);
   console.log("🗓️  GET /api/availability/acts-available", { date });
@@ -327,85 +350,56 @@ app.get("/api/availability/acts-available", async (req, res) => {
     return result;
   } catch (err) {
     console.error("❌ acts-available failed:", err?.message || err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error" });
   }
 });
 
-
-
-
-
-
-
 // Health check
-app.get('/', (_req, res) => {
+app.get("/", (_req, res) => {
   res.send("✅ API Working");
 });
 app.use("/api/debug", debugRoutes);
 
-// Google calendar webhook setup
-app.get('/api/google/watch', async (_req, res) => {
-  try {
-    await watchCalendar();
-    res.send('📡 Calendar webhook registered');
-  } catch (err) {
-    console.error('❌ Failed to register calendar watch:', err);
-    res.status(500).send('Watch registration failed');
-  }
-});
-
 app.use("/api/allocations", allocationRoutes);
 app.use("/api/payments", paymentsRouter);
-app.get("/debug/musician-id?email=shamyra@thesupremecollective.co.uk", router);
+app.get(
+  "/debug/musician-id?email=shamyra@thesupremecollective.co.uk",
+  router
+);
 
-// Upload & musician routes (dup kept for compat)
+// Upload & musician routes (duplicate kept for compatibility)
 app.use("/api/musician", musicianRoutes);
 app.use("/api/upload", uploadRoutes);
 
 /* -------------------------------------------------------------------------- */
-/*                                   Server                                   */
+/*                            Global error handler                            */
 /* -------------------------------------------------------------------------- */
-// Global error handler (returns JSON)
+
 app.use((err, req, res, next) => {
-  console.error('🔥 Unhandled error:', err?.stack || err);
-  if (res.headersSent) return; // if headers already sent, let Express finish
-  res.status(err.status || 500).json({ success: false, message: err.message || 'Server error' });
+  console.error("🔥 Unhandled error:", err?.stack || err);
+  if (res.headersSent) return;
+  res
+    .status(err.status || 500)
+    .json({ success: false, message: err.message || "Server error" });
 });
 
-// ---------------------------------------------------------------------------
-// 🕒 Google Calendar auto-watch refresh (runs daily at 3am UTC)
-// ---------------------------------------------------------------------------
+/* -------------------------------------------------------------------------- */
+/*                          Cron & background jobs                            */
+/* -------------------------------------------------------------------------- */
 
-
-let isRegistering = false;
-
-cron.schedule('0 3 * * *', async () => {
-  if (isRegistering) {
-    console.log('⏸️ Skipping duplicate cron run (already refreshing)');
-    return;
-  }
-
-  try {
-    isRegistering = true;
-    console.log('🔄 [CRON] Re-registering Google Calendar webhook...');
-    const res = await watchCalendar();
-    console.log('✅ Webhook refreshed:', res.id || '(no id returned)');
-  } catch (err) {
-    console.error('❌ [CRON] Webhook refresh failed:', err.message);
-  } finally {
-    isRegistering = false;
-  }
+// Run chase & escalation every hour
+cron.schedule("0 * * * *", async () => {
+  await runChaseAndEscalation();
 });
-console.log('🕒 Cron job scheduled: Google Calendar webhook will refresh daily at 03:00 UTC');
 
-app.listen(port, () => console.log(`🚀 Server started on PORT: ${port}`));
-
-
+// Refresh availability badges every 30 minutes
 cron.schedule("*/30 * * * *", async () => {
   console.log("🔁 [CRON] Refreshing availability badges...");
   try {
-    // ✅ Correct: get all acts (not availability docs)
-    const acts = await actModel.find({})
+    const acts = await actModel
+      .find({})
       .select("_id name tscName formattedAddress availabilityBadges lineups")
       .lean();
 
@@ -424,9 +418,13 @@ cron.schedule("*/30 * * * *", async () => {
             { _id: act._id },
             { $set: { [`availabilityBadges.${dateISO}`]: badge } }
           );
-          console.log(`✅ Refreshed badge for ${act.tscName || act.name} (${dateISO})`);
+          console.log(
+            `✅ Refreshed badge for ${act.tscName || act.name} (${dateISO})`
+          );
         } else {
-          console.log(`🪶 No badge data for ${act.tscName || act.name} (${dateISO})`);
+          console.log(
+            `🪶 No badge data for ${act.tscName || act.name} (${dateISO})`
+          );
         }
       }
     }
@@ -437,12 +435,45 @@ cron.schedule("*/30 * * * *", async () => {
   }
 });
 
-// Auto-register Google Calendar watch channel at server startup
+// Re-register Google Calendar webhook daily at 03:00 UTC
+let isRegistering = false;
+
+cron.schedule("0 3 * * *", async () => {
+  if (isRegistering) {
+    console.log("⏸️ Skipping duplicate cron run (already refreshing)");
+    return;
+  }
+
+  try {
+    isRegistering = true;
+    console.log("🔄 [CRON] Re-registering Google Calendar webhook...");
+    const resWatch = await watchCalendar();
+    console.log("✅ Webhook refreshed:", resWatch?.id || "(no id returned)");
+  } catch (err) {
+    console.error("❌ [CRON] Webhook refresh failed:", err.message);
+  } finally {
+    isRegistering = false;
+  }
+});
+
+console.log(
+  "🕒 Cron job scheduled: Google Calendar webhook will refresh daily at 03:00 UTC"
+);
+
+/* -------------------------------------------------------------------------- */
+/*                                   Server                                   */
+/* -------------------------------------------------------------------------- */
+
+app.listen(port, () =>
+  console.log(`🚀 Server started on PORT: ${port}`)
+);
+
+// Auto-register Google Calendar watch channel at startup
 (async () => {
   try {
     await watchCalendar();
-    console.log('📡 Google Calendar watch channel started');
+    console.log("📡 Google Calendar watch channel started");
   } catch (err) {
-    console.warn('⚠️ Could not start calendar watch:', err.message);
+    console.warn("⚠️ Could not start calendar watch:", err.message);
   }
 })();
