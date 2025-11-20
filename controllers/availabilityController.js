@@ -2722,25 +2722,18 @@ vocalistName: displayBits.resolvedName || "",
 /** ---------------------------------------------------------------------- */
 /**  🔧 REBUILD & APPLY AVAILABILITY BADGE — WITH DEBUG ANCHORS            */
 /** ---------------------------------------------------------------------- */
-export async function rebuildAndApplyAvailabilityBadge(reqOrActId, maybeDateISO, act) {
-
-  /* ------------------------------------------------------------------ */
-  /* 🟦 1. INITIAL INPUT LOG                                             */
-  /* ------------------------------------------------------------------ */
-  console.log("🟦 rebuildAndApplyAvailabilityBadge START", {
-    actId: typeof reqOrActId === "object" ? reqOrActId.body?.actId : reqOrActId,
-    dateISO: typeof reqOrActId === "object" ? reqOrActId.body?.dateISO : maybeDateISO
-  });
-
-  const actId =
-    typeof reqOrActId === "object" ? reqOrActId.body?.actId : reqOrActId;
-  const dateISO =
-    typeof reqOrActId === "object" ? reqOrActId.body?.dateISO : maybeDateISO;
+export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
+  console.log("🟦 rebuildAndApplyAvailabilityBadge START", { actId, dateISO });
 
   if (!actId || !dateISO) {
-    console.warn("❌ Missing actId/dateISO in rebuildAndApplyAvailabilityBadge");
-    return { success: false, message: "Missing actId/dateISO" };
+    console.error("❌ rebuildAndApplyAvailabilityBadge missing actId/dateISO", {
+      actId,
+      dateISO
+    });
+    return null;
   }
+
+
 
   /* ------------------------------------------------------------------ */
   /* 🟦 2. FETCH ACT + LOG SUMMARY                                       */
