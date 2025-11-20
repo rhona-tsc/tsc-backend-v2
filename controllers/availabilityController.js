@@ -1352,13 +1352,47 @@ console.log("🎤 Multi vocalist save:", {
   finalMusicianId: enriched?._id || vMember?.musicianId
 });
 
+// Resolve actual Musician DB record
+let musicianDoc = null;
+
+try {
+  // Try explicit musicianId first
+  if (vMember.musicianId) {
+    musicianDoc = await Musician.findById(vMember.musicianId).lean();
+  }
+
+  // Try match by normalized phone
+  if (!musicianDoc) {
+    const cleanPhone = normalizePhone(
+      vMember.phone || vMember.phoneNumber || ""
+    );
+    if (cleanPhone) {
+      musicianDoc = await Musician.findOne({
+        $or: [
+          { phoneNormalized: cleanPhone },
+          { phone: cleanPhone }
+        ]
+      }).lean();
+    }
+  }
+} catch (err) {
+  console.warn("⚠️ Failed to fetch real musician:", err.message);
+}
+
+const realMusicianId =
+  musicianDoc?._id ||
+  vMember.musicianId ||
+  vMember.id || null;
+
+
+
 await AvailabilityModel.create({
   actId,
   lineupId: lineup?._id || null,
 
   // 🔥 FIX: FULL MUSICIAN DATA STORED
-musicianId: enriched._id || vMember.musicianId || enriched.musicianId,
-  musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
+musicianId: realMusicianId,
+    musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
   photoUrl: enriched.photoUrl || enriched.profilePicture || "",
 
   phone,

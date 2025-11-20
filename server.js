@@ -83,6 +83,7 @@ const ALLOWED_HOSTS = new Set([
   'tscadmin.netlify.app', 
   'www.thesupremecollective.co.uk',
   'api.thesupremecollective.co.uk',
+  'admin.thesupremecollective.co.uk',
 ]);
 
 function isAllowedOrigin(origin) {
