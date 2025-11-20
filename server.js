@@ -77,10 +77,14 @@ const ALLOWED_HOSTS = new Set([
   'localhost:5173',
   'localhost:5174',
   'tsc2025.netlify.app',
-  'meek-biscotti-8d5020.netlify.app', // preview site
+  'meek-biscotti-8d5020.netlify.app',
   'tsc2025-admin-portal.netlify.app',
   'tsc-backend-v2.onrender.com',
-  'tscadmin.netlify.app', 
+
+  // 🔥 Add this line:
+  'tsc2025.onrender.com',
+
+  'tscadmin.netlify.app',
   'www.thesupremecollective.co.uk',
   'api.thesupremecollective.co.uk',
   'admin.thesupremecollective.co.uk',
