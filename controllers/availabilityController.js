@@ -2016,13 +2016,11 @@ console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.
         if (isDeputy) updated.isDeputy = true;
         await updated.save();
 
-const badgeResult = await rebuildAndApplyAvailabilityBadge(
-  { body: { actId, dateISO }, __fromYesFlow: true },
-  {
-    json: () => {},
-    status: () => ({ json: () => {} }),
-  }
-);
+const badgeResult = await rebuildAndApplyAvailabilityBadge({
+  actId,
+  dateISO,
+  __fromYesFlow: true
+});
 
        // 3️⃣ Broadcast SSE updates
 if (global.availabilityNotify) {
