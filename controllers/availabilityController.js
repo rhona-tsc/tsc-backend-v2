@@ -1308,7 +1308,9 @@ if (!isDeputy && vocalists.length > 1) {
     await AvailabilityModel.create({
       actId,
       lineupId: lineup?._id || null,
-      musicianId: vMember._id || null,
+musicianId: enriched._id || vMember.musicianId || null,
+musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
+photoUrl: enriched.photoUrl || enriched.profilePicture || "",
       phone,
       dateISO,
       address: fullFormattedAddress,
@@ -1523,7 +1525,9 @@ if (existing && !skipDuplicateCheck) {
     await AvailabilityModel.create({
       actId,
       lineupId: lineup?._id || null,
-      musicianId: targetMember._id || null,
+musicianId: enrichedMember._id || targetMember.musicianId || null,
+musicianName: `${enrichedMember.firstName || targetMember.firstName || ""} ${enrichedMember.lastName || targetMember.lastName || ""}`.trim(),
+photoUrl: enrichedMember.photoUrl || enrichedMember.profilePicture || "",
       phone,
       dateISO,
         address: fullFormattedAddress,              // ✅ added
@@ -1533,9 +1537,7 @@ if (existing && !skipDuplicateCheck) {
       clientName: resolvedClientName || "",
 clientEmail: resolvedClientEmail || "",
       actName: act?.tscName || act?.name || "",
-      musicianName: `${targetMember.firstName || ""} ${
-        targetMember.lastName || ""
-      }`.trim(),
+  
       duties:
         body?.inheritedDuties || targetMember.instrument || "Performance",
       fee: String(finalFee),
@@ -2656,8 +2658,15 @@ const availRows = await AvailabilityModel.find({ actId, dateISO }).lean();
 const leadRows = availRows.filter(r => r.isDeputy !== true);
 const anyLeadYes = leadRows.some(r => r.reply === "yes");
 if (!anyLeadYes) {
-  console.log(`⏭️ Skipping badge build — no lead 'yes' replies for ${dateISO}`);
-  return null; // ✅ Forces rebuildAndApplyAvailabilityBadge() to clear
+  // wait a moment in case YES is still being written to DB
+  await new Promise(r => setTimeout(r, 200));
+  const recheck = await AvailabilityModel.exists({
+    actId,
+    dateISO,
+    isDeputy: { $ne: true },
+    reply: "yes"
+  });
+  if (!recheck) return null;
 }
 
 const anyWithClient = availRows.find(
