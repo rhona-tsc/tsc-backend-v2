@@ -2249,22 +2249,6 @@ console.log("📤 notifyDeputies triggered with slotIndex:", slotIndex);
               dateISO,
               reply: "yes",
             });
-
-            if (!stillActive) {
-              global.availabilityNotify.badgeUpdated({
-                type: "availability_badge_updated",
-                actId,
-                actName: act?.tscName || act?.name,
-                dateISO,
-                badge: null,
-              });
-              console.log(
-                "📡 Cleared badge — no remaining active availabilities."
-              );
-            } else {
-              console.log(
-                "🟡 Skipped badge clear — deputies still marked available."
-              );
             }
           }
           // 🚫 Ensure lead badge stays cleared even if deputies respond later
@@ -2802,16 +2786,7 @@ let badge = await buildAvailabilityBadgeFromRows({
       stillActive
     });
 
-    if (global.availabilityNotify?.badgeUpdated) {
-      setTimeout(() => {
-        console.log("📡 SSE badgeUpdated fired (null badge)");
-        global.availabilityNotify.badgeUpdated({
-          type: "availability_badge_updated",
-          actId: String(actId),
-          dateISO,
-          badge: null
-        });
-      }, 600);
+
     }
 
     return { success: true, cleared: true };
