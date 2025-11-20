@@ -2904,8 +2904,11 @@ if (actDoc?.availabilityBadgesMeta?.[dateISO]?.lockedByLeadUnavailable) {
   return { success: true, skipped: true, reason: "lead_unavailable_lock" };
 }
 
-    const badge = await buildAvailabilityBadgeFromRows(act, dateISO);
-    if (!badge) {
+const badge = await buildAvailabilityBadgeFromRows({
+  actId,
+  dateISO,
+  hasLineups: actDoc?.hasLineups ?? true,
+});    if (!badge) {
       console.log("🪶 No badge found for act/date:", { actId, dateISO });
       return res.json({ badge: null });
     }
