@@ -2690,11 +2690,15 @@ export async function buildAvailabilityBadgeFromRows({
 
     console.log("🧩 SLOT", slotKey, "display bits:", displayBits);
 
+    if (displayBits?.musicianId && typeof displayBits.musicianId !== "string") {
+  displayBits.musicianId = String(displayBits.musicianId);
+}
+
     slots.push({
       slotIndex: Number(slotKey),
       isDeputy: !!leadRow?.isDeputy,
       vocalistName: displayBits.resolvedName || "",
-      musicianId: displayBits.musicianId || "",
+musicianId: String(displayBits.musicianId || ""),
       photoUrl: displayBits.photoUrl,
       profileUrl: displayBits.profileUrl,
       deputies: [],
