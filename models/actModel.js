@@ -16,17 +16,31 @@ const AvailabilityDeputySchema = new mongoose.Schema(
 const availabilityBadgesSchema = new mongoose.Schema(
   {
     active: { type: Boolean, default: false },
-    isDeputy: { type: Boolean, default: false },     // for the lead slot when it's a deputy
-    vocalistName: { type: String, default: "" },     // lead/deputy name currently featured
-    musicianId: { type: String, default: "" },       // lead/deputy musician id currently featured
+    isDeputy: { type: Boolean, default: false },
+    vocalistName: { type: String, default: "" }, 
+    musicianId: { type: String, default: "" },   
     inPromo: { type: Boolean, default: false },
     dateISO: { type: String, default: "" },
     address: { type: String, default: "" },
     setAt: { type: Date, default: null },
     photoUrl: { type: String, default: "" },
 
-    // NEW: the shortlist of deputies who replied YES
+    // deputies list (lead slot)
     deputies: { type: [AvailabilityDeputySchema], default: [] },
+
+    // 🚀 NEW — slot array
+    slots: [
+      {
+        slotIndex: { type: Number, default: 0 },
+        isDeputy: { type: Boolean, default: false },
+        vocalistName: { type: String, default: "" },
+        musicianId: { type: String, default: "" },
+        photoUrl: { type: String, default: "" },
+        profileUrl: { type: String, default: "" },
+        deputies: { type: [AvailabilityDeputySchema], default: [] },
+        setAt: { type: Date, default: null },
+      }
+    ],
   },
   { _id: false }
 );
