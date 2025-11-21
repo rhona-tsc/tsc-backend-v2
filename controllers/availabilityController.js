@@ -2651,12 +2651,26 @@ export async function buildAvailabilityBadgeFromRows({
   for (const [slotKey, slotRows] of Object.entries(groupedBySlot)) {
     console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows);
 
-    // Prefer "yes", otherwise most recently updated
-    let leadRow =
-      slotRows.find((r) => r.reply === "yes") ||
-      slotRows.sort(
-        (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
-      )[0];
+// ⭐ NEW LOGIC: We ONLY show a slot if someone actually replied.
+// Otherwise the slot stays empty (pending)
+let leadRow = slotRows.find((r) =>
+  ["yes", "no", "unavailable"].includes(r.reply)
+);
+
+if (!leadRow) {
+  // 🚫 No reply for this slot — do NOT do lookups or placeholder bits
+  slots.push({
+    slotIndex: Number(slotKey),
+    isDeputy: false,
+    vocalistName: "",
+    musicianId: null,
+    photoUrl: null,
+    profileUrl: null,
+    deputies: [],
+    state: "pending", // <-- optional flag for frontend
+  });
+  continue; // ⬅️ IMPORTANT — skip the rest of the loop
+}
 
     console.log(`🎯 SLOT ${slotKey} — picked lead row:`, {
       musicianId: leadRow?.musicianId,
