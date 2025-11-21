@@ -1125,7 +1125,20 @@ async function getDeputyDisplayBits(dep) {
       photoUrl,
       profileUrl,
       resolvedEmail,
+      
     };
+
+    // ⭐ Add name fields for badge + toasts
+if (mus) {
+  finalBits.firstName = mus.firstName || "";
+  finalBits.lastName = mus.lastName || "";
+  finalBits.resolvedName = `${mus.firstName || ""} ${mus.lastName || ""}`.trim();
+} else {
+  // fallback if dep itself had name (vocalists do)
+  finalBits.firstName = dep.firstName || "";
+  finalBits.lastName = dep.lastName || "";
+  finalBits.resolvedName = `${dep.firstName || ""} ${dep.lastName || ""}`.trim();
+}
 
     console.log("🎯 FINAL getDeputyDisplayBits result:", finalBits);
     return finalBits;
@@ -2650,13 +2663,12 @@ export async function buildAvailabilityBadgeFromRows({
   for (const [slotKey, slotRows] of Object.entries(groupedBySlot)) {
     console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows);
 
-    // ⭐ NEW LOGIC — only treat rows with real replies as valid
+    // ⭐ Only accept rows with ACTUAL replies ("yes", "no", "unavailable")
     let leadRow = slotRows.find((r) =>
       ["yes", "no", "unavailable"].includes(r.reply)
     );
 
     if (!leadRow) {
-      // 🚫 No replies yet — PENDING slot
       console.log(`⏭️ SLOT ${slotKey} pending — no replies`);
       slots.push({
         slotIndex: Number(slotKey),
@@ -2666,6 +2678,7 @@ export async function buildAvailabilityBadgeFromRows({
         photoUrl: null,
         profileUrl: null,
         deputies: [],
+        setAt: null,
         state: "pending",
       });
       continue;
@@ -2677,7 +2690,6 @@ export async function buildAvailabilityBadgeFromRows({
       updatedAt: leadRow?.updatedAt,
     });
 
-    // Build the dep-like lookup object
     const depLike = {
       musicianId: leadRow?.musicianId,
     };
@@ -2690,20 +2702,28 @@ export async function buildAvailabilityBadgeFromRows({
 
     console.log("🧩 SLOT", slotKey, "display bits:", displayBits);
 
-    if (displayBits?.musicianId && typeof displayBits.musicianId !== "string") {
-  displayBits.musicianId = String(displayBits.musicianId);
-}
+    // Ensure musicianId is string
+    let resolvedMusicianId = displayBits?.musicianId || "";
+    if (resolvedMusicianId && typeof resolvedMusicianId !== "string") {
+      resolvedMusicianId = String(resolvedMusicianId);
+    }
+
+    // Name handling
+    const vocalistName =
+      displayBits?.resolvedName ||
+      displayBits?.firstName ||
+      "";
 
     slots.push({
       slotIndex: Number(slotKey),
       isDeputy: !!leadRow?.isDeputy,
-      vocalistName: displayBits.resolvedName || "",
-musicianId: String(displayBits.musicianId || ""),
-      photoUrl: displayBits.photoUrl,
-      profileUrl: displayBits.profileUrl,
+      vocalistName,
+      musicianId: resolvedMusicianId || null,
+      photoUrl: displayBits.photoUrl || null,
+      profileUrl: displayBits.profileUrl || null,
       deputies: [],
       setAt: leadRow?.updatedAt || new Date(),
-      state: leadRow.reply, // yes/no/unavailable
+      state: leadRow.reply, // yes | no | unavailable
     });
   }
 
