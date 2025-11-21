@@ -1341,7 +1341,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
       for (let i = 0; i < vocalists.length; i++) {
         const vMember = vocalists[i];
-        const slotIndexForThis = slotIndexBase + i;
+const slotIndexForThis = i; 
 
         const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
         if (!phone) {
