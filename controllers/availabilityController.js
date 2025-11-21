@@ -2622,8 +2622,7 @@ export async function buildAvailabilityBadgeFromRows({
   const rows = await AvailabilityModel.find({
     actId,
     dateISO,
-      reply: { $in: ["yes", "no", "unavailable", null] },
-
+    reply: { $in: ["yes", "no", "unavailable", null] },
     v2: true,
   })
     .select("musicianId slotIndex reply updatedAt isDeputy")
@@ -2651,26 +2650,26 @@ export async function buildAvailabilityBadgeFromRows({
   for (const [slotKey, slotRows] of Object.entries(groupedBySlot)) {
     console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows);
 
-// ⭐ NEW LOGIC: We ONLY show a slot if someone actually replied.
-// Otherwise the slot stays empty (pending)
-let leadRow = slotRows.find((r) =>
-  ["yes", "no", "unavailable"].includes(r.reply)
-);
+    // ⭐ NEW LOGIC — only treat rows with real replies as valid
+    let leadRow = slotRows.find((r) =>
+      ["yes", "no", "unavailable"].includes(r.reply)
+    );
 
-if (!leadRow) {
-  // 🚫 No reply for this slot — do NOT do lookups or placeholder bits
-  slots.push({
-    slotIndex: Number(slotKey),
-    isDeputy: false,
-    vocalistName: "",
-    musicianId: null,
-    photoUrl: null,
-    profileUrl: null,
-    deputies: [],
-    state: "pending", // <-- optional flag for frontend
-  });
-  continue; // ⬅️ IMPORTANT — skip the rest of the loop
-}
+    if (!leadRow) {
+      // 🚫 No replies yet — PENDING slot
+      console.log(`⏭️ SLOT ${slotKey} pending — no replies`);
+      slots.push({
+        slotIndex: Number(slotKey),
+        isDeputy: false,
+        vocalistName: "",
+        musicianId: null,
+        photoUrl: null,
+        profileUrl: null,
+        deputies: [],
+        state: "pending",
+      });
+      continue;
+    }
 
     console.log(`🎯 SLOT ${slotKey} — picked lead row:`, {
       musicianId: leadRow?.musicianId,
@@ -2678,7 +2677,7 @@ if (!leadRow) {
       updatedAt: leadRow?.updatedAt,
     });
 
-    // Prepare dep-like object for getDeputyDisplayBits
+    // Build the dep-like lookup object
     const depLike = {
       musicianId: leadRow?.musicianId,
     };
@@ -2694,18 +2693,19 @@ if (!leadRow) {
     slots.push({
       slotIndex: Number(slotKey),
       isDeputy: !!leadRow?.isDeputy,
-vocalistName: displayBits.resolvedName || "",
+      vocalistName: displayBits.resolvedName || "",
       musicianId: displayBits.musicianId || "",
       photoUrl: displayBits.photoUrl,
       profileUrl: displayBits.profileUrl,
-      deputies: [], // can be populated later once deputy logic is added
+      deputies: [],
       setAt: leadRow?.updatedAt || new Date(),
+      state: leadRow.reply, // yes/no/unavailable
     });
   }
 
   const badge = {
     dateISO,
-    address: "TBC", // you can load from first row if desired
+    address: "TBC",
     active: true,
     slots: slots.sort((a, b) => a.slotIndex - b.slotIndex),
   };
