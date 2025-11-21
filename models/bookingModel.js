@@ -286,6 +286,18 @@ BookingSchema.pre("validate", function (next) {
 
 BookingSchema.index({ "contactRouting.ivrCode": 1 }, { sparse: true });
 
+// Bookings by musician payouts
+BookingSchema.index({ "payments.musician": 1 });
+
+// Bookings by event date (for month charts)
+BookingSchema.index({ date: 1 });
+
+// Bookings by status
+BookingSchema.index({ status: 1 });
+
+// Bookings by act (for act-specific metrics)
+BookingSchema.index({ act: 1 });
+
 const Booking =
   mongoose.models.Booking || mongoose.model("Booking", BookingSchema);
 

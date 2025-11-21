@@ -15,6 +15,7 @@ import {
   approveAmendment, registerDeputy, listPendingDeputies, approveDeputy,
   rejectDeputy, updateAct, rejectAct, refreshAccessToken, logoutMusician, getDeputyById
 } from "../controllers/musicianController.js";
+import bookingModel from "../models/bookingModel.js";
 
 const router = express.Router();
 
@@ -270,8 +271,195 @@ router.post("/moderation/deputy/:id/repertoire/append", appendDeputyRepertoire);
 
 router.post("/suggest", suggestDeputies);
 
+// GET /api/musician/stats/:id
+router.get("/stats/:id", verifyToken, async (req, res) => {
+  try {
+    const musicianId = req.params.id;
 
+    // 12-month window
+    const since = new Date();
+    since.setMonth(since.getMonth() - 12);
 
+    // 1) Enquiries (shortlists, enquiries board…)
+    const enquiries = await bookingModel.aggregate([
+      { $match: { createdAt: { $gte: since } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" }},
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
 
+    // 2) Bookings where musician is part of ANY lineup
+    const bookings = await bookingModel.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: since },
+          "musicians.musicianId": musicianId
+        }
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" }},
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    // 3) Cash earned by musician (from fee allocations)
+    const cash = await bookingModel.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: since },
+          "musicians.musicianId": musicianId
+        }
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" }},
+          amount: { $sum: "$musicians.$.paidAmount" }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    return res.json({
+      success: true,
+      enquiries,
+      bookings,
+      cash
+    });
+
+  } catch (err) {
+    console.error("❌ Error in GET /stats/:id", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// GET /api/musician/depping/:id
+router.get("/depping/:id", verifyToken, async (req, res) => {
+  try {
+    const musicianId = req.params.id;
+    const { email, phoneNormalized } = req.user;
+
+    const acts = await actModel.find({
+      "lineups.bandMembers.deputies": {
+        $elemMatch: {
+          $or: [
+            { email },
+            { phoneNormalized },
+            { musicianId } // if you later store it
+          ]
+        }
+      }
+    })
+    .select("_id name tscName coverImage images status")
+    .lean();
+
+    return res.json({ success: true, acts });
+  } catch (err) {
+    console.error("❌ Error in GET /depping/:id", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// GET /api/musician/act-v2/my-drafts
+router.get("/act-v2/my-drafts", verifyToken, async (req, res) => {
+  try {
+    const musicianId = req.user.id;
+
+    const drafts = await actModel
+      .find({
+        createdBy: musicianId,
+        status: "draft"
+      })
+      .select("_id name tscName images coverImage updatedAt createdAt amendmentDraft")
+      .lean();
+
+    return res.json({
+      success: true,
+      drafts
+    });
+
+  } catch (err) {
+    console.error("❌ Error getting drafts:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+router.get("/dashboard/:id", verifyToken, async (req, res) => {
+  try {
+    const musicianId = req.params.id;
+    const user = req.user;
+    const email = user.email;
+    const phone = user.phoneNormalized;
+
+    // 1️⃣ Acts created by musician
+    const actsOwned = await actModel.find(
+      { createdBy: musicianId },
+      "_id name tscName coverImage status createdAt"
+    ).lean();
+
+    // 2️⃣ Acts the musician is depping for
+    const actsDepping = await actModel.find({
+      "lineups.bandMembers.deputies": {
+        $elemMatch: {
+          $or: [
+            { email },
+            { phoneNormalized: phone }
+          ]
+        }
+      }
+    }).select("_id name tscName coverImage status").lean();
+
+    // 3️⃣ Bookings invoicing the musician
+    const bookings = await bookingModel.find({
+      "payments.musician": musicianId
+    }).select("date amount status createdAt").lean();
+
+    // Group bookings into chart data
+    const byMonth = {};
+    bookings.forEach(b => {
+      const d = new Date(b.date);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+      if (!byMonth[key]) {
+        byMonth[key] = { enquiries: 0, bookings: 0, revenue: 0 };
+      }
+      byMonth[key].bookings += 1;
+      byMonth[key].revenue += b.amount || 0;
+    });
+
+    // 4️⃣ Draft acts
+    const drafts = await actModel.find(
+      { createdBy: musicianId, status: "draft" },
+      "_id name createdAt"
+    ).lean();
+
+    // 5️⃣ Placeholder reviews categories
+    const reviewCategories = [
+      { label: "Technical Skill", avg: null },
+      { label: "Team Spirit", avg: null },
+      { label: "Preparation", avg: null },
+      { label: "Timeliness", avg: null },
+      { label: "Client Satisfaction", avg: null },
+    ];
+
+    return res.json({
+      success: true,
+      actsOwned,
+      actsDepping,
+      bookingsByMonth: byMonth,
+      drafts,
+      reviewCategories
+    });
+
+  } catch (err) {
+    console.error("❌ Dashboard error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
 
 export default router;

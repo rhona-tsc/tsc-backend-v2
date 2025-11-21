@@ -351,6 +351,8 @@ availabilityBadges: {
 
 
 
+
+
 // --- helper: E.164-ish normaliser (+44…)
 function normalizePhoneE164(raw = "") {
   let s = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
@@ -404,21 +406,7 @@ actSchema.pre("save", function (next) {
   next();
 });
 
-actSchema.pre("save", function (next) {
-  if (Array.isArray(this.lineups)) {
-    const seen = new Set();
-    this.lineups.forEach((lineup) => {
-      if (!lineup.lineupId) lineup.lineupId = uuidv4();
 
-      // Avoid duplicates within the same doc
-      if (seen.has(lineup.lineupId)) {
-        lineup.lineupId = uuidv4();
-      }
-      seen.add(lineup.lineupId);
-    });
-  }
-  next();
-});
 
 // Normalize car registration: if a member selected "HAS_CAR" and provided a carRegistrationValue,
 // persist the actual plate into carRegistration before save.
@@ -444,6 +432,22 @@ actSchema.pre("save", function (next) {
   }
   next();
 });
+
+// Acts where musician is creator
+actSchema.index({ createdBy: 1 });
+
+// Acts sorted by creation date (used by dashboards)
+actSchema.index({ createdAt: -1 });
+
+// Acts where musician appears inside nested deputy array
+actSchema.index({
+  "lineups.bandMembers.deputies.email": 1,
+  "lineups.bandMembers.deputies.phoneNormalized": 1
+});
+
+// Acts by status
+actSchema.index({ status: 1 });
+
 const actModel = mongoose.models.act || mongoose.model("act", actSchema);
 
 export default actModel;
