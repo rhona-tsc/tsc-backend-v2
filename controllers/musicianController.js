@@ -986,47 +986,78 @@ const saveAmendmentDraft = async (req, res) => {
 };
 
 // Login
+// Login
 const loginMusician = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    let { email, password } = req.body;
 
-    const user = await musicianModel.findOne({ email });
-    if (!user) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    // 🔥 1) Normalise email
+    const normEmail = (email || "").trim().toLowerCase();
+
+    if (!normEmail || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
     }
 
+    console.log("🔍 Attempting login for:", normEmail);
+
+    // 🔥 2) Find musician safely
+    const user = await musicianModel.findOne({
+      email: normEmail,
+    });
+
+    if (!user) {
+      console.warn("❌ No user found for email:", normEmail);
+      return res.status(404).json({
+        success: false,
+        message: "No account found for that email",
+      });
+    }
+
+    // 🔥 3) Validate password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
+      console.warn("❌ Wrong password for:", normEmail);
+      return res.status(401).json({
+        success: false,
+        message: "Incorrect password",
+      });
     }
 
-    const fullUser = await musicianModel.findById(user._id);
-
+    // 🔥 4) Create access token (no password included!)
     const accessToken = jwt.sign(
       {
         id: user._id,
         email: user.email,
         role: user.role,
         firstName: user.firstName,
-        userLastName: user.lastName,
-        userPhone: user.phone,
-        password: user.password,
+        lastName: user.lastName,
+        phone: user.phone,
       },
       process.env.JWT_SECRET,
       { expiresIn: "15m" }
     );
 
-    const refreshToken = jwt.sign({ id: user._id }, process.env.JWT_REFRESH_SECRET, {
-      expiresIn: "7d",
-    });
+    // 🔥 5) Create refresh token
+    const refreshToken = jwt.sign(
+      { id: user._id },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: "7d" }
+    );
 
+    // 🔥 6) Set refresh token cookie
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure: false, // dev
-      sameSite: "Strict",
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "None",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
-console.log('ACAO header being sent (backend/controllers/musicianController.js):', res.getHeader('Access-Control-Allow-Origin'));
+
+    console.log("✅ Login successful for:", user.email);
+
+    // 🔥 7) Send safe response
     return res.status(200).json({
       success: true,
       token: accessToken,
@@ -1036,12 +1067,15 @@ console.log('ACAO header being sent (backend/controllers/musicianController.js):
       firstName: user.firstName,
       lastName: user.lastName,
       phone: user.phone,
-      password: user.password,
       message: "Login successful",
     });
+
   } catch (error) {
-    console.error("Login error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error("🔥 Login error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
 
