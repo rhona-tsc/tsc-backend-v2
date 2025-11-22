@@ -76,6 +76,9 @@ app.set("trust proxy", 1); // Render/Cloudflare
 const ALLOWED_HOSTS = new Set([
   "localhost:5173",
   "localhost:5174",
+  "http://localhost:5173",
+  "http://localhost:5174",
+  
 
   // Public marketing site + admin portal
   "www.thesupremecollective.co.uk",

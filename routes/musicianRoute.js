@@ -342,7 +342,6 @@ router.get("/stats/:id", verifyToken, async (req, res) => {
 // GET /api/musician/depping/:id
 router.get("/depping/:id", verifyToken, async (req, res) => {
   try {
-    const musicianId = req.params.id;
     const { email, phoneNormalized } = req.user;
 
     const acts = await actModel.find({
@@ -351,7 +350,6 @@ router.get("/depping/:id", verifyToken, async (req, res) => {
           $or: [
             { email },
             { phoneNormalized },
-            { musicianId } // if you later store it
           ]
         }
       }
