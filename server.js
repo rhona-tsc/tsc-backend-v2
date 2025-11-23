@@ -10,7 +10,9 @@ import cron from "node-cron";
 import connectDB from "./config/mongodb.js";
 import connectCloudinary from "./config/connectCloudinary.js";
 import cloudinary from "./config/cloudinary.js";
-
+import feedbackRoutes from "./routes/feedbackRoutes.js";
+import noticeRoutes from "./routes/noticeRoutes.js";
+import actPreSubmissionRoutes from "./routes/actPreSubmissionRoutes.js";
 import router from "./routes/debugRoutes.js";
 import shortlistRoutes from "./routes/shortlist.js";
 import boardBackfillRoutes from "./routes/boardBackfillRoutes.js";
@@ -343,6 +345,9 @@ app.use("/api/act-submission", submitActSubmission);
 app.post("/api/rebuild-badge", rebuildAndApplyAvailabilityBadge);
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/shortlist", shortlistRoutes);
+app.use("/api/feedback", feedbackRoutes);
+app.use("/api/noticeboard", noticeRoutes);
+app.use("/api/act-pre-submissions", actPreSubmissionRoutes);
 
 // Availability direct mount
 app.get("/api/availability/acts-available", async (req, res) => {
