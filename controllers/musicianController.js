@@ -490,6 +490,9 @@ const registerDeputy = async (req, res) => {
       ...(profileUrl && { profilePicture: profileUrl }),
       ...(coverHeroUrl && { coverHeroImage: coverHeroUrl }),
 
+      paAndBackline: safeParse(body.paAndBackline, []),
+vocals: safeParse(body.vocals, {}),
+
       // Videos
       functionBandVideoLinks: safeParse(body.functionBandVideoLinks, []),
       tscApprovedFunctionBandVideoLinks: safeParse(body.tscApprovedFunctionBandVideoLinks, []),

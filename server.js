@@ -79,7 +79,9 @@ const ALLOWED_HOSTS = new Set([
   "localhost:5173",
   "localhost:5174",
   "http://localhost:5173",
+   "http://localhost:5173/",
   "http://localhost:5174",
+    "http://localhost:5174/",
   
 
   // Public marketing site + admin portal
