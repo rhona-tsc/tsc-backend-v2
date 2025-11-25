@@ -46,7 +46,7 @@ router.post("/auth/refresh", refreshAccessToken);
 router.post("/auth/logout", logoutMusician);
 
 /* ---------------- Deputy registration ---------------- */
-router.post("/register-deputy", uploadFields, registerDeputy);
+router.post("/moderation/register-deputy", uploadFields, registerDeputy);
 router.get("/moderation/deputy/:id", verifyToken, getDeputyById);
 router.get("/pending-deputies", verifyToken, listPendingDeputies);
 router.post("/approve-deputy", verifyToken, approveDeputy);

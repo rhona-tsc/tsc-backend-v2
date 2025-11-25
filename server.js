@@ -123,6 +123,7 @@ const corsOptions = {
   allowedHeaders: [
     "Content-Type",
     "Authorization",
+    "authorization",
     "token",
     "X-Requested-With",
     "x-eventsheet-client",

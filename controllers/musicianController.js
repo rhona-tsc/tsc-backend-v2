@@ -369,98 +369,47 @@ const getDeputyById = async (req, res) => {
 
 // Deputy Registration / Update Controller
 const registerDeputy = async (req, res) => {
-  console.log("📨 Received deputy registration request");
-  console.log("📁 req.files:", req.files);
+  console.group("📩 NEW DEPUTY REGISTRATION REQUEST");
+
+  console.log("📨 Request received at:", new Date().toISOString());
+  console.log("📁 Multer req.files:", req.files);
   console.log("🧾 req.body keys:", Object.keys(req.body || {}));
+
+  console.group("🗂 FILE + BODY INSPECTION");
+  console.log("📁 Raw req.files object:", req.files);
+  console.log("📂 File fields:", Object.keys(req.files || {}));
+  console.log("📄 Body fields:", Object.keys(req.body || {}));
+  console.log("📄 basicInfo raw:", req.body.basicInfo);
+  console.log("📄 functionBandVideoLinks raw:", req.body.functionBandVideoLinks);
+  console.log("📄 tscApprovedFunctionBandVideoLinks raw:", req.body.tscApprovedFunctionBandVideoLinks);
+  console.log("📄 originalBandVideoLinks raw:", req.body.originalBandVideoLinks);
+  console.log("📄 tscApprovedOriginalBandVideoLinks raw:", req.body.tscApprovedOriginalBandVideoLinks);
+
+  console.log(
+    "🎧 Incoming Cover MP3s:",
+    req.files?.coverMp3s?.map((f) => `${f.originalname} (${f.mimetype})`)
+  );
+  console.log(
+    "🎧 Incoming Original MP3s:",
+    req.files?.originalMp3s?.map((f) => `${f.originalname} (${f.mimetype})`)
+  );
+
+  if (!req.files || Object.keys(req.files).length === 0) {
+    console.warn("⚠️ No files received. Check axios multipart config & multer fields.");
+  } else {
+    console.log("✅ req.files contains:", Object.keys(req.files));
+  }
+  console.groupEnd(); // FILE + BODY
 
   try {
     const body = req.body;
 
-    // Debug logs
-    console.log("📁 Raw req.files:", req.files);
-    console.log("📂 Incoming Files:", Object.keys(req.files || {}));
-    console.log("📄 Incoming Body:", Object.keys(body || {}));
-    console.log("📄 Raw basicInfo value:", body.basicInfo);
-    console.log("📄 Raw functionBandVideoLinks value:", body.functionBandVideoLinks);
-    console.log(
-      "📄 Raw tscApprovedFunctionBandVideoLinks value:",
-      body.tscApprovedFunctionBandVideoLinks
-    );
-    console.log("📄 Raw originalBandVideoLinks value:", body.originalBandVideoLinks);
-    console.log(
-      "📄 Raw tscApprovedOriginalBandVideoLinks value:",
-      body.tscApprovedOriginalBandVideoLinks
-    );
-    console.log(
-      "🎧 Cover MP3 Files:",
-      req.files?.coverMp3s?.map((f) => `${f.originalname} - ${f.mimetype}`)
-    );
-    console.log(
-      "🎧 Original MP3 Files:",
-      req.files?.originalMp3s?.map((f) => `${f.originalname} - ${f.mimetype}`)
-    );
-
-    if (!req.files || Object.keys(req.files).length === 0) {
-      console.warn(
-        "⚠️ No files received in multipart form data. Check multer configuration and form encoding."
-      );
-    } else {
-      console.log("✅ req.files exists and contains:", req.files);
-    }
-
-    const coverMp3Files = req.files?.coverMp3s || [];
-    const originalMp3Files = req.files?.originalMp3s || [];
-
-    // Optional uploads
-    let profileUrl = null;
-    if (req.files?.profilePicture?.[0]) {
-      const result = await uploader(
-        req.files.profilePicture[0].buffer,
-        "profile.jpg",
-        "musicians"
-      );
-      profileUrl = result.secure_url;
-    }
-
-    let coverHeroUrl = null;
-    try {
-      if (req.files?.coverHeroImage?.[0]) {
-        const f = req.files.coverHeroImage[0];
-
-        console.log("🖼️ Received coverHeroImage:", {
-          fieldname: f.fieldname,
-          originalname: f.originalname,
-          mimetype: f.mimetype,
-          size: f.size,
-          hasBuffer: !!f.buffer,
-        });
-
-        const result = await uploader(
-          f.buffer,
-          f.originalname || "cover-hero.jpg",
-          "musicians"
-        );
-        coverHeroUrl = result?.secure_url || null;
-        console.log("✅ Uploaded coverHeroImage to Cloudinary:", coverHeroUrl);
-      } else {
-        console.log("ℹ️ No coverHeroImage file present in req.files");
-      }
-    } catch (e) {
-      console.error("❌ Cover hero upload failed:", e);
-    }
-
+    // helper
     const safeParse = (val, fallback) => {
       try {
-        if (typeof fallback === "object" && !Array.isArray(fallback)) {
-          return typeof val === "string"
-            ? JSON.parse(val)
-            : val && typeof val === "object" && !Array.isArray(val)
-            ? val
-            : fallback;
-        }
         return typeof val === "string"
           ? JSON.parse(val)
-          : Array.isArray(val)
+          : Array.isArray(val) || typeof val === "object"
           ? val
           : fallback;
       } catch {
@@ -468,97 +417,108 @@ const registerDeputy = async (req, res) => {
       }
     };
 
-    // Equipment spec cleanup sample
-    let cleanedEquipmentSpec = safeParse(body.equipment_spec, {});
-    if (Array.isArray(cleanedEquipmentSpec?.other_lighting)) {
-      cleanedEquipmentSpec.other_lighting = cleanedEquipmentSpec.other_lighting.map(
-        (item) => ({
-          name: item?.name?.trim() || "",
-          quantity: item?.quantity || "",
-          wattage: item?.wattage || "",
-        })
-      );
+    console.group("🎤 IMAGE UPLOAD HANDLING");
+
+    // Profile pic
+    let profileUrl = null;
+    if (req.files?.profilePicture?.[0]) {
+      const f = req.files.profilePicture[0];
+      console.log("🖼️ Received profilePicture:", {
+        fieldname: f.fieldname,
+        originalname: f.originalname,
+        mimetype: f.mimetype,
+        size: f.size,
+        buffer: !!f.buffer,
+      });
+
+      const result = await uploader(f.buffer, "profile.jpg", "musicians");
+      profileUrl = result.secure_url;
+      console.log("✅ Uploaded profilePicture →", profileUrl);
+    } else {
+      console.log("ℹ️ No profile picture uploaded");
     }
 
-    // ---- Safe coercion for repertoire & selectedSongs (ignore blob-ish strings) ----
-const coerceSongsArray = (raw) => {
-  try {
-    if (Array.isArray(raw)) return raw;
-    if (typeof raw !== "string") return [];
-    const s = raw.trim();
+    // Cover hero
+    let coverHeroUrl = null;
+    if (req.files?.coverHeroImage?.[0]) {
+      const f = req.files.coverHeroImage[0];
+      console.log("🖼️ coverHeroImage received:", {
+        fieldname: f.fieldname,
+        originalname: f.originalname,
+        mimetype: f.mimetype,
+        size: f.size,
+      });
 
-    // If it looks like a proper JSON array, parse it
-    if (s.startsWith("[")) {
-      const arr = JSON.parse(s);
-      return Array.isArray(arr) ? arr : [];
+      const result = await uploader(f.buffer, f.originalname ?? "cover-hero.jpg", "musicians");
+      coverHeroUrl = result.secure_url;
+      console.log("✅ Uploaded coverHeroImage →", coverHeroUrl);
+    } else {
+      console.log("ℹ️ No coverHeroImage file included");
     }
+    console.groupEnd(); // IMAGE UPLOAD
 
-    // If it contains signs of a file/blob (buffer, ObjectId etc), ignore it
-    if (/buffer|Binary\.createFromBase64|ObjectId/i.test(s)) return [];
+    // ---- Song coercion ----
 
-    // Anything else that isn't JSON array — ignore
-    return [];
-  } catch {
-    return [];
-  }
-};
+    const coerceSongsArray = (raw) => {
+      try {
+        if (Array.isArray(raw)) return raw;
+        if (typeof raw !== "string") return [];
+        const s = raw.trim();
+        if (s.startsWith("[")) return JSON.parse(s);
+        if (/buffer|Binary\.createFromBase64|ObjectId/i.test(s)) return [];
+        return [];
+      } catch {
+        return [];
+      }
+    };
 
-const repertoireCoerced    = coerceSongsArray(req.body.repertoire);
-const selectedSongsCoerced = coerceSongsArray(req.body.selectedSongs);
+    const repertoireCoerced = coerceSongsArray(body.repertoire);
+    const selectedSongsCoerced = coerceSongsArray(body.selectedSongs);
 
-console.log("🪵 Coerced repertoire:", Array.isArray(repertoireCoerced) ? repertoireCoerced.length : typeof repertoireCoerced);
-console.log("🪵 Coerced selectedSongs:", Array.isArray(selectedSongsCoerced) ? selectedSongsCoerced.length : typeof selectedSongsCoerced);
+    console.group("🎵 REPERTOIRE + SELECTED SONGS PARSING");
+    console.log("🎶 repertoireCoerced → count:", repertoireCoerced.length);
+    console.log("🎶 selectedSongsCoerced → count:", selectedSongsCoerced.length);
+    console.groupEnd();
 
-    // Build parsedData
+    // ---- MAIN PARSED DATA ----
+    console.group("🧱 BUILDING PARSED DATA OBJECT");
+
     const parsedData = {
       ...body,
-      role: body.role,
-      basicInfo: JSON.parse(body.basicInfo || "{}"),
-      address: JSON.parse(body.address || "{}"),
+      basicInfo: safeParse(body.basicInfo, {}),
+      address: safeParse(body.address, {}),
       ...(profileUrl && { profilePicture: profileUrl }),
       ...(coverHeroUrl && { coverHeroImage: coverHeroUrl }),
 
+      // Videos
       functionBandVideoLinks: safeParse(body.functionBandVideoLinks, []),
-      tscApprovedFunctionBandVideoLinks: safeParse(
-        body.tscApprovedFunctionBandVideoLinks,
-        []
-      ),
+      tscApprovedFunctionBandVideoLinks: safeParse(body.tscApprovedFunctionBandVideoLinks, []),
       originalBandVideoLinks: safeParse(body.originalBandVideoLinks, []),
-      tscApprovedOriginalBandVideoLinks: safeParse(
-        body.tscApprovedOriginalBandVideoLinks,
-        []
-      ),
+      tscApprovedOriginalBandVideoLinks: safeParse(body.tscApprovedOriginalBandVideoLinks, []),
 
+      // MP3 arrays
       coverMp3s: safeParse(body.coverMp3s, []),
       originalMp3s: safeParse(body.originalMp3s, []),
 
+      // Basic text
       bio: body.bio || "",
       tagLine: body.tagLine || "",
       tscApprovedBio: body.tscApprovedBio || "",
 
+      // Arrays
       academic_credentials: safeParse(body.academic_credentials, []),
       awards: safeParse(body.awards, []),
-      function_bands_performed_with: safeParse(
-        body.function_bands_performed_with,
-        []
-      ),
-      original_bands_performed_with: safeParse(
-        body.original_bands_performed_with,
-        []
-      ),
+      function_bands_performed_with: safeParse(body.function_bands_performed_with, []),
+      original_bands_performed_with: safeParse(body.original_bands_performed_with, []),
       sessions: safeParse(body.sessions, []),
       social_media_links: safeParse(body.social_media_links, []),
-
       instrumentation: safeParse(body.instrumentation, []),
-      lighting: JSON.parse(body.lighting || "{}"),
-      paAndBackline: safeParse(body.paAndBackline, []),
-      availability: safeParse(body.availability, []),
-      vocals: safeParse(body.vocals, {}),
 
-      // IMPORTANT: parse from the body but we will MERGE when updating
-  repertoire: repertoireCoerced,
-selectedSongs: selectedSongsCoerced,
+      // Songs
+      repertoire: repertoireCoerced,
+      selectedSongs: selectedSongsCoerced,
 
+      // More fields…
       other_skills: safeParse(body.other_skills, []),
       logistics: safeParse(body.logistics, []),
       vocalMics: safeParse(body.vocalMics, {}),
@@ -566,11 +526,8 @@ selectedSongs: selectedSongsCoerced,
       additionalEquipment: safeParse(body.additionalEquipment, {}),
       instrumentMics: safeParse(body.instrumentMics, {}),
       speechMics: safeParse(body.speechMics, {}),
-
       cableLogistics: safeParse(body.cableLogistics, []),
-      // FIX: read extensionCableLogistics from its own field
       extensionCableLogistics: safeParse(body.extensionCableLogistics, []),
-
       uplights: safeParse(body.uplights, []),
       tbars: safeParse(body.tbars, []),
       lightBars: safeParse(body.lightBars, []),
@@ -585,311 +542,102 @@ selectedSongs: selectedSongsCoerced,
       instrumentSpecs: safeParse(body.instrumentSpecs, []),
       djEquipment: safeParse(body.djEquipment, {}),
       bank_account: safeParse(body.bank_account, {}),
-      deputy_contract_signed: body.deputy_contract_signed || "",
       agreementCheckboxes: safeParse(body.agreementCheckboxes, []),
+
+      deputy_contract_signed: body.deputy_contract_signed || "",
       dateRegistered: new Date(),
     };
 
-    // Status & email
     parsedData.status = parsedData.status || body.status || "pending";
-    parsedData.email =
-      parsedData.basicInfo?.email?.trim() || body.email?.trim() || null;
+    parsedData.email = parsedData.basicInfo?.email || body.email || null;
+
+    console.log("📧 Final parsed email:", parsedData.email);
+    console.log("🔍 parsedData.status:", parsedData.status);
+    console.groupEnd(); // BUILDING PARSED DATA
 
     if (!parsedData.email) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Email is required." });
+      console.error("❌ Missing email in parsedData.");
+      return res.status(400).json({ success: false, message: "Email is required." });
     }
 
-    if (Array.isArray(parsedData.status)) {
-      parsedData.status =
-        parsedData.status.find((s) => typeof s === "string" && s.trim() !== "") ||
-        "pending";
-    }
+    // ---- UPDATE OR CREATE ----
+    console.group("🛠 UPDATE OR CREATE LOGIC");
 
-    // Clean vocals
-    const { type, gender, range, rap, genres } = parsedData.vocals || {};
-    parsedData.vocals = {
-      ...(type ? { type } : {}),
-      ...(gender ? { gender } : {}),
-      ...(range ? { range } : {}),
-      ...(typeof rap === "boolean" || typeof rap === "string" ? { rap } : {}),
-      ...(genres ? { genres } : {}),
-    };
+    let musician = await musicianModel.findOne({ email: parsedData.email });
+    let createdNew = false;
 
-    // Clean instrumentation
-    if (Array.isArray(parsedData.instrumentation)) {
-      parsedData.instrumentation = parsedData.instrumentation
-        .filter((i) => i.instrument || i.skill_level)
-        .map((i) => ({
-          instrument: i.instrument || undefined,
-          skill_level: i.skill_level || undefined,
-        }));
-    }
+    if (musician) {
+      console.log("🟡 Updating existing musician:", parsedData.email);
 
-    console.log("🔍 Final parsedData.status:", parsedData.status);
+      const before = musician.toObject();
+      console.log("🟡 Previous status:", before.status);
 
-    // Find existing musician
-    let newMusician = await musicianModel.findOne({ email: parsedData.email });
-    let didSave = false;
-
-    // Build wardrobe arrays using existing + incoming
-    const digitalWardrobeBlackTieUrls = [
-      ...(newMusician?.digitalWardrobeBlackTie || []),
-      ...(Array.isArray(body.digitalWardrobeBlackTie)
-        ? body.digitalWardrobeBlackTie
-        : [body.digitalWardrobeBlackTie].filter(Boolean)),
-    ];
-
-    const digitalWardrobeFormalUrls = [
-      ...(newMusician?.digitalWardrobeFormal || []),
-      ...(Array.isArray(body.digitalWardrobeFormal)
-        ? body.digitalWardrobeFormal
-        : [body.digitalWardrobeFormal].filter(Boolean)),
-    ];
-
-    const digitalWardrobeSmartCasualUrls = [
-      ...(newMusician?.digitalWardrobeSmartCasual || []),
-      ...(Array.isArray(body.digitalWardrobeSmartCasual)
-        ? body.digitalWardrobeSmartCasual
-        : [body.digitalWardrobeSmartCasual].filter(Boolean)),
-    ];
-
-    const digitalWardrobeSessionAllBlackUrls = [
-      ...(newMusician?.digitalWardrobeSessionAllBlack || []),
-      ...(Array.isArray(body.digitalWardrobeSessionAllBlack)
-        ? body.digitalWardrobeSessionAllBlack
-        : [body.digitalWardrobeSessionAllBlack]
-      ).filter((item) => typeof item === "object" && item?.secure_url),
-    ];
-
-    const additionalImageUrls = [
-      ...(newMusician?.additionalImages || []),
-      ...(Array.isArray(body.additionalImages)
-        ? body.additionalImages
-        : [body.additionalImages].filter(Boolean)),
-    ];
-
-    if (newMusician) {
-      console.log("👀 Updating existing musician:", parsedData.email);
-
-      // Snapshot for diff
-      const before = newMusician.toObject();
-      console.log("🟡 Current status:", before.status);
-
-      // Parse instrumentation fallback
-      if (typeof parsedData.instrumentation === "string") {
-        try {
-          parsedData.instrumentation = JSON.parse(parsedData.instrumentation);
-          console.log("✅ Parsed instrumentation from string.");
-        } catch (err) {
-          console.error("❌ Failed to parse instrumentation JSON:", err?.message);
-        }
+      // Merge selectedSongs & repertoire safely
+      if (Array.isArray(parsedData.repertoire)) {
+        musician.repertoire = mergeRepertoireObjectsUnique(musician.repertoire || [], parsedData.repertoire);
+        musician.markModified("repertoire");
+        delete parsedData.repertoire;
+      }
+      if (Array.isArray(parsedData.selectedSongs)) {
+        musician.selectedSongs = mergeSelectedSongsUnique(musician.selectedSongs || [], parsedData.selectedSongs);
+        musician.markModified("selectedSongs");
+        delete parsedData.selectedSongs;
       }
 
-// ⚠️ IMPORTANT: Merge arrays that must persist (repertoire & selectedSongs)
-// Preserve what may have been appended by other flows (e.g., append endpoint)
+      Object.assign(musician, parsedData);
 
-// Repertoire is an array of SONG OBJECTS now (NOT ObjectIds)
-if (Array.isArray(parsedData.repertoire)) {
-  const mergedRep = mergeRepertoireObjectsUnique(
-    newMusician.repertoire || [],
-    parsedData.repertoire
-  );
-  newMusician.repertoire = mergedRep;
-  newMusician.markModified("repertoire");
-  // prevent overwrite by Object.assign below
-  delete parsedData.repertoire;
-}
-
-// selectedSongs is also array of song objects (same keying rule)
-if (Array.isArray(parsedData.selectedSongs)) {
-  const mergedSel = mergeSelectedSongsUnique(
-    newMusician.selectedSongs || [],
-    parsedData.selectedSongs
-  );
-  newMusician.selectedSongs = mergedSel;
-  newMusician.markModified("selectedSongs");
-  delete parsedData.selectedSongs;
-}
-
-      // Apply other incoming fields (non-destructive for the above)
-      Object.assign(newMusician, parsedData);
-      console.log(
-        "📝 Incoming status:",
-        parsedData.status,
-        "| Current status after assign:",
-        newMusician.status
-      );
-
-      // Merge wardrobe arrays (dedupe)
-      newMusician.digitalWardrobeBlackTie = [...new Set(digitalWardrobeBlackTieUrls)];
-      newMusician.digitalWardrobeFormal = [...new Set(digitalWardrobeFormalUrls)];
-      newMusician.digitalWardrobeSmartCasual = [
-        ...new Set(digitalWardrobeSmartCasualUrls),
-      ];
-      newMusician.digitalWardrobeSessionAllBlack = [
-        ...new Set(digitalWardrobeSessionAllBlackUrls),
-      ];
-      newMusician.additionalImages = [...new Set(additionalImageUrls)];
-
-      // Handle deletions
-      const deletedImages = body.deletedImages ? JSON.parse(body.deletedImages) : [];
-      if (deletedImages.length > 0) {
-        const wardrobeFields = [
-          "digitalWardrobeBlackTie",
-          "digitalWardrobeFormal",
-          "digitalWardrobeSmartCasual",
-          "digitalWardrobeSessionAllBlack",
-          "additionalImages",
-        ];
-        for (const field of wardrobeFields) {
-          if (Array.isArray(newMusician[field])) {
-            newMusician[field] = newMusician[field].filter(
-              (url) => !deletedImages.includes(url)
-            );
-          }
-        }
-      }
-
-      // Diff keys for logging/markModified
-      const keysToWatch = [
-        "firstName",
-        "lastName",
-        "phone",
-        "bio",
-        "tagLine",
-        "basicInfo",
-        "address",
-        "availability",
-        "bank_account",
-        "instrumentation",
-        "vocals",
-        "other_skills",
-        "logistics",
-        "paAndBackline",
-        "backline",
-        "instrumentMics",
-        "speechMics",
-        "vocalMics",
-        "inEarMonitoring",
-        "cableLogistics",
-        "extensionCableLogistics",
-        "uplights",
-        "tbars",
-        "lightBars",
-        "discoBall",
-        "otherLighting",
-        "paSpeakerSpecs",
-        "mixingDesk",
-        "floorMonitorSpecs",
-        "djGearRequired",
-        "instrumentSpecs",
-        "djEquipment",
-        "social_media_links",
-        "repertoire",
-        "selectedSongs",
-        "coverMp3s",
-        "originalMp3s",
-        "profilePicture",
-        "coverHeroImage",
-        "digitalWardrobeBlackTie",
-        "digitalWardrobeFormal",
-        "digitalWardrobeSmartCasual",
-        "digitalWardrobeSessionAllBlack",
-        "additionalImages",
-      ];
-
-      const beforeSnapshot = before;
-      const changedKeys = keysToWatch.filter((k) => {
-        const a = beforeSnapshot?.[k];
-        const b = newMusician?.[k];
-        return JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+      // Detect changed keys
+      const fieldsToCheck = Object.keys(parsedData);
+      const changed = fieldsToCheck.filter((k) => {
+        return JSON.stringify(before[k]) !== JSON.stringify(musician[k]);
       });
 
-      console.log("🧾 Changed keys:", changedKeys.length ? changedKeys : "(none)");
+      console.log("🧾 Changed keys:", changed.length ? changed : "(none)");
 
-      changedKeys.forEach((k) => {
-        const v = newMusician[k];
-        if (v && typeof v === "object") newMusician.markModified(k);
-      });
+      changed.forEach((k) => musician.markModified(k));
 
-      // Status flip logic if previously approved (case-insensitive just in case)
-      const wasApproved = String(before.status || "").toLowerCase() === "approved";
-      const hasChanges = changedKeys.length > 0;
-      const forcePending =
-        req.body?.forcePending === "true" || req.body?.submit === "true";
-
-      if (wasApproved && (hasChanges || forcePending)) {
-        newMusician.status = "Approved, changes pending";
-        newMusician.markModified("status");
-        console.log("🔁 Status changed to:", newMusician.status);
-      } else {
-        console.log("ℹ️ Status left as:", newMusician.status);
-      }
-
-  console.log("💾 About to save. Pending modified paths:", newMusician.modifiedPaths());
-try {
-  const saved = await saveDeputyWithRetry({ staleDoc: newMusician, parsedData });
-  didSave = true;
-  console.log("✅ Saved musician:", {
-    _id: saved._id.toString(),
-    status: saved.status,
-    modified: saved.modifiedPaths?.() || "(n/a)",
-  });
-} catch (e) {
-  console.error("❌ Save failed (after retry):", e);
-  throw e;
-}
-
-      const verify = await musicianModel
-        .findById(newMusician._id)
-        .select("status firstName lastName updatedAt");
-      console.log("🔎 Post-save verification:", verify?.toObject());
+      console.log("💾 Saving updated musician...");
+      const saved = await musician.save();
+      console.log("✅ Updated musician saved:", saved._id.toString(), saved.status);
     } else {
       console.log("🆕 Creating new musician:", parsedData.email);
-      newMusician = new musicianModel({
+
+      musician = new musicianModel({
         ...parsedData,
         status: "pending",
-        digitalWardrobeBlackTie: digitalWardrobeBlackTieUrls,
-        digitalWardrobeFormal: digitalWardrobeFormalUrls,
-        digitalWardrobeSmartCasual: digitalWardrobeSmartCasualUrls,
-        digitalWardrobeSessionAllBlack: digitalWardrobeSessionAllBlackUrls,
-        additionalImages: additionalImageUrls,
       });
 
-      const saved = await newMusician.save();
-      didSave = true;
-      console.log("✅ Musician saved (create path):", {
-        _id: saved._id.toString(),
-        status: saved.status,
-      });
+      const saved = await musician.save();
+      createdNew = true;
+      console.log("✅ New musician created:", saved._id.toString());
     }
 
- console.log("✅ Deputy registration complete.");
+    console.groupEnd(); // UPDATE/CREATE
 
-// ✅ Determine final saved musician reference (either updated or created)
-const finalMusician = newMusician?._id
-  ? await musicianModel.findById(newMusician._id)
-      .select("_id firstName lastName profilePicture status email")
-      .lean()
-  : null;
+    console.log("🎉 Deputy registration complete.");
+    console.groupEnd(); // entire request
 
-return res.status(201).json({
-  success: true,
-  message: "Deputy submitted for approval",
-  musician: finalMusician,
-});
+    const finalMusician = await musicianModel
+      .findById(musician._id)
+      .select("_id firstName lastName email status")
+      .lean();
+
+    return res.status(201).json({
+      success: true,
+      message: createdNew ? "Deputy submitted for approval" : "Deputy updated",
+      musician: finalMusician,
+    });
   } catch (err) {
-    console.error("❌ Deputy registration error:", err);
-    console.error("❌ Full error stack:", err.stack);
-    res
-      .status(400)
-      .json({
-        success: false,
-        message: "Deputy registration failed",
-        error: err.message,
-      });
+    console.error("❌ REGISTER DEPUTY ERROR:", err);
+    console.error("❌ STACK:", err.stack);
+
+    console.groupEnd(); // safety close
+
+    return res.status(400).json({
+      success: false,
+      message: "Deputy registration failed",
+      error: err.message,
+    });
   }
 };
 
