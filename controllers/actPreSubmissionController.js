@@ -4,19 +4,64 @@ import { sendActApprovalEmail } from "../utils/sendActApprovalEmail.js";
 
 export const submitActPreSubmission = async (req, res) => {
   try {
-    const {
-      musicianId,
-      musicianName,
-      musicianEmail,
-      actName,
-      videoLink1,
-      videoLink2,
-      videoLink3,
-      extraInfo,
-      isBandLeader,
-      bandLeaderName,
-      bandLeaderEmail
-    } = req.body;
+    // Support BOTH old and new payload structures
+    const body = req.body;
+
+    // 1️⃣ Musician info (old format OR new `submittedBy`)
+    const musicianId =
+      body.musicianId ||
+      body.submittedBy?.userId ||
+      null;
+
+    const musicianName =
+      body.musicianName ||
+      body.submittedBy?.name ||
+      "";
+
+    const musicianEmail =
+      body.musicianEmail ||
+      body.submittedBy?.email ||
+      "";
+
+    // 2️⃣ Act name
+    const actName = body.actName || "";
+
+    // 3️⃣ Video links (old format OR new `videoLinks` array)
+    let videoLink1 = body.videoLink1 || "";
+    let videoLink2 = body.videoLink2 || "";
+    let videoLink3 = body.videoLink3 || "";
+
+    if (Array.isArray(body.videoLinks)) {
+      videoLink1 = body.videoLinks[0] || "";
+      videoLink2 = body.videoLinks[1] || "";
+      videoLink3 = body.videoLinks[2] || "";
+    }
+
+    // 4️⃣ Band leader/manager info
+    const isBandLeader =
+      typeof body.isBandLeader === "boolean"
+        ? body.isBandLeader
+        : true;
+
+    const bandLeaderName =
+      body.bandLeaderName ||
+      body.bandLeaderOrManager?.name ||
+      musicianName;
+
+    const bandLeaderEmail =
+      body.bandLeaderEmail ||
+      body.bandLeaderOrManager?.email ||
+      musicianEmail;
+
+    // 5️⃣ Extra info
+    const extraInfo = body.extraInfo || "";
+
+    if (!musicianId) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing musicianId"
+      });
+    }
 
     const submission = await ActPreSubmission.create({
       musicianId,
@@ -30,13 +75,16 @@ export const submitActPreSubmission = async (req, res) => {
       isBandLeader,
       bandLeaderName,
       bandLeaderEmail,
-      status: "pending"
+      status: "pending",
     });
 
     return res.json({ success: true, submission });
   } catch (err) {
     console.error("submitActPreSubmission error:", err);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({
+      success: false,
+      message: "Server error"
+    });
   }
 };
 
