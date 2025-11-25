@@ -241,17 +241,6 @@ const parseStatuses = (statusStr = "") => {
 };
 
 export const getAllActsV2 = async (req, res) => {
-  console.log("📡 [getAllActsV2] Filter used:", filter);
-console.log("📦 [getAllActsV2] Returned acts:", acts.length);
-if (acts.length > 0) {
-  console.log("🧾 Sample act data:", {
-    name: acts[0].name,
-    numberOfSets: acts[0].numberOfSets,
-    lengthOfSets: acts[0].lengthOfSets,
-    lineupsCount: acts[0].lineups?.length || 0,
-  });
-}
-
   try {
     const {
       status = "",
@@ -263,36 +252,38 @@ if (acts.length > 0) {
       q = "",
     } = req.query;
 
-    // --- Ownership scoping vars ---
     const authUserId = req.user?.id || req.user?._id || req.headers.userid || null;
     const authUserRole = req.user?.role || req.headers.userrole || null;
-    const mineFlag = String(req.query.mine || req.headers["x-scope"] || "").toLowerCase() === "mine" || String(req.query.authorId || "").length > 0;
+    const mineFlag =
+      String(req.query.mine || req.headers["x-scope"] || "").toLowerCase() === "mine" ||
+      String(req.query.authorId || "").length > 0;
 
     const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
     const pg = Math.max(parseInt(page, 10) || 1, 1);
     const skip = (pg - 1) * lim;
 
- const projection = sanitizeFields(fields) || {
-  _id: 1,
-  name: 1,
-  tscName: 1,
-  images: 1,
-  coverImage: 1,
-  createdAt: 1,
-  status: 1,
-  amendment: 1,
-  numberOfSets: 1,
-  lengthOfSets: 1,
-  minimumIntervalLength: 1,
-  lineups: 1,
-  genres: 1,
-};
+    const projection =
+      sanitizeFields(fields) || {
+        _id: 1,
+        name: 1,
+        tscName: 1,
+        images: 1,
+        coverImage: 1,
+        createdAt: 1,
+        status: 1,
+        amendment: 1,
+        numberOfSets: 1,
+        lengthOfSets: 1,
+        minimumIntervalLength: 1,
+        lineups: 1,
+        genres: 1,
+      };
 
     const filter = {};
     if (includeTrashed !== "true") filter.status = { $ne: "trashed" };
 
     const statuses = parseStatuses(status);
-    if (statuses && statuses.length) {
+    if (statuses?.length) {
       if (filter.status) {
         filter.$and = [{ status: filter.status }, { status: { $in: statuses } }];
         delete filter.status;
@@ -301,14 +292,11 @@ if (acts.length > 0) {
       }
     }
 
-    if (q && q.trim()) {
+    if (q.trim()) {
       const re = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
       filter.$or = [{ name: re }, { tscName: re }];
     }
 
-    // --- Ownership scoping ---
-    // If the caller is a musician, always restrict to their acts.
-    // Admin/moderator can opt-in via ?mine=true or ?authorId=...
     if (authUserRole === "musician") {
       if (!authUserId) {
         return res.status(401).json({ success: false, message: "Unauthorized: Missing user id" });
@@ -326,7 +314,6 @@ if (acts.length > 0) {
     } else if (mineFlag) {
       const uid = String(req.query.authorId || authUserId || "");
       if (uid) {
-        // Merge with existing $or if present
         const mineOr = [
           { createdBy: uid },
           { owner: uid },
@@ -344,28 +331,42 @@ if (acts.length > 0) {
         }
       }
     }
-  if (req.query.authorId) {
-    const authorId = String(req.query.authorId);
-    const ownershipConditions = [
-      { createdBy: authorId },
-      { owner: authorId },
-      { ownerId: authorId },
-      { registeredBy: authorId },
-      { userId: authorId },
-      { musicianId: authorId },
-      { owners: authorId },
-    ];
-    if (filter.$or) {
-      filter.$and = filter.$and || [];
-      filter.$and.push({ $or: ownershipConditions });
-    } else {
-      filter.$or = ownershipConditions;
+
+    if (req.query.authorId) {
+      const authorId = String(req.query.authorId);
+      const ownershipConditions = [
+        { createdBy: authorId },
+        { owner: authorId },
+        { ownerId: authorId },
+        { registeredBy: authorId },
+        { userId: authorId },
+        { musicianId: authorId },
+        { owners: authorId },
+      ];
+      if (filter.$or) {
+        filter.$and = filter.$and || [];
+        filter.$and.push({ $or: ownershipConditions });
+      } else {
+        filter.$or = ownershipConditions;
+      }
     }
-  }
+
     const [total, acts] = await Promise.all([
       actModel.countDocuments(filter),
       actModel.find(filter, projection).sort(sort).skip(skip).limit(lim).lean(),
     ]);
+
+    // ✅ Move logs *here*, where the variables exist
+    console.log("📡 [getAllActsV2] Filter used:", filter);
+    console.log("📦 [getAllActsV2] Returned acts:", acts.length);
+    if (acts.length > 0) {
+      console.log("🧾 Sample act data:", {
+        name: acts[0].name,
+        numberOfSets: acts[0].numberOfSets,
+        lengthOfSets: acts[0].lengthOfSets,
+        lineupsCount: acts[0].lineups?.length || 0,
+      });
+    }
 
     res.json({
       success: true,

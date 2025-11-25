@@ -161,7 +161,7 @@ const EventSheetSchema = new mongoose.Schema(
 
 const BookingSchema = new mongoose.Schema(
   {
-    bookingId: { type: String, required: true, index: true },
+    bookingId: { type: String, required: true},
     // User
     userId: { type: String, index: true },
     userEmail: { type: String, index: true },
@@ -176,7 +176,7 @@ const BookingSchema = new mongoose.Schema(
     calendarEventId: { type: String },
 
     // Core details
-    act: { type: String, index: true }, // primary act id (string is fine)
+    act: { type: String}, // primary act id (string is fine)
     lineupId: { type: String }, // chosen lineup id
     bandLineup: [{ type: mongoose.Schema.Types.ObjectId, ref: "musician" }], // confirmed players
     venue: { type: String }, // short venue name
