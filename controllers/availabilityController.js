@@ -2658,19 +2658,17 @@ export async function buildAvailabilityBadgeFromRows({
   for (const [slotKey, slotRows] of Object.entries(groupedBySlot)) {
     console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows);
 
-    // ⭐ Only accept rows with ACTUAL replies ("yes", "no", "unavailable")
+    // ⭐ NEW: We ONLY pick a leadRow if they actually replied
     let leadRow = slotRows.find((r) =>
       ["yes", "no", "unavailable"].includes(r.reply)
     );
-        const displayBits = await getDeputyDisplayBits(depLike);
-
 
     if (!leadRow) {
-      console.log(`⏭️ SLOT ${slotKey} pending — no replies`);
+      console.log(`⏳ SLOT ${slotKey} pending — no real replies yet`);
       slots.push({
         slotIndex: Number(slotKey),
         isDeputy: false,
-        vocalistName: displayBits.firstName || "",
+        vocalistName: "",
         musicianId: null,
         photoUrl: null,
         profileUrl: null,
@@ -2682,29 +2680,23 @@ export async function buildAvailabilityBadgeFromRows({
     }
 
     console.log(`🎯 SLOT ${slotKey} — picked lead row:`, {
-      musicianId: leadRow?.musicianId,
-      reply: leadRow?.reply,
-      updatedAt: leadRow?.updatedAt,
+      musicianId: leadRow.musicianId,
+      reply: leadRow.reply,
+      updatedAt: leadRow.updatedAt,
     });
 
-    const depLike = {
-      musicianId: leadRow?.musicianId,
-    };
+    // ✅ FIX: define depLike FIRST, then call lookup
+    const depLike = { musicianId: leadRow.musicianId };
 
-    console.log("👤 SLOT", slotKey, "musician lookup:", {
-      id: depLike.musicianId,
-    });
-
+    const displayBits = await getDeputyDisplayBits(depLike);
 
     console.log("🧩 SLOT", slotKey, "display bits:", displayBits);
 
-    // Ensure musicianId is string
     let resolvedMusicianId = displayBits?.musicianId || "";
     if (resolvedMusicianId && typeof resolvedMusicianId !== "string") {
       resolvedMusicianId = String(resolvedMusicianId);
     }
 
-    // Name handling
     const vocalistName =
       displayBits?.resolvedName ||
       displayBits?.firstName ||
@@ -2712,14 +2704,14 @@ export async function buildAvailabilityBadgeFromRows({
 
     slots.push({
       slotIndex: Number(slotKey),
-      isDeputy: !!leadRow?.isDeputy,
+      isDeputy: !!leadRow.isDeputy,
       vocalistName,
-      musicianId: resolvedMusicianId || null,
+      musicianId: resolvedMusicianId,
       photoUrl: displayBits.photoUrl || null,
       profileUrl: displayBits.profileUrl || null,
       deputies: [],
-      setAt: leadRow?.updatedAt || new Date(),
-      state: leadRow.reply, // yes | no | unavailable
+      setAt: leadRow.updatedAt,
+      state: leadRow.reply,
     });
   }
 
@@ -2730,7 +2722,7 @@ export async function buildAvailabilityBadgeFromRows({
     slots: slots.sort((a, b) => a.slotIndex - b.slotIndex),
   };
 
-  console.log("💜 FINAL BADGE FROM buildAvailabilityBadgeFromRows:", badge);
+  console.log("💜 FINAL BADGE:", badge);
   return badge;
 }
 
