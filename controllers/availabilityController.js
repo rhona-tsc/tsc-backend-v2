@@ -2662,6 +2662,8 @@ export async function buildAvailabilityBadgeFromRows({
     let leadRow = slotRows.find((r) =>
       ["yes", "no", "unavailable"].includes(r.reply)
     );
+        const displayBits = await getDeputyDisplayBits(depLike);
+
 
     if (!leadRow) {
       console.log(`⏭️ SLOT ${slotKey} pending — no replies`);
@@ -2693,7 +2695,6 @@ export async function buildAvailabilityBadgeFromRows({
       id: depLike.musicianId,
     });
 
-    const displayBits = await getDeputyDisplayBits(depLike);
 
     console.log("🧩 SLOT", slotKey, "display bits:", displayBits);
 
