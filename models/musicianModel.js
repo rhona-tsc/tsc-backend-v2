@@ -48,13 +48,7 @@ const musicianSchema = new mongoose.Schema(
         education_level: { type: String },
       },
     ],
-    paAndBackline: [
-      {
-        name: { type: String },
-        wattage: { type: Number },
-        quantity: { type: Number },
-      },
-    ],
+
     awards: [
       {
         description: { type: String },

@@ -489,8 +489,6 @@ const registerDeputy = async (req, res) => {
       address: safeParse(body.address, {}),
       ...(profileUrl && { profilePicture: profileUrl }),
       ...(coverHeroUrl && { coverHeroImage: coverHeroUrl }),
-
-      paAndBackline: safeParse(body.paAndBackline, []),
 vocals: safeParse(body.vocals, {}),
 
       // Videos

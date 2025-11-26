@@ -74,36 +74,24 @@ const port = process.env.PORT || 4000;
 
 app.set("trust proxy", 1); // Render/Cloudflare
 
+// ===== ✅ ADD THIS ORIGIN ALLOWLIST + CHECK FUNCTION FIRST =====
+
 // Host-based allowlist
 const ALLOWED_HOSTS = new Set([
   "localhost:5173",
   "localhost:5174",
-  "http://localhost:5173",
-   "http://localhost:5173/",
-  "http://localhost:5174",
-    "http://localhost:5174/",
-  
-
-  // Public marketing site + admin portal
-  "www.thesupremecollective.co.uk",
   "admin.thesupremecollective.co.uk",
+  "www.thesupremecollective.co.uk",
   "api.thesupremecollective.co.uk",
-
-  // Deploys
   "tsc2025.netlify.app",
   "tsc2025-admin-portal.netlify.app",
   "tscadmin.netlify.app",
   "tsc-backend-v2.onrender.com",
   "tsc2025.onrender.com",
-    "https://tsc-backend-v2.onrender.com/",
-     "https://tsc-backend-v2.onrender.com",
-
-  // extra preview
-  "meek-biscotti-8d5020.netlify.app",
 ]);
 
 function isAllowedOrigin(origin) {
-  if (!origin) return true; // same-origin / curl
+  if (!origin) return true;
   try {
     const { host, protocol } = new URL(origin);
     if (!/^https?:$/.test(protocol)) return false;
@@ -117,56 +105,51 @@ function isAllowedOrigin(origin) {
   }
 }
 
-const corsOptions = {
-  origin(origin, cb) {
-    return isAllowedOrigin(origin)
-      ? cb(null, true)
-      : cb(new Error(`CORS blocked origin: ${origin}`));
-  },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "authorization",
-    "token",
-    "X-Requested-With",
-    "x-eventsheet-client",
-    "x-requested-with",
-  ],
-  credentials: true,
-  optionsSuccessStatus: 204,
-};
 
-// 1️⃣ Apply CORS globally
-app.use(cors(corsOptions));
-
-// 2️⃣ Ensure credentials header is always present
+// Force allow *actual requesting origin* to satisfy preflight
 app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && isAllowedOrigin(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Vary", "Origin");
   next();
 });
 
-// 3️⃣ Explicit preflight handler (so Render/Cloudflare can't interfere)
+// ✅ Explicit support for admin portal domain
+app.use(cors({
+  origin: [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "https://admin.thesupremecollective.co.uk",
+    "https://www.thesupremecollective.co.uk",
+    "https://meek-biscotti-8d5020.netlify.app",
+    "https://tsc2025.netlify.app",
+    "https://tsc2025-admin-portal.netlify.app",
+    "https://tsc-backend-v2.onrender.com",
+  ],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "token"],
+  credentials: true,
+  optionsSuccessStatus: 204
+}));
+
+// ✅ Global preflight handler to override proxy-level blocking
 app.use((req, res, next) => {
   if (req.method === "OPTIONS") {
     const origin = req.headers.origin;
     if (origin && isAllowedOrigin(origin)) {
       res.header("Access-Control-Allow-Origin", origin);
     }
-    res.header(
-      "Access-Control-Allow-Methods",
-      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-    );
-    res.header(
-      "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, token, X-Requested-With, x-eventsheet-client, x-requested-with"
-    );
+    res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, token");
     res.header("Access-Control-Allow-Credentials", "true");
     return res.sendStatus(204);
   }
   next();
 });
+
 
 /* -------------------------------------------------------------------------- */
 /*                          Standard app middleware                            */
