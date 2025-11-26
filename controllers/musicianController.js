@@ -373,6 +373,7 @@ const registerDeputy = async (req, res) => {
   console.log("📨 Request received at:", new Date().toISOString());
   console.log("📁 Multer req.files:", req.files);
 
+
   try {
     const body = req.body;
 
@@ -417,6 +418,8 @@ const registerDeputy = async (req, res) => {
     musician.lastName = body.lastName || musician.lastName || JSON.parse(body.basicInfo)?.lastName || "";
     musician.phone = body.phone || JSON.parse(body.basicInfo)?.phone || musician.phone || "";
 
+  
+  
     // ✔ Optional nested objects
     musician.agreementCheckboxes = safeParse(body.agreementCheckboxes, []);
 
@@ -435,24 +438,14 @@ const registerDeputy = async (req, res) => {
     musician.academic_credentials = safeParse(body.academic_credentials, []);
     musician.social_media_links = safeParse(body.social_media_links, []);
 
-    // ✔ Enums tolerant
-    if (musician.vocals?.gender === "") musician.vocals.gender = "";
-    if (musician.vocals?.range === "") musician.vocals.range = "";
+
 // 🎤 ensure vocals object exists, then assign tolerant array
 if (!musician.vocals) musician.vocals = {};
 const vocalsParsed = safeParse(body.vocals, {});
 musician.vocals.type = Array.isArray(vocalsParsed.type) ? vocalsParsed.type : [];
 musician.markModified("vocals.type");
     // ✔ Songs
-    if (repertoireCoerced?.length) {
-      musician.repertoire = mergeRepertoireObjectsUnique(musician.repertoire || [], repertoireCoerced);
-      musician.markModified("repertoire");
-    }
-
-    if (selectedSongsCoerced?.length) {
-      musician.selectedSongs = mergeSelectedSongsUnique(musician.selectedSongs || [], selectedSongsCoerced);
-      musician.markModified("selectedSongs");
-    }
+ 
 
     // ✔ MP3s are files
     if (req.files?.coverMp3s) {
