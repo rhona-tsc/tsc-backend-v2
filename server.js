@@ -97,20 +97,61 @@ const ALLOWED_HOSTS = new Set([
 function isAllowedOrigin(origin) {
   if (!origin) return true;
   try {
-    const { host, protocol } = new URL(origin);
-    if (!/^https?:$/.test(protocol)) return false;
+    const url = new URL(origin);
+    if (!/^https?:$/.test(url.protocol)) return false;
     return (
-      ALLOWED_HOSTS.has(host) ||
-      host.endsWith(".netlify.app") ||
-      host.includes("localhost")
+      ALLOWED_HOSTS.has(url.host) ||
+      url.host.endsWith(".netlify.app") ||
+      url.host.includes("localhost")
     );
   } catch {
     return false;
   }
 }
 
+// ===== 🧠 CORS CONFIG (NOW SAFE TO USE THE HELPERS) =====
 
-// Force allow *actual requesting origin* to satisfy preflight
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin || isAllowedOrigin(origin)) {
+      cb(null, true);
+    } else {
+      cb(new Error("CORS blocked"), false);
+    }
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "token", "X-Requested-With"],
+  credentials: true,
+  optionsSuccessStatus: 204,
+}));
+
+// ✅ Explicit support for admin portal domain
+app.use(cors({
+  origin: [
+    "http://localhost:5173",
+    "http://localhost:5173/",
+    "http://localhost:5174",
+    "http://localhost:5174/",
+    "https://admin.thesupremecollective.co.uk",
+    "https://admin.thesupremecollective.co.uk/",
+    "https://www.thesupremecollective.co.uk",
+    "https://meek-biscotti-8d5020.netlify.app",
+     "https://meek-biscotti-8d5020.netlify.app/",
+    "https://tsc2025.netlify.app",
+    "https://tsc2025.netlify.app/",
+    "https://tsc2025-admin-portal.netlify.app",
+    "https://tsc2025-admin-portal.netlify.app/",
+    "https://tsc-backend-v2.onrender.com",
+      "https://tsc-backend-v2.onrender.com/",
+  ],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "token"],
+  credentials: true,
+  optionsSuccessStatus: 204
+}));
+
+// ===== 🛰 FORCE HEADERS SO HOSTING LAYERS DON’T DROP PREFLIGHT =====
+
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && isAllowedOrigin(origin)) {
@@ -121,24 +162,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ Explicit support for admin portal domain
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "https://admin.thesupremecollective.co.uk",
-    "https://www.thesupremecollective.co.uk",
-    "https://meek-biscotti-8d5020.netlify.app",
-    "https://tsc2025.netlify.app",
-    "https://tsc2025-admin-portal.netlify.app",
-    "https://tsc-backend-v2.onrender.com",
-  ],
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "token"],
-  credentials: true,
-  optionsSuccessStatus: 204
-}));
-
 // ✅ Global preflight handler to override proxy-level blocking
 app.use((req, res, next) => {
   if (req.method === "OPTIONS") {
@@ -147,7 +170,7 @@ app.use((req, res, next) => {
       res.header("Access-Control-Allow-Origin", origin);
     }
     res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, token");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, token, X-Requested-With");
     res.header("Access-Control-Allow-Credentials", "true");
     return res.sendStatus(204);
   }
