@@ -2406,26 +2406,21 @@ export const makeAvailabilityBroadcaster = (broadcastFn) => ({
     });
   },
 
-  badgeUpdated: ({ actId, actName, dateISO, badge = null }) => {
-    // 🧩 Ensure badge.deputies has at least one valid name for toasts
-    if (badge?.isDeputy && (!badge.deputies || !badge.deputies.length)) {
-      badge.deputies = [
-        {
-          vocalistName: badge.vocalistName || "Deputy Vocalist",
-          musicianId: badge.musicianId || null,
-          phoneNormalized: badge.phoneNormalized || null,
-        },
-      ];
-    }
+badgeUpdated: ({ actId, actName, dateISO, badge }) => {
+  if (!badge) {
+    console.log("🔕 SSE: badge was null/undefined – skipping broadcast", { actId, dateISO });
+    return; // ✅ STOP here, do NOT send to SSE
+  }
 
-    broadcastFn({
-      type: "availability_badge_updated",
-      actId,
-      actName,
-      dateISO,
-      badge, // 👈 full badge object (with slots) goes to SSE clients
-    });
-  },
+  // If badge exists, broadcast it as normal
+  broadcastFn({
+    type: "availability_badge_updated",
+    actId,
+    actName,
+    dateISO,
+    badge,
+  });
+}
 });
 
 // one-shot WA→SMS for a single deputy
@@ -2673,7 +2668,7 @@ export async function buildAvailabilityBadgeFromRows({
       slots.push({
         slotIndex: Number(slotKey),
         isDeputy: false,
-        vocalistName: "",
+        vocalistName: displayBits.firstName || "",
         musicianId: null,
         photoUrl: null,
         profileUrl: null,

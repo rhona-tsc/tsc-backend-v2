@@ -125,30 +125,6 @@ app.use(cors({
   optionsSuccessStatus: 204,
 }));
 
-// ✅ Explicit support for admin portal domain
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:5173/",
-    "http://localhost:5174",
-    "http://localhost:5174/",
-    "https://admin.thesupremecollective.co.uk",
-    "https://admin.thesupremecollective.co.uk/",
-    "https://www.thesupremecollective.co.uk",
-    "https://meek-biscotti-8d5020.netlify.app",
-     "https://meek-biscotti-8d5020.netlify.app/",
-    "https://tsc2025.netlify.app",
-    "https://tsc2025.netlify.app/",
-    "https://tsc2025-admin-portal.netlify.app",
-    "https://tsc2025-admin-portal.netlify.app/",
-    "https://tsc-backend-v2.onrender.com",
-      "https://tsc-backend-v2.onrender.com/",
-  ],
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "token"],
-  credentials: true,
-  optionsSuccessStatus: 204
-}));
 
 // ===== 🛰 FORCE HEADERS SO HOSTING LAYERS DON’T DROP PREFLIGHT =====
 
