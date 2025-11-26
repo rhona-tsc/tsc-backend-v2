@@ -79,14 +79,18 @@ app.set("trust proxy", 1); // Render/Cloudflare
 // Host-based allowlist
 const ALLOWED_HOSTS = new Set([
   "localhost:5173",
+    "localhost:5173/",
   "localhost:5174",
+    "localhost:5174/",
   "admin.thesupremecollective.co.uk",
+    "admin.thesupremecollective.co.uk/",
+      "https://admin.thesupremecollective.co.uk",
+          "https://admin.thesupremecollective.co.uk/",
   "www.thesupremecollective.co.uk",
   "api.thesupremecollective.co.uk",
   "tsc2025.netlify.app",
-  "tsc2025-admin-portal.netlify.app",
-  "tscadmin.netlify.app",
   "tsc-backend-v2.onrender.com",
+    "tsc-backend-v2.onrender.com/",
   "tsc2025.onrender.com",
 ]);
 
