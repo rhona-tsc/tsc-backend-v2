@@ -370,28 +370,37 @@ const getDeputyById = async (req, res) => {
 // Deputy Registration / Update Controller
 const registerDeputy = async (req, res) => {
   console.group("📩 NEW DEPUTY REGISTRATION REQUEST");
-
   console.log("📨 Request received at:", new Date().toISOString());
   console.log("📁 Multer req.files:", req.files);
-  console.log("🧾 req.body keys:", Object.keys(req.body || {}));
 
   try {
     const body = req.body;
 
-    // Safe JSON parser
-    const safeParse = (v, fb) => {
-      try { return v && typeof v === "string" ? JSON.parse(v) : (v ?? fb); }
-      catch { return fb; }
+    const safeParse = (v, fallback) => {
+      try {
+        return v && typeof v === "string" ? JSON.parse(v) : (v ?? fallback);
+      } catch {
+        return fallback;
+      }
     };
 
-    // 🔥 1) Normalise email
-    const email = body.basicInfo?.email ? body.basicInfo.email.trim().toLowerCase() : null;
+    // ✔ Normalise + extract email from incoming `basicInfo`
+    let email = null;
+
+    if (typeof body.basicInfo === "string") {
+      email = JSON.parse(body.basicInfo)?.email;
+    } else if (body.basicInfo?.email) {
+      email = body.basicInfo.email;
+    }
+
+    email = email ? email.trim().toLowerCase() : null;
+    console.log("🔍 Extracted email:", email);
+
     if (!email) {
-      console.error("❌ Missing email");
+      console.error("❌ No valid email found in payload");
       return res.status(400).json({ success: false, message: "Email is required." });
     }
 
-    // 🔥 2) Find or Create musician
     let musician = await musicianModel.findOne({ email });
     let createdNew = false;
 
@@ -403,48 +412,77 @@ const registerDeputy = async (req, res) => {
       console.log("🟡 Updating existing musician:", email);
     }
 
-    // 🔥 3) Parse optional data safely
-    musician.address = safeParse(body.address, {});
-    musician.vocals = safeParse(body.vocals, {});
+    // ✔ Safe assign simple optional fields
+    musician.firstName = body.firstName || musician.firstName || JSON.parse(body.basicInfo)?.firstName || "";
+    musician.lastName = body.lastName || musician.lastName || JSON.parse(body.basicInfo)?.lastName || "";
+    musician.phone = body.phone || JSON.parse(body.basicInfo)?.phone || musician.phone || "";
+
+    // ✔ Optional nested objects
+    musician.agreementCheckboxes = safeParse(body.agreementCheckboxes, []);
+
+    // ✔ PA and Backline systems are submitted as separate fields in your form
+    musician.paAndBackline = safeParse(body.paAndBackline, []);
+    musician.backline = safeParse(body.backline, []);
+    musician.vocalMics = safeParse(body.vocalMics, {});
+    musician.inEarMonitoring = safeParse(body.inEarMonitoring, {});
+    musician.instrumentMics = safeParse(body.instrumentMics, {});
+    musician.speechMics = safeParse(body.speechMics, {});
     musician.instrumentation = safeParse(body.instrumentation, []);
+    musician.awards = safeParse(body.awards, []);
+    musician.sessions = safeParse(body.sessions, []);
     musician.other_skills = safeParse(body.other_skills, []);
     musician.logistics = safeParse(body.logistics, []);
     musician.academic_credentials = safeParse(body.academic_credentials, []);
+    musician.social_media_links = safeParse(body.social_media_links, []);
 
-    // ✅ Allow blank enum vocals.gender & vocals.range
-    // (no need to delete it now, schema already allows "")
+    // ✔ Enums tolerant
     if (musician.vocals?.gender === "") musician.vocals.gender = "";
     if (musician.vocals?.range === "") musician.vocals.range = "";
+// 🎤 ensure vocals object exists, then assign tolerant array
+if (!musician.vocals) musician.vocals = {};
+const vocalsParsed = safeParse(body.vocals, {});
+musician.vocals.type = Array.isArray(vocalsParsed.type) ? vocalsParsed.type : [];
+musician.markModified("vocals.type");
+    // ✔ Songs
+    if (repertoireCoerced?.length) {
+      musician.repertoire = mergeRepertoireObjectsUnique(musician.repertoire || [], repertoireCoerced);
+      musician.markModified("repertoire");
+    }
 
-    // 🔥 4) Save MP3 file URLs if uploaded (optional)
+    if (selectedSongsCoerced?.length) {
+      musician.selectedSongs = mergeSelectedSongsUnique(musician.selectedSongs || [], selectedSongsCoerced);
+      musician.markModified("selectedSongs");
+    }
+
+    // ✔ MP3s are files
     if (req.files?.coverMp3s) {
       musician.coverMp3s = req.files.coverMp3s.map(f => ({ title: "", url: f.path }));
       musician.markModified("coverMp3s");
     }
+
     if (req.files?.originalMp3s) {
       musician.originalMp3s = req.files.originalMp3s.map(f => ({ title: "", url: f.path }));
       musician.markModified("originalMp3s");
     }
 
-    // 🔥 5) Save images safely if uploaded (OPTIONAL)
+    // ✔ Optional image uploads
     if (req.files?.profilePicture?.[0]?.buffer) {
       const f = req.files.profilePicture[0];
-      const up = await uploader(f.buffer, f.originalname ?? "profile.jpg", "musicians");
+      const up = await uploader(f.buffer, f.originalname || "profile.jpg", "musicians");
       musician.profilePhoto = up.secure_url;
       musician.markModified("profilePhoto");
     }
 
     if (req.files?.coverHeroImage?.[0]?.buffer) {
       const f = req.files.coverHeroImage[0];
-      const up = await uploader(f.buffer, f.originalname ?? "hero.jpg", "musicians");
+      const up = await uploader(f.buffer, f.originalname || "cover-hero.jpg", "musicians");
       musician.coverHeroImage = up.secure_url;
       musician.markModified("coverHeroImage");
     }
 
-    // 🔥 6) Save the document with all optional fields tolerant
+    // 💾 Save
     const saved = await musician.save();
     console.log("✅ Musician saved:", saved._id.toString());
-
     console.groupEnd();
 
     return res.status(201).json({
