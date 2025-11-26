@@ -1,16 +1,13 @@
 import mongoose from "mongoose";
 
-
-
 const musicianSchema = new mongoose.Schema(
-
-  
   {
     role: {
       type: String,
       enum: ["musician", "agent"],
       default: "musician",
     },
+
     tagLine: { type: String, maxlength: 160 },
     email: { type: String },
     firstName: { type: String },
@@ -19,75 +16,92 @@ const musicianSchema = new mongoose.Schema(
     phoneNormalized: { type: String, index: true },
     whatsappOptIn: { type: Boolean, default: false },
     password: { type: String },
+
     basicInfo: {
       firstName: { type: String },
       lastName: { type: String },
-
       phone: { type: String },
+      email: { type: String },
     },
+
+    agreementCheckboxes: [
+      {
+        termsAndConditions: { type: Boolean, default: false },
+        privacyPolicy: { type: Boolean, default: false },
+      }
+    ],
+
     address: {
-      line1: { type: String },
-      line2: { type: String },
-      town: { type: String },
-      county: { type: String },
-      postcode: { type: String },
-      country: { type: String },
+      line1: { type: String, default: "" },
+      line2: { type: String, default: "" },
+      town: { type: String, default: "" },
+      county: { type: String, default: "" },
+      postcode: { type: String, default: "" },
+      country: { type: String, default: "" },
     },
-    bio: { type: String },
-    tscApprovedBio: { type: String, default: "" },
+
     status: {
       type: String,
       enum: ["pending", "approved", "rejected", "Approved, changes pending"],
       default: "pending",
+      set: v => v === "" ? null : v
     },
+
     academic_credentials: [
       {
-        course: { type: String },
-        institution: { type: String },
-        years: { type: String },
-        education_level: { type: String },
-      },
+        course: { type: String, default: "" },
+        institution: { type: String, default: "" },
+        years: { type: String, default: "" },
+        education_level: { type: String, default: "" },
+      }
     ],
 
     awards: [
       {
-        description: { type: String },
-        years: { type: String },
-      },
+        description: { type: String, default: "" },
+        years: { type: String, default: "" },
+      }
     ],
+
     function_bands_performed_with: [
       {
-        function_band_name: { type: String },
-        function_band_leader_email: { type: String },
-      },
+        function_band_name: { type: String, default: "" },
+        function_band_leader_email: { type: String, default: "" },
+      }
     ],
+
     original_bands_performed_with: [
       {
-        original_band_name: { type: String },
-        original_band_leader_email: { type: String },
-      },
+        original_band_name: { type: String, default: "" },
+        original_band_leader_email: { type: String, default: "" },
+      }
     ],
+
     sessions: [
       {
-        artist: { type: String },
-        session_type: { type: String },
-      },
+        artist: { type: String, default: "" },
+        session_type: { type: String, default: "" },
+      }
     ],
+
     social_media_links: [
       {
-        platform: { type: String },
-        link: { type: String },
-      },
+        platform: { type: String, default: "" },
+        url: { type: String, default: "" },
+      }
     ],
+
     instrumentation: [
       {
-        instrument: String,
+        instrument: { type: String, default: "" },
         skill_level: {
           type: String,
           enum: ["Expert", "Intermediate", "Advanced"],
+          default: null, // ✅ fully optional
           required: false,
-        },
-      },
+          set: v => v === "" ? null : v // ✅ empty becomes null
+        }
+      }
     ],
 
     vocals: {
@@ -100,252 +114,132 @@ const musicianSchema = new mongoose.Schema(
           "Backing Vocalist-Instrumentalist",
           "Lead Vocalist-Instrumentalist",
         ],
+        default: [], // ✅ always valid even if blank
         required: false,
+        set: v => v === "" ? [] : v // ✅ ignore invalid empty string arrays
       },
+
       gender: {
         type: String,
-        enum: ["Male", "Female", "Non-Binary"],
+        enum: ["Male", "Female", "Non-Binary", null],
+        default: null, // ✅ blank allowed
         required: false,
+        set: v => v === "" ? null : v
       },
+
       range: {
         type: String,
         enum: [
-          "Soprano",
-          "Mezzo-Soprano",
-          "Alto",
-          "Tenor",
-          "Baritone",
-          "Bass",
-          "Not sure",
+          "Soprano", "Mezzo-Soprano", "Alto", "Tenor", "Baritone",
+          "Bass", "Not sure", null
         ],
+        default: null, // ✅ blank allowed
         required: false,
+        set: v => v === "" ? null : v
       },
+
       rap: {
         type: String,
+        default: "",
         required: false,
       },
-      genres: [String], // <-- make sure this is here!
+
+      genres: {
+        type: [String],
+        default: [],
+        required: false,
+        set: v => Array.isArray(v) ? v : [] // ✅ ensure clean save if malformed
+      }
     },
-    other_skills: [String],
-    logistics: [String],
+
+    other_skills: { type: [String], default: [] },
+    logistics: { type: [String], default: [] },
+
     vocalMics: {
-      wireless_vocal_mics: { type: String },
-      wired_vocal_mics: { type: String },
-      wireless_vocal_adapters: { type: String },
+      wireless_vocal_mics: { type: String, default: null, set: v => v === "" ? null : v },
+      wired_vocal_mics: { type: String, default: null, set: v => v === "" ? null : v },
+      wireless_vocal_adapters: { type: String, default: null, set: v => v === "" ? null : v }
     },
+
     inEarMonitoring: {
-      wired_in_ear_packs: { type: String },
-      wireless_in_ear_packs: { type: String },
-      in_ear_monitors: { type: String },
+      wired_in_ear_packs: { type: String, default: null, set: v => v === "" ? null : v },
+      wireless_in_ear_packs: { type: String, default: null, set: v => v === "" ? null : v },
+      in_ear_monitors: { type: String, default: null, set: v => v === "" ? null : v }
     },
+
     instrumentMics: {
-      extra_wired_instrument_mics: { type: String },
-      wireless_horn_mics: { type: String },
-      drum_mic_kit: { type: String },
+      extra_wired_instrument_mics: { type: String, default: null, set: v => v === "" ? null : v },
+      wireless_horn_mics: { type: String, default: null, set: v => v === "" ? null : v },
+      drum_mic_kit: { type: String, default: null, set: v => v === "" ? null : v }
     },
+
     speechMics: {
-      wireless_speech_mics: { type: String },
-      wired_speech_mics: { type: String },
+      wireless_speech_mics: { type: String, default: null, set: v => v === "" ? null : v },
+      wired_speech_mics: { type: String, default: null, set: v => v === "" ? null : v }
     },
-    cableLogistics: [
-      {
-        length: { type: String },
-        quantity: { type: String },
-      },
-    ],
-    extensionCableLogistics: [
-      {
-        length: { type: String },
-        quantity: { type: String },
-      },
-    ],
-    additionalEquipment: {
-      mic_stands: { type: String },
-      di_boxes: { type: String },
-      wireless_guitar_jacks: { type: String },
-    },
-    uplights: [
-      {
-        quantity: { type: String },
-        wattage: { type: Number },
-      },
-    ],
-    tbars: [
-      {
-        quantity: { type: String },
-        wattage: { type: Number },
-      },
-    ],
-    lightBars: [
-      {
-        quantity: { type: String },
-        wattage: { type: Number },
-      },
-    ],
-    discoBall: [
-      {
-        quantity: { type: String },
-        wattage: { type: Number },
-      },
-    ],
-    otherLighting: [
-      {
-        name: { type: String },
-        quantity: { type: String },
-        wattage: { type: Number },
-      },
-    ],
+
     paSpeakerSpecs: [
       {
-        name: { type: String },
-        quantity: { type: String },
-        wattage: { type: Number },
-      },
-    ],
-    mixingDesk: [
-      {
-        name: { type: String },
-        quantity: { type: String },
-        wattage: { type: Number },
-      },
-    ],
-    floorMonitorSpecs: [
-      {
-        name: { type: String },
-        quantity: { type: String },
-        wattage: { type: Number },
-      },
-    ],
-    djGearRequired: [
-      {
-        name: { type: String },
-        quantity: { type: String },
-        wattage: { type: Number },
-      },
-    ],
-    instrumentSpecs: [
-      {
-        name: { type: String },
-
-        wattage: { type: Number },
-      },
-    ],
-    djEquipment: [
-      {
-        name: { type: String },
-        quantity: { type: String },
-        wattage: { type: Number },
-      },
-    ],
-    backline: [
-      {
-        name: { type: String },
-        quantity: { type: String },
-        wattage: { type: Number },
-      },
-    ],
-    djEquipmentCategories: [
-      {
-        hasDjTable: { type: Boolean },
-        hasDjBooth: { type: Boolean },
-        hasMixingConsole: { type: Boolean },
-        hasCdjs: { type: Boolean },
-        hasVinylDecks: { type: Boolean },
-      },
-    ],
-    bank_account: {
-      sort_code: { type: String },
-      account_number: { type: String },
-      account_name: { type: String },
-      account_type: { type: String },
-    },
-    profilePicture: { type: String },
-    coverHeroImage: { type: String },
-    availability: [
-      { type: mongoose.Schema.Types.ObjectId, ref: "Availability" },
+        name: { type: String, default: "" },
+        quantity: { type: String, default: null, set: v => v === "" ? null : v },
+        wattage: { type: Number, default: 0 }
+      }
     ],
 
-    // NEW: Media & visual assets
-    digitalWardrobeBlackTie: [{ type: String }],
-    digitalWardrobeFormal: [{ type: String }],
-    digitalWardrobeSmartCasual: [{ type: String }],
-    digitalWardrobeSessionAllBlack: [{ type: String }],
-    additionalImages: [{ type: String }],
+    mixingDesk: [{ name: { type: String, default: "" }, quantity: { type: String, default: null, set: v=>v===""?null:v }, wattage: { type: Number, default: 0 } }],
+    floorMonitorSpecs: [{ name: { type: String, default: "" }, quantity: { type: String, default: null, set: v=>v===""?null:v }, wattage: { type: Number, default: 0 } }],
 
-    // NEW: Videos & MP3s
-    functionBandVideoLinks: [{ title: String, url: String }],
-    tscApprovedFunctionBandVideoLinks: [{ title: String, url: String }],
-    originalBandVideoLinks: [{ title: String, url: String }],
-    tscApprovedOriginalBandVideoLinks: [{ title: String, url: String }],
+    backline: [{ name: { type: String, default: "" }, quantity: { type: String, default: null, set: v=>v===""?null:v }, wattage: { type: Number, default: 0 } }],
+    djGearRequired: [{ name: { type: String, default: "" }, quantity: { type: String, default: null, set: v=>v===""?null:v }, wattage: { type: Number, default: 0 } }],
+    instrumentSpecs: [{ name: { type: String, default: "" }, wattage: { type: Number, default: 0 } }],
+    djEquipment: [{ name: { type: String, default: "" }, quantity: { type: String, default: null, set: v=>v===""?null:v }, wattage: { type: Number, default: 0 } }],
 
-    coverMp3s: [{ title: String, url: String }],
-    originalMp3s: [{ title: String, url: String }],
+    digitalWardrobeBlackTie: { type: [String], default: [] },
+    digitalWardrobeFormal: { type: [String], default: [] },
+    digitalWardrobeSmartCasual: { type: [String], default: [] },
+    digitalWardrobeSessionAllBlack: { type: [String], default: [] },
+    additionalImages: { type: [String], default: [] },
 
-    customRepertoire: { type: String },
-repertoire: [{
-  title: String,
-  artist: String,
-  year: Number,
-  genre: String
-}],
-    selectedSongs: [
-      {
-        title: String,
-        artist: String,
-        genre: String,
-        year: String,
-      },
-    ],
-    pat: { type: Boolean },
-    patExpiry: { type: Date },
-    patFile: { type: String },
-    pli: { type: Boolean },
-    pliExpiry: { type: Date },
-    pliFile: { type: String },
-    pliAmount: { type: Number },
-    deputy_contract_signed: { type: String },
-    agreementCheckboxes: [
-      {
-        termsAndConditions: { type: Boolean },
-        privacyPolicy: { type: Boolean },
-      },
-    ],
-    
-    dateRegistered: { type: Date, default: Date.now },
+    coverMp3s: { type: [{ title: String, url: String }], default: [] },
+    originalMp3s: { type: [{ title: String, url: String }], default: [] },
+
+    repertoire: [{
+      title: { type: String, default: "" },
+      artist: { type: String, default: "" },
+      year: { type: Number, default: null, required: false, set: v=>v===""?null:v },
+      genre: { type: String, default: "" }
+    }],
+
+    selectedSongs: [{
+      title: { type: String, default: "" },
+      artist: { type: String, default: "" },
+      genre: { type: String, default: "" },
+      year: { type: String, default: null, set: v=>v===""?null:v }
+    }],
+
+    pat: { type: Boolean, default: false },
+    patExpiry: { type: Date, default: null },
+    patFile: { type: String, default: null },
+    pli: { type: Boolean, default: false },
+    pliExpiry: { type: Date, default: null },
+    pliFile: { type: String, default: null },
+    pliAmount: { type: Number, default: null },
+
+    deputy_contract_signed: { type: String, default: null, set: v => v === "" ? null : v },
+    deputy_contract_agreed: { type: String, default: null, set: v => v === "" ? null : v },
+    deputy_contract_signed: { type: String, default: null, set: v => v === "" ? null : v },
+
+    dateRegistered: { type: Date, default: Date.now }
   },
-  
-  { minimize: false }
+
+  { minimize: false, minimize: false, strict: true }
 );
 
-musicianSchema.pre('save', function(next) {
-  const norm = (v = "") => {
-    let s = String(v || "").replace(/\s+/g, "");
-    if (!s) return "";
-    if (s.startsWith("+")) return s;
-    if (s.startsWith("07")) return s.replace(/^0/, "+44");
-    if (s.startsWith("44")) return `+${s}`;
-    return s;
-  };
-  if (this.isModified('phone') || this.isModified('phoneNumber')) {
-    this.phoneNormalized = norm(this.phone || this.phoneNumber);
-  }
-  next();
-});
-
-const musicianModel =
-  mongoose.models.musician || mongoose.model("musician", musicianSchema);
-
-  musicianSchema.index({ status: 1 });
+musicianSchema.index({ status: 1 });
 musicianSchema.index({ "instrumentation.instrument": 1 });
 musicianSchema.index({ other_skills: 1 });
 
-// Export this helper to use during form submission
-export const sanitizeMp3sForSubmission = (mp3s) =>
-  (mp3s || [])
-    .filter((mp3) => mp3.title || mp3.url)
-    .map(({ title, url }) => ({
-      title: title || "",
-      url: url || "",
-    }));
+const musicianModel =
+  mongoose.models.musician || mongoose.model("musician", musicianSchema);
 
 export default musicianModel;
