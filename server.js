@@ -95,6 +95,8 @@ const ALLOWED_HOSTS = new Set([
   "tscadmin.netlify.app",
   "tsc-backend-v2.onrender.com",
   "tsc2025.onrender.com",
+    "https://tsc-backend-v2.onrender.com/",
+     "https://tsc-backend-v2.onrender.com",
 
   // extra preview
   "meek-biscotti-8d5020.netlify.app",
