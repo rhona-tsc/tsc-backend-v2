@@ -16,7 +16,8 @@ const musicianSchema = new mongoose.Schema(
     phoneNormalized: { type: String, index: true },
     whatsappOptIn: { type: Boolean, default: false },
     password: { type: String },
-
+profilePhoto: { type: String, default: null },
+coverHeroImage: { type: String, default: null },
     basicInfo: {
       firstName: { type: String },
       lastName: { type: String },
@@ -46,6 +47,7 @@ const musicianSchema = new mongoose.Schema(
       default: "pending",
       set: v => v === "" ? null : v
     },
+
 
     academic_credentials: [
       {
@@ -119,24 +121,16 @@ const musicianSchema = new mongoose.Schema(
         set: v => v === "" ? [] : v // ✅ ignore invalid empty string arrays
       },
 
-      gender: {
-        type: String,
-        enum: ["Male", "Female", "Non-Binary", null],
-        default: null, // ✅ blank allowed
-        required: false,
-        set: v => v === "" ? null : v
-      },
-
-      range: {
-        type: String,
-        enum: [
-          "Soprano", "Mezzo-Soprano", "Alto", "Tenor", "Baritone",
-          "Bass", "Not sure", null
-        ],
-        default: null, // ✅ blank allowed
-        required: false,
-        set: v => v === "" ? null : v
-      },
+gender: {
+  type: String,
+  enum: ["Male", "Female", "Other", ""], // ✅ blank now allowed
+  default: "",
+},
+range: {
+  type: String,
+  enum: ["Soprano", "Alto", "Tenor", "Mezzo-Soprano", ""], // ✅ blank now allowed
+  default: "",
+},
 
       rap: {
         type: String,
@@ -225,8 +219,6 @@ const musicianSchema = new mongoose.Schema(
     pliFile: { type: String, default: null },
     pliAmount: { type: Number, default: null },
 
-    deputy_contract_signed: { type: String, default: null, set: v => v === "" ? null : v },
-    deputy_contract_agreed: { type: String, default: null, set: v => v === "" ? null : v },
     deputy_contract_signed: { type: String, default: null, set: v => v === "" ? null : v },
 
     dateRegistered: { type: Date, default: Date.now }
