@@ -15,20 +15,6 @@ const AvailabilityDeputySchema = new mongoose.Schema(
 
 const availabilityBadgesSchema = new mongoose.Schema(
   {
-    active: { type: Boolean, default: false },
-    isDeputy: { type: Boolean, default: false },
-    vocalistName: { type: String, default: "" }, 
-    musicianId: { type: String, default: "" },   
-    inPromo: { type: Boolean, default: false },
-    dateISO: { type: String, default: "" },
-    address: { type: String, default: "" },
-    setAt: { type: Date, default: null },
-    photoUrl: { type: String, default: "" },
-
-    // deputies list (lead slot)
-    deputies: { type: [AvailabilityDeputySchema], default: [] },
-
-    // 🚀 NEW — slot array
     slots: [
       {
         slotIndex: { type: Number, default: 0 },
