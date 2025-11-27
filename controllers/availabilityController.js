@@ -1012,6 +1012,8 @@ async function getDeputyDisplayBits(dep) {
       (dep?._id && String(dep._id)) ||
       "";
 
+      let resolvedMusicianId = initialMusicianId; // ⬅️ track locally; never mutate dep
+
     let photoUrl = getPictureUrlFrom(dep);
     console.log("📸 Step 1: Direct deputy picture →", photoUrl || "❌ none");
 
@@ -1029,11 +1031,12 @@ async function getDeputyDisplayBits(dep) {
         .lean();
 
       if (mus) {
-        photoUrl = getPictureUrlFrom(mus);
-        console.log("📸 Step 2 result: From musicianId →", photoUrl || "❌ none");
-      } else {
-        console.warn("⚠️ Step 2: No musician found by ID", initialMusicianId);
-      }
+  photoUrl = getPictureUrlFrom(mus);
+  resolvedMusicianId = String(mus._id || initialMusicianId);
+  console.log("📸 Step 2 result: From musicianId →", photoUrl || "❌ none");
+} else {
+  console.warn("⚠️ Step 2: No musician found by ID", initialMusicianId);
+}
     }
 
     /* -------------------------------------------------------------- */
@@ -1069,10 +1072,10 @@ async function getDeputyDisplayBits(dep) {
 
         if (musByPhone) {
           mus = musByPhone;
+          resolvedMusicianId = String(musByPhone._id || resolvedMusicianId);
           photoUrl = getPictureUrlFrom(musByPhone);
           console.log("📸 Step 2.5 result: Found by phone →", photoUrl || "❌ none");
 
-          if (!dep.musicianId) dep.musicianId = musByPhone._id;
         } else {
           console.warn("⚠️ Step 2.5: No musician found by phone", normalizedPhone);
         }
@@ -1101,11 +1104,12 @@ async function getDeputyDisplayBits(dep) {
 
       if (musByEmail) {
         mus = musByEmail;
+        resolvedMusicianId = String(musByEmail._id || resolvedMusicianId);
         photoUrl = getPictureUrlFrom(musByEmail);
         resolvedEmail = musByEmail.email;
         console.log("📸 Step 3 result: Found by email →", photoUrl || "❌ none");
 
-        if (!dep.musicianId) dep.musicianId = musByEmail._id;
+      
       } else {
         console.warn("⚠️ Step 3: No musician found for email", resolvedEmail);
       }
@@ -1114,14 +1118,13 @@ async function getDeputyDisplayBits(dep) {
     /* -------------------------------------------------------------- */
     /* 🟢 FINAL RESOLUTION                                            */
     /* -------------------------------------------------------------- */
-    const resolvedMusicianId =
-      (dep?.musicianId && String(dep.musicianId)) ||
-      initialMusicianId ||
-      "";
+const finalMusicianId = String(
+  resolvedMusicianId || dep?.musicianId || initialMusicianId || ""
+);
 
-    const profileUrl = resolvedMusicianId
-      ? `${PUBLIC_SITE_BASE}/musician/${resolvedMusicianId}`
-      : "";
+const profileUrl = finalMusicianId
+  ? `${PUBLIC_SITE_BASE}/musician/${finalMusicianId}`
+  : "";
 
     const FALLBACK_PHOTO =
       "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1761313694/profile_placeholder_rcdly4.png";
@@ -1132,7 +1135,7 @@ async function getDeputyDisplayBits(dep) {
     }
 
     const finalBits = {
-      musicianId: resolvedMusicianId,
+      musicianId: finalMusicianId,
       photoUrl,
       profileUrl,
       resolvedEmail,
@@ -1409,6 +1412,7 @@ const setOnInsert = {
   dateISO,
   phone,
   v2: true,
+  
   enquiryId,
   slotIndex: slotIndexForThis,
   createdAt: now,
@@ -1627,6 +1631,7 @@ const setOnInsert = {
   actId,
   lineupId: lineup?._id || null,
   dateISO,
+  isDeputy: !!isDeputy, 
   phone,
   v2: true,
   enquiryId,
@@ -1642,6 +1647,7 @@ const setAlways = {
     enrichedMember.musicianId ||
     targetMember.musicianId ||
     null,
+    
   musicianName: `${enrichedMember.firstName || targetMember.firstName || ""} ${enrichedMember.lastName || targetMember.lastName || ""}`.trim(),
   musicianEmail: enrichedMember.email || targetMember.email || "",
   photoUrl: enrichedMember.photoUrl || enrichedMember.profilePicture || "",
@@ -1881,10 +1887,10 @@ if (!musician && updated?.musicianName) {
 }
 
 // 🔹 use musician (for deputies) or updated (for lead) directly
-const bits = await getDeputyDisplayBits(
-  (musician && musician.toObject ? musician.toObject() : musician) ||
-  (updated && updated.toObject ? updated.toObject() : updated)
-);
+const bits = await getDeputyDisplayBits({
+  ...((musician && musician.toObject ? musician.toObject() : musician) || {}),
+  ...((updated && updated.toObject ? updated.toObject() : updated) || {}),
+});
 const emailForInvite =
   bits?.resolvedEmail ||
   musician?.email ||
@@ -2004,9 +2010,10 @@ console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.
         await sendWhatsAppText(toE164, "Super — we’ll send a diary invite to log the enquiry for your records.");
 
         // 2️⃣ Mark as available + rebuild badge
-        updated.status = "read";
-        if (isDeputy) updated.isDeputy = true;
-        await updated.save();
+       await AvailabilityModel.updateOne(
+  { _id: updated._id },
+  { $set: { status: "read", ...(isDeputy ? { isDeputy: true } : {}) } }
+);
 
 const badgeResult = await rebuildAndApplyAvailabilityBadge({
   actId,
@@ -2596,22 +2603,19 @@ export async function pingDeputiesFor(
 
 // ✅ buildAvailabilityBadgeFromRows (refined to include both photoUrl & profileUrl)
 // controllers/availabilityBadgeController.js (or wherever it lives)
-export async function buildAvailabilityBadgeFromRows({
-  actId,
-  dateISO,
-  hasLineups = true,
-  skipLead = true,                 // 👈 NEW: default to skipping lead
-  deputyStates = ["yes"],          // 👈 NEW: only emit deputies with these replies
-}) {
+export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineups = true }) {
+  console.log("🟣 buildAvailabilityBadgeFromRows START", { actId, dateISO, hasLineups });
+
   const rows = await AvailabilityModel.find({
     actId,
     dateISO,
     reply: { $in: ["yes", "no", "unavailable", null] },
     v2: true,
   })
-    .select("musicianId slotIndex reply updatedAt isDeputy")
+    .select("musicianId slotIndex reply updatedAt isDeputy photoUrl") // ⬅️ pull photoUrl through
     .lean();
 
+  console.log("📥 buildBadge: availability rows:", rows);
   if (!rows.length) return null;
 
   const groupedBySlot = rows.reduce((acc, row) => {
@@ -2619,78 +2623,90 @@ export async function buildAvailabilityBadgeFromRows({
     (acc[key] ||= []).push(row);
     return acc;
   }, {});
+  console.log("📦 buildBadge: rows grouped by slot:", Object.keys(groupedBySlot));
 
   const slots = [];
   const orderedKeys = Object.keys(groupedBySlot).sort((a, b) => Number(a) - Number(b));
 
   for (const slotKey of orderedKeys) {
     const slotRows = groupedBySlot[slotKey];
+    console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows);
 
-    const leadRows   = slotRows.filter((r) => r.isDeputy !== true);
-    const deputyRows = slotRows.filter((r) => r.isDeputy === true);
+    const leadRows   = slotRows.filter(r => r.isDeputy !== true);
+    const deputyRows = slotRows.filter(r => r.isDeputy === true);
 
-    // Lead (only used if skipLead === false)
-    const leadReply =
-      leadRows
-        .filter((r) => ["yes", "no", "unavailable"].includes(r.reply))
-        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
+    // Latest by reply type
+    const latest = (arr, allow = ["yes","no","unavailable"]) =>
+      arr.filter(r => allow.includes(r.reply))
+         .sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
 
-    // Deputies to emit as *top-level* slots
+    const deputyYes = latest(deputyRows, ["yes"]);
+    const leadYes   = latest(leadRows, ["yes"]);
+    const leadAny   = latest(leadRows, ["yes","no","unavailable"]); // fallback if nobody said yes
+
+    // 🎛 precedence: deputy YES → lead YES → lead (no/unavailable) → pending
+    let chosenRow   = deputyYes || leadYes || leadAny || null;
+    let chosenType  = deputyYes ? "deputy" : (leadYes || leadAny ? "lead" : "pending");
+
+    // Build deputies list (newest first)
     const deputyReplies = deputyRows
-      .filter((r) => deputyStates.includes(r.reply))        // default: only “yes”
-      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+      .filter(r => ["yes","no","unavailable"].includes(r.reply))
+      .sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
-    // Push each deputy as its own top-level slot (keeps slotIndex consistent)
+    const deputies = [];
     for (const r of deputyReplies) {
       try {
         const bits = await getDeputyDisplayBits({ musicianId: r.musicianId });
         let depId = bits?.musicianId || r.musicianId || "";
         if (depId && typeof depId !== "string") depId = String(depId);
 
-        slots.push({
+        deputies.push({
           slotIndex: Number(slotKey),
           isDeputy: true,
-          vocalistName: bits?.resolvedName || bits?.firstName || "",
           musicianId: depId || "",
-          photoUrl: bits?.photoUrl || null,
-          profileUrl: bits?.profileUrl || null,
-          deputies: [],                // deputies are promoted, so keep empty
-          setAt: r.updatedAt || null,
-          state: r.reply,              // 'yes' | 'no' | 'unavailable'
+          photoUrl: bits?.photoUrl || r.photoUrl || null, // ⬅️ fallback to row.photoUrl
+          profileUrl: bits?.profileUrl || (depId ? `${globalThis?.origin || ""}/musician/${depId}` : null),
+          vocalistName: bits?.resolvedName || bits?.firstName || "",
+          state: r.reply,
+          setAt: r.updatedAt,
+          repliedAt: r.updatedAt,
         });
       } catch (e) {
         console.warn("⚠️ getDeputyDisplayBits (deputy) failed:", e?.message, r?.musicianId);
       }
     }
 
-    // Optionally include the lead as a top-level slot
-    if (!skipLead && leadReply) {
+    // Slot header (lead or deputy based on precedence)
+    let headerBits = null;
+    if (chosenRow) {
       try {
-        const leadBits = await getDeputyDisplayBits({ musicianId: leadReply.musicianId });
-        slots.push({
-          slotIndex: Number(slotKey),
-          isDeputy: false,
-          vocalistName: leadBits?.resolvedName || leadBits?.firstName || "",
-          musicianId: leadBits?.musicianId ? String(leadBits.musicianId) : String(leadReply.musicianId),
-          photoUrl: leadBits?.photoUrl || null,
-          profileUrl: leadBits?.profileUrl || null,
-          deputies: [],
-          setAt: leadReply?.updatedAt || null,
-          state: leadReply?.reply || "pending",
-        });
+        headerBits = await getDeputyDisplayBits({ musicianId: chosenRow.musicianId });
       } catch (e) {
-        console.warn("⚠️ getDeputyDisplayBits (lead) failed:", e?.message);
+        console.warn("⚠️ getDeputyDisplayBits (header) failed:", e?.message);
       }
     }
+
+    const chosenMusicianId = (headerBits?.musicianId || chosenRow?.musicianId || null);
+    let chosenIdStr = chosenMusicianId && typeof chosenMusicianId !== "string"
+      ? String(chosenMusicianId)
+      : (chosenMusicianId || null);
+
+    slots.push({
+      slotIndex: Number(slotKey),
+      isDeputy: chosenType === "deputy",          // ⬅️ marks deputy header when applicable
+      vocalistName: headerBits?.resolvedName || headerBits?.firstName || "",
+      musicianId: chosenIdStr,
+      photoUrl: headerBits?.photoUrl || chosenRow?.photoUrl || null, // ⬅️ use row photo if lookup fails
+      profileUrl: headerBits?.profileUrl || (chosenIdStr ? `${globalThis?.origin || ""}/musician/${chosenIdStr}` : null),
+      deputies,
+      setAt: chosenRow?.updatedAt || null,
+      state: chosenRow?.reply || "pending",
+    });
   }
 
-  // If nothing matched (e.g., only lead present and skipLead=true), return an empty slots badge
-  return {
-    dateISO,
-    address: "TBC",
-    active: true,
-    slots, // already ordered
-  };
+  const badge = { dateISO, address: "TBC", active: true, slots };
+  console.log("💜 FINAL BADGE:", badge);
+  return badge;
 }
 
 
