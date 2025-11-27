@@ -76,6 +76,36 @@ const toE164 = (raw = "") => {
   return s;
 };
 
+const normalize44 = (raw='') =>
+  String(raw).replace(/\s+/g, '').replace(/^(\+44|44|0)/, '+44');
+
+async function findCanonicalMusicianByPhone(phoneLike) {
+  if (!phoneLike) return null;
+  const p = normalize44(phoneLike);
+  return await Musician.findOne({
+    $or: [
+      { phoneNormalized: p },
+      { phone: p },
+      { phoneNumber: p },
+      { 'contact.phone': p },
+      { whatsappNumber: p },
+    ],
+  })
+  .select('_id firstName lastName email profilePicture musicianProfileImage profileImage photoUrl imageUrl phoneNormalized')
+  .lean();
+}
+
+function pickPic(mus) {
+  return (
+    mus?.profilePicture ||
+    mus?.musicianProfileImage ||
+    mus?.profileImage ||
+    mus?.photoUrl ||
+    mus?.imageUrl ||
+    ''
+  );
+}
+
 /**
  * Compute a member's total fee (base + travel) given act, member, and address.
  */
@@ -1516,6 +1546,23 @@ if (isDeputy && deputy?.id && !targetMember.musicianId) {
     const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
     if (!phone) throw new Error("Missing phone");
 
+    // 🔎 Canonical musician from Musicians collection (by phone)
+const canonical = await findCanonicalMusicianByPhone(phone);
+
+// Prefer canonical-from-phone; fall back to any enriched/act ids
+const canonicalId = canonical?._id
+  || enrichedMember?._id
+  || targetMember?.musicianId
+  || null;
+
+const canonicalName = canonical
+  ? `${canonical.firstName || ''} ${canonical.lastName || ''}`.trim()
+  : `${targetMember.firstName || ''} ${targetMember.lastName || ''}`.trim();
+
+const canonicalPhoto = pickPic(canonical) ||
+  enrichedMember?.photoUrl ||
+  enrichedMember?.profilePicture ||
+  '';
     /* -------------------------------------------------------------- */
     /* 🔐 Strong duplicate guard                                      */
     /*    (For deputies we scope by slotIndex to avoid cross-slot     */
@@ -1632,7 +1679,6 @@ const setOnInsert = {
   actId,
   lineupId: lineup?._id || null,
   dateISO,
-  // ⛔️ removed: isDeputy here would conflict with $set
   phone,
   v2: true,
   enquiryId,
@@ -1640,19 +1686,14 @@ const setOnInsert = {
   createdAt: now,
   status: "sent",
   reply: null,
+  musicianId: canonicalId,        // ✅ insert with canonical musician id
 };
 
 const setAlways = {
-  isDeputy: !!isDeputy, // ✅ only here
-  musicianId:
-    enrichedMember._id ||
-    enrichedMember.musicianId ||
-    targetMember.musicianId ||
-    null,
-
-  musicianName: `${enrichedMember.firstName || targetMember.firstName || ""} ${enrichedMember.lastName || targetMember.lastName || ""}`.trim(),
-  musicianEmail: enrichedMember.email || targetMember.email || "",
-  photoUrl: enrichedMember.photoUrl || enrichedMember.profilePicture || "",
+  isDeputy: !!isDeputy,
+  musicianName: canonicalName,    // ✅ name from canonical
+  musicianEmail: canonical?.email || targetMember.email || "",
+  photoUrl: canonicalPhoto,       // ✅ photo from canonical
   address: fullFormattedAddress,
   formattedAddress: fullFormattedAddress,
   formattedDate,
@@ -1662,6 +1703,7 @@ const setAlways = {
   duties: body?.inheritedDuties || targetMember.instrument || "Performance",
   fee: String(finalFee),
   updatedAt: now,
+  profileUrl: canonicalId ? `${PUBLIC_SITE_BASE}/musician/${canonicalId}` : "",
 };
 
 const saved = await AvailabilityModel.findOneAndUpdate(
@@ -1841,24 +1883,37 @@ export const twilioInbound = async (req, res) => {
         console.warn("⚠️ No matching AvailabilityModel found for inbound reply.");
         return;
       }
+// Resolve canonical Musician by the deputy’s phone (preferred) or the row’s id
+const byPhone = await findCanonicalMusicianByPhone(updated.phone);
+let musician = byPhone || (updated?.musicianId ? await Musician.findById(updated.musicianId).lean() : null);
+
+// If the availability row still carries the ACT-collection id, fix it to the canonical Musicians id
+if (updated.isDeputy && musician && String(updated.musicianId) !== String(musician._id)) {
+  await AvailabilityModel.updateOne(
+    { _id: updated._id },
+    {
+      $set: {
+        musicianId: musician._id,
+        musicianName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+        musicianEmail: musician.email || updated.musicianEmail || "",
+        photoUrl: pickPic(musician),
+        profileUrl: `${BASE_URL}/musician/${musician._id}`,
+      },
+    }
+  );
+
+  // keep in-memory copy in sync for the rest of this handler
+  updated.musicianId = musician._id;
+  updated.musicianName = `${musician.firstName || ""} ${musician.lastName || ""}`.trim();
+  updated.musicianEmail = musician.email || updated.musicianEmail;
+  updated.photoUrl = pickPic(musician) || updated.photoUrl;
+}
+
 
       // 🧩 Debug + ensure slotIndex is available for deputy notifications
 const slotIndex = typeof updated.slotIndex === "number" ? updated.slotIndex : null;
 console.log("🎯 [twilioInbound] Matched slotIndex:", slotIndex);
 
-    let musician = updated?.musicianId
-        ? await Musician.findById(updated.musicianId).lean()
-        : null;
-
-      if (!musician && updated?.phone) {
-        musician = await Musician.findOne({
-          $or: [
-            { phone: updated.phone },
-            { whatsappNumber: updated.phone },
-            { "contact.phone": updated.phone },
-          ],
-        }).lean();
-      }
 
 const isDeputy = Boolean(updated?.isDeputy);
 
