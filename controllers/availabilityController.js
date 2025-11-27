@@ -1882,7 +1882,16 @@ console.log("🎯 [twilioInbound] Matched slotIndex:", slotIndex);
         }).lean();
       }
 
-const isDeputy = false;
+const isDeputy = Boolean(updated?.isDeputy);
+
+// If this row should be a deputy row but the flag isn't persisted yet, persist it.
+if (isDeputy && updated?.isDeputy !== true) {
+  await AvailabilityModel.updateOne(
+    { _id: updated._id },
+    { $set: { isDeputy: true } }
+  );
+  updated.isDeputy = true;
+}
 
 // 🔍 Ensure we always have musician data (lead or deputy)
 if (!musician && updated?.musicianId) {
@@ -2621,11 +2630,7 @@ export async function buildAvailabilityBadgeFromRows({
   dateISO,
   hasLineups = true,
 }) {
-  console.log("🟣 buildAvailabilityBadgeFromRows START", {
-    actId,
-    dateISO,
-    hasLineups,
-  });
+  console.log("🟣 buildAvailabilityBadgeFromRows START", { actId, dateISO, hasLineups });
 
   const rows = await AvailabilityModel.find({
     actId,
@@ -2637,7 +2642,6 @@ export async function buildAvailabilityBadgeFromRows({
     .lean();
 
   console.log("📥 buildBadge: availability rows:", rows);
-
   if (!rows.length) {
     console.log("ℹ️ No availability rows found — returning null badge");
     return null;
@@ -2650,68 +2654,78 @@ export async function buildAvailabilityBadgeFromRows({
     acc[key].push(row);
     return acc;
   }, {});
-
   console.log("📦 buildBadge: rows grouped by slot:", Object.keys(groupedBySlot));
 
   const slots = [];
 
-  for (const [slotKey, slotRows] of Object.entries(groupedBySlot)) {
+  // keep slot order stable
+  const orderedKeys = Object.keys(groupedBySlot).sort((a, b) => Number(a) - Number(b));
+
+  for (const slotKey of orderedKeys) {
+    const slotRows = groupedBySlot[slotKey];
     console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows);
 
-    // ⭐ NEW: We ONLY pick a leadRow if they actually replied
-    let leadRow = slotRows.find((r) =>
-      ["yes", "no", "unavailable"].includes(r.reply)
-    );
+    // Split lead vs deputy
+    const leadRows   = slotRows.filter((r) => r.isDeputy !== true);
+    const deputyRows = slotRows.filter((r) => r.isDeputy === true);
 
-    if (!leadRow) {
-      console.log(`⏳ SLOT ${slotKey} pending — no real replies yet`);
-      slots.push({
-        slotIndex: Number(slotKey),
-        isDeputy: false,
-        vocalistName: "",
-        musicianId: null,
-        photoUrl: null,
-        profileUrl: null,
-        deputies: [],
-        setAt: null,
-        state: "pending",
-      });
-      continue;
+    // Latest meaningful lead reply (yes/no/unavailable)
+    const leadReply =
+      leadRows
+        .filter((r) => ["yes", "no", "unavailable"].includes(r.reply))
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
+
+    // Lead display bits (if we have a replied lead)
+    let leadDisplayBits = null;
+    if (leadReply) {
+      try {
+        leadDisplayBits = await getDeputyDisplayBits({ musicianId: leadReply.musicianId });
+      } catch (e) {
+        console.warn("⚠️ getDeputyDisplayBits (lead) failed:", e?.message);
+      }
     }
 
-    console.log(`🎯 SLOT ${slotKey} — picked lead row:`, {
-      musicianId: leadRow.musicianId,
-      reply: leadRow.reply,
-      updatedAt: leadRow.updatedAt,
-    });
+    // Build deputies (can be many) – newest first
+    const deputyReplies = deputyRows
+      .filter((r) => ["yes", "no", "unavailable"].includes(r.reply))
+      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
-    // ✅ FIX: define depLike FIRST, then call lookup
-    const depLike = { musicianId: leadRow.musicianId };
+    const deputies = [];
+    for (const r of deputyReplies) {
+      try {
+        const bits = await getDeputyDisplayBits({ musicianId: r.musicianId });
+        let depId = bits?.musicianId || r.musicianId || "";
+        if (depId && typeof depId !== "string") depId = String(depId);
 
-    const displayBits = await getDeputyDisplayBits(depLike);
-
-    console.log("🧩 SLOT", slotKey, "display bits:", displayBits);
-
-    let resolvedMusicianId = displayBits?.musicianId || "";
-    if (resolvedMusicianId && typeof resolvedMusicianId !== "string") {
-      resolvedMusicianId = String(resolvedMusicianId);
+        deputies.push({
+          slotIndex: Number(slotKey),
+          isDeputy: true,
+          musicianId: depId || "",
+          photoUrl: bits?.photoUrl || null,
+          profileUrl: bits?.profileUrl || null,
+          vocalistName: bits?.resolvedName || bits?.firstName || "",
+          state: r.reply,             // 'yes' | 'no' | 'unavailable'
+          setAt: r.updatedAt,
+          repliedAt: r.updatedAt,
+        });
+      } catch (e) {
+        console.warn("⚠️ getDeputyDisplayBits (deputy) failed:", e?.message, r?.musicianId);
+      }
     }
 
-    const vocalistName =
-      displayBits?.resolvedName ||
-      displayBits?.firstName ||
-      "";
-
+    // Push final slot (lead stays lead; deputies live under .deputies)
     slots.push({
       slotIndex: Number(slotKey),
-      isDeputy: !!leadRow.isDeputy,
-      vocalistName,
-      musicianId: resolvedMusicianId,
-      photoUrl: displayBits.photoUrl || null,
-      profileUrl: displayBits.profileUrl || null,
-      deputies: [],
-      setAt: leadRow.updatedAt,
-      state: leadRow.reply,
+      isDeputy: false,
+      vocalistName: leadDisplayBits?.resolvedName || leadDisplayBits?.firstName || "",
+      musicianId: leadDisplayBits?.musicianId
+        ? String(leadDisplayBits.musicianId)
+        : (leadReply ? String(leadReply.musicianId) : null),
+      photoUrl: leadDisplayBits?.photoUrl || null,
+      profileUrl: leadDisplayBits?.profileUrl || null,
+      deputies,                               // 👈 all deputies for this slot
+      setAt: leadReply?.updatedAt || null,
+      state: leadReply?.reply || "pending",   // lead state only
     });
   }
 
@@ -2719,7 +2733,7 @@ export async function buildAvailabilityBadgeFromRows({
     dateISO,
     address: "TBC",
     active: true,
-    slots: slots.sort((a, b) => a.slotIndex - b.slotIndex),
+    slots, // already ordered
   };
 
   console.log("💜 FINAL BADGE:", badge);
