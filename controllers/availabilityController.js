@@ -397,19 +397,30 @@ export async function notifyDeputies({
 
       console.log(`🎯 Sending deputy enquiry to ${deputy.firstName || deputy.name} (slot ${slotIndex ?? "?"})`);
 
-      await triggerAvailabilityRequest({
-        actId,
-        lineupId,
-        dateISO,
-        formattedAddress,
-        clientName,
-        clientEmail,
-        isDeputy: true,
-        deputy: { ...deputy, phone: cleanPhone },
-        inheritedFee,
-        inheritedDuties: vocalist.instrument || "Vocalist",
-        skipDuplicateCheck,
-      });
+await triggerAvailabilityRequest({
+  actId,
+  lineupId,
+  dateISO,
+  slotIndex, // 👈 make sure we pass it through
+  formattedAddress,
+  clientName,
+  clientEmail,
+
+  isDeputy: true,                      // 👈 hard-assert deputy
+  deputy: {                            // normalize the deputy payload we send
+    id: deputy.id || deputy.musicianId || deputy._id || null,
+    musicianId: deputy.musicianId || deputy.id || deputy._id || null,
+    firstName: deputy.firstName || deputy.name || "",
+    lastName: deputy.lastName || "",
+    phone: cleanPhone,                 // normalized above
+    email: deputy.email || "",
+    imageUrl: deputy.imageUrl || deputy.photoUrl || null,
+  },
+
+  inheritedFee,
+  inheritedDuties: vocalist.instrument || "Vocalist",
+  skipDuplicateCheck,
+});
 
       existingSet.add(cleanPhone);
       totalSent++;
