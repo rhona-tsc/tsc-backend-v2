@@ -2634,76 +2634,63 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     const slotRows = groupedBySlot[slotKey];
     console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows);
 
-    const leadRows   = slotRows.filter(r => r.isDeputy !== true);
-    const deputyRows = slotRows.filter(r => r.isDeputy === true);
+   // Split lead vs deputy
+const leadRows   = slotRows.filter(r => r.isDeputy !== true);
+const deputyRows = slotRows.filter(r => r.isDeputy === true);
 
-    // Latest by reply type
-    const latest = (arr, allow = ["yes","no","unavailable"]) =>
-      arr.filter(r => allow.includes(r.reply))
-         .sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
+// Latest meaningful lead reply
+const leadReply = leadRows
+  .filter(r => ["yes","no","unavailable"].includes(r.reply))
+  .sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
 
-    const deputyYes = latest(deputyRows, ["yes"]);
-    const leadYes   = latest(leadRows, ["yes"]);
-    const leadAny   = latest(leadRows, ["yes","no","unavailable"]); // fallback if nobody said yes
+let leadDisplayBits = null;
+if (leadReply) {
+  try {
+    leadDisplayBits = await getDeputyDisplayBits({ musicianId: leadReply.musicianId });
+  } catch (e) {
+    console.warn("getDeputyDisplayBits (lead) failed:", e?.message);
+  }
+}
 
-    // 🎛 precedence: deputy YES → lead YES → lead (no/unavailable) → pending
-    let chosenRow   = deputyYes || leadYes || leadAny || null;
-    let chosenType  = deputyYes ? "deputy" : (leadYes || leadAny ? "lead" : "pending");
+// Build deputies array — include 'state'
+const deputyReplies = deputyRows
+  .filter(r => ["yes","no","unavailable"].includes(r.reply))
+  .sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
-    // Build deputies list (newest first)
-    const deputyReplies = deputyRows
-      .filter(r => ["yes","no","unavailable"].includes(r.reply))
-      .sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-
-    const deputies = [];
-    for (const r of deputyReplies) {
-      try {
-        const bits = await getDeputyDisplayBits({ musicianId: r.musicianId });
-        let depId = bits?.musicianId || r.musicianId || "";
-        if (depId && typeof depId !== "string") depId = String(depId);
-
-        deputies.push({
-          slotIndex: Number(slotKey),
-          isDeputy: true,
-          musicianId: depId || "",
-          photoUrl: bits?.photoUrl || r.photoUrl || null, // ⬅️ fallback to row.photoUrl
-          profileUrl: bits?.profileUrl || (depId ? `${globalThis?.origin || ""}/musician/${depId}` : null),
-          vocalistName: bits?.resolvedName || bits?.firstName || "",
-          state: r.reply,
-          setAt: r.updatedAt,
-          repliedAt: r.updatedAt,
-        });
-      } catch (e) {
-        console.warn("⚠️ getDeputyDisplayBits (deputy) failed:", e?.message, r?.musicianId);
-      }
-    }
-
-    // Slot header (lead or deputy based on precedence)
-    let headerBits = null;
-    if (chosenRow) {
-      try {
-        headerBits = await getDeputyDisplayBits({ musicianId: chosenRow.musicianId });
-      } catch (e) {
-        console.warn("⚠️ getDeputyDisplayBits (header) failed:", e?.message);
-      }
-    }
-
-    const chosenMusicianId = (headerBits?.musicianId || chosenRow?.musicianId || null);
-    let chosenIdStr = chosenMusicianId && typeof chosenMusicianId !== "string"
-      ? String(chosenMusicianId)
-      : (chosenMusicianId || null);
-
-    slots.push({
+const deputies = [];
+for (const r of deputyReplies) {
+  try {
+    const bits = await getDeputyDisplayBits({ musicianId: r.musicianId, phone: r.phone, email: r.musicianEmail });
+    deputies.push({
       slotIndex: Number(slotKey),
-      isDeputy: chosenType === "deputy",          // ⬅️ marks deputy header when applicable
-      vocalistName: headerBits?.resolvedName || headerBits?.firstName || "",
-      musicianId: chosenIdStr,
-      photoUrl: headerBits?.photoUrl || chosenRow?.photoUrl || null, // ⬅️ use row photo if lookup fails
-      profileUrl: headerBits?.profileUrl || (chosenIdStr ? `${globalThis?.origin || ""}/musician/${chosenIdStr}` : null),
-      deputies,
-      setAt: chosenRow?.updatedAt || null,
-      state: chosenRow?.reply || "pending",
+      isDeputy: true,
+      musicianId: String(bits?.musicianId || r.musicianId || ""),
+      photoUrl: bits?.photoUrl || null,
+      profileUrl: bits?.profileUrl || "",
+      vocalistName: bits?.resolvedName || bits?.firstName || "",
+      state: r.reply,            // <-- keep this; UI uses it
+      setAt: r.updatedAt,
+      repliedAt: r.repliedAt || r.updatedAt || null,
     });
+  } catch (e) {
+    console.warn("getDeputyDisplayBits (deputy) failed:", e?.message, r?.musicianId);
+  }
+}
+
+// Final slot (ALWAYS lead container; never deputy)
+slots.push({
+  slotIndex: Number(slotKey),
+  isDeputy: false,               // <-- important
+  vocalistName: leadDisplayBits?.resolvedName || "",
+  musicianId: leadDisplayBits?.musicianId
+    ? String(leadDisplayBits.musicianId)
+    : (leadReply ? String(leadReply.musicianId) : null),
+  photoUrl: leadDisplayBits?.photoUrl || null,
+  profileUrl: leadDisplayBits?.profileUrl || "",
+  deputies,
+  setAt: leadReply?.updatedAt || null,
+  state: leadReply?.reply || "pending",
+});
   }
 
   const badge = { dateISO, address: "TBC", active: true, slots };
