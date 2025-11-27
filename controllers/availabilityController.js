@@ -1401,42 +1401,48 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         const realMusicianId =
           musicianDoc?._id || vMember.musicianId || vMember._id || null;
 
-        const now = new Date();
-        const query = { actId, dateISO, phone, slotIndex: slotIndexForThis };
-        const setOnInsert = {
-          actId,
-          lineupId: lineup?._id || null,
-          dateISO,
-          phone,
-          v2: true,
-          enquiryId,
-          slotIndex: slotIndexForThis,
-          createdAt: now,
-          status: "sent",
-          reply: null,
-        };
-        const setAlways = {
-          isDeputy: false, // 👈 explicit lead
-          musicianId: realMusicianId,
-          musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
-          musicianEmail: enriched.email || "",
-          photoUrl: enriched.photoUrl || enriched.profilePicture || "",
-          address: fullFormattedAddress,
-          formattedAddress: fullFormattedAddress,
-          formattedDate,
-          clientName: resolvedClientName || "",
-          clientEmail: resolvedClientEmail || "",
-          actName: act?.tscName || act?.name || "",
-          duties: vMember.instrument || "Vocalist",
-          fee: String(finalFee),
-          updatedAt: now,
-        };
+const now = new Date();
+const query = { actId, dateISO, phone, slotIndex: slotIndexForThis };
+const setOnInsert = {
+  actId,
+  lineupId: lineup?._id || null,
+  dateISO,
+  phone,
+  v2: true,
+  enquiryId,
+  slotIndex: slotIndexForThis,
+  createdAt: now,
+  status: "sent",
+  reply: null,
+};
+const setAlways = {
+  isDeputy: false, // 👈 force LEAD on every write
+  musicianId: realMusicianId,
+  musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
+  musicianEmail: enriched.email || "",
+  photoUrl: enriched.photoUrl || enriched.profilePicture || "",
+  address: fullFormattedAddress,
+  formattedAddress: fullFormattedAddress,
+  formattedDate,
+  clientName: resolvedClientName || "",
+  clientEmail: resolvedClientEmail || "",
+  actName: act?.tscName || act?.name || "",
+  duties: vMember.instrument || "Vocalist",
+  fee: String(finalFee),
+  updatedAt: now,
+};
 
-        await AvailabilityModel.findOneAndUpdate(
-          query,
-          { $setOnInsert: setOnInsert, $set: setAlways },
-          { new: true, upsert: true }
-        );
+const savedLead = await AvailabilityModel.findOneAndUpdate(
+  query,
+  { $setOnInsert: setOnInsert, $set: setAlways },
+  { new: true, upsert: true }
+);
+
+console.log("✅ Upserted LEAD row", {
+  slot: slotIndexForThis,
+  isDeputy: savedLead?.isDeputy,
+  musicianId: String(savedLead?.musicianId || ""),
+});
 
         const msg = `Hi ${vMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${vMember.instrument} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
 
@@ -1495,6 +1501,11 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       console.warn("⚠️ Enrich failed:", err.message);
     }
 
+
+if (isDeputy && deputy?.id && !targetMember.musicianId) {
+  targetMember.musicianId = deputy.id;
+}
+
     targetMember.email = enrichedMember.email || targetMember.email || null;
     targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
 
@@ -1506,21 +1517,20 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     /*    (For deputies we scope by slotIndex to avoid cross-slot     */
     /*     collisions with the same phone on the same date.)          */
     /* -------------------------------------------------------------- */
-    const strongGuardQuery = {
-      actId,
-      dateISO,
-      phone,
-      v2: true,
-      ...(isDeputy && slotIndexFromBody !== null ? { slotIndex: slotIndexFromBody } : {}),
-    };
+   const strongGuardQuery = {
+  actId,
+  dateISO,
+  phone,
+  v2: true,
+  ...(isDeputy && slotIndexFromBody !== null ? { slotIndex: slotIndexFromBody } : {}),
+};
+const existingAny = await AvailabilityModel.findOne(strongGuardQuery).lean();
 
-    const existingAny = await AvailabilityModel.findOne(strongGuardQuery).lean();
-
-    if (existingAny && !skipDuplicateCheck) {
-      console.log("🚫 Strong duplicate guard — already requested availability", strongGuardQuery);
-      if (res) return res.json({ success: true, sent: 0, skipped: "duplicate-strong" });
-      return { success: true, sent: 0, skipped: "duplicate-strong" };
-    }
+if (existingAny && !skipDuplicateCheck) {
+  console.log("🚫 Strong duplicate guard — already requested availability", strongGuardQuery);
+  if (res) return res.json({ success: true, sent: 0, skipped: "duplicate-strong" });
+  return { success: true, sent: 0, skipped: "duplicate-strong" };
+}
 
     /* -------------------------------------------------------------- */
     /* 🧮 Final Fee Logic (including deputy inheritedFee)             */
@@ -1609,54 +1619,54 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     /* ✅ Upsert availability record (single lead / deputy)           */
     /* -------------------------------------------------------------- */
     const singleSlotIndex =
-      typeof body.slotIndex === "number"
-        ? body.slotIndex
-        : (isDeputy ? 0 : 0); // default to 0 if not supplied
+  typeof body.slotIndex === "number" ? body.slotIndex : 0;
 
-    const now = new Date();
-    const query = { actId, dateISO, phone, slotIndex: singleSlotIndex };
-    const setOnInsert = {
-      actId,
-      lineupId: lineup?._id || null,
-      dateISO,
-      phone,
-      v2: true,
-      enquiryId,
-      slotIndex: singleSlotIndex,
-      createdAt: now,
-      status: "sent",
-      reply: null,
-    };
-    const setAlways = {
-      isDeputy: !!isDeputy, // 👈 enforce deputy/lead flag on every write
-      musicianId:
-        enrichedMember._id ||
-        enrichedMember.musicianId ||
-        targetMember.musicianId ||
-        null,
-      musicianName: `${enrichedMember.firstName || targetMember.firstName || ""} ${enrichedMember.lastName || targetMember.lastName || ""}`.trim(),
-      musicianEmail: enrichedMember.email || targetMember.email || "",
-      photoUrl: enrichedMember.photoUrl || enrichedMember.profilePicture || "",
-      address: fullFormattedAddress,
-      formattedAddress: fullFormattedAddress,
-      formattedDate,
-      clientName: resolvedClientName || "",
-      clientEmail: resolvedClientEmail || "",
-      actName: act?.tscName || act?.name || "",
-      duties: body?.inheritedDuties || targetMember.instrument || "Performance",
-      fee: String(finalFee),
-      updatedAt: now,
-    };
+const now = new Date();
+const query = { actId, dateISO, phone, slotIndex: singleSlotIndex };
+const setOnInsert = {
+  actId,
+  lineupId: lineup?._id || null,
+  dateISO,
+  phone,
+  v2: true,
+  enquiryId,
+  slotIndex: singleSlotIndex,
+  createdAt: now,
+  status: "sent",
+  reply: null,
+};
+const setAlways = {
+  isDeputy: !!isDeputy, // 👈 force correct identity on every write
+  musicianId:
+    enrichedMember._id ||
+    enrichedMember.musicianId ||
+    targetMember.musicianId ||
+    null,
+  musicianName: `${enrichedMember.firstName || targetMember.firstName || ""} ${enrichedMember.lastName || targetMember.lastName || ""}`.trim(),
+  musicianEmail: enrichedMember.email || targetMember.email || "",
+  photoUrl: enrichedMember.photoUrl || enrichedMember.profilePicture || "",
+  address: fullFormattedAddress,
+  formattedAddress: fullFormattedAddress,
+  formattedDate,
+  clientName: resolvedClientName || "",
+  clientEmail: resolvedClientEmail || "",
+  actName: act?.tscName || act?.name || "",
+  duties: body?.inheritedDuties || targetMember.instrument || "Performance",
+  fee: String(finalFee),
+  updatedAt: now,
+};
 
-    await AvailabilityModel.findOneAndUpdate(
-      query,
-      { $setOnInsert: setOnInsert, $set: setAlways },
-      { new: true, upsert: true }
-    );
+const saved = await AvailabilityModel.findOneAndUpdate(
+  query,
+  { $setOnInsert: setOnInsert, $set: setAlways },
+  { new: true, upsert: true }
+);
 
-    console.log(
-      `✅ Availability ${isDeputy ? "deputy" : "lead"} upserted — slotIndex ${singleSlotIndex} — £${finalFee}`
-    );
+console.log(`✅ Upserted ${isDeputy ? "DEPUTY" : "LEAD"} row`, {
+  slot: singleSlotIndex,
+  isDeputy: saved?.isDeputy,
+  musicianId: String(saved?.musicianId || ""),
+});
 
     /* -------------------------------------------------------------- */
     /* 💬 Send WhatsApp                                               */

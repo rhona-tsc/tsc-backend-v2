@@ -14,6 +14,8 @@ const availabilitySchema = new mongoose.Schema(
     lineupId: { type: mongoose.Schema.Types.ObjectId, ref: "Lineup", index: true },
     musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician", index: true },
 
+        isDeputy: { type: Boolean, default: false, index: true },
+
     // 🆕 Track which vocalist slot this record applies to (0, 1, etc.)
     slotIndex: { type: Number, default: 0, index: true },
 
