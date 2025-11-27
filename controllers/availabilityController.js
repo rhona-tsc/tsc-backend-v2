@@ -1216,7 +1216,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       ? await AvailabilityModel.find({ enquiryId }).lean()
       : [];
 
-    const slotIndexBase = existingForEnquiry.length;
+    const slotIndexBase = existingForEnquiry.length; // (kept for reference)
+    const slotIndexFromBody =
+      typeof body.slotIndex === "number" ? body.slotIndex : null;
 
     /* -------------------------------------------------------------- */
     /* 🧭 Enrich clientName/email                                     */
@@ -1235,13 +1237,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           .lean();
 
         if (userDoc) {
-          resolvedClientName = `${userDoc.firstName || ""} ${
-            userDoc.surname || ""
-          }`.trim();
+          resolvedClientName = `${userDoc.firstName || ""} ${userDoc.surname || ""}`.trim();
           resolvedClientEmail = userDoc.email || "";
-          console.log(
-            `📧 Enriched client details from userId: ${resolvedClientName} <${resolvedClientEmail}>`
-          );
+          console.log(`📧 Enriched client details from userId: ${resolvedClientName} <${resolvedClientEmail}>`);
         }
       } catch (err) {
         console.warn("⚠️ Failed to enrich client from userId:", err.message);
@@ -1251,8 +1249,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     /* -------------------------------------------------------------- */
     /* 📅 Basic act + date resolution                                 */
     /* -------------------------------------------------------------- */
-    const dateISO =
-      dISO || (date ? new Date(date).toISOString().slice(0, 10) : null);
+    const dateISO = dISO || (date ? new Date(date).toISOString().slice(0, 10) : null);
     if (!actId || !dateISO) throw new Error("Missing actId or dateISO");
 
     const act = await Act.findById(actId).lean();
@@ -1290,14 +1287,10 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       : lineups[0];
 
     if (!lineup) {
-      console.warn(
-        "⚠️ No valid lineup found — defaulting to first available or skipping lineup-specific logic."
-      );
+      console.warn("⚠️ No valid lineup found — defaulting to first available or skipping lineup-specific logic.");
     }
 
-    const members = Array.isArray(lineup?.bandMembers)
-      ? lineup.bandMembers
-      : [];
+    const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
 
     /* -------------------------------------------------------------- */
     /* 🔢 Normalise phone                                             */
@@ -1365,13 +1358,11 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
       for (let i = 0; i < vocalists.length; i++) {
         const vMember = vocalists[i];
-const slotIndexForThis = i; 
+        const slotIndexForThis = i;
 
         const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
         if (!phone) {
-          console.warn(
-            `⚠️ Skipping vocalist ${vMember.firstName} — no phone number`
-          );
+          console.warn(`⚠️ Skipping vocalist ${vMember.firstName} — no phone number`);
           continue;
         }
 
@@ -1382,60 +1373,54 @@ const slotIndexForThis = i;
             if (mus) enriched = { ...mus, ...enriched };
           }
         } catch (err) {
-          console.warn(
-            `⚠️ Failed to enrich vocalist ${vMember.firstName}:`,
-            err.message
-          );
+          console.warn(`⚠️ Failed to enrich vocalist ${vMember.firstName}:`, err.message);
         }
 
         const finalFee = await feeForMember(vMember);
-        console.log("🎤 Multi vocalist save:", {
-          slotIndex: slotIndexForThis,
-          vMember_id: vMember?.musicianId,
-          enriched_id: enriched?._id,
-        });
 
-        // 🔍 Resolve actual Musician document
+        // Resolve a real musicianId if possible
         let musicianDoc = null;
         try {
           if (vMember.musicianId) {
             musicianDoc = await Musician.findById(vMember.musicianId).lean();
           }
-
           if (!musicianDoc) {
-            const cleanPhone = normalizePhone(
-              vMember.phone || vMember.phoneNumber || ""
-            );
-            if (cleanPhone) {
-              musicianDoc = await Musician.findOne({
-                $or: [
-                  { phoneNormalized: cleanPhone },
-                  { phone: cleanPhone },
-                  { phoneNumber: cleanPhone },
-                ],
-              }).lean();
-            }
+            const cleanPhone = phone;
+            musicianDoc = await Musician.findOne({
+              $or: [
+                { phoneNormalized: cleanPhone },
+                { phone: cleanPhone },
+                { phoneNumber: cleanPhone },
+              ],
+            }).lean();
           }
         } catch (err) {
           console.warn("⚠️ Failed to fetch real musician:", err.message);
         }
 
         const realMusicianId =
-          musicianDoc?._id ||
-          vMember.musicianId ||
-          vMember._id ||
-          null;
+          musicianDoc?._id || vMember.musicianId || vMember._id || null;
 
-        await AvailabilityModel.create({
+        const now = new Date();
+        const query = { actId, dateISO, phone, slotIndex: slotIndexForThis };
+        const setOnInsert = {
           actId,
           lineupId: lineup?._id || null,
-          musicianId: realMusicianId,
-          musicianName: `${enriched.firstName || vMember.firstName || ""} ${
-            enriched.lastName || vMember.lastName || ""
-          }`.trim(),
-          photoUrl: enriched.photoUrl || enriched.profilePicture || "",
-          phone,
           dateISO,
+          phone,
+          v2: true,
+          enquiryId,
+          slotIndex: slotIndexForThis,
+          createdAt: now,
+          status: "sent",
+          reply: null,
+        };
+        const setAlways = {
+          isDeputy: false, // 👈 explicit lead
+          musicianId: realMusicianId,
+          musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
+          musicianEmail: enriched.email || "",
+          photoUrl: enriched.photoUrl || enriched.profilePicture || "",
           address: fullFormattedAddress,
           formattedAddress: fullFormattedAddress,
           formattedDate,
@@ -1444,19 +1429,16 @@ const slotIndexForThis = i;
           actName: act?.tscName || act?.name || "",
           duties: vMember.instrument || "Vocalist",
           fee: String(finalFee),
-          reply: null,
-          v2: true,
-          enquiryId,
-          slotIndex: slotIndexForThis, // 👈 multi-vocalist slotIndex
-        });
+          updatedAt: now,
+        };
 
-        const msg = `Hi ${
-          vMember.firstName || "there"
-        }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${
-          vMember.instrument
-        } duties with ${
-          act.tscName || act.name
-        }. Please indicate your availability 💫`;
+        await AvailabilityModel.findOneAndUpdate(
+          query,
+          { $setOnInsert: setOnInsert, $set: setAlways },
+          { new: true, upsert: true }
+        );
+
+        const msg = `Hi ${vMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${vMember.instrument} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
 
         await sendWhatsAppMessage({
           to: phone,
@@ -1478,20 +1460,11 @@ const slotIndexForThis = i;
           smsBody: msg,
         });
 
-        results.push({
-          name: vMember.firstName,
-          slotIndex: slotIndexForThis,
-          phone,
-        });
+        results.push({ name: vMember.firstName, slotIndex: slotIndexForThis, phone });
       }
 
       console.log(`✅ Multi-vocalist availability triggered for:`, results);
-      if (res)
-        return res.json({
-          success: true,
-          sent: results.length,
-          details: results,
-        });
+      if (res) return res.json({ success: true, sent: results.length, details: results });
       return { success: true, sent: results.length, details: results };
     }
 
@@ -1510,9 +1483,7 @@ const slotIndexForThis = i;
         const mus = await Musician.findById(targetMember.musicianId).lean();
         if (mus) enrichedMember = { ...mus, ...enrichedMember };
       } else {
-        const cleanPhone = (targetMember.phone || targetMember.phoneNumber || "")
-          .replace(/\s+/g, "")
-          .replace(/^0/, "+44");
+        const cleanPhone = normalizePhone(targetMember.phone || targetMember.phoneNumber || "");
         if (cleanPhone) {
           const mus = await Musician.findOne({
             $or: [{ phoneNormalized: cleanPhone }, { phone: cleanPhone }],
@@ -1525,37 +1496,29 @@ const slotIndexForThis = i;
     }
 
     targetMember.email = enrichedMember.email || targetMember.email || null;
-    targetMember.musicianId =
-      enrichedMember._id || targetMember.musicianId || null;
+    targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
 
-    const phone = normalizePhone(
-      targetMember.phone || targetMember.phoneNumber
-    );
+    const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
     if (!phone) throw new Error("Missing phone");
 
     /* -------------------------------------------------------------- */
-    /* 🔐 Strong duplicate guard (any v2 row for this phone)          */
+    /* 🔐 Strong duplicate guard                                      */
+    /*    (For deputies we scope by slotIndex to avoid cross-slot     */
+    /*     collisions with the same phone on the same date.)          */
     /* -------------------------------------------------------------- */
-    const existingAny = await AvailabilityModel.findOne({
+    const strongGuardQuery = {
       actId,
       dateISO,
       phone,
       v2: true,
-    }).lean();
+      ...(isDeputy && slotIndexFromBody !== null ? { slotIndex: slotIndexFromBody } : {}),
+    };
+
+    const existingAny = await AvailabilityModel.findOne(strongGuardQuery).lean();
 
     if (existingAny && !skipDuplicateCheck) {
-      console.log(
-        "🚫 Strong duplicate guard — already requested availability",
-        { actId, dateISO, phone }
-      );
-
-      if (res)
-        return res.json({
-          success: true,
-          sent: 0,
-          skipped: "duplicate-strong",
-        });
-
+      console.log("🚫 Strong duplicate guard — already requested availability", strongGuardQuery);
+      if (res) return res.json({ success: true, sent: 0, skipped: "duplicate-strong" });
       return { success: true, sent: 0, skipped: "duplicate-strong" };
     }
 
@@ -1565,17 +1528,13 @@ const slotIndexForThis = i;
     let finalFee;
 
     if (isDeputy && inheritedFee) {
-      const parsed =
-        parseFloat(String(inheritedFee).replace(/[^\d.]/g, "")) || 0;
+      const parsed = parseFloat(String(inheritedFee).replace(/[^\d.]/g, "")) || 0;
       let inheritedTotal = parsed;
 
       if (inheritedTotal < 350) {
-        console.log(
-          "🧭 Inherited fee seems base-only — adding travel component for deputy"
-        );
+        console.log("🧭 Inherited fee seems base-only — adding travel component for deputy");
 
-        const { county: selectedCounty } =
-          countyFromAddress(fullFormattedAddress);
+        const { county: selectedCounty } = countyFromAddress(fullFormattedAddress);
         const selectedDate = dateISO;
 
         let travelFee = 0;
@@ -1603,11 +1562,7 @@ const slotIndexForThis = i;
         }
 
         inheritedTotal += travelFee;
-        console.log("💷 Deputy travel applied:", {
-          travelFee,
-          travelSource,
-          inheritedTotal,
-        });
+        console.log("💷 Deputy travel applied:", { travelFee, travelSource, inheritedTotal });
       }
 
       finalFee = Math.round(inheritedTotal);
@@ -1630,89 +1585,86 @@ const slotIndexForThis = i;
     const existing = await AvailabilityModel.findOne({
       actId,
       dateISO,
-      phone: normalizePhone(
-        targetMember.phone || targetMember.phoneNumber
-      ),
+      phone,
       v2: true,
     }).lean();
 
-    if (
-      existing &&
-      !skipDuplicateCheck &&
-      ["unavailable", "no"].includes(existing.reply)
-    ) {
+    if (existing && !skipDuplicateCheck && ["unavailable", "no"].includes(existing.reply)) {
       console.log(
         "🚫 Skipping availability request — musician already marked unavailable/no reply",
         { actId, dateISO, phone: existing.phone, reply: existing.reply }
       );
-      if (res)
-        return res.json({
-          success: true,
-          sent: 0,
-          skipped: existing.reply,
-        });
+      if (res) return res.json({ success: true, sent: 0, skipped: existing.reply });
       return { success: true, sent: 0, skipped: existing.reply };
     }
 
-    if (existing && !skipDuplicateCheck) {
-      console.log(
-        "⚠️ Duplicate availability request detected — skipping WhatsApp send",
-        { actId, dateISO, phone: existing.phone }
-      );
-      if (res)
-        return res.json({ success: true, sent: 0, skipped: "duplicate" });
+    if (existing && !skipDuplicateCheck && !isDeputy) {
+      // Keep the legacy behaviour for lead re-sends; deputies are handled by scoped guard above.
+      console.log("⚠️ Duplicate availability request detected — skipping WhatsApp send", { actId, dateISO, phone: existing.phone });
+      if (res) return res.json({ success: true, sent: 0, skipped: "duplicate" });
       return { success: true, sent: 0, skipped: "duplicate" };
     }
 
     /* -------------------------------------------------------------- */
-    /* ✅ Create availability record (single / deputy)                */
+    /* ✅ Upsert availability record (single lead / deputy)           */
     /* -------------------------------------------------------------- */
     const singleSlotIndex =
-      typeof body.slotIndex === "number" ? body.slotIndex : 0;
+      typeof body.slotIndex === "number"
+        ? body.slotIndex
+        : (isDeputy ? 0 : 0); // default to 0 if not supplied
 
-    await AvailabilityModel.create({
+    const now = new Date();
+    const query = { actId, dateISO, phone, slotIndex: singleSlotIndex };
+    const setOnInsert = {
       actId,
       lineupId: lineup?._id || null,
+      dateISO,
+      phone,
+      v2: true,
+      enquiryId,
+      slotIndex: singleSlotIndex,
+      createdAt: now,
+      status: "sent",
+      reply: null,
+    };
+    const setAlways = {
+      isDeputy: !!isDeputy, // 👈 enforce deputy/lead flag on every write
       musicianId:
         enrichedMember._id ||
         enrichedMember.musicianId ||
         targetMember.musicianId ||
         null,
-      musicianName: `${enrichedMember.firstName || targetMember.firstName || ""} ${
-        enrichedMember.lastName || targetMember.lastName || ""
-      }`.trim(),
+      musicianName: `${enrichedMember.firstName || targetMember.firstName || ""} ${enrichedMember.lastName || targetMember.lastName || ""}`.trim(),
+      musicianEmail: enrichedMember.email || targetMember.email || "",
       photoUrl: enrichedMember.photoUrl || enrichedMember.profilePicture || "",
-      phone,
-      dateISO,
       address: fullFormattedAddress,
       formattedAddress: fullFormattedAddress,
       formattedDate,
       clientName: resolvedClientName || "",
       clientEmail: resolvedClientEmail || "",
       actName: act?.tscName || act?.name || "",
-      duties:
-        body?.inheritedDuties || targetMember.instrument || "Performance",
+      duties: body?.inheritedDuties || targetMember.instrument || "Performance",
       fee: String(finalFee),
-      reply: null,
-      v2: true,
-      enquiryId,
-      slotIndex: singleSlotIndex, // 👈 single/deputy slot index (usually 0)
-    });
+      updatedAt: now,
+    };
 
-    console.log(`✅ Availability record created — £${finalFee}`);
+    await AvailabilityModel.findOneAndUpdate(
+      query,
+      { $setOnInsert: setOnInsert, $set: setAlways },
+      { new: true, upsert: true }
+    );
+
+    console.log(
+      `✅ Availability ${isDeputy ? "deputy" : "lead"} upserted — slotIndex ${singleSlotIndex} — £${finalFee}`
+    );
 
     /* -------------------------------------------------------------- */
     /* 💬 Send WhatsApp                                               */
     /* -------------------------------------------------------------- */
-    const role =
-      body?.inheritedDuties || targetMember.instrument || "Performance";
+    const role = body?.inheritedDuties || targetMember.instrument || "Performance";
     const feeStr = finalFee > 0 ? `£${finalFee}` : "TBC";
 
-    const msg = `Hi ${
-      targetMember.firstName || "there"
-    }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${
-      act.tscName || act.name
-    }. Please indicate your availability 💫`;
+    const msg = `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
 
     console.log("🐛 About to call sendWhatsAppMessage()");
     await sendWhatsAppMessage({
@@ -1740,10 +1692,7 @@ const slotIndexForThis = i;
     return { success: true, sent: 1 };
   } catch (err) {
     console.error("❌ triggerAvailabilityRequest error:", err);
-    if (res)
-      return res
-        .status(500)
-        .json({ success: false, message: err.message });
+    if (res) return res.status(500).json({ success: false, message: err.message });
     return { success: false, error: err.message };
   }
 };
