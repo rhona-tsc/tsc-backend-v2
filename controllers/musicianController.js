@@ -353,19 +353,33 @@ const computeGenreFit = (act, dep) => {
 // ----------------------- Controllers -----------------------
 
 // Fetch a single deputy by ID
-const getDeputyById = async (req, res) => {
+export async function getDeputyById(req, res) {
   try {
     const { id } = req.params;
-    const deputy = await musicianModel.findById(id);
-    if (!deputy) {
-      return res.status(404).json({ success: false, message: "Deputy not found" });
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: "Invalid musician id" });
     }
-    res.json({ success: true, deputy });
-  } catch (err) {
-    console.error("❌ Error fetching deputy by ID:", err);
-    res.status(500).json({ success: false, message: "Server error" });
+
+    // Optional: access control — allow self or agents
+    const me = req.user; // set by verifyToken
+    const isSelf = me?._id?.toString?.() === id;
+    const isAgent = (me?.role || me?.userRole || "").toLowerCase() === "agent";
+    if (!isSelf && !isAgent) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const deputy = await Musician.findById(id).lean();
+    if (!deputy) {
+      return res.status(404).json({ success: false, message: "Musician not found" });
+    }
+
+    return res.json({ success: true, deputy });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
-};
+}
 
 // Deputy Registration / Update Controller
 const registerDeputy = async (req, res) => {
