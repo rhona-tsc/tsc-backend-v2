@@ -353,7 +353,7 @@ const computeGenreFit = (act, dep) => {
 // ----------------------- Controllers -----------------------
 
 // Fetch a single deputy by ID
-export async function getDeputyById(req, res) {
+async function getDeputyById(req, res) {
   try {
     const { id } = req.params;
 
