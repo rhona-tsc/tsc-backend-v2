@@ -1622,16 +1622,17 @@ if (existingAny && !skipDuplicateCheck) {
     /* -------------------------------------------------------------- */
     /* ✅ Upsert availability record (single lead / deputy)           */
     /* -------------------------------------------------------------- */
-    const singleSlotIndex =
+   const singleSlotIndex =
   typeof body.slotIndex === "number" ? body.slotIndex : 0;
 
 const now = new Date();
 const query = { actId, dateISO, phone, slotIndex: singleSlotIndex };
+
 const setOnInsert = {
   actId,
   lineupId: lineup?._id || null,
   dateISO,
-  isDeputy: !!isDeputy, 
+  // ⛔️ removed: isDeputy here would conflict with $set
   phone,
   v2: true,
   enquiryId,
@@ -1640,14 +1641,15 @@ const setOnInsert = {
   status: "sent",
   reply: null,
 };
+
 const setAlways = {
-  isDeputy: !!isDeputy, // 👈 force correct identity on every write
+  isDeputy: !!isDeputy, // ✅ only here
   musicianId:
     enrichedMember._id ||
     enrichedMember.musicianId ||
     targetMember.musicianId ||
     null,
-    
+
   musicianName: `${enrichedMember.firstName || targetMember.firstName || ""} ${enrichedMember.lastName || targetMember.lastName || ""}`.trim(),
   musicianEmail: enrichedMember.email || targetMember.email || "",
   photoUrl: enrichedMember.photoUrl || enrichedMember.profilePicture || "",
