@@ -427,30 +427,42 @@ export async function notifyDeputies({
 
       console.log(`🎯 Sending deputy enquiry to ${deputy.firstName || deputy.name} (slot ${slotIndex ?? "?"})`);
 
-await triggerAvailabilityRequest({
-  actId,
-  lineupId,
-  dateISO,
-  slotIndex, // 👈 make sure we pass it through
-  formattedAddress,
-  clientName,
-  clientEmail,
+      // --- Insert displayName helpers for deputy/vocalist ---
+      const displayNameOf = (p = {}) => {
+        const fn = (p.firstName || p.name || "").trim();
+        const ln = (p.lastName || "").trim();
+        return (fn && ln) ? `${fn} ${ln}` : (fn || ln || "");
+      };
+      const deputyDisplayName = displayNameOf(deputy);
+      const vocalistDisplayName = displayNameOf(vocalist);
 
-  isDeputy: true,                      // 👈 hard-assert deputy
-  deputy: {                            // normalize the deputy payload we send
-    id: deputy.id || deputy.musicianId || deputy._id || null,
-    musicianId: deputy.musicianId || deputy.id || deputy._id || null,
-    firstName: deputy.firstName || deputy.name || "",
-    lastName: deputy.lastName || "",
-    phone: cleanPhone,                 // normalized above
-    email: deputy.email || "",
-    imageUrl: deputy.imageUrl || deputy.photoUrl || null,
-  },
+      await triggerAvailabilityRequest({
+        actId,
+        lineupId,
+        dateISO,
+        slotIndex, // 👈 make sure we pass it through
+        formattedAddress,
+        clientName,
+        clientEmail,
 
-  inheritedFee,
-  inheritedDuties: vocalist.instrument || "Vocalist",
-  skipDuplicateCheck,
-});
+        isDeputy: true,                      // 👈 hard-assert deputy
+        selectedVocalistName: deputyDisplayName || vocalistDisplayName || "",
+        vocalistName: vocalistDisplayName || "",
+        deputy: {                            // normalize the deputy payload we send
+          id: deputy.id || deputy.musicianId || deputy._id || null,
+          musicianId: deputy.musicianId || deputy.id || deputy._id || null,
+          firstName: deputy.firstName || deputy.name || "",
+          lastName: deputy.lastName || "",
+          phone: cleanPhone,                 // normalized above
+          email: deputy.email || "",
+          imageUrl: deputy.imageUrl || deputy.photoUrl || null,
+          displayName: deputyDisplayName || "",
+        },
+
+        inheritedFee,
+        inheritedDuties: vocalist.instrument || "Vocalist",
+        skipDuplicateCheck,
+      });
 
       existingSet.add(cleanPhone);
       totalSent++;
@@ -1229,6 +1241,8 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       deputy = null,
       inheritedFee = null, // 🔹 optional
       skipDuplicateCheck = false,
+      selectedVocalistName = "",
+      vocalistName = "",
     } = body;
 
     /* -------------------------------------------------------------- */
@@ -1638,20 +1652,27 @@ if (isDeputy && deputy?.id && !targetMember.musicianId) {
     // 🔎 Canonical musician from Musicians collection (by phone)
 const canonical = await findCanonicalMusicianByPhone(phone);
 
-// Prefer canonical-from-phone; fall back to any enriched/act ids
-const canonicalId = canonical?._id
-  || enrichedMember?._id
-  || targetMember?.musicianId
-  || null;
+    // Prefer canonical-from-phone; fall back to any enriched/act ids
+    const canonicalId = canonical?._id
+      || enrichedMember?._id
+      || targetMember?.musicianId
+      || null;
 
-const canonicalName = canonical
-  ? `${canonical.firstName || ''} ${canonical.lastName || ''}`.trim()
-  : `${targetMember.firstName || ''} ${targetMember.lastName || ''}`.trim();
+    const canonicalName = canonical
+      ? `${canonical.firstName || ''} ${canonical.lastName || ''}`.trim()
+      : `${targetMember.firstName || ''} ${targetMember.lastName || ''}`.trim();
 
-const canonicalPhoto = pickPic(canonical) ||
-  enrichedMember?.photoUrl ||
-  enrichedMember?.profilePicture ||
-  '';
+    const canonicalPhoto = pickPic(canonical) ||
+      enrichedMember?.photoUrl ||
+      enrichedMember?.profilePicture ||
+      '';
+
+    // Preferred display name to carry through toasts/cart
+    const selectedName = String(
+      selectedVocalistName ||
+      canonicalName ||
+      `${targetMember?.firstName || ""} ${targetMember?.lastName || ""}`
+    ).trim();
     /* -------------------------------------------------------------- */
     /* 🛡️ Prior-reply check (same date + same location)               */
     /*     If we already have a YES/NO/UNAVAILABLE for this member    */
@@ -1844,6 +1865,8 @@ const setOnInsert = {
   status: "sent",
   reply: null,
   musicianId: canonicalId,        // ✅ insert with canonical musician id
+  selectedVocalistName: selectedName,
+  selectedVocalistId: canonicalId || null,
 };
   const PUBLIC_SITE_BASE = (
     process.env.PUBLIC_SITE_URL ||
@@ -1867,6 +1890,9 @@ const setAlways = {
   fee: String(finalFee),
   updatedAt: now,
   profileUrl: canonicalId ? `${PUBLIC_SITE_BASE}/musician/${canonicalId}` : "",
+  selectedVocalistName: selectedName,
+  selectedVocalistId: canonicalId || null,
+  vocalistName: vocalistName || selectedName || "",
 };
 
 const saved = await AvailabilityModel.findOneAndUpdate(
