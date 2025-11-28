@@ -338,7 +338,7 @@ app.use("/api/availability", availabilityRoutes);
 app.use("/api/shortlist", shortlistRoutes);
 app.use("/api/feedback", feedbackRoutes);
 app.use("/api/noticeboard", noticeRoutes);
-app.use("/api/act-pre-submissions", actPreSubmissionRoutes);
+app.use("/api/", actPreSubmissionRoutes);
 
 // Availability direct mount
 app.get("/api/availability/acts-available", async (req, res) => {
