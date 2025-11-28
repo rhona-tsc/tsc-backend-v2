@@ -2675,7 +2675,8 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     reply: { $in: ["yes", "no", "unavailable", null] },
     v2: true,
   })
-    .select("musicianId slotIndex reply updatedAt isDeputy photoUrl") // ⬅️ pull photoUrl through
+    // NOTE: added phone, musicianEmail, repliedAt to support lookups + UI timestamps
+    .select("musicianId slotIndex reply updatedAt repliedAt isDeputy photoUrl phone musicianEmail")
     .lean();
 
   console.log("📥 buildBadge: availability rows:", rows);
@@ -2688,6 +2689,8 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
   }, {});
   console.log("📦 buildBadge: rows grouped by slot:", Object.keys(groupedBySlot));
 
+  const isHttp = (u) => typeof u === "string" && u.startsWith("http");
+
   const slots = [];
   const orderedKeys = Object.keys(groupedBySlot).sort((a, b) => Number(a) - Number(b));
 
@@ -2695,63 +2698,120 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     const slotRows = groupedBySlot[slotKey];
     console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows);
 
-   // Split lead vs deputy
-const leadRows   = slotRows.filter(r => r.isDeputy !== true);
-const deputyRows = slotRows.filter(r => r.isDeputy === true);
+    // Split lead vs deputy
+    const leadRows   = slotRows.filter(r => r.isDeputy !== true);
+    const deputyRows = slotRows.filter(r => r.isDeputy === true);
 
-// Latest meaningful lead reply
-const leadReply = leadRows
-  .filter(r => ["yes","no","unavailable"].includes(r.reply))
-  .sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
+    // Latest meaningful lead reply
+    const leadReply = leadRows
+      .filter(r => ["yes", "no", "unavailable"].includes(r.reply))
+      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
 
-let leadDisplayBits = null;
-if (leadReply) {
-  try {
-    leadDisplayBits = await getDeputyDisplayBits({ musicianId: leadReply.musicianId });
-  } catch (e) {
-    console.warn("getDeputyDisplayBits (lead) failed:", e?.message);
-  }
-}
+    // Resolve lead display bits
+    let leadDisplayBits = null;
+    if (leadReply?.musicianId) {
+      try {
+        leadDisplayBits = await getDeputyDisplayBits({ musicianId: leadReply.musicianId });
+      } catch (e) {
+        console.warn("getDeputyDisplayBits (lead) failed:", e?.message);
+      }
+    }
 
-// Build deputies array — include 'state'
-const deputyReplies = deputyRows
-  .filter(r => ["yes","no","unavailable"].includes(r.reply))
-  .sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    // Normalized lead object (used for primary decision)
+    const leadBits = leadDisplayBits
+      ? {
+          musicianId: String(leadDisplayBits.musicianId || leadReply?.musicianId || ""),
+          photoUrl: leadDisplayBits.photoUrl || null,
+          profileUrl: leadDisplayBits.profileUrl || "",
+          setAt: leadReply?.updatedAt || null,
+          state: leadReply?.reply || "pending",
+          available: leadReply?.reply === "yes",
+          isDeputy: false,
+        }
+      : (leadReply
+          ? {
+              musicianId: String(leadReply.musicianId || ""),
+              photoUrl: null,
+              profileUrl: "",
+              setAt: leadReply.updatedAt || null,
+              state: leadReply.reply || "pending",
+              available: leadReply.reply === "yes",
+              isDeputy: false,
+            }
+          : null);
 
-const deputies = [];
-for (const r of deputyReplies) {
-  try {
-    const bits = await getDeputyDisplayBits({ musicianId: r.musicianId, phone: r.phone, email: r.musicianEmail });
-    deputies.push({
+    // Deputies — include ALL (even pending) so fallback-to-photo works
+    const deputyRowsSorted = deputyRows.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+
+    const deputies = [];
+    for (const r of deputyRowsSorted) {
+      try {
+        const bits = await getDeputyDisplayBits({
+          musicianId: r.musicianId,
+          phone: r.phone,
+          email: r.musicianEmail,
+        });
+        deputies.push({
+          slotIndex: Number(slotKey),
+          isDeputy: true,
+          musicianId: String(bits?.musicianId || r.musicianId || ""),
+          photoUrl: bits?.photoUrl || r?.photoUrl || null,
+          profileUrl: bits?.profileUrl || "",
+          vocalistName: bits?.resolvedName || bits?.firstName || "",
+          state: r.reply ?? null,
+          available: r.reply === "yes",
+          setAt: r.updatedAt || null,
+          repliedAt: r.repliedAt || r.updatedAt || null,
+        });
+      } catch (e) {
+        console.warn("getDeputyDisplayBits (deputy) failed:", e?.message, r?.musicianId);
+      }
+    }
+
+    // Choose primary
+    const leadAvailable = leadBits?.available === true;
+    const coveringYes = deputies.find(d => d.available && isHttp(d.photoUrl));
+    const firstDepWithPhoto = deputies.find(d => isHttp(d.photoUrl));
+
+    let primary = null;
+    if (!leadAvailable && coveringYes) {
+      primary = coveringYes;                                 // ✅ deputy covers if lead unavailable
+    } else if (leadAvailable && isHttp(leadBits?.photoUrl)) {
+      primary = leadBits;                                    // ✅ lead is available with photo
+    } else if (!leadAvailable && firstDepWithPhoto) {
+      primary = firstDepWithPhoto;                           // fallback to any deputy with photo
+    } else if (isHttp(leadBits?.photoUrl)) {
+      primary = leadBits;                                    // last resort: show lead photo
+    }
+
+    // Final slot (keep legacy top-level fields for compatibility)
+    slots.push({
       slotIndex: Number(slotKey),
-      isDeputy: true,
-      musicianId: String(bits?.musicianId || r.musicianId || ""),
-      photoUrl: bits?.photoUrl || null,
-      profileUrl: bits?.profileUrl || "",
-      vocalistName: bits?.resolvedName || bits?.firstName || "",
-      state: r.reply,            // <-- keep this; UI uses it
-      setAt: r.updatedAt,
-      repliedAt: r.repliedAt || r.updatedAt || null,
-    });
-  } catch (e) {
-    console.warn("getDeputyDisplayBits (deputy) failed:", e?.message, r?.musicianId);
-  }
-}
+      isDeputy: false, // legacy
+      vocalistName: leadDisplayBits?.resolvedName || "",
+      musicianId: leadBits?.musicianId ?? (leadReply ? String(leadReply.musicianId) : null),
+      photoUrl: leadBits?.photoUrl || null,
+      profileUrl: leadBits?.profileUrl || "",
+      deputies,
+      setAt: leadReply?.updatedAt || null,
+      state: leadReply?.reply || "pending",
 
-// Final slot (ALWAYS lead container; never deputy)
-slots.push({
-  slotIndex: Number(slotKey),
-  isDeputy: false,               // <-- important
-  vocalistName: leadDisplayBits?.resolvedName || "",
-  musicianId: leadDisplayBits?.musicianId
-    ? String(leadDisplayBits.musicianId)
-    : (leadReply ? String(leadReply.musicianId) : null),
-  photoUrl: leadDisplayBits?.photoUrl || null,
-  profileUrl: leadDisplayBits?.profileUrl || "",
-  deputies,
-  setAt: leadReply?.updatedAt || null,
-  state: leadReply?.reply || "pending",
-});
+      // ✅ New unified flags used by UI
+      available: Boolean(leadAvailable || coveringYes),                  // slot can be covered on this date
+      covering: primary?.isDeputy ? "deputy" : "lead",                   // who is shown as primary
+
+      // ✅ The one thing the UI should render
+      primary: primary
+        ? {
+            musicianId: primary.musicianId || null,
+            photoUrl: primary.photoUrl || null,
+            profileUrl: primary.profileUrl || "",
+            setAt: primary.setAt || null,
+            isDeputy: Boolean(primary.isDeputy),
+            available: Boolean(primary.available ?? (primary.isDeputy ? primary.available : leadAvailable)),
+          }
+        : null,
+    });
   }
 
   const badge = { dateISO, address: "TBC", active: true, slots };

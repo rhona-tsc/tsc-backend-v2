@@ -1,14 +1,21 @@
 import mongoose from "mongoose";
 import { v4 as uuidv4 } from "uuid";
 
+// If you have this elsewhere, update it too:
 const AvailabilityDeputySchema = new mongoose.Schema(
   {
+    slotIndex: { type: Number, default: 0 },
+    isDeputy: { type: Boolean, default: true },
     musicianId: { type: String, default: "" },
+    photoUrl: { type: String, default: "" },
+    profileUrl: { type: String, default: "" },
     vocalistName: { type: String, default: "" },
-    photoUrl: { type: String, default: "" },        // cropped/approved image if you have it
-    profilePicture: { type: String, default: "" },  // raw profile picture fallback (optional)
-    profileUrl: { type: String, default: "" },      // /musician/:id link (optional)
+
+    // 🔑 new/used fields
+    state: { type: String, default: null },      // "yes" | "no" | "unavailable" | null
+    available: { type: Boolean, default: false }, // true iff state === "yes"
     setAt: { type: Date, default: null },
+    repliedAt: { type: Date, default: null },
   },
   { _id: false }
 );
@@ -25,7 +32,22 @@ const availabilityBadgesSchema = new mongoose.Schema(
         profileUrl: { type: String, default: "" },
         deputies: { type: [AvailabilityDeputySchema], default: [] },
         setAt: { type: Date, default: null },
-      }
+
+        // 🔑 new/used fields from the builder
+        state: { type: String, default: "pending" }, // lead’s state
+        available: { type: Boolean, default: false }, // lead available OR covered by a YES deputy
+        covering: { type: String, default: null },    // "lead" | "deputy" | null
+
+        // what the UI should render
+        primary: {
+          musicianId: { type: String, default: "" },
+          photoUrl:   { type: String, default: "" },
+          profileUrl: { type: String, default: "" },
+          setAt:      { type: Date,  default: null },
+          isDeputy:   { type: Boolean, default: false },
+          available:  { type: Boolean, default: false },
+        },
+      },
     ],
   },
   { _id: false }
