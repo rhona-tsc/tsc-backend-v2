@@ -1337,6 +1337,27 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       return v;
     };
 
+    // 🔎 Rough address matcher (treats "City, County" vs full-line equivalently; ignores case/extra spaces/"UK")
+    const normalizeAddr = (s = "") =>
+      String(s || "")
+        .toLowerCase()
+        .replace(/\buk\b/g, "")
+        .replace(/\s+/g, " ")
+        .replace(/,\s*/g, ",")
+        .trim();
+
+    const lastTwoParts = (s = "") => normalizeAddr(s).split(",").slice(-2).join(",");
+
+    const addressesRoughlyEqual = (a = "", b = "") => {
+      if (!a || !b) return false;
+      const A = normalizeAddr(a);
+      const B = normalizeAddr(b);
+      if (A === B) return true;
+      const A2 = lastTwoParts(a);
+      const B2 = lastTwoParts(b);
+      return A2 && B2 && (A2 === B2 || A2.includes(B2) || B2.includes(A2));
+    };
+
     /* -------------------------------------------------------------- */
     /* 💰 Fee calculation helper                                      */
     /* -------------------------------------------------------------- */
@@ -1409,6 +1430,75 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           console.warn(`⚠️ Failed to enrich vocalist ${vMember.firstName}:`, err.message);
         }
 
+        // 🧯 PRIOR-REPLY CHECK (per-slot) — if this vocalist already replied for SAME date+location, don't message again.
+        try {
+          const prior = await AvailabilityModel.findOne({
+            actId,
+            dateISO,
+            phone,
+            v2: true,
+            slotIndex: slotIndexForThis,
+            reply: { $in: ["yes", "no", "unavailable"] },
+          })
+            .sort({ updatedAt: -1, createdAt: -1 })
+            .lean();
+
+          if (prior && addressesRoughlyEqual(prior.formattedAddress || prior.address || "", fullFormattedAddress)) {
+            console.log("ℹ️ Using existing reply (multi-vocalist) — skipping WA send", {
+              slotIndex: slotIndexForThis,
+              reply: prior.reply,
+              phone,
+            });
+
+            // ✅ If lead previously UNAVAILABLE/NO, immediately notify deputies for this slot
+            if (prior.reply === "unavailable" || prior.reply === "no") {
+              await notifyDeputies({
+                actId,
+                lineupId: lineup?._id || lineupId || null,
+                dateISO,
+                formattedAddress: fullFormattedAddress,
+                clientName: resolvedClientName || "",
+                clientEmail: resolvedClientEmail || "",
+                slotIndex: slotIndexForThis,
+                skipDuplicateCheck: true,
+                skipIfUnavailable: false,
+              });
+            }
+
+            // ✅ If lead previously YES, refresh badge (optional best-effort)
+            if (prior.reply === "yes") {
+              try {
+                const { rebuildAndApplyAvailabilityBadge } = await import("./availabilityBadgeController.js");
+                const badgeRes = await rebuildAndApplyAvailabilityBadge({ actId, dateISO, __fromExistingReply: true });
+                if (global.availabilityNotify && badgeRes?.badge) {
+                  global.availabilityNotify.badgeUpdated({
+                    type: "availability_badge_updated",
+                    actId,
+                    actName: act?.tscName || act?.name,
+                    dateISO,
+                    badge: badgeRes.badge,
+                    isDeputy: false,
+                  });
+                }
+              } catch (e) {
+                console.warn("⚠️ Badge refresh (existing YES) failed:", e?.message || e);
+              }
+            }
+
+            // Record into results for parity with the loop, but mark as reused
+            results.push({
+              name: vMember.firstName,
+              slotIndex: slotIndexForThis,
+              phone,
+              reusedExisting: true,
+              existingReply: prior.reply,
+            });
+            continue; // ⬅️ move to next vocalist without sending
+          }
+        } catch (e) {
+          console.warn("⚠️ Prior-reply check (multi) failed:", e?.message || e);
+        }
+
         const finalFee = await feeForMember(vMember);
 
         // Resolve a real musicianId if possible
@@ -1434,49 +1524,48 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         const realMusicianId =
           musicianDoc?._id || vMember.musicianId || vMember._id || null;
 
-const now = new Date();
-const query = { actId, dateISO, phone, slotIndex: slotIndexForThis };
-const setOnInsert = {
-  actId,
-  lineupId: lineup?._id || null,
-  dateISO,
-  phone,
-  v2: true,
-  
-  enquiryId,
-  slotIndex: slotIndexForThis,
-  createdAt: now,
-  status: "sent",
-  reply: null,
-};
-const setAlways = {
-  isDeputy: false, // 👈 force LEAD on every write
-  musicianId: realMusicianId,
-  musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
-  musicianEmail: enriched.email || "",
-  photoUrl: enriched.photoUrl || enriched.profilePicture || "",
-  address: fullFormattedAddress,
-  formattedAddress: fullFormattedAddress,
-  formattedDate,
-  clientName: resolvedClientName || "",
-  clientEmail: resolvedClientEmail || "",
-  actName: act?.tscName || act?.name || "",
-  duties: vMember.instrument || "Vocalist",
-  fee: String(finalFee),
-  updatedAt: now,
-};
+        const now = new Date();
+        const query = { actId, dateISO, phone, slotIndex: slotIndexForThis };
+        const setOnInsert = {
+          actId,
+          lineupId: lineup?._id || null,
+          dateISO,
+          phone,
+          v2: true,
+          enquiryId,
+          slotIndex: slotIndexForThis,
+          createdAt: now,
+          status: "sent",
+          reply: null,
+        };
+        const setAlways = {
+          isDeputy: false, // 👈 force LEAD on every write
+          musicianId: realMusicianId,
+          musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
+          musicianEmail: enriched.email || "",
+          photoUrl: enriched.photoUrl || enriched.profilePicture || "",
+          address: fullFormattedAddress,
+          formattedAddress: fullFormattedAddress,
+          formattedDate,
+          clientName: resolvedClientName || "",
+          clientEmail: resolvedClientEmail || "",
+          actName: act?.tscName || act?.name || "",
+          duties: vMember.instrument || "Vocalist",
+          fee: String(finalFee),
+          updatedAt: now,
+        };
 
-const savedLead = await AvailabilityModel.findOneAndUpdate(
-  query,
-  { $setOnInsert: setOnInsert, $set: setAlways },
-  { new: true, upsert: true }
-);
+        const savedLead = await AvailabilityModel.findOneAndUpdate(
+          query,
+          { $setOnInsert: setOnInsert, $set: setAlways },
+          { new: true, upsert: true }
+        );
 
-console.log("✅ Upserted LEAD row", {
-  slot: slotIndexForThis,
-  isDeputy: savedLead?.isDeputy,
-  musicianId: String(savedLead?.musicianId || ""),
-});
+        console.log("✅ Upserted LEAD row", {
+          slot: slotIndexForThis,
+          isDeputy: savedLead?.isDeputy,
+          musicianId: String(savedLead?.musicianId || ""),
+        });
 
         const msg = `Hi ${vMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${vMember.instrument} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
 
@@ -1564,24 +1653,92 @@ const canonicalPhoto = pickPic(canonical) ||
   enrichedMember?.profilePicture ||
   '';
     /* -------------------------------------------------------------- */
-    /* 🔐 Strong duplicate guard                                      */
-    /*    (For deputies we scope by slotIndex to avoid cross-slot     */
-    /*     collisions with the same phone on the same date.)          */
+    /* 🛡️ Prior-reply check (same date + same location)               */
+    /*     If we already have a YES/NO/UNAVAILABLE for this member    */
+    /*     on the same date and location, DO NOT message again.       */
+    /*     Instead, proceed as if that reply just occurred.           */
     /* -------------------------------------------------------------- */
-   const strongGuardQuery = {
-  actId,
-  dateISO,
-  phone,
-  v2: true,
-  ...(isDeputy && slotIndexFromBody !== null ? { slotIndex: slotIndexFromBody } : {}),
-};
-const existingAny = await AvailabilityModel.findOne(strongGuardQuery).lean();
+    const priorReplyQuery = {
+      actId,
+      dateISO,
+      phone,
+      v2: true,
+      ...(isDeputy && slotIndexFromBody !== null ? { slotIndex: slotIndexFromBody } : {}),
+      reply: { $in: ["yes", "no", "unavailable"] },
+    };
 
-if (existingAny && !skipDuplicateCheck) {
-  console.log("🚫 Strong duplicate guard — already requested availability", strongGuardQuery);
-  if (res) return res.json({ success: true, sent: 0, skipped: "duplicate-strong" });
-  return { success: true, sent: 0, skipped: "duplicate-strong" };
-}
+    const prior = await AvailabilityModel.findOne(priorReplyQuery)
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .lean();
+
+    if (prior && addressesRoughlyEqual(prior.formattedAddress || prior.address || "", fullFormattedAddress)) {
+      console.log("ℹ️ Using existing reply (single path) — skipping WA send", {
+        isDeputy,
+        reply: prior.reply,
+        phone,
+      });
+
+      if (prior.reply === "yes") {
+        // ✅ Refresh badge (best-effort)
+        try {
+          const { rebuildAndApplyAvailabilityBadge } = await import("./availabilityBadgeController.js");
+          const badgeRes = await rebuildAndApplyAvailabilityBadge({ actId, dateISO, __fromExistingReply: true });
+          if (global.availabilityNotify && badgeRes?.badge) {
+            global.availabilityNotify.badgeUpdated({
+              type: "availability_badge_updated",
+              actId,
+              actName: act?.tscName || act?.name,
+              dateISO,
+              badge: badgeRes.badge,
+              isDeputy,
+            });
+          }
+        } catch (e) {
+          console.warn("⚠️ Badge refresh (existing YES) failed:", e?.message || e);
+        }
+      }
+
+      if (!isDeputy && (prior.reply === "unavailable" || prior.reply === "no")) {
+        // ✅ Lead previously unavailable — trigger deputies now
+        await notifyDeputies({
+          actId,
+          lineupId: lineup?._id || lineupId || null,
+          dateISO,
+          formattedAddress: fullFormattedAddress,
+          clientName: resolvedClientName || "",
+          clientEmail: resolvedClientEmail || "",
+          slotIndex: typeof body.slotIndex === "number" ? body.slotIndex : null,
+          skipDuplicateCheck: true,
+          skipIfUnavailable: false,
+        });
+      }
+
+      // Return without sending any new message
+      if (res) return res.json({ success: true, sent: 0, usedExisting: prior.reply });
+      return { success: true, sent: 0, usedExisting: prior.reply };
+    }
+
+    /* -------------------------------------------------------------- */
+    /* 🔐 Refined duplicate guard                                     */
+    /*     If a row exists but has NO reply yet, keep legacy          */
+    /*     behaviour for leads (skip re-send unless explicitly        */
+    /*     allowed via skipDuplicateCheck); for deputies scope by     */
+    /*     slotIndex to avoid cross-slot collisions.                  */
+    /* -------------------------------------------------------------- */
+    const strongGuardQuery = {
+      actId,
+      dateISO,
+      phone,
+      v2: true,
+      ...(isDeputy && slotIndexFromBody !== null ? { slotIndex: slotIndexFromBody } : {}),
+    };
+    const existingAny = await AvailabilityModel.findOne(strongGuardQuery).lean();
+
+    if (existingAny && !skipDuplicateCheck) {
+      console.log("⚠️ Duplicate availability request detected — skipping WhatsApp send", strongGuardQuery);
+      if (res) return res.json({ success: true, sent: 0, skipped: "duplicate-strong" });
+      return { success: true, sent: 0, skipped: "duplicate-strong" };
+    }
 
     /* -------------------------------------------------------------- */
     /* 🧮 Final Fee Logic (including deputy inheritedFee)             */
