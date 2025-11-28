@@ -189,16 +189,48 @@ router.get("/subscribe", sseNoCompression, (req, res) => {
     ].filter(Boolean)
   );
   const NETLIFY_RE = /^https:\/\/[a-z0-9-]+\.netlify\.app$/i;
-  const origin = req.headers.origin || "";
+
+  // Some dev proxies (e.g., Vite) drop the Origin header for same-origin proxied requests.
+  const originHeader = req.headers.origin || "";
+  const refererHeader = req.headers.referer || req.headers.referrer || "";
+  const refererOrigin = (() => {
+    try {
+      return refererHeader ? new URL(refererHeader).origin : "";
+    } catch {
+      return "";
+    }
+  })();
+
+  // Prefer Origin; fall back to Referer; if both missing and we're on localhost, allow.
+  const resolvedOrigin = originHeader || refererOrigin;
+  const allowWhenNoOrigin =
+    !resolvedOrigin &&
+    (req.hostname === "localhost" || req.hostname === "127.0.0.1");
+
   const isAllowed =
-    STATIC_ALLOWED.has(origin) || NETLIFY_RE.test(origin);
+    allowWhenNoOrigin ||
+    STATIC_ALLOWED.has(resolvedOrigin) ||
+    NETLIFY_RE.test(resolvedOrigin);
+
+  console.log("🔐 (availability.js) SSE CORS check", {
+    originHeader,
+    refererHeader,
+    refererOrigin,
+    resolvedOrigin,
+    host: req.hostname,
+    allowed: isAllowed,
+  });
 
   if (!isAllowed) {
-    console.warn("🚫 (availability.js) SSE origin blocked by CORS:", origin);
+    console.warn("🚫 (availability.js) SSE origin blocked by CORS:", {
+      originHeader,
+      refererHeader,
+    });
     return res.status(403).end();
   }
 
-  res.setHeader("Access-Control-Allow-Origin", origin);
+  // If no origin could be resolved (same-host dev), use '*'; otherwise echo the origin.
+  res.setHeader("Access-Control-Allow-Origin", resolvedOrigin || "*");
   res.setHeader("Access-Control-Allow-Credentials", "false");
   res.setHeader("Vary", "Origin");
   res.setHeader("Content-Type", "text/event-stream");
