@@ -1688,6 +1688,12 @@ const setOnInsert = {
   reply: null,
   musicianId: canonicalId,        // ✅ insert with canonical musician id
 };
+  const PUBLIC_SITE_BASE = (
+    process.env.PUBLIC_SITE_URL ||
+    process.env.FRONTEND_URL ||
+    "http://localhost:5174"
+  ).replace(/\/$/, "");
+
 
 const setAlways = {
   isDeputy: !!isDeputy,
