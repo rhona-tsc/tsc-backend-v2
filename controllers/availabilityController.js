@@ -277,6 +277,7 @@ function getCountyFeeValue(countyFees, countyName) {
   return undefined;
 }
 
+
 const _waFallbackSent = new Set(); // remember WA SIDs we've already fallen back for
 
 // Normalise first-name display so we never fall back to "there" when we actually have a name
@@ -1555,7 +1556,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         const setAlways = {
           isDeputy: false, // 👈 force LEAD on every write
           musicianId: realMusicianId,
-          musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(),
+          musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(), // we must be getting this too
           musicianEmail: enriched.email || "",
           photoUrl: enriched.photoUrl || enriched.profilePicture || "",
           address: fullFormattedAddress,
@@ -1592,7 +1593,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           dateISO,
           role: vMember.instrument,
           variables: {
-            firstName: vMember.firstName || "Musician",
+            firstName: vMember.firstName || "Musician", // we get the first name here
             date: formattedDate,
             location: shortAddress,
             fee: String(finalFee),
@@ -2270,70 +2271,48 @@ const badgeResult = await rebuildAndApplyAvailabilityBadge({
        // 3️⃣ Broadcast SSE updates
 if (global.availabilityNotify) {
   // 🩷 Deputy branch
-  if (isDeputy) {
-    // Try to get the *real* deputy name
-    let deputyName =
-      updated?.musicianName ||
-      updated?.name ||
-      musician?.firstName ||
-      bits?.resolvedEmail?.split("@")[0] || // fallback from email
-      "Deputy Vocalist";
-
-    // If we have deputies in the rebuilt badge, prefer that
-  if (badgeResult?.badge?.deputies?.length) {
-  // Sort by repliedAt or setAt (descending)
-  const sorted = [...badgeResult.badge.deputies].sort((a, b) =>
-    new Date(b.repliedAt || b.setAt || 0) - new Date(a.repliedAt || a.setAt || 0)
-  );
-  const latestDeputy = sorted[0];
-  deputyName =
-    latestDeputy?.vocalistName ||
-    latestDeputy?.name ||
-    deputyName;
+if (isDeputy) {
+  // compute deputyName as you already do...
+  global.availabilityNotify.deputyYes({
+    actId,
+    actName: act?.tscName || act?.name,
+    musicianName: deputyName,       // ✅ feed the name through
+    dateISO,
+    // optionally include musicianId if you want:
+    musicianId: musician?._id || updated?.musicianId || null,
+    // (badge is optional; only include if you want the broadcaster to use it)
+    badge: badgeResult?.badge,
+  });
 }
-
-    global.availabilityNotify.badgeUpdated({
-      type: "deputy_yes",
-      actId,
-      actName: act?.tscName || act?.name,
-      musicianName: deputyName,
-      dateISO,
-      isDeputy: true,
-    });
-
-    console.log("📡 SSE broadcasted: deputy_yes →", deputyName);
-  }
 
   
 
   // ⭐ Lead branch
   if (!isDeputy) {
-    const leadName =
-      musician?.firstName ||
-      updated?.musicianName ||
-      updated?.name ||
-      "Lead Vocalist";
-  global.availabilityNotify.badgeUpdated({
-  type: "leadYes",
-  actId,
-  actName: act?.tscName || act?.name,
-  musicianName: musician?.firstName || updated?.musicianName || "Lead Vocalist",
-  dateISO,
-  isDeputy: false,
-});
-    console.log("📡 SSE broadcasted: leadYes →", leadName);
-  }
+  const leadName =
+    musician?.firstName ||
+    updated?.musicianName ||
+    updated?.name ||
+    "Lead Vocalist";
 
-  // 🎤 Live badge refresh (lead or deputy)
+  global.availabilityNotify.leadYes({
+    actId,
+    actName: act?.tscName || act?.name,
+    musicianName: leadName,         // ✅ feed the name through
+    dateISO,
+    musicianId: musician?._id || updated?.musicianId || null,
+  });
+}
+
+// 🎤 Live badge refresh (lead or deputy) — keep this as-is
 if (badgeResult?.badge) {
   global.availabilityNotify.badgeUpdated({
-    type: "availability_badge_updated",
     actId,
     actName: act?.tscName || act?.name,
     dateISO,
-    badge: badgeResult.badge,
-    isDeputy,
+    badge: badgeResult.badge,       // ✅ badge goes here
   });
+}
 
   console.log("📡 SSE broadcasted: availability_badge_updated");
 }
