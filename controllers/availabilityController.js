@@ -2983,13 +2983,18 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
       primary = leadBits;                                    // last resort: show lead photo
     }
 
-    const mus = row.musicianId
-  ? await Musician.findById(row.musicianId).select("firstName lastName profilePhoto photoUrl").lean()
-  : null;
+    const mus = leadReply?.musicianId
+      ? await Musician.findById(leadReply.musicianId)
+          .select("firstName lastName profilePhoto photoUrl")
+          .lean()
+      : null;
 
-const name =
-  (row.selectedVocalistName || row.vocalistName || row.musicianName ||
-   `${mus?.firstName || ""} ${mus?.lastName || ""}`.trim() || "").trim();
+    const name = (
+      leadReply?.selectedVocalistName ||
+      leadReply?.vocalistName ||
+      leadReply?.musicianName ||
+      `${mus?.firstName || ""} ${mus?.lastName || ""}`.trim()
+    ).trim();
 
 
     // Final slot (keep legacy top-level fields for compatibility)
@@ -3182,17 +3187,18 @@ export async function getAvailabilityBadge(req, res) {
     }
 
     // 🚫 Skip rebuild if lead marked unavailable
-const actDoc = await Act.findById(actId).lean();
-if (actDoc?.availabilityBadgesMeta?.[dateISO]?.lockedByLeadUnavailable) {
-  console.log(`⏭️ Skipping rebuild — lead unavailable lock active for ${dateISO}`);
-  return { success: true, skipped: true, reason: "lead_unavailable_lock" };
-}
+    const actDoc = await Act.findById(actId).lean();
+    if (actDoc?.availabilityBadgesMeta?.[dateISO]?.lockedByLeadUnavailable) {
+      console.log(`⏭️ Skipping rebuild — lead unavailable lock active for ${dateISO}`);
+      return res.json({ badge: null, skipped: true, reason: "lead_unavailable_lock" });
+    }
 
-const badge = await buildAvailabilityBadgeFromRows({
-  actId,
-  dateISO,
-  hasLineups: actDoc?.hasLineups ?? true,
-});    if (!badge) {
+    const badge = await buildAvailabilityBadgeFromRows({
+      actId,
+      dateISO,
+      hasLineups: actDoc?.hasLineups ?? true,
+    });
+    if (!badge) {
       console.log("🪶 No badge found for act/date:", { actId, dateISO });
       return res.json({ badge: null });
     }
