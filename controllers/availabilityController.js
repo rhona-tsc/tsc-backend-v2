@@ -638,6 +638,8 @@ const isVocalRoleGlobal = (role = "") => {
 
 // --- New helpers for badge rebuilding ---
 
+
+
 const normalizePhoneE164 = (raw = "") => {
 
   let v = String(raw || "")
@@ -1553,22 +1555,28 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           status: "sent",
           reply: null,
         };
-        const setAlways = {
-          isDeputy: false, // 👈 force LEAD on every write
-          musicianId: realMusicianId,
-          musicianName: `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim(), // we must be getting this too
-          musicianEmail: enriched.email || "",
-          photoUrl: enriched.photoUrl || enriched.profilePicture || "",
-          address: fullFormattedAddress,
-          formattedAddress: fullFormattedAddress,
-          formattedDate,
-          clientName: resolvedClientName || "",
-          clientEmail: resolvedClientEmail || "",
-          actName: act?.tscName || act?.name || "",
-          duties: vMember.instrument || "Vocalist",
-          fee: String(finalFee),
-          updatedAt: now,
-        };
+       const displayNameForLead = `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim();
+
+const setAlways = {
+  isDeputy: false,
+  musicianId: realMusicianId,                  // ✅ ensure row is linked
+  musicianName: displayNameForLead,
+  musicianEmail: enriched.email || "",
+  photoUrl: enriched.photoUrl || enriched.profilePicture || "",
+  address: fullFormattedAddress,
+  formattedAddress: fullFormattedAddress,
+  formattedDate,
+  clientName: resolvedClientName || "",
+  clientEmail: resolvedClientEmail || "",
+  actName: act?.tscName || act?.name || "",
+  duties: vMember.instrument || "Vocalist",
+  fee: String(finalFee),
+  updatedAt: now,
+  // ✅ new: carry the *same* name into modern fields
+  selectedVocalistName: displayNameForLead,
+  selectedVocalistId: realMusicianId || null,
+  vocalistName: displayNameForLead,
+};
 
         const savedLead = await AvailabilityModel.findOneAndUpdate(
           query,
@@ -2029,10 +2037,21 @@ export const twilioInbound = async (req, res) => {
 
   // ✅ Immediately acknowledge Twilio to prevent retries
   res.status(200).send("OK");
+// Resolve a human-friendly display name from row + musician doc
+const resolveDisplayName = (row, musician) => {
+  const fromRow =
+    (row?.selectedVocalistName || row?.vocalistName || row?.musicianName || "").trim();
+  if (fromRow) return fromRow;
+
+  const fromMus = `${musician?.firstName || ""} ${musician?.lastName || ""}`.trim();
+  return fromMus || "Vocalist";
+};
 
   setImmediate( () => {
     (async () => {
     try {
+
+      
 
       const bodyText = String(req.body?.Body || "");
       const buttonText = String(req.body?.ButtonText || "");
@@ -2099,6 +2118,22 @@ if (updated.isDeputy && musician && String(updated.musicianId) !== String(musici
   updated.photoUrl = pickPic(musician) || updated.photoUrl;
 }
 
+const displayName = resolveDisplayName(updated, musician);
+
+// Make sure the Availability row carries a stable vocalistName
+if (displayName && updated?.vocalistName !== displayName) {
+  await AvailabilityModel.updateOne(
+    { _id: updated._id },
+    {
+      $set: {
+        vocalistName: displayName,
+        musicianName: updated?.musicianName || displayName, // keep old field too
+      },
+    }
+  );
+  updated.vocalistName = displayName; // keep in-memory copy in sync
+  if (!updated.musicianName) updated.musicianName = displayName;
+}
 
       // 🧩 Debug + ensure slotIndex is available for deputy notifications
 const slotIndex = typeof updated.slotIndex === "number" ? updated.slotIndex : null;
@@ -2268,23 +2303,36 @@ const badgeResult = await rebuildAndApplyAvailabilityBadge({
   __fromYesFlow: true
 });
 
-       // 3️⃣ Broadcast SSE updates
+// 3️⃣ Broadcast SSE updates
 if (global.availabilityNotify) {
-  // 🩷 Deputy branch
-if (isDeputy) {
-  // compute deputyName as you already do...
-  global.availabilityNotify.deputyYes({
-    actId,
-    actName: act?.tscName || act?.name,
-    musicianName: deputyName,       // ✅ feed the name through
-    dateISO,
-    // optionally include musicianId if you want:
-    musicianId: musician?._id || updated?.musicianId || null,
-    // (badge is optional; only include if you want the broadcaster to use it)
-    badge: badgeResult?.badge,
-  });
-}
+  if (isDeputy) {
+    global.availabilityNotify.deputyYes({
+      actId,
+      actName: act?.tscName || act?.name,
+      musicianName: displayName,  // ✅ use resolved name
+      dateISO,
+      musicianId: musician?._id || updated?.musicianId || null,
+      badge: badgeResult?.badge,
+    });
+  } else {
+    global.availabilityNotify.leadYes({
+      actId,
+      actName: act?.tscName || act?.name,
+      musicianName: displayName,  // ✅ use resolved name
+      dateISO,
+      musicianId: musician?._id || updated?.musicianId || null,
+    });
+  }
 
+  if (badgeResult?.badge) {
+    global.availabilityNotify.badgeUpdated({
+      actId,
+      actName: act?.tscName || act?.name,
+      dateISO,
+      badge: badgeResult.badge,
+    });
+  }
+}
   
 
   // ⭐ Lead branch
@@ -2600,13 +2648,9 @@ export const makeAvailabilityBroadcaster = (broadcastFn) => ({
     });
   },
 
-  deputyYes: ({ actId, actName, musicianName, dateISO, badge }) => {
-    const deputyName =
-      musicianName ||
-      badge?.deputies?.[0]?.vocalistName ||
-      badge?.deputies?.[0]?.name ||
-      badge?.vocalistName ||
-      "Deputy Vocalist";
+deputyYes: ({ actId, actName, musicianName, dateISO, badge }) => {
+  const deputyName = (musicianName || badge?.deputies?.[0]?.vocalistName || badge?.deputies?.[0]?.name || "Deputy Vocalist");
+  
 
     broadcastFn({
       type: "availability_deputy_yes",
@@ -2946,11 +2990,20 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
       primary = leadBits;                                    // last resort: show lead photo
     }
 
+    const mus = row.musicianId
+  ? await Musician.findById(row.musicianId).select("firstName lastName profilePhoto photoUrl").lean()
+  : null;
+
+const name =
+  (row.selectedVocalistName || row.vocalistName || row.musicianName ||
+   `${mus?.firstName || ""} ${mus?.lastName || ""}`.trim() || "").trim();
+
+
     // Final slot (keep legacy top-level fields for compatibility)
     slots.push({
       slotIndex: Number(slotKey),
       isDeputy: false, // legacy
-      vocalistName: leadDisplayBits?.resolvedName || "",
+      vocalistName: name, 
       musicianId: leadBits?.musicianId ?? (leadReply ? String(leadReply.musicianId) : null),
       photoUrl: leadBits?.photoUrl || null,
       profileUrl: leadBits?.profileUrl || "",
