@@ -1485,8 +1485,11 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
             // ✅ If lead previously YES, refresh badge (optional best-effort)
             if (prior.reply === "yes") {
               try {
-                const { rebuildAndApplyAvailabilityBadge } = await import("./availabilityBadgeController.js");
-                const badgeRes = await rebuildAndApplyAvailabilityBadge({ actId, dateISO, __fromExistingReply: true });
+                const badgeRes = await rebuildAndApplyAvailabilityBadge({
+                actId,
+                dateISO,
+                __fromExistingReply: true,
+              });
                 if (global.availabilityNotify && badgeRes?.badge) {
                   global.availabilityNotify.badgeUpdated({
                     type: "availability_badge_updated",
@@ -1711,8 +1714,11 @@ const canonical = await findCanonicalMusicianByPhone(phone);
       if (prior.reply === "yes") {
         // ✅ Refresh badge (best-effort)
         try {
-          const { rebuildAndApplyAvailabilityBadge } = await import("./availabilityBadgeController.js");
-          const badgeRes = await rebuildAndApplyAvailabilityBadge({ actId, dateISO, __fromExistingReply: true });
+         const badgeRes = await rebuildAndApplyAvailabilityBadge({
+          actId,
+          dateISO,
+          __fromExistingReply: true,
+        });
           if (global.availabilityNotify && badgeRes?.badge) {
             global.availabilityNotify.badgeUpdated({
               type: "availability_badge_updated",
@@ -2212,7 +2218,6 @@ console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
         console.log(`✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`);
 
         const { createCalendarInvite } = await import("./googleController.js");
-        const { rebuildAndApplyAvailabilityBadge } = await import("./availabilityBadgeController.js");
 
         // 1️⃣ Create a calendar invite for either lead or deputy
         console.log("📧 [Calendar Debug] emailForInvite=", emailForInvite, "act=", !!act, "dateISO=", dateISO);
@@ -2294,11 +2299,16 @@ console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
           { $set: { status: "read", ...(isDeputy ? { isDeputy: true } : {}) } }
         );
 
-        const badgeResult = await rebuildAndApplyAvailabilityBadge({
-          actId,
-          dateISO,
-          __fromYesFlow: true
-        });
+        let badgeResult = null;
+        try {
+          badgeResult = await rebuildAndApplyAvailabilityBadge({
+            actId,
+            dateISO,
+            __fromYesFlow: true,
+          });
+        } catch (e) {
+          console.warn("⚠️ Badge rebuild failed:", e?.message || e);
+        }
 
         // 3️⃣ Broadcast SSE updates
         if (global.availabilityNotify) {
