@@ -2316,7 +2316,7 @@ if (badgeResult?.badge) {
 
   console.log("📡 SSE broadcasted: availability_badge_updated");
 }
-}
+
 
         return;
       }
