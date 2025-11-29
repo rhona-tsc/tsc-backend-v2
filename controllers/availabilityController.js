@@ -2212,164 +2212,157 @@ console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
         console.log(`✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`);
 
         const { createCalendarInvite } = await import("./googleController.js");
+        const { rebuildAndApplyAvailabilityBadge } = await import("./availabilityBadgeController.js");
 
         // 1️⃣ Create a calendar invite for either lead or deputy
         console.log("📧 [Calendar Debug] emailForInvite=", emailForInvite, "act=", !!act, "dateISO=", dateISO);
-if (emailForInvite && act && dateISO) {
-  const formattedDateString = new Date(dateISO).toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+        if (emailForInvite && act && dateISO) {
+          const formattedDateString = new Date(dateISO).toLocaleDateString("en-GB", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          });
 
-  const fee =
-    updated?.fee ||
-    act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
-    null;
+          const fee =
+            updated?.fee ||
+            act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
+            null;
 
-try {
-;
+          try {
+            // 🧹 Cancel any existing calendar event before re-creating a new one
+            if (updated?.calendarEventId && emailForInvite) {
+              try {
+                console.log("🗓️ Cancelling old calendar event before new YES invite");
+                await cancelCalendarInvite({
+                  eventId: updated.calendarEventId,
+                  actId: act?._id || updated.actId,
+                  dateISO: updated.dateISO,
+                  email: emailForInvite,
+                });
+              } catch (err) {
+                console.warn("⚠️ Failed to cancel old calendar event:", err.message);
+              }
+            }
 
-// 🧹 Cancel any existing calendar event before re-creating a new one
-if (updated?.calendarEventId && emailForInvite) {
-  try {
-    console.log("🗓️ Cancelling old calendar event before new YES invite");
-    await cancelCalendarInvite({
-      eventId: updated.calendarEventId,
-      actId: act?._id || updated.actId,
-      dateISO: updated.dateISO,
-      email: emailForInvite,
-    });
-  } catch (err) {
-    console.warn("⚠️ Failed to cancel old calendar event:", err.message);
-  }
-}
+            const event = await createCalendarInvite(
+              {
+                enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
+                actId,
+                dateISO,
+                email: emailForInvite,
+                summary: `TSC: ${act.tscName || act.name} enquiry`,
+                description: [
+                  `Event Date: ${formattedDateString}`,
+                  `Act: ${act.tscName || act.name}`,
+                  `Role: ${updated.duties || ""}`,
+                  `Address: ${updated.formattedAddress || "TBC"}`,
+                  `Fee: £${fee || "TBC"}`,
+                ].join("\n"),
+                startTime: `${dateISO}T17:00:00Z`,
+                endTime: `${dateISO}T23:59:00Z`,
+                fee,
+              });
 
-  const event = await createCalendarInvite(
-{
-    enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
-    actId,
-    dateISO,
-    email: emailForInvite,
-    summary: `TSC: ${act.tscName || act.name} enquiry`,
-    description: [
-      `Event Date: ${formattedDateString}`,
-      `Act: ${act.tscName || act.name}`,
-      `Role: ${updated.duties || ""}`,
-      `Address: ${updated.formattedAddress || "TBC"}`,
-      `Fee: £${fee || "TBC"}`,
-    ].join("\n"),
-    startTime: `${dateISO}T17:00:00Z`,
-    endTime: `${dateISO}T23:59:00Z`,
-    fee,
-    
-  });
+            console.log("📅 Calendar invite sent:", emailForInvite, {
+              eventId: event?.id || event?.data?.id,
+            });
 
-  console.log("📅 Calendar invite sent:", emailForInvite, {
-    eventId: event?.id || event?.data?.id,
-  });
-
-  
-  // ✅ move this INSIDE the try
-  await AvailabilityModel.updateOne(
-    { _id: updated._id },
-    {
-      $set: {
-        calendarEventId: event?.id || event?.data?.id || null,
-        calendarInviteEmail: emailForInvite,
-        calendarInviteSentAt: new Date(),
-        calendarStatus: "needsAction",
-      },
-    }
-  );
-} catch (err) {
-  console.error("❌ Calendar invite failed:", err.message);
-}
+            // ✅ move this INSIDE the try
+            await AvailabilityModel.updateOne(
+              { _id: updated._id },
+              {
+                $set: {
+                  calendarEventId: event?.id || event?.data?.id || null,
+                  calendarInviteEmail: emailForInvite,
+                  calendarInviteSentAt: new Date(),
+                  calendarStatus: "needsAction",
+                },
+              }
+            );
+          } catch (err) {
+            console.error("❌ Calendar invite failed:", err.message);
+          }
         }
-console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
+        console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
 
         await sendWhatsAppText(toE164, "Super — we’ll send a diary invite to log the enquiry for your records.");
 
         // 2️⃣ Mark as available + rebuild badge
-       await AvailabilityModel.updateOne(
-  { _id: updated._id },
-  { $set: { status: "read", ...(isDeputy ? { isDeputy: true } : {}) } }
-);
+        await AvailabilityModel.updateOne(
+          { _id: updated._id },
+          { $set: { status: "read", ...(isDeputy ? { isDeputy: true } : {}) } }
+        );
 
-const badgeResult = await rebuildAndApplyAvailabilityBadge({
-  actId,
-  dateISO,
-  __fromYesFlow: true
-});
+        const badgeResult = await rebuildAndApplyAvailabilityBadge({
+          actId,
+          dateISO,
+          __fromYesFlow: true
+        });
 
-// 3️⃣ Broadcast SSE updates
-if (global.availabilityNotify) {
-  if (isDeputy) {
-    global.availabilityNotify.deputyYes({
-      actId,
-      actName: act?.tscName || act?.name,
-      musicianName: displayName,  // ✅ use resolved name
-      dateISO,
-      musicianId: musician?._id || updated?.musicianId || null,
-      badge: badgeResult?.badge,
-    });
-  } else {
-    global.availabilityNotify.leadYes({
-      actId,
-      actName: act?.tscName || act?.name,
-      musicianName: displayName,  // ✅ use resolved name
-      dateISO,
-      musicianId: musician?._id || updated?.musicianId || null,
-    });
-  }
+        // 3️⃣ Broadcast SSE updates
+        if (global.availabilityNotify) {
+          if (isDeputy) {
+            global.availabilityNotify.deputyYes({
+              actId,
+              actName: act?.tscName || act?.name,
+              musicianName: displayName,  // ✅ use resolved name
+              dateISO,
+              musicianId: musician?._id || updated?.musicianId || null,
+              badge: badgeResult?.badge,
+            });
+          } else {
+            global.availabilityNotify.leadYes({
+              actId,
+              actName: act?.tscName || act?.name,
+              musicianName: displayName,  // ✅ use resolved name
+              dateISO,
+              musicianId: musician?._id || updated?.musicianId || null,
+            });
+          }
 
-  if (badgeResult?.badge) {
-    global.availabilityNotify.badgeUpdated({
-      actId,
-      actName: act?.tscName || act?.name,
-      dateISO,
-      badge: badgeResult.badge,
-    });
-  }
-}
-  
+          if (badgeResult?.badge) {
+            global.availabilityNotify.badgeUpdated({
+              actId,
+              actName: act?.tscName || act?.name,
+              dateISO,
+              badge: badgeResult.badge,
+            });
+          }
+        }
 
-  // ⭐ Lead branch
-  if (!isDeputy) {
-  const leadName =
-    musician?.firstName ||
-    updated?.musicianName ||
-    updated?.name ||
-    "Lead Vocalist";
+        // ⭐ Lead branch
+        if (!isDeputy) {
+          const leadName =
+            musician?.firstName ||
+            updated?.musicianName ||
+            updated?.name ||
+            "Lead Vocalist";
 
-  global.availabilityNotify.leadYes({
-    actId,
-    actName: act?.tscName || act?.name,
-    musicianName: leadName,         // ✅ feed the name through
-    dateISO,
-    musicianId: musician?._id || updated?.musicianId || null,
-  });
-}
+          global.availabilityNotify.leadYes({
+            actId,
+            actName: act?.tscName || act?.name,
+            musicianName: leadName,         // ✅ feed the name through
+            dateISO,
+            musicianId: musician?._id || updated?.musicianId || null,
+          });
+        }
 
-// 🎤 Live badge refresh (lead or deputy) — keep this as-is
-if (badgeResult?.badge) {
-  global.availabilityNotify.badgeUpdated({
-    actId,
-    actName: act?.tscName || act?.name,
-    dateISO,
-    badge: badgeResult.badge,       // ✅ badge goes here
-  });
-}
+        // 🎤 Live badge refresh (lead or deputy) — keep this as-is
+        if (badgeResult?.badge) {
+          global.availabilityNotify.badgeUpdated({
+            actId,
+            actName: act?.tscName || act?.name,
+            dateISO,
+            badge: badgeResult.badge,       // ✅ badge goes here
+          });
+        }
 
-  console.log("📡 SSE broadcasted: availability_badge_updated");
-}
-
-
+        console.log("📡 SSE broadcasted: availability_badge_updated");
         return;
-      }
+      } // ← closes YES branch
 
- // 🚫 NO / UNAVAILABLE / NOLOC BRANCH
+// 🚫 NO / UNAVAILABLE / NOLOC BRANCH
         if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
           console.log("🚫 UNAVAILABLE reply received via WhatsApp");
 
