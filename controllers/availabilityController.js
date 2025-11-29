@@ -2641,44 +2641,41 @@ const firstNameOf = (p) => {
 
 
 export const makeAvailabilityBroadcaster = (broadcastFn) => ({
-  leadYes: ({ actId, actName, musicianName, dateISO }) => {
+  leadYes: ({ actId, actName, musicianName, dateISO, musicianId }) => {
     broadcastFn({
-      type: "availability_yes",
+      type: "availability_yes", // frontend already normalizes to "leadYes"
       actId,
       actName,
       musicianName: musicianName || "Lead Vocalist",
+      musicianId: musicianId || null, // ← include this
       dateISO,
     });
   },
 
-deputyYes: ({ actId, actName, musicianName, dateISO, badge }) => {
-  const deputyName = (musicianName || badge?.deputies?.[0]?.vocalistName || badge?.deputies?.[0]?.name || "Deputy Vocalist");
-  
+  deputyYes: ({ actId, actName, musicianName, dateISO, badge, musicianId }) => {
+    const deputyName =
+      (musicianName ||
+       badge?.deputies?.[0]?.vocalistName ||
+       badge?.deputies?.[0]?.name ||
+       "Deputy Vocalist");
 
     broadcastFn({
       type: "availability_deputy_yes",
       actId,
       actName,
       musicianName: deputyName,
+      musicianId: musicianId || badge?.deputies?.[0]?.musicianId || null, // ← include this too
       dateISO,
     });
   },
 
-badgeUpdated: ({ actId, actName, dateISO, badge }) => {
-  if (!badge) {
-    console.log("🔕 SSE: badge was null/undefined – skipping broadcast", { actId, dateISO });
-    return; // ✅ STOP here, do NOT send to SSE
+  badgeUpdated: ({ actId, actName, dateISO, badge }) => {
+    if (!badge) {
+      console.log("🔕 SSE: badge was null/undefined – skipping broadcast", { actId, dateISO });
+      return;
+    }
+    broadcastFn({ type: "availability_badge_updated", actId, actName, dateISO, badge });
   }
-
-  // If badge exists, broadcast it as normal
-  broadcastFn({
-    type: "availability_badge_updated",
-    actId,
-    actName,
-    dateISO,
-    badge,
-  });
-}
 });
 
 // one-shot WA→SMS for a single deputy
