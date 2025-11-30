@@ -3290,14 +3290,6 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       actDoc.coverImage?.url ||
       "";
 
-    // Load mailer lazily to avoid top-level import clashes
-    let sendClientEmail = null;
-    try {
-      ({ sendClientEmail } = await import("../utils/sendClientEmail.js"));
-    } catch (e) {
-      console.warn("⚠️ sendClientEmail util not available — skipping client email:", e?.message || e);
-    }
-
     if (sendClientEmail) {
       // LEAD AVAILABLE → "Good news" mail
       if (leadSlot) {
