@@ -1028,199 +1028,77 @@ function findVocalistPhone(actData, lineupId) {
   return { vocalist, phone };
 }
 
-async function getDeputyDisplayBits(dep) {
-  const PUBLIC_SITE_BASE = (
-    process.env.PUBLIC_SITE_URL ||
-    process.env.FRONTEND_URL ||
-    "http://localhost:5174"
-  ).replace(/\/$/, "");
+// Build a sensible display name from however your musician schema stores it
+function buildMusicianDisplayName(m) {
+  const first =
+    m?.firstName ||
+    m?.personal?.name?.first ||
+    m?.name?.first ||
+    "";
+  const last =
+    m?.lastName ||
+    m?.personal?.name?.last ||
+    m?.name?.last ||
+    "";
+  const stage = m?.stageName || "";
+  const display = m?.displayName || "";
 
-  console.log("🔍 getDeputyDisplayBits START", {
-    incomingDep: {
-      id: dep?._id,
-      musicianId: dep?.musicianId,
-      firstName: dep?.firstName,
-      lastName: dep?.lastName,
-      phone: dep?.phone,
-      phoneNumber: dep?.phoneNumber,
-      phoneNormalized: dep?.phoneNormalized,
-      email: dep?.email || dep?.emailAddress,
-    }
-  });
-
-  try {
-    /* -------------------------------------------------------------- */
-    /* 🟣 1. INITIAL ID + DIRECT PICTURE CHECK                         */
-    /* -------------------------------------------------------------- */
-    const initialMusicianId =
-      (dep?.musicianId && String(dep.musicianId)) ||
-      (dep?._id && String(dep._id)) ||
-      "";
-
-      let resolvedMusicianId = initialMusicianId; // ⬅️ track locally; never mutate dep
-
-    let photoUrl = getPictureUrlFrom(dep);
-    console.log("📸 Step 1: Direct deputy picture →", photoUrl || "❌ none");
-
-    let mus = null;
-
-    /* -------------------------------------------------------------- */
-    /* 🔵 2. Lookup by musicianId                                      */
-    /* -------------------------------------------------------------- */
-    if ((!photoUrl || !photoUrl.startsWith("http")) && initialMusicianId) {
-      console.log("🆔 Step 2: Looking up musician by ID →", initialMusicianId);
-      mus = await Musician.findById(initialMusicianId)
-        .select(
-          "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl email phoneNormalized phone phoneNumber"
-        )
-        .lean();
-
-      if (mus) {
-  photoUrl = getPictureUrlFrom(mus);
-  resolvedMusicianId = String(mus._id || initialMusicianId);
-  console.log("📸 Step 2 result: From musicianId →", photoUrl || "❌ none");
-} else {
-  console.warn("⚠️ Step 2: No musician found by ID", initialMusicianId);
-}
-    }
-
-    /* -------------------------------------------------------------- */
-    /* 🟡 2.5 Lookup by phone if no photo yet                          */
-    /* -------------------------------------------------------------- */
-    if ((!photoUrl || !photoUrl.startsWith("http"))) {
-      const possiblePhone =
-        dep.phoneNormalized ||
-        dep.phoneNumber ||
-        dep.phone ||
-        mus?.phoneNormalized ||
-        mus?.phone ||
-        mus?.phoneNumber;
-
-      if (possiblePhone) {
-        const normalizedPhone = possiblePhone
-          .replace(/\s+/g, "")
-          .replace(/^(\+44|44|0)/, "+44");
-
-        console.log("📞 Step 2.5: Looking up by phone →", normalizedPhone);
-
-        const musByPhone = await Musician.findOne({
-          $or: [
-            { phoneNormalized: normalizedPhone },
-            { phone: normalizedPhone },
-            { phoneNumber: normalizedPhone },
-          ],
-        })
-          .select(
-            "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl email phoneNormalized _id"
-          )
-          .lean();
-
-        if (musByPhone) {
-          mus = musByPhone;
-          resolvedMusicianId = String(musByPhone._id || resolvedMusicianId);
-          photoUrl = getPictureUrlFrom(musByPhone);
-          console.log("📸 Step 2.5 result: Found by phone →", photoUrl || "❌ none");
-
-        } else {
-          console.warn("⚠️ Step 2.5: No musician found by phone", normalizedPhone);
-        }
-      } else {
-        console.log("ℹ️ Step 2.5 skipped — no phone available");
-      }
-    }
-
-    /* -------------------------------------------------------------- */
-    /* 🟤 3. Lookup by email                                           */
-    /* -------------------------------------------------------------- */
-    let resolvedEmail =
-      dep?.email ||
-      dep?.emailAddress ||
-      mus?.email ||
-      "";
-
-    if ((!photoUrl || !photoUrl.startsWith("http")) && resolvedEmail) {
-      console.log("📧 Step 3: Lookup by email →", resolvedEmail);
-
-      const musByEmail = await Musician.findOne({ email: resolvedEmail })
-        .select(
-          "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl _id email"
-        )
-        .lean();
-
-      if (musByEmail) {
-        mus = musByEmail;
-        resolvedMusicianId = String(musByEmail._id || resolvedMusicianId);
-        photoUrl = getPictureUrlFrom(musByEmail);
-        resolvedEmail = musByEmail.email;
-        console.log("📸 Step 3 result: Found by email →", photoUrl || "❌ none");
-
-      
-      } else {
-        console.warn("⚠️ Step 3: No musician found for email", resolvedEmail);
-      }
-    }
-
-    /* -------------------------------------------------------------- */
-    /* 🟢 FINAL RESOLUTION                                            */
-    /* -------------------------------------------------------------- */
-const finalMusicianId = String(
-  resolvedMusicianId || dep?.musicianId || initialMusicianId || ""
-);
-
-const profileUrl = finalMusicianId
-  ? `${PUBLIC_SITE_BASE}/musician/${finalMusicianId}`
-  : "";
-
-    const FALLBACK_PHOTO =
-      "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1761313694/profile_placeholder_rcdly4.png";
-
-    if (!photoUrl || !photoUrl.startsWith("http")) {
-      console.log("🪄 No valid photo found — using fallback");
-      photoUrl = FALLBACK_PHOTO;
-    }
-
-    const finalBits = {
-      musicianId: finalMusicianId,
-      photoUrl,
-      profileUrl,
-      resolvedEmail,
-      
-    };
-
-    // ⭐ Add name fields for badge + toasts
-if (mus) {
-  finalBits.firstName = mus.firstName || "";
-  finalBits.lastName = mus.lastName || "";
-  finalBits.resolvedName = `${mus.firstName || ""} ${mus.lastName || ""}`.trim();
-} else {
-  // fallback if dep itself had name (vocalists do)
-  finalBits.firstName = dep.firstName || "";
-  finalBits.lastName = dep.lastName || "";
-  finalBits.resolvedName = `${dep.firstName || ""} ${dep.lastName || ""}`.trim();
+  // preference order: explicit displayName → stageName → “First L”
+  if (display) return display;
+  if (stage) return stage;
+  if (first && last) return `${first} ${String(last).charAt(0)}`;
+  return first || ""; // may still be empty if we truly have no names
 }
 
-    console.log("🎯 FINAL getDeputyDisplayBits result:", finalBits);
-    return finalBits;
-  } catch (e) {
-    console.warn("❌ getDeputyDisplayBits FAILED:", e.message || e);
+export async function getDeputyDisplayBits({ incomingDep = {} }) {
+  const musicianId = String(incomingDep.musicianId || incomingDep.id || "");
+  const bits = {
+    musicianId: musicianId || null,
+    photoUrl: null,
+    profileUrl: "",
+    resolvedEmail: "",
+    firstName: "",
+    lastName: "",
+    displayName: "",
+    resolvedName: "",
+    vocalistName: "", // <-- we will set this to the display name too
+  };
 
-    const fallbackId =
-      (dep?.musicianId && String(dep.musicianId)) ||
-      (dep?._id && String(dep._id)) ||
+  if (!musicianId) return bits;
+
+  // You already use this for photos; keep using it so photos remain correct
+  const photoUrl = await getPictureUrlFrom({ musicianId });
+  if (photoUrl) bits.photoUrl = photoUrl;
+
+  // Pull lightweight identity fields
+  const m = await Musician.findById(musicianId)
+    .select("firstName lastName shortName stageName displayName profileUrl email personal.name")
+    .lean();
+
+  if (m) {
+    const first =
+      m?.firstName ||
+      m?.personal?.name?.first ||
+      m?.name?.first ||
+      "";
+    const last =
+      m?.lastName ||
+      m?.personal?.name?.last ||
+      m?.name?.last ||
       "";
 
-    const FALLBACK_PHOTO =
-      "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1761313694/profile_placeholder_rcdly4.png";
+    const resolved = buildMusicianDisplayName(m);
 
-    return {
-      musicianId: fallbackId,
-      photoUrl: FALLBACK_PHOTO,
-      profileUrl: fallbackId
-        ? `${PUBLIC_SITE_BASE}/musician/${fallbackId}`
-        : "",
-      resolvedEmail: dep?.email || "",
-    };
+    bits.profileUrl = m?.profileUrl || bits.profileUrl;
+    bits.resolvedEmail = m?.email || bits.resolvedEmail;
+    bits.firstName = first;
+    bits.lastName = last;
+    bits.displayName = resolved;
+    bits.resolvedName = resolved;
+    bits.vocalistName = resolved; // <-- important: fill this too
   }
+
+  return bits;
 }
 
 
@@ -2880,6 +2758,10 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     dateISO,
     reply: { $in: ["yes", "no", "unavailable", null] },
     v2: true,
+     musicianId: chosenRow.musicianId,
+  available: chosenRow.reply === "yes",
+  isDeputy: !!chosenRow.isDeputy,
+  vocalistName: resolvedName
   })
     // NOTE: added phone, musicianEmail, repliedAt to support lookups + UI timestamps
     .select("musicianId slotIndex reply updatedAt repliedAt isDeputy photoUrl phone musicianEmail")
@@ -2949,29 +2831,33 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     // Deputies — include ALL (even pending) so fallback-to-photo works
     const deputyRowsSorted = deputyRows.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
-    const deputies = [];
-    for (const r of deputyRowsSorted) {
-      try {
-        const bits = await getDeputyDisplayBits({
-          musicianId: r.musicianId,
-          phone: r.phone,
-          email: r.musicianEmail,
-        });
-        deputies.push({
-          slotIndex: Number(slotKey),
-          isDeputy: true,
-          musicianId: String(bits?.musicianId || r.musicianId || ""),
-          photoUrl: bits?.photoUrl || r?.photoUrl || null,
-          profileUrl: bits?.profileUrl || "",
-          vocalistName: bits?.resolvedName || bits?.firstName || "",
-          state: r.reply ?? null,
-          available: r.reply === "yes",
-          setAt: r.updatedAt || null,
-          repliedAt: r.repliedAt || r.updatedAt || null,
-        });
-      } catch (e) {
-        console.warn("getDeputyDisplayBits (deputy) failed:", e?.message, r?.musicianId);
-      }
+   const deputies = [];
+for (const depRow of slotRows.filter(r => r.isDeputy)) {
+  const nameBits = await getDeputyDisplayBits({ incomingDep: depRow });
+  deputies.push({
+    // identity & image
+    musicianId: nameBits.musicianId,
+    photoUrl: nameBits.photoUrl,
+    profileUrl: nameBits.profileUrl,
+
+    // names (all populated now)
+    displayName: nameBits.displayName,
+    resolvedName: nameBits.resolvedName,
+    vocalistName: nameBits.vocalistName,
+    firstName: nameBits.firstName,
+    lastName: nameBits.lastName,
+
+    // availability state & metadata
+    isDeputy: true,
+    slotIndex: slotIndex,                         // keep your slot index
+    state: depRow.reply,                          // "yes" | "no" | null
+    available: depRow.reply === "yes",
+    covering: "deputy",
+    repliedAt: depRow.repliedAt || null,
+    setAt: depRow.updatedAt || null,
+    phone: depRow.phone || null,
+  });
+} 
     }
 
     // Choose primary
@@ -3073,6 +2959,10 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     actId,
     dateISO,
     hasLineups: actDoc?.hasLineups ?? true,
+     musicianId: chosenRow.musicianId,
+  available: chosenRow.reply === "yes",
+  isDeputy: !!chosenRow.isDeputy,
+  vocalistName: resolvedName
   });
 
   console.log("🎨 Raw badge returned from buildAvailabilityBadgeFromRows:", badge);
@@ -3275,13 +3165,31 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       })
     );
 
-    // Lead vs Deputy decision from new slot-based badge
-    const leadSlot = (badge?.slots || []).find(
-      (s) => s?.available && (!s?.primary || s?.primary?.isDeputy !== true)
-    );
-    const deputySlot = (badge?.slots || []).find(
-      (s) => s?.primary?.isDeputy === true && s?.primary?.available
-    );
+   // --- Who's actually covering this date? (robust selectors) ---
+const slots = Array.isArray(badge?.slots) ? badge.slots : [];
+
+const leadSlot = slots.find(
+  (s) =>
+    s?.available === true &&
+    (
+      s?.covering === "lead" ||                // preferred if build sets this
+      s?.primary?.isDeputy === false ||        // explicit "lead"
+      (s?.isDeputy === false && s?.musicianId) // legacy/top-level flags
+    )
+);
+
+const deputySlot = slots.find(
+  (s) =>
+    s?.available === true &&
+    (
+      s?.covering === "deputy" ||              // preferred if build sets this
+      s?.primary?.isDeputy === true ||         // explicit "deputy"
+      s?.isDeputy === true                     // legacy/top-level flags
+    )
+);
+
+// Business rule: prefer lead if both are available, otherwise deputy if only deputy is available
+const emailMode = leadSlot ? "lead" : (deputySlot ? "deputy" : null);
 
     // Resolve hero
     const heroImg =
@@ -3463,6 +3371,10 @@ export async function getAvailabilityBadge(req, res) {
       actId,
       dateISO,
       hasLineups: actDoc?.hasLineups ?? true,
+       musicianId: chosenRow.musicianId,
+  available: chosenRow.reply === "yes",
+  isDeputy: !!chosenRow.isDeputy,
+  vocalistName: resolvedName
     });
     if (!badge) {
       console.log("🪶 No badge found for act/date:", { actId, dateISO });
