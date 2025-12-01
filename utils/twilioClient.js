@@ -191,6 +191,14 @@ function pickPic(mus) {
     "";
   return (typeof url === "string" && url.trim().startsWith("http")) ? url.trim() : "";
 }
+
+const PUBLIC_SITE_BASE = (
+  process.env.PUBLIC_SITE_URL ||
+  process.env.FRONTEND_URL ||
+  "http://localhost:5174"
+).replace(/\/$/, "");
+
+
 const buildProfileUrl = (id) =>
   id ? `${PUBLIC_SITE_BASE}/musician/${id}` : "";
 
