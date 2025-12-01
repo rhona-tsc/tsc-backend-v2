@@ -111,6 +111,89 @@ export async function sendWhatsAppMessage(opts = {}) {
       console.warn("⚠️ [sendWhatsAppMessage] Fee compute failed:", err?.message);
     }
   }
+    // ── name helpers (drop these in once, before any usage of firstLast) ───────────
+const firstLast = (nameLike) => {
+  const s = (nameLike ?? "").toString().trim();
+  if (!s) return { first: "", last: "", firstName: "", lastName: "", displayName: "" };
+  const parts = s.split(/\s+/);
+  const first = parts[0] || "";
+  const last = parts.length > 1 ? parts.slice(1).join(" ") : "";
+  return { first, last, firstName: first, lastName: last, displayName: s };
+};
+
+const logIdentity = (label, obj = {}) => {
+  const firstName =
+    obj.firstName ||
+    obj.fn ||
+    obj.givenName ||
+    obj.selectedVocalistName?.split?.(" ")?.[0] ||
+    "";
+  const lastName =
+    obj.lastName ||
+    obj.ln ||
+    obj.familyName ||
+    (obj.selectedVocalistName?.includes?.(" ")
+      ? obj.selectedVocalistName.split(" ").slice(1).join(" ")
+      : "") ||
+    "";
+  const displayName =
+    obj.displayName ||
+    obj.musicianName ||
+    obj.resolvedName ||
+    `${firstName} ${lastName}`.trim();
+  const vocalistDisplayName =
+    obj.vocalistDisplayName ||
+    obj.vocalistName ||
+    obj.selectedVocalistName ||
+    displayName;
+
+  console.log(`👤 ${label}`, {
+    firstName: firstName || undefined,
+    lastName: lastName || undefined,
+    displayName: displayName || undefined,
+    vocalistDisplayName: vocalistDisplayName || undefined,
+    address: obj.address || undefined,
+    formattedAddress: obj.formattedAddress || undefined,
+    profileUrl: obj.profileUrl || obj.tscProfileUrl || undefined,
+    photoUrl:
+      obj.photoUrl ||
+      obj.profilePicture ||
+      obj.profilePhoto ||
+      obj.imageUrl ||
+      undefined,
+    isDeputy: Boolean(obj.isDeputy),
+    slotIndex: obj.slotIndex ?? undefined,
+    musicianId: obj.musicianId ? String(obj.musicianId) : undefined,
+    phone: obj.phone || obj.phoneNormalized || undefined,
+    reply: obj.reply || obj.state || undefined,
+  });
+};
+
+
+ const displayNameOf = (p = {}, log = true, label = "displayNameOf") => {
+  const fn = (p.firstName || p.name || "").trim();
+  const ln = (p.lastName || "").trim();
+  const dn = (fn && ln) ? `${fn} ${ln}` : (fn || ln || "");
+  if (log) {
+    logIdentity(label, { ...p, displayName: dn });
+  }
+  return dn;
+};
+
+
+function pickPic(mus) {
+  const url =
+    mus?.profilePicture ||
+    mus?.musicianProfileImage ||
+    mus?.profileImage ||
+    mus?.photoUrl ||
+    mus?.imageUrl ||
+    "";
+  return (typeof url === "string" && url.trim().startsWith("http")) ? url.trim() : "";
+}
+const buildProfileUrl = (id) =>
+  id ? `${PUBLIC_SITE_BASE}/musician/${id}` : "";
+
 
   const memberNames = firstLast(member || {});
   const memberDisplayName = displayNameOf(member || {});
