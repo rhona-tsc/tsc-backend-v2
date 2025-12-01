@@ -2829,35 +2829,67 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
           : null);
 
     // Deputies — include ALL (even pending) so fallback-to-photo works
-    const deputyRowsSorted = deputyRows.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+    const deputyRowsSorted = deputyRows.sort(
+      (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)
+    );
 
-   const deputies = [];
-for (const depRow of slotRows.filter(r => r.isDeputy)) {
-  const nameBits = await getDeputyDisplayBits({ incomingDep: depRow });
-  deputies.push({
-    // identity & image
-    musicianId: nameBits.musicianId,
-    photoUrl: nameBits.photoUrl,
-    profileUrl: nameBits.profileUrl,
+    const deputies = [];
+    for (const depRow of deputyRowsSorted) {
+      // 🔎 Try to fetch the canonical musician for reliable names/media
+      let musDoc = null;
+      if (depRow?.musicianId) {
+        try {
+          musDoc = await Musician.findById(depRow.musicianId)
+            .select(
+              "firstName lastName email profilePicture photoUrl imageUrl profileImage musicianProfileImage musicianProfileImageUpload tscProfileUrl"
+            )
+            .lean();
+        } catch (e) {
+          console.warn("getDeputyDisplayBits: failed to load musician doc:", e?.message || e);
+        }
+      }
 
-    // names (all populated now)
-    displayName: nameBits.displayName,
-    resolvedName: nameBits.resolvedName,
-    vocalistName: nameBits.vocalistName,
-    firstName: nameBits.firstName,
-    lastName: nameBits.lastName,
+      // 🧩 Build display bits using a flat merged shape (expected by helper)
+      const bits = await getDeputyDisplayBits({
+        ...(musDoc || {}),
+        ...(depRow || {}),
+      });
 
-    // availability state & metadata
-    isDeputy: true,
-    slotIndex: slotIndex,                         // keep your slot index
-    state: depRow.reply,                          // "yes" | "no" | null
-    available: depRow.reply === "yes",
-    covering: "deputy",
-    repliedAt: depRow.repliedAt || null,
-    setAt: depRow.updatedAt || null,
-    phone: depRow.phone || null,
-  });
-} 
+      // 🏷️ Resolve a human-friendly name for the deputy
+      const resolvedDeputyName =
+        (depRow?.selectedVocalistName && depRow.selectedVocalistName.trim()) ||
+        (depRow?.vocalistName && depRow.vocalistName.trim()) ||
+        (depRow?.musicianName && depRow.musicianName.trim()) ||
+        (bits?.displayName && String(bits.displayName).trim()) ||
+        (bits?.vocalistName && String(bits.vocalistName).trim()) ||
+        `${(bits?.firstName || "").trim()} ${(bits?.lastName || "").trim()}`.trim();
+
+      deputies.push({
+        // identity & image
+        musicianId: String(depRow?.musicianId || musDoc?._id || ""),
+        photoUrl: bits?.photoUrl || depRow?.photoUrl || null,
+        profileUrl:
+          bits?.profileUrl ||
+          (musDoc?._id ? `${process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || ""}`.replace(/\/$/, "") + `/musician/${musDoc._id}` : ""),
+
+        // names (include multiple fields to help the UI)
+        displayName: bits?.displayName || resolvedDeputyName || "",
+        resolvedName: bits?.resolvedName || resolvedDeputyName || "",
+        vocalistName: resolvedDeputyName || "",     // ✅ the key your UI reads
+        firstName: bits?.firstName || musDoc?.firstName || "",
+        lastName: bits?.lastName || musDoc?.lastName || "",
+
+        // availability state & metadata
+        isDeputy: true,
+        slotIndex: Number(slotKey),                 // ✅ use current slot
+        state: depRow?.reply ?? null,               // "yes" | "no" | null
+        available: depRow?.reply === "yes",
+        covering: "deputy",
+        repliedAt: depRow?.repliedAt || null,
+        setAt: depRow?.updatedAt || null,
+        phone: depRow?.phone || null,
+      });
+    }
     }
 
     // Choose primary
@@ -3198,143 +3230,143 @@ const emailMode = leadSlot ? "lead" : (deputySlot ? "deputy" : null);
       actDoc.coverImage?.url ||
       "";
 
-    if (sendClientEmail) {
-      // LEAD AVAILABLE → "Good news" mail
-      if (leadSlot) {
-        const vocalistFirst = (leadSlot?.vocalistName || "").split(" ")[0] || "our lead vocalist";
-        await sendClientEmail({
-          actId: String(actId),
-          subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s lead vocalist is available`,
-          to: clientEmail,
-          name: clientName,
-          html: `
-            <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
-              <p>Hi ${(clientName || "there").split(" ")[0]},</p>
-              <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
-              <p>
-                We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with
-                <strong>${vocalistFirst}</strong> on lead vocals, and they’d love to perform for you and your guests.
-              </p>
-              ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
-              <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
-              <p style="margin:6px 0 14px; color:#555;">${actDoc.tscDescription || actDoc.description || ""}</p>
-              <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
-              ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
-              <h4 style="margin-top:25px;">Included in your quote:</h4>
-              <ul>
-                <li>${setsLine}</li>
-                ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
-                <li>Band arrival from 5pm and finish by midnight as standard</li>
-                <li>Or up to 7 hours on site if earlier arrival is needed</li>
-                ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
-                ${tailoring ? `<li>${tailoring}</li>` : ""}
-                <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
-              </ul>
-              <div style="margin-top:30px;">
-                <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
-              </div>
-              <p style="margin-top:20px; color:#555;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
-              <p>If you have any questions, just reply — we’re always happy to help.</p>
-              <p style="margin-top:25px;">
-                Warmest wishes,<br/>
-                <strong>The Supreme Collective ✨</strong><br/>
-                <a href="${SITE}" style="color:#ff6667;">${SITE.replace(/^https?:\/\//, "")}</a>
-              </p>
-            </div>
-          `,
-        });
-        console.log("📧 Client email sent (lead available).");
+if (sendClientEmail && emailMode) {
+  // LEAD AVAILABLE → "Good news" mail
+  if (emailMode === "lead") {
+    const vocalistFirst = (leadSlot?.vocalistName || "").split(" ")[0] || "our lead vocalist";
+    await sendClientEmail({
+      actId: String(actId),
+      subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s lead vocalist is available`,
+      to: clientEmail,
+      name: clientName,
+      html: `
+        <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
+          <p>Hi ${(clientName || "there").split(" ")[0]},</p>
+          <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
+          <p>
+            We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with
+            <strong>${vocalistFirst}</strong> on lead vocals, and they’d love to perform for you and your guests.
+          </p>
+          ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
+          <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
+          <p style="margin:6px 0 14px; color:#555;">${actDoc.tscDescription || actDoc.description || ""}</p>
+          <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
+          ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
+          <h4 style="margin-top:25px;">Included in your quote:</h4>
+          <ul>
+            <li>${setsLine}</li>
+            ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
+            <li>Band arrival from 5pm and finish by midnight as standard</li>
+            <li>Or up to 7 hours on site if earlier arrival is needed</li>
+            ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
+            ${tailoring ? `<li>${tailoring}</li>` : ""}
+            <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
+          </ul>
+          <div style="margin-top:30px;">
+            <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
+          </div>
+          <p style="margin-top:20px; color:#555;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
+          <p>If you have any questions, just reply — we’re always happy to help.</p>
+          <p style="margin-top:25px;">
+            Warmest wishes,<br/>
+            <strong>The Supreme Collective ✨</strong><br/>
+            <a href="${SITE}" style="color:#ff6667;">${SITE.replace(/^https?:\/\//, "")}</a>
+          </p>
+        </div>
+      `,
+    });
+    console.log("📧 Client email sent (lead available).");
+  }
+  // DEPUTY COVERING → deputy-available mail
+  else if (emailMode === "deputy") {
+    const deputyName = (deputySlot?.vocalistName || "").split(" ")[0] || "one of our vocalists";
+
+    // Try to enrich deputy media/profile
+    let deputyPhotoUrl = deputySlot?.photoUrl || "";
+    let deputyProfileUrl = deputySlot?.profileUrl || "";
+    let deputyVideos = [];
+    try {
+      let deputyMusician = null;
+      if (deputySlot?.musicianId) {
+        deputyMusician = await Musician.findById(deputySlot.musicianId)
+          .select("firstName lastName profilePicture photoUrl tscProfileUrl functionBandVideoLinks originalBandVideoLinks")
+          .lean();
       }
-      // DEPUTY COVERING → deputy-available mail
-      else if (deputySlot) {
-        const deputyName = (deputySlot?.vocalistName || "").split(" ")[0] || "one of our vocalists";
+      if (deputyMusician) {
+        if (!deputyPhotoUrl) deputyPhotoUrl = deputyMusician.profilePicture || deputyMusician.photoUrl || "";
+        if (!deputyProfileUrl) deputyProfileUrl = deputyMusician.tscProfileUrl || `${SITE}musician/${deputyMusician._id}`;
 
-        // Try to enrich deputy media/profile
-        let deputyPhotoUrl = deputySlot?.photoUrl || "";
-        let deputyProfileUrl = deputySlot?.profileUrl || "";
-        let deputyVideos = [];
-        try {
-          let deputyMusician = null;
-          if (deputySlot?.musicianId) {
-            deputyMusician = await Musician.findById(deputySlot.musicianId)
-              .select("firstName lastName profilePicture photoUrl tscProfileUrl functionBandVideoLinks originalBandVideoLinks")
-              .lean();
-          }
-          if (deputyMusician) {
-            if (!deputyPhotoUrl) deputyPhotoUrl = deputyMusician.profilePicture || deputyMusician.photoUrl || "";
-            if (!deputyProfileUrl) deputyProfileUrl = deputyMusician.tscProfileUrl || `${SITE}musician/${deputyMusician._id}`;
-
-            const fnVids = (deputyMusician.functionBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
-            const origVids = (deputyMusician.originalBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
-            deputyVideos = [...new Set([...fnVids, ...origVids])];
-          }
-        } catch (e) {
-          console.warn("⚠️ Deputy enrichment failed:", e?.message || e);
-        }
-
-        await sendClientEmail({
-          actId: String(actId),
-          subject: `${deputyName} is raring to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
-          to: clientEmail,
-          name: clientName,
-          html: `
-            <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
-              <p>Hi ${(clientName || "there").split(" ")[0]},</p>
-              <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
-              <p>
-                The band's regular lead vocalist isn’t available for your date, but we’re delighted to confirm that 
-                <strong>${deputyName}</strong> — one of the band's trusted deputy vocalists — is available to perform instead. 
-                ${deputyName} performs regularly with ${actDoc.tscName || actDoc.name} and is ready to seamlessly step in and deliver a 5-star performance for your big day.
-              </p>
-              ${
-                deputyProfileUrl || deputyPhotoUrl
-                  ? `<div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
-                       <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyName}</h3>
-                       ${deputyPhotoUrl ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />` : ""}
-                     </div>`
-                  : ""
-              }
-              ${
-                deputyVideos?.length
-                  ? `<div style="margin-top:25px;">
-                       <h4 style="color:#111;">🎬 Watch ${deputyName} perform</h4>
-                       <ul style="list-style:none; padding-left:0;">
-                         ${deputyVideos.slice(0,3).map((v) => `<li style="margin-bottom:8px;"><a href="${v}" target="_blank" style="color:#ff6667;">${v}</a></li>`).join("")}
-                       </ul>
-                     </div>`
-                  : ""
-              }
-              ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
-              <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
-              <p style="margin:6px 0 14px; color:#555;">${actDoc.tscDescription || actDoc.description || ""}</p>
-              <p><a href="${deputyProfileUrl || profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
-              ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
-              <h4 style="margin-top:25px;">Included in your quote:</h4>
-              <ul>
-                <li>${setsLine}</li>
-                ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
-                <li>Band arrival from 5pm and finish by midnight as standard</li>
-                <li>Or up to 7 hours on site if earlier arrival is needed</li>
-                ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
-                ${tailoring ? `<li>${tailoring}</li>` : ""}
-                <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
-              </ul>
-              <div style="margin-top:30px;">
-                <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
-              </div>
-              <p style="margin-top:20px; color:#555;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
-              <p>If you have any questions, just reply — we’re always happy to help.</p>
-              <p style="margin-top:25px;">
-                Warmest wishes,<br/>
-                <strong>The Supreme Collective ✨</strong><br/>
-                <a href="${SITE}" style="color:#ff6667;">${SITE.replace(/^https?:\/\//, "")}</a>
-              </p>
-            </div>
-          `,
-        });
-        console.log("📧 Deputy-available client email sent successfully.");
+        const fnVids = (deputyMusician.functionBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+        const origVids = (deputyMusician.originalBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+        deputyVideos = [...new Set([...fnVids, ...origVids])];
       }
+    } catch (e) {
+      console.warn("⚠️ Deputy enrichment failed:", e?.message || e);
     }
+
+    await sendClientEmail({
+      actId: String(actId),
+      subject: `${deputyName} is raring to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
+      to: clientEmail,
+      name: clientName,
+      html: `
+        <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
+          <p>Hi ${(clientName || "there").split(" ")[0]},</p>
+          <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
+          <p>
+            The band's regular lead vocalist isn’t available for your date, but we’re delighted to confirm that 
+            <strong>${deputyName}</strong> — one of the band's trusted deputy vocalists — is available to perform instead. 
+            ${deputyName} performs regularly with ${actDoc.tscName || actDoc.name} and is ready to seamlessly step in and deliver a 5-star performance for your big day.
+          </p>
+          ${
+            deputyProfileUrl || deputyPhotoUrl
+              ? `<div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
+                   <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyName}</h3>
+                   ${deputyPhotoUrl ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />` : ""}
+                 </div>`
+              : ""
+          }
+          ${
+            deputyVideos?.length
+              ? `<div style="margin-top:25px;">
+                   <h4 style="color:#111;">🎬 Watch ${deputyName} perform</h4>
+                   <ul style="list-style:none; padding-left:0;">
+                     ${deputyVideos.slice(0,3).map((v) => `<li style="margin-bottom:8px;"><a href="${v}" target="_blank" style="color:#ff6667;">${v}</a></li>`).join("")}
+                   </ul>
+                 </div>`
+              : ""
+          }
+          ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
+          <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
+          <p style="margin:6px 0 14px; color:#555;">${actDoc.tscDescription || actDoc.description || ""}</p>
+          <p><a href="${deputyProfileUrl || profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
+          ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
+          <h4 style="margin-top:25px;">Included in your quote:</h4>
+          <ul>
+            <li>${setsLine}</li>
+            ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
+            <li>Band arrival from 5pm and finish by midnight as standard</li>
+            <li>Or up to 7 hours on site if earlier arrival is needed</li>
+            ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
+            ${tailoring ? `<li>${tailoring}</li>` : ""}
+            <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
+          </ul>
+          <div style="margin-top:30px;">
+            <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
+          </div>
+          <p style="margin-top:20px; color:#555;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
+          <p>If you have any questions, just reply — we’re always happy to help.</p>
+          <p style="margin-top:25px;">
+            Warmest wishes,<br/>
+            <strong>The Supreme Collective ✨</strong><br/>
+            <a href="${SITE}" style="color:#ff6667;">${SITE.replace(/^https?:\/\//, "")}</a>
+          </p>
+        </div>
+      `,
+    });
+    console.log("📧 Deputy-available client email sent successfully.");
+  }
+}
   } catch (e) {
     console.warn("⚠️ Client email block failed:", e?.message || e);
   }
