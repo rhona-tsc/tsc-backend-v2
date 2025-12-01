@@ -3442,6 +3442,22 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     .select("musicianId slotIndex reply updatedAt repliedAt isDeputy photoUrl phone musicianEmail formattedAddress vocalistName musicianName selectedVocalistName")
     .lean();
 
+  // Build a cache of musician display names for fallback name resolution
+  const ids = [...new Set(rows.map((r) => String(r.musicianId)).filter(Boolean))];
+  const musDocs = await Musician.find({ _id: { $in: ids } })
+    .select("firstName lastName displayName preferredName name")
+    .lean();
+  const musById = Object.fromEntries(musDocs.map((m) => [String(m._id), m]));
+
+  const pickDisplayName = (m) => {
+    if (!m) return "";
+    const s = m.displayName || m.preferredName || m.name || "";
+    if (typeof s === "string" && s.trim()) return s.trim();
+    const fn = (m.firstName || "").trim();
+    const ln = (m.lastName || "").trim();
+    return `${fn} ${ln}`.trim();
+  };
+
   console.log("📥 buildBadge: availability rows (identity snapshot):", rows.map(r => ({
     slotIndex: r.slotIndex,
     reply: r.reply,
@@ -3498,6 +3514,8 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
           state: leadReply?.reply || "pending",
           available: leadReply?.reply === "yes",
           isDeputy: false,
+          // (Optional: also add vocalistName for uniformity)
+          // vocalistName: chosenName, // see below
         }
       : (leadReply
           ? {
@@ -3527,7 +3545,12 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
           musicianId: String(bits?.musicianId || r.musicianId || ""),
           photoUrl: bits?.photoUrl || r?.photoUrl || null,
           profileUrl: bits?.profileUrl || "",
-          vocalistName: bits?.resolvedName || r?.selectedVocalistName || r?.vocalistName || "",
+          vocalistName:
+            (bits?.resolvedName ||
+             r?.selectedVocalistName ||
+             r?.vocalistName ||
+             pickDisplayName(musById[String(r.musicianId)]) ||
+             "").trim(),
           state: r.reply ?? null,
           available: r.reply === "yes",
           setAt: r.updatedAt || null,
@@ -3553,18 +3576,21 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
       primary = leadBits; // last resort photo
     }
 
-    // Choose name for the slot
+    // Choose name for the slot (use cached musician docs as fallback, avoid per-slot DB queries)
     const leadMus = leadReply?.musicianId
-      ? await Musician.findById(leadReply.musicianId)
-          .select("firstName lastName")
-          .lean()
+      ? musById[String(leadReply.musicianId)] || null
       : null;
 
     const chosenName =
-      leadReply?.selectedVocalistName ||
-      leadReply?.vocalistName ||
-      leadReply?.musicianName ||
-      `${leadMus?.firstName || ""} ${leadMus?.lastName || ""}`.trim();
+      (leadReply?.selectedVocalistName ||
+       leadReply?.vocalistName ||
+       leadReply?.musicianName ||
+       pickDisplayName(leadMus) ||
+       "").trim();
+
+    if (leadBits && leadDisplayBits) {
+      leadBits.vocalistName = chosenName;
+    }
 
     const slotObj = {
       slotIndex: Number(slotKey),
@@ -3659,6 +3685,57 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     hasLineups: actDoc?.hasLineups ?? true,
   });
 
+  /** Normalise a good display name from a musician doc */
+const pickDisplayName = (m) => {
+  if (!m) return "";
+  const s =
+    m.displayName ||
+    m.preferredName ||
+    m.vocalistName ||           // some schemas keep this
+    m.name ||
+    "";
+  if (typeof s === "string" && s.trim()) return s.trim();
+  const fn = (m.firstName || m.first_name || "").trim();
+  const ln = (m.lastName || m.last_name || "").trim();
+  return `${fn} ${ln}`.trim();
+};
+
+// Gather any musicianIds that are missing vocalistName
+const missingIds = [];
+for (const slot of badge?.slots || []) {
+  if (slot?.primary?.musicianId && !slot.primary.vocalistName) {
+    missingIds.push(String(slot.primary.musicianId));
+  }
+  for (const d of slot?.deputies || []) {
+    if (d?.musicianId && !d.vocalistName) {
+      missingIds.push(String(d.musicianId));
+    }
+  }
+}
+
+if (missingIds.length) {
+  const uniqIds = [...new Set(missingIds)];
+  const musDocs = await Musician.find({ _id: { $in: uniqIds } })
+    .select("firstName lastName displayName preferredName name")
+    .lean();
+  const musById = Object.fromEntries(musDocs.map((m) => [String(m._id), m]));
+
+  for (const slot of badge.slots || []) {
+    if (slot?.primary && !slot.primary.vocalistName) {
+      const m = musById[String(slot.primary.musicianId)];
+      slot.primary.vocalistName = pickDisplayName(m);
+    }
+    if (Array.isArray(slot?.deputies)) {
+      slot.deputies = slot.deputies.map((d) => {
+        if (d.vocalistName && d.vocalistName.trim()) return d;
+        const m = musById[String(d.musicianId)];
+        return { ...d, vocalistName: pickDisplayName(m) };
+        }
+      );
+    }
+  }
+}
+
   console.log("🎨 [rebuildAndApplyAvailabilityBadge] Raw badge", {
     hasBadge: !!badge,
     address: badge?.address,
@@ -3667,6 +3744,8 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     photoUrl: badge?.slots?.find(s => s?.primary)?.primary?.photoUrl || null,
     slotsCount: badge?.slots?.length || 0,
   });
+
+  
 
   // Pull rows for optional email + safe summaries
   const availRows = await AvailabilityModel.find({ actId, dateISO }).lean();
@@ -3706,8 +3785,15 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
   // (Optional) safe primary summary (NO presentRow!)
   const idxPrimarySlot = (badge.slots || []).findIndex(s => !!s?.primary);
   const primaryRef = idxPrimarySlot >= 0 ? badge.slots[idxPrimarySlot].primary : null;
-  const primaryName = idxPrimarySlot >= 0 ? (badge.slots[idxPrimarySlot].vocalistName || "") : "";
-  const nameSnap = firstLast(primaryName);
+const primaryName =
+  idxPrimarySlot >= 0
+    ? (
+        badge.slots[idxPrimarySlot].vocalistName ||
+        badge.slots[idxPrimarySlot]?.primary?.vocalistName ||
+        ""
+      )
+    : "";
+      const nameSnap = firstLast(primaryName);
 
   console.log("👤 PrimaryChosen", {
     musicianId: primaryRef?.musicianId || null,
