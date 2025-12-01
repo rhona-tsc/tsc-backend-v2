@@ -282,19 +282,71 @@ export const getAllActsV2 = async (req, res) => {
     const filter = {};
     if (includeTrashed !== "true") filter.status = { $ne: "trashed" };
 
-    const statuses = parseStatuses(status);
-    if (statuses?.length) {
+    /* ---------------------------------------------------------------------- */
+    /*  Status handling with special "approved_changes_pending" support       */
+    /* ---------------------------------------------------------------------- */
+    const rawTokens = String(status || "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+    const tokensLC = rawTokens.map(s => s.toLowerCase());
+
+    const wantsApprovedChangesPending =
+      tokensLC.includes("approved_changes_pending") ||
+      tokensLC.includes("approved (changes pending)") ||
+      tokensLC.includes("approved, changes pending") ||
+      // tolerate split tokens like "approved,changes pending"
+      (tokensLC.includes("approved") && tokensLC.includes("changes pending"));
+
+    // keep only regular statuses (exclude special sentinel tokens)
+    const allowed = new Set(["approved", "pending", "draft", "trashed", "rejected"]);
+    const isSentinel = (s) =>
+      /^approved(_|\s*\(|,\s*)changes\s*pending\)?$/i.test(s) ||
+      s.toLowerCase() === "changes pending";
+    const normalStatuses = rawTokens
+      .filter(s => !isSentinel(s))
+      .map(s => s.toLowerCase())
+      .filter(s => allowed.has(s));
+
+    if (normalStatuses.length) {
       if (filter.status) {
-        filter.$and = [{ status: filter.status }, { status: { $in: statuses } }];
+        // merge existing "not trashed" with $in list
+        filter.$and = [{ status: filter.status }, { status: { $in: normalStatuses } }];
         delete filter.status;
       } else {
-        filter.status = { $in: statuses };
+        filter.status = { $in: normalStatuses };
       }
     }
 
+    if (wantsApprovedChangesPending) {
+      const specialClause = { $and: [{ status: "approved" }, { "amendment.isPending": true }] };
+      if (filter.$or) {
+        filter.$or.push(specialClause);
+      } else {
+        if (filter.status) {
+          // combine existing status condition with special clause via $or
+          const existing = { status: filter.status };
+          delete filter.status;
+          filter.$or = [existing, specialClause];
+        } else if (filter.$and) {
+          // already have $and (e.g., from merging "not trashed" with $in)
+          filter.$or = [specialClause];
+        } else {
+          filter.$or = [specialClause];
+        }
+      }
+    }
+    /* ---------------------------------------------------------------------- */
+
     if (q.trim()) {
       const re = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      filter.$or = [{ name: re }, { tscName: re }];
+      // If an $or already exists (ownership or special clause), keep both via $and
+      if (filter.$or) {
+        filter.$and = filter.$and || [];
+        filter.$and.push({ $or: [{ name: re }, { tscName: re }] });
+      } else {
+        filter.$or = [{ name: re }, { tscName: re }];
+      }
     }
 
     if (authUserRole === "musician") {
@@ -302,7 +354,7 @@ export const getAllActsV2 = async (req, res) => {
         return res.status(401).json({ success: false, message: "Unauthorized: Missing user id" });
       }
       const uid = String(authUserId);
-      filter.$or = [
+      const ownOr = [
         { createdBy: uid },
         { owner: uid },
         { ownerId: uid },
@@ -311,6 +363,13 @@ export const getAllActsV2 = async (req, res) => {
         { musicianId: uid },
         { owners: uid },
       ];
+      // Preserve any existing $or (search/special-status) by nesting via $and
+      if (filter.$or) {
+        filter.$and = filter.$and || [];
+        filter.$and.push({ $or: ownOr });
+      } else {
+        filter.$or = ownOr;
+      }
     } else if (mineFlag) {
       const uid = String(req.query.authorId || authUserId || "");
       if (uid) {
@@ -356,7 +415,6 @@ export const getAllActsV2 = async (req, res) => {
       actModel.find(filter, projection).sort(sort).skip(skip).limit(lim).lean(),
     ]);
 
-    // ✅ Move logs *here*, where the variables exist
     console.log("📡 [getAllActsV2] Filter used:", filter);
     console.log("📦 [getAllActsV2] Returned acts:", acts.length);
     if (acts.length > 0) {
