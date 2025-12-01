@@ -2758,10 +2758,6 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     dateISO,
     reply: { $in: ["yes", "no", "unavailable", null] },
     v2: true,
-     musicianId: chosenRow.musicianId,
-  available: chosenRow.reply === "yes",
-  isDeputy: !!chosenRow.isDeputy,
-  vocalistName: resolvedName
   })
     // NOTE: added phone, musicianEmail, repliedAt to support lookups + UI timestamps
     .select("musicianId slotIndex reply updatedAt repliedAt isDeputy photoUrl phone musicianEmail")
@@ -2923,13 +2919,16 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
 
 
     // Final slot (keep legacy top-level fields for compatibility)
+    const slotVocalistLabel = primary?.isDeputy
+      ? ((primary?.resolvedName || primary?.vocalistName || "").trim() || name)
+      : name;
     slots.push({
       slotIndex: Number(slotKey),
       isDeputy: false, // legacy
-      vocalistName: name, 
+      vocalistName: slotVocalistLabel,
       musicianId: leadBits?.musicianId ?? (leadReply ? String(leadReply.musicianId) : null),
-      photoUrl: leadBits?.photoUrl || null,
-      profileUrl: leadBits?.profileUrl || "",
+      photoUrl: primary?.photoUrl || leadBits?.photoUrl || null,
+      profileUrl: primary?.profileUrl || leadBits?.profileUrl || "",
       deputies,
       setAt: leadReply?.updatedAt || null,
       state: leadReply?.reply || "pending",
@@ -2991,10 +2990,6 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     actId,
     dateISO,
     hasLineups: actDoc?.hasLineups ?? true,
-     musicianId: chosenRow.musicianId,
-  available: chosenRow.reply === "yes",
-  isDeputy: !!chosenRow.isDeputy,
-  vocalistName: resolvedName
   });
 
   console.log("🎨 Raw badge returned from buildAvailabilityBadgeFromRows:", badge);
@@ -3403,10 +3398,6 @@ export async function getAvailabilityBadge(req, res) {
       actId,
       dateISO,
       hasLineups: actDoc?.hasLineups ?? true,
-       musicianId: chosenRow.musicianId,
-  available: chosenRow.reply === "yes",
-  isDeputy: !!chosenRow.isDeputy,
-  vocalistName: resolvedName
     });
     if (!badge) {
       console.log("🪶 No badge found for act/date:", { actId, dateISO });
