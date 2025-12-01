@@ -1915,6 +1915,19 @@ export async function notifyDeputyOneShot(req, res) {
   }
 }
 
+// Resolve a human-friendly display name from an availability row + optional musician doc
+function resolveDisplayName(row = {}, musician = {}) {
+  const fromRow = String(
+    (row?.selectedVocalistName || row?.vocalistName || row?.musicianName || "")
+  ).trim();
+  if (fromRow) return fromRow;
+
+  const fn = String(musician?.firstName || "").trim();
+  const ln = String(musician?.lastName || "").trim();
+  if (fn || ln) return `${fn} ${ln}`.trim();
+
+  return "Vocalist";
+}
 
 export const twilioInbound = async (req, res) => {
   console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
@@ -2852,26 +2865,26 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
       });
 
       // 🏷️ Resolve a human-friendly name for the deputy
-      const resolvedDeputyName =
-        (depRow?.selectedVocalistName && depRow.selectedVocalistName.trim()) ||
-        (depRow?.vocalistName && depRow.vocalistName.trim()) ||
-        (depRow?.musicianName && depRow.musicianName.trim()) ||
-        (bits?.displayName && String(bits.displayName).trim()) ||
-        (bits?.vocalistName && String(bits.vocalistName).trim()) ||
-        `${(bits?.firstName || "").trim()} ${(bits?.lastName || "").trim()}`.trim();
+  const resolvedDeputyName =
+  resolveDisplayName(depRow, musDoc) ||
+  (bits?.displayName && String(bits.displayName).trim()) ||
+  (bits?.vocalistName && String(bits.vocalistName).trim()) ||
+  `${(bits?.firstName || "").trim()} ${(bits?.lastName || "").trim()}`.trim();
 
       deputies.push({
         // identity & image
-        musicianId: String(depRow?.musicianId || musDoc?._id || ""),
-        photoUrl: bits?.photoUrl || depRow?.photoUrl || null,
+musicianId: (primary?.musicianId) ||
+            (leadBits?.musicianId) ||
+            (leadReply ? String(leadReply.musicianId) : null),
+                    photoUrl: bits?.photoUrl || depRow?.photoUrl || null,
         profileUrl:
           bits?.profileUrl ||
           (musDoc?._id ? `${process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || ""}`.replace(/\/$/, "") + `/musician/${musDoc._id}` : ""),
 
         // names (include multiple fields to help the UI)
-        displayName: bits?.displayName || resolvedDeputyName || "",
-        resolvedName: bits?.resolvedName || resolvedDeputyName || "",
-        vocalistName: resolvedDeputyName || "",     // ✅ the key your UI reads
+       displayName: resolvedDeputyName || bits?.displayName || "",
+resolvedName: resolvedDeputyName || bits?.resolvedName || "",
+vocalistName: resolvedDeputyName || "",
         firstName: bits?.firstName || musDoc?.firstName || "",
         lastName: bits?.lastName || musDoc?.lastName || "",
 
