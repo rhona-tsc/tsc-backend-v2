@@ -158,6 +158,18 @@ export async function findCanonicalMusicianByPhone(phoneLike) {
     return null;
   }
 
+  // ── name helpers (drop these in once, before any usage of firstLast) ───────────
+const firstLast = (nameLike) => {
+  const s = (nameLike ?? "").toString().trim();
+  if (!s) return { first: "", last: "", firstName: "", lastName: "", displayName: "" };
+  const parts = s.split(/\s+/);
+  const first = parts[0] || "";
+  const last = parts.length > 1 ? parts.slice(1).join(" ") : "";
+  return { first, last, firstName: first, lastName: last, displayName: s };
+};
+
+
+
   const names = firstLast(mus);
   const displayName = displayNameOf(mus);
   const profileUrl = buildProfileUrl(mus?._id);
