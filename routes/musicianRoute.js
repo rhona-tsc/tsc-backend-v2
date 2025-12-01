@@ -47,6 +47,38 @@ router.post("/auth/logout", logoutMusician);
 
 /* ---------------- Deputy registration ---------------- */
 router.post("/moderation/register-deputy", uploadFields, registerDeputy);
+
+// Save updates to an existing deputy during moderation (no signature required)
+router.patch("/moderation/deputy/:id/save", verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body || {};
+
+    const doc = await musicianModel.findById(id);
+    if (!doc) return res.status(404).json({ success: false, message: "Musician not found" });
+
+    // Merge incoming updates (keep it simple – trust admin UI)
+    Object.assign(doc, updates);
+
+    // If the deputy was previously approved, mark as “Approved, changes pending”
+    if ((doc.status || "").toLowerCase() === "approved") {
+      doc.status = "Approved, changes pending";
+    }
+
+    // If the deputy is still pending, keep as pending
+    await doc.save();
+
+    return res.json({
+      success: true,
+      message: "Deputy changes saved",
+      deputy: { _id: doc._id, email: doc.email, status: doc.status }
+    });
+  } catch (err) {
+    console.error("❌ save deputy (moderation) failed:", err);
+    return res.status(500).json({ success: false, message: "Failed to save deputy" });
+  }
+});
+
 router.get("/moderation/deputy/:id", verifyToken, getDeputyById);
 router.get("/pending-deputies", verifyToken, listPendingDeputies);
 router.post("/approve-deputy", verifyToken, approveDeputy);

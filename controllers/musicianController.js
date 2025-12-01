@@ -400,21 +400,24 @@ const registerDeputy = async (req, res) => {
     };
 
     // ✔ Normalise + extract email from incoming `basicInfo`
-    let email = null;
+  let email = null;
+try {
+  if (typeof body.basicInfo === "string") {
+    email = JSON.parse(body.basicInfo || "{}")?.email;
+  } else if (body.basicInfo?.email) {
+    email = body.basicInfo.email;
+  }
+} catch { /* ignore parse error; fall back below */ }
 
-    if (typeof body.basicInfo === "string") {
-      email = JSON.parse(body.basicInfo)?.email;
-    } else if (body.basicInfo?.email) {
-      email = body.basicInfo.email;
-    }
+if (!email && body.email) {
+  email = String(body.email).trim().toLowerCase();
+}
 
-    email = email ? email.trim().toLowerCase() : null;
-    console.log("🔍 Extracted email:", email);
+email = email ? email.trim().toLowerCase() : null;
 
-    if (!email) {
-      console.error("❌ No valid email found in payload");
-      return res.status(400).json({ success: false, message: "Email is required." });
-    }
+if (!email) {
+  return res.status(400).json({ success: false, message: "Email is required." });
+}
 
     let musician = await musicianModel.findOne({ email });
     let createdNew = false;
