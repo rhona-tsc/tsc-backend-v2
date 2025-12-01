@@ -25,6 +25,57 @@ if (AvailabilityModel?.schema?.paths) {
   console.warn("⚠️ AvailabilityModel missing schema.paths — check import");
 }
 
+// ───────────────────────────────────────────────────────────────────────────────
+// Helper: consistent identity logging
+// ───────────────────────────────────────────────────────────────────────────────
+const logIdentity = (label, obj = {}) => {
+  const firstName =
+    obj.firstName ||
+    obj.fn ||
+    obj.givenName ||
+    obj.selectedVocalistName?.split?.(" ")?.[0] ||
+    "";
+  const lastName =
+    obj.lastName ||
+    obj.ln ||
+    obj.familyName ||
+    (obj.selectedVocalistName?.includes?.(" ")
+      ? obj.selectedVocalistName.split(" ").slice(1).join(" ")
+      : "") ||
+    "";
+  const displayName =
+    obj.displayName ||
+    obj.musicianName ||
+    obj.resolvedName ||
+    `${firstName} ${lastName}`.trim();
+  const vocalistDisplayName =
+    obj.vocalistDisplayName ||
+    obj.vocalistName ||
+    obj.selectedVocalistName ||
+    displayName;
+
+  console.log(`👤 ${label}`, {
+    firstName: firstName || undefined,
+    lastName: lastName || undefined,
+    displayName: displayName || undefined,
+    vocalistDisplayName: vocalistDisplayName || undefined,
+    address: obj.address || undefined,
+    formattedAddress: obj.formattedAddress || undefined,
+    profileUrl: obj.profileUrl || obj.tscProfileUrl || undefined,
+    photoUrl:
+      obj.photoUrl ||
+      obj.profilePicture ||
+      obj.profilePhoto ||
+      obj.imageUrl ||
+      undefined,
+    isDeputy: Boolean(obj.isDeputy),
+    slotIndex: obj.slotIndex ?? undefined,
+    musicianId: obj.musicianId ? String(obj.musicianId) : undefined,
+    phone: obj.phone || obj.phoneNormalized || undefined,
+    reply: obj.reply || obj.state || undefined,
+  });
+};
+
 const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
 const normCountyKey = (s) =>
   String(s || "")
@@ -79,31 +130,63 @@ const toE164 = (raw = "") => {
 const normalize44 = (raw='') =>
   String(raw).replace(/\s+/g, '').replace(/^(\+44|44|0)/, '+44');
 
-async function findCanonicalMusicianByPhone(phoneLike) {
+/* ========================================================================== */
+/* 👤 findCanonicalMusicianByPhone                                            */
+/* ========================================================================== */
+export async function findCanonicalMusicianByPhone(phoneLike) {
   if (!phoneLike) return null;
   const p = normalize44(phoneLike);
-  return await Musician.findOne({
+
+  console.log("🔎 [findCanonicalMusicianByPhone] Lookup by phone", { phoneLike, normalized: p });
+
+  const mus = await Musician.findOne({
     $or: [
       { phoneNormalized: p },
       { phone: p },
       { phoneNumber: p },
-      { 'contact.phone': p },
+      { "contact.phone": p },
       { whatsappNumber: p },
     ],
   })
-  .select('_id firstName lastName email profilePicture musicianProfileImage profileImage photoUrl imageUrl phoneNormalized')
-  .lean();
+    .select(
+      "_id firstName lastName email profilePicture musicianProfileImage profileImage photoUrl imageUrl phoneNormalized"
+    )
+    .lean();
+
+  if (!mus) {
+    console.log("ℹ️ [findCanonicalMusicianByPhone] No canonical musician found");
+    return null;
+  }
+
+  const names = firstLast(mus);
+  const displayName = displayNameOf(mus);
+  const profileUrl = buildProfileUrl(mus?._id);
+  const photoUrl = pickPic(mus);
+
+  console.log("✅ [findCanonicalMusicianByPhone] Canonical found", {
+    ...names,
+    displayName,
+    vocalistDisplayName: displayName,
+    profileUrl,
+    photoUrl,
+    isDeputy: mus?.isDeputy ?? undefined,
+    email: mus?.email || "",
+    phoneNormalized: mus?.phoneNormalized || "",
+    _id: String(mus?._id || ""),
+  });
+
+  return mus;
 }
 
 function pickPic(mus) {
-  return (
+  const url =
     mus?.profilePicture ||
     mus?.musicianProfileImage ||
     mus?.profileImage ||
     mus?.photoUrl ||
     mus?.imageUrl ||
-    ''
-  );
+    "";
+  return (typeof url === "string" && url.trim().startsWith("http")) ? url.trim() : "";
 }
 
 /**
@@ -172,30 +255,41 @@ export function formatNiceDate(dateISO) {
  * Send a client-facing email about act availability.
  * Falls back to hello@thesupremecollective.co.uk if no client email found.
  */
+// ───────────────────────────────────────────────────────────────────────────────
+// sendClientEmail — with identity and URL logging
+// ───────────────────────────────────────────────────────────────────────────────
 export async function sendClientEmail({ actId, to, name, subject, html }) {
+  console.log("✉️ sendClientEmail START", { actId, to, name, subject });
+
   try {
     const act = await Act.findById(actId).lean();
 
     const recipient =
-      (to && to !== "hello@thesupremecollective.co.uk") ? to :
-      (act?.contactEmail && act.contactEmail !== "hello@thesupremecollective.co.uk") ? act.contactEmail :
-      process.env.NOTIFY_EMAIL ||
-      "hello@thesupremecollective.co.uk";
+      (to && to !== "hello@thesupremecollective.co.uk")
+        ? to
+        : (act?.contactEmail &&
+           act.contactEmail !== "hello@thesupremecollective.co.uk")
+        ? act.contactEmail
+        : process.env.NOTIFY_EMAIL || "hello@thesupremecollective.co.uk";
 
+    console.log("📨 sendClientEmail recipient decision", {
+      requestedTo: to,
+      actContactEmail: act?.contactEmail,
+      finalRecipient: recipient,
+    });
 
     if (!recipient || recipient === "hello@thesupremecollective.co.uk") {
       console.warn("⚠️ No valid client recipient found, skipping sendEmail");
       return { success: false, skipped: true };
     }
 
-    // ✅ Correct positional call
-    await sendEmail(
+    await sendEmail(recipient, subject, html, "hello@thesupremecollective.co.uk");
+
+    console.log("✅ sendClientEmail OK", {
+      actName: act?.tscName || act?.name,
       recipient,
       subject,
-      html,
-      "hello@thesupremecollective.co.uk"
-    );
-
+    });
     return { success: true };
   } catch (err) {
     console.error("❌ sendClientEmail failed:", err.message);
@@ -245,35 +339,44 @@ const normalizeToE164 = (raw = "") => {
   if (s.startsWith("44")) return `+${s}`;
   return s;
 };
-function getCountyFeeValue(countyFees, countyName) {
-  console.log(
-    `🟢 (availabilityController.js) getCountyFeeValue  START at ${new Date().toISOString()}`,
-    {}
-  );
+/* ========================================================================== */
+/* 💷 getCountyFeeValue                                                        */
+/* ========================================================================== */
+export function getCountyFeeValue(countyFees, countyName) {
+  console.log("🟢 [getCountyFeeValue] START", {
+    at: new Date().toISOString(),
+    hasFees: !!countyFees,
+    countyName,
+  });
   if (!countyFees || !countyName) return undefined;
 
-  // Normalized compare: "Berkshire" === "berkshire" === "berk_shire"
-  const want = normCountyKey(countyName); // e.g. "berkshire"
+  const want = normCountyKey(countyName);
 
-  // Map support
+  // Map
   if (typeof countyFees.get === "function") {
     for (const [k, v] of countyFees) {
-      if (normCountyKey(k) === want) return v;
+      if (normCountyKey(k) === want) {
+        console.log("✅ [getCountyFeeValue] Match (Map)", { key: k, value: v });
+        return v;
+      }
     }
     return undefined;
   }
 
-  // Plain object support
-  // 1) quick direct hits
+  // Object fast paths
   if (countyFees[countyName] != null) return countyFees[countyName];
   if (countyFees[want] != null) return countyFees[want];
   const spaced = countyName.replace(/_/g, " ");
   if (countyFees[spaced] != null) return countyFees[spaced];
 
-  // 2) case-insensitive scan
+  // Case-insensitive scan
   for (const [k, v] of Object.entries(countyFees)) {
-    if (normCountyKey(k) === want) return v;
+    if (normCountyKey(k) === want) {
+      console.log("✅ [getCountyFeeValue] Match (scan)", { key: k, value: v });
+      return v;
+    }
   }
+  console.log("ℹ️ [getCountyFeeValue] No match");
   return undefined;
 }
 
@@ -304,27 +407,33 @@ function extractOutcode(address = "") {
   return o ? o[1] : "";
 }
 
+
+/* ========================================================================== */
+/* 🗺️ countyFromAddress                                                       */
+/* ========================================================================== */
 export function countyFromAddress(address = "") {
-  console.log(
-    `🟢 (availabilityController.js) countyFromAddress START at ${new Date().toISOString()}`,
-    {}
-  );
-  // pull something like SL6, W1, SW1A from the address
-  const outcode = extractOutcode(address).toUpperCase();
-  if (!outcode) return { outcode: "", county: "" };
+  console.log("🟢 [countyFromAddress] START", {
+    at: new Date().toISOString(),
+    addressSample: String(address).slice(0, 140),
+  });
 
-  // your export is: export const postcodes = [ { county: [OUTCODES...] } ];
+  const outcode = (extractOutcode(address) || "").toUpperCase();
+  if (!outcode) {
+    console.warn("⚠️ [countyFromAddress] No outcode extracted");
+    return { outcode: "", county: "" };
+  }
+
   const table = Array.isArray(postcodes) ? postcodes[0] || {} : postcodes || {};
-
   let found = "";
+
   for (const [countyKey, list] of Object.entries(table)) {
     if (Array.isArray(list) && list.includes(outcode)) {
-      // normalise snake_case keys from the file into human names
       found = countyKey.replace(/_/g, " ").trim();
       break;
     }
   }
 
+  console.log("✅ [countyFromAddress] Resolved", { outcode, county: found });
   return { outcode, county: found };
 }
 
@@ -344,6 +453,9 @@ const getPictureUrlFrom = (obj = {}) => {
 };
 
 
+/* ========================================================================== */
+/* 📣 notifyDeputies                                                           */
+/* ========================================================================== */
 export async function notifyDeputies({
   actId,
   lineupId,
@@ -351,34 +463,48 @@ export async function notifyDeputies({
   formattedAddress,
   clientName,
   clientEmail,
-  slotIndex = null,          // 👈 NEW — only trigger for the vocalist slot that went unavailable
+  slotIndex = null,
   skipDuplicateCheck = false,
-  skipIfUnavailable = true,
+  skipIfUnavailable = true, // currently unused in this snippet
 }) {
-  console.log(`📢 [notifyDeputies] START — act ${actId}, date ${dateISO}, slotIndex ${slotIndex}`);
+  console.log("📢 [notifyDeputies] START", {
+    actId,
+    lineupId,
+    dateISO,
+    formattedAddress,
+    clientName,
+    clientEmail,
+    slotIndex,
+    skipDuplicateCheck,
+  });
 
-  // 🔹 Lookup act + lineup
   const act = await Act.findById(actId).lean();
-  if (!act) return console.warn("⚠️ No act found for notifyDeputies()");
+  if (!act) return console.warn("⚠️ [notifyDeputies] No act found");
+
   const lineup = act?.lineups?.find((l) => String(l._id) === String(lineupId));
-  if (!lineup) return console.warn("⚠️ No lineup found for notifyDeputies()");
+  if (!lineup) return console.warn("⚠️ [notifyDeputies] No lineup found");
 
-  // 🎤 Identify all vocalists
-  const vocalists = lineup.bandMembers?.filter((m) =>
-    ["vocal", "vocalist"].some((v) => (m.instrument || "").toLowerCase().includes(v))
-  ) || [];
+  const vocalists =
+    lineup.bandMembers?.filter((m) =>
+      ["vocal", "vocalist"].some((v) =>
+        (m.instrument || "").toLowerCase().includes(v)
+      )
+    ) || [];
 
-  if (!vocalists.length) return console.warn("⚠️ No vocalists found in lineup.");
+  if (!vocalists.length) {
+    console.warn("⚠️ [notifyDeputies] No vocalists in lineup");
+    return;
+  }
 
-  // 🧩 Determine which vocalist(s) to target
   const targetVocalists =
-    slotIndex !== null && vocalists[slotIndex]
-      ? [vocalists[slotIndex]]
-      : vocalists;
+    slotIndex !== null && vocalists[slotIndex] ? [vocalists[slotIndex]] : vocalists;
 
-  console.log(`🎯 Targeting ${targetVocalists.length} vocalist(s) for deputy notification.`);
+  console.log("🎯 [notifyDeputies] Target vocalists", {
+    count: targetVocalists.length,
+    slotIndex,
+  });
 
-  // 🧩 Find corresponding lead availability for inherited fee
+  // Try to inherit fee from a lead who is not unavailable/no
   let inheritedFee = null;
   try {
     const leadAvailability = await AvailabilityModel.findOne({
@@ -393,70 +519,83 @@ export async function notifyDeputies({
 
     if (leadAvailability?.fee) {
       inheritedFee = Number(leadAvailability.fee);
-      console.log(`💾 Found existing lead fee: £${inheritedFee}`);
+      console.log("💾 [notifyDeputies] Using lead fee", { inheritedFee });
     }
   } catch (err) {
-    console.warn("⚠️ Could not fetch lead fee:", err.message);
+    console.warn("⚠️ [notifyDeputies] Lead fee lookup failed:", err?.message);
   }
 
   if (!inheritedFee && targetVocalists[0]?.fee) {
     inheritedFee = Number(targetVocalists[0].fee);
-    console.log(`💾 Fallback fee from act data: £${inheritedFee}`);
+    console.log("💾 [notifyDeputies] Fallback fee from act data", { inheritedFee });
   }
 
-  // 🧮 Build exclusion list of already-contacted / unavailable phones
+  // Build exclusion set (already YES/unavailable)
   const existingPhonesAgg = await AvailabilityModel.aggregate([
-    {
-      $match: {
-        actId,
-        dateISO,
-        reply: { $in: ["yes", "unavailable"] },
-      },
-    },
+    { $match: { actId, dateISO, reply: { $in: ["yes", "unavailable"] } } },
     { $group: { _id: "$phone" } },
   ]);
   const existingSet = new Set(existingPhonesAgg.map((p) => (p._id || "").replace(/\s+/g, "")));
 
-  // 🧱 Limit tracking per slot
   let totalSent = 0;
 
   for (const vocalist of targetVocalists) {
+    const vocalistNames = firstLast(vocalist);
+    const vocalistDisplayName = displayNameOf(vocalist);
+
     for (const deputy of vocalist.deputies || []) {
       const cleanPhone = (deputy.phoneNumber || deputy.phone || "").replace(/\s+/g, "");
       if (!/^\+?\d{10,15}$/.test(cleanPhone)) continue;
       if (existingSet.has(cleanPhone)) continue;
 
-      console.log(`🎯 Sending deputy enquiry to ${deputy.firstName || deputy.name} (slot ${slotIndex ?? "?"})`);
-
-      // --- Insert displayName helpers for deputy/vocalist ---
-      const displayNameOf = (p = {}) => {
-        const fn = (p.firstName || p.name || "").trim();
-        const ln = (p.lastName || "").trim();
-        return (fn && ln) ? `${fn} ${ln}` : (fn || ln || "");
-      };
+      const deputyNames = firstLast(deputy);
       const deputyDisplayName = displayNameOf(deputy);
-      const vocalistDisplayName = displayNameOf(vocalist);
+
+      console.log("🎯 [notifyDeputies] Triggering deputy", {
+        isDeputy: true,
+        deputy: {
+          ...deputyNames,
+          displayName: deputyDisplayName,
+          profileUrl: buildProfileUrl(deputy?.musicianId || deputy?._id),
+          photoUrl: pickPic(deputy),
+          phone: cleanPhone,
+          email: deputy?.email || "",
+        },
+        vocalist: {
+          ...vocalistNames,
+          vocalistDisplayName,
+          profileUrl: buildProfileUrl(vocalist?.musicianId || vocalist?._id),
+          photoUrl: pickPic(vocalist),
+        },
+        address: null,
+        formattedAddress: formattedAddress || null,
+        lineupId,
+        slotIndex,
+        inheritedFee,
+      });
 
       await triggerAvailabilityRequest({
         actId,
         lineupId,
         dateISO,
-        slotIndex, // 👈 make sure we pass it through
+        slotIndex,
         formattedAddress,
+
         clientName,
         clientEmail,
 
-        isDeputy: true,                      // 👈 hard-assert deputy
+        isDeputy: true,
         selectedVocalistName: deputyDisplayName || vocalistDisplayName || "",
         vocalistName: vocalistDisplayName || "",
-        deputy: {                            // normalize the deputy payload we send
+
+        deputy: {
           id: deputy.id || deputy.musicianId || deputy._id || null,
           musicianId: deputy.musicianId || deputy.id || deputy._id || null,
           firstName: deputy.firstName || deputy.name || "",
           lastName: deputy.lastName || "",
-          phone: cleanPhone,                 // normalized above
+          phone: cleanPhone,
           email: deputy.email || "",
-          imageUrl: deputy.imageUrl || deputy.photoUrl || null,
+          imageUrl: deputy.imageUrl || deputy.photoUrl || pickPic(deputy) || null,
           displayName: deputyDisplayName || "",
         },
 
@@ -468,15 +607,14 @@ export async function notifyDeputies({
       existingSet.add(cleanPhone);
       totalSent++;
       if (totalSent >= 3) {
-        console.log("🛑 Limit reached (3 deputies contacted)");
+        console.log("🛑 [notifyDeputies] Limit reached — contacted 3 deputies");
         return;
       }
     }
   }
 
-  console.log(`✅ [notifyDeputies] Complete — deputies contacted: ${totalSent}`);
+  console.log("✅ [notifyDeputies] COMPLETE", { deputiesContacted: totalSent });
 }
-
 
 export async function triggerNextDeputy({
   actId,
@@ -951,154 +1089,329 @@ const computeMemberTravelFee = async ({
   }
 };
 
-function findVocalistPhone(actData, lineupId) {
+/* ========================================================================== */
+/* 🔧 Tiny shared helpers for consistent logs                                  */
+/* ========================================================================== */
+
+const PUBLIC_SITE_BASE = (
+  process.env.PUBLIC_SITE_URL ||
+  process.env.FRONTEND_URL ||
+  "http://localhost:5174"
+).replace(/\/$/, "");
+
+const buildProfileUrl = (id) =>
+  id ? `${PUBLIC_SITE_BASE}/musician/${id}` : "";
+
+// ───────────────────────────────────────────────────────────────────────────────
+// displayNameOf — small helper with optional logging
+// ───────────────────────────────────────────────────────────────────────────────
+export const displayNameOf = (p = {}, log = true, label = "displayNameOf") => {
+  const fn = (p.firstName || p.name || "").trim();
+  const ln = (p.lastName || "").trim();
+  const dn = (fn && ln) ? `${fn} ${ln}` : (fn || ln || "");
+  if (log) {
+    logIdentity(label, { ...p, displayName: dn });
+  }
+  return dn;
+};
+
+const firstLast = (p = {}) => ({
+  firstName: (p.firstName || p.name || "").trim() || undefined,
+  lastName: (p.lastName || "").trim() || undefined,
+});
+
+
+/* ========================================================================== */
+/* 🎤 findVocalistPhone                                                        */
+/* ========================================================================== */
+export function findVocalistPhone(actData, lineupId) {
   console.log(
-    `🐠 (controllers/shortlistController.js) findVocalistPhone called at`,
-    new Date().toISOString(),
-    { lineupId, totalLineups: actData?.lineups?.length || 0 }
+    "🐠 [findVocalistPhone] START",
+    {
+      at: new Date().toISOString(),
+      lineupId,
+      totalLineups: actData?.lineups?.length || 0,
+      actName: actData?.tscName || actData?.name || "",
+    }
   );
 
-  if (!actData?.lineups?.length) return null;
+  if (!actData?.lineups?.length) {
+    console.warn("⚠️ [findVocalistPhone] No lineups on act");
+    return null;
+  }
 
-  // Prefer specified lineupId
   const lineup = lineupId
-    ? actData.lineups.find(
-        (l) => String(l._id || l.lineupId) === String(lineupId)
-      )
+    ? actData.lineups.find((l) => String(l._id || l.lineupId) === String(lineupId))
     : actData.lineups[0];
 
-  if (!lineup?.bandMembers?.length) return null;
+  if (!lineup?.bandMembers?.length) {
+    console.warn("⚠️ [findVocalistPhone] Lineup has no bandMembers");
+    return null;
+  }
 
-  // 🎤 Step 1: Find the lead vocalist (or first vocalist)
+  // Lead (or first) vocalist
   const vocalist = lineup.bandMembers.find((m) =>
     String(m.instrument || "").toLowerCase().includes("vocal")
   );
 
   if (!vocalist) {
-    console.warn("⚠️ No vocalist found in lineup", lineupId);
+    console.warn("⚠️ [findVocalistPhone] No vocalist found in lineup", { lineupId });
     return null;
   }
 
-  // 🎤 Step 2: Try to get a direct phone number
   let phone =
     vocalist.phoneNormalized ||
     vocalist.phoneNumber ||
     vocalist.phone ||
     "";
 
-  // 🎤 Step 3: If no phone for lead, check deputies
+  // If lead has no phone, try a deputy’s
   if (!phone && Array.isArray(vocalist.deputies) && vocalist.deputies.length) {
     const deputyWithPhone = vocalist.deputies.find(
       (d) => d.phoneNormalized || d.phoneNumber || d.phone
     );
-
     if (deputyWithPhone) {
       phone =
         deputyWithPhone.phoneNormalized ||
         deputyWithPhone.phoneNumber ||
         deputyWithPhone.phone ||
         "";
-      console.log(
-        `🎯 Using deputy phone (${deputyWithPhone.firstName || deputyWithPhone.name}) for ${vocalist.firstName}`
-      );
+      console.log("🎯 [findVocalistPhone] Using deputy phone", {
+        deputyFirstName: deputyWithPhone.firstName || deputyWithPhone.name || "",
+        deputyLastName: deputyWithPhone.lastName || "",
+        forVocalist: displayNameOf(vocalist),
+      });
     }
   }
 
-  // 🎤 Step 4: Normalize to E.164 if needed
+  // Normalize (expects your existing helper)
   phone = toE164(phone);
 
   if (!phone) {
-    console.warn("⚠️ No valid phone found for vocalist or deputies:", {
-      vocalist: `${vocalist.firstName} ${vocalist.lastName}`,
+    console.warn("⚠️ [findVocalistPhone] No valid phone for vocalist/deputies", {
+      vocalistFirstName: vocalist.firstName || "",
+      vocalistLastName: vocalist.lastName || "",
       lineup: lineup.actSize,
       act: actData.tscName || actData.name,
     });
     return null;
   }
 
-  console.log("🎤 Lead vocalist found (with deputy fallback):", {
-    name: `${vocalist.firstName} ${vocalist.lastName}`,
+  const vNames = firstLast(vocalist);
+  const vDisplayName = displayNameOf(vocalist);
+
+  console.log("🎤 [findVocalistPhone] Lead vocalist resolved", {
+    ...vNames,
+    displayName: vDisplayName,
+    vocalistDisplayName: vDisplayName,
     instrument: vocalist.instrument,
     fee: vocalist.fee,
+    // These are unknown in this function; include as nulls for consistency
+    address: null,
+    formattedAddress: null,
+    profileUrl: buildProfileUrl(vocalist?.musicianId || vocalist?._id),
+    photoUrl: pickPic(vocalist),
+    isDeputy: false,
     phone,
-    email: vocalist.email,
+    lineupSize: lineup?.actSize || "",
   });
 
-  // ✅ Return full object
   return { vocalist, phone };
 }
 
-// Build a sensible display name from however your musician schema stores it
-function buildMusicianDisplayName(m) {
-  const first =
-    m?.firstName ||
-    m?.personal?.name?.first ||
-    m?.name?.first ||
-    "";
-  const last =
-    m?.lastName ||
-    m?.personal?.name?.last ||
-    m?.name?.last ||
-    "";
-  const stage = m?.stageName || "";
-  const display = m?.displayName || "";
+async function getDeputyDisplayBits(dep) {
+  const PUBLIC_SITE_BASE = (
+    process.env.PUBLIC_SITE_URL ||
+    process.env.FRONTEND_URL ||
+    "http://localhost:5174"
+  ).replace(/\/$/, "");
 
-  // preference order: explicit displayName → stageName → “First L”
-  if (display) return display;
-  if (stage) return stage;
-  if (first && last) return `${first} ${String(last).charAt(0)}`;
-  return first || ""; // may still be empty if we truly have no names
+  console.log("🔍 getDeputyDisplayBits START", {
+    incomingDep: {
+      id: dep?._id,
+      musicianId: dep?.musicianId,
+      firstName: dep?.firstName,
+      lastName: dep?.lastName,
+      phone: dep?.phone,
+      phoneNumber: dep?.phoneNumber,
+      phoneNormalized: dep?.phoneNormalized,
+      email: dep?.email || dep?.emailAddress,
+    }
+  });
+
+  try {
+    /* -------------------------------------------------------------- */
+    /* 🟣 1. INITIAL ID + DIRECT PICTURE CHECK                         */
+    /* -------------------------------------------------------------- */
+    const initialMusicianId =
+      (dep?.musicianId && String(dep.musicianId)) ||
+      (dep?._id && String(dep._id)) ||
+      "";
+
+      let resolvedMusicianId = initialMusicianId; // ⬅️ track locally; never mutate dep
+
+    let photoUrl = getPictureUrlFrom(dep);
+    console.log("📸 Step 1: Direct deputy picture →", photoUrl || "❌ none");
+
+    let mus = null;
+
+    /* -------------------------------------------------------------- */
+    /* 🔵 2. Lookup by musicianId                                      */
+    /* -------------------------------------------------------------- */
+    if ((!photoUrl || !photoUrl.startsWith("http")) && initialMusicianId) {
+      console.log("🆔 Step 2: Looking up musician by ID →", initialMusicianId);
+      mus = await Musician.findById(initialMusicianId)
+        .select(
+          "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl email phoneNormalized phone phoneNumber"
+        )
+        .lean();
+
+      if (mus) {
+  photoUrl = getPictureUrlFrom(mus);
+  resolvedMusicianId = String(mus._id || initialMusicianId);
+  console.log("📸 Step 2 result: From musicianId →", photoUrl || "❌ none");
+} else {
+  console.warn("⚠️ Step 2: No musician found by ID", initialMusicianId);
+}
+    }
+
+    /* -------------------------------------------------------------- */
+    /* 🟡 2.5 Lookup by phone if no photo yet                          */
+    /* -------------------------------------------------------------- */
+    if ((!photoUrl || !photoUrl.startsWith("http"))) {
+      const possiblePhone =
+        dep.phoneNormalized ||
+        dep.phoneNumber ||
+        dep.phone ||
+        mus?.phoneNormalized ||
+        mus?.phone ||
+        mus?.phoneNumber;
+
+      if (possiblePhone) {
+        const normalizedPhone = possiblePhone
+          .replace(/\s+/g, "")
+          .replace(/^(\+44|44|0)/, "+44");
+
+        console.log("📞 Step 2.5: Looking up by phone →", normalizedPhone);
+
+        const musByPhone = await Musician.findOne({
+          $or: [
+            { phoneNormalized: normalizedPhone },
+            { phone: normalizedPhone },
+            { phoneNumber: normalizedPhone },
+          ],
+        })
+          .select(
+            "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl email phoneNormalized _id"
+          )
+          .lean();
+
+        if (musByPhone) {
+          mus = musByPhone;
+          resolvedMusicianId = String(musByPhone._id || resolvedMusicianId);
+          photoUrl = getPictureUrlFrom(musByPhone);
+          console.log("📸 Step 2.5 result: Found by phone →", photoUrl || "❌ none");
+
+        } else {
+          console.warn("⚠️ Step 2.5: No musician found by phone", normalizedPhone);
+        }
+      } else {
+        console.log("ℹ️ Step 2.5 skipped — no phone available");
+      }
+    }
+
+    /* -------------------------------------------------------------- */
+    /* 🟤 3. Lookup by email                                           */
+    /* -------------------------------------------------------------- */
+    let resolvedEmail =
+      dep?.email ||
+      dep?.emailAddress ||
+      mus?.email ||
+      "";
+
+    if ((!photoUrl || !photoUrl.startsWith("http")) && resolvedEmail) {
+      console.log("📧 Step 3: Lookup by email →", resolvedEmail);
+
+      const musByEmail = await Musician.findOne({ email: resolvedEmail })
+        .select(
+          "musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl _id email"
+        )
+        .lean();
+
+      if (musByEmail) {
+        mus = musByEmail;
+        resolvedMusicianId = String(musByEmail._id || resolvedMusicianId);
+        photoUrl = getPictureUrlFrom(musByEmail);
+        resolvedEmail = musByEmail.email;
+        console.log("📸 Step 3 result: Found by email →", photoUrl || "❌ none");
+
+      
+      } else {
+        console.warn("⚠️ Step 3: No musician found for email", resolvedEmail);
+      }
+    }
+
+    /* -------------------------------------------------------------- */
+    /* 🟢 FINAL RESOLUTION                                            */
+    /* -------------------------------------------------------------- */
+const finalMusicianId = String(
+  resolvedMusicianId || dep?.musicianId || initialMusicianId || ""
+);
+
+const profileUrl = finalMusicianId
+  ? `${PUBLIC_SITE_BASE}/musician/${finalMusicianId}`
+  : "";
+
+    const FALLBACK_PHOTO =
+      "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1761313694/profile_placeholder_rcdly4.png";
+
+    if (!photoUrl || !photoUrl.startsWith("http")) {
+      console.log("🪄 No valid photo found — using fallback");
+      photoUrl = FALLBACK_PHOTO;
+    }
+
+    const finalBits = {
+      musicianId: finalMusicianId,
+      photoUrl,
+      profileUrl,
+      resolvedEmail,
+      
+    };
+
+    // ⭐ Add name fields for badge + toasts
+if (mus) {
+  finalBits.firstName = mus.firstName || "";
+  finalBits.lastName = mus.lastName || "";
+  finalBits.resolvedName = `${mus.firstName || ""} ${mus.lastName || ""}`.trim();
+} else {
+  // fallback if dep itself had name (vocalists do)
+  finalBits.firstName = dep.firstName || "";
+  finalBits.lastName = dep.lastName || "";
+  finalBits.resolvedName = `${dep.firstName || ""} ${dep.lastName || ""}`.trim();
 }
 
-export async function getDeputyDisplayBits({ incomingDep = {} }) {
-  const musicianId = String(incomingDep.musicianId || incomingDep.id || "");
-  const bits = {
-    musicianId: musicianId || null,
-    photoUrl: null,
-    profileUrl: "",
-    resolvedEmail: "",
-    firstName: "",
-    lastName: "",
-    displayName: "",
-    resolvedName: "",
-    vocalistName: "", // <-- we will set this to the display name too
-  };
+    console.log("🎯 FINAL getDeputyDisplayBits result:", finalBits);
+    return finalBits;
+  } catch (e) {
+    console.warn("❌ getDeputyDisplayBits FAILED:", e.message || e);
 
-  if (!musicianId) return bits;
-
-  // You already use this for photos; keep using it so photos remain correct
-  const photoUrl = await getPictureUrlFrom({ musicianId });
-  if (photoUrl) bits.photoUrl = photoUrl;
-
-  // Pull lightweight identity fields
-  const m = await Musician.findById(musicianId)
-    .select("firstName lastName shortName stageName displayName profileUrl email personal.name")
-    .lean();
-
-  if (m) {
-    const first =
-      m?.firstName ||
-      m?.personal?.name?.first ||
-      m?.name?.first ||
-      "";
-    const last =
-      m?.lastName ||
-      m?.personal?.name?.last ||
-      m?.name?.last ||
+    const fallbackId =
+      (dep?.musicianId && String(dep.musicianId)) ||
+      (dep?._id && String(dep._id)) ||
       "";
 
-    const resolved = buildMusicianDisplayName(m);
+    const FALLBACK_PHOTO =
+      "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1761313694/profile_placeholder_rcdly4.png";
 
-    bits.profileUrl = m?.profileUrl || bits.profileUrl;
-    bits.resolvedEmail = m?.email || bits.resolvedEmail;
-    bits.firstName = first;
-    bits.lastName = last;
-    bits.displayName = resolved;
-    bits.resolvedName = resolved;
-    bits.vocalistName = resolved; // <-- important: fill this too
+    return {
+      musicianId: fallbackId,
+      photoUrl: FALLBACK_PHOTO,
+      profileUrl: fallbackId
+        ? `${PUBLIC_SITE_BASE}/musician/${fallbackId}`
+        : "",
+      resolvedEmail: dep?.email || "",
+    };
   }
-
-  return bits;
 }
 
 
@@ -1125,6 +1438,13 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       selectedVocalistName = "",
       vocalistName = "",
     } = body;
+
+    // Base URL for profile links (moved to the top so we can log a profileUrl early)
+    const PUBLIC_SITE_BASE = (
+      process.env.PUBLIC_SITE_URL ||
+      process.env.FRONTEND_URL ||
+      "http://localhost:5174"
+    ).replace(/\/$/, "");
 
     /* -------------------------------------------------------------- */
     /* 🔢 Enquiry + slotIndex base                                    */
@@ -1202,6 +1522,22 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       year: "numeric",
     });
 
+    // 🔍 Entry summary
+    console.log("🟣 [triggerAvailabilityRequest] ENTRY", {
+      actId,
+      lineupId,
+      dateISO,
+      isDeputy,
+      selectedVocalistName,
+      vocalistName,
+      address: address || null,
+      formattedAddress: formattedAddress || null,
+      fullFormattedAddress,
+      shortAddress,
+      enquiryId,
+      slotIndexFromBody,
+    });
+
     /* -------------------------------------------------------------- */
     /* 🎵 Lineup + members                                            */
     /* -------------------------------------------------------------- */
@@ -1221,7 +1557,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
 
     /* -------------------------------------------------------------- */
-    /* 🔢 Normalise phone                                             */
+    /* 🔢 Normalise phone & address compare                            */
     /* -------------------------------------------------------------- */
     const normalizePhone = (raw = "") => {
       let v = String(raw || "").replace(/\s+/g, "").replace(/^whatsapp:/i, "");
@@ -1364,10 +1700,10 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
             if (prior.reply === "yes") {
               try {
                 const badgeRes = await rebuildAndApplyAvailabilityBadge({
-                actId,
-                dateISO,
-                __fromExistingReply: true,
-              });
+                  actId,
+                  dateISO,
+                  __fromExistingReply: true,
+                });
                 if (global.availabilityNotify && badgeRes?.badge) {
                   global.availabilityNotify.badgeUpdated({
                     type: "availability_badge_updated",
@@ -1436,28 +1772,45 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           status: "sent",
           reply: null,
         };
-       const displayNameForLead = `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim();
 
-const setAlways = {
-  isDeputy: false,
-  musicianId: realMusicianId,                  // ✅ ensure row is linked
-  musicianName: displayNameForLead,
-  musicianEmail: enriched.email || "",
-  photoUrl: enriched.photoUrl || enriched.profilePicture || "",
-  address: fullFormattedAddress,
-  formattedAddress: fullFormattedAddress,
-  formattedDate,
-  clientName: resolvedClientName || "",
-  clientEmail: resolvedClientEmail || "",
-  actName: act?.tscName || act?.name || "",
-  duties: vMember.instrument || "Vocalist",
-  fee: String(finalFee),
-  updatedAt: now,
-  // ✅ new: carry the *same* name into modern fields
-  selectedVocalistName: displayNameForLead,
-  selectedVocalistId: realMusicianId || null,
-  vocalistName: displayNameForLead,
-};
+        const displayNameForLead = `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim();
+
+        const setAlways = {
+          isDeputy: false,
+          musicianId: realMusicianId,                  // ✅ ensure row is linked
+          musicianName: displayNameForLead,
+          musicianEmail: enriched.email || "",
+          photoUrl: enriched.photoUrl || enriched.profilePicture || "",
+          address: fullFormattedAddress,
+          formattedAddress: fullFormattedAddress,
+          formattedDate,
+          clientName: resolvedClientName || "",
+          clientEmail: resolvedClientEmail || "",
+          actName: act?.tscName || act?.name || "",
+          duties: vMember.instrument || "Vocalist",
+          fee: String(finalFee),
+          updatedAt: now,
+          // ✅ new: carry the *same* name into modern fields
+          selectedVocalistName: displayNameForLead,
+          selectedVocalistId: realMusicianId || null,
+          vocalistName: displayNameForLead,
+        };
+
+        // 🔎 Per-person debug summary (multi lead)
+        console.log("🔎 [triggerAvailabilityRequest/multi] PERSON", {
+          role: "LEAD",
+          firstName: (enriched.firstName || vMember.firstName || "").trim(),
+          lastName: (enriched.lastName || vMember.lastName || "").trim(),
+          selectedVocalistName: displayNameForLead,
+          vocalistName: displayNameForLead,
+          address: fullFormattedAddress,
+          shortAddress,
+          photoUrl: setAlways.photoUrl || "",
+          profileUrl: realMusicianId ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}` : "",
+          musicianId: realMusicianId || null,
+          phone,
+          slotIndex: slotIndexForThis,
+        });
 
         const savedLead = await AvailabilityModel.findOneAndUpdate(
           query,
@@ -1528,10 +1881,10 @@ const setAlways = {
       console.warn("⚠️ Enrich failed:", err.message);
     }
 
-
-if (isDeputy && deputy?.id && !targetMember.musicianId) {
-  targetMember.musicianId = deputy.id;
-}
+    // Make sure deputy's id is mapped if provided
+    if (isDeputy && deputy?.id && !targetMember.musicianId) {
+      targetMember.musicianId = deputy.id;
+    }
 
     targetMember.email = enrichedMember.email || targetMember.email || null;
     targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
@@ -1540,7 +1893,7 @@ if (isDeputy && deputy?.id && !targetMember.musicianId) {
     if (!phone) throw new Error("Missing phone");
 
     // 🔎 Canonical musician from Musicians collection (by phone)
-const canonical = await findCanonicalMusicianByPhone(phone);
+    const canonical = await findCanonicalMusicianByPhone(phone);
 
     // Prefer canonical-from-phone; fall back to any enriched/act ids
     const canonicalId = canonical?._id
@@ -1563,11 +1916,9 @@ const canonical = await findCanonicalMusicianByPhone(phone);
       canonicalName ||
       `${targetMember?.firstName || ""} ${targetMember?.lastName || ""}`
     ).trim();
+
     /* -------------------------------------------------------------- */
     /* 🛡️ Prior-reply check (same date + same location)               */
-    /*     If we already have a YES/NO/UNAVAILABLE for this member    */
-    /*     on the same date and location, DO NOT message again.       */
-    /*     Instead, proceed as if that reply just occurred.           */
     /* -------------------------------------------------------------- */
     const priorReplyQuery = {
       actId,
@@ -1592,11 +1943,11 @@ const canonical = await findCanonicalMusicianByPhone(phone);
       if (prior.reply === "yes") {
         // ✅ Refresh badge (best-effort)
         try {
-         const badgeRes = await rebuildAndApplyAvailabilityBadge({
-          actId,
-          dateISO,
-          __fromExistingReply: true,
-        });
+          const badgeRes = await rebuildAndApplyAvailabilityBadge({
+            actId,
+            dateISO,
+            __fromExistingReply: true,
+          });
           if (global.availabilityNotify && badgeRes?.badge) {
             global.availabilityNotify.badgeUpdated({
               type: "availability_badge_updated",
@@ -1634,10 +1985,6 @@ const canonical = await findCanonicalMusicianByPhone(phone);
 
     /* -------------------------------------------------------------- */
     /* 🔐 Refined duplicate guard                                     */
-    /*     If a row exists but has NO reply yet, keep legacy          */
-    /*     behaviour for leads (skip re-send unless explicitly        */
-    /*     allowed via skipDuplicateCheck); for deputies scope by     */
-    /*     slotIndex to avoid cross-slot collisions.                  */
     /* -------------------------------------------------------------- */
     const strongGuardQuery = {
       actId,
@@ -1740,65 +2087,77 @@ const canonical = await findCanonicalMusicianByPhone(phone);
     /* -------------------------------------------------------------- */
     /* ✅ Upsert availability record (single lead / deputy)           */
     /* -------------------------------------------------------------- */
-   const singleSlotIndex =
-  typeof body.slotIndex === "number" ? body.slotIndex : 0;
+    const singleSlotIndex =
+      typeof body.slotIndex === "number" ? body.slotIndex : 0;
 
-const now = new Date();
-const query = { actId, dateISO, phone, slotIndex: singleSlotIndex };
+    const now = new Date();
+    const query = { actId, dateISO, phone, slotIndex: singleSlotIndex };
 
-const setOnInsert = {
-  actId,
-  lineupId: lineup?._id || null,
-  dateISO,
-  phone,
-  v2: true,
-  enquiryId,
-  slotIndex: singleSlotIndex,
-  createdAt: now,
-  status: "sent",
-  reply: null,
-  musicianId: canonicalId,        // ✅ insert with canonical musician id
-  selectedVocalistName: selectedName,
-  selectedVocalistId: canonicalId || null,
-};
-  const PUBLIC_SITE_BASE = (
-    process.env.PUBLIC_SITE_URL ||
-    process.env.FRONTEND_URL ||
-    "http://localhost:5174"
-  ).replace(/\/$/, "");
+    const setOnInsert = {
+      actId,
+      lineupId: lineup?._id || null,
+      dateISO,
+      phone,
+      v2: true,
+      enquiryId,
+      slotIndex: singleSlotIndex,
+      createdAt: now,
+      status: "sent",
+      reply: null,
+      musicianId: canonicalId,        // ✅ insert with canonical musician id
+      selectedVocalistName: selectedName,
+      selectedVocalistId: canonicalId || null,
+    };
 
+    const setAlways = {
+      isDeputy: !!isDeputy,
+      musicianName: canonicalName,    // ✅ name from canonical
+      musicianEmail: canonical?.email || targetMember.email || "",
+      photoUrl: canonicalPhoto,       // ✅ photo from canonical
+      address: fullFormattedAddress,
+      formattedAddress: fullFormattedAddress,
+      formattedDate,
+      clientName: resolvedClientName || "",
+      clientEmail: resolvedClientEmail || "",
+      actName: act?.tscName || act?.name || "",
+      duties: body?.inheritedDuties || targetMember.instrument || "Performance",
+      fee: String(finalFee),
+      updatedAt: now,
+      profileUrl: canonicalId ? `${PUBLIC_SITE_BASE}/musician/${canonicalId}` : "",
+      selectedVocalistName: selectedName,
+      selectedVocalistId: canonicalId || null,
+      vocalistName: vocalistName || selectedName || "",
+    };
 
-const setAlways = {
-  isDeputy: !!isDeputy,
-  musicianName: canonicalName,    // ✅ name from canonical
-  musicianEmail: canonical?.email || targetMember.email || "",
-  photoUrl: canonicalPhoto,       // ✅ photo from canonical
-  address: fullFormattedAddress,
-  formattedAddress: fullFormattedAddress,
-  formattedDate,
-  clientName: resolvedClientName || "",
-  clientEmail: resolvedClientEmail || "",
-  actName: act?.tscName || act?.name || "",
-  duties: body?.inheritedDuties || targetMember.instrument || "Performance",
-  fee: String(finalFee),
-  updatedAt: now,
-  profileUrl: canonicalId ? `${PUBLIC_SITE_BASE}/musician/${canonicalId}` : "",
-  selectedVocalistName: selectedName,
-  selectedVocalistId: canonicalId || null,
-  vocalistName: vocalistName || selectedName || "",
-};
+    // 🔎 Single-path person debug summary (lead or deputy)
+    const resolvedFirstName = (canonical?.firstName || targetMember.firstName || enrichedMember.firstName || "").trim();
+    const resolvedLastName  = (canonical?.lastName  || targetMember.lastName  || enrichedMember.lastName  || "").trim();
+    console.log("🔎 [triggerAvailabilityRequest/single] PERSON", {
+      role: isDeputy ? "DEPUTY" : "LEAD",
+      firstName: resolvedFirstName,
+      lastName: resolvedLastName,
+      selectedVocalistName: setAlways.selectedVocalistName,
+      vocalistName: setAlways.vocalistName,
+      address: fullFormattedAddress,
+      shortAddress,
+      photoUrl: setAlways.photoUrl || "",
+      profileUrl: setAlways.profileUrl || "",
+      musicianId: canonicalId || null,
+      phone,
+      slotIndex: singleSlotIndex,
+    });
 
-const saved = await AvailabilityModel.findOneAndUpdate(
-  query,
-  { $setOnInsert: setOnInsert, $set: setAlways },
-  { new: true, upsert: true }
-);
+    const saved = await AvailabilityModel.findOneAndUpdate(
+      query,
+      { $setOnInsert: setOnInsert, $set: setAlways },
+      { new: true, upsert: true }
+    );
 
-console.log(`✅ Upserted ${isDeputy ? "DEPUTY" : "LEAD"} row`, {
-  slot: singleSlotIndex,
-  isDeputy: saved?.isDeputy,
-  musicianId: String(saved?.musicianId || ""),
-});
+    console.log(`✅ Upserted ${isDeputy ? "DEPUTY" : "LEAD"} row`, {
+      slot: singleSlotIndex,
+      isDeputy: saved?.isDeputy,
+      musicianId: String(saved?.musicianId || ""),
+    });
 
     /* -------------------------------------------------------------- */
     /* 💬 Send WhatsApp                                               */
@@ -1806,9 +2165,23 @@ console.log(`✅ Upserted ${isDeputy ? "DEPUTY" : "LEAD"} row`, {
     const role = body?.inheritedDuties || targetMember.instrument || "Performance";
     const feeStr = finalFee > 0 ? `£${finalFee}` : "TBC";
 
+    // One more concise log just before sending WA
+    console.log("📤 [WA SEND] Summary", {
+      to: phone,
+      role,
+      fee: feeStr,
+      date: formattedDate,
+      shortAddress,
+      actName: act.tscName || act.name,
+      isDeputy,
+      selectedVocalistName: setAlways.selectedVocalistName,
+      vocalistName: setAlways.vocalistName,
+      photoUrl: setAlways.photoUrl,
+      profileUrl: setAlways.profileUrl,
+    });
+
     const msg = `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
 
-    console.log("🐛 About to call sendWhatsAppMessage()");
     await sendWhatsAppMessage({
       to: phone,
       actData: act,
@@ -1915,19 +2288,6 @@ export async function notifyDeputyOneShot(req, res) {
   }
 }
 
-// Resolve a human-friendly display name from an availability row + optional musician doc
-function resolveDisplayName(row = {}, musician = {}) {
-  const fromRow = String(
-    (row?.selectedVocalistName || row?.vocalistName || row?.musicianName || "")
-  ).trim();
-  if (fromRow) return fromRow;
-
-  const fn = String(musician?.firstName || "").trim();
-  const ln = String(musician?.lastName || "").trim();
-  if (fn || ln) return `${fn} ${ln}`.trim();
-
-  return "Vocalist";
-}
 
 export const twilioInbound = async (req, res) => {
   console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
@@ -2531,43 +2891,210 @@ const firstNameOf = (p) => {
 // -------------------- SSE Broadcaster --------------------
 
 
-export const makeAvailabilityBroadcaster = (broadcastFn) => ({
-  leadYes: ({ actId, actName, musicianName, dateISO, musicianId }) => {
-    broadcastFn({
-      type: "availability_yes", // frontend already normalizes to "leadYes"
-      actId,
-      actName,
-      musicianName: musicianName || "Lead Vocalist",
-      musicianId: musicianId || null, // ← include this
-      dateISO,
+// ───────────────────────────────────────────────────────────────────────────────
+// makeAvailabilityBroadcaster — with identity-focused console logging
+// ───────────────────────────────────────────────────────────────────────────────
+export const makeAvailabilityBroadcaster = (broadcastFn) => {
+  // Small helpers local to this broadcaster
+  const toStr = (v) => (typeof v === "string" ? v : "");
+  const splitName = (name) => {
+    const n = toStr(name).trim();
+    if (!n) return { first: "", last: "" };
+    const parts = n.split(/\s+/);
+    const first = parts[0] || "";
+    const last = parts.length > 1 ? parts.slice(1).join(" ") : "";
+    return { first, last };
+  };
+  const logIdentity = (label, obj = {}) => {
+    const { first = "", last = "" } = splitName(
+      obj.displayName || obj.vocalistDisplayName || obj.musicianName
+    );
+    console.log(`📡 [SSE] ${label}`, {
+      actId: obj.actId,
+      actName: obj.actName,
+      dateISO: obj.dateISO,
+      firstName: obj.firstName || first || undefined,
+      lastName: obj.lastName || last || undefined,
+      displayName:
+        obj.displayName ||
+        obj.musicianName ||
+        obj.vocalistDisplayName ||
+        undefined,
+      vocalistDisplayName:
+        obj.vocalistDisplayName || obj.displayName || undefined,
+      profileUrl: obj.profileUrl || undefined,
+      photoUrl: obj.photoUrl || undefined,
+      address: obj.address || undefined,
+      formattedAddress: obj.formattedAddress || undefined,
+      isDeputy: obj.isDeputy === true,
+      musicianId: obj.musicianId ? String(obj.musicianId) : undefined,
+      slotIndex: obj.slotIndex ?? undefined,
+      slotsCount:
+        Array.isArray(obj.badge?.slots) ? obj.badge.slots.length : undefined,
     });
-  },
+  };
 
-  deputyYes: ({ actId, actName, musicianName, dateISO, badge, musicianId }) => {
-    const deputyName =
-      (musicianName ||
-       badge?.deputies?.[0]?.vocalistName ||
-       badge?.deputies?.[0]?.name ||
-       "Deputy Vocalist");
+  // Build a quick identity snapshot from a badge slot (if present)
+  const snapshotFromSlot = (slot = {}) => {
+    const dn =
+      slot.vocalistName ||
+      slot.primary?.displayName ||
+      slot.primary?.musicianName ||
+      "";
+    const { first, last } = splitName(dn);
+    return {
+      firstName: first,
+      lastName: last,
+      displayName: dn || undefined,
+      vocalistDisplayName: dn || undefined,
+      profileUrl: slot.primary?.profileUrl || slot.profileUrl || undefined,
+      photoUrl: slot.primary?.photoUrl || slot.photoUrl || undefined,
+      isDeputy: Boolean(slot.primary?.isDeputy),
+      musicianId:
+        slot.primary?.musicianId || slot.musicianId || slot?.primary?.id || null,
+      slotIndex: slot.slotIndex,
+    };
+  };
 
-    broadcastFn({
-      type: "availability_deputy_yes",
-      actId,
-      actName,
-      musicianName: deputyName,
-      musicianId: musicianId || badge?.deputies?.[0]?.musicianId || null, // ← include this too
-      dateISO,
-    });
-  },
+  return {
+    // Lead vocalist confirmed YES
+    leadYes: ({ actId, actName, musicianName, dateISO, musicianId }) => {
+      const { first, last } = splitName(musicianName);
+      logIdentity("leadYes (pre-broadcast)", {
+        actId,
+        actName,
+        dateISO,
+        firstName: first,
+        lastName: last,
+        displayName: musicianName,
+        vocalistDisplayName: musicianName,
+        isDeputy: false,
+        musicianId,
+      });
 
-  badgeUpdated: ({ actId, actName, dateISO, badge }) => {
-    if (!badge) {
-      console.log("🔕 SSE: badge was null/undefined – skipping broadcast", { actId, dateISO });
-      return;
-    }
-    broadcastFn({ type: "availability_badge_updated", actId, actName, dateISO, badge });
-  }
-});
+      broadcastFn({
+        type: "availability_yes", // frontend normalizes to "leadYes"
+        actId,
+        actName,
+        musicianName: musicianName || "Lead Vocalist",
+        musicianId: musicianId || null,
+        dateISO,
+      });
+
+      console.log("📤 [SSE] leadYes broadcast dispatched", {
+        actId,
+        actName,
+        dateISO,
+        musicianId: musicianId || null,
+      });
+    },
+
+    // Deputy confirmed YES
+    deputyYes: ({ actId, actName, musicianName, dateISO, badge, musicianId }) => {
+      const dep0 =
+        Array.isArray(badge?.deputies) && badge.deputies.length
+          ? badge.deputies[0]
+          : null;
+
+      const deputyName =
+        musicianName ||
+        dep0?.vocalistName ||
+        dep0?.name ||
+        "Deputy Vocalist";
+
+      const { first, last } = splitName(deputyName);
+      const profileUrl =
+        dep0?.profileUrl ||
+        badge?.primary?.profileUrl ||
+        badge?.profileUrl ||
+        undefined;
+      const photoUrl =
+        dep0?.photoUrl || badge?.primary?.photoUrl || badge?.photoUrl || undefined;
+      const resolvedMusicianId = musicianId || dep0?.musicianId || null;
+
+      logIdentity("deputyYes (pre-broadcast)", {
+        actId,
+        actName,
+        dateISO,
+        firstName: first,
+        lastName: last,
+        displayName: deputyName,
+        vocalistDisplayName: deputyName,
+        profileUrl,
+        photoUrl,
+        isDeputy: true,
+        musicianId: resolvedMusicianId,
+        badge, // for slotsCount
+      });
+
+      broadcastFn({
+        type: "availability_deputy_yes",
+        actId,
+        actName,
+        musicianName: deputyName,
+        musicianId: resolvedMusicianId,
+        dateISO,
+      });
+
+      console.log("📤 [SSE] deputyYes broadcast dispatched", {
+        actId,
+        actName,
+        dateISO,
+        musicianId: resolvedMusicianId,
+      });
+    },
+
+    // Full badge update (SSE)
+    badgeUpdated: ({ actId, actName, dateISO, badge }) => {
+      if (!badge) {
+        console.log("🔕 [SSE] badge was null/undefined – skipping broadcast", {
+          actId,
+          dateISO,
+        });
+        return;
+      }
+
+      // Try to surface a primary slot identity for richer logs
+      const primarySlot = Array.isArray(badge.slots)
+        ? badge.slots.find((s) => s?.primary) || badge.slots[0]
+        : undefined;
+
+      if (primarySlot) {
+        const snap = snapshotFromSlot(primarySlot);
+        logIdentity("badgeUpdated (primary slot snapshot)", {
+          ...snap,
+          actId,
+          actName,
+          dateISO,
+          address: badge.address || undefined,
+          formattedAddress: badge.address || undefined,
+          badge,
+        });
+      } else {
+        console.log("🟡 [SSE] badgeUpdated: no slots available to snapshot", {
+          actId,
+          actName,
+          dateISO,
+        });
+      }
+
+      broadcastFn({
+        type: "availability_badge_updated",
+        actId,
+        actName,
+        dateISO,
+        badge,
+      });
+
+      console.log("📤 [SSE] badgeUpdated broadcast dispatched", {
+        actId,
+        actName,
+        dateISO,
+        slots: Array.isArray(badge.slots) ? badge.slots.length : 0,
+      });
+    },
+  };
+};
 
 // one-shot WA→SMS for a single deputy
 export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
@@ -2763,6 +3290,9 @@ export async function pingDeputiesFor(
 
 // ✅ buildAvailabilityBadgeFromRows (refined to include both photoUrl & profileUrl)
 // controllers/availabilityBadgeController.js (or wherever it lives)
+// ───────────────────────────────────────────────────────────────────────────────
+// buildAvailabilityBadgeFromRows — with identity-focused console logging
+// ───────────────────────────────────────────────────────────────────────────────
 export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineups = true }) {
   console.log("🟣 buildAvailabilityBadgeFromRows START", { actId, dateISO, hasLineups });
 
@@ -2772,11 +3302,27 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     reply: { $in: ["yes", "no", "unavailable", null] },
     v2: true,
   })
-    // NOTE: added phone, musicianEmail, repliedAt to support lookups + UI timestamps
-    .select("musicianId slotIndex reply updatedAt repliedAt isDeputy photoUrl phone musicianEmail")
+    .select(
+      "musicianId slotIndex reply updatedAt repliedAt isDeputy photoUrl phone musicianEmail musicianName vocalistName selectedVocalistName profileUrl address formattedAddress"
+    )
     .lean();
 
-  console.log("📥 buildBadge: availability rows:", rows);
+  console.log(
+    "📥 buildBadge: availability rows (identity snapshot):",
+    rows.map((r) => ({
+      slotIndex: r.slotIndex,
+      reply: r.reply,
+      updatedAt: r.updatedAt,
+      isDeputy: r.isDeputy,
+      musicianId: r.musicianId,
+      vocalistName: r.vocalistName || r.selectedVocalistName || r.musicianName,
+      photoUrl: r.photoUrl,
+      profileUrl: r.profileUrl,
+      phone: r.phone,
+      formattedAddress: r.formattedAddress || r.address,
+    }))
+  );
+
   if (!rows.length) return null;
 
   const groupedBySlot = rows.reduce((acc, row) => {
@@ -2786,29 +3332,46 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
   }, {});
   console.log("📦 buildBadge: rows grouped by slot:", Object.keys(groupedBySlot));
 
-  const isHttp = (u) => typeof u === "string" && u.startsWith("http");
+  const isHttp = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
 
   const slots = [];
   const orderedKeys = Object.keys(groupedBySlot).sort((a, b) => Number(a) - Number(b));
 
   for (const slotKey of orderedKeys) {
     const slotRows = groupedBySlot[slotKey];
-    console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows);
+    console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows.length);
 
     // Split lead vs deputy
-    const leadRows   = slotRows.filter(r => r.isDeputy !== true);
-    const deputyRows = slotRows.filter(r => r.isDeputy === true);
+    const leadRows   = slotRows.filter((r) => r.isDeputy !== true);
+    const deputyRows = slotRows.filter((r) => r.isDeputy === true);
 
     // Latest meaningful lead reply
-    const leadReply = leadRows
-      .filter(r => ["yes", "no", "unavailable"].includes(r.reply))
-      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
+    const leadReply =
+      leadRows
+        .filter((r) => ["yes", "no", "unavailable"].includes(r.reply))
+        .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0] || null;
 
-    // Resolve lead display bits
+    if (leadReply) {
+      logIdentity("LeadRow", {
+        isDeputy: false,
+        slotIndex: Number(slotKey),
+        musicianId: leadReply.musicianId,
+        reply: leadReply.reply,
+        photoUrl: leadReply.photoUrl,
+        profileUrl: leadReply.profileUrl,
+        phone: leadReply.phone,
+        formattedAddress: leadReply.formattedAddress || leadReply.address,
+        vocalistDisplayName:
+          leadReply.vocalistName || leadReply.selectedVocalistName || leadReply.musicianName,
+      });
+    }
+
+    // Resolve lead display bits (via helper)
     let leadDisplayBits = null;
     if (leadReply?.musicianId) {
       try {
         leadDisplayBits = await getDeputyDisplayBits({ musicianId: leadReply.musicianId });
+        logIdentity("LeadDisplayBits", { ...leadDisplayBits, isDeputy: false, slotIndex: Number(slotKey) });
       } catch (e) {
         console.warn("getDeputyDisplayBits (lead) failed:", e?.message);
       }
@@ -2825,17 +3388,17 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
           available: leadReply?.reply === "yes",
           isDeputy: false,
         }
-      : (leadReply
-          ? {
-              musicianId: String(leadReply.musicianId || ""),
-              photoUrl: null,
-              profileUrl: "",
-              setAt: leadReply.updatedAt || null,
-              state: leadReply.reply || "pending",
-              available: leadReply.reply === "yes",
-              isDeputy: false,
-            }
-          : null);
+      : leadReply
+      ? {
+          musicianId: String(leadReply.musicianId || ""),
+          photoUrl: isHttp(leadReply.photoUrl) ? leadReply.photoUrl : null,
+          profileUrl: leadReply.profileUrl || "",
+          setAt: leadReply.updatedAt || null,
+          state: leadReply.reply || "pending",
+          available: leadReply.reply === "yes",
+          isDeputy: false,
+        }
+      : null;
 
     // Deputies — include ALL (even pending) so fallback-to-photo works
     const deputyRowsSorted = deputyRows.sort(
@@ -2843,84 +3406,64 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     );
 
     const deputies = [];
-    for (const depRow of deputyRowsSorted) {
-      // 🔎 Try to fetch the canonical musician for reliable names/media
-      let musDoc = null;
-      if (depRow?.musicianId) {
-        try {
-          musDoc = await Musician.findById(depRow.musicianId)
-            .select(
-              "firstName lastName email profilePicture photoUrl imageUrl profileImage musicianProfileImage musicianProfileImageUpload tscProfileUrl"
-            )
-            .lean();
-        } catch (e) {
-          console.warn("getDeputyDisplayBits: failed to load musician doc:", e?.message || e);
-        }
+    for (const r of deputyRowsSorted) {
+      try {
+        const bits = await getDeputyDisplayBits({
+          musicianId: r.musicianId,
+          phone: r.phone,
+          email: r.musicianEmail,
+        });
+        const dep = {
+          slotIndex: Number(slotKey),
+          isDeputy: true,
+          musicianId: String(bits?.musicianId || r.musicianId || ""),
+          photoUrl: bits?.photoUrl || r?.photoUrl || null,
+          profileUrl: bits?.profileUrl || "",
+          vocalistName: bits?.resolvedName || bits?.firstName || "",
+          state: r.reply ?? null,
+          available: r.reply === "yes",
+          setAt: r.updatedAt || null,
+          repliedAt: r.repliedAt || r.updatedAt || null,
+          phone: r.phone,
+          formattedAddress: r.formattedAddress || r.address,
+        };
+        logIdentity("DeputyRow→Bits", dep);
+        deputies.push(dep);
+      } catch (e) {
+        console.warn("getDeputyDisplayBits (deputy) failed:", e?.message, r?.musicianId);
       }
-
-      // 🧩 Build display bits using a flat merged shape (expected by helper)
-      const bits = await getDeputyDisplayBits({
-        ...(musDoc || {}),
-        ...(depRow || {}),
-      });
-
-      // 🏷️ Resolve a human-friendly name for the deputy
-  const resolvedDeputyName =
-  resolveDisplayName(depRow, musDoc) ||
-  (bits?.displayName && String(bits.displayName).trim()) ||
-  (bits?.vocalistName && String(bits.vocalistName).trim()) ||
-  `${(bits?.firstName || "").trim()} ${(bits?.lastName || "").trim()}`.trim();
-
-      deputies.push({
-        // identity & image
-musicianId: (primary?.musicianId) ||
-            (leadBits?.musicianId) ||
-            (leadReply ? String(leadReply.musicianId) : null),
-                    photoUrl: bits?.photoUrl || depRow?.photoUrl || null,
-        profileUrl:
-          bits?.profileUrl ||
-          (musDoc?._id ? `${process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || ""}`.replace(/\/$/, "") + `/musician/${musDoc._id}` : ""),
-
-        // names (include multiple fields to help the UI)
-       displayName: resolvedDeputyName || bits?.displayName || "",
-resolvedName: resolvedDeputyName || bits?.resolvedName || "",
-vocalistName: resolvedDeputyName || "",
-        firstName: bits?.firstName || musDoc?.firstName || "",
-        lastName: bits?.lastName || musDoc?.lastName || "",
-
-        // availability state & metadata
-        isDeputy: true,
-        slotIndex: Number(slotKey),                 // ✅ use current slot
-        state: depRow?.reply ?? null,               // "yes" | "no" | null
-        available: depRow?.reply === "yes",
-        covering: "deputy",
-        repliedAt: depRow?.repliedAt || null,
-        setAt: depRow?.updatedAt || null,
-        phone: depRow?.phone || null,
-      });
     }
 
-    // Choose primary
+    // Choose primary for this slot
     const leadAvailable = leadBits?.available === true;
-    const coveringYes = deputies.find(d => d.available && isHttp(d.photoUrl));
-    const firstDepWithPhoto = deputies.find(d => isHttp(d.photoUrl));
+    const coveringYes   = deputies.find((d) => d.available && isHttp(d.photoUrl));
+    const firstDepWithPhoto = deputies.find((d) => isHttp(d.photoUrl));
 
     let primary = null;
     if (!leadAvailable && coveringYes) {
-      primary = coveringYes;                                 // ✅ deputy covers if lead unavailable
+      primary = coveringYes;
     } else if (leadAvailable && isHttp(leadBits?.photoUrl)) {
-      primary = leadBits;                                    // ✅ lead is available with photo
+      primary = leadBits;
     } else if (!leadAvailable && firstDepWithPhoto) {
-      primary = firstDepWithPhoto;                           // fallback to any deputy with photo
+      primary = firstDepWithPhoto;
     } else if (isHttp(leadBits?.photoUrl)) {
-      primary = leadBits;                                    // last resort: show lead photo
+      primary = leadBits;
     }
 
+    if (primary) {
+      logIdentity("PrimaryChosen", { ...primary, slotIndex: Number(slotKey) });
+    } else {
+      console.log("⚪ No primary chosen for slot", slotKey);
+    }
+
+    // Fetch musician doc for nicer name fallback (optional)
     const mus = leadReply?.musicianId
       ? await Musician.findById(leadReply.musicianId)
           .select("firstName lastName profilePhoto photoUrl")
           .lean()
       : null;
+
+    if (mus) logIdentity("LeadMusicianDoc", { ...mus, isDeputy: false });
 
     const name = (
       leadReply?.selectedVocalistName ||
@@ -2929,27 +3472,19 @@ vocalistName: resolvedDeputyName || "",
       `${mus?.firstName || ""} ${mus?.lastName || ""}`.trim()
     ).trim();
 
-
-    // Final slot (keep legacy top-level fields for compatibility)
-    const slotVocalistLabel = primary?.isDeputy
-      ? ((primary?.resolvedName || primary?.vocalistName || "").trim() || name)
-      : name;
-    slots.push({
+    const slotObj = {
       slotIndex: Number(slotKey),
       isDeputy: false, // legacy
-      vocalistName: slotVocalistLabel,
-      musicianId: leadBits?.musicianId ?? (leadReply ? String(leadReply.musicianId) : null),
-      photoUrl: primary?.photoUrl || leadBits?.photoUrl || null,
-      profileUrl: primary?.profileUrl || leadBits?.profileUrl || "",
+      vocalistName: name,
+      musicianId:
+        leadBits?.musicianId ?? (leadReply ? String(leadReply.musicianId) : null),
+      photoUrl: leadBits?.photoUrl || null,
+      profileUrl: leadBits?.profileUrl || "",
       deputies,
       setAt: leadReply?.updatedAt || null,
       state: leadReply?.reply || "pending",
-
-      // ✅ New unified flags used by UI
-      available: Boolean(leadAvailable || coveringYes),                  // slot can be covered on this date
-      covering: primary?.isDeputy ? "deputy" : "lead",                   // who is shown as primary
-
-      // ✅ The one thing the UI should render
+      available: Boolean(leadAvailable || coveringYes),
+      covering: primary?.isDeputy ? "deputy" : "lead",
       primary: primary
         ? {
             musicianId: primary.musicianId || null,
@@ -2957,46 +3492,80 @@ vocalistName: resolvedDeputyName || "",
             profileUrl: primary.profileUrl || "",
             setAt: primary.setAt || null,
             isDeputy: Boolean(primary.isDeputy),
-            available: Boolean(primary.available ?? (primary.isDeputy ? primary.available : leadAvailable)),
+            available:
+              Boolean(
+                primary.available ??
+                  (primary.isDeputy ? primary.available : leadAvailable)
+              ),
           }
         : null,
+    };
+
+    logIdentity("SlotSummary", {
+      ...slotObj.primary,
+      vocalistDisplayName: slotObj.vocalistName,
+      slotIndex: slotObj.slotIndex,
+      isDeputy: slotObj.primary?.isDeputy,
+      profileUrl: slotObj.primary?.profileUrl || slotObj.profileUrl,
+      photoUrl: slotObj.primary?.photoUrl || slotObj.photoUrl,
     });
+
+    slots.push(slotObj);
   }
 
   const badge = { dateISO, address: "TBC", active: true, slots };
-  console.log("💜 FINAL BADGE:", badge);
+  console.log("💜 FINAL BADGE (identity snapshot):", {
+    dateISO: badge.dateISO,
+    address: badge.address,
+    slots: badge.slots.map((s) => ({
+      slotIndex: s.slotIndex,
+      vocalistName: s.vocalistName,
+      available: s.available,
+      covering: s.covering,
+      primary: {
+        isDeputy: s.primary?.isDeputy,
+        profileUrl: s.primary?.profileUrl,
+        photoUrl: s.primary?.photoUrl,
+      },
+    })),
+  });
   return badge;
 }
 
 
+
+/* ==========================================================================
+   🟦 rebuildAndApplyAvailabilityBadge — instrumented
+   ========================================================================== */
 export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
-  console.log("🟦 rebuildAndApplyAvailabilityBadge START", { actId, dateISO });
+  console.log("🟦 [rebuildAndApplyAvailabilityBadge] START", { actId, dateISO });
 
   if (!actId || !dateISO) {
-    console.error("❌ rebuildAndApplyAvailabilityBadge missing actId/dateISO", {
+    console.error("❌ [rebuildAndApplyAvailabilityBadge] Missing actId/dateISO", {
       actId,
-      dateISO
+      dateISO,
     });
     return null;
   }
 
   /* ------------------------------------------------------------------ */
-  /* 🟦 2. FETCH ACT + LOG SUMMARY                                       */
+  /* 2) FETCH ACT + LOG SUMMARY                                         */
   /* ------------------------------------------------------------------ */
   const actDoc = await Act.findById(actId)
     .select("+availabilityBadgesMeta")
     .lean();
 
-  console.log("📘 actDoc fetched:", {
-    name: actDoc?.tscName || actDoc?.name,
+  console.log("📘 [rebuildAndApplyAvailabilityBadge] actDoc fetched", {
+    actName: actDoc?.tscName || actDoc?.name || "",
+    actId: String(actId),
     hasLineups: Array.isArray(actDoc?.lineups),
-    hasMeta: !!actDoc?.availabilityBadgesMeta?.[dateISO]
+    hasMetaForDate: !!actDoc?.availabilityBadgesMeta?.[dateISO],
   });
 
   if (!actDoc) return { success: false, message: "Act not found" };
 
   /* ------------------------------------------------------------------ */
-  /* 🟦 3. BUILD RAW BADGE + LOG RESULT                                  */
+  /* 3) BUILD RAW BADGE                                                 */
   /* ------------------------------------------------------------------ */
   let badge = await buildAvailabilityBadgeFromRows({
     actId,
@@ -3004,26 +3573,47 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     hasLineups: actDoc?.hasLineups ?? true,
   });
 
-  console.log("🎨 Raw badge returned from buildAvailabilityBadgeFromRows:", badge);
+  // Try to extract a representative person from badge for logging
+  const badgePrimary =
+    (Array.isArray(badge?.slots) && badge.slots.length && presentBadgePrimary(badge.slots[0])) ||
+    (badge ? {
+      firstName: splitName(badge?.vocalistName || badge?.musicianName || "").firstName,
+      lastName: splitName(badge?.vocalistName || badge?.musicianName || "").lastName,
+      displayName: badge?.vocalistName || badge?.musicianName || undefined,
+      vocalistDisplayName: badge?.vocalistName || badge?.musicianName || undefined,
+      address: badge?.address || undefined,
+      formattedAddress: badge?.formattedAddress || undefined,
+      profileUrl: badge?.profileUrl || undefined,
+      photoUrl: badge?.photoUrl || undefined,
+      isDeputy: !!badge?.isDeputy,
+    } : null);
+
+  console.log("🎨 [rebuildAndApplyAvailabilityBadge] Raw badge", {
+    hasBadge: !!badge,
+    address: badge?.address || undefined,
+    formattedAddress: badge?.formattedAddress || undefined,
+    profileUrl: badge?.profileUrl || undefined,
+    photoUrl: badge?.photoUrl || undefined,
+    slotsCount: Array.isArray(badge?.slots) ? badge.slots.length : 0,
+    primary: badgePrimary || undefined,
+  });
 
   /* ------------------------------------------------------------------ */
-  /* 🟦 4. FETCH ALL AVAILABILITY ROWS + LOG                             */
+  /* 4) FETCH ALL AVAILABILITY ROWS + LOG                               */
   /* ------------------------------------------------------------------ */
   const availRows = await AvailabilityModel.find({ actId, dateISO }).lean();
 
-  console.log("📥 Availability rows at rebuild:", availRows.map(r => ({
-    id: r._id,
-    musicianId: r.musicianId,
-    reply: r.reply,
-    slotIndex: r.slotIndex,
-    updatedAt: r.updatedAt
-  })));
+  const rowSummaries = availRows.map((r) => presentRow(r));
+  console.log("📥 [rebuildAndApplyAvailabilityBadge] Availability rows snapshot", {
+    total: availRows.length,
+    rows: rowSummaries,
+  });
 
   /* ------------------------------------------------------------------ */
-  /* 🟡 If no badge, attempt to clear + broadcast null                   */
+  /* 5) If no badge, attempt to clear + broadcast null                  */
   /* ------------------------------------------------------------------ */
   if (!badge) {
-    console.log("🟠 No badge returned — attempting CLEAR operation");
+    console.log("🟠 [rebuildAndApplyAvailabilityBadge] No badge returned — attempting CLEAR");
 
     const stillActive = await AvailabilityModel.exists({
       actId,
@@ -3032,7 +3622,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     });
 
     if (stillActive) {
-      console.log("🟡 CLEAR skipped — active YES rows still present");
+      console.log("🟡 [rebuildAndApplyAvailabilityBadge] CLEAR skipped — active YES rows still present");
       return { success: true, skipped: true };
     }
 
@@ -3041,18 +3631,29 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       { $unset: { [`availabilityBadges.${dateISO}`]: "" } }
     );
 
-    console.log("🧹 CLEAR applied:", {
-      actId,
+    console.log("🧹 [rebuildAndApplyAvailabilityBadge] CLEARED", {
+      actId: String(actId),
       dateISO,
-      reason: "badge null",
-      stillActive
+      reason: "badge null and no active YES rows",
     });
 
-    return { success: true, cleared: true }; // ← this must be INSIDE the if-block
+    // Broadcast null badge if SSE available
+    if (global.availabilityNotify?.badgeUpdated) {
+      global.availabilityNotify.badgeUpdated({
+        type: "availability_badge_updated",
+        actId: String(actId),
+        actName: actDoc?.tscName || actDoc?.name,
+        dateISO,
+        badge: null,
+      });
+      console.log("📡 [rebuildAndApplyAvailabilityBadge] SSE badgeUpdated fired with null badge");
+    }
+
+    return { success: true, cleared: true };
   }
 
   /* ------------------------------------------------------------------ */
-  /* 🟦 5. BEFORE SAVING                                                 */
+  /* 6) BEFORE SAVING                                                   */
   /* ------------------------------------------------------------------ */
   const shortAddress = (badge?.address || actDoc?.formattedAddress || "unknown")
     .replace(/\b(united_kingdom|uk)\b/gi, "")
@@ -3062,65 +3663,81 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
 
   const key = `${dateISO}_${shortAddress}`;
 
-  console.log("💾 FINAL badge about to apply:", {
+  // Try to surface a primary slot/person for rich logs
+  const leadSlot =
+    Array.isArray(badge?.slots) &&
+    badge.slots.find((s) => s?.primary && s.primary.available && !s.primary.isDeputy);
+  const deputySlot =
+    Array.isArray(badge?.slots) &&
+    badge.slots.find((s) => s?.primary && s.primary.isDeputy && s.primary.available);
+
+  console.log("💾 [rebuildAndApplyAvailabilityBadge] FINAL badge about to apply", {
     key,
-    actId,
+    actId: String(actId),
     dateISO,
-    slots: badge?.slots,
-    photoUrl: badge?.photoUrl,
-    profileUrl: badge?.profileUrl
+    address: badge?.address || undefined,
+    formattedAddress: badge?.formattedAddress || undefined,
+    photoUrl: badge?.photoUrl || undefined,
+    profileUrl: badge?.profileUrl || undefined,
+    slots: Array.isArray(badge?.slots)
+      ? badge.slots.map((s, i) => ({
+          i,
+          primary: presentBadgePrimary(s),
+        }))
+      : undefined,
+    leadPrimary: leadSlot ? presentBadgePrimary(leadSlot) : undefined,
+    deputyPrimary: deputySlot ? presentBadgePrimary(deputySlot) : undefined,
   });
 
   /* ------------------------------------------------------------------ */
-  /* 🟩 SAVE BADGE TO ACT                                                */
+  /* 7) SAVE BADGE TO ACT                                               */
   /* ------------------------------------------------------------------ */
   await Act.updateOne(
     { _id: actId },
     { $set: { [`availabilityBadges.${key}`]: badge } }
   );
 
-  console.log(`✅ Applied badge for ${actDoc.tscName || actDoc.name}`);
+  console.log(`✅ [rebuildAndApplyAvailabilityBadge] Applied badge for ${actDoc.tscName || actDoc.name} (${key})`);
 
   /* ------------------------------------------------------------------ */
-  /* 🟦 6. SSE BROADCAST                                                 */
+  /* 8) SSE BROADCAST                                                   */
   /* ------------------------------------------------------------------ */
   if (global.availabilityNotify?.badgeUpdated) {
-    console.log("📡 SSE badgeUpdated fired:", {
-      actId,
-      dateISO,
-      slots: badge?.slots?.length,
-      badgeIsNull: false
-    });
-
-    global.availabilityNotify.badgeUpdated({
+    const payload = {
       type: "availability_badge_updated",
       actId: String(actId),
       actName: actDoc?.tscName || actDoc?.name,
       dateISO,
-      badge
+      badge,
+    };
+    global.availabilityNotify.badgeUpdated(payload);
+    console.log("📡 [rebuildAndApplyAvailabilityBadge] SSE badgeUpdated fired", {
+      actId: String(actId),
+      dateISO,
+      slots: Array.isArray(badge?.slots) ? badge.slots.length : 0,
+      badgeIsNull: false,
     });
   }
 
   /* ------------------------------------------------------------------ */
-  /* ✉️ Client email notifications (lead/deputy)                         */
+  /* 9) Optional: Client email notifications (lead/deputy)              */
+  /*     (kept from your version; augmented with extra logs)            */
   /* ------------------------------------------------------------------ */
   try {
-    // Pull latest availability rows (for client email + address)
     const allRows = await AvailabilityModel.find({ actId, dateISO }).lean();
     const availabilityRecord = await AvailabilityModel.findOne({ actId, dateISO })
       .sort({ createdAt: -1 })
       .lean();
 
-    // Resolve client email/name from rows (fallback to default)
     let clientEmail =
       (allRows.find((r) => r.clientEmail && r.clientEmail.includes("@"))?.clientEmail) ||
       "hello@thesupremecollective.co.uk";
-    let clientName =
-      (allRows.find((r) => r.clientName)?.clientName) || "there";
+    let clientName = (allRows.find((r) => r.clientName)?.clientName) || "there";
 
-    // Site + URLs
-    const SITE_RAW = process.env.FRONTEND_URL || "https://meek-biscotti-8d5020.netlify.app/";
+    const SITE_RAW =
+      process.env.FRONTEND_URL || "https://meek-biscotti-8d5020.netlify.app/";
     const SITE = SITE_RAW.endsWith("/") ? SITE_RAW : `${SITE_RAW}/`;
+
     const selectedAddress =
       badge?.address ||
       availabilityRecord?.formattedAddress ||
@@ -3131,7 +3748,6 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     const profileUrl = `${SITE}act/${actDoc._id}`;
     const cartUrl = `${SITE}act/${actDoc._id}?date=${dateISO}&address=${encodeURIComponent(selectedAddress)}`;
 
-    // Small helpers reused from your previous version
     const normKey = (s = "") => s.toString().toLowerCase().replace(/[^a-z]/g, "");
     const paMap = { smallpa: "small", mediumpa: "medium", largepa: "large" };
     const lightMap = { smalllight: "small", mediumlight: "medium", largelight: "large" };
@@ -3145,7 +3761,6 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
         ? `Up to ${setsA[0]}×${lensA[0]}-minute or ${setsA[1] || setsA[0]}×${lensA[1] || lensA[0]}-minute live sets`
         : `Up to 3×40-minute or 2×60-minute live sets`;
 
-    // Complimentary extras + tailoring
     const complimentaryExtras = [];
     if (actDoc?.extras && typeof actDoc.extras === "object") {
       for (const [k, v] of Object.entries(actDoc.extras)) {
@@ -3156,6 +3771,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
         }
       }
     }
+
     const tailoring =
       actDoc.setlist === "smallTailoring"
         ? "Signature setlist curated by the band"
@@ -3165,7 +3781,6 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
         ? "Fully tailored setlist built from your requests"
         : null;
 
-    // Pricing snippets for all lineups (uses existing helpers already imported in this file)
     const lineupQuotes = await Promise.all(
       (actDoc.lineups || []).map(async (lu) => {
         try {
@@ -3187,7 +3802,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
               travelTotal = `£${Math.round(Number(total)).toLocaleString("en-GB")}`;
             }
           } catch (err) {
-            console.warn("⚠️ Price calc failed:", err.message);
+            console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Price calc failed:", err.message);
           }
 
           const instruments = (lu?.bandMembers || [])
@@ -3198,187 +3813,165 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
 
           return { html: `<strong>${name}</strong>: ${instruments} — <strong>${travelTotal}</strong>` };
         } catch (err) {
-          console.warn("⚠️ Lineup formatting failed:", err.message);
+          console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Lineup formatting failed:", err.message);
           return { html: "<em>Lineup unavailable</em>" };
         }
       })
     );
 
-   // --- Who's actually covering this date? (robust selectors) ---
-const slots = Array.isArray(badge?.slots) ? badge.slots : [];
+    const leadPrimary = leadSlot ? presentBadgePrimary(leadSlot) : null;
+    const depPrimary = deputySlot ? presentBadgePrimary(deputySlot) : null;
 
-const leadSlot = slots.find(
-  (s) =>
-    s?.available === true &&
-    (
-      s?.covering === "lead" ||                // preferred if build sets this
-      s?.primary?.isDeputy === false ||        // explicit "lead"
-      (s?.isDeputy === false && s?.musicianId) // legacy/top-level flags
-    )
-);
+    console.log("✉️ [rebuildAndApplyAvailabilityBadge] Email decision context", {
+      clientName,
+      clientEmail,
+      selectedAddress,
+      leadPrimary,
+      deputyPrimary: depPrimary,
+    });
 
-const deputySlot = slots.find(
-  (s) =>
-    s?.available === true &&
-    (
-      s?.covering === "deputy" ||              // preferred if build sets this
-      s?.primary?.isDeputy === true ||         // explicit "deputy"
-      s?.isDeputy === true                     // legacy/top-level flags
-    )
-);
+    // Lazy import (if you use this util)
+    let sendClientEmail = null;
+    try {
+      ({ sendClientEmail } = await import("../utils/sendClientEmail.js"));
+    } catch (e) {
+      console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] sendClientEmail not available:", e?.message || e);
+    }
 
-// Business rule: prefer lead if both are available, otherwise deputy if only deputy is available
-const emailMode = leadSlot ? "lead" : (deputySlot ? "deputy" : null);
-
-    // Resolve hero
     const heroImg =
       (Array.isArray(actDoc.coverImage) && actDoc.coverImage[0]?.url) ||
       (Array.isArray(actDoc.images) && actDoc.images[0]?.url) ||
       actDoc.coverImage?.url ||
       "";
 
-if (sendClientEmail && emailMode) {
-  // LEAD AVAILABLE → "Good news" mail
-  if (emailMode === "lead") {
-    const vocalistFirst = (leadSlot?.vocalistName || "").split(" ")[0] || "our lead vocalist";
-    await sendClientEmail({
-      actId: String(actId),
-      subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s lead vocalist is available`,
-      to: clientEmail,
-      name: clientName,
-      html: `
-        <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
-          <p>Hi ${(clientName || "there").split(" ")[0]},</p>
-          <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
-          <p>
-            We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with
-            <strong>${vocalistFirst}</strong> on lead vocals, and they’d love to perform for you and your guests.
-          </p>
-          ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
-          <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
-          <p style="margin:6px 0 14px; color:#555;">${actDoc.tscDescription || actDoc.description || ""}</p>
-          <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
-          ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
-          <h4 style="margin-top:25px;">Included in your quote:</h4>
-          <ul>
-            <li>${setsLine}</li>
-            ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
-            <li>Band arrival from 5pm and finish by midnight as standard</li>
-            <li>Or up to 7 hours on site if earlier arrival is needed</li>
-            ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
-            ${tailoring ? `<li>${tailoring}</li>` : ""}
-            <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
-          </ul>
-          <div style="margin-top:30px;">
-            <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
-          </div>
-          <p style="margin-top:20px; color:#555;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
-          <p>If you have any questions, just reply — we’re always happy to help.</p>
-          <p style="margin-top:25px;">
-            Warmest wishes,<br/>
-            <strong>The Supreme Collective ✨</strong><br/>
-            <a href="${SITE}" style="color:#ff6667;">${SITE.replace(/^https?:\/\//, "")}</a>
-          </p>
-        </div>
-      `,
-    });
-    console.log("📧 Client email sent (lead available).");
-  }
-  // DEPUTY COVERING → deputy-available mail
-  else if (emailMode === "deputy") {
-    const deputyName = (deputySlot?.vocalistName || "").split(" ")[0] || "one of our vocalists";
+    if (sendClientEmail) {
+      // Lead available → good-news email
+      if (leadPrimary?.available && leadPrimary?.isDeputy === false) {
+        const vocalistFirst = leadPrimary.firstName || "our lead vocalist";
+        console.log("📧 [rebuildAndApplyAvailabilityBadge] Sending LEAD-available email", {
+          vocalistFirst,
+          to: clientEmail,
+        });
 
-    // Try to enrich deputy media/profile
-    let deputyPhotoUrl = deputySlot?.photoUrl || "";
-    let deputyProfileUrl = deputySlot?.profileUrl || "";
-    let deputyVideos = [];
-    try {
-      let deputyMusician = null;
-      if (deputySlot?.musicianId) {
-        deputyMusician = await Musician.findById(deputySlot.musicianId)
-          .select("firstName lastName profilePicture photoUrl tscProfileUrl functionBandVideoLinks originalBandVideoLinks")
-          .lean();
-      }
-      if (deputyMusician) {
-        if (!deputyPhotoUrl) deputyPhotoUrl = deputyMusician.profilePicture || deputyMusician.photoUrl || "";
-        if (!deputyProfileUrl) deputyProfileUrl = deputyMusician.tscProfileUrl || `${SITE}musician/${deputyMusician._id}`;
+        await sendClientEmail({
+          actId: String(actId),
+          subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s lead vocalist is available`,
+          to: clientEmail,
+          name: clientName,
+          html: `
+            <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
+              <p>Hi ${(clientName || "there").split(" ")[0]},</p>
+              <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
+              <p>
+                We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with
+                <strong>${vocalistFirst}</strong> on lead vocals, and they’d love to perform for you and your guests.
+              </p>
+              ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
+              <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
+              <p style="margin:6px 0 14px; color:#555;">${actDoc.tscDescription || actDoc.description || ""}</p>
+              <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
+              ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
+              <h4 style="margin-top:25px;">Included in your quote:</h4>
+              <ul>
+                <li>${setsLine}</li>
+                ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
+                <li>Band arrival from 5pm and finish by midnight as standard</li>
+                <li>Or up to 7 hours on site if earlier arrival is needed</li>
+                ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
+                ${tailoring ? `<li>${tailoring}</li>` : ""}
+                <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
+              </ul>
+              <div style="margin-top:30px;">
+                <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
+              </div>
+            </div>
+          `,
+        });
 
-        const fnVids = (deputyMusician.functionBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
-        const origVids = (deputyMusician.originalBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
-        deputyVideos = [...new Set([...fnVids, ...origVids])];
+        console.log("✅ [rebuildAndApplyAvailabilityBadge] Client email sent (lead available).");
       }
-    } catch (e) {
-      console.warn("⚠️ Deputy enrichment failed:", e?.message || e);
+      // Deputy covering → deputy-available email
+      else if (depPrimary?.available && depPrimary?.isDeputy === true) {
+        const deputyName = depPrimary.displayName || depPrimary.firstName || "one of our vocalists";
+        console.log("📧 [rebuildAndApplyAvailabilityBadge] Sending DEPUTY-available email", {
+          deputyName,
+          to: clientEmail,
+        });
+
+        // Try to enrich deputy media/profile
+        let deputyPhotoUrl = depPrimary.photoUrl || "";
+        let deputyProfileUrl = depPrimary.profileUrl || "";
+        let deputyVideos = [];
+        try {
+          let deputyMusician = null;
+          if (depPrimary?.musicianId) {
+            deputyMusician = await Musician.findById(depPrimary.musicianId)
+              .select("firstName lastName profilePicture photoUrl tscProfileUrl functionBandVideoLinks originalBandVideoLinks")
+              .lean();
+          }
+          if (deputyMusician) {
+            if (!deputyPhotoUrl)
+              deputyPhotoUrl = deputyMusician.profilePicture || deputyMusician.photoUrl || "";
+            if (!deputyProfileUrl)
+              deputyProfileUrl = deputyMusician.tscProfileUrl || `${SITE}musician/${deputyMusician._id}`;
+
+            const fnVids = (deputyMusician.functionBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+            const origVids = (deputyMusician.originalBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+            deputyVideos = [...new Set([...fnVids, ...origVids])];
+          }
+        } catch (e) {
+          console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Deputy enrichment failed:", e?.message || e);
+        }
+
+        await sendClientEmail({
+          actId: String(actId),
+          subject: `${deputyName} is raring to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
+          to: clientEmail,
+          name: clientName,
+          html: `
+            <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
+              <p>Hi ${(clientName || "there").split(" ")[0]},</p>
+              <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
+              <p>
+                The band's regular lead vocalist isn’t available for your date, but we’re delighted to confirm that 
+                <strong>${deputyName}</strong> — one of the band's trusted deputy vocalists — is available to perform instead.
+              </p>
+              ${
+                deputyProfileUrl || deputyPhotoUrl
+                  ? `<div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
+                       <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyName}</h3>
+                       ${deputyPhotoUrl ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />` : ""}
+                     </div>`
+                  : ""
+              }
+              ${
+                deputyVideos?.length
+                  ? `<div style="margin-top:25px;">
+                       <h4 style="color:#111;">🎬 Watch ${deputyName} perform</h4>
+                       <ul style="list-style:none; padding-left:0;">
+                         ${deputyVideos.slice(0,3).map((v) => `<li style="margin-bottom:8px;"><a href="${v}" target="_blank" style="color:#ff6667;">${v}</a></li>`).join("")}
+                       </ul>
+                     </div>`
+                  : ""
+              }
+              ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
+              <p><a href="${deputyProfileUrl || profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
+              ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
+              <div style="margin-top:30px;">
+                <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
+              </div>
+            </div>
+          `,
+        });
+
+        console.log("✅ [rebuildAndApplyAvailabilityBadge] Deputy-available client email sent.");
+      }
     }
-
-    await sendClientEmail({
-      actId: String(actId),
-      subject: `${deputyName} is raring to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
-      to: clientEmail,
-      name: clientName,
-      html: `
-        <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
-          <p>Hi ${(clientName || "there").split(" ")[0]},</p>
-          <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
-          <p>
-            The band's regular lead vocalist isn’t available for your date, but we’re delighted to confirm that 
-            <strong>${deputyName}</strong> — one of the band's trusted deputy vocalists — is available to perform instead. 
-            ${deputyName} performs regularly with ${actDoc.tscName || actDoc.name} and is ready to seamlessly step in and deliver a 5-star performance for your big day.
-          </p>
-          ${
-            deputyProfileUrl || deputyPhotoUrl
-              ? `<div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
-                   <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyName}</h3>
-                   ${deputyPhotoUrl ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />` : ""}
-                 </div>`
-              : ""
-          }
-          ${
-            deputyVideos?.length
-              ? `<div style="margin-top:25px;">
-                   <h4 style="color:#111;">🎬 Watch ${deputyName} perform</h4>
-                   <ul style="list-style:none; padding-left:0;">
-                     ${deputyVideos.slice(0,3).map((v) => `<li style="margin-bottom:8px;"><a href="${v}" target="_blank" style="color:#ff6667;">${v}</a></li>`).join("")}
-                   </ul>
-                 </div>`
-              : ""
-          }
-          ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
-          <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
-          <p style="margin:6px 0 14px; color:#555;">${actDoc.tscDescription || actDoc.description || ""}</p>
-          <p><a href="${deputyProfileUrl || profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
-          ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
-          <h4 style="margin-top:25px;">Included in your quote:</h4>
-          <ul>
-            <li>${setsLine}</li>
-            ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
-            <li>Band arrival from 5pm and finish by midnight as standard</li>
-            <li>Or up to 7 hours on site if earlier arrival is needed</li>
-            ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
-            ${tailoring ? `<li>${tailoring}</li>` : ""}
-            <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
-          </ul>
-          <div style="margin-top:30px;">
-            <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
-          </div>
-          <p style="margin-top:20px; color:#555;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
-          <p>If you have any questions, just reply — we’re always happy to help.</p>
-          <p style="margin-top:25px;">
-            Warmest wishes,<br/>
-            <strong>The Supreme Collective ✨</strong><br/>
-            <a href="${SITE}" style="color:#ff6667;">${SITE.replace(/^https?:\/\//, "")}</a>
-          </p>
-        </div>
-      `,
-    });
-    console.log("📧 Deputy-available client email sent successfully.");
-  }
-}
   } catch (e) {
-    console.warn("⚠️ Client email block failed:", e?.message || e);
+    console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Client email block failed:", e?.message || e);
   }
 
-  return { success: true, updated: true, badge }; // ← now back inside function
+  return { success: true, updated: true, badge };
 }
 
 export async function getAvailabilityBadge(req, res) {

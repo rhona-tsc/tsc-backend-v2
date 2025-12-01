@@ -63,8 +63,10 @@ export const WA_FALLBACK_CACHE = new Map(); // sid -> { to, smsBody }
 /**
  * Send a WhatsApp message via Content Template.
  */
+/* ========================================================================== */
+/* 💬 sendWhatsAppMessage                                                      */
+/* ========================================================================== */
 export async function sendWhatsAppMessage(opts = {}) {
-
   const client = getTwilioClient();
   if (!client) throw new Error("Twilio disabled");
 
@@ -76,19 +78,17 @@ export async function sendWhatsAppMessage(opts = {}) {
     address = "",
     dateISO = "",
     role = "",
-    templateParams = {},
-    variables = undefined,
+    templateParams = {}, // unused here; kept for compatibility
+    variables = undefined, // preferred input for Twilio variables
     contentSid,
     smsBody = "",
+    finalFee,            // optional: if you want to pass a computed fee directly
+    skipFeeCompute = false,
   } = opts;
 
   const toE = toE164(to);
   const fromE = toE164(TWILIO_WA_SENDER || "");
   if (!toE || !fromE) throw new Error("Missing WA to/from");
-
-  /* -------------------------------------------------------------------------- */
-  /* 🧮 Calculate fee + format address and date                                 */
-  /* -------------------------------------------------------------------------- */
 
   const shortAddress = address
     ? address.split(",").slice(0, 2).join(", ").trim()
@@ -96,52 +96,59 @@ export async function sendWhatsAppMessage(opts = {}) {
 
   const formattedDate = dateISO ? formatNiceDate(dateISO) : "TBC";
 
-  // 🪙 Respect upstream variables.fee or opts.finalFee first
+  // Determine fee string
   let formattedFee = "TBC";
-
   if (variables?.fee) {
-    formattedFee = variables.fee; // trust inherited fee (e.g. £300)
-  } else if (opts.finalFee) {
-    formattedFee = `£${opts.finalFee}`;
-  } else if (
-    !opts.skipFeeCompute &&
-    actData &&
-    member &&
-    address &&
-    dateISO &&
-    lineup
-  ) {
+    formattedFee = variables.fee; // trust upstream
+  } else if (finalFee != null) {
+    formattedFee = `£${finalFee}`;
+  } else if (!skipFeeCompute && actData && member && address && dateISO && lineup) {
     try {
-      const feeValue = await computeFinalFeeForMember(
-        actData,
-        member,
-        address,
-        dateISO,
-        lineup
-      );
+      const feeValue = await computeFinalFeeForMember(actData, member, address, dateISO, lineup);
       formattedFee = `£${feeValue}`;
-      console.log(`🧮 Computed fallback fee: ${formattedFee}`);
+      console.log("🧮 [sendWhatsAppMessage] Computed fallback fee", { formattedFee });
     } catch (err) {
-      console.warn("⚠️ Failed to compute final fee for member:", err.message);
+      console.warn("⚠️ [sendWhatsAppMessage] Fee compute failed:", err?.message);
     }
   }
 
-  /* -------------------------------------------------------------------------- */
-  /* 🎭 Merge all into named content variables (for Twilio {{firstName}}, etc.) */
-  /* -------------------------------------------------------------------------- */
+  const memberNames = firstLast(member || {});
+  const memberDisplayName = displayNameOf(member || {});
+  const memberPhotoUrl = pickPic(member || {});
+  const memberProfileUrl = buildProfileUrl(member?._id || member?.musicianId);
+
+  // Attempt to infer deputy flag from member
+  const isDeputy =
+    (member && (member.isDeputy === true || member?.role === "deputy")) ||
+    (typeof opts.isDeputy === "boolean" ? opts.isDeputy : undefined);
+
   const enrichedVars = {
     firstName: member?.firstName || member?.name || "Musician",
     date: formattedDate,
     location: shortAddress,
-    fee: formattedFee.replace(/[^0-9.]/g, ""), // Twilio expects raw number (no £)
+    fee: String(formattedFee).replace(/[^0-9.]/g, ""), // Twilio expects raw number
     role: role || member?.instrument || "Musician",
     actName: actData?.tscName || actData?.name || "TSC Act",
   };
 
+  console.log("📨 [sendWhatsAppMessage] PRE-SEND", {
+    to: toE,
+    from: fromE,
+    actName: actData?.tscName || actData?.name || "",
+    lineupId: lineup?._id || lineup?.lineupId || null,
+    address,
+    formattedAddress: opts.formattedAddress || null, // if caller passed it
+    dateISO,
+    ...memberNames,
+    displayName: memberDisplayName,
+    vocalistDisplayName: memberDisplayName,
+    profileUrl: memberProfileUrl,
+    photoUrl: memberPhotoUrl,
+    isDeputy,
+    variables: enrichedVars,
+    contentSid: contentSid || TWILIO_ENQUIRY_SID,
+  });
 
-  /* -------------------------------------------------------------------------- */
-  /* ✉️ Send via Twilio                                                        */
-  /* -------------------------------------------------------------------------- */
   const payload = {
     from: `whatsapp:${fromE}`,
     to: `whatsapp:${toE}`,
@@ -152,15 +159,19 @@ export async function sendWhatsAppMessage(opts = {}) {
 
   const msg = await client.messages.create(payload);
 
-  /* -------------------------------------------------------------------------- */
-  /* 💾 Fallback persist (unchanged)                                           */
-  /* -------------------------------------------------------------------------- */
+  console.log("✅ [sendWhatsAppMessage] SENT", {
+    sid: msg?.sid,
+    status: msg?.status,
+    to: toE,
+  });
+
+  // Persist fallback SMS body if relevant
   try {
     const twilioSid = msg?.sid;
-    const toE = toE164(to);
-    if (twilioSid && toE && smsBody && !contentSid) {
+    const dest = toE164(to);
+    if (twilioSid && dest && smsBody && !contentSid) {
       await AvailabilityModel.updateOne(
-        { phone: toE, v2: true },
+        { phone: dest, v2: true },
         {
           $set: {
             "outbound.sid": twilioSid,
@@ -169,10 +180,11 @@ export async function sendWhatsAppMessage(opts = {}) {
           },
         }
       );
-      WA_FALLBACK_CACHE.set(twilioSid, { to: toE, smsBody });
+      WA_FALLBACK_CACHE.set(twilioSid, { to: dest, smsBody });
+      console.log("💾 [sendWhatsAppMessage] Fallback persisted", { twilioSid });
     }
   } catch (e) {
-    console.warn("[twilio] failed to persist WA fallback arm:", e?.message || e);
+    console.warn("[sendWhatsAppMessage] Persist fallback failed:", e?.message || e);
   }
 
   return msg;
