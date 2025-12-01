@@ -2886,7 +2886,6 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
         phone: depRow?.phone || null,
       });
     }
-    }
 
     // Choose primary
     const leadAvailable = leadBits?.available === true;
@@ -3368,6 +3367,7 @@ if (sendClientEmail && emailMode) {
 
   return { success: true, updated: true, badge }; // ← now back inside function
 }
+
 export async function getAvailabilityBadge(req, res) {
   try {
     const { actId, dateISO } = req.params;
