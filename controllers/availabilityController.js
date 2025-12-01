@@ -76,6 +76,52 @@ const logIdentity = (label, obj = {}) => {
   });
 };
 
+
+
+/** Normalise stringy names from any source */
+const normalizeNameBits = (nameLike) => {
+  const s = (nameLike ?? "").toString().trim();
+  if (!s) return { first:"", last:"", firstName:"", lastName:"", displayName:"", vocalistDisplayName:"" };
+  const parts = s.split(/\s+/);
+  const first = parts[0] || "";
+  const last = parts.length > 1 ? parts.slice(1).join(" ") : "";
+  return {
+    first, last,
+    firstName: first, lastName: last,
+    displayName: s,
+    vocalistDisplayName: s,
+  };
+};
+
+/** Build a complete "primary" record for the badge slot */
+function presentBadgePrimary({ row = {}, musicianDoc = {}, leadBits = {} }) {
+  const id = String(row.musicianId || musicianDoc?._id || '');
+  const nameBits = normalizeNameBits({
+    firstName: musicianDoc.firstName ?? leadBits.firstName ?? row.firstName,
+    lastName:  musicianDoc.lastName  ?? leadBits.lastName  ?? row.lastName,
+    displayName: musicianDoc.displayName ?? leadBits.displayName,
+    vocalistDisplayName:
+      leadBits.vocalistDisplayName ?? row.vocalistName ?? musicianDoc.vocalistDisplayName
+  });
+
+  const photoUrl =
+    leadBits.photoUrl || musicianDoc.photoUrl || row.photoUrl || null;
+  const profileUrl =
+    leadBits.profileUrl || musicianDoc.profileUrl || row.profileUrl || '';
+
+  return {
+    musicianId: id || null,
+    ...nameBits,
+    photoUrl,
+    profileUrl,
+    isDeputy: !!row.isDeputy,
+    phone: row.phone || musicianDoc.phone || null,
+    setAt: row.updatedAt || new Date().toISOString(),
+    available: row.reply === 'yes',
+    slotIndex: typeof row.slotIndex === 'number' ? row.slotIndex : null,
+  };
+}
+
 const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
 const normCountyKey = (s) =>
   String(s || "")
@@ -465,9 +511,7 @@ const getPictureUrlFrom = (obj = {}) => {
 };
 
 
-/* ========================================================================== */
-/* 📣 notifyDeputies                                                           */
-/* ========================================================================== */
+// controllers/notifyDeputies.js
 export async function notifyDeputies({
   actId,
   lineupId,
@@ -490,10 +534,48 @@ export async function notifyDeputies({
     skipDuplicateCheck,
   });
 
+  const normalizePhone = (raw = "") => {
+    let v = String(raw || "").replace(/\s+/g, "").replace(/^whatsapp:/i, "");
+    if (!v) return "";
+    if (v.startsWith("+")) return v;
+    if (v.startsWith("07")) return v.replace(/^0/, "+44");
+    if (v.startsWith("44")) return `+${v}`;
+    return v;
+  };
+
+  const firstLast = (o = {}) => {
+    const s = String(o?.name || "").trim();
+    const fn = String(o?.firstName || (s ? s.split(/\s+/)[0] : "") || "").trim();
+    const ln = String(o?.lastName || (s && s.includes(" ") ? s.split(/\s+/).slice(1).join(" ") : "") || "").trim();
+    return { firstName: fn, lastName: ln };
+  };
+
+  const displayNameOf = (p = {}) => {
+    const fn = (p.firstName || p.name || "").trim();
+    const ln = (p.lastName || "").trim();
+    return (fn && ln) ? `${fn} ${ln}` : fn || ln || "";
+  };
+
+  const pickPic = (m = {}) =>
+    m.photoUrl ||
+    m.imageUrl ||
+    m.profilePicture ||
+    m.musicianProfileImage ||
+    m.profileImage ||
+    null;
+
+  const buildProfileUrl = (id) => {
+    const base = (process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "http://localhost:5174").replace(/\/$/, "");
+    return id ? `${base}/musician/${id}` : "";
+  };
+
   const act = await Act.findById(actId).lean();
   if (!act) return console.warn("⚠️ [notifyDeputies] No act found");
 
-  const lineup = act?.lineups?.find((l) => String(l._id) === String(lineupId));
+  const lineup =
+    act?.lineups?.find((l) => String(l._id) === String(lineupId)) ||
+    act?.lineups?.find((l) => String(l.lineupId) === String(lineupId)) ||
+    null;
   if (!lineup) return console.warn("⚠️ [notifyDeputies] No lineup found");
 
   const vocalists =
@@ -556,7 +638,7 @@ export async function notifyDeputies({
     const vocalistDisplayName = displayNameOf(vocalist);
 
     for (const deputy of vocalist.deputies || []) {
-      const cleanPhone = (deputy.phoneNumber || deputy.phone || "").replace(/\s+/g, "");
+      const cleanPhone = normalizePhone(deputy.phoneNumber || deputy.phone || "");
       if (!/^\+?\d{10,15}$/.test(cleanPhone)) continue;
       if (existingSet.has(cleanPhone)) continue;
 
@@ -1101,9 +1183,6 @@ const computeMemberTravelFee = async ({
   }
 };
 
-/* ========================================================================== */
-/* 🔧 Tiny shared helpers for consistent logs                                  */
-/* ========================================================================== */
 
 const PUBLIC_SITE_BASE = (
   process.env.PUBLIC_SITE_URL ||
@@ -1114,17 +1193,36 @@ const PUBLIC_SITE_BASE = (
 const buildProfileUrl = (id) =>
   id ? `${PUBLIC_SITE_BASE}/musician/${id}` : "";
 
-// ───────────────────────────────────────────────────────────────────────────────
-// displayNameOf — small helper with optional logging
-// ───────────────────────────────────────────────────────────────────────────────
-export const displayNameOf = (p = {}, log = true, label = "displayNameOf") => {
+
+const displayNameOf = (p = {}) => {
   const fn = (p.firstName || p.name || "").trim();
   const ln = (p.lastName || "").trim();
-  const dn = (fn && ln) ? `${fn} ${ln}` : (fn || ln || "");
-  if (log) {
-    logIdentity(label, { ...p, displayName: dn });
-  }
-  return dn;
+  return (fn && ln) ? `${fn} ${ln}` : fn || ln || "";
+};
+
+
+// 🆕 When you need structured pieces for templates/variables
+export const nameBitsOf = (x = {}, { log = true, label = "nameBitsOf" } = {}) => {
+  const firstName = (x.firstName || x.first || "").toString().trim();
+  const lastName  = (x.lastName  || x.last  || "").toString().trim();
+  const displayName = (
+    x.displayName ||
+    x.vocalistDisplayName ||
+    x.selectedVocalistName ||
+    x.vocalistName ||
+    x.musicianName ||
+    [firstName, lastName].filter(Boolean).join(" ")
+  ).toString().trim();
+  const vocalistDisplayName = (
+    x.vocalistDisplayName ||
+    x.selectedVocalistName ||
+    x.vocalistName ||
+    displayName
+  ).toString().trim();
+
+  const bits = { firstName, lastName, displayName, vocalistDisplayName };
+  if (log && typeof logIdentity === "function") logIdentity(label, bits);
+  return bits;
 };
 
 const firstLast = (p = {}) => ({
@@ -1427,11 +1525,49 @@ if (mus) {
 }
 
 
-// controllers/availabilityController.js
 export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   const isExpress = !!maybeRes;
   const body = isExpress ? reqOrArgs.body : reqOrArgs;
   const res = isExpress ? maybeRes : null;
+
+  // --- local helpers (self-contained in this function) ---
+  const normalizeNameBits = (nameLike) => {
+    const s = (nameLike ?? "").toString().trim();
+    if (!s) return { first:"", last:"", firstName:"", lastName:"", displayName:"", vocalistDisplayName:"" };
+    const parts = s.split(/\s+/);
+    const first = parts[0] || "";
+    const last = parts.length > 1 ? parts.slice(1).join(" ") : "";
+    return {
+      first, last,
+      firstName: first, lastName: last,
+      displayName: s,
+      vocalistDisplayName: s,
+    };
+  };
+  const displayNameOf = (p = {}) => {
+    const fn = (p.firstName || p.name || "").trim();
+    const ln = (p.lastName || "").trim();
+    return (fn && ln) ? `${fn} ${ln}` : fn || ln || "";
+  };
+  const pickPic = (m = {}) =>
+    m.photoUrl ||
+    m.musicianProfileImageUpload ||
+    m.profileImage ||
+    m.imageUrl ||
+    m.profilePicture ||
+    m.musicianProfileImage ||
+    null;
+
+  const normalizePhone = (raw = "") => {
+    let v = String(raw || "").replace(/\s+/g, "").replace(/^whatsapp:/i, "");
+    if (!v) return "";
+    if (v.startsWith("+")) return v;
+    if (v.startsWith("07")) return v.replace(/^0/, "+44");
+    if (v.startsWith("44")) return `+${v}`;
+    return v;
+  };
+
+  const normalizeToE164 = (raw = "") => normalizePhone(raw); // alias
 
   try {
     const {
@@ -1451,7 +1587,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       vocalistName = "",
     } = body;
 
-    // Base URL for profile links (moved to the top so we can log a profileUrl early)
     const PUBLIC_SITE_BASE = (
       process.env.PUBLIC_SITE_URL ||
       process.env.FRONTEND_URL ||
@@ -1476,7 +1611,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       ? await AvailabilityModel.find({ enquiryId }).lean()
       : [];
 
-    const slotIndexBase = existingForEnquiry.length; // (kept for reference)
+    const slotIndexBase = existingForEnquiry.length; // kept for reference
     const slotIndexFromBody =
       typeof body.slotIndex === "number" ? body.slotIndex : null;
 
@@ -1515,17 +1650,14 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const act = await Act.findById(actId).lean();
     if (!act) throw new Error("Act not found");
 
-    let shortAddress =
-      formattedAddress || address || act?.formattedAddress || "TBC";
-    shortAddress = shortAddress
-      .split(",")
-      .slice(-2)
-      .join(",")
-      .replace(/,\s*UK$/i, "")
-      .trim();
-
+    // derive addresses
     const fullFormattedAddress =
       formattedAddress || address || act?.formattedAddress || act?.venueAddress || "TBC";
+
+    let shortAddress =
+      (fullFormattedAddress || "TBC").split(",").slice(0, 2).join(", ").trim() || "TBC";
+
+    const metaAddress = fullFormattedAddress || shortAddress || "TBC";
 
     const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
       weekday: "long",
@@ -1546,6 +1678,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       formattedAddress: formattedAddress || null,
       fullFormattedAddress,
       shortAddress,
+      metaAddress,
       enquiryId,
       slotIndexFromBody,
     });
@@ -1569,18 +1702,8 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
 
     /* -------------------------------------------------------------- */
-    /* 🔢 Normalise phone & address compare                            */
+    /* 🔎 Address compare helpers                                     */
     /* -------------------------------------------------------------- */
-    const normalizePhone = (raw = "") => {
-      let v = String(raw || "").replace(/\s+/g, "").replace(/^whatsapp:/i, "");
-      if (!v) return "";
-      if (v.startsWith("+")) return v;
-      if (v.startsWith("07")) return v.replace(/^0/, "+44");
-      if (v.startsWith("44")) return `+${v}`;
-      return v;
-    };
-
-    // 🔎 Rough address matcher (treats "City, County" vs full-line equivalently; ignores case/extra spaces/"UK")
     const normalizeAddr = (s = "") =>
       String(s || "")
         .toLowerCase()
@@ -1693,7 +1816,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
               phone,
             });
 
-            // ✅ If lead previously UNAVAILABLE/NO, immediately notify deputies for this slot
             if (prior.reply === "unavailable" || prior.reply === "no") {
               await notifyDeputies({
                 actId,
@@ -1708,7 +1830,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
               });
             }
 
-            // ✅ If lead previously YES, refresh badge (optional best-effort)
             if (prior.reply === "yes") {
               try {
                 const badgeRes = await rebuildAndApplyAvailabilityBadge({
@@ -1731,7 +1852,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
               }
             }
 
-            // Record into results for parity with the loop, but mark as reused
             results.push({
               name: vMember.firstName,
               slotIndex: slotIndexForThis,
@@ -1739,7 +1859,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
               reusedExisting: true,
               existingReply: prior.reply,
             });
-            continue; // ⬅️ move to next vocalist without sending
+            continue;
           }
         } catch (e) {
           console.warn("⚠️ Prior-reply check (multi) failed:", e?.message || e);
@@ -1789,7 +1909,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
         const setAlways = {
           isDeputy: false,
-          musicianId: realMusicianId,                  // ✅ ensure row is linked
+          musicianId: realMusicianId,
           musicianName: displayNameForLead,
           musicianEmail: enriched.email || "",
           photoUrl: enriched.photoUrl || enriched.profilePicture || "",
@@ -1802,13 +1922,12 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           duties: vMember.instrument || "Vocalist",
           fee: String(finalFee),
           updatedAt: now,
-          // ✅ new: carry the *same* name into modern fields
           selectedVocalistName: displayNameForLead,
           selectedVocalistId: realMusicianId || null,
           vocalistName: displayNameForLead,
+          profileUrl: realMusicianId ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}` : "",
         };
 
-        // 🔎 Per-person debug summary (multi lead)
         console.log("🔎 [triggerAvailabilityRequest/multi] PERSON", {
           role: "LEAD",
           firstName: (enriched.firstName || vMember.firstName || "").trim(),
@@ -1818,7 +1937,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           address: fullFormattedAddress,
           shortAddress,
           photoUrl: setAlways.photoUrl || "",
-          profileUrl: realMusicianId ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}` : "",
+          profileUrl: setAlways.profileUrl || "",
           musicianId: realMusicianId || null,
           phone,
           slotIndex: slotIndexForThis,
@@ -1836,18 +1955,17 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           musicianId: String(savedLead?.musicianId || ""),
         });
 
-        const msg = `Hi ${vMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${vMember.instrument} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
-
+        const nameBits = normalizeNameBits(displayNameOf(vMember));
         await sendWhatsAppMessage({
           to: phone,
           actData: act,
           lineup: lineup || {},
           member: vMember,
-          address: shortAddress,
+          address: metaAddress,
           dateISO,
           role: vMember.instrument,
           variables: {
-            firstName: vMember.firstName || "Musician", // we get the first name here
+            firstName: nameBits.firstName || "Musician",
             date: formattedDate,
             location: shortAddress,
             fee: String(finalFee),
@@ -1855,7 +1973,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
             actName: act.tscName || act.name,
           },
           contentSid: process.env.TWILIO_ENQUIRY_SID,
-          smsBody: msg,
+          smsBody: `Hi ${vMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${vMember.instrument} duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
         });
 
         results.push({ name: vMember.firstName, slotIndex: slotIndexForThis, phone });
@@ -1893,7 +2011,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       console.warn("⚠️ Enrich failed:", err.message);
     }
 
-    // Make sure deputy's id is mapped if provided
     if (isDeputy && deputy?.id && !targetMember.musicianId) {
       targetMember.musicianId = deputy.id;
     }
@@ -1922,7 +2039,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       enrichedMember?.profilePicture ||
       '';
 
-    // Preferred display name to carry through toasts/cart
     const selectedName = String(
       selectedVocalistName ||
       canonicalName ||
@@ -1953,7 +2069,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       });
 
       if (prior.reply === "yes") {
-        // ✅ Refresh badge (best-effort)
         try {
           const badgeRes = await rebuildAndApplyAvailabilityBadge({
             actId,
@@ -1976,7 +2091,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       }
 
       if (!isDeputy && (prior.reply === "unavailable" || prior.reply === "no")) {
-        // ✅ Lead previously unavailable — trigger deputies now
         await notifyDeputies({
           actId,
           lineupId: lineup?._id || lineupId || null,
@@ -1990,7 +2104,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         });
       }
 
-      // Return without sending any new message
       if (res) return res.json({ success: true, sent: 0, usedExisting: prior.reply });
       return { success: true, sent: 0, usedExisting: prior.reply };
     }
@@ -2090,7 +2203,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     }
 
     if (existing && !skipDuplicateCheck && !isDeputy) {
-      // Keep the legacy behaviour for lead re-sends; deputies are handled by scoped guard above.
       console.log("⚠️ Duplicate availability request detected — skipping WhatsApp send", { actId, dateISO, phone: existing.phone });
       if (res) return res.json({ success: true, sent: 0, skipped: "duplicate" });
       return { success: true, sent: 0, skipped: "duplicate" };
@@ -2116,16 +2228,16 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       createdAt: now,
       status: "sent",
       reply: null,
-      musicianId: canonicalId,        // ✅ insert with canonical musician id
+      musicianId: canonicalId,
       selectedVocalistName: selectedName,
       selectedVocalistId: canonicalId || null,
     };
 
     const setAlways = {
       isDeputy: !!isDeputy,
-      musicianName: canonicalName,    // ✅ name from canonical
+      musicianName: canonicalName,
       musicianEmail: canonical?.email || targetMember.email || "",
-      photoUrl: canonicalPhoto,       // ✅ photo from canonical
+      photoUrl: canonicalPhoto,
       address: fullFormattedAddress,
       formattedAddress: fullFormattedAddress,
       formattedDate,
@@ -2141,7 +2253,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       vocalistName: vocalistName || selectedName || "",
     };
 
-    // 🔎 Single-path person debug summary (lead or deputy)
     const resolvedFirstName = (canonical?.firstName || targetMember.firstName || enrichedMember.firstName || "").trim();
     const resolvedLastName  = (canonical?.lastName  || targetMember.lastName  || enrichedMember.lastName  || "").trim();
     console.log("🔎 [triggerAvailabilityRequest/single] PERSON", {
@@ -2177,7 +2288,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const role = body?.inheritedDuties || targetMember.instrument || "Performance";
     const feeStr = finalFee > 0 ? `£${finalFee}` : "TBC";
 
-    // One more concise log just before sending WA
+    const person = targetMember || {};
+    const nameBits = normalizeNameBits(displayNameOf(person));
+
     console.log("📤 [WA SEND] Summary", {
       to: phone,
       role,
@@ -2192,18 +2305,16 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       profileUrl: setAlways.profileUrl,
     });
 
-    const msg = `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
-
     await sendWhatsAppMessage({
       to: phone,
       actData: act,
       lineup: lineup || {},
-      member: targetMember,
-      address: shortAddress,
+      member: person,
+      address: metaAddress,
       dateISO,
       role,
       variables: {
-        firstName: targetMember.firstName || "Musician",
+        firstName: nameBits.firstName || nameBits.displayName || "Musician",
         date: formattedDate,
         location: shortAddress,
         fee: String(finalFee),
@@ -2211,7 +2322,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         actName: act.tscName || act.name,
       },
       contentSid: process.env.TWILIO_ENQUIRY_SID,
-      smsBody: msg,
+      smsBody: `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
     });
 
     console.log(`📲 WhatsApp sent successfully — ${feeStr}`);
@@ -2223,7 +2334,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     return { success: false, error: err.message };
   }
 };
-
 // -------------------- Delivery/Read Receipts --------------------
 // module-scope guard so we don't double-fallback on Twilio retries
 export const twilioStatus = async (req, res) => {
@@ -2301,220 +2411,247 @@ export async function notifyDeputyOneShot(req, res) {
 }
 
 
+// ✅ Drop-in replacement: Twilio inbound handler with robust identity resolution,
+// badge rebuilds on YES/UNAVAILABLE, and single clean SSE broadcast.
+// Assumes AvailabilityModel, Musician, Act, notifyDeputies, rebuildAndApplyAvailabilityBadge,
+// getDeputyDisplayBits, findCanonicalMusicianByPhone, normalizeToE164, normalizeFrom,
+// seenInboundOnce, parsePayload, classifyReply, sendWhatsAppText are available in scope.
+
 export const twilioInbound = async (req, res) => {
   console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
 
   // ✅ Immediately acknowledge Twilio to prevent retries
   res.status(200).send("OK");
-// Resolve a human-friendly display name from row + musician doc
-const resolveDisplayName = (row, musician) => {
-  const fromRow =
-    (row?.selectedVocalistName || row?.vocalistName || row?.musicianName || "").trim();
-  if (fromRow) return fromRow;
 
-  const fromMus = `${musician?.firstName || ""} ${musician?.lastName || ""}`.trim();
-  return fromMus || "Vocalist";
-};
+  // --- local helpers (self-contained, no external deps required) ---
+  const FRONTEND_BASE =
+    process.env.FRONTEND_URL ||
+    process.env.PUBLIC_SITE_BASE ||
+    "https://meek-biscotti-8d5020.netlify.app";
 
-  setImmediate( () => {
+  const pickPicLocal = (m = {}) =>
+    m.photoUrl ||
+    m.musicianProfileImageUpload ||
+    m.profileImage ||
+    m.imageUrl ||
+    m.profilePicture ||
+    m.musicianProfileImage ||
+    null;
+
+  const resolveDisplayName = (row, musician) => {
+    const fromRow =
+      (row?.selectedVocalistName || row?.vocalistName || row?.musicianName || "").trim();
+    if (fromRow) return fromRow;
+    const fromMus = `${musician?.firstName || ""} ${musician?.lastName || ""}`.trim();
+    return fromMus || "Vocalist";
+  };
+  // --- end helpers ---
+
+  setImmediate(() => {
     (async () => {
-    try {
+      try {
+        const bodyText = String(req.body?.Body || "");
+        const buttonText = String(req.body?.ButtonText || "");
+        const buttonPayload = String(req.body?.ButtonPayload || "");
+        const inboundSid = String(req.body?.MessageSid || "");
+        const fromRaw = String(req.body?.WaId || req.body?.From || "").replace(/^whatsapp:/i, "");
 
-      
+        const noContent = !buttonPayload && !buttonText && !bodyText;
+        if (noContent) return console.log("🪵 Ignoring empty inbound message", { From: fromRaw });
 
-      const bodyText = String(req.body?.Body || "");
-      const buttonText = String(req.body?.ButtonText || "");
-      const buttonPayload = String(req.body?.ButtonPayload || "");
-      const inboundSid = String(req.body?.MessageSid || "");
-      const fromRaw = String(req.body?.WaId || req.body?.From || "").replace(/^whatsapp:/i, "");
+        if (seenInboundOnce(inboundSid)) {
+          console.log("🪵 Duplicate inbound — already handled", { MessageSid: inboundSid });
+          return;
+        }
 
-      const noContent = !buttonPayload && !buttonText && !bodyText;
-      if (noContent) return console.log("🪵 Ignoring empty inbound message", { From: fromRaw });
+        let { reply, enquiryId } = parsePayload(buttonPayload);
+        if (!reply) reply = classifyReply(buttonText) || classifyReply(bodyText) || null;
+        if (!reply) return;
 
-      if (seenInboundOnce(inboundSid)) {
-        console.log("🪵 Duplicate inbound — already handled", { MessageSid: inboundSid });
-        return;
-      }
+        // --- Find matching availability row ---
+        let updated = null;
+        if (enquiryId) {
+          updated = await AvailabilityModel.findOneAndUpdate(
+            { enquiryId },
+            { $set: { reply, repliedAt: new Date(), "inbound.sid": inboundSid } },
+            { new: true }
+          );
+        }
+        if (!updated) {
+          updated = await AvailabilityModel.findOneAndUpdate(
+            { phone: normalizeFrom(fromRaw) },
+            { $set: { reply, repliedAt: new Date(), "inbound.sid": inboundSid } },
+            { sort: { createdAt: -1 }, new: true }
+          );
+        }
 
-      let { reply, enquiryId } = parsePayload(buttonPayload);
-      if (!reply) reply = classifyReply(buttonText) || classifyReply(bodyText) || null;
-      if (!reply) return;
+        if (!updated) {
+          console.warn("⚠️ No matching AvailabilityModel found for inbound reply.");
+          return;
+        }
 
-      // --- Find matching availability row ---
-      let updated = null;
-      if (enquiryId) {
-        updated = await AvailabilityModel.findOneAndUpdate(
-          { enquiryId },
-          { $set: { reply, repliedAt: new Date(), "inbound.sid": inboundSid } },
-          { new: true }
-        );
-      }
-      if (!updated) {
-        updated = await AvailabilityModel.findOneAndUpdate(
-          { phone: normalizeFrom(fromRaw) },
-          { $set: { reply, repliedAt: new Date(), "inbound.sid": inboundSid } },
-          { sort: { createdAt: -1 }, new: true }
-        );
-      }
+        // 🔎 Resolve canonical Musician by phone (preferred) or by row's musicianId
+        const byPhone = await findCanonicalMusicianByPhone(updated.phone);
+        let musician =
+          byPhone || (updated?.musicianId ? await Musician.findById(updated.musicianId).lean() : null);
 
-      if (!updated) {
-        console.warn("⚠️ No matching AvailabilityModel found for inbound reply.");
-        return;
-      }
-// Resolve canonical Musician by the deputy’s phone (preferred) or the row’s id
-const byPhone = await findCanonicalMusicianByPhone(updated.phone);
-let musician = byPhone || (updated?.musicianId ? await Musician.findById(updated.musicianId).lean() : null);
-
-// If the availability row still carries the ACT-collection id, fix it to the canonical Musicians id
-if (updated.isDeputy && musician && String(updated.musicianId) !== String(musician._id)) {
-  await AvailabilityModel.updateOne(
-    { _id: updated._id },
-    {
-      $set: {
-        musicianId: musician._id,
-        musicianName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
-        musicianEmail: musician.email || updated.musicianEmail || "",
-        photoUrl: pickPic(musician),
-        profileUrl: `${BASE_URL}/musician/${musician._id}`,
-      },
-    }
-  );
-
-  // keep in-memory copy in sync for the rest of this handler
-  updated.musicianId = musician._id;
-  updated.musicianName = `${musician.firstName || ""} ${musician.lastName || ""}`.trim();
-  updated.musicianEmail = musician.email || updated.musicianEmail;
-  updated.photoUrl = pickPic(musician) || updated.photoUrl;
-}
-
-const displayName = resolveDisplayName(updated, musician);
-
-// Make sure the Availability row carries a stable vocalistName
-if (displayName && updated?.vocalistName !== displayName) {
-  await AvailabilityModel.updateOne(
-    { _id: updated._id },
-    {
-      $set: {
-        vocalistName: displayName,
-        musicianName: updated?.musicianName || displayName, // keep old field too
-      },
-    }
-  );
-  updated.vocalistName = displayName; // keep in-memory copy in sync
-  if (!updated.musicianName) updated.musicianName = displayName;
-}
-
-      // 🧩 Debug + ensure slotIndex is available for deputy notifications
-const slotIndex = typeof updated.slotIndex === "number" ? updated.slotIndex : null;
-console.log("🎯 [twilioInbound] Matched slotIndex:", slotIndex);
-
-
-const isDeputy = Boolean(updated?.isDeputy);
-
-// If this row should be a deputy row but the flag isn't persisted yet, persist it.
-if (isDeputy && updated?.isDeputy !== true) {
-  await AvailabilityModel.updateOne(
-    { _id: updated._id },
-    { $set: { isDeputy: true } }
-  );
-  updated.isDeputy = true;
-}
-
-// 🔍 Ensure we always have musician data (lead or deputy)
-if (!musician && updated?.musicianId) {
-  musician = await Musician.findById(updated.musicianId).lean();
-}
-
-if (!musician && updated?.musicianName) {
-  musician = await Musician.findOne({
-    $or: [
-      { name: updated.musicianName },
-      { firstName: new RegExp(updated.musicianName.split(" ")[0], "i") },
-      { lastName: new RegExp(updated.musicianName.split(" ").slice(-1)[0], "i") },
-    ],
-  })
-    .select("email firstName lastName musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl _id")
-    .lean();
-}
-
-// 🔹 use musician (for deputies) or updated (for lead) directly
-const bits = await getDeputyDisplayBits({
-  ...((musician && musician.toObject ? musician.toObject() : musician) || {}),
-  ...((updated && updated.toObject ? updated.toObject() : updated) || {}),
-});
-const emailForInvite =
-  bits?.resolvedEmail ||
-  musician?.email ||
-  updated?.musicianEmail ||
-  updated?.email ||
-  "hello@thesupremecollective.co.uk";
-
-console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
- const actId = String(updated.actId);
-      const dateISO = updated.dateISO;
-      const toE164 = normalizeToE164(updated.phone || fromRaw);
-
-        // 🧭 Always resolve Act regardless of how actId is stored
-  let act = null;
-  try {
-    const actIdValue = updated?.actId?._id || updated?.actId;
-    if (actIdValue) {
-      act = await Act.findById(actIdValue).lean();
-      console.log("📡 Act resolved for notifyDeputies:", act?.tscName || act?.name);
-    }
-  } catch (err) {
-    console.warn("⚠️ Failed to resolve act from updated.actId:", err.message);
-  }
-
-      // ──────────────────────────────────────────────────────────────
-      console.log("──────────────────────────────────────────────");
-      console.log(`📩 Twilio Inbound (${reply?.toUpperCase?.() || "UNKNOWN"}) for ${act?.tscName || "Unknown Act"}`);
-      console.log(`👤 ${musician?.firstName || updated?.musicianName || "Unknown Musician"}`);
-      console.log(`📅 ${updated?.dateISO || "Unknown Date"}`);
-      console.log(`📧 ${emailForInvite}`);
-      console.log("──────────────────────────────────────────────");
-      /* ---------------------------------------------------------------------- */
-      /* ✅ YES BRANCH (Lead or Deputy)                                         */
-      /* ---------------------------------------------------------------------- */
-      
-      if (reply === "yes") {
-        console.log(`✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`);
-
-        const { createCalendarInvite } = await import("./googleController.js");
-
-        // 1️⃣ Create a calendar invite for either lead or deputy
-        console.log("📧 [Calendar Debug] emailForInvite=", emailForInvite, "act=", !!act, "dateISO=", dateISO);
-        if (emailForInvite && act && dateISO) {
-          const formattedDateString = new Date(dateISO).toLocaleDateString("en-GB", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-            year: "numeric",
-          });
-
-          const fee =
-            updated?.fee ||
-            act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
-            null;
-
-          try {
-            // 🧹 Cancel any existing calendar event before re-creating a new one
-            if (updated?.calendarEventId && emailForInvite) {
-              try {
-                console.log("🗓️ Cancelling old calendar event before new YES invite");
-                await cancelCalendarInvite({
-                  eventId: updated.calendarEventId,
-                  actId: act?._id || updated.actId,
-                  dateISO: updated.dateISO,
-                  email: emailForInvite,
-                });
-              } catch (err) {
-                console.warn("⚠️ Failed to cancel old calendar event:", err.message);
-              }
+        // If deputy row is carrying ACT collection id, re-point to canonical Musician id
+        if (updated.isDeputy && musician && String(updated.musicianId) !== String(musician._id)) {
+          await AvailabilityModel.updateOne(
+            { _id: updated._id },
+            {
+              $set: {
+                musicianId: musician._id,
+                musicianName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+                musicianEmail: musician.email || updated.musicianEmail || "",
+                photoUrl: pickPicLocal(musician),
+                profileUrl: `${FRONTEND_BASE}/musician/${musician._id}`,
+              },
             }
+          );
 
-            const event = await createCalendarInvite(
-              {
+          // keep in-memory copy in sync for the rest of this handler
+          updated.musicianId = musician._id;
+          updated.musicianName = `${musician.firstName || ""} ${musician.lastName || ""}`.trim();
+          updated.musicianEmail = musician.email || updated.musicianEmail;
+          updated.photoUrl = pickPicLocal(musician) || updated.photoUrl;
+          updated.profileUrl = `${FRONTEND_BASE}/musician/${musician._id}`;
+        }
+
+        const displayName = resolveDisplayName(updated, musician);
+
+        // 📛 Ensure the row carries a stable vocalistName for downstream badge/name use
+        if (displayName && updated?.vocalistName !== displayName) {
+          await AvailabilityModel.updateOne(
+            { _id: updated._id },
+            {
+              $set: {
+                vocalistName: displayName,
+                musicianName: updated?.musicianName || displayName, // keep old field too
+              },
+            }
+          );
+          updated.vocalistName = displayName; // in-memory
+          if (!updated.musicianName) updated.musicianName = displayName;
+        }
+
+        // 🧩 Slot + deputy flags
+        const slotIndex = typeof updated.slotIndex === "number" ? updated.slotIndex : null;
+        console.log("🎯 [twilioInbound] Matched slotIndex:", slotIndex);
+
+        const isDeputy = Boolean(updated?.isDeputy);
+        if (isDeputy && updated?.isDeputy !== true) {
+          await AvailabilityModel.updateOne({ _id: updated._id }, { $set: { isDeputy: true } });
+          updated.isDeputy = true;
+        }
+
+        // 🔍 Ensure we have a musician doc when possible
+        if (!musician && updated?.musicianId) {
+          musician = await Musician.findById(updated.musicianId).lean();
+        }
+        if (!musician && updated?.musicianName) {
+          const parts = String(updated.musicianName).trim().split(/\s+/);
+          musician = await Musician.findOne({
+            $or: [
+              { name: updated.musicianName },
+              { firstName: new RegExp(parts[0] || "", "i") },
+              { lastName: new RegExp(parts.slice(-1)[0] || "", "i") },
+            ],
+          })
+            .select(
+              "email firstName lastName musicianProfileImageUpload musicianProfileImage profileImage profilePicture photoUrl imageUrl _id"
+            )
+            .lean();
+        }
+
+        // 🔹 Enrich identity bits (email/photo/profile) from either row or musician
+        const bits = await getDeputyDisplayBits({
+          ...((musician && musician.toObject ? musician.toObject() : musician) || {}),
+          ...((updated && updated.toObject ? updated.toObject() : updated) || {}),
+        });
+
+        const emailForInvite =
+          bits?.resolvedEmail ||
+          musician?.email ||
+          updated?.musicianEmail ||
+          updated?.email ||
+          "hello@thesupremecollective.co.uk";
+
+        console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
+
+        const actId = String(updated.actId);
+        const dateISO = updated.dateISO;
+        const toE164 = normalizeToE164(updated.phone || fromRaw);
+
+        // 🧭 Resolve Act reliably
+        let act = null;
+        try {
+          const actIdValue = updated?.actId?._id || updated?.actId;
+          if (actIdValue) {
+            act = await Act.findById(actIdValue).lean();
+            console.log("📡 Act resolved for notifyDeputies:", act?.tscName || act?.name);
+          }
+        } catch (err) {
+          console.warn("⚠️ Failed to resolve act from updated.actId:", err.message);
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        console.log("──────────────────────────────────────────────");
+        console.log(
+          `📩 Twilio Inbound (${reply?.toUpperCase?.() || "UNKNOWN"}) for ${act?.tscName || "Unknown Act"}`
+        );
+        console.log(`👤 ${musician?.firstName || updated?.musicianName || "Unknown Musician"}`);
+        console.log(`📅 ${updated?.dateISO || "Unknown Date"}`);
+        console.log(`📧 ${emailForInvite}`);
+        console.log("──────────────────────────────────────────────");
+
+        /* ---------------------------------------------------------------------- */
+        /* ✅ YES BRANCH (Lead or Deputy)                                         */
+        /* ---------------------------------------------------------------------- */
+        if (reply === "yes") {
+          console.log(`✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`);
+
+          const { createCalendarInvite, cancelCalendarInvite } = await import("./googleController.js");
+
+          // 1️⃣ Create/refresh calendar invite
+          console.log(
+            "📧 [Calendar Debug] emailForInvite=",
+            emailForInvite,
+            "act=",
+            !!act,
+            "dateISO=",
+            dateISO
+          );
+          if (emailForInvite && act && dateISO) {
+            const formattedDateString = new Date(dateISO).toLocaleDateString("en-GB", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            });
+
+            const fee =
+              updated?.fee ||
+              act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
+              null;
+
+            try {
+              // 🧹 Cancel prior event if it exists, then create a fresh one
+              if (updated?.calendarEventId && emailForInvite) {
+                try {
+                  console.log("🗓️ Cancelling old calendar event before new YES invite");
+                  await cancelCalendarInvite({
+                    eventId: updated.calendarEventId,
+                    actId: act?._id || updated.actId,
+                    dateISO: updated.dateISO,
+                    email: emailForInvite,
+                  });
+                } catch (err) {
+                  console.warn("⚠️ Failed to cancel old calendar event:", err.message);
+                }
+              }
+
+              const event = await createCalendarInvite({
                 enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
                 actId,
                 dateISO,
@@ -2532,116 +2669,89 @@ console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
                 fee,
               });
 
-            console.log("📅 Calendar invite sent:", emailForInvite, {
-              eventId: event?.id || event?.data?.id,
-            });
+              console.log("📅 Calendar invite sent:", emailForInvite, {
+                eventId: event?.id || event?.data?.id,
+              });
 
-            // ✅ move this INSIDE the try
-            await AvailabilityModel.updateOne(
-              { _id: updated._id },
-              {
-                $set: {
-                  calendarEventId: event?.id || event?.data?.id || null,
-                  calendarInviteEmail: emailForInvite,
-                  calendarInviteSentAt: new Date(),
-                  calendarStatus: "needsAction",
-                },
-              }
-            );
-          } catch (err) {
-            console.error("❌ Calendar invite failed:", err.message);
+              await AvailabilityModel.updateOne(
+                { _id: updated._id },
+                {
+                  $set: {
+                    calendarEventId: event?.id || event?.data?.id || null,
+                    calendarInviteEmail: emailForInvite,
+                    calendarInviteSentAt: new Date(),
+                    calendarStatus: "needsAction",
+                  },
+                }
+              );
+            } catch (err) {
+              console.error("❌ Calendar invite failed:", err.message);
+            }
           }
-        }
-        console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
 
-        await sendWhatsAppText(toE164, "Super — we’ll send a diary invite to log the enquiry for your records.");
+          console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
+          await sendWhatsAppText(
+            toE164,
+            "Super — we’ll send a diary invite to log the enquiry for your records."
+          );
 
-        // 2️⃣ Mark as available + rebuild badge
-        await AvailabilityModel.updateOne(
-          { _id: updated._id },
-          { $set: { status: "read", ...(isDeputy ? { isDeputy: true } : {}) } }
-        );
+          // 2️⃣ Mark as read + (if deputy) persist flag
+          await AvailabilityModel.updateOne(
+            { _id: updated._id },
+            { $set: { status: "read", ...(isDeputy ? { isDeputy: true } : {}) } }
+          );
 
-        let badgeResult = null;
-        try {
-          badgeResult = await rebuildAndApplyAvailabilityBadge({
-            actId,
-            dateISO,
-            __fromYesFlow: true,
-          });
-        } catch (e) {
-          console.warn("⚠️ Badge rebuild failed:", e?.message || e);
-        }
+          // 3️⃣ Rebuild badge NOW (prevents flicker/drops)
+          let badgeResult = null;
+          try {
+            badgeResult = await rebuildAndApplyAvailabilityBadge({
+              actId,
+              dateISO,
+              __fromYesFlow: true,
+            });
+          } catch (e) {
+            console.warn("⚠️ Badge rebuild failed:", e?.message || e);
+          }
 
-        // 3️⃣ Broadcast SSE updates
-        if (global.availabilityNotify) {
-          if (isDeputy) {
-            global.availabilityNotify.deputyYes({
+          // 4️⃣ SSE broadcast (single clean event + badgeUpdated)
+          if (global.availabilityNotify) {
+            const payload = {
               actId,
               actName: act?.tscName || act?.name,
-              musicianName: displayName,  // ✅ use resolved name
+              musicianName: displayName,
               dateISO,
               musicianId: musician?._id || updated?.musicianId || null,
-              badge: badgeResult?.badge,
-            });
-          } else {
-            global.availabilityNotify.leadYes({
-              actId,
-              actName: act?.tscName || act?.name,
-              musicianName: displayName,  // ✅ use resolved name
-              dateISO,
-              musicianId: musician?._id || updated?.musicianId || null,
-            });
+            };
+
+            if (isDeputy && global.availabilityNotify.deputyYes) {
+              global.availabilityNotify.deputyYes(payload);
+            }
+            if (!isDeputy && global.availabilityNotify.leadYes) {
+              global.availabilityNotify.leadYes(payload);
+            }
+            if (badgeResult?.badge && global.availabilityNotify.badgeUpdated) {
+              global.availabilityNotify.badgeUpdated({
+                actId,
+                actName: act?.tscName || act?.name,
+                dateISO,
+                badge: badgeResult.badge,
+              });
+            }
           }
 
-          if (badgeResult?.badge) {
-            global.availabilityNotify.badgeUpdated({
-              actId,
-              actName: act?.tscName || act?.name,
-              dateISO,
-              badge: badgeResult.badge,
-            });
-          }
-        }
+          console.log("📡 SSE broadcasted: availability_badge_updated");
+          return;
+        } // ← YES branch
 
-        // ⭐ Lead branch
-        if (!isDeputy) {
-          const leadName =
-            musician?.firstName ||
-            updated?.musicianName ||
-            updated?.name ||
-            "Lead Vocalist";
-
-          global.availabilityNotify.leadYes({
-            actId,
-            actName: act?.tscName || act?.name,
-            musicianName: leadName,         // ✅ feed the name through
-            dateISO,
-            musicianId: musician?._id || updated?.musicianId || null,
-          });
-        }
-
-        // 🎤 Live badge refresh (lead or deputy) — keep this as-is
-        if (badgeResult?.badge) {
-          global.availabilityNotify.badgeUpdated({
-            actId,
-            actName: act?.tscName || act?.name,
-            dateISO,
-            badge: badgeResult.badge,       // ✅ badge goes here
-          });
-        }
-
-        console.log("📡 SSE broadcasted: availability_badge_updated");
-        return;
-      } // ← closes YES branch
-
-// 🚫 NO / UNAVAILABLE / NOLOC BRANCH
+        /* ---------------------------------------------------------------------- */
+        /* 🚫 NO / UNAVAILABLE / NOLOC / NOLOCATION BRANCH                         */
+        /* ---------------------------------------------------------------------- */
         if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
           console.log("🚫 UNAVAILABLE reply received via WhatsApp");
 
           await AvailabilityModel.updateMany(
             {
-              musicianEmail: emailForInvite.toLowerCase(),
+              musicianEmail: (emailForInvite || "").toLowerCase(),
               dateISO: updated.dateISO,
             },
             {
@@ -2653,13 +2763,13 @@ console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
               },
             }
           );
-
           console.log(
             `🚫 Marked all enquiries for ${emailForInvite} on ${updated.dateISO} as unavailable`
           );
 
-          // 🗓️ Cancel the shared event
+          // 🗓️ Cancel calendar event if exists
           try {
+            const { cancelCalendarInvite } = await import("./googleController.js");
             await cancelCalendarInvite({
               eventId: updated.calendarEventId,
               dateISO: updated.dateISO,
@@ -2669,16 +2779,23 @@ console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
             console.error("❌ Failed to cancel shared event:", err.message);
           }
 
-          // 🗑️ Clear any active badge
+          // 🔔 Rebuild badge *immediately* so remaining badges persist (e.g., Kedesha stays visible)
+          let rebuilt = null;
+          try {
+            rebuilt = await rebuildAndApplyAvailabilityBadge({ actId, dateISO, __fromUnavailable: true });
+          } catch (e) {
+            console.warn("⚠️ Badge rebuild (unavailable) failed:", e?.message || e);
+          }
+
+          // 🗑️ Clear legacy badge keys in Act (tbc/non-tbc map keys)
           try {
             const unset = {
-              [`availabilityBadges.${dateISO}`]: "",
               [`availabilityBadges.${dateISO}_tbc`]: "",
             };
             await Act.updateOne({ _id: actId }, { $unset: unset });
-            console.log("🗑️ Cleared badge keys from Act:", dateISO);
+            console.log("🗑️ Cleared legacy TBC badge key for:", dateISO);
           } catch (err) {
-            console.error("❌ Failed to $unset badge keys:", err.message);
+            console.error("❌ Failed to $unset legacy TBC badge key:", err.message);
           }
 
           await sendWhatsAppText(
@@ -2686,137 +2803,117 @@ console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
             "Thanks for letting us know — we've updated your availability."
           );
 
-          // ✅ Only trigger deputy notifications if YES / NOLOC / NOLOCATION
-        // ✅ Revised logic: always trigger deputies when LEAD replies unavailable
-const shouldTriggerDeputies =
-  (!isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply));
+          // ✅ Trigger deputies when LEAD replies unavailable/no/noloc/nolocation
+          const shouldTriggerDeputies =
+            !isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply);
 
-if (act?._id && shouldTriggerDeputies) {
-  console.log(
-    `📢 Triggering deputy notifications for ${act?.tscName || act?.name} — ${dateISO}`
-  );
+          if (act?._id && shouldTriggerDeputies) {
+            console.log(
+              `📢 Triggering deputy notifications for ${act?.tscName || act?.name} — ${dateISO}`
+            );
+            await notifyDeputies({
+              actId: act._id,
+              lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+              dateISO,
+              formattedAddress: updated.formattedAddress || act.formattedAddress || "TBC",
+              clientName: updated.clientName || "",
+              clientEmail: updated.clientEmail || "",
+              slotIndex, // keep grouping aligned
+              skipDuplicateCheck: true,
+              skipIfUnavailable: false,
+            });
+            console.log("📤 notifyDeputies triggered with slotIndex:", slotIndex);
+          } else if (isDeputy && reply === "unavailable") {
+            console.log("📨 Deputy unavailable — trigger next deputy in queue");
+            const { triggerNextDeputy } = await import("./notifyDeputiesHelpers.js");
+            await triggerNextDeputy({
+              actId: act._id,
+              lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+              dateISO,
+              excludePhones: [
+                updated.phone,
+                updated.whatsappNumber,
+                ...(await AvailabilityModel.distinct("phone", {
+                  actId,
+                  dateISO,
+                  reply: { $in: ["unavailable", "yes"] },
+                })),
+              ],
+            });
+          }
 
-await notifyDeputies({
-  actId: act._id,
-  lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
-  dateISO,
-  formattedAddress:
-    updated.formattedAddress || act.formattedAddress || "TBC",
-  clientName: updated.clientName || "",
-  clientEmail: updated.clientEmail || "",
-  slotIndex, // 👈 use the explicitly extracted one for clarity
-  skipDuplicateCheck: true,
-  skipIfUnavailable: false,
-});
-console.log("📤 notifyDeputies triggered with slotIndex:", slotIndex);
-} else if (isDeputy && reply === "unavailable") {
-  console.log("📨 Deputy unavailable — trigger next deputy in queue");
-
-  const { triggerNextDeputy } = await import("./notifyDeputiesHelpers.js");
-  await triggerNextDeputy({
-    actId: act._id,
-    lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
-    dateISO,
-    excludePhones: [
-      updated.phone,
-      updated.whatsappNumber,
-      ...await AvailabilityModel.distinct("phone", {
-        actId,
-        dateISO,
-        reply: { $in: ["unavailable", "yes"] },
-      }),
-    ],
-  });
-}
-
-          // 📨 Cancellation email
+          // 📨 Courtesy cancellation email
           try {
             const { sendEmail } = await import("../utils/sendEmail.js");
-            const subject = `❌ ${
-              act?.tscName || act?.name
-            }: Diary Invite Cancelled for ${new Date(
+            const subject = `❌ ${act?.tscName || act?.name}: Diary Invite Cancelled for ${new Date(
               dateISO
             ).toLocaleDateString("en-GB")}`;
             const html = `
               <p><strong>${updated?.musicianName || musician?.firstName || "Lead Musician"}</strong>,</p>
               <p>Your diary invite for <b>${act?.tscName || act?.name}</b> on <b>${new Date(
-              dateISO
-            ).toLocaleDateString("en-GB")}</b> has been cancelled.</p>
+                dateISO
+              ).toLocaleDateString("en-GB")}</b> has been cancelled.</p>
               <p>If your availability changes, reply "Yes" to the WhatsApp message to re-confirm.</p>
               <br/>
               <p>– The Supreme Collective Team</p>
             `;
 
             const leadEmail = (emailForInvite || "").trim();
-            const recipients = [leadEmail].filter(
-              (e) => e && e.includes("@")
-            );
+            const recipients = [leadEmail].filter((e) => e && e.includes("@"));
 
             if (recipients.length > 0) {
-              console.log(
-                "📧 Preparing to send cancellation email:",
-                recipients
-              );
+              console.log("📧 Preparing to send cancellation email:", recipients);
               await sendEmail({
                 to: recipients,
                 bcc: ["hello@thesupremecollective.co.uk"],
                 subject,
                 html,
               });
-              console.log(
-                `✅ Cancellation email sent successfully to: ${recipients.join(
-                  ", "
-                )}`
-              );
+              console.log(`✅ Cancellation email sent successfully to: ${recipients.join(", ")}`);
             } else {
-              console.warn(
-                "⚠️ Skipping cancellation email — no valid recipients found."
-              );
+              console.warn("⚠️ Skipping cancellation email — no valid recipients found.");
             }
           } catch (emailErr) {
-            console.error(
-              "❌ Failed to send cancellation email:",
-              emailErr.message
-            );
+            console.error("❌ Failed to send cancellation email:", emailErr.message);
           }
 
-          // 🔔 SSE clear badge
-          if (!updated.isDeputy && global.availabilityNotify?.badgeUpdated) {
-            const stillActive = await AvailabilityModel.exists({
+          // 🔒 Lock meta so lead badge stays cleared if appropriate (doesn't undo deputy YES)
+          const update = {
+            $unset: {
+              // clear any old exact-date badge map; the rebuilt badge above will repopulate correctly
+              [`availabilityBadges.${dateISO}`]: "",
+              [`availabilityBadges.${dateISO}_tbc`]: "",
+            },
+          };
+          if (!isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply)) {
+            update.$set = {
+              [`availabilityBadgesMeta.${dateISO}.lockedByLeadUnavailable`]: true,
+            };
+          }
+          await Act.updateOne({ _id: actId }, update);
+          console.log("🔒 Lead marked UNAVAILABLE — badge locked for date:", dateISO);
+
+          // 📡 SSE: push rebuilt badge to clients (so remaining vocalist stays on cards/UI)
+          if (rebuilt?.badge && global.availabilityNotify?.badgeUpdated) {
+            global.availabilityNotify.badgeUpdated({
               actId,
+              actName: act?.tscName || act?.name,
               dateISO,
-              reply: "yes",
+              badge: rebuilt.badge,
             });
-
-            
           }
-          // 🚫 Ensure lead badge stays cleared even if deputies respond later
-const update = {
-  $unset: {
-    [`availabilityBadges.${dateISO}`]: "",
-    [`availabilityBadges.${dateISO}_tbc`]: "",
-  },
-};
-
-// 🔒 Only set lock when reply is truly unavailable
-if (!isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply)) {
-  update.$set = {
-    [`availabilityBadgesMeta.${dateISO}.lockedByLeadUnavailable`]: true,
-  };
-}
-
-await Act.updateOne({ _id: actId }, update);
-console.log("🔒 Lead marked UNAVAILABLE — badge locked for date:", dateISO);
 
           return;
-        } // ← closes unavailable branch
+        } // ← UNAVAILABLE branch
 
+        // If we reach here, reply type wasn’t handled (e.g., "maybe")
+        console.log("ℹ️ Inbound reply ignored (not YES/NO/UNAVAILABLE/NOL0C):", reply);
       } catch (err) {
         console.error("❌ Error in twilioInbound background task:", err);
       }
-    })(); // ✅ closes async IIFE
-  }); // ✅ closes setImmediate
-}; // ✅ closes twilioInbound
+    })(); // async IIFE
+  }); // setImmediate
+};
 
 const INBOUND_SEEN = new Map();
 const INBOUND_TTL_MS = 10 * 60 * 1000;
@@ -2902,6 +2999,42 @@ const firstNameOf = (p) => {
 
 // -------------------- SSE Broadcaster --------------------
 
+// availabilityNotify.js (or wherever you define global.availabilityNotify / broadcast helpers)
+const recentEvents = new Map(); // module-scope TTL cache
+
+function dedupeAndBroadcast(key, emitFn) {
+  if (recentEvents.has(key)) return;
+  recentEvents.set(key, Date.now());
+  setTimeout(() => recentEvents.delete(key), 2000);
+  emitFn();
+}
+
+// Example wiring with socket.io `io.emit` (adjust to your emitter)
+global.availabilityNotify = {
+  leadYes: (p) =>
+    dedupeAndBroadcast(
+      `${p.actId}:${p.dateISO}:leadYes:${p.musicianId}`,
+      () => io.emit("lead_yes", p)
+    ),
+  deputyYes: (p) =>
+    dedupeAndBroadcast(
+      `${p.actId}:${p.dateISO}:deputyYes:${p.musicianId}`,
+      () => io.emit("deputy_yes", p)
+    ),
+  badgeUpdated: (p) =>
+    dedupeAndBroadcast(
+      `${p.actId}:${p.dateISO}:badgeUpdated`,
+      () => io.emit("availability_badge_updated", p)
+    ),
+};
+
+// If you don't wrap global, you can inline this exactly before any broadcast:
+///
+/// const key = `${actId}:${dateISO}:leadYes:${musicianId}`;
+// if (recentEvents.has(key)) return;
+// recentEvents.set(key, Date.now());
+// setTimeout(() => recentEvents.delete(key), 2000);
+// io.emit('lead_yes', payload);
 
 // ───────────────────────────────────────────────────────────────────────────────
 // makeAvailabilityBroadcaster — with identity-focused console logging
@@ -3298,15 +3431,47 @@ export async function pingDeputiesFor(
   await handleLeadNegativeReply({ act, updated: fakeUpdated });
 }
 
-// --- Availability Badge Rebuild Helpers (WhatsApp-only flow) ---
-
-// ✅ buildAvailabilityBadgeFromRows (refined to include both photoUrl & profileUrl)
-// controllers/availabilityBadgeController.js (or wherever it lives)
-// ───────────────────────────────────────────────────────────────────────────────
-// buildAvailabilityBadgeFromRows — with identity-focused console logging
-// ───────────────────────────────────────────────────────────────────────────────
 export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineups = true }) {
   console.log("🟣 buildAvailabilityBadgeFromRows START", { actId, dateISO, hasLineups });
+
+  // --- local helpers (self-contained) ---
+  const isHttp = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
+  const logIdentity = (label, obj) => console.log(`👤 ${label}`, obj || {});
+
+  function normalizeNameBits({ firstName, lastName, displayName, vocalistDisplayName } = {}) {
+    const fn = (firstName ?? "").toString().trim();
+    const ln = (lastName ?? "").toString().trim();
+    const dn = (displayName ?? [fn, ln].filter(Boolean).join(" ")).trim();
+    const vd = (vocalistDisplayName ?? dn).trim();
+    return { firstName: fn, lastName: ln, displayName: dn, vocalistDisplayName: vd };
+  }
+
+  function presentBadgePrimary({ row = {}, musicianDoc = {}, leadBits = {} }) {
+    const id = String(row.musicianId || musicianDoc?._id || "");
+    const nameBits = normalizeNameBits({
+      firstName: musicianDoc.firstName ?? row.firstName,
+      lastName: musicianDoc.lastName ?? row.lastName,
+      displayName: musicianDoc.displayName ?? row.displayName,
+      vocalistDisplayName:
+        row.vocalistName || row.selectedVocalistName || musicianDoc.vocalistDisplayName,
+    });
+
+    const photoUrl = leadBits.photoUrl || musicianDoc.photoUrl || row.photoUrl || null;
+    const profileUrl = leadBits.profileUrl || musicianDoc.profileUrl || row.profileUrl || "";
+
+    return {
+      musicianId: id || null,
+      ...nameBits,
+      photoUrl,
+      profileUrl,
+      isDeputy: !!row.isDeputy,
+      phone: row.phone || musicianDoc.phone || null,
+      setAt: row.updatedAt || new Date().toISOString(),
+      available: row.reply === "yes",
+      slotIndex: typeof row.slotIndex === "number" ? row.slotIndex : null,
+    };
+  }
+  // --- end helpers ---
 
   const rows = await AvailabilityModel.find({
     actId,
@@ -3335,8 +3500,23 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     }))
   );
 
-  if (!rows.length) return null;
+  // Derive a sensible badge-level address from rows
+  const fullFormattedAddress =
+    rows?.find((r) => r.formattedAddress)?.formattedAddress ||
+    rows?.find((r) => r.address)?.address ||
+    "";
 
+  const shortAddress =
+    (fullFormattedAddress || "TBC").split(",").slice(0, 2).join(", ").trim() || "TBC";
+
+  const metaAddress = fullFormattedAddress || shortAddress || "TBC";
+
+  // Always return a badge object (avoid null to prevent frontend flicker)
+  if (!rows.length) {
+    return { dateISO, address: metaAddress, active: false, slots: [] };
+  }
+
+  // Group rows by slot
   const groupedBySlot = rows.reduce((acc, row) => {
     const key = String(row.slotIndex ?? 0);
     (acc[key] ||= []).push(row);
@@ -3344,171 +3524,88 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
   }, {});
   console.log("📦 buildBadge: rows grouped by slot:", Object.keys(groupedBySlot));
 
-  const isHttp = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
+  const badge = { dateISO, address: metaAddress, active: true, slots: [] };
 
-  const slots = [];
+  // Deterministic order
   const orderedKeys = Object.keys(groupedBySlot).sort((a, b) => Number(a) - Number(b));
 
-  for (const slotKey of orderedKeys) {
-    const slotRows = groupedBySlot[slotKey];
-    console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows.length);
+  for (const key of orderedKeys) {
+    const rowsForSlot = groupedBySlot[key] || [];
+    const slotIndex = Number(key);
+    console.log(`🟨 SLOT ${key} — raw rows:`, rowsForSlot.length);
 
-    // Split lead vs deputy
-    const leadRows   = slotRows.filter((r) => r.isDeputy !== true);
-    const deputyRows = slotRows.filter((r) => r.isDeputy === true);
-
-    // Latest meaningful lead reply
-    const leadReply =
-      leadRows
-        .filter((r) => ["yes", "no", "unavailable"].includes(r.reply))
-        .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0] || null;
-
-    if (leadReply) {
-      logIdentity("LeadRow", {
-        isDeputy: false,
-        slotIndex: Number(slotKey),
-        musicianId: leadReply.musicianId,
-        reply: leadReply.reply,
-        photoUrl: leadReply.photoUrl,
-        profileUrl: leadReply.profileUrl,
-        phone: leadReply.phone,
-        formattedAddress: leadReply.formattedAddress || leadReply.address,
-        vocalistDisplayName:
-          leadReply.vocalistName || leadReply.selectedVocalistName || leadReply.musicianName,
-      });
-    }
-
-    // Resolve lead display bits (via helper)
-    let leadDisplayBits = null;
-    if (leadReply?.musicianId) {
-      try {
-        leadDisplayBits = await getDeputyDisplayBits({ musicianId: leadReply.musicianId });
-        logIdentity("LeadDisplayBits", { ...leadDisplayBits, isDeputy: false, slotIndex: Number(slotKey) });
-      } catch (e) {
-        console.warn("getDeputyDisplayBits (lead) failed:", e?.message);
-      }
-    }
-
-    // Normalized lead object (used for primary decision)
-    const leadBits = leadDisplayBits
-      ? {
-          musicianId: String(leadDisplayBits.musicianId || leadReply?.musicianId || ""),
-          photoUrl: leadDisplayBits.photoUrl || null,
-          profileUrl: leadDisplayBits.profileUrl || "",
-          setAt: leadReply?.updatedAt || null,
-          state: leadReply?.reply || "pending",
-          available: leadReply?.reply === "yes",
-          isDeputy: false,
-        }
-      : leadReply
-      ? {
-          musicianId: String(leadReply.musicianId || ""),
-          photoUrl: isHttp(leadReply.photoUrl) ? leadReply.photoUrl : null,
-          profileUrl: leadReply.profileUrl || "",
-          setAt: leadReply.updatedAt || null,
-          state: leadReply.reply || "pending",
-          available: leadReply.reply === "yes",
-          isDeputy: false,
-        }
-      : null;
-
-    // Deputies — include ALL (even pending) so fallback-to-photo works
-    const deputyRowsSorted = deputyRows.sort(
-      (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)
-    );
-
-    const deputies = [];
-    for (const r of deputyRowsSorted) {
-      try {
-        const bits = await getDeputyDisplayBits({
-          musicianId: r.musicianId,
-          phone: r.phone,
-          email: r.musicianEmail,
-        });
-        const dep = {
-          slotIndex: Number(slotKey),
-          isDeputy: true,
-          musicianId: String(bits?.musicianId || r.musicianId || ""),
-          photoUrl: bits?.photoUrl || r?.photoUrl || null,
-          profileUrl: bits?.profileUrl || "",
-          vocalistName: bits?.resolvedName || bits?.firstName || "",
-          state: r.reply ?? null,
-          available: r.reply === "yes",
-          setAt: r.updatedAt || null,
-          repliedAt: r.repliedAt || r.updatedAt || null,
-          phone: r.phone,
-          formattedAddress: r.formattedAddress || r.address,
-        };
-        logIdentity("DeputyRow→Bits", dep);
-        deputies.push(dep);
-      } catch (e) {
-        console.warn("getDeputyDisplayBits (deputy) failed:", e?.message, r?.musicianId);
-      }
-    }
-
-    // Choose primary for this slot
-    const leadAvailable = leadBits?.available === true;
-    const coveringYes   = deputies.find((d) => d.available && isHttp(d.photoUrl));
-    const firstDepWithPhoto = deputies.find((d) => isHttp(d.photoUrl));
+    // Prefer a ‘yes’, otherwise first row
+    const primaryRow =
+      rowsForSlot.find((r) => r.reply === "yes") || rowsForSlot[0] || null;
 
     let primary = null;
-    if (!leadAvailable && coveringYes) {
-      primary = coveringYes;
-    } else if (leadAvailable && isHttp(leadBits?.photoUrl)) {
-      primary = leadBits;
-    } else if (!leadAvailable && firstDepWithPhoto) {
-      primary = firstDepWithPhoto;
-    } else if (isHttp(leadBits?.photoUrl)) {
-      primary = leadBits;
+    let musicianDoc = null;
+    let leadBits = {};
+
+    if (primaryRow?.musicianId) {
+      try {
+        musicianDoc =
+          (await Musician.findById(primaryRow.musicianId)
+            .select(
+              "firstName lastName displayName vocalistDisplayName photoUrl profileUrl phone"
+            )
+            .lean()) || {};
+      } catch (e) {
+        console.warn("Musician lookup failed:", e?.message);
+      }
+
+      try {
+        leadBits =
+          (await getDeputyDisplayBits({
+            musicianId: primaryRow.musicianId,
+            phone: primaryRow.phone,
+            email: primaryRow.musicianEmail,
+          })) || {};
+      } catch (e) {
+        console.warn("getDeputyDisplayBits (primary) failed:", e?.message);
+      }
     }
 
-    if (primary) {
-      logIdentity("PrimaryChosen", { ...primary, slotIndex: Number(slotKey) });
+    if (primaryRow) {
+      primary = presentBadgePrimary({ row: primaryRow, musicianDoc, leadBits });
+      logIdentity("PrimaryChosen", { ...primary, slotIndex });
     } else {
-      console.log("⚪ No primary chosen for slot", slotKey);
+      console.log("⚪ No primary chosen for slot", key);
     }
 
-    // Fetch musician doc for nicer name fallback (optional)
-    const mus = leadReply?.musicianId
-      ? await Musician.findById(leadReply.musicianId)
-          .select("firstName lastName profilePhoto photoUrl")
-          .lean()
-      : null;
-
-    if (mus) logIdentity("LeadMusicianDoc", { ...mus, isDeputy: false });
-
-    const name = (
-      leadReply?.selectedVocalistName ||
-      leadReply?.vocalistName ||
-      leadReply?.musicianName ||
-      `${mus?.firstName || ""} ${mus?.lastName || ""}`.trim()
-    ).trim();
+    // Fallback name for the slot label
+    const vocalistName =
+      (primary && (primary.vocalistDisplayName || primary.displayName)) ||
+      primaryRow?.vocalistName ||
+      primaryRow?.selectedVocalistName ||
+      primaryRow?.musicianName ||
+      "";
 
     const slotObj = {
-      slotIndex: Number(slotKey),
-      isDeputy: false, // legacy
-      vocalistName: name,
-      musicianId:
-        leadBits?.musicianId ?? (leadReply ? String(leadReply.musicianId) : null),
-      photoUrl: leadBits?.photoUrl || null,
-      profileUrl: leadBits?.profileUrl || "",
-      deputies,
-      setAt: leadReply?.updatedAt || null,
-      state: leadReply?.reply || "pending",
-      available: Boolean(leadAvailable || coveringYes),
+      slotIndex,
+      isDeputy: !!primaryRow?.isDeputy,
+      vocalistName,
+      musicianId: primary?.musicianId || null,
+      photoUrl: isHttp(primary?.photoUrl) ? primary.photoUrl : null,
+      profileUrl: primary?.profileUrl || "",
+      deputies: [], // populate if you add deputy bubbles
+      setAt: primary?.setAt || primaryRow?.updatedAt || null,
+      state: primaryRow?.reply || "pending",
+      available: !!primary?.available,
       covering: primary?.isDeputy ? "deputy" : "lead",
       primary: primary
         ? {
             musicianId: primary.musicianId || null,
-            photoUrl: primary.photoUrl || null,
+            firstName: primary.firstName || "",
+            lastName: primary.lastName || "",
+            displayName: primary.displayName || "",
+            vocalistDisplayName: primary.vocalistDisplayName || "",
+            phone: primary.phone || null,
+            photoUrl: isHttp(primary.photoUrl) ? primary.photoUrl : null,
             profileUrl: primary.profileUrl || "",
             setAt: primary.setAt || null,
-            isDeputy: Boolean(primary.isDeputy),
-            available:
-              Boolean(
-                primary.available ??
-                  (primary.isDeputy ? primary.available : leadAvailable)
-              ),
+            isDeputy: !!primary.isDeputy,
+            available: !!primary.available,
           }
         : null,
     };
@@ -3522,10 +3619,9 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
       photoUrl: slotObj.primary?.photoUrl || slotObj.photoUrl,
     });
 
-    slots.push(slotObj);
+    badge.slots.push(slotObj);
   }
 
-  const badge = { dateISO, address: "TBC", active: true, slots };
   console.log("💜 FINAL BADGE (identity snapshot):", {
     dateISO: badge.dateISO,
     address: badge.address,
@@ -3541,6 +3637,7 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
       },
     })),
   });
+
   return badge;
 }
 
