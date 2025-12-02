@@ -13,6 +13,7 @@ import calculateActPricing from "../utils/calculateActPricing.js";
 import { createCalendarInvite } from "./googleController.js";
 import userModel from "../models/userModel.js";
 import { computeMemberMessageFee } from "./helpersForCorrectFee.js";
+import { makeShortId } from "../utils/makeShortId.js";
 
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
@@ -1530,7 +1531,12 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   const body = isExpress ? reqOrArgs.body : reqOrArgs;
   const res = isExpress ? maybeRes : null;
 
-  // --- local helpers (self-contained in this function) ---
+  // ────────────────────────────────────────────────────────────────────────────
+  // Helpers
+  // ────────────────────────────────────────────────────────────────────────────
+  const makeShortId = () =>
+    Math.random().toString(36).slice(2, 8).toUpperCase();
+
   const normalizeNameBits = (nameLike) => {
     const s = (nameLike ?? "").toString().trim();
     if (!s) return { first:"", last:"", firstName:"", lastName:"", displayName:"", vocalistDisplayName:"" };
@@ -1544,11 +1550,13 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       vocalistDisplayName: s,
     };
   };
+
   const displayNameOf = (p = {}) => {
     const fn = (p.firstName || p.name || "").trim();
     const ln = (p.lastName || "").trim();
     return (fn && ln) ? `${fn} ${ln}` : fn || ln || "";
   };
+
   const pickPic = (m = {}) =>
     m.photoUrl ||
     m.musicianProfileImageUpload ||
@@ -1796,7 +1804,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           console.warn(`⚠️ Failed to enrich vocalist ${vMember.firstName}:`, err.message);
         }
 
-        // 🧯 PRIOR-REPLY CHECK (per-slot) — if this vocalist already replied for SAME date+location, don't message again.
+        // 🧯 PRIOR-REPLY CHECK (per-slot)
         try {
           const prior = await AvailabilityModel.findOne({
             actId,
@@ -1892,6 +1900,10 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
         const now = new Date();
         const query = { actId, dateISO, phone, slotIndex: slotIndexForThis };
+
+        // 🔗 correlation id
+        const requestId = makeShortId();
+
         const setOnInsert = {
           actId,
           lineupId: lineup?._id || null,
@@ -1903,6 +1915,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           createdAt: now,
           status: "sent",
           reply: null,
+          requestId, // 🔗
         };
 
         const displayNameForLead = `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim();
@@ -1926,6 +1939,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           selectedVocalistId: realMusicianId || null,
           vocalistName: displayNameForLead,
           profileUrl: realMusicianId ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}` : "",
+          requestId, // 🔗 keep for visibility/queries
         };
 
         console.log("🔎 [triggerAvailabilityRequest/multi] PERSON", {
@@ -1941,6 +1955,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           musicianId: realMusicianId || null,
           phone,
           slotIndex: slotIndexForThis,
+          requestId,
         });
 
         const savedLead = await AvailabilityModel.findOneAndUpdate(
@@ -1953,10 +1968,20 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           slot: slotIndexForThis,
           isDeputy: savedLead?.isDeputy,
           musicianId: String(savedLead?.musicianId || ""),
+          requestId,
         });
 
+        // Build interactive buttons (carry requestId)
+        const buttons = [
+          { id: `YES:${requestId}`,         title: "Yes" },
+          { id: `NO:${requestId}`,          title: "No" },
+          { id: `UNAVAILABLE:${requestId}`, title: "Unavailable" },
+        ];
+
         const nameBits = normalizeNameBits(displayNameOf(vMember));
-        await sendWhatsAppMessage({
+
+        // Send interactive WA (no contentSid with interactive)
+        const msg = await sendWhatsAppMessage({
           to: phone,
           actData: act,
           lineup: lineup || {},
@@ -1972,11 +1997,23 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
             role: vMember.instrument,
             actName: act.tscName || act.name,
           },
-          contentSid: process.env.TWILIO_ENQUIRY_SID,
+          requestId,   // 🔗
+          buttons,     // 🔗
+          // smsBody kept here as fallback text if you decide to send plain message in future
           smsBody: `Hi ${vMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${vMember.instrument} duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
         });
 
-        results.push({ name: vMember.firstName, slotIndex: slotIndexForThis, phone });
+        // persist Twilio SID + requestId to the row
+        try {
+          await AvailabilityModel.updateOne(
+            { _id: savedLead._id },
+            { $set: { messageSidOut: msg?.sid || null, requestId } }
+          );
+        } catch (e) {
+          console.warn("⚠️ Could not persist messageSidOut/requestId (multi):", e?.message || e);
+        }
+
+        results.push({ name: vMember.firstName, slotIndex: slotIndexForThis, phone, requestId, sid: msg?.sid || null });
       }
 
       console.log(`✅ Multi-vocalist availability triggered for:`, results);
@@ -2217,6 +2254,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const now = new Date();
     const query = { actId, dateISO, phone, slotIndex: singleSlotIndex };
 
+    // 🔗 correlation id
+    const requestId = makeShortId();
+
     const setOnInsert = {
       actId,
       lineupId: lineup?._id || null,
@@ -2231,6 +2271,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       musicianId: canonicalId,
       selectedVocalistName: selectedName,
       selectedVocalistId: canonicalId || null,
+      requestId, // 🔗
     };
 
     const setAlways = {
@@ -2251,6 +2292,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       selectedVocalistName: selectedName,
       selectedVocalistId: canonicalId || null,
       vocalistName: vocalistName || selectedName || "",
+      requestId, // 🔗
     };
 
     const resolvedFirstName = (canonical?.firstName || targetMember.firstName || enrichedMember.firstName || "").trim();
@@ -2268,6 +2310,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       musicianId: canonicalId || null,
       phone,
       slotIndex: singleSlotIndex,
+      requestId,
     });
 
     const saved = await AvailabilityModel.findOneAndUpdate(
@@ -2280,12 +2323,13 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       slot: singleSlotIndex,
       isDeputy: saved?.isDeputy,
       musicianId: String(saved?.musicianId || ""),
+      requestId,
     });
 
     /* -------------------------------------------------------------- */
-    /* 💬 Send WhatsApp                                               */
+    /* 💬 Send WhatsApp (interactive buttons with requestId)          */
     /* -------------------------------------------------------------- */
-    const role = body?.inheritedDuties || targetMember.instrument || "Performance";
+    const roleStr = body?.inheritedDuties || targetMember.instrument || "Performance";
     const feeStr = finalFee > 0 ? `£${finalFee}` : "TBC";
 
     const person = targetMember || {};
@@ -2293,7 +2337,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
     console.log("📤 [WA SEND] Summary", {
       to: phone,
-      role,
+      role: roleStr,
       fee: feeStr,
       date: formattedDate,
       shortAddress,
@@ -2303,27 +2347,46 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       vocalistName: setAlways.vocalistName,
       photoUrl: setAlways.photoUrl,
       profileUrl: setAlways.profileUrl,
+      requestId,
     });
 
-    await sendWhatsAppMessage({
+    const buttons = [
+      { id: `YES:${requestId}`,         title: "Yes" },
+      { id: `NO:${requestId}`,          title: "No" },
+      { id: `UNAVAILABLE:${requestId}`, title: "Unavailable" },
+    ];
+
+    const msg = await sendWhatsAppMessage({
       to: phone,
       actData: act,
       lineup: lineup || {},
       member: person,
       address: metaAddress,
       dateISO,
-      role,
+      role: roleStr,
       variables: {
         firstName: nameBits.firstName || nameBits.displayName || "Musician",
         date: formattedDate,
         location: shortAddress,
         fee: String(finalFee),
-        role,
+        role: roleStr,
         actName: act.tscName || act.name,
       },
-      contentSid: process.env.TWILIO_ENQUIRY_SID,
-      smsBody: `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${role} duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
+      requestId,       // 🔗 correlation
+      buttons,         // 🔗 interactive quick replies
+      // No contentSid here because interactive messages don't use Content API
+      smsBody: `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${roleStr} duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
     });
+
+    // Persist Twilio SID + requestId to the row
+    try {
+      await AvailabilityModel.updateOne(
+        { _id: saved._id },
+        { $set: { messageSidOut: msg?.sid || null, requestId } }
+      );
+    } catch (e) {
+      console.warn("⚠️ Could not persist messageSidOut/requestId (single):", e?.message || e);
+    }
 
     console.log(`📲 WhatsApp sent successfully — ${feeStr}`);
     if (res) return res.json({ success: true, sent: 1 });
@@ -2334,6 +2397,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     return { success: false, error: err.message };
   }
 };
+
 // -------------------- Delivery/Read Receipts --------------------
 // module-scope guard so we don't double-fallback on Twilio retries
 export const twilioStatus = async (req, res) => {
@@ -2445,18 +2509,74 @@ export const twilioInbound = async (req, res) => {
     const fromMus = `${musician?.firstName || ""} ${musician?.lastName || ""}`.trim();
     return fromMus || "Vocalist";
   };
+
+  // ── NEW: robust pick + requestId parsers (button/list + text) ───────────────
+  const pick = (obj, ...keys) => {
+    for (const k of keys) {
+      const v = obj?.[k];
+      if (v !== undefined && v !== null && v !== "") return v;
+    }
+    return null;
+  };
+
+  function parseInteractive(body) {
+    // Covers Content API & non-Content variants
+    const id =
+      pick(body, "ButtonResponse[Id]", "ButtonPayload", "ListResponse[Id]", "ListId") || null;
+    const title =
+      pick(body, "ButtonResponse[Text]", "ButtonText", "ListResponse[Title]", "ListTitle") || null;
+
+    if (!id) return { requestId: null, reply: null, source: null, title: null };
+
+    // Expect "YES:RID" / "NO:RID" / "UNAVAILABLE:RID"
+    const [raw, rid] = String(id).split(":");
+    const reply =
+      raw?.toLowerCase().startsWith("yes") ? "yes" :
+      raw?.toLowerCase().startsWith("un")  ? "unavailable" :
+      raw?.toLowerCase().startsWith("no")  ? "no" : null;
+
+    return { requestId: (rid || "").toUpperCase(), reply, source: "button", title };
+  }
+
+  function parseText(body) {
+    const text = String(body?.Body || "").trim();
+    if (!text) return { requestId: null, reply: null, source: null };
+
+    // allow inline "#ABC123" anywhere in text
+    const m = text.match(/#([A-Z0-9]{5,12})/i);
+    const requestId = m ? m[1].toUpperCase() : null;
+
+    const t = text.replace(/#\w+/g, "").trim().toLowerCase();
+    const reply = t.startsWith("y")
+      ? "yes"
+      : t.startsWith("un")
+      ? "unavailable"
+      : t.startsWith("n")
+      ? "no"
+      : null;
+
+    return { requestId, reply, source: "text" };
+  }
   // --- end helpers ---
 
   setImmediate(() => {
     (async () => {
       try {
-        const bodyText = String(req.body?.Body || "");
-        const buttonText = String(req.body?.ButtonText || "");
-        const buttonPayload = String(req.body?.ButtonPayload || "");
-        const inboundSid = String(req.body?.MessageSid || "");
-        const fromRaw = String(req.body?.WaId || req.body?.From || "").replace(/^whatsapp:/i, "");
+        const bodyObj = req.body || {};
+        const bodyText = String(bodyObj?.Body || "");
+        const buttonText = String(bodyObj?.ButtonText || "");
+        const buttonPayload = String(bodyObj?.ButtonPayload || "");
+        const inboundSid = String(bodyObj?.MessageSid || bodyObj?.SmsMessageSid || "");
+        const fromRaw = String(bodyObj?.WaId || bodyObj?.From || "").replace(/^whatsapp:/i, "");
 
-        const noContent = !buttonPayload && !buttonText && !bodyText;
+        const noContent =
+          !buttonPayload &&
+          !buttonText &&
+          !bodyText &&
+          !bodyObj["ButtonResponse[Id]"] &&
+          !bodyObj["ButtonResponse[Text]"] &&
+          !bodyObj["ListResponse[Id]"] &&
+          !bodyObj["ListResponse[Title]"];
         if (noContent) return console.log("🪵 Ignoring empty inbound message", { From: fromRaw });
 
         if (seenInboundOnce(inboundSid)) {
@@ -2464,23 +2584,89 @@ export const twilioInbound = async (req, res) => {
           return;
         }
 
-        let { reply, enquiryId } = parsePayload(buttonPayload);
-        if (!reply) reply = classifyReply(buttonText) || classifyReply(bodyText) || null;
-        if (!reply) return;
+        // ── NEW: try to parse interactive payload first; then text with #RID ──
+        let { requestId, reply, source } = parseInteractive(bodyObj);
+        if (!requestId) {
+          const p = parseText(bodyObj);
+          requestId = p.requestId;
+          reply = reply || p.reply;
+          source = source || p.source;
+        }
 
-        // --- Find matching availability row ---
+        // Original compatibility: keep your existing parse to get enquiryId
+        // (e.g., your template might still pass enquiryId in ButtonPayload)
+        let parsedPayload = { reply: null, enquiryId: null };
+        try {
+          parsedPayload = parsePayload(buttonPayload); // your existing helper
+        } catch (_) {}
+        if (!reply) {
+          // still allow your classify function for plain "Yes/No/Unavailable"
+          reply = classifyReply(buttonText) || classifyReply(bodyText) || parsedPayload.reply || null;
+        }
+
+        // --- Find matching availability row with strictest match first ---
         let updated = null;
-        if (enquiryId) {
+        let targetRow = null;
+
+        if (requestId) {
+          targetRow = await AvailabilityModel.findOne({ requestId }).lean();
+          if (!targetRow) {
+            console.log("⚠️ requestId not found, soft-fallback allowed", { requestId });
+          }
+        }
+
+        if (targetRow) {
+          // We have an exact match by requestId — safest path
           updated = await AvailabilityModel.findOneAndUpdate(
-            { enquiryId },
-            { $set: { reply, repliedAt: new Date(), "inbound.sid": inboundSid } },
+            { _id: targetRow._id },
+            {
+              $set: {
+                reply: reply || "no", // default to 'no' if unclassifiable
+                repliedAt: new Date(),
+                "inbound.sid": inboundSid || null,
+                "inbound.body": bodyText || "",
+                "inbound.buttonText": bodyObj["ButtonResponse[Text]"] || buttonText || null,
+                "inbound.buttonPayload": bodyObj["ButtonResponse[Id]"] || buttonPayload || null,
+                "inbound.source": source || null,
+                "inbound.requestId": requestId,
+              },
+            },
             { new: true }
           );
-        }
-        if (!updated) {
+        } else if (parsedPayload?.enquiryId) {
+          // Legacy path: locate by enquiryId (as in your original)
+          updated = await AvailabilityModel.findOneAndUpdate(
+            { enquiryId: parsedPayload.enquiryId },
+            {
+              $set: {
+                reply: reply || "no",
+                repliedAt: new Date(),
+                "inbound.sid": inboundSid,
+                "inbound.body": bodyText,
+                "inbound.buttonText": bodyObj["ButtonResponse[Text]"] || buttonText || null,
+                "inbound.buttonPayload": bodyObj["ButtonResponse[Id]"] || buttonPayload || null,
+                "inbound.source": source || null,
+                ...(requestId ? { requestId, "inbound.requestId": requestId } : {}),
+              },
+            },
+            { new: true }
+          );
+        } else {
+          // Fallback: last row by phone (your original behavior)
           updated = await AvailabilityModel.findOneAndUpdate(
             { phone: normalizeFrom(fromRaw) },
-            { $set: { reply, repliedAt: new Date(), "inbound.sid": inboundSid } },
+            {
+              $set: {
+                reply: reply || "no",
+                repliedAt: new Date(),
+                "inbound.sid": inboundSid,
+                "inbound.body": bodyText,
+                "inbound.buttonText": bodyObj["ButtonResponse[Text]"] || buttonText || null,
+                "inbound.buttonPayload": bodyObj["ButtonResponse[Id]"] || buttonPayload || null,
+                "inbound.source": source || null,
+                ...(requestId ? { requestId, "inbound.requestId": requestId } : {}),
+              },
+            },
             { sort: { createdAt: -1 }, new: true }
           );
         }
@@ -2545,7 +2731,7 @@ export const twilioInbound = async (req, res) => {
           updated.isDeputy = true;
         }
 
-        // 🔍 Ensure we have a musician doc when possible
+        // 🔍 Ensure we have a musician doc when possible (fallbacks preserved)
         if (!musician && updated?.musicianId) {
           musician = await Musician.findById(updated.musicianId).lean();
         }
@@ -2606,7 +2792,7 @@ export const twilioInbound = async (req, res) => {
         console.log("──────────────────────────────────────────────");
 
         /* ---------------------------------------------------------------------- */
-        /* ✅ YES BRANCH (Lead or Deputy)                                         */
+        /* ✅ YES BRANCH (Lead or Deputy) — unchanged logic                       */
         /* ---------------------------------------------------------------------- */
         if (reply === "yes") {
           console.log(`✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`);
@@ -2744,7 +2930,7 @@ export const twilioInbound = async (req, res) => {
         } // ← YES branch
 
         /* ---------------------------------------------------------------------- */
-        /* 🚫 NO / UNAVAILABLE / NOLOC / NOLOCATION BRANCH                         */
+        /* 🚫 NO / UNAVAILABLE / NOLOC / NOLOCATION BRANCH — unchanged logic      */
         /* ---------------------------------------------------------------------- */
         if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
           console.log("🚫 UNAVAILABLE reply received via WhatsApp");
@@ -3240,195 +3426,10 @@ export const makeAvailabilityBroadcaster = (broadcastFn) => {
   };
 };
 
-// one-shot WA→SMS for a single deputy
-export async function handleLeadNegativeReply({ act, updated, fromRaw = "" }) {
-  console.log(`🟢 (availabilityController.js) handleLeadNegativeReply START`);
-  // 1) Find the lead in the lineup by phone (so we can access their deputies)
-  const leadMatch = findPersonByPhone(
-    act,
-    updated.lineupId,
-    updated.phone || fromRaw
-  );
-  const leadMember = leadMatch?.parentMember || leadMatch?.person || null;
-  const deputies = Array.isArray(leadMember?.deputies)
-    ? leadMember.deputies
-    : [];
-
-  console.log(
-    "👥 Deputies for lead:",
-    deputies.map((d) => ({
-      name: `${d.firstName || ""} ${d.lastName || ""}`.trim(),
-      phone: d.phoneNumber || d.phone || "",
-    }))
-  );
-
-  // 2) Build normalized phone list for deputies
-  const norm = (v) =>
-    String(v || "")
-      .replace(/^whatsapp:/i, "")
-      .replace(/\s+/g, "")
-      .replace(/^0(?=7)/, "+44")
-      .replace(/^(?=44)/, "+");
-
-  const depPhones = deputies
-    .map((d) => ({ obj: d, phone: norm(d.phoneNumber || d.phone || "") }))
-    .filter((x) => !!x.phone);
-
-  if (depPhones.length === 0) {
-    console.log("ℹ️ No deputy phones to contact.");
-    return { pinged: 0, reason: "no_deputy_phones" };
-  }
-
-  // 3) Current availability state for this act/date
-  const prevRows = await AvailabilityModel.find({
-    actId: updated.actId,
-    dateISO: updated.dateISO,
-  })
-    .select({ phone: 1, reply: 1, updatedAt: 1, createdAt: 1 })
-    .lean();
-
-  const repliedYes = new Map(); // phone -> row
-  const repliedNo = new Map(); // phone -> row
-  const pending = new Map(); // phone -> most-recent row (no reply yet)
-
-  for (const r of prevRows) {
-    const p = norm(r.phone);
-    if (!p) continue;
-    const rep = String(r.reply || "").toLowerCase();
-    if (rep === "yes") {
-      repliedYes.set(p, r);
-    } else if (rep === "no" || rep === "unavailable") {
-      repliedNo.set(p, r);
-    } else {
-      const prev = pending.get(p);
-      const ts = new Date(r.updatedAt || r.createdAt || 0).getTime();
-      if (
-        !prev ||
-        ts > new Date(prev.updatedAt || prev.createdAt || 0).getTime()
-      ) {
-        pending.set(p, r);
-      }
-    }
-  }
-
-  // 4) Count active deputies (YES + pending)
-  const activeYes = depPhones.filter(({ phone }) => repliedYes.has(phone));
-  const activePending = depPhones.filter(({ phone }) => pending.has(phone));
-  const activeCount = activeYes.length + activePending.length;
-
-  const DESIRED = 3;
-  const toFill = Math.max(0, DESIRED - activeCount);
-
-  // 5) Re-ping stale pending deputies (> 6h since last activity)
-  const SIX_HOURS = 6 * 60 * 60 * 1000;
-  let rePingCount = 0;
-
-  for (const { phone: p, obj } of activePending) {
-    const row = pending.get(p);
-    const last = new Date(row?.updatedAt || row?.createdAt || 0).getTime();
-    if (Date.now() - last > SIX_HOURS) {
-      try {
-        console.log("📤 Sending WhatsApp to deputy…");
-        console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
-        const sendRes = await sendWhatsAppMessage({
-          to: p,
-          templateParams: {
-            FirstName: firstNameOf(obj),
-            FormattedDate: updated.formattedDate,
-            FormattedAddress: updated.formattedAddress,
-            Fee: String(updated.fee || "300"),
-            Duties: updated.duties || "Lead Vocal",
-            ActName: act.tscName || act.name || "the band",
-            MetaActId: String(act._id || ""),
-            MetaISODate: updated.dateISO,
-            MetaAddress: updated.formattedAddress,
-          },
-        });
-        await AvailabilityModel.updateOne(
-          { _id: row?._id },
-          {
-            $set: {
-              status: sendRes?.status || "queued",
-              messageSidOut: sendRes?.sid || row?.messageSidOut || null,
-              contactChannel:
-                sendRes?.channel || row?.contactChannel || "whatsapp",
-              updatedAt: new Date(),
-            },
-          }
-        );
-        rePingCount++;
-        console.log("✅ Deputy pinged");
-      } catch (e) {
-        console.warn("⚠️ Failed to notify deputy", e?.message || e);
-      }
-    }
-  }
-
-  // 6) Top up with fresh deputies to reach 3 active
-  let freshPinged = 0;
-
-  if (toFill > 0) {
-    const alreadyActive = new Set([
-      ...activeYes.map(({ phone }) => phone),
-      ...activePending.map(({ phone }) => phone),
-    ]);
-
-    const candidates = depPhones.filter(
-      ({ phone }) => !repliedNo.has(phone) && !alreadyActive.has(phone)
-    );
-
-    for (const cand of candidates.slice(0, toFill)) {
-      try {
-        const { phone: depPhone, enquiryId: depEnquiryId } =
-         await notifyDeputies({
-  act,
-  lineupId: updated.lineupId,
-  dateISO: updated.dateISO,
-  excludePhone: toE164,
-});
-        console.log("✅ Deputy pinged");
-        freshPinged++;
-      } catch (e) {
-        console.warn("⚠️ Failed to notify deputy", e?.message || e);
-      }
-    }
-  }
-
-  console.log(
-    `✅ Deputies active after lead NO/UNAVAILABLE: yes=${activeYes.length}, pending=${activePending.length}, rePinged=${rePingCount}, newlyPinged=${freshPinged}`
-  );
-
-  return {
-    activeYes: activeYes.length,
-    activePending: activePending.length,
-    rePinged: rePingCount,
-    newlyPinged: freshPinged,
-  };
-}
 
 
-export async function pingDeputiesFor(
-  actId,
-  lineupId,
-  dateISO,
-  formattedAddress,
-  duties
-) {
-  console.log(`🟢 (availabilityController.js) pingDeputiesFor START`);
-  const act = await Act.findById(actId).lean();
-  if (!act) return;
-  const fakeUpdated = {
-    actId,
-    lineupId,
-    phone: "",
-    dateISO,
-    formattedDate: formatWithOrdinal(dateISO),
-    formattedAddress: formattedAddress || "",
-    duties: duties || "your role",
-    fee: "",
-  };
-  await handleLeadNegativeReply({ act, updated: fakeUpdated });
-}
+
+
 
 export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineups = true }) {
   console.log("🟣 buildAvailabilityBadgeFromRows START", { actId, dateISO, hasLineups });

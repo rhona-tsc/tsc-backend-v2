@@ -61,7 +61,7 @@ const availabilitySchema = new mongoose.Schema(
     },
 
     repliedAt: { type: Date },
-
+requestId: { type: String, index: true },
     inbound: {
       sid: { type: String },
       body: { type: String },

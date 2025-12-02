@@ -81,70 +81,50 @@ export async function sendWhatsAppMessage(opts = {}) {
     address = "",
     dateISO = "",
     role = "",
-    templateParams = {}, // unused here; kept for compatibility
-    variables = undefined, // preferred input for Twilio variables
-    contentSid,
+    templateParams = {},              // kept for compatibility
+    variables = undefined,            // preferred input for Twilio variables
+    contentSid,                       // optional override (defaults to TWILIO_ENQUIRY_SID if set)
     smsBody = "",
-    finalFee, // optional: if you want to pass a computed fee directly
+    finalFee,                         // optional: pass a computed fee directly
     skipFeeCompute = false,
+
+    // 🔗 Correlation + interactive buttons (NEW)
+    requestId = null,                 // e.g. "7F3K9QX"
+    buttons = null,                   // [{ id, title }, ...] → send interactive WA with reply payloads
   } = opts;
 
+  // E.164 helpers
   const toE = toE164(to);
-  const fromE = toE164(TWILIO_WA_SENDER || "");
+  const fromE = toE164(
+    ((typeof TWILIO_WA_SENDER !== "undefined" && TWILIO_WA_SENDER) ||
+      process.env.TWILIO_WA_SENDER ||
+      "")
+  );
   if (!toE || !fromE) throw new Error("Missing WA to/from");
 
-  const shortAddress = address
-    ? address.split(",").slice(0, 2).join(", ").trim()
-    : "TBC";
-
+  const shortAddress = address ? address.split(",").slice(0, 2).join(", ").trim() : "TBC";
   const formattedDate = dateISO ? formatNiceDate(dateISO) : "TBC";
 
-  // Determine fee string
+  // ── fee string ────────────────────────────────────────────────────────────────
   let formattedFee = "TBC";
   if (variables?.fee) {
     formattedFee = variables.fee; // trust upstream
   } else if (finalFee != null) {
     formattedFee = `£${finalFee}`;
-  } else if (
-    !skipFeeCompute &&
-    actData &&
-    member &&
-    address &&
-    dateISO &&
-    lineup
-  ) {
+  } else if (!skipFeeCompute && actData && member && address && dateISO && lineup) {
     try {
-      const feeValue = await computeFinalFeeForMember(
-        actData,
-        member,
-        address,
-        dateISO,
-        lineup
-      );
+      const feeValue = await computeFinalFeeForMember(actData, member, address, dateISO, lineup);
       formattedFee = `£${feeValue}`;
-      console.log("🧮 [sendWhatsAppMessage] Computed fallback fee", {
-        formattedFee,
-      });
+      console.log("🧮 [sendWhatsAppMessage] Computed fallback fee", { formattedFee });
     } catch (err) {
-      console.warn(
-        "⚠️ [sendWhatsAppMessage] Fee compute failed:",
-        err?.message
-      );
+      console.warn("⚠️ [sendWhatsAppMessage] Fee compute failed:", err?.message);
     }
   }
 
-
-  // ── name helpers (drop these in once, before any usage of firstLast) ───────────
+  // ── name / identity helpers (as in your version) ─────────────────────────────
   const firstLast = (nameLike) => {
     const s = (nameLike ?? "").toString().trim();
-    if (!s)
-      return {
-        first: "",
-        last: "",
-        firstName: "",
-        lastName: "",
-        displayName: "",
-      };
+    if (!s) return { first: "", last: "", firstName: "", lastName: "", displayName: "" };
     const parts = s.split(/\s+/);
     const first = parts[0] || "";
     const last = parts.length > 1 ? parts.slice(1).join(" ") : "";
@@ -172,10 +152,7 @@ export async function sendWhatsAppMessage(opts = {}) {
       obj.resolvedName ||
       `${firstName} ${lastName}`.trim();
     const vocalistDisplayName =
-      obj.vocalistDisplayName ||
-      obj.vocalistName ||
-      obj.selectedVocalistName ||
-      displayName;
+      obj.vocalistDisplayName || obj.vocalistName || obj.selectedVocalistName || displayName;
 
     console.log(`👤 ${label}`, {
       firstName: firstName || undefined,
@@ -186,11 +163,7 @@ export async function sendWhatsAppMessage(opts = {}) {
       formattedAddress: obj.formattedAddress || undefined,
       profileUrl: obj.profileUrl || obj.tscProfileUrl || undefined,
       photoUrl:
-        obj.photoUrl ||
-        obj.profilePicture ||
-        obj.profilePhoto ||
-        obj.imageUrl ||
-        undefined,
+        obj.photoUrl || obj.profilePicture || obj.profilePhoto || obj.imageUrl || undefined,
       isDeputy: Boolean(obj.isDeputy),
       slotIndex: obj.slotIndex ?? undefined,
       musicianId: obj.musicianId ? String(obj.musicianId) : undefined,
@@ -203,9 +176,7 @@ export async function sendWhatsAppMessage(opts = {}) {
     const fn = (p.firstName || p.name || "").trim();
     const ln = (p.lastName || "").trim();
     const dn = fn && ln ? `${fn} ${ln}` : fn || ln || "";
-    if (log) {
-      logIdentity(label, { ...p, displayName: dn });
-    }
+    if (log) logIdentity(label, { ...p, displayName: dn });
     return dn;
   };
 
@@ -217,9 +188,7 @@ export async function sendWhatsAppMessage(opts = {}) {
       mus?.photoUrl ||
       mus?.imageUrl ||
       "";
-    return typeof url === "string" && url.trim().startsWith("http")
-      ? url.trim()
-      : "";
+    return typeof url === "string" && url.trim().startsWith("http") ? url.trim() : "";
   }
 
   const PUBLIC_SITE_BASE = (
@@ -227,30 +196,36 @@ export async function sendWhatsAppMessage(opts = {}) {
     process.env.FRONTEND_URL ||
     "http://localhost:5174"
   ).replace(/\/$/, "");
-
-  const buildProfileUrl = (id) =>
-    id ? `${PUBLIC_SITE_BASE}/musician/${id}` : "";
+  const buildProfileUrl = (id) => (id ? `${PUBLIC_SITE_BASE}/musician/${id}` : "");
 
   const memberNames = firstLast(member || {});
   const memberDisplayName = displayNameOf(member || {});
   const memberPhotoUrl = pickPic(member || {});
   const memberProfileUrl = buildProfileUrl(member?._id || member?.musicianId);
 
-  // Attempt to infer deputy flag from member
   const isDeputy =
     (member && (member.isDeputy === true || member?.role === "deputy")) ||
     (typeof opts.isDeputy === "boolean" ? opts.isDeputy : undefined);
 
-let enrichedVars = {
-  firstName: member?.firstName || member?.name || "Musician",
-  date: formattedDate,
-  location: shortAddress,
-  fee: String(formattedFee).replace(/[^0-9.]/g, ""),
-  role: role || member?.instrument || "Musician",
-  actName: actData?.tscName || actData?.name || "TSC Act",
-  ...(variables || {}),
-};
-enrichedVars.fee = String(enrichedVars.fee ?? "").replace(/[^0-9.]/g, "");
+  // enrich variables for ContentSid templates
+  let enrichedVars = {
+    firstName: member?.firstName || member?.name || "Musician",
+    date: formattedDate,
+    location: shortAddress,
+    fee: String(formattedFee).replace(/[^0-9.]/g, ""),
+    role: role || member?.instrument || "Musician",
+    actName: actData?.tscName || actData?.name || "TSC Act",
+    ...(variables || {}),
+  };
+  enrichedVars.fee = String(enrichedVars.fee ?? "").replace(/[^0-9.]/g, "");
+
+  // add correlation variables so templates can show them
+  const requestCode = requestId ? `#${requestId}` : "";
+  enrichedVars = {
+    ...enrichedVars,
+    requestId: requestId || "",
+    requestCode,
+  };
 
   console.log("📨 [sendWhatsAppMessage] PRE-SEND", {
     to: toE,
@@ -258,7 +233,7 @@ enrichedVars.fee = String(enrichedVars.fee ?? "").replace(/[^0-9.]/g, "");
     actName: actData?.tscName || actData?.name || "",
     lineupId: lineup?._id || lineup?.lineupId || null,
     address,
-    formattedAddress: opts.formattedAddress || null, // if caller passed it
+    formattedAddress: opts.formattedAddress || null,
     dateISO,
     ...memberNames,
     displayName: memberDisplayName,
@@ -267,15 +242,77 @@ enrichedVars.fee = String(enrichedVars.fee ?? "").replace(/[^0-9.]/g, "");
     photoUrl: memberPhotoUrl,
     isDeputy,
     variables: enrichedVars,
-    contentSid: contentSid || TWILIO_ENQUIRY_SID,
+    contentSid: contentSid || (typeof TWILIO_ENQUIRY_SID !== "undefined" ? TWILIO_ENQUIRY_SID : undefined),
+    requestId,
+    buttonsCount: Array.isArray(buttons) ? buttons.length : 0,
   });
 
+  // ── build base text (used for plain & interactive) ────────────────────────────
+  const baseBody =
+    smsBody ||
+    `Are you available for ${actData?.tscName || actData?.name || "this act"} on ${formattedDate} in ${shortAddress}? Fee: ${formattedFee}.`;
+
+  // ── INTERACTIVE BUTTONS path (carries requestId in reply IDs) ─────────────────
+  if (Array.isArray(buttons) && buttons.length) {
+    const interactiveButtons = buttons.map((b) => ({
+      type: "reply",
+      reply: { id: b.id, title: b.title },
+    }));
+
+    const interactivePayload = {
+      from: `whatsapp:${fromE}`,
+      to: `whatsapp:${toE}`,
+      body: `${baseBody}\n\nRef: ${requestCode}`, // visible fallback ref
+      interactive: {
+        type: "button",
+        body: { text: `Please tap a button below.\nRef: ${requestCode}` },
+        action: { buttons: interactiveButtons },
+      },
+      ...(typeof statusCallback !== "undefined" && statusCallback ? { statusCallback } : {}),
+    };
+
+    const msg = await client.messages.create(interactivePayload);
+
+    console.log("✅ [sendWhatsAppMessage] SENT (interactive)", {
+      sid: msg?.sid,
+      status: msg?.status,
+      to: toE,
+    });
+
+    // Optional persistence of fallback SMS body
+    try {
+      const twilioSid = msg?.sid;
+      const dest = toE164(to);
+      if (twilioSid && dest && smsBody && !contentSid) {
+        await AvailabilityModel.updateOne(
+          { phone: dest, v2: true },
+          { $set: { "outbound.sid": twilioSid, "outbound.smsBody": smsBody, updatedAt: new Date() } }
+        );
+        if (typeof WA_FALLBACK_CACHE !== "undefined" && WA_FALLBACK_CACHE?.set) {
+          WA_FALLBACK_CACHE.set(twilioSid, { to: dest, smsBody });
+        }
+        console.log("💾 [sendWhatsAppMessage] Fallback persisted", { twilioSid });
+      }
+    } catch (e) {
+      console.warn("[sendWhatsAppMessage] Persist fallback failed:", e?.message || e);
+    }
+
+    return msg;
+  }
+
+  // ── CONTENT TEMPLATE or PLAIN TEXT path ───────────────────────────────────────
   const payload = {
     from: `whatsapp:${fromE}`,
     to: `whatsapp:${toE}`,
-    contentSid: contentSid || TWILIO_ENQUIRY_SID,
-    contentVariables: JSON.stringify(enrichedVars),
-    ...(statusCallback ? { statusCallback } : {}),
+    ...(contentSid || (typeof TWILIO_ENQUIRY_SID !== "undefined" && TWILIO_ENQUIRY_SID)
+      ? {
+          contentSid: contentSid || TWILIO_ENQUIRY_SID,
+          contentVariables: JSON.stringify(enrichedVars),
+        }
+      : {
+          body: `${baseBody}${requestCode ? `\n\nRef: ${requestCode}` : ""}`,
+        }),
+    ...(typeof statusCallback !== "undefined" && statusCallback ? { statusCallback } : {}),
   };
 
   const msg = await client.messages.create(payload);
@@ -286,29 +323,22 @@ enrichedVars.fee = String(enrichedVars.fee ?? "").replace(/[^0-9.]/g, "");
     to: toE,
   });
 
-  // Persist fallback SMS body if relevant
+  // Optional fallback persistence (only when sending plain body)
   try {
     const twilioSid = msg?.sid;
     const dest = toE164(to);
-    if (twilioSid && dest && smsBody && !contentSid) {
+    if (twilioSid && dest && smsBody && !(contentSid || (typeof TWILIO_ENQUIRY_SID !== "undefined" && TWILIO_ENQUIRY_SID))) {
       await AvailabilityModel.updateOne(
         { phone: dest, v2: true },
-        {
-          $set: {
-            "outbound.sid": twilioSid,
-            "outbound.smsBody": smsBody,
-            updatedAt: new Date(),
-          },
-        }
+        { $set: { "outbound.sid": twilioSid, "outbound.smsBody": smsBody, updatedAt: new Date() } }
       );
-      WA_FALLBACK_CACHE.set(twilioSid, { to: dest, smsBody });
+      if (typeof WA_FALLBACK_CACHE !== "undefined" && WA_FALLBACK_CACHE?.set) {
+        WA_FALLBACK_CACHE.set(twilioSid, { to: dest, smsBody });
+      }
       console.log("💾 [sendWhatsAppMessage] Fallback persisted", { twilioSid });
     }
   } catch (e) {
-    console.warn(
-      "[sendWhatsAppMessage] Persist fallback failed:",
-      e?.message || e
-    );
+    console.warn("[sendWhatsAppMessage] Persist fallback failed:", e?.message || e);
   }
 
   return msg;
