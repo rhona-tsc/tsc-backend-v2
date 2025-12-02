@@ -381,16 +381,16 @@ async function getDeputyById(req, res) {
   }
 }
 
-// Deputy Registration / Update Controller
 const registerDeputy = async (req, res) => {
   console.group("📩 NEW DEPUTY REGISTRATION REQUEST");
   console.log("📨 Request received at:", new Date().toISOString());
   console.log("📁 Multer req.files:", req.files);
-
+  console.log("🧾 req.body keys:", Object.keys(req.body || {}));
 
   try {
     const body = req.body;
 
+    // helpers
     const safeParse = (v, fallback) => {
       try {
         return v && typeof v === "string" ? JSON.parse(v) : (v ?? fallback);
@@ -398,30 +398,29 @@ const registerDeputy = async (req, res) => {
         return fallback;
       }
     };
+    const asArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+    const stringArray = (v) => asArray(v).map(String).filter(Boolean);
+    const urlArray = (v) => stringArray(v).filter((s) => /^https?:\/\//i.test(s));
 
-    // ✔ Normalise + extract email from incoming `basicInfo`
-  let email = null;
-try {
-  if (typeof body.basicInfo === "string") {
-    email = JSON.parse(body.basicInfo || "{}")?.email;
-  } else if (body.basicInfo?.email) {
-    email = body.basicInfo.email;
-  }
-} catch { /* ignore parse error; fall back below */ }
+    // email from basicInfo or top-level
+    let email = null;
+    try {
+      if (typeof body.basicInfo === "string") {
+        email = JSON.parse(body.basicInfo || "{}")?.email;
+      } else if (body.basicInfo?.email) {
+        email = body.basicInfo.email;
+      }
+    } catch {}
+    if (!email && body.email) email = String(body.email).trim().toLowerCase();
+    email = email ? email.trim().toLowerCase() : null;
 
-if (!email && body.email) {
-  email = String(body.email).trim().toLowerCase();
-}
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email is required." });
+    }
 
-email = email ? email.trim().toLowerCase() : null;
-
-if (!email) {
-  return res.status(400).json({ success: false, message: "Email is required." });
-}
-
+    // find/create doc
     let musician = await musicianModel.findOne({ email });
     let createdNew = false;
-
     if (!musician) {
       musician = new musicianModel({ email, status: "pending" });
       createdNew = true;
@@ -430,67 +429,208 @@ if (!email) {
       console.log("🟡 Updating existing musician:", email);
     }
 
-    // ✔ Safe assign simple optional fields
-    musician.firstName = body.firstName || musician.firstName || JSON.parse(body.basicInfo)?.firstName || "";
-    musician.lastName = body.lastName || musician.lastName || JSON.parse(body.basicInfo)?.lastName || "";
-    musician.phone = body.phone || JSON.parse(body.basicInfo)?.phone || musician.phone || "";
+    // parse blobs
+    const basicInfo = safeParse(body.basicInfo, {});
+    const address = safeParse(body.address, musician.address || {});
+    const bank = safeParse(body.bank_account, musician.bank_account || {});
+    const academic_credentials = safeParse(body.academic_credentials, []);
+    const agreementCheckboxes = safeParse(body.agreementCheckboxes, []);
+    const paAndBackline = safeParse(body.paAndBackline, []); // optional
+    const backline = safeParse(body.backline, []);
+    const vocalMics = safeParse(body.vocalMics, {});
+    const inEarMonitoring = safeParse(body.inEarMonitoring, {});
+    const instrumentMics = safeParse(body.instrumentMics, {});
+    const speechMics = safeParse(body.speechMics, {});
+    const instrumentation = safeParse(body.instrumentation, []);
+    const awards = safeParse(body.awards, []);
+    const sessions = safeParse(body.sessions, []);
+    const social_media_links = safeParse(body.social_media_links, []);
+    const repertoire = safeParse(body.repertoire, []);
+    const selectedSongs = safeParse(body.selectedSongs, []);
+    const other_skills = safeParse(body.other_skills, []);
+    const logistics = safeParse(body.logistics, []);
 
-  
-  
-    // ✔ Optional nested objects
-    musician.agreementCheckboxes = safeParse(body.agreementCheckboxes, []);
+    const functionBandVideoLinks = safeParse(body.functionBandVideoLinks, []);
+    const tscApprovedFunctionBandVideoLinks = safeParse(body.tscApprovedFunctionBandVideoLinks, []);
+    const originalBandVideoLinks = safeParse(body.originalBandVideoLinks, []);
+    const tscApprovedOriginalBandVideoLinks = safeParse(body.tscApprovedOriginalBandVideoLinks, []);
 
-    // ✔ PA and Backline systems are submitted as separate fields in your form
-    musician.paAndBackline = safeParse(body.paAndBackline, []);
-    musician.backline = safeParse(body.backline, []);
-    musician.vocalMics = safeParse(body.vocalMics, {});
-    musician.inEarMonitoring = safeParse(body.inEarMonitoring, {});
-    musician.instrumentMics = safeParse(body.instrumentMics, {});
-    musician.speechMics = safeParse(body.speechMics, {});
-    musician.instrumentation = safeParse(body.instrumentation, []);
-    musician.awards = safeParse(body.awards, []);
-    musician.sessions = safeParse(body.sessions, []);
-    musician.other_skills = safeParse(body.other_skills, []);
-    musician.logistics = safeParse(body.logistics, []);
-    musician.academic_credentials = safeParse(body.academic_credentials, []);
-    musician.social_media_links = safeParse(body.social_media_links, []);
+    // lighting / PA
+    const cableLogistics = safeParse(body.cableLogistics, []);
+    const extensionCableLogistics = safeParse(body.extensionCableLogistics, []);
+    const uplights = safeParse(body.uplights, []);
+    const tbars = safeParse(body.tbars, []);
+    const lightBars = safeParse(body.lightBars, []);
+    const discoBall = safeParse(body.discoBall, []);
+    const otherLighting = safeParse(body.otherLighting, []);
+    const paSpeakerSpecs = safeParse(body.paSpeakerSpecs, []);
+    const mixingDesk = safeParse(body.mixingDesk, []);
+    const floorMonitorSpecs = safeParse(body.floorMonitorSpecs, []);
+    const djEquipment = safeParse(body.djEquipment, []);
+    const djEquipmentCategories = safeParse(body.djEquipmentCategories, []);
+    const djGearRequired = safeParse(body.djGearRequired, []);
+    const instrumentSpecs = safeParse(body.instrumentSpecs, []);
 
+    // wardrobe / extra images as URL strings
+    const digitalWardrobeBlackTie = urlArray(body.digitalWardrobeBlackTie);
+    const digitalWardrobeFormal = urlArray(body.digitalWardrobeFormal);
+    const digitalWardrobeSmartCasual = urlArray(body.digitalWardrobeSmartCasual);
+    const digitalWardrobeSessionAllBlack = urlArray(body.digitalWardrobeSessionAllBlack);
+    const additionalImages = urlArray(body.additionalImages);
 
-// 🎤 ensure vocals object exists, then assign tolerant array
-if (!musician.vocals) musician.vocals = {};
-const vocalsParsed = safeParse(body.vocals, {});
-musician.vocals.type = Array.isArray(vocalsParsed.type) ? vocalsParsed.type : [];
-musician.markModified("vocals.type");
-    // ✔ Songs
- 
+    // mp3s: files OR JSON
+    let coverMp3s = [];
+    let originalMp3s = [];
 
-    // ✔ MP3s are files
-    if (req.files?.coverMp3s) {
-      musician.coverMp3s = req.files.coverMp3s.map(f => ({ title: "", url: f.path }));
-      musician.markModified("coverMp3s");
+    if (req.files?.coverMp3s?.length) {
+      coverMp3s = req.files.coverMp3s.map((f) => ({ title: "", url: f.path }));
+    } else {
+      const coverMp3sBody = safeParse(body.coverMp3s, []);
+      if (Array.isArray(coverMp3sBody)) {
+        coverMp3s = coverMp3sBody
+          .map((x) => (typeof x === "string" ? { title: "", url: x } : { title: x?.title || "", url: x?.url || "" }))
+          .filter((m) => m.url);
+      }
     }
 
-    if (req.files?.originalMp3s) {
-      musician.originalMp3s = req.files.originalMp3s.map(f => ({ title: "", url: f.path }));
-      musician.markModified("originalMp3s");
+    if (req.files?.originalMp3s?.length) {
+      originalMp3s = req.files.originalMp3s.map((f) => ({ title: "", url: f.path }));
+    } else {
+      const originalMp3sBody = safeParse(body.originalMp3s, []);
+      if (Array.isArray(originalMp3sBody)) {
+        originalMp3s = originalMp3sBody
+          .map((x) => (typeof x === "string" ? { title: "", url: x } : { title: x?.title || "", url: x?.url || "" }))
+          .filter((m) => m.url);
+      }
     }
 
-    // ✔ Optional image uploads
+    // simple fields
+    musician.firstName = (body.firstName || basicInfo.firstName || musician.firstName || "").trim();
+    musician.lastName = (body.lastName || basicInfo.lastName || musician.lastName || "").trim();
+    musician.phone = (body.phone || basicInfo.phone || musician.phone || "").trim();
+    musician.role = body.role || musician.role || "musician";
+    musician.status = musician.status || "pending";
+    musician.bio = body.bio ?? musician.bio ?? "";
+    musician.tscApprovedBio = body.tscApprovedBio ?? musician.tscApprovedBio ?? "";
+    musician.tagLine = body.tagLine ?? musician.tagLine ?? "";
+
+    if (body.dateRegistered) {
+      const d = new Date(body.dateRegistered);
+      if (!isNaN(d)) musician.dateRegistered = d;
+    }
+
+    // contracts
+    const agreed = safeParse(body.deputy_contract_agreed, null);
+    if (typeof agreed === "boolean") {
+      musician.deputy_contract_agreed = agreed;
+    } else if (typeof agreed === "string") {
+      musician.deputy_contract_agreed = agreed === "true";
+    }
+    if (typeof body.deputy_contract_signed === "string") {
+      musician.deputy_contract_signed = body.deputy_contract_signed;
+    }
+
+    // nested assigns
+    musician.address = address;
+    musician.bank_account = bank;
+    musician.academic_credentials = academic_credentials;
+    musician.agreementCheckboxes = agreementCheckboxes;
+    musician.paAndBackline = paAndBackline;
+    musician.backline = backline;
+    musician.vocalMics = vocalMics;
+    musician.inEarMonitoring = inEarMonitoring;
+    musician.instrumentMics = instrumentMics;
+    musician.speechMics = speechMics;
+    musician.instrumentation = instrumentation;
+    musician.awards = awards;
+    musician.sessions = sessions;
+    musician.social_media_links = social_media_links;
+    musician.repertoire = repertoire;
+    musician.selectedSongs = selectedSongs;
+    musician.other_skills = other_skills;
+    musician.logistics = logistics;
+
+    // videos
+    musician.functionBandVideoLinks = functionBandVideoLinks;
+    musician.tscApprovedFunctionBandVideoLinks = tscApprovedFunctionBandVideoLinks;
+    musician.originalBandVideoLinks = originalBandVideoLinks;
+    musician.tscApprovedOriginalBandVideoLinks = tscApprovedOriginalBandVideoLinks;
+
+    // lighting / PA
+    musician.cableLogistics = cableLogistics;
+    musician.extensionCableLogistics = extensionCableLogistics;
+    musician.uplights = uplights;
+    musician.tbars = tbars;
+    musician.lightBars = lightBars;
+    musician.discoBall = discoBall;
+    musician.otherLighting = otherLighting;
+    musician.paSpeakerSpecs = paSpeakerSpecs;
+    musician.mixingDesk = mixingDesk;
+    musician.floorMonitorSpecs = floorMonitorSpecs;
+    musician.djEquipment = djEquipment;
+    musician.djEquipmentCategories = djEquipmentCategories;
+    musician.djGearRequired = djGearRequired;
+    musician.instrumentSpecs = instrumentSpecs;
+
+    // wardrobe/images
+    musician.digitalWardrobeBlackTie = digitalWardrobeBlackTie;
+    musician.digitalWardrobeFormal = digitalWardrobeFormal;
+    musician.digitalWardrobeSmartCasual = digitalWardrobeSmartCasual;
+    musician.digitalWardrobeSessionAllBlack = digitalWardrobeSessionAllBlack;
+    musician.additionalImages = additionalImages;
+
+    // mp3s
+    musician.coverMp3s = coverMp3s;
+    musician.originalMp3s = originalMp3s;
+
+    // vocals
+    if (!musician.vocals) musician.vocals = {};
+    const vocalsParsed = safeParse(body.vocals, {});
+    musician.vocals.type = Array.isArray(vocalsParsed.type) ? vocalsParsed.type : [];
+    musician.vocals.gender = vocalsParsed.gender || "";
+    musician.vocals.range = vocalsParsed.range || "";
+    musician.vocals.rap = vocalsParsed.rap === true || vocalsParsed.rap === "true";
+    musician.vocals.genres = Array.isArray(vocalsParsed.genres) ? vocalsParsed.genres : [];
+
+    // profile & cover images (file or string URL)
     if (req.files?.profilePicture?.[0]?.buffer) {
       const f = req.files.profilePicture[0];
       const up = await uploader(f.buffer, f.originalname || "profile.jpg", "musicians");
-      musician.profilePhoto = up.secure_url;
-      musician.markModified("profilePhoto");
+      musician.profilePicture = up.secure_url;
+    } else if (typeof body.profilePicture === "string" && body.profilePicture.trim()) {
+      musician.profilePicture = body.profilePicture.trim();
     }
 
     if (req.files?.coverHeroImage?.[0]?.buffer) {
       const f = req.files.coverHeroImage[0];
       const up = await uploader(f.buffer, f.originalname || "cover-hero.jpg", "musicians");
       musician.coverHeroImage = up.secure_url;
-      musician.markModified("coverHeroImage");
+    } else if (typeof body.coverHeroImage === "string" && body.coverHeroImage.trim()) {
+      musician.coverHeroImage = body.coverHeroImage.trim();
     }
 
-    // 💾 Save
+    // mark modified where helpful
+    musician.markModified("vocalMics");
+    musician.markModified("inEarMonitoring");
+    musician.markModified("instrumentMics");
+    musician.markModified("speechMics");
+    musician.markModified("instrumentation");
+    musician.markModified("repertoire");
+    musician.markModified("selectedSongs");
+    musician.markModified("social_media_links");
+    musician.markModified("functionBandVideoLinks");
+    musician.markModified("tscApprovedFunctionBandVideoLinks");
+    musician.markModified("originalBandVideoLinks");
+    musician.markModified("tscApprovedOriginalBandVideoLinks");
+    musician.markModified("digitalWardrobeBlackTie");
+    musician.markModified("digitalWardrobeFormal");
+    musician.markModified("digitalWardrobeSmartCasual");
+    musician.markModified("digitalWardrobeSessionAllBlack");
+    musician.markModified("additionalImages");
+    musician.markModified("coverMp3s");
+    musician.markModified("originalMp3s");
+    musician.markModified("vocals");
+
     const saved = await musician.save();
     console.log("✅ Musician saved:", saved._id.toString());
     console.groupEnd();
@@ -504,13 +644,14 @@ musician.markModified("vocals.type");
         status: saved.status,
         firstName: saved.firstName,
         lastName: saved.lastName,
-      }
+      },
     });
-
   } catch (err) {
     console.error("❌ Deputy registration failed:", err);
     console.groupEnd();
-    return res.status(400).json({ success: false, message: "Deputy registration failed", error: err.message });
+    return res
+      .status(400)
+      .json({ success: false, message: "Deputy registration failed", error: err.message });
   }
 };
 
