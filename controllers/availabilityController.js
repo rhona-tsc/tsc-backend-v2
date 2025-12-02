@@ -1526,62 +1526,76 @@ if (mus) {
 }
 
 
-export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
-  const isExpress = !!maybeRes;
-  const body = isExpress ? reqOrArgs.body : reqOrArgs;
-  const res = isExpress ? maybeRes : null;
+// 🔧 Adjust these imports to your project structure
+import Act from "../models/actModel.js";
+import AvailabilityModel from "../models/availabilityModel.js";
+import Musician from "../models/musicianModel.js";
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Helpers
-  // ────────────────────────────────────────────────────────────────────────────
-  const makeShortId = () =>
-    Math.random().toString(36).slice(2, 8).toUpperCase();
+import { notifyDeputies } from "./notifyDeputies.js";
+import { rebuildAndApplyAvailabilityBadge } from "./availabilityBadge.js";
+import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
+import { findVocalistPhone } from "../utils/findVocalistPhone.js";
 
-  const normalizeNameBits = (nameLike) => {
-    const s = (nameLike ?? "").toString().trim();
-    if (!s) return { first:"", last:"", firstName:"", lastName:"", displayName:"", vocalistDisplayName:"" };
-    const parts = s.split(/\s+/);
-    const first = parts[0] || "";
-    const last = parts.length > 1 ? parts.slice(1).join(" ") : "";
-    return {
-      first, last,
-      firstName: first, lastName: last,
-      displayName: s,
-      vocalistDisplayName: s,
-    };
-  };
+import { countyFromAddress, getCountyFeeValue } from "../utils/geo/countyFromAddress.js";
+import { computeMemberTravelFee } from "../utils/travel/computeMemberTravelFee.js";
+import userModel from "../models/userModel.js";
 
-  // --- helpers to derive county + postcode (UK) from a freeform address
+// If you already have these helpers elsewhere, remove these and import instead.
+const makeShortId = () => Math.random().toString(36).slice(2, 8).toUpperCase();
+const normalizeToE164 = (raw = "") => normalizePhone(raw);
+const normalizePhone = (raw = "") => {
+  let v = String(raw || "").replace(/\s+/g, "").replace(/^whatsapp:/i, "");
+  if (!v) return "";
+  if (v.startsWith("+")) return v;
+  if (v.startsWith("07")) return v.replace(/^0/, "+44");
+  if (v.startsWith("44")) return `+${v}`;
+  return v;
+};
 const extractUKPostcode = (s = "") => {
   const m = String(s).toUpperCase().match(/\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/);
   return m ? m[1].replace(/\s+/, " ") : "";
 };
-
-  const displayNameOf = (p = {}) => {
-    const fn = (p.firstName || p.name || "").trim();
-    const ln = (p.lastName || "").trim();
-    return (fn && ln) ? `${fn} ${ln}` : fn || ln || "";
+const normalizeNameBits = (nameLike) => {
+  const s = (nameLike ?? "").toString().trim();
+  if (!s)
+    return {
+      first: "",
+      last: "",
+      firstName: "",
+      lastName: "",
+      displayName: "",
+      vocalistDisplayName: "",
+    };
+  const parts = s.split(/\s+/);
+  const first = parts[0] || "";
+  const last = parts.length > 1 ? parts.slice(1).join(" ") : "";
+  return {
+    first,
+    last,
+    firstName: first,
+    lastName: last,
+    displayName: s,
+    vocalistDisplayName: s,
   };
+};
+const displayNameOf = (p = {}) => {
+  const fn = (p.firstName || p.name || "").trim();
+  const ln = (p.lastName || "").trim();
+  return fn && ln ? `${fn} ${ln}` : fn || ln || "";
+};
+const pickPic = (m = {}) =>
+  m.photoUrl ||
+  m.musicianProfileImageUpload ||
+  m.profileImage ||
+  m.imageUrl ||
+  m.profilePicture ||
+  m.musicianProfileImage ||
+  null;
 
-  const pickPic = (m = {}) =>
-    m.photoUrl ||
-    m.musicianProfileImageUpload ||
-    m.profileImage ||
-    m.imageUrl ||
-    m.profilePicture ||
-    m.musicianProfileImage ||
-    null;
-
-  const normalizePhone = (raw = "") => {
-    let v = String(raw || "").replace(/\s+/g, "").replace(/^whatsapp:/i, "");
-    if (!v) return "";
-    if (v.startsWith("+")) return v;
-    if (v.startsWith("07")) return v.replace(/^0/, "+44");
-    if (v.startsWith("44")) return `+${v}`;
-    return v;
-  };
-
-  const normalizeToE164 = (raw = "") => normalizePhone(raw); // alias
+export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
+  const isExpress = !!maybeRes;
+  const body = isExpress ? reqOrArgs.body : reqOrArgs;
+  const res = isExpress ? maybeRes : null;
 
   try {
     const {
@@ -1595,7 +1609,7 @@ const extractUKPostcode = (s = "") => {
       clientEmail,
       isDeputy = false,
       deputy = null,
-      inheritedFee = null, // 🔹 optional
+      inheritedFee = null, // optional
       skipDuplicateCheck = false,
       selectedVocalistName = "",
       vocalistName = "",
@@ -1611,11 +1625,7 @@ const extractUKPostcode = (s = "") => {
     /* 🔢 Enquiry + slotIndex base                                    */
     /* -------------------------------------------------------------- */
     const enquiryId =
-      body.enquiryId ||
-      body.shortlistId ||
-      body.requestId ||
-      body.parentKey ||
-      null;
+      body.enquiryId || body.shortlistId || body.requestId || body.parentKey || null;
 
     if (!enquiryId) {
       console.warn("⚠️ No enquiryId provided — slotIndex grouping may fail");
@@ -1625,7 +1635,7 @@ const extractUKPostcode = (s = "") => {
       ? await AvailabilityModel.find({ enquiryId }).lean()
       : [];
 
-    const slotIndexBase = existingForEnquiry.length; // kept for reference
+    const slotIndexBase = existingForEnquiry.length; // just FYI
     const slotIndexFromBody =
       typeof body.slotIndex === "number" ? body.slotIndex : null;
 
@@ -1648,7 +1658,9 @@ const extractUKPostcode = (s = "") => {
         if (userDoc) {
           resolvedClientName = `${userDoc.firstName || ""} ${userDoc.surname || ""}`.trim();
           resolvedClientEmail = userDoc.email || "";
-          console.log(`📧 Enriched client details from userId: ${resolvedClientName} <${resolvedClientEmail}>`);
+          console.log(
+            `📧 Enriched client details from userId: ${resolvedClientName} <${resolvedClientEmail}>`
+          );
         }
       } catch (err) {
         console.warn("⚠️ Failed to enrich client from userId:", err.message);
@@ -1668,17 +1680,19 @@ const extractUKPostcode = (s = "") => {
     const fullFormattedAddress =
       formattedAddress || address || act?.formattedAddress || act?.venueAddress || "TBC";
 
-   const { county: derivedCounty } = countyFromAddress(fullFormattedAddress) || {};
-const derivedPostcode = extractUKPostcode(fullFormattedAddress);
-let shortAddress = [derivedCounty, derivedPostcode].filter(Boolean).join(", ") || "TBC";
+    // Short address = "County, POSTCODE"
+    const { county: derivedCounty } = countyFromAddress(fullFormattedAddress) || {};
+    const derivedPostcode = extractUKPostcode(fullFormattedAddress);
+    let shortAddress =
+      [derivedCounty, derivedPostcode].filter(Boolean).join(", ") || "TBC";
 
-// Debug so we can trace where it came from:
-console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
-  shortAddress,
-  derivedCounty,
-  derivedPostcode,
-  fullFormattedAddress,
-});
+    // Debug shortAddress to trace variables into templates
+    console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
+      shortAddress,
+      derivedCounty,
+      derivedPostcode,
+      fullFormattedAddress,
+    });
 
     const metaAddress = fullFormattedAddress || shortAddress || "TBC";
 
@@ -1719,7 +1733,9 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       : lineups[0];
 
     if (!lineup) {
-      console.warn("⚠️ No valid lineup found — defaulting to first available or skipping lineup-specific logic.");
+      console.warn(
+        "⚠️ No valid lineup found — defaulting to first available or skipping lineup-specific logic."
+      );
     }
 
     const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
@@ -1816,7 +1832,10 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
             if (mus) enriched = { ...mus, ...enriched };
           }
         } catch (err) {
-          console.warn(`⚠️ Failed to enrich vocalist ${vMember.firstName}:`, err.message);
+          console.warn(
+            `⚠️ Failed to enrich vocalist ${vMember.firstName}:`,
+            err.message
+          );
         }
 
         // 🧯 PRIOR-REPLY CHECK (per-slot)
@@ -1832,12 +1851,21 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
             .sort({ updatedAt: -1, createdAt: -1 })
             .lean();
 
-          if (prior && addressesRoughlyEqual(prior.formattedAddress || prior.address || "", fullFormattedAddress)) {
-            console.log("ℹ️ Using existing reply (multi-vocalist) — skipping WA send", {
-              slotIndex: slotIndexForThis,
-              reply: prior.reply,
-              phone,
-            });
+          if (
+            prior &&
+            addressesRoughlyEqual(
+              prior.formattedAddress || prior.address || "",
+              fullFormattedAddress
+            )
+          ) {
+            console.log(
+              "ℹ️ Using existing reply (multi-vocalist) — skipping WA send",
+              {
+                slotIndex: slotIndexForThis,
+                reply: prior.reply,
+                phone,
+              }
+            );
 
             if (prior.reply === "unavailable" || prior.reply === "no") {
               await notifyDeputies({
@@ -1871,7 +1899,10 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
                   });
                 }
               } catch (e) {
-                console.warn("⚠️ Badge refresh (existing YES) failed:", e?.message || e);
+                console.warn(
+                  "⚠️ Badge refresh (existing YES) failed:",
+                  e?.message || e
+                );
               }
             }
 
@@ -1919,7 +1950,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
         // 🔗 correlation id
         const requestId = makeShortId();
 
-        // ⛳ INSERT-ONLY META — no duplicates with $set
+        // ⛳ INSERT-ONLY META — keep clean
         const setOnInsert = {
           actId,
           lineupId: lineup?._id || null,
@@ -1933,9 +1964,11 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
           reply: null,
         };
 
-        const displayNameForLead = `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim();
+        const displayNameForLead = `${enriched.firstName || vMember.firstName || ""} ${
+          enriched.lastName || vMember.lastName || ""
+        }`.trim();
 
-        // 🔁 ALWAYS-UPDATE FIELDS
+        // 🔁 ALWAYS-UPDATE FIELDS (requestId ONLY HERE → avoids $setOnInsert conflict)
         const setAlways = {
           isDeputy: false,
           musicianId: realMusicianId,
@@ -1954,8 +1987,10 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
           selectedVocalistName: displayNameForLead,
           selectedVocalistId: realMusicianId || null,
           vocalistName: displayNameForLead,
-          profileUrl: realMusicianId ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}` : "",
-          requestId, // ← only in $set
+          profileUrl: realMusicianId
+            ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}`
+            : "",
+          requestId, // ← set here (no $setOnInsert duplicate)
         };
 
         console.log("🔎 [triggerAvailabilityRequest/multi] PERSON", {
@@ -1989,14 +2024,14 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
 
         // Build interactive buttons (carry requestId)
         const buttons = [
-          { id: `YES:${requestId}`,         title: "Yes" },
-          { id: `NO:${requestId}`,          title: "No" },
+          { id: `YES:${requestId}`, title: "Yes" },
+          { id: `NO:${requestId}`, title: "No" },
           { id: `UNAVAILABLE:${requestId}`, title: "Unavailable" },
         ];
 
         const nameBits = normalizeNameBits(displayNameOf(vMember));
 
-        // Send interactive WA (no contentSid with interactive)
+        // Send interactive WA (variables use shortAddress)
         const msg = await sendWhatsAppMessage({
           to: phone,
           actData: act,
@@ -2013,22 +2048,35 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
             role: vMember.instrument,
             actName: act.tscName || act.name,
           },
-          requestId,   // 🔗
-          buttons,     // 🔗
-          smsBody: `Hi ${vMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${vMember.instrument} duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
+          requestId, // 🔗
+          buttons, // 🔗
+          smsBody: `Hi ${
+            vMember.firstName || "there"
+          }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${
+            vMember.instrument
+          } duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
         });
 
-        // persist Twilio SID + requestId to the row
+        // persist Twilio SID (requestId already set above)
         try {
           await AvailabilityModel.updateOne(
             { _id: savedLead._id },
-            { $set: { messageSidOut: msg?.sid || null, requestId } }
+            { $set: { messageSidOut: msg?.sid || null } }
           );
         } catch (e) {
-          console.warn("⚠️ Could not persist messageSidOut/requestId (multi):", e?.message || e);
+          console.warn(
+            "⚠️ Could not persist messageSidOut (multi):",
+            e?.message || e
+          );
         }
 
-        results.push({ name: vMember.firstName, slotIndex: slotIndexForThis, phone, requestId, sid: msg?.sid || null });
+        results.push({
+          name: vMember.firstName,
+          slotIndex: slotIndexForThis,
+          phone,
+          requestId,
+          sid: msg?.sid || null,
+        });
       }
 
       console.log(`✅ Multi-vocalist availability triggered for:`, results);
@@ -2051,7 +2099,9 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
         const mus = await Musician.findById(targetMember.musicianId).lean();
         if (mus) enrichedMember = { ...mus, ...enrichedMember };
       } else {
-        const cleanPhone = normalizePhone(targetMember.phone || targetMember.phoneNumber || "");
+        const cleanPhone = normalizePhone(
+          targetMember.phone || targetMember.phoneNumber || ""
+        );
         if (cleanPhone) {
           const mus = await Musician.findOne({
             $or: [{ phoneNormalized: cleanPhone }, { phone: cleanPhone }],
@@ -2067,8 +2117,10 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       targetMember.musicianId = deputy.id;
     }
 
-    targetMember.email = enrichedMember.email || targetMember.email || null;
-    targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
+    targetMember.email =
+      enrichedMember.email || targetMember.email || null;
+    targetMember.musicianId =
+      enrichedMember._id || targetMember.musicianId || null;
 
     const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
     if (!phone) throw new Error("Missing phone");
@@ -2077,24 +2129,23 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
     const canonical = await findCanonicalMusicianByPhone(phone);
 
     // Prefer canonical-from-phone; fall back to any enriched/act ids
-    const canonicalId = canonical?._id
-      || enrichedMember?._id
-      || targetMember?.musicianId
-      || null;
+    const canonicalId =
+      canonical?._id || enrichedMember?._id || targetMember?.musicianId || null;
 
     const canonicalName = canonical
-      ? `${canonical.firstName || ''} ${canonical.lastName || ''}`.trim()
-      : `${targetMember.firstName || ''} ${targetMember.lastName || ''}`.trim();
+      ? `${canonical.firstName || ""} ${canonical.lastName || ""}`.trim()
+      : `${targetMember.firstName || ""} ${targetMember.lastName || ""}`.trim();
 
-    const canonicalPhoto = pickPic(canonical) ||
+    const canonicalPhoto =
+      pickPic(canonical) ||
       enrichedMember?.photoUrl ||
       enrichedMember?.profilePicture ||
-      '';
+      "";
 
     const selectedName = String(
       selectedVocalistName ||
-      canonicalName ||
-      `${targetMember?.firstName || ""} ${targetMember?.lastName || ""}`
+        canonicalName ||
+        `${targetMember?.firstName || ""} ${targetMember?.lastName || ""}`
     ).trim();
 
     /* -------------------------------------------------------------- */
@@ -2105,7 +2156,9 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       dateISO,
       phone,
       v2: true,
-      ...(isDeputy && slotIndexFromBody !== null ? { slotIndex: slotIndexFromBody } : {}),
+      ...(isDeputy && slotIndexFromBody !== null
+        ? { slotIndex: slotIndexFromBody }
+        : {}),
       reply: { $in: ["yes", "no", "unavailable"] },
     };
 
@@ -2113,7 +2166,13 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       .sort({ updatedAt: -1, createdAt: -1 })
       .lean();
 
-    if (prior && addressesRoughlyEqual(prior.formattedAddress || prior.address || "", fullFormattedAddress)) {
+    if (
+      prior &&
+      addressesRoughlyEqual(
+        prior.formattedAddress || prior.address || "",
+        fullFormattedAddress
+      )
+    ) {
       console.log("ℹ️ Using existing reply (single path) — skipping WA send", {
         isDeputy,
         reply: prior.reply,
@@ -2150,7 +2209,8 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
           formattedAddress: fullFormattedAddress,
           clientName: resolvedClientName || "",
           clientEmail: resolvedClientEmail || "",
-          slotIndex: typeof body.slotIndex === "number" ? body.slotIndex : null,
+          slotIndex:
+            typeof body.slotIndex === "number" ? body.slotIndex : null,
           skipDuplicateCheck: true,
           skipIfUnavailable: false,
         });
@@ -2168,12 +2228,17 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       dateISO,
       phone,
       v2: true,
-      ...(isDeputy && slotIndexFromBody !== null ? { slotIndex: slotIndexFromBody } : {}),
+      ...(isDeputy && slotIndexFromBody !== null
+        ? { slotIndex: slotIndexFromBody }
+        : {}),
     };
     const existingAny = await AvailabilityModel.findOne(strongGuardQuery).lean();
 
     if (existingAny && !skipDuplicateCheck) {
-      console.log("⚠️ Duplicate availability request detected — skipping WhatsApp send", strongGuardQuery);
+      console.log(
+        "⚠️ Duplicate availability request detected — skipping WhatsApp send",
+        strongGuardQuery
+      );
       if (res) return res.json({ success: true, sent: 0, skipped: "duplicate-strong" });
       return { success: true, sent: 0, skipped: "duplicate-strong" };
     }
@@ -2184,11 +2249,14 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
     let finalFee;
 
     if (isDeputy && inheritedFee) {
-      const parsed = parseFloat(String(inheritedFee).replace(/[^\d.]/g, "")) || 0;
+      const parsed =
+        parseFloat(String(inheritedFee).replace(/[^\d.]/g, "")) || 0;
       let inheritedTotal = parsed;
 
       if (inheritedTotal < 350) {
-        console.log("🧭 Inherited fee seems base-only — adding travel component for deputy");
+        console.log(
+          "🧭 Inherited fee seems base-only — adding travel component for deputy"
+        );
 
         const { county: selectedCounty } = countyFromAddress(fullFormattedAddress);
         const selectedDate = dateISO;
@@ -2218,7 +2286,11 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
         }
 
         inheritedTotal += travelFee;
-        console.log("💷 Deputy travel applied:", { travelFee, travelSource, inheritedTotal });
+        console.log("💷 Deputy travel applied:", {
+          travelFee,
+          travelSource,
+          inheritedTotal,
+        });
       }
 
       finalFee = Math.round(inheritedTotal);
@@ -2246,16 +2318,22 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
     }).lean();
 
     if (existing && !skipDuplicateCheck && ["unavailable", "no"].includes(existing.reply)) {
-      console.log(
-        "🚫 Skipping availability request — musician already marked unavailable/no reply",
-        { actId, dateISO, phone: existing.phone, reply: existing.reply }
-      );
+      console.log("🚫 Skipping — musician already unavailable/no", {
+        actId,
+        dateISO,
+        phone: existing.phone,
+        reply: existing.reply,
+      });
       if (res) return res.json({ success: true, sent: 0, skipped: existing.reply });
       return { success: true, sent: 0, skipped: existing.reply };
     }
 
     if (existing && !skipDuplicateCheck && !isDeputy) {
-      console.log("⚠️ Duplicate availability request detected — skipping WhatsApp send", { actId, dateISO, phone: existing.phone });
+      console.log("⚠️ Duplicate availability request detected — skipping", {
+        actId,
+        dateISO,
+        phone: existing.phone,
+      });
       if (res) return res.json({ success: true, sent: 0, skipped: "duplicate" });
       return { success: true, sent: 0, skipped: "duplicate" };
     }
@@ -2263,8 +2341,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
     /* -------------------------------------------------------------- */
     /* ✅ Upsert availability record (single lead / deputy)           */
     /* -------------------------------------------------------------- */
-    const singleSlotIndex =
-      typeof body.slotIndex === "number" ? body.slotIndex : 0;
+    const singleSlotIndex = typeof body.slotIndex === "number" ? body.slotIndex : 0;
 
     const now = new Date();
     const query = { actId, dateISO, phone, slotIndex: singleSlotIndex };
@@ -2272,7 +2349,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
     // 🔗 correlation id
     const requestId = makeShortId();
 
-    // ⛳ INSERT-ONLY META — keep clean of duplicates
+    // ⛳ INSERT-ONLY META — keep clean of duplicates on same op
     const setOnInsert = {
       actId,
       lineupId: lineup?._id || null,
@@ -2284,10 +2361,9 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       createdAt: now,
       status: "sent",
       reply: null,
-      // ❌ removed musicianId / selectedVocalistName / selectedVocalistId / requestId
     };
 
-    // 🔁 ALWAYS-UPDATE FIELDS
+    // 🔁 ALWAYS-UPDATE FIELDS (requestId ONLY HERE → avoids conflict)
     const setAlways = {
       isDeputy: !!isDeputy,
       musicianId: canonicalId,
@@ -2307,11 +2383,22 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       selectedVocalistName: selectedName,
       selectedVocalistId: canonicalId || null,
       vocalistName: vocalistName || selectedName || "",
-      requestId, // ← only in $set
+      requestId, // ← here (not in $setOnInsert)
     };
 
-    const resolvedFirstName = (canonical?.firstName || targetMember.firstName || enrichedMember.firstName || "").trim();
-    const resolvedLastName  = (canonical?.lastName  || targetMember.lastName  || enrichedMember.lastName  || "").trim();
+    const resolvedFirstName = (
+      canonical?.firstName ||
+      targetMember.firstName ||
+      enrichedMember.firstName ||
+      ""
+    ).trim();
+    const resolvedLastName = (
+      canonical?.lastName ||
+      targetMember.lastName ||
+      enrichedMember.lastName ||
+      ""
+    ).trim();
+
     console.log("🔎 [triggerAvailabilityRequest/single] PERSON", {
       role: isDeputy ? "DEPUTY" : "LEAD",
       firstName: resolvedFirstName,
@@ -2344,7 +2431,8 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
     /* -------------------------------------------------------------- */
     /* 💬 Send WhatsApp (interactive buttons with requestId)          */
     /* -------------------------------------------------------------- */
-    const roleStr = body?.inheritedDuties || targetMember.instrument || "Performance";
+    const roleStr =
+      body?.inheritedDuties || targetMember.instrument || "Performance";
     const feeStr = finalFee > 0 ? `£${finalFee}` : "TBC";
 
     const person = targetMember || {};
@@ -2366,8 +2454,8 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
     });
 
     const buttons = [
-      { id: `YES:${requestId}`,         title: "Yes" },
-      { id: `NO:${requestId}`,          title: "No" },
+      { id: `YES:${requestId}`, title: "Yes" },
+      { id: `NO:${requestId}`, title: "No" },
       { id: `UNAVAILABLE:${requestId}`, title: "Unavailable" },
     ];
 
@@ -2382,24 +2470,31 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       variables: {
         firstName: nameBits.firstName || nameBits.displayName || "Musician",
         date: formattedDate,
-        location: shortAddress,
+        location: shortAddress, // ✅ COUNTY + POSTCODE
         fee: String(finalFee),
         role: roleStr,
         actName: act.tscName || act.name,
       },
-      requestId,       // 🔗 correlation
-      buttons,         // 🔗 interactive quick replies
-      smsBody: `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${roleStr} duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
+      requestId, // 🔗 correlation
+      buttons, // 🔗 interactive quick replies
+      smsBody: `Hi ${
+        targetMember.firstName || "there"
+      }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${roleStr} duties with ${
+        act.tscName || act.name
+      }. Please indicate your availability 💫`,
     });
 
-    // Persist Twilio SID + requestId to the row
+    // Persist Twilio SID (requestId already stored above)
     try {
       await AvailabilityModel.updateOne(
         { _id: saved._id },
-        { $set: { messageSidOut: msg?.sid || null, requestId } }
+        { $set: { messageSidOut: msg?.sid || null } }
       );
     } catch (e) {
-      console.warn("⚠️ Could not persist messageSidOut/requestId (single):", e?.message || e);
+      console.warn(
+        "⚠️ Could not persist messageSidOut (single):",
+        e?.message || e
+      );
     }
 
     console.log(`📲 WhatsApp sent successfully — ${feeStr}`);
