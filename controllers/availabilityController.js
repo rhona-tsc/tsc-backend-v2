@@ -3842,10 +3842,237 @@ const primaryName =
       "hello@thesupremecollective.co.uk";
     let clientName = (allRows.find((r) => r.clientName)?.clientName) || "there";
 
-    // … keep your existing email block here unchanged …
-    // (Left out for brevity — your earlier version is fine.)
+ const SITE_RAW =
+      process.env.FRONTEND_URL || "https://meek-biscotti-8d5020.netlify.app/";
+    const SITE = SITE_RAW.endsWith("/") ? SITE_RAW : `${SITE_RAW}/`;
+
+    const selectedAddress =
+      badge?.address ||
+      availabilityRecord?.formattedAddress ||
+      actDoc?.formattedAddress ||
+      actDoc?.venueAddress ||
+      "TBC";
+
+    const profileUrl = `${SITE}act/${actDoc._id}`;
+    const cartUrl = `${SITE}act/${actDoc._id}?date=${dateISO}&address=${encodeURIComponent(selectedAddress)}`;
+
+    const normKey = (s = "") => s.toString().toLowerCase().replace(/[^a-z]/g, "");
+    const paMap = { smallpa: "small", mediumpa: "medium", largepa: "large" };
+    const lightMap = { smalllight: "small", mediumlight: "medium", largelight: "large" };
+    const paSize = paMap[normKey(actDoc.paSystem)];
+    const lightSize = lightMap[normKey(actDoc.lightingSystem)];
+
+    const setsA = Array.isArray(actDoc.numberOfSets) ? actDoc.numberOfSets : [actDoc.numberOfSets].filter(Boolean);
+    const lensA = Array.isArray(actDoc.lengthOfSets) ? actDoc.lengthOfSets : [actDoc.lengthOfSets].filter(Boolean);
+    const setsLine =
+      setsA.length && lensA.length
+        ? `Up to ${setsA[0]}×${lensA[0]}-minute or ${setsA[1] || setsA[0]}×${lensA[1] || lensA[0]}-minute live sets`
+        : `Up to 3×40-minute or 2×60-minute live sets`;
+
+    const complimentaryExtras = [];
+    if (actDoc?.extras && typeof actDoc.extras === "object") {
+      for (const [k, v] of Object.entries(actDoc.extras)) {
+        if (v && v.complimentary) {
+          complimentaryExtras.push(
+            k.replace(/_/g, " ").replace(/\s+/g, " ").replace(/^\w/, (c) => c.toUpperCase())
+          );
+        }
+      }
+    }
+
+    const tailoring =
+      actDoc.setlist === "smallTailoring"
+        ? "Signature setlist curated by the band"
+        : actDoc.setlist === "mediumTailoring"
+        ? "Collaborative setlist (your top picks + band favourites)"
+        : actDoc.setlist === "largeTailoring"
+        ? "Fully tailored setlist built from your requests"
+        : null;
+
+    const lineupQuotes = await Promise.all(
+      (actDoc.lineups || []).map(async (lu) => {
+        try {
+          const name =
+            lu?.actSize ||
+            `${(lu?.bandMembers || []).filter((m) => m?.isEssential).length}-Piece`;
+
+          let travelTotal = "price TBC";
+          try {
+            const { county: selectedCounty } = countyFromAddress(selectedAddress);
+            const { total } = await calculateActPricing(
+              actDoc,
+              selectedCounty,
+              selectedAddress,
+              dateISO,
+              lu
+            );
+            if (total && !isNaN(total)) {
+              travelTotal = `£${Math.round(Number(total)).toLocaleString("en-GB")}`;
+            }
+          } catch (err) {
+            console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Price calc failed:", err.message);
+          }
+
+          const instruments = (lu?.bandMembers || [])
+            .filter((m) => m?.isEssential)
+            .map((m) => m?.instrument)
+            .filter(Boolean)
+            .join(", ");
+
+          return { html: `<strong>${name}</strong>: ${instruments} — <strong>${travelTotal}</strong>` };
+        } catch (err) {
+          console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Lineup formatting failed:", err.message);
+          return { html: "<em>Lineup unavailable</em>" };
+        }
+      })
+    );
+
+    const leadPrimary = leadSlot ? presentBadgePrimary(leadSlot) : null;
+    const depPrimary = deputySlot ? presentBadgePrimary(deputySlot) : null;
+
+    console.log("✉️ [rebuildAndApplyAvailabilityBadge] Email decision context", {
+      clientName,
+      clientEmail,
+      selectedAddress,
+      leadPrimary,
+      deputyPrimary: depPrimary,
+    });
+
+    // Lazy import (if you use this util)
+    let sendClientEmail = null;
+  
+
+    const heroImg =
+      (Array.isArray(actDoc.coverImage) && actDoc.coverImage[0]?.url) ||
+      (Array.isArray(actDoc.images) && actDoc.images[0]?.url) ||
+      actDoc.coverImage?.url ||
+      "";
+
+    if (sendClientEmail) {
+      // Lead available → good-news email
+      if (leadPrimary?.available && leadPrimary?.isDeputy === false) {
+        const vocalistFirst = leadPrimary.firstName || "our lead vocalist";
+        console.log("📧 [rebuildAndApplyAvailabilityBadge] Sending LEAD-available email", {
+          vocalistFirst,
+          to: clientEmail,
+        });
+
+        await sendClientEmail({
+          actId: String(actId),
+          subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s lead vocalist is available`,
+          to: clientEmail,
+          name: clientName,
+          html: `
+            <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
+              <p>Hi ${(clientName || "there").split(" ")[0]},</p>
+              <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
+              <p>
+                We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with
+                <strong>${vocalistFirst}</strong> on lead vocals, and they’d love to perform for you and your guests.
+              </p>
+              ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
+              <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
+              <p style="margin:6px 0 14px; color:#555;">${actDoc.tscDescription || actDoc.description || ""}</p>
+              <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
+              ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
+              <h4 style="margin-top:25px;">Included in your quote:</h4>
+              <ul>
+                <li>${setsLine}</li>
+                ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
+                <li>Band arrival from 5pm and finish by midnight as standard</li>
+                <li>Or up to 7 hours on site if earlier arrival is needed</li>
+                ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
+                ${tailoring ? `<li>${tailoring}</li>` : ""}
+                <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
+              </ul>
+              <div style="margin-top:30px;">
+                <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
+              </div>
+            </div>
+          `,
+        });
+
+        console.log("✅ [rebuildAndApplyAvailabilityBadge] Client email sent (lead available).");
+      }
+      // Deputy covering → deputy-available email
+      else if (depPrimary?.available && depPrimary?.isDeputy === true) {
+        const deputyName = depPrimary.displayName || depPrimary.firstName || "one of our vocalists";
+        console.log("📧 [rebuildAndApplyAvailabilityBadge] Sending DEPUTY-available email", {
+          deputyName,
+          to: clientEmail,
+        });
+
+        // Try to enrich deputy media/profile
+        let deputyPhotoUrl = depPrimary.photoUrl || "";
+        let deputyProfileUrl = depPrimary.profileUrl || "";
+        let deputyVideos = [];
+        try {
+          let deputyMusician = null;
+          if (depPrimary?.musicianId) {
+            deputyMusician = await Musician.findById(depPrimary.musicianId)
+              .select("firstName lastName profilePicture photoUrl tscProfileUrl functionBandVideoLinks originalBandVideoLinks")
+              .lean();
+          }
+          if (deputyMusician) {
+            if (!deputyPhotoUrl)
+              deputyPhotoUrl = deputyMusician.profilePicture || deputyMusician.photoUrl || "";
+            if (!deputyProfileUrl)
+              deputyProfileUrl = deputyMusician.tscProfileUrl || `${SITE}musician/${deputyMusician._id}`;
+
+            const fnVids = (deputyMusician.functionBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+            const origVids = (deputyMusician.originalBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+            deputyVideos = [...new Set([...fnVids, ...origVids])];
+          }
+        } catch (e) {
+          console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Deputy enrichment failed:", e?.message || e);
+        }
+
+        await sendClientEmail({
+          actId: String(actId),
+          subject: `${deputyName} is raring to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
+          to: clientEmail,
+          name: clientName,
+          html: `
+            <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
+              <p>Hi ${(clientName || "there").split(" ")[0]},</p>
+              <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
+              <p>
+                The band's regular lead vocalist isn’t available for your date, but we’re delighted to confirm that 
+                <strong>${deputyName}</strong> — one of the band's trusted deputy vocalists — is available to perform instead.
+              </p>
+              ${
+                deputyProfileUrl || deputyPhotoUrl
+                  ? `<div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
+                       <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyName}</h3>
+                       ${deputyPhotoUrl ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />` : ""}
+                     </div>`
+                  : ""
+              }
+              ${
+                deputyVideos?.length
+                  ? `<div style="margin-top:25px;">
+                       <h4 style="color:#111;">🎬 Watch ${deputyName} perform</h4>
+                       <ul style="list-style:none; padding-left:0;">
+                         ${deputyVideos.slice(0,3).map((v) => `<li style="margin-bottom:8px;"><a href="${v}" target="_blank" style="color:#ff6667;">${v}</a></li>`).join("")}
+                       </ul>
+                     </div>`
+                  : ""
+              }
+              ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
+              <p><a href="${deputyProfileUrl || profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
+              ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
+              <div style="margin-top:30px;">
+                <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
+              </div>
+            </div>
+          `,
+        });
+
+        console.log("✅ [rebuildAndApplyAvailabilityBadge] Deputy-available client email sent.");
+      }
+    }
   } catch (e) {
-    console.warn("⚠️ Client email block failed:", e?.message || e);
+    console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Client email block failed:", e?.message || e);
   }
 
   return { success: true, updated: true, badge };
