@@ -3793,7 +3793,23 @@ const primaryName =
         ""
       )
     : "";
-      const nameSnap = firstLast(primaryName);
+   // Ensure we always pass a *string* into the name splitter
+const toNameString = (v) =>
+  typeof v === "string" && v.trim()
+    ? v.trim()
+    : pickDisplayName(v) || ""; // uses the helper you defined above
+
+const safeFirstLast = (s = "") => {
+  const str = String(s || "").trim().replace(/\s+/g, " ");
+  if (!str) return { firstName: "", lastName: "", displayName: "" };
+  const parts = str.split(" ");
+  const firstName = parts[0];
+  const lastName = parts.length > 1 ? parts[parts.length - 1] : "";
+  const displayName = lastName ? `${firstName} ${lastName[0].toUpperCase()}` : firstName;
+  return { firstName, lastName, displayName };
+};
+
+const nameSnap = safeFirstLast(toNameString(primaryName));
 
   console.log("👤 PrimaryChosen", {
     musicianId: primaryRef?.musicianId || null,
@@ -3961,6 +3977,86 @@ const isDeputyCoveringSlot = (s) => {
 
 const leadSlot   = slotsArr.find(isLeadAvailableSlot)   || null;
 const deputySlot = slotsArr.find(isDeputyCoveringSlot) || null;
+
+// Pick a presentable "primary" person from a slot (lead or deputy cover)
+const presentBadgePrimary = (slot = null) => {
+  if (!slot || typeof slot !== "object") return null;
+
+  const isHttp = (u) => typeof u === "string" && u.startsWith("http");
+
+  // Choose the candidate we want to present
+  let candidate = null;
+  let isDeputy = false;
+
+  // If a deputy is covering, prefer a YES deputy with a valid photo
+  if (slot.covering === "deputy") {
+    if (Array.isArray(slot.deputies)) {
+      const yesDep = slot.deputies.find((d) => d?.state === "yes" && isHttp(d?.photoUrl));
+      if (yesDep) {
+        candidate = yesDep;
+        isDeputy = true;
+      }
+    }
+    if (!candidate && slot?.primary?.isDeputy && isHttp(slot?.primary?.photoUrl)) {
+      candidate = slot.primary;
+      isDeputy = true;
+    }
+    if (!candidate && Array.isArray(slot.deputies)) {
+      const anyDep = slot.deputies.find((d) => isHttp(d?.photoUrl));
+      if (anyDep) {
+        candidate = anyDep;
+        isDeputy = true;
+      }
+    }
+  }
+
+  // Otherwise, prefer the lead
+  if (!candidate) {
+    if (slot?.primary && slot.primary.isDeputy === false && isHttp(slot.primary.photoUrl)) {
+      candidate = slot.primary;
+      isDeputy = false;
+    } else if (isHttp(slot?.photoUrl)) {
+      candidate = slot;
+      isDeputy = false;
+    }
+  }
+
+  if (!candidate) return null;
+
+  const rawName =
+    candidate.vocalistName ||
+    candidate.displayName ||
+    candidate.preferredName ||
+    candidate.name ||
+    "";
+
+  const nameStr =
+    typeof rawName === "string" && rawName.trim()
+      ? rawName.trim()
+      : pickDisplayName(candidate); // fallback using your earlier helper
+
+  const { firstName, lastName, displayName } = safeFirstLast(nameStr);
+
+  return {
+    musicianId: candidate.musicianId || null,
+    first: firstName,           // keep legacy fields if you log them
+    last: lastName,
+    firstName,
+    lastName,
+    displayName,
+    vocalistDisplayName: nameStr,
+    photoUrl: candidate.photoUrl || null,
+    profileUrl: candidate.profileUrl || "",
+    isDeputy,
+    phone: null,
+    setAt: candidate.setAt || slot.setAt || null,
+    available:
+      candidate.available === true ||
+      candidate.state === "yes" ||
+      slot.state === "yes",
+    slotIndex: slot.slotIndex ?? null,
+  };
+};
 
     const leadPrimary = leadSlot ? presentBadgePrimary(leadSlot) : null;
     const depPrimary = deputySlot ? presentBadgePrimary(deputySlot) : null;
