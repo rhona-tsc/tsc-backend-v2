@@ -2605,7 +2605,7 @@ export const twilioInbound = async (req, res) => {
     return fromMus || "Vocalist";
   };
 
-  // ── NEW: robust pick + requestId parsers (button/list + text) ───────────────
+  // tiny safe getter for odd webhook keys (with bracket names)
   const pick = (obj, ...keys) => {
     for (const k of keys) {
       const v = obj?.[k];
@@ -2614,8 +2614,28 @@ export const twilioInbound = async (req, res) => {
     return null;
   };
 
+  // E.164 normalizer for WaId/From
+  const normE164 = (raw = "") => {
+    let v = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+    if (!v) return "";
+    if (v.startsWith("+")) return v;
+    if (/^44\d+$/.test(v)) return `+${v}`;
+    if (/^0\d{10}$/.test(v)) return `+44${v.slice(1)}`;
+    if (/^\d{10,13}$/.test(v)) return v.startsWith("44") ? `+${v}` : `+44${v.replace(/^0?/, "")}`;
+    return v;
+  };
+
+  const classifyReply = (s = "") => {
+    const t = String(s || "").trim().toLowerCase();
+    if (!t) return null;
+    if (/^y(es)?$/.test(t)) return "yes";
+    if (/^un/.test(t)) return "unavailable";
+    if (/^n(o)?$/.test(t)) return "no";
+    return null;
+  };
+
+  // Covers Content API & non-Content interactive payloads
   function parseInteractive(body) {
-    // Covers Content API & non-Content variants
     const id =
       pick(body, "ButtonResponse[Id]", "ButtonPayload", "ListResponse[Id]", "ListId") || null;
     const title =
@@ -2623,7 +2643,7 @@ export const twilioInbound = async (req, res) => {
 
     if (!id) return { requestId: null, reply: null, source: null, title: null };
 
-    // Expect "YES:RID" / "NO:RID" / "UNAVAILABLE:RID"
+    // Expect "YES:RID" / "NO:RID" / "UNAVAILABLE:RID" on non-Content; Content quick replies usually DON'T carry requestId
     const [raw, rid] = String(id).split(":");
     const reply =
       raw?.toLowerCase().startsWith("yes") ? "yes" :
@@ -2658,20 +2678,18 @@ export const twilioInbound = async (req, res) => {
     (async () => {
       try {
         const bodyObj = req.body || {};
-        const bodyText = String(bodyObj?.Body || "");
-        const buttonText = String(bodyObj?.ButtonText || "");
-        const buttonPayload = String(bodyObj?.ButtonPayload || "");
-        const inboundSid = String(bodyObj?.MessageSid || bodyObj?.SmsMessageSid || "");
-        const fromRaw = String(bodyObj?.WaId || bodyObj?.From || "").replace(/^whatsapp:/i, "");
 
+        // detect empty payloads
         const noContent =
-          !buttonPayload &&
-          !buttonText &&
-          !bodyText &&
+          !String(bodyObj?.ButtonPayload || "") &&
+          !String(bodyObj?.ButtonText || "") &&
+          !String(bodyObj?.Body || "") &&
           !bodyObj["ButtonResponse[Id]"] &&
           !bodyObj["ButtonResponse[Text]"] &&
           !bodyObj["ListResponse[Id]"] &&
           !bodyObj["ListResponse[Title]"];
+        const inboundSid = String(bodyObj?.MessageSid || bodyObj?.SmsMessageSid || "");
+        const fromRaw = String(bodyObj?.WaId || bodyObj?.From || "");
         if (noContent) return console.log("🪵 Ignoring empty inbound message", { From: fromRaw });
 
         if (seenInboundOnce(inboundSid)) {
@@ -2679,182 +2697,116 @@ export const twilioInbound = async (req, res) => {
           return;
         }
 
-        // ── NEW: try to parse interactive payload first; then text with #RID ──
-        let { requestId, reply, source } = parseInteractive(bodyObj);
+        // snapshot for debugging
+        const bodyText = String(bodyObj?.Body || "");
+        const btnText =
+          pick(bodyObj, "ButtonText", "ButtonResponse[Text]", "Interactive[ButtonReply][Title]") || "";
+        const btnId =
+          pick(
+            bodyObj,
+            "ButtonPayload",               // Content quick reply → ID (static, from template)
+            "ButtonResponse[Id]",          // non-Content interactive
+            "ListResponse[Id]",            // list id
+            "Interactive[ButtonReply][Id]" // alternative shape
+          ) || "";
+        const sender = normE164(fromRaw);
+
+        console.log("📥 [twilioInbound] RAW SNAPSHOT", {
+          keys: Object.keys(bodyObj),
+          Body_preview: bodyText.slice(0, 120),
+          ButtonText: btnText,
+          ButtonPayload: btnId,
+          WaId: bodyObj?.WaId,
+          From: bodyObj?.From,
+          sender_norm: sender,
+          MessageSid: inboundSid,
+        });
+
+        // Parse intent: try interactive first, then text
+        let { requestId, reply } = parseInteractive(bodyObj);
         if (!requestId) {
           const p = parseText(bodyObj);
           requestId = p.requestId;
           reply = reply || p.reply;
-          source = source || p.source;
         }
 
-        // Original compatibility: keep your existing parse to get enquiryId
-        // (e.g., your template might still pass enquiryId in ButtonPayload)
+        // Legacy compatibility: your existing JSON payload parser (if template passes enquiryId, etc.)
         let parsedPayload = { reply: null, enquiryId: null };
         try {
-          parsedPayload = parsePayload(buttonPayload); // your existing helper
+          parsedPayload = parsePayload(btnId); // your existing helper (safe try)
         } catch (_) {}
         if (!reply) {
-          // still allow your classify function for plain "Yes/No/Unavailable"
-          reply = classifyReply(buttonText) || classifyReply(bodyText) || parsedPayload.reply || null;
+          reply = classifyReply(btnText) || classifyReply(bodyText) || parsedPayload.reply || null;
+        }
+        if (!reply) reply = "no"; // very defensive default
+
+        console.log("🧷 [twilioInbound] Parsed intent", { reply, requestId });
+
+        /* ---------------------------------------------------------------------- */
+        /* 🎯 Locate the Availability row to update                               */
+        /*   1) Strict: requestId                                                 */
+        /*   2) Fallback: latest row by phone, v2, awaiting reply                 */
+        /* ---------------------------------------------------------------------- */
+        let updated = null;
+
+        if (requestId) {
+          updated = await AvailabilityModel.findOneAndUpdate(
+            { requestId },
+            {
+              $set: {
+                reply,
+                repliedAt: new Date(),
+                "inbound.sid": inboundSid || null,
+                "inbound.body": bodyText || "",
+                "inbound.buttonText": btnText || null,
+                "inbound.buttonPayload": btnId || null,
+                "inbound.source": "button-or-text",
+                "inbound.requestId": requestId,
+              },
+            },
+            { new: true }
+          );
+          if (!updated) {
+            console.log("⚠️ requestId not found, falling back to phone match", { requestId });
+          }
         }
 
-       /* ---------------------------------------------------------------------- */
-/* 🧭 Normalizers + classifiers (local helpers)                           */
-/* ---------------------------------------------------------------------- */
-const normE164 = (raw = "") => {
-  let v = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
-  if (!v) return "";
-  if (v.startsWith("+")) return v;
-  if (/^44\d+$/.test(v)) return `+${v}`;
-  if (/^0\d{10}$/.test(v)) return `+44${v.slice(1)}`;
-  if (/^\d{10,13}$/.test(v)) return v.startsWith("44") ? `+${v}` : `+44${v.replace(/^0?/, "")}`;
-  return v;
-};
+        if (!updated && sender) {
+          updated = await AvailabilityModel.findOneAndUpdate(
+            {
+              phone: sender,
+              v2: true,
+              $or: [{ reply: { $exists: false } }, { reply: null }, { reply: "" }],
+            },
+            {
+              $set: {
+                reply,
+                repliedAt: new Date(),
+                "inbound.sid": inboundSid || null,
+                "inbound.body": bodyText || "",
+                "inbound.buttonText": btnText || null,
+                "inbound.buttonPayload": btnId || null,
+                "inbound.source": "button-or-text",
+                ...(requestId ? { requestId, "inbound.requestId": requestId } : {}),
+              },
+            },
+            { new: true, sort: { createdAt: -1 } }
+          );
+        }
 
-const classifyReply = (s = "") => {
-  const t = String(s || "").trim().toLowerCase();
-  if (!t) return null;
-  if (/^y(es)?$/.test(t)) return "yes";
-  if (/^un/.test(t)) return "unavailable";
-  if (/^n(o)?$/.test(t)) return "no";
-  return null;
-};
-
-// tiny safe getter
-const pick = (obj, ...keys) => {
-  for (const k of keys) {
-    const v = obj?.[k];
-    if (v !== undefined && v !== null && v !== "") return v;
-  }
-  return null;
-};
-
-/* ---------------------------------------------------------------------- */
-/* 🔎 Dump key inbound fields to help debugging                           */
-/* ---------------------------------------------------------------------- */
-const bodyObj = req.body || {};
-const bodyText = String(bodyObj?.Body || "");
-const btnText =
-  pick(bodyObj, "ButtonText", "ButtonResponse[Text]", "Interactive[ButtonReply][Title]") || "";
-const btnId =
-  pick(
-    bodyObj,
-    "ButtonPayload",               // Content quick reply → ID (static, from template)
-    "ButtonResponse[Id]",          // non-Content interactive
-    "ListResponse[Id]",            // list id if ever used
-    "Interactive[ButtonReply][Id]" // alternative shape
-  ) || "";
-
-const inboundSid = String(bodyObj?.MessageSid || bodyObj?.SmsMessageSid || "");
-const fromRaw = String(bodyObj?.WaId || bodyObj?.From || "");
-const sender = normE164(fromRaw);
-
-console.log("📥 [twilioInbound] RAW SNAPSHOT", {
-  keys: Object.keys(bodyObj),
-  Body_preview: bodyText.slice(0, 120),
-  ButtonText: btnText,
-  ButtonPayload: btnId,
-  WaId: bodyObj?.WaId,
-  From: bodyObj?.From,
-  sender_norm: sender,
-  MessageSid: inboundSid,
-});
-
-/* ---------------------------------------------------------------------- */
-/* 🧩 Pull requestId if present (non-Content interactive path), or from   */
-/*     inline '#ABC123' text. Content quick replies won't include it.     */
-/* ---------------------------------------------------------------------- */
-let requestId = null;
-let reply = classifyReply(btnText) || classifyReply(btnId) || classifyReply(bodyText);
-
-// e.g. "YES:A1B2C3"
-const mId = String(btnId || "").match(/^[A-Z]+:([A-Z0-9]{5,12})$/i);
-if (mId) requestId = mId[1].toUpperCase();
-
-// fallback: extract "#CODE" anywhere in message body
-if (!requestId) {
-  const mHash = String(bodyText || "").match(/#([A-Z0-9]{5,12})/i);
-  if (mHash) requestId = mHash[1].toUpperCase();
-}
-
-if (!reply) reply = "no"; // default to "no" if we truly can't classify
-
-console.log("🧷 [twilioInbound] Parsed intent", { reply, requestId });
-
-/* ---------------------------------------------------------------------- */
-/* 🎯 Locate the Availability row to update                               */
-/*   1) Strict: requestId                                                 */
-/*   2) Fallback: latest row by phone, v2, not replied yet                */
-/* ---------------------------------------------------------------------- */
-let updated = null;
-
-// 1) requestId exact hit (best!)
-if (requestId) {
-  updated = await AvailabilityModel.findOneAndUpdate(
-    { requestId },
-    {
-      $set: {
-        reply,
-        repliedAt: new Date(),
-        "inbound.sid": inboundSid || null,
-        "inbound.body": bodyText || "",
-        "inbound.buttonText": btnText || null,
-        "inbound.buttonPayload": btnId || null,
-        "inbound.source": "button-or-text",
-        "inbound.requestId": requestId,
-      },
-    },
-    { new: true }
-  );
-  if (!updated) {
-    console.log("⚠️ requestId not found, falling back to phone match", { requestId });
-  }
-}
-
-// 2) fallback by phone → pick most recent row still awaiting reply
-if (!updated && sender) {
-  updated = await AvailabilityModel.findOneAndUpdate(
-    {
-      phone: sender,
-      v2: true,
-      $or: [{ reply: { $exists: false } }, { reply: null }, { reply: "" }],
-    },
-    {
-      $set: {
-        reply,
-        repliedAt: new Date(),
-        "inbound.sid": inboundSid || null,
-        "inbound.body": bodyText || "",
-        "inbound.buttonText": btnText || null,
-        "inbound.buttonPayload": btnId || null,
-        "inbound.source": "button-or-text",
-        ...(requestId ? { requestId, "inbound.requestId": requestId } : {}),
-      },
-    },
-    { new: true, sort: { createdAt: -1 } }
-  );
-}
-
-// extra diagnostic if still no match
-if (!updated) {
-  const candidateCount = await AvailabilityModel.countDocuments({
-    phone: sender,
-    v2: true,
-  });
-  console.warn("⚠️ No matching AvailabilityModel found for inbound reply.", {
-    sender,
-    candidateCount,
-    hint: "If you send multiple enquiries to the same person back-to-back using Content quick replies, we cannot correlate by requestId. We now take the latest 'awaiting reply' row for this phone.",
-  });
-  return; // bail early like before
-}
-
-/* ---------------------------------------------------------------------- */
-/* ✅ From here on your original logic continues unchanged                */
-/*     (musician resolution, calendar invite, badge rebuild, SSE, etc.)   */
-/* ---------------------------------------------------------------------- */
-
+        if (!updated) {
+          const candidateCount = await AvailabilityModel.countDocuments({
+            phone: sender,
+            v2: true,
+          });
+          console.warn("⚠️ No matching AvailabilityModel found for inbound reply.", {
+            sender,
+            candidateCount,
+            hint:
+              "With Content quick replies, no requestId is returned. We now take the latest 'awaiting reply' row for this phone.",
+          });
+          return; // bail early like before
+        }
 
         // 🔎 Resolve canonical Musician by phone (preferred) or by row's musicianId
         const byPhone = await findCanonicalMusicianByPhone(updated.phone);
@@ -2947,7 +2899,7 @@ if (!updated) {
 
         const actId = String(updated.actId);
         const dateISO = updated.dateISO;
-        const toE164 = normalizeToE164(updated.phone || fromRaw);
+        const toE164 = normE164(updated.phone || fromRaw);
 
         // 🧭 Resolve Act reliably
         let act = null;
@@ -2972,7 +2924,7 @@ if (!updated) {
         console.log("──────────────────────────────────────────────");
 
         /* ---------------------------------------------------------------------- */
-        /* ✅ YES BRANCH (Lead or Deputy) — unchanged logic                       */
+        /* ✅ YES BRANCH (Lead or Deputy)                                         */
         /* ---------------------------------------------------------------------- */
         if (reply === "yes") {
           console.log(`✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`);
@@ -2980,14 +2932,7 @@ if (!updated) {
           const { createCalendarInvite, cancelCalendarInvite } = await import("./googleController.js");
 
           // 1️⃣ Create/refresh calendar invite
-          console.log(
-            "📧 [Calendar Debug] emailForInvite=",
-            emailForInvite,
-            "act=",
-            !!act,
-            "dateISO=",
-            dateISO
-          );
+          console.log("📧 [Calendar Debug] emailForInvite=", emailForInvite, "act=", !!act, "dateISO=", dateISO);
           if (emailForInvite && act && dateISO) {
             const formattedDateString = new Date(dateISO).toLocaleDateString("en-GB", {
               weekday: "long",
@@ -3110,7 +3055,7 @@ if (!updated) {
         } // ← YES branch
 
         /* ---------------------------------------------------------------------- */
-        /* 🚫 NO / UNAVAILABLE / NOLOC / NOLOCATION BRANCH — unchanged logic      */
+        /* 🚫 NO / UNAVAILABLE / NOLOC / NOLOCATION BRANCH                         */
         /* ---------------------------------------------------------------------- */
         if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
           console.log("🚫 UNAVAILABLE reply received via WhatsApp");
@@ -3145,7 +3090,7 @@ if (!updated) {
             console.error("❌ Failed to cancel shared event:", err.message);
           }
 
-          // 🔔 Rebuild badge *immediately* so remaining badges persist (e.g., Kedesha stays visible)
+          // 🔔 Rebuild badge immediately
           let rebuilt = null;
           try {
             rebuilt = await rebuildAndApplyAvailabilityBadge({ actId, dateISO, __fromUnavailable: true });
@@ -3169,7 +3114,7 @@ if (!updated) {
             "Thanks for letting us know — we've updated your availability."
           );
 
-          // ✅ Trigger deputies when LEAD replies unavailable/no/noloc/nolocation
+          // ✅ Trigger deputies when LEAD replies negative
           const shouldTriggerDeputies =
             !isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply);
 
@@ -3242,10 +3187,9 @@ if (!updated) {
             console.error("❌ Failed to send cancellation email:", emailErr.message);
           }
 
-          // 🔒 Lock meta so lead badge stays cleared if appropriate (doesn't undo deputy YES)
+          // 🔒 Lock meta so lead badge stays cleared if appropriate
           const update = {
             $unset: {
-              // clear any old exact-date badge map; the rebuilt badge above will repopulate correctly
               [`availabilityBadges.${dateISO}`]: "",
               [`availabilityBadges.${dateISO}_tbc`]: "",
             },
@@ -3258,7 +3202,7 @@ if (!updated) {
           await Act.updateOne({ _id: actId }, update);
           console.log("🔒 Lead marked UNAVAILABLE — badge locked for date:", dateISO);
 
-          // 📡 SSE: push rebuilt badge to clients (so remaining vocalist stays on cards/UI)
+          // 📡 SSE: push rebuilt badge to clients
           if (rebuilt?.badge && global.availabilityNotify?.badgeUpdated) {
             global.availabilityNotify.badgeUpdated({
               actId,
