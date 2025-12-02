@@ -73,9 +73,9 @@ export async function sendWhatsAppMessage(opts = {}) {
   const client = getTwilioClient();
   if (!client) throw new Error("Twilio disabled");
 
-const statusCallback =
-  process.env.TWILIO_STATUS_CALLBACK_URL ||
-  `${process.env.BACKEND_PUBLIC_URL || process.env.BACKEND_URL}/api/twilio/status`;
+  const statusCallback =
+    process.env.TWILIO_STATUS_CALLBACK_URL ||
+    `${process.env.BACKEND_PUBLIC_URL || process.env.BACKEND_URL}/api/twilio/status`;
 
   const {
     to,
@@ -94,7 +94,8 @@ const statusCallback =
 
     // 🔗 Correlation + interactive buttons (NEW)
     requestId = null,                 // e.g. "7F3K9QX"
-    buttons = null,                   // [{ id, title }, ...] → send interactive WA with reply payloads
+    buttons = null,                   // [{ id, title }, ...]
+    isDeputy: isDeputyFromOpts,       // allow explicit override
   } = opts;
 
   // E.164 helpers
@@ -125,7 +126,7 @@ const statusCallback =
     }
   }
 
-  // ── name / identity helpers (as in your version) ─────────────────────────────
+  // ── name / identity helpers ──────────────────────────────────────────────────
   const firstLast = (nameLike) => {
     const s = (nameLike ?? "").toString().trim();
     if (!s) return { first: "", last: "", firstName: "", lastName: "", displayName: "" };
@@ -209,16 +210,16 @@ const statusCallback =
 
   const isDeputy =
     (member && (member.isDeputy === true || member?.role === "deputy")) ||
-    (typeof opts.isDeputy === "boolean" ? opts.isDeputy : undefined);
+    (typeof isDeputyFromOpts === "boolean" ? isDeputyFromOpts : undefined);
 
-    // Prefer caller-provided location (from triggerAvailabilityRequest) → county + postcode
-const effectiveLocation = (variables && variables.location) || shortAddress;
-console.log("📨 [sendWhatsAppMessage] location going to Content", {
-  effectiveLocation,
-  fromVariables: Boolean(variables?.location),
-  computedShort: shortAddress,
-  addressRaw: address,
-});
+  // Prefer caller-provided location (from triggerAvailabilityRequest) → county + postcode
+  const effectiveLocation = (variables && variables.location) || shortAddress;
+  console.log("📨 [sendWhatsAppMessage] location going to Content", {
+    effectiveLocation,
+    fromVariables: Boolean(variables?.location),
+    computedShort: shortAddress,
+    addressRaw: address,
+  });
 
   // enrich variables for ContentSid templates
   let enrichedVars = {
@@ -241,7 +242,7 @@ console.log("📨 [sendWhatsAppMessage] location going to Content", {
   };
 
   // REQUIRED for Quick Reply button IDs (YES{{7}} etc.)
-enrichedVars["7"] = requestId || "";
+  enrichedVars["7"] = requestId || "";
 
   console.log("📨 [sendWhatsAppMessage] PRE-SEND", {
     to: toE,
@@ -263,104 +264,56 @@ enrichedVars["7"] = requestId || "";
     buttonsCount: Array.isArray(buttons) ? buttons.length : 0,
   });
 
-  // ── build base text (used for plain & interactive) ────────────────────────────
-  const baseBody =
-    smsBody ||
-    `Are you available for ${actData?.tscName || actData?.name || "this act"} on ${formattedDate} in ${shortAddress}? Fee: ${formattedFee}.`;
+  /* ────────────────────────────────────────────────────────────────────────────
+   * ⬇️ SEND VIA TWILIO, THEN PERSIST outboundSid FOR INBOUND MATCHING
+   * ──────────────────────────────────────────────────────────────────────────── */
+  const useContent = !!(contentSid || process.env.TWILIO_ENQUIRY_SID);
+  let result = null;
 
-    const hasContentQuickReply = Boolean(contentSid || process.env.TWILIO_ENQUIRY_SID);
-const useInteractive = Array.isArray(buttons) && buttons.length && !hasContentQuickReply;
-
-  // ── INTERACTIVE BUTTONS path (carries requestId in reply IDs) ─────────────────
-if (useInteractive) {
-    const interactiveButtons = buttons.map((b) => ({
-      type: "reply",
-      reply: { id: b.id, title: b.title },
-    }));
-
-    const interactivePayload = {
-      from: `whatsapp:${fromE}`,
-      to: `whatsapp:${toE}`,
-      body: `${baseBody}\n\nRef: ${requestCode}`, // visible fallback ref
-      interactive: {
-        type: "button",
-        body: { text: `Please tap a button below.\nRef: ${requestCode}` },
-        action: { buttons: interactiveButtons },
-      },
-      ...(typeof statusCallback !== "undefined" && statusCallback ? { statusCallback } : {}),
-    };
-
-    const msg = await client.messages.create(interactivePayload);
-
-    console.log("✅ [sendWhatsAppMessage] SENT (interactive)", {
-      sid: msg?.sid,
-      status: msg?.status,
-      to: toE,
-    });
-
-    // Optional persistence of fallback SMS body
-    try {
-      const twilioSid = msg?.sid;
-      const dest = toE164(to);
-      if (twilioSid && dest && smsBody && !contentSid) {
-        await AvailabilityModel.updateOne(
-          { phone: dest, v2: true },
-          { $set: { "outbound.sid": twilioSid, "outbound.smsBody": smsBody, updatedAt: new Date() } }
-        );
-        if (typeof WA_FALLBACK_CACHE !== "undefined" && WA_FALLBACK_CACHE?.set) {
-          WA_FALLBACK_CACHE.set(twilioSid, { to: dest, smsBody });
-        }
-        console.log("💾 [sendWhatsAppMessage] Fallback persisted", { twilioSid });
-      }
-    } catch (e) {
-      console.warn("[sendWhatsAppMessage] Persist fallback failed:", e?.message || e);
-    }
-
-    return msg;
-  }
-
-  // ── CONTENT TEMPLATE or PLAIN TEXT path ───────────────────────────────────────
-const payload = {
-  from: `whatsapp:${fromE}`,
-  to: `whatsapp:${toE}`,
-  ...(contentSid || process.env.TWILIO_ENQUIRY_SID
-    ? {
+  try {
+    if (useContent) {
+      // ✅ Preferred: Content API with variables (supports quick replies)
+      result = await client.messages.create({
+        to: `whatsapp:${toE}`,
+        from: `whatsapp:${fromE}`,
         contentSid: contentSid || process.env.TWILIO_ENQUIRY_SID,
         contentVariables: JSON.stringify(enrichedVars),
-      }
-    : {
-        body: `${baseBody}${requestCode ? `\n\nRef: ${requestCode}` : ""}`,
-      }),
-  ...(statusCallback ? { statusCallback } : {}),
-};
-
-  const msg = await client.messages.create(payload);
-
-  console.log("✅ [sendWhatsAppMessage] SENT", {
-    sid: msg?.sid,
-    status: msg?.status,
-    to: toE,
-  });
-
-  // Optional fallback persistence (only when sending plain body)
-  try {
-    const twilioSid = msg?.sid;
-    const dest = toE164(to);
-    if (twilioSid && dest && smsBody && !(contentSid || (typeof TWILIO_ENQUIRY_SID !== "undefined" && TWILIO_ENQUIRY_SID))) {
-      await AvailabilityModel.updateOne(
-        { phone: dest, v2: true },
-        { $set: { "outbound.sid": twilioSid, "outbound.smsBody": smsBody, updatedAt: new Date() } }
-      );
-      if (typeof WA_FALLBACK_CACHE !== "undefined" && WA_FALLBACK_CACHE?.set) {
-        WA_FALLBACK_CACHE.set(twilioSid, { to: dest, smsBody });
-      }
-      console.log("💾 [sendWhatsAppMessage] Fallback persisted", { twilioSid });
+        statusCallback,
+      });
+    } else {
+      // Fallback plain text (no template)
+      const defaultBody =
+        smsBody && smsBody.trim()
+          ? smsBody.trim()
+          : `Are you available for ${actData?.tscName || actData?.name || "this act"} on ${formattedDate} at ${effectiveLocation}? Reply YES or UNAVAILABLE ${requestCode}`;
+      result = await client.messages.create({
+        to: `whatsapp:${toE}`,
+        from: `whatsapp:${fromE}`,
+        body: defaultBody,
+        statusCallback,
+      });
     }
-  } catch (e) {
-    console.warn("[sendWhatsAppMessage] Persist fallback failed:", e?.message || e);
+
+    const sid = result?.sid;
+    console.log("✅ [sendWhatsAppMessage] Twilio sent", { sid, useContent });
+
+    // ⛳️ PERSIST THE OUTBOUND SID FOR DETERMINISTIC INBOUND MATCHING
+    if (sid && requestId) {
+      await AvailabilityModel.updateOne(
+        { requestId },
+        { $set: { outboundSid: sid } }
+      );
+      console.log("🧷 [sendWhatsAppMessage] outboundSid stored on Availability row", {
+        requestId,
+        outboundSid: sid,
+      });
+    }
+  } catch (err) {
+    console.error("❌ [sendWhatsAppMessage] Twilio send failed:", err?.message || err);
+    throw err;
   }
 
-  return msg;
+  return result;
 }
 
 /**

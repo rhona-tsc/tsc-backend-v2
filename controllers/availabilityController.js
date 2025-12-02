@@ -2634,7 +2634,7 @@ export const twilioInbound = async (req, res) => {
     return null;
   };
 
-  // Covers Content API & non-Content interactive payloads
+  // Covers Content API & non-Content interactive payloads (legacy)
   function parseInteractive(body) {
     const id =
       pick(body, "ButtonResponse[Id]", "ButtonPayload", "ListResponse[Id]", "ListId") || null;
@@ -2643,14 +2643,14 @@ export const twilioInbound = async (req, res) => {
 
     if (!id) return { requestId: null, reply: null, source: null, title: null };
 
-    // Expect "YES:RID" / "NO:RID" / "UNAVAILABLE:RID" on non-Content; Content quick replies usually DON'T carry requestId
+    // Expect "YES:RID" / "NO:RID" / "UNAVAILABLE:RID" on non-Content
     const [raw, rid] = String(id).split(":");
     const reply =
       raw?.toLowerCase().startsWith("yes") ? "yes" :
       raw?.toLowerCase().startsWith("un")  ? "unavailable" :
       raw?.toLowerCase().startsWith("no")  ? "no" : null;
 
-    return { requestId: (rid || "").toUpperCase(), reply, source: "button", title };
+    return { requestId: (rid || "").toUpperCase() || null, reply, source: "button", title };
   }
 
   function parseText(body) {
@@ -2692,7 +2692,7 @@ export const twilioInbound = async (req, res) => {
         const fromRaw = String(bodyObj?.WaId || bodyObj?.From || "");
         if (noContent) return console.log("🪵 Ignoring empty inbound message", { From: fromRaw });
 
-        if (seenInboundOnce(inboundSid)) {
+        if (typeof seenInboundOnce === "function" && seenInboundOnce(inboundSid)) {
           console.log("🪵 Duplicate inbound — already handled", { MessageSid: inboundSid });
           return;
         }
@@ -2709,6 +2709,58 @@ export const twilioInbound = async (req, res) => {
             "ListResponse[Id]",            // list id
             "Interactive[ButtonReply][Id]" // alternative shape
           ) || "";
+
+        // Deterministic join to the exact outbound message we sent
+        const repliedSid =
+          pick(bodyObj, "OriginalRepliedMessageSid", "InReplyToSid", "QuotedMessageSid") || null;
+
+        // First-pass reply classification
+        let reply =
+          classifyReply(btnText) ||
+          classifyReply(btnId) ||
+          classifyReply(bodyText) ||
+          null;
+
+        // Accept: "YES:RID", "YES RID", "YES-RID", "YESRID" (no delimiter), or just "RID"
+        const tryExtractRid = (s) => {
+          if (!s) return null;
+          const t = String(s).trim();
+
+          // 1) YES/NO/UNAVAILABLE with optional delimiter + RID
+          const m1 = t.match(/^(?:YES|NO|UNAVAILABLE)[:\s-]?([A-Z0-9]{5,12})$/i);
+          if (m1) return m1[1].toUpperCase();
+
+          // 2) plain RID alone
+          const m2 = t.match(/^([A-Z0-9]{5,12})$/i);
+          if (m2) return m2[1].toUpperCase();
+
+          return null;
+        };
+
+        // RID extraction from multiple carriers
+        let requestId =
+          tryExtractRid(btnId) ||
+          tryExtractRid(btnText) ||
+          ((String(bodyText || "").match(/#([A-Z0-9]{5,12})/i) || [])[1] || null);
+
+        // Legacy parsers as soft fallback (do NOT shadow vars)
+        const iParse = parseInteractive(bodyObj);
+        if (!requestId && iParse.requestId) requestId = iParse.requestId;
+        if (!reply && iParse.reply) reply = iParse.reply;
+
+        const tParse = parseText(bodyObj);
+        if (!requestId && tParse.requestId) requestId = tParse.requestId;
+        if (!reply && tParse.reply) reply = tParse.reply;
+
+        // Legacy payload JSON (safe try)
+        try {
+          const parsedPayload = parsePayload ? parsePayload(btnId) : null;
+          if (!reply && parsedPayload?.reply) reply = parsedPayload.reply;
+        } catch {}
+
+        if (requestId) requestId = requestId.toUpperCase();
+        if (!reply) reply = "no"; // very defensive default
+
         const sender = normE164(fromRaw);
 
         console.log("📥 [twilioInbound] RAW SNAPSHOT", {
@@ -2720,32 +2772,16 @@ export const twilioInbound = async (req, res) => {
           From: bodyObj?.From,
           sender_norm: sender,
           MessageSid: inboundSid,
+          OriginalRepliedMessageSid: repliedSid,
         });
 
-        // Parse intent: try interactive first, then text
-        let { requestId, reply } = parseInteractive(bodyObj);
-        if (!requestId) {
-          const p = parseText(bodyObj);
-          requestId = p.requestId;
-          reply = reply || p.reply;
-        }
-
-        // Legacy compatibility: your existing JSON payload parser (if template passes enquiryId, etc.)
-        let parsedPayload = { reply: null, enquiryId: null };
-        try {
-          parsedPayload = parsePayload(btnId); // your existing helper (safe try)
-        } catch (_) {}
-        if (!reply) {
-          reply = classifyReply(btnText) || classifyReply(bodyText) || parsedPayload.reply || null;
-        }
-        if (!reply) reply = "no"; // very defensive default
-
-        console.log("🧷 [twilioInbound] Parsed intent", { reply, requestId });
+        console.log("🧷 [twilioInbound] Parsed intent", { reply, requestId, repliedSid });
 
         /* ---------------------------------------------------------------------- */
         /* 🎯 Locate the Availability row to update                               */
         /*   1) Strict: requestId                                                 */
-        /*   2) Fallback: latest row by phone, v2, awaiting reply                 */
+        /*   2) Deterministic: repliedSid → outboundSid                           */
+        /*   3) Fallback: latest row by phone, v2, awaiting reply                 */
         /* ---------------------------------------------------------------------- */
         let updated = null;
 
@@ -2757,6 +2793,7 @@ export const twilioInbound = async (req, res) => {
                 reply,
                 repliedAt: new Date(),
                 "inbound.sid": inboundSid || null,
+                "inbound.repliedSid": repliedSid || null,
                 "inbound.body": bodyText || "",
                 "inbound.buttonText": btnText || null,
                 "inbound.buttonPayload": btnId || null,
@@ -2767,7 +2804,30 @@ export const twilioInbound = async (req, res) => {
             { new: true }
           );
           if (!updated) {
-            console.log("⚠️ requestId not found, falling back to phone match", { requestId });
+            console.log("⚠️ requestId not found, will try repliedSid/phone fallbacks", { requestId });
+          }
+        }
+
+        if (!updated && repliedSid) {
+          updated = await AvailabilityModel.findOneAndUpdate(
+            { outboundSid: repliedSid },
+            {
+              $set: {
+                reply,
+                repliedAt: new Date(),
+                "inbound.sid": inboundSid || null,
+                "inbound.repliedSid": repliedSid,
+                "inbound.body": bodyText || "",
+                "inbound.buttonText": btnText || null,
+                "inbound.buttonPayload": btnId || null,
+                "inbound.source": "button-or-text",
+                ...(requestId ? { requestId, "inbound.requestId": requestId } : {}),
+              },
+            },
+            { new: true }
+          );
+          if (!updated) {
+            console.log("⚠️ repliedSid did not match any row by outboundSid", { repliedSid });
           }
         }
 
@@ -2783,6 +2843,7 @@ export const twilioInbound = async (req, res) => {
                 reply,
                 repliedAt: new Date(),
                 "inbound.sid": inboundSid || null,
+                "inbound.repliedSid": repliedSid || null,
                 "inbound.body": bodyText || "",
                 "inbound.buttonText": btnText || null,
                 "inbound.buttonPayload": btnId || null,
@@ -2803,7 +2864,7 @@ export const twilioInbound = async (req, res) => {
             sender,
             candidateCount,
             hint:
-              "With Content quick replies, no requestId is returned. We now take the latest 'awaiting reply' row for this phone.",
+              "With Content quick replies, some payloads lack RID. We now try requestId, then OriginalRepliedMessageSid→outboundSid, then latest 'awaiting reply' by phone.",
           });
           return; // bail early like before
         }
