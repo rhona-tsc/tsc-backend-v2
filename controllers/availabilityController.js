@@ -2699,77 +2699,162 @@ export const twilioInbound = async (req, res) => {
           reply = classifyReply(buttonText) || classifyReply(bodyText) || parsedPayload.reply || null;
         }
 
-        // --- Find matching availability row with strictest match first ---
-        let updated = null;
-        let targetRow = null;
+       /* ---------------------------------------------------------------------- */
+/* 🧭 Normalizers + classifiers (local helpers)                           */
+/* ---------------------------------------------------------------------- */
+const normE164 = (raw = "") => {
+  let v = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+  if (!v) return "";
+  if (v.startsWith("+")) return v;
+  if (/^44\d+$/.test(v)) return `+${v}`;
+  if (/^0\d{10}$/.test(v)) return `+44${v.slice(1)}`;
+  if (/^\d{10,13}$/.test(v)) return v.startsWith("44") ? `+${v}` : `+44${v.replace(/^0?/, "")}`;
+  return v;
+};
 
-        if (requestId) {
-          targetRow = await AvailabilityModel.findOne({ requestId }).lean();
-          if (!targetRow) {
-            console.log("⚠️ requestId not found, soft-fallback allowed", { requestId });
-          }
-        }
+const classifyReply = (s = "") => {
+  const t = String(s || "").trim().toLowerCase();
+  if (!t) return null;
+  if (/^y(es)?$/.test(t)) return "yes";
+  if (/^un/.test(t)) return "unavailable";
+  if (/^n(o)?$/.test(t)) return "no";
+  return null;
+};
 
-        if (targetRow) {
-          // We have an exact match by requestId — safest path
-          updated = await AvailabilityModel.findOneAndUpdate(
-            { _id: targetRow._id },
-            {
-              $set: {
-                reply: reply || "no", // default to 'no' if unclassifiable
-                repliedAt: new Date(),
-                "inbound.sid": inboundSid || null,
-                "inbound.body": bodyText || "",
-                "inbound.buttonText": bodyObj["ButtonResponse[Text]"] || buttonText || null,
-                "inbound.buttonPayload": bodyObj["ButtonResponse[Id]"] || buttonPayload || null,
-                "inbound.source": source || null,
-                "inbound.requestId": requestId,
-              },
-            },
-            { new: true }
-          );
-        } else if (parsedPayload?.enquiryId) {
-          // Legacy path: locate by enquiryId (as in your original)
-          updated = await AvailabilityModel.findOneAndUpdate(
-            { enquiryId: parsedPayload.enquiryId },
-            {
-              $set: {
-                reply: reply || "no",
-                repliedAt: new Date(),
-                "inbound.sid": inboundSid,
-                "inbound.body": bodyText,
-                "inbound.buttonText": bodyObj["ButtonResponse[Text]"] || buttonText || null,
-                "inbound.buttonPayload": bodyObj["ButtonResponse[Id]"] || buttonPayload || null,
-                "inbound.source": source || null,
-                ...(requestId ? { requestId, "inbound.requestId": requestId } : {}),
-              },
-            },
-            { new: true }
-          );
-        } else {
-          // Fallback: last row by phone (your original behavior)
-          updated = await AvailabilityModel.findOneAndUpdate(
-            { phone: normalizeFrom(fromRaw) },
-            {
-              $set: {
-                reply: reply || "no",
-                repliedAt: new Date(),
-                "inbound.sid": inboundSid,
-                "inbound.body": bodyText,
-                "inbound.buttonText": bodyObj["ButtonResponse[Text]"] || buttonText || null,
-                "inbound.buttonPayload": bodyObj["ButtonResponse[Id]"] || buttonPayload || null,
-                "inbound.source": source || null,
-                ...(requestId ? { requestId, "inbound.requestId": requestId } : {}),
-              },
-            },
-            { sort: { createdAt: -1 }, new: true }
-          );
-        }
+// tiny safe getter
+const pick = (obj, ...keys) => {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (v !== undefined && v !== null && v !== "") return v;
+  }
+  return null;
+};
 
-        if (!updated) {
-          console.warn("⚠️ No matching AvailabilityModel found for inbound reply.");
-          return;
-        }
+/* ---------------------------------------------------------------------- */
+/* 🔎 Dump key inbound fields to help debugging                           */
+/* ---------------------------------------------------------------------- */
+const bodyObj = req.body || {};
+const bodyText = String(bodyObj?.Body || "");
+const btnText =
+  pick(bodyObj, "ButtonText", "ButtonResponse[Text]", "Interactive[ButtonReply][Title]") || "";
+const btnId =
+  pick(
+    bodyObj,
+    "ButtonPayload",               // Content quick reply → ID (static, from template)
+    "ButtonResponse[Id]",          // non-Content interactive
+    "ListResponse[Id]",            // list id if ever used
+    "Interactive[ButtonReply][Id]" // alternative shape
+  ) || "";
+
+const inboundSid = String(bodyObj?.MessageSid || bodyObj?.SmsMessageSid || "");
+const fromRaw = String(bodyObj?.WaId || bodyObj?.From || "");
+const sender = normE164(fromRaw);
+
+console.log("📥 [twilioInbound] RAW SNAPSHOT", {
+  keys: Object.keys(bodyObj),
+  Body_preview: bodyText.slice(0, 120),
+  ButtonText: btnText,
+  ButtonPayload: btnId,
+  WaId: bodyObj?.WaId,
+  From: bodyObj?.From,
+  sender_norm: sender,
+  MessageSid: inboundSid,
+});
+
+/* ---------------------------------------------------------------------- */
+/* 🧩 Pull requestId if present (non-Content interactive path), or from   */
+/*     inline '#ABC123' text. Content quick replies won't include it.     */
+/* ---------------------------------------------------------------------- */
+let requestId = null;
+let reply = classifyReply(btnText) || classifyReply(btnId) || classifyReply(bodyText);
+
+// e.g. "YES:A1B2C3"
+const mId = String(btnId || "").match(/^[A-Z]+:([A-Z0-9]{5,12})$/i);
+if (mId) requestId = mId[1].toUpperCase();
+
+// fallback: extract "#CODE" anywhere in message body
+if (!requestId) {
+  const mHash = String(bodyText || "").match(/#([A-Z0-9]{5,12})/i);
+  if (mHash) requestId = mHash[1].toUpperCase();
+}
+
+if (!reply) reply = "no"; // default to "no" if we truly can't classify
+
+console.log("🧷 [twilioInbound] Parsed intent", { reply, requestId });
+
+/* ---------------------------------------------------------------------- */
+/* 🎯 Locate the Availability row to update                               */
+/*   1) Strict: requestId                                                 */
+/*   2) Fallback: latest row by phone, v2, not replied yet                */
+/* ---------------------------------------------------------------------- */
+let updated = null;
+
+// 1) requestId exact hit (best!)
+if (requestId) {
+  updated = await AvailabilityModel.findOneAndUpdate(
+    { requestId },
+    {
+      $set: {
+        reply,
+        repliedAt: new Date(),
+        "inbound.sid": inboundSid || null,
+        "inbound.body": bodyText || "",
+        "inbound.buttonText": btnText || null,
+        "inbound.buttonPayload": btnId || null,
+        "inbound.source": "button-or-text",
+        "inbound.requestId": requestId,
+      },
+    },
+    { new: true }
+  );
+  if (!updated) {
+    console.log("⚠️ requestId not found, falling back to phone match", { requestId });
+  }
+}
+
+// 2) fallback by phone → pick most recent row still awaiting reply
+if (!updated && sender) {
+  updated = await AvailabilityModel.findOneAndUpdate(
+    {
+      phone: sender,
+      v2: true,
+      $or: [{ reply: { $exists: false } }, { reply: null }, { reply: "" }],
+    },
+    {
+      $set: {
+        reply,
+        repliedAt: new Date(),
+        "inbound.sid": inboundSid || null,
+        "inbound.body": bodyText || "",
+        "inbound.buttonText": btnText || null,
+        "inbound.buttonPayload": btnId || null,
+        "inbound.source": "button-or-text",
+        ...(requestId ? { requestId, "inbound.requestId": requestId } : {}),
+      },
+    },
+    { new: true, sort: { createdAt: -1 } }
+  );
+}
+
+// extra diagnostic if still no match
+if (!updated) {
+  const candidateCount = await AvailabilityModel.countDocuments({
+    phone: sender,
+    v2: true,
+  });
+  console.warn("⚠️ No matching AvailabilityModel found for inbound reply.", {
+    sender,
+    candidateCount,
+    hint: "If you send multiple enquiries to the same person back-to-back using Content quick replies, we cannot correlate by requestId. We now take the latest 'awaiting reply' row for this phone.",
+  });
+  return; // bail early like before
+}
+
+/* ---------------------------------------------------------------------- */
+/* ✅ From here on your original logic continues unchanged                */
+/*     (musician resolution, calendar invite, badge rebuild, SSE, etc.)   */
+/* ---------------------------------------------------------------------- */
+
 
         // 🔎 Resolve canonical Musician by phone (preferred) or by row's musicianId
         const byPhone = await findCanonicalMusicianByPhone(updated.phone);
