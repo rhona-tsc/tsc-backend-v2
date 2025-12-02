@@ -1525,24 +1525,6 @@ if (mus) {
   }
 }
 
-
-// 🔧 Adjust these imports to your project structure
-import Act from "../models/actModel.js";
-import AvailabilityModel from "../models/availabilityModel.js";
-import Musician from "../models/musicianModel.js";
-
-import { notifyDeputies } from "./notifyDeputies.js";
-import { rebuildAndApplyAvailabilityBadge } from "./availabilityBadge.js";
-import { sendWhatsAppMessage } from "../utils/sendWhatsAppMessage.js";
-import { findVocalistPhone } from "../utils/findVocalistPhone.js";
-
-import { countyFromAddress, getCountyFeeValue } from "../utils/geo/countyFromAddress.js";
-import { computeMemberTravelFee } from "../utils/travel/computeMemberTravelFee.js";
-import userModel from "../models/userModel.js";
-
-// If you already have these helpers elsewhere, remove these and import instead.
-const makeShortId = () => Math.random().toString(36).slice(2, 8).toUpperCase();
-const normalizeToE164 = (raw = "") => normalizePhone(raw);
 const normalizePhone = (raw = "") => {
   let v = String(raw || "").replace(/\s+/g, "").replace(/^whatsapp:/i, "");
   if (!v) return "";
@@ -1555,42 +1537,6 @@ const extractUKPostcode = (s = "") => {
   const m = String(s).toUpperCase().match(/\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/);
   return m ? m[1].replace(/\s+/, " ") : "";
 };
-const normalizeNameBits = (nameLike) => {
-  const s = (nameLike ?? "").toString().trim();
-  if (!s)
-    return {
-      first: "",
-      last: "",
-      firstName: "",
-      lastName: "",
-      displayName: "",
-      vocalistDisplayName: "",
-    };
-  const parts = s.split(/\s+/);
-  const first = parts[0] || "";
-  const last = parts.length > 1 ? parts.slice(1).join(" ") : "";
-  return {
-    first,
-    last,
-    firstName: first,
-    lastName: last,
-    displayName: s,
-    vocalistDisplayName: s,
-  };
-};
-const displayNameOf = (p = {}) => {
-  const fn = (p.firstName || p.name || "").trim();
-  const ln = (p.lastName || "").trim();
-  return fn && ln ? `${fn} ${ln}` : fn || ln || "";
-};
-const pickPic = (m = {}) =>
-  m.photoUrl ||
-  m.musicianProfileImageUpload ||
-  m.profileImage ||
-  m.imageUrl ||
-  m.profilePicture ||
-  m.musicianProfileImage ||
-  null;
 
 export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   const isExpress = !!maybeRes;
