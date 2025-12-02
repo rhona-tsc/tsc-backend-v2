@@ -1551,6 +1551,12 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     };
   };
 
+  // --- helpers to derive county + postcode (UK) from a freeform address
+const extractUKPostcode = (s = "") => {
+  const m = String(s).toUpperCase().match(/\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/);
+  return m ? m[1].replace(/\s+/, " ") : "";
+};
+
   const displayNameOf = (p = {}) => {
     const fn = (p.firstName || p.name || "").trim();
     const ln = (p.lastName || "").trim();
@@ -1662,8 +1668,17 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const fullFormattedAddress =
       formattedAddress || address || act?.formattedAddress || act?.venueAddress || "TBC";
 
-    let shortAddress =
-      (fullFormattedAddress || "TBC").split(",").slice(0, 2).join(", ").trim() || "TBC";
+   const { county: derivedCounty } = countyFromAddress(fullFormattedAddress) || {};
+const derivedPostcode = extractUKPostcode(fullFormattedAddress);
+let shortAddress = [derivedCounty, derivedPostcode].filter(Boolean).join(", ") || "TBC";
+
+// Debug so we can trace where it came from:
+console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
+  shortAddress,
+  derivedCounty,
+  derivedPostcode,
+  fullFormattedAddress,
+});
 
     const metaAddress = fullFormattedAddress || shortAddress || "TBC";
 

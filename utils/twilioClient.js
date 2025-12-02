@@ -211,11 +211,20 @@ const statusCallback =
     (member && (member.isDeputy === true || member?.role === "deputy")) ||
     (typeof opts.isDeputy === "boolean" ? opts.isDeputy : undefined);
 
+    // Prefer caller-provided location (from triggerAvailabilityRequest) → county + postcode
+const effectiveLocation = (variables && variables.location) || shortAddress;
+console.log("📨 [sendWhatsAppMessage] location going to Content", {
+  effectiveLocation,
+  fromVariables: Boolean(variables?.location),
+  computedShort: shortAddress,
+  addressRaw: address,
+});
+
   // enrich variables for ContentSid templates
   let enrichedVars = {
     firstName: member?.firstName || member?.name || "Musician",
     date: formattedDate,
-    location: shortAddress,
+    location: effectiveLocation,
     fee: String(formattedFee).replace(/[^0-9.]/g, ""),
     role: role || member?.instrument || "Musician",
     actName: actData?.tscName || actData?.name || "TSC Act",
