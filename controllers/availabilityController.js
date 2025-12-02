@@ -3927,6 +3927,41 @@ const primaryName =
       })
     );
 
+    // ──────────────────────────────────────────────────────────────
+// Derive leadSlot & deputySlot from the badge for email logic
+// ──────────────────────────────────────────────────────────────
+const slotsArr = Array.isArray(badge?.slots) ? badge.slots : [];
+
+const isHttp = (u) => typeof u === "string" && u.startsWith("http");
+
+// A "lead available" slot: slot itself says yes AND we're not showing a deputy,
+// or the primary is explicitly not a deputy and has a usable photo.
+const isLeadAvailableSlot = (s) => {
+  const leadSaysYes = s?.state === "yes" && s?.covering !== "deputy";
+  const primaryIsLead =
+    s?.primary && s.primary.isDeputy === false &&
+    (s.primary.available === true || s?.state === "yes") &&
+    (isHttp(s?.primary?.photoUrl) || isHttp(s?.photoUrl));
+  return !!(leadSaysYes || primaryIsLead);
+};
+
+// A "deputy covering" slot: either the slot is marked as deputy cover with a deputy
+// primary that has a photo, or any deputy replied yes with a photo.
+const isDeputyCoveringSlot = (s) => {
+  const primaryDeputyCover =
+    s?.covering === "deputy" &&
+    s?.primary?.isDeputy === true &&
+    isHttp(s?.primary?.photoUrl);
+
+  const yesDeputyWithPhoto = Array.isArray(s?.deputies) &&
+    s.deputies.some((d) => d?.state === "yes" && isHttp(d?.photoUrl));
+
+  return !!(primaryDeputyCover || yesDeputyWithPhoto);
+};
+
+const leadSlot   = slotsArr.find(isLeadAvailableSlot)   || null;
+const deputySlot = slotsArr.find(isDeputyCoveringSlot) || null;
+
     const leadPrimary = leadSlot ? presentBadgePrimary(leadSlot) : null;
     const depPrimary = deputySlot ? presentBadgePrimary(deputySlot) : null;
 
