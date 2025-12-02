@@ -1622,23 +1622,52 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const act = await Act.findById(actId).lean();
     if (!act) throw new Error("Act not found");
 
+    // Title-case helper tuned for UK place names
+function toTitleCaseCounty(s = "") {
+  const exceptions = new Set(["of", "and", "the", "upon", "on", "by", "in"]);
+  const fixups = {
+    "east riding of yorkshire": "East Riding of Yorkshire",
+    "city of london": "City of London",
+    "isle of wight": "Isle of Wight",
+    "na h-eileanan siar": "Na h-Eileanan Siar",
+  };
+
+  const raw = String(s || "").trim();
+  if (!raw) return "";
+
+  const lower = raw.toLowerCase();
+  if (fixups[lower]) return fixups[lower];
+
+  // keep spaces, hyphens, and apostrophes as separators but preserved
+  return lower
+    .split(/([\s\-’'])/)
+    .map((part, idx) => {
+      if (/^[\s\-’']$/.test(part)) return part;          // keep separator
+      if (idx !== 0 && exceptions.has(part)) return part; // small words
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    // Mc/Mac prefixes (simple pass)
+    .join("")
+    .replace(/\bMc([a-z])/g, (_, c) => "Mc" + c.toUpperCase())
+    .replace(/\bMac([a-z])/g, (_, c) => "Mac" + c.toUpperCase());
+}
+
     // derive addresses
     const fullFormattedAddress =
       formattedAddress || address || act?.formattedAddress || act?.venueAddress || "TBC";
 
-    // Short address = "County, POSTCODE"
-    const { county: derivedCounty } = countyFromAddress(fullFormattedAddress) || {};
-    const derivedPostcode = extractUKPostcode(fullFormattedAddress);
-    let shortAddress =
-      [derivedCounty, derivedPostcode].filter(Boolean).join(", ") || "TBC";
+const { county: derivedCountyRaw } = countyFromAddress(fullFormattedAddress) || {};
+const derivedCounty = toTitleCaseCounty(derivedCountyRaw);
+const derivedPostcode = extractUKPostcode(fullFormattedAddress);
 
-    // Debug shortAddress to trace variables into templates
-    console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
-      shortAddress,
-      derivedCounty,
-      derivedPostcode,
-      fullFormattedAddress,
-    });
+const shortAddress = [derivedCounty, derivedPostcode].filter(Boolean).join(", ") || "TBC";
+
+console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
+  shortAddress,
+  derivedCounty,
+  derivedPostcode,
+  fullFormattedAddress,
+});
 
     const metaAddress = fullFormattedAddress || shortAddress || "TBC";
 
