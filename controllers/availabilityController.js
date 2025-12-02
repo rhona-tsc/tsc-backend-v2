@@ -1904,6 +1904,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         // 🔗 correlation id
         const requestId = makeShortId();
 
+        // ⛳ INSERT-ONLY META — no duplicates with $set
         const setOnInsert = {
           actId,
           lineupId: lineup?._id || null,
@@ -1915,11 +1916,11 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           createdAt: now,
           status: "sent",
           reply: null,
-          requestId, // 🔗
         };
 
         const displayNameForLead = `${enriched.firstName || vMember.firstName || ""} ${enriched.lastName || vMember.lastName || ""}`.trim();
 
+        // 🔁 ALWAYS-UPDATE FIELDS
         const setAlways = {
           isDeputy: false,
           musicianId: realMusicianId,
@@ -1939,7 +1940,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           selectedVocalistId: realMusicianId || null,
           vocalistName: displayNameForLead,
           profileUrl: realMusicianId ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}` : "",
-          requestId, // 🔗 keep for visibility/queries
+          requestId, // ← only in $set
         };
 
         console.log("🔎 [triggerAvailabilityRequest/multi] PERSON", {
@@ -1999,7 +2000,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           },
           requestId,   // 🔗
           buttons,     // 🔗
-          // smsBody kept here as fallback text if you decide to send plain message in future
           smsBody: `Hi ${vMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${vMember.instrument} duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
         });
 
@@ -2257,6 +2257,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     // 🔗 correlation id
     const requestId = makeShortId();
 
+    // ⛳ INSERT-ONLY META — keep clean of duplicates
     const setOnInsert = {
       actId,
       lineupId: lineup?._id || null,
@@ -2268,14 +2269,13 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       createdAt: now,
       status: "sent",
       reply: null,
-      musicianId: canonicalId,
-      selectedVocalistName: selectedName,
-      selectedVocalistId: canonicalId || null,
-      requestId, // 🔗
+      // ❌ removed musicianId / selectedVocalistName / selectedVocalistId / requestId
     };
 
+    // 🔁 ALWAYS-UPDATE FIELDS
     const setAlways = {
       isDeputy: !!isDeputy,
+      musicianId: canonicalId,
       musicianName: canonicalName,
       musicianEmail: canonical?.email || targetMember.email || "",
       photoUrl: canonicalPhoto,
@@ -2292,7 +2292,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       selectedVocalistName: selectedName,
       selectedVocalistId: canonicalId || null,
       vocalistName: vocalistName || selectedName || "",
-      requestId, // 🔗
+      requestId, // ← only in $set
     };
 
     const resolvedFirstName = (canonical?.firstName || targetMember.firstName || enrichedMember.firstName || "").trim();
@@ -2374,7 +2374,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       },
       requestId,       // 🔗 correlation
       buttons,         // 🔗 interactive quick replies
-      // No contentSid here because interactive messages don't use Content API
       smsBody: `Hi ${targetMember.firstName || "there"}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${roleStr} duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
     });
 
