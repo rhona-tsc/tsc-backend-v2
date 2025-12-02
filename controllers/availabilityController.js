@@ -2400,47 +2400,58 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 // -------------------- Delivery/Read Receipts --------------------
 // module-scope guard so we don't double-fallback on Twilio retries
 export const twilioStatus = async (req, res) => {
-  console.log(
-    `🟢 (availabilityController.js) twilioStatus START at ${new Date().toISOString()}`,
-    {}
-  );
+  console.log(`🟢 (availabilityController.js) twilioStatus START ${new Date().toISOString()}`);
   try {
     const {
       MessageSid,
-      MessageStatus, // delivered, failed, undelivered, read, sent, queued, etc.
-      SmsStatus, // sometimes used instead of MessageStatus
-      To, // e.g. whatsapp:+447...
-      From, // your sender e.g. whatsapp:+1555...
+      MessageStatus,         // delivered, failed, undelivered, read, sent, queued...
+      SmsStatus,             // sometimes used
+      To,
+      From,
       ErrorCode,
       ErrorMessage,
     } = req.body || {};
 
     const status = String(
       req.body?.MessageStatus ??
-        req.body?.SmsStatus ??
-        req.body?.message_status ??
-        ""
+      req.body?.SmsStatus ??
+      req.body?.message_status ??
+      ""
     ).toLowerCase();
-
-    const isWA = /^whatsapp:/i.test(String(From || "")); // channel we used
-    const toAddr = String(To || ""); // "whatsapp:+44…" OR "+44…"
 
     console.log("📡 Twilio status:", {
       sid: MessageSid,
       status,
-      to: toAddr,
+      to: To,
       from: From,
       err: ErrorCode || null,
       errMsg: ErrorMessage || null,
-      body: String(req.body?.Body || "").slice(0, 100) || null,
     });
 
-    // Optionally, update DB status here if needed (not sending SMS fallback)
+    // 🔗 Optional: reflect outbound status on the availability row
+    if (MessageSid) {
+      const update = {
+        $set: {
+          "outbound.status": status,
+          "outbound.lastEventAt": new Date(),
+        },
+      };
+      if (status === "read") update.$set["outbound.readAt"] = new Date();
+      if (ErrorCode) {
+        update.$set["outbound.errorCode"] = ErrorCode;
+        update.$set["outbound.errorMessage"] = ErrorMessage || "";
+      }
 
-    return res.status(200).send("OK"); // Twilio expects 2xx
+      await AvailabilityModel.updateOne(
+        { messageSidOut: MessageSid },
+        update
+      );
+    }
+
+    return res.status(200).send("OK"); // Twilio needs 2xx
   } catch (e) {
     console.error("❌ twilioStatus error:", e);
-    return res.status(200).send("OK"); // still 200 so Twilio stops retrying
+    return res.status(200).send("OK"); // still 200 to stop retries
   }
 };
 

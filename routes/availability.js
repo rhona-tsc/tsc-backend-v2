@@ -7,6 +7,7 @@ import {
   rebuildAndApplyAvailabilityBadge,
   clearavailabilityBadges,
   triggerAvailabilityRequest,
+  twilioStatus,
 } from "../controllers/availabilityController.js";
 import { makeAvailabilityBroadcaster } from "../controllers/availabilityController.js";
 import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYesV2.js";
@@ -64,6 +65,9 @@ router.post("/twilio/inbound", (req, res, next) => {
   );
   next();
 }, twilioInbound);
+
+// In your router:
+router.post("/api/twilio/status", twilioStatus);    // handles delivery/read/fail
 
 /* -------------------------------------------------------------------------- */
 /* 🟦 POST /rebuild-availability-badge                                        */

@@ -73,6 +73,10 @@ export async function sendWhatsAppMessage(opts = {}) {
   const client = getTwilioClient();
   if (!client) throw new Error("Twilio disabled");
 
+const statusCallback =
+  process.env.TWILIO_STATUS_CALLBACK_URL ||
+  `${process.env.BACKEND_PUBLIC_URL || process.env.BACKEND_URL}/api/twilio/status`;
+
   const {
     to,
     actData = null,
@@ -227,6 +231,9 @@ export async function sendWhatsAppMessage(opts = {}) {
     requestCode,
   };
 
+  // REQUIRED for Quick Reply button IDs (YES{{7}} etc.)
+enrichedVars["7"] = requestId || "";
+
   console.log("📨 [sendWhatsAppMessage] PRE-SEND", {
     to: toE,
     from: fromE,
@@ -252,8 +259,11 @@ export async function sendWhatsAppMessage(opts = {}) {
     smsBody ||
     `Are you available for ${actData?.tscName || actData?.name || "this act"} on ${formattedDate} in ${shortAddress}? Fee: ${formattedFee}.`;
 
+    const hasContentQuickReply = Boolean(contentSid || process.env.TWILIO_ENQUIRY_SID);
+const useInteractive = Array.isArray(buttons) && buttons.length && !hasContentQuickReply;
+
   // ── INTERACTIVE BUTTONS path (carries requestId in reply IDs) ─────────────────
-  if (Array.isArray(buttons) && buttons.length) {
+if (useInteractive) {
     const interactiveButtons = buttons.map((b) => ({
       type: "reply",
       reply: { id: b.id, title: b.title },
@@ -301,19 +311,19 @@ export async function sendWhatsAppMessage(opts = {}) {
   }
 
   // ── CONTENT TEMPLATE or PLAIN TEXT path ───────────────────────────────────────
-  const payload = {
-    from: `whatsapp:${fromE}`,
-    to: `whatsapp:${toE}`,
-    ...(contentSid || (typeof TWILIO_ENQUIRY_SID !== "undefined" && TWILIO_ENQUIRY_SID)
-      ? {
-          contentSid: contentSid || TWILIO_ENQUIRY_SID,
-          contentVariables: JSON.stringify(enrichedVars),
-        }
-      : {
-          body: `${baseBody}${requestCode ? `\n\nRef: ${requestCode}` : ""}`,
-        }),
-    ...(typeof statusCallback !== "undefined" && statusCallback ? { statusCallback } : {}),
-  };
+const payload = {
+  from: `whatsapp:${fromE}`,
+  to: `whatsapp:${toE}`,
+  ...(contentSid || process.env.TWILIO_ENQUIRY_SID
+    ? {
+        contentSid: contentSid || process.env.TWILIO_ENQUIRY_SID,
+        contentVariables: JSON.stringify(enrichedVars),
+      }
+    : {
+        body: `${baseBody}${requestCode ? `\n\nRef: ${requestCode}` : ""}`,
+      }),
+  ...(statusCallback ? { statusCallback } : {}),
+};
 
   const msg = await client.messages.create(payload);
 
