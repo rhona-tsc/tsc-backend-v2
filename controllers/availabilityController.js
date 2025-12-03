@@ -4166,7 +4166,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
   }
 
   const actDoc = await Act.findById(actId)
-    .select("+availabilityBadgesMeta lineups tscName name formattedAddress venueAddress")
+    .select("+availabilityBadgesMeta lineups tscName name formattedAddress venueAddress coverImage images description tscDescription paSystem lightingSystem extras numberOfSets lengthOfSets repertoire tscRepertoire selectedSongs repertoireByYear setlist")
     .lean();
 
   console.log("📘 [rebuildAndApplyAvailabilityBadge] actDoc fetched", {
@@ -4650,7 +4650,7 @@ const offRepLine =
                 <li>Or up to 7 hours on site if earlier arrival is needed</li>
                 ${offRepLine ? `<li>${offRepLine}</li>` : ""}
                 ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
-                <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
+                <li>Travel to ${selectedAddress || "TBC"}</li>
                 ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
               </ul>
               <div style="margin-top:30px;">
@@ -4722,6 +4722,8 @@ const offRepLine =
                   : ""
               }
               ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />` : ""}
+              <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
+              <p style="margin:6px 0 14px; color:#555;">${(actDoc.tscDescription || actDoc.description || "").toString()}</p>
               <p><a href="${deputyProfileUrl || profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
               ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
               <h4 style="margin-top:25px;">Included in your quote:</h4>
@@ -4732,7 +4734,7 @@ const offRepLine =
                 <li>Or up to 7 hours on site if earlier arrival is needed</li>
                 ${offRepLine ? `<li>${offRepLine}</li>` : ""}
                 ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
-                <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
+                <li>Travel to ${selectedAddress || "TBC"}</li>
                 ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
               </ul>
               <div style="margin-top:30px;">
