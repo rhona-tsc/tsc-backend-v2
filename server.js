@@ -50,6 +50,7 @@ import {
   twilioInbound,
   twilioStatus,
   buildAvailabilityBadgeFromRows,
+  processDueDeputyEscalations,
 } from "./controllers/availabilityController.js";
 import { getAvailableActIds } from "./controllers/actAvailabilityController.js";
 import { submitActSubmission } from "./controllers/actSubmissionController.js";
@@ -387,6 +388,26 @@ app.use((err, req, res, next) => {
 /* -------------------------------------------------------------------------- */
 /*                          Cron & background jobs                            */
 /* -------------------------------------------------------------------------- */
+
+// kick off a light poller every 2 minutes (no-op if nothing is due)
+if (process.env.ENABLE_DEFERRED_AVAILABILITY !== "0") {
+  setInterval(() => {
+    processDueDeputyEscalations().catch((e) =>
+      console.warn("[deferredAvailability] poller error:", e.message)
+    );
+  }, 2 * 60 * 1000);
+}
+
+// routes
+app.get("/api/availability/process-deferred", async (req, res) => {
+  try {
+    const out = await processDueDeputyEscalations({ maxBatch: 50 });
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 
 // Run chase & escalation every hour
 cron.schedule("0 * * * *", async () => {

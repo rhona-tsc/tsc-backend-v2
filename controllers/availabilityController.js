@@ -26,6 +26,174 @@ if (AvailabilityModel?.schema?.paths) {
   console.warn("⚠️ AvailabilityModel missing schema.paths — check import");
 }
 
+
+// Deffered Availability Request (if lead take longer than 3 hours to reply ping next deputy)
+
+// ───────────────────────────────────────────────────────────────────────────────
+// 3h escalation helpers
+// ───────────────────────────────────────────────────────────────────────────────
+const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+
+/** Upsert a "ping deputies in 3h if no reply" job for a LEAD vocalist */
+export async function scheduleDeputyEscalation({
+  availabilityId,
+  actId,
+  lineupId,
+  dateISO,
+  phone,
+  slotIndex = 0,
+  formattedAddress = "TBC",
+  clientName = "",
+  clientEmail = "",
+}) {
+  try {
+    const dueAt = new Date(Date.now() + THREE_HOURS_MS);
+
+    await DeferredAvailability.findOneAndUpdate(
+      {
+        reason: "no-reply-3h",
+        actId,
+        dateISO,
+        phone,
+        slotIndex,
+        status: { $in: ["pending", "processing"] },
+      },
+      {
+        $setOnInsert: {
+          availabilityId,
+          lineupId,
+          formattedAddress,
+          clientName,
+          clientEmail,
+          dueAt,
+          status: "pending",
+        },
+        $set: {
+          // if it already exists as pending/processing, refresh the dueAt forward
+          dueAt,
+        },
+      },
+      { new: true, upsert: true }
+    );
+
+    console.log("⏱️ [scheduleDeputyEscalation] job scheduled for", {
+      actId,
+      dateISO,
+      slotIndex,
+      phone,
+      dueAt,
+    });
+  } catch (e) {
+    console.warn("⚠️ [scheduleDeputyEscalation] failed:", e.message);
+  }
+}
+
+/** Cancel any pending 3h escalation for a LEAD row (call on any reply) */
+export async function cancelDeputyEscalation({ actId, dateISO, phone, slotIndex = 0 }) {
+  try {
+    const res = await DeferredAvailability.updateMany(
+      {
+        reason: "no-reply-3h",
+        actId,
+        dateISO,
+        phone,
+        slotIndex,
+        status: { $in: ["pending", "processing"] },
+      },
+      { $set: { status: "cancelled", processedAt: new Date() } }
+    );
+    if (res.modifiedCount) {
+      console.log("🧯 [cancelDeputyEscalation] cancelled", {
+        actId, dateISO, slotIndex, phone, cancelled: res.modifiedCount
+      });
+    }
+  } catch (e) {
+    console.warn("⚠️ [cancelDeputyEscalation] failed:", e.message);
+  }
+}
+
+/** Worker: processes due jobs and calls notifyDeputies if the lead hasn't replied */
+export async function processDueDeputyEscalations({ maxBatch = 20 } = {}) {
+  const now = new Date();
+
+  for (let i = 0; i < maxBatch; i++) {
+    // atomically claim one job
+    const job = await DeferredAvailability.findOneAndUpdate(
+      { status: "pending", dueAt: { $lte: now } },
+      { $set: { status: "processing", processingStartedAt: new Date() } },
+      { sort: { dueAt: 1 }, new: true }
+    );
+
+    if (!job) break; // nothing due
+
+    try {
+      // Try to fetch the original availability row (most accurate)
+      const row =
+        job.availabilityId
+          ? await AvailabilityModel.findById(job.availabilityId).lean()
+          : await AvailabilityModel.findOne({
+              actId: job.actId,
+              dateISO: job.dateISO,
+              phone: job.phone,
+              slotIndex: job.slotIndex,
+              v2: true,
+            }).sort({ createdAt: -1 }).lean();
+
+      // If lead already replied, or deputies were already contacted, do nothing
+      if (row?.reply) {
+        await DeferredAvailability.updateOne(
+          { _id: job._id },
+          { $set: { status: "processed", processedAt: new Date(), error: "lead_already_replied" } }
+        );
+        continue;
+      }
+
+      const deputiesExist = await AvailabilityModel.exists({
+        actId: job.actId,
+        dateISO: job.dateISO,
+        slotIndex: job.slotIndex,
+        isDeputy: true,
+      });
+
+      if (deputiesExist) {
+        await DeferredAvailability.updateOne(
+          { _id: job._id },
+          { $set: { status: "processed", processedAt: new Date(), error: "already_escalated" } }
+        );
+        continue;
+      }
+
+      // Call your existing helper – we pass slotIndex so the right vocalist's deputies are pinged
+      await notifyDeputies({
+        actId: job.actId,
+        lineupId: row?.lineupId || job.lineupId || null,
+        dateISO: job.dateISO,
+        formattedAddress: row?.formattedAddress || job.formattedAddress || "TBC",
+        clientName: row?.clientName || job.clientName || "",
+        clientEmail: row?.clientEmail || job.clientEmail || "",
+        slotIndex: typeof job.slotIndex === "number" ? job.slotIndex : null,
+        skipDuplicateCheck: true,
+        skipIfUnavailable: false,
+      });
+
+      await DeferredAvailability.updateOne(
+        { _id: job._id },
+        { $set: { status: "processed", processedAt: new Date() } }
+      );
+
+      console.log("📣 [processDueDeputyEscalations] deputies pinged (no reply in 3h)", {
+        actId: job.actId, dateISO: job.dateISO, slotIndex: job.slotIndex
+      });
+    } catch (e) {
+      console.error("❌ [processDueDeputyEscalations] job failed", e);
+      await DeferredAvailability.updateOne(
+        { _id: job._id },
+        { $set: { status: "error", error: e.message, processedAt: new Date() } }
+      );
+    }
+  }
+}
+
 // ───────────────────────────────────────────────────────────────────────────────
 // Helper: consistent identity logging
 // ───────────────────────────────────────────────────────────────────────────────
@@ -918,6 +1086,7 @@ export const clearavailabilityBadges = async (req, res) => {
 
 // -------------------- Utilities --------------------
 
+
 const mapTwilioToEnquiryStatus = (s) => {
   console.log(
     `🟢  (availabilityController.js) mapTwilioToEnquiryStatus START at ${new Date().toISOString()}`,
@@ -932,6 +1101,53 @@ const mapTwilioToEnquiryStatus = (s) => {
   if (v === "undelivered") return "undelivered";
   if (v === "failed") return "failed";
   return "queued";
+};
+
+// --- Helper: fetch county fee from object or Map (case-insensitive) ---
+const getCountyFeeValue = (fees, county) => {
+  if (!fees || !county) return 0;
+  const key = String(county).toLowerCase().trim();
+  try {
+    // Map-like
+    if (typeof fees.get === "function") {
+      const v = fees.get(key);
+      return Number(v || 0);
+    }
+    // Plain object
+    if (typeof fees === "object") {
+      const direct = fees[key];
+      if (direct != null) return Number(direct);
+      const compact = fees[key.replace(/\s+/g, " ")];
+      if (compact != null) return Number(compact);
+      const dashed = fees[key.replace(/\s+/g, "-")];
+      if (dashed != null) return Number(dashed);
+    }
+  } catch {}
+  return 0;
+};
+
+// --- Helper: pick best available musician picture URL ---
+const pickPictureUrl = (o = {}) =>
+  (o.photoUrl ||
+    o.musicianProfileImageUpload ||
+    o.musicianProfileImage ||
+    o.profileImage ||
+    o.profilePicture ||
+    o.imageUrl ||
+    "");
+
+// --- Helper: lightweight name normalizer used for WA template vars ---
+const normalizeNameBits = (displayLike) => {
+  const fallback = { firstName: "Musician", lastName: "", displayName: "Musician" };
+  if (!displayLike) return fallback;
+  const s = String(displayLike).trim();
+  if (!s) return fallback;
+  const parts = s.split(/\s+/);
+  return {
+    firstName: parts[0] || "Musician",
+    lastName: parts.length > 1 ? parts.slice(1).join(" ") : "",
+    displayName: s,
+  };
 };
 
 const BASE_URL = (
@@ -2045,6 +2261,19 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
           );
         }
 
+        // ⏰ Schedule deputy escalation for THIS lead vocalist (inside loop scope)
+        await scheduleDeputyEscalation({
+          availabilityId: savedLead?._id || null,
+          actId,
+          lineupId: lineup?._id || lineupId || null,
+          dateISO,
+          phone,
+          slotIndex: slotIndexForThis,
+          formattedAddress: fullFormattedAddress,
+          clientName: resolvedClientName || "",
+          clientEmail: resolvedClientEmail || "",
+        });
+
         results.push({
           name: vMember.firstName,
           slotIndex: slotIndexForThis,
@@ -2053,7 +2282,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
           sid: msg?.sid || null,
         });
       }
-
+// after sending the WA to this LEAD vocalist (multi-vocalist path)
       console.log(`✅ Multi-vocalist availability triggered for:`, results);
       if (res) return res.json({ success: true, sent: results.length, details: results });
       return { success: true, sent: results.length, details: results };
@@ -2112,9 +2341,8 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       : `${targetMember.firstName || ""} ${targetMember.lastName || ""}`.trim();
 
     const canonicalPhoto =
-      pickPic(canonical) ||
-      enrichedMember?.photoUrl ||
-      enrichedMember?.profilePicture ||
+      pickPictureUrl(canonical) ||
+      pickPictureUrl(enrichedMember) ||
       "";
 
     const selectedName = String(
@@ -2471,6 +2699,20 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
         e?.message || e
       );
     }
+
+    if (!isDeputy) {
+  await scheduleDeputyEscalation({
+    availabilityId: saved?._id || null,
+    actId,
+    lineupId: lineup?._id || lineupId || null,
+    dateISO,
+    phone,
+    slotIndex: singleSlotIndex,
+    formattedAddress: fullFormattedAddress,
+    clientName: resolvedClientName || "",
+    clientEmail: resolvedClientEmail || "",
+  });
+}
 
     console.log(`📲 WhatsApp sent successfully — ${feeStr}`);
     if (res) return res.json({ success: true, sent: 1 });
@@ -3056,10 +3298,13 @@ export const twilioInbound = async (req, res) => {
                   },
                 }
               );
+
+              
             } catch (err) {
               console.error("❌ Calendar invite failed:", err.message);
             }
           }
+          
 
           console.log("🟦 About to sendWhatsAppMessage using content SID:", process.env.TWILIO_ENQUIRY_SID);
           await sendWhatsAppText(
@@ -3067,12 +3312,18 @@ export const twilioInbound = async (req, res) => {
             "Super — we’ll send a diary invite to log the enquiry for your records."
           );
 
-          // 2️⃣ Mark as read + (if deputy) persist flag
-          await AvailabilityModel.updateOne(
-            { _id: updated._id },
-            { $set: { status: "read", ...(isDeputy ? { isDeputy: true } : {}) } }
-          );
-
+        // 2️⃣ Mark as read + (if deputy) persist flag
+        await AvailabilityModel.updateOne(
+          { _id: updated._id },
+          { $set: { status: "read", ...(isDeputy ? { isDeputy: true } : {}) } }
+        );
+        // ✅ On YES, cancel any pending escalations for this slot/lead
+        await cancelDeputyEscalation({
+          actId,
+          dateISO,
+          phone: updated.phone,
+          slotIndex,
+        });
           // 3️⃣ Rebuild badge NOW (prevents flicker/drops)
           let badgeResult = null;
           try {
@@ -3212,6 +3463,13 @@ export const twilioInbound = async (req, res) => {
               ],
             });
           }
+
+          await cancelDeputyEscalation({
+  actId,
+  dateISO,
+  phone: updated.phone,
+  slotIndex,
+});
 
           // 📨 Courtesy cancellation email
           try {
