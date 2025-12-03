@@ -33,11 +33,7 @@ async function sendEmail({ to, cc, bcc, subject, html, text, from }) {
     return { ok: false, skipped: true, reason: "no_recipients" };
   }
 
-  // DRY-RUN guard
-  if (process.env.SEND_EMAILS !== "true") {
-    console.log("✉️ [DRY-RUN] sendEmail", { recipients, bccRecipients, subject });
-    return { ok: true, dryRun: true, recipients, bccRecipients };
-  }
+
 
   const mail = {
     from: from || process.env.DEFAULT_FROM || "hello@thesupremecollective.co.uk",
