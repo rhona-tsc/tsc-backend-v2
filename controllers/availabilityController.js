@@ -4619,8 +4619,7 @@ const clientUserId =
   to: clientEmail,             // still pass as a fallback
   name: clientName,
   subject: `${deputyName} can't wait to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
-  html: `...`
-}); `
+  html: `
             <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
               <p>Hi ${(clientName || "there").split(" ")[0]},</p>
               <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
@@ -4654,7 +4653,7 @@ const clientUserId =
               </div>
             </div>
           `,
-        });
+});
 
         console.log("✅ [rebuildAndApplyAvailabilityBadge] Deputy-available client email sent.");
       }
