@@ -567,7 +567,7 @@ export async function sendClientEmail({ actId, to, userId = null, name, subject,
     // ── Actually send ────────────────────────────────────────────────────────
     const result = await sendEmail({
       to: [finalRecipient], // ensure array for strict normalizers
-      cc: ["hello@thesupremecollective.co.uk"],
+      bcc: ["hello@thesupremecollective.co.uk"],
       subject,
       html,
       from: process.env.DEFAULT_FROM || "hello@thesupremecollective.co.uk",
@@ -4557,10 +4557,10 @@ const presentBadgePrimary = (slot = null) => {
   };
 };
 
-    const leadPrimary = leadSlot ? presentBadgePrimary(leadSlot) : null;
-    const depPrimary = deputySlot ? presentBadgePrimary(deputySlot) : null;
+const leadPrimary = leadSlot ? presentBadgePrimary(leadSlot) : null;
+const depPrimary  = deputySlot ? presentBadgePrimary(deputySlot) : null;
 
- console.log("✉️ [rebuildAndApplyAvailabilityBadge] Email decision context", {
+console.log("✉️ [rebuildAndApplyAvailabilityBadge] Email decision context", {
   clientName,
   clientEmail,
   selectedAddress,
@@ -4575,30 +4575,61 @@ const clientUserId =
   (allRows.find((r) => r?.userId)?.userId) ||
   (allRows.find((r) => r?.clientUserId)?.clientUserId) ||
   null;
-  
 
-    const heroImg =
-      (Array.isArray(actDoc.coverImage) && actDoc.coverImage[0]?.url) ||
-      (Array.isArray(actDoc.images) && actDoc.images[0]?.url) ||
-      actDoc.coverImage?.url ||
-      "";
+const heroImg =
+  (Array.isArray(actDoc.coverImage) && actDoc.coverImage[0]?.url) ||
+  (Array.isArray(actDoc.images) && actDoc.images[0]?.url) ||
+  actDoc.coverImage?.url ||
+  "";
+
+// --- exact setlist wording + "from over N songs"
+const songCount = (() => {
+  if (Array.isArray(actDoc?.selectedSongs) && actDoc.selectedSongs.length) return actDoc.selectedSongs.length;
+  if (actDoc?.repertoireByYear && typeof actDoc.repertoireByYear === "object") {
+    return Object.values(actDoc.repertoireByYear).reduce((n, arr) => n + (Array.isArray(arr) ? arr.length : 0), 0);
+  }
+  if (Array.isArray(actDoc?.repertoire) && actDoc.repertoire.length) return actDoc.repertoire.length;
+  if (Array.isArray(actDoc?.tscRepertoire) && actDoc.tscRepertoire.length) return actDoc.tscRepertoire.length;
+  return 0;
+})();
+
+const setlistTail = songCount ? ` — drawn from over ${songCount} songs` : "";
+
+const tailoringExact =
+  actDoc.setlist === "smallTailoring"
+    ? `A signature setlist curated by the band — guaranteed crowd-pleasers that they know work every time${setlistTail}`
+    : actDoc.setlist === "mediumTailoring"
+    ? `A collaborative setlist blending your top picks with our tried-and-tested favourites for the perfect party balance${setlistTail}`
+    : actDoc.setlist === "largeTailoring"
+    ? `A fully tailored setlist made up almost entirely of your requests — a truly personalised music experience${setlistTail}`
+    : null;
+
+// --- Off-repertoire requests (exact wording)
+const offRepCount = Number(actDoc?.offRepertoireRequests || 0);
+const offRepLine =
+  offRepCount > 0
+    ? (offRepCount === 1
+        ? "One additional ‘off-repertoire’ song request (e.g. often the first dance or your favourite song)"
+        : `${offRepCount} additional ‘off-repertoire’ song requests (e.g. often the first dance or your favourite songs)`)
+    : "";
 
     
-      // Lead available → good-news email
-      if (leadPrimary?.available && leadPrimary?.isDeputy === false) {
-        const vocalistFirst = leadPrimary.firstName || "our lead vocalist";
-        console.log("📧 [rebuildAndApplyAvailabilityBadge] Sending LEAD-available email", {
-          vocalistFirst,
-          to: clientEmail,
-        });
+    // Lead available → good-news email
+    if (leadPrimary?.available && leadPrimary?.isDeputy === false) {
+      const vocalistFirst = leadPrimary.firstName || "our lead vocalist";
+      console.log("📧 [rebuildAndApplyAvailabilityBadge] Sending LEAD-available email", {
+        vocalistFirst,
+        to: clientEmail,
+      });
 
-       await sendClientEmail({
-  actId: String(actId),
-  userId: clientUserId,        // 👈 added
-  to: clientEmail,             // still pass as a fallback
-  name: clientName,
-  subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s lead vocalist is available`,
-  html: `
+      await sendClientEmail({
+        actId: String(actId),
+        userId: clientUserId,
+        to: clientEmail,
+        name: clientName,
+        bcc: ["hello@thesupremecollective.co.uk"],
+        subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s lead vocalist is available`,
+        html: `
             <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
               <p>Hi ${(clientName || "there").split(" ")[0]},</p>
               <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
@@ -4606,10 +4637,10 @@ const clientUserId =
                 We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with
                 <strong>${vocalistFirst}</strong> on lead vocals, and they’d love to perform for you and your guests.
               </p>
-              ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
+              ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />` : ""}
               <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
-              <p style="margin:6px 0 14px; color:#555;">${actDoc.tscDescription || actDoc.description || ""}</p>
-              <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
+              <p style="margin:6px 0 14px; color:#555;">${(actDoc.tscDescription || actDoc.description || "").toString()}</p>
+              <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
               ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
               <h4 style="margin-top:25px;">Included in your quote:</h4>
               <ul>
@@ -4617,59 +4648,64 @@ const clientUserId =
                 ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
                 <li>Band arrival from 5pm and finish by midnight as standard</li>
                 <li>Or up to 7 hours on site if earlier arrival is needed</li>
-                ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
-                ${tailoring ? `<li>${tailoring}</li>` : ""}
+                ${offRepLine ? `<li>${offRepLine}</li>` : ""}
+                ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
                 <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
+                ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
               </ul>
               <div style="margin-top:30px;">
-                <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
+                <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
               </div>
+              <p style="margin-top:16px;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
+              <p>If you have any questions, just reply — we’re always happy to help.</p>
+              <p>Warmest wishes,<br/><strong>The Supreme Collective ✨</strong><br/><a href="https://www.thesupremecollective.co.uk" style="color:#888; text-decoration:none;">www.thesupremecollective.co.uk</a></p>
             </div>
           `,
-        });
+      });
 
-        console.log("✅ [rebuildAndApplyAvailabilityBadge] Client email sent (lead available).");
-      }
-      // Deputy covering → deputy-available email
-      else if (depPrimary?.available && depPrimary?.isDeputy === true) {
-        const deputyName = depPrimary.displayName || depPrimary.firstName || "one of our vocalists";
-        console.log("📧 [rebuildAndApplyAvailabilityBadge] Sending DEPUTY-available email", {
-          deputyName,
-          to: clientEmail,
-        });
+      console.log("✅ [rebuildAndApplyAvailabilityBadge] Client email sent (lead available).");
+    }
+    // Deputy covering → deputy-available email
+    else if (depPrimary?.available && depPrimary?.isDeputy === true) {
+      const deputyName = depPrimary.displayName || depPrimary.firstName || "one of our vocalists";
+      console.log("📧 [rebuildAndApplyAvailabilityBadge] Sending DEPUTY-available email", {
+        deputyName,
+        to: clientEmail,
+      });
 
-        // Try to enrich deputy media/profile
-        let deputyPhotoUrl = depPrimary.photoUrl || "";
-        let deputyProfileUrl = depPrimary.profileUrl || "";
-        let deputyVideos = [];
-        try {
-          let deputyMusician = null;
-          if (depPrimary?.musicianId) {
-            deputyMusician = await Musician.findById(depPrimary.musicianId)
-              .select("firstName lastName profilePicture photoUrl tscProfileUrl functionBandVideoLinks originalBandVideoLinks")
-              .lean();
-          }
-          if (deputyMusician) {
-            if (!deputyPhotoUrl)
-              deputyPhotoUrl = deputyMusician.profilePicture || deputyMusician.photoUrl || "";
-            if (!deputyProfileUrl)
-              deputyProfileUrl = deputyMusician.tscProfileUrl || `${SITE}musician/${deputyMusician._id}`;
-
-            const fnVids = (deputyMusician.functionBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
-            const origVids = (deputyMusician.originalBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
-            deputyVideos = [...new Set([...fnVids, ...origVids])];
-          }
-        } catch (e) {
-          console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Deputy enrichment failed:", e?.message || e);
+      // Try to enrich deputy media/profile
+      let deputyPhotoUrl = depPrimary.photoUrl || "";
+      let deputyProfileUrl = depPrimary.profileUrl || "";
+      let deputyVideos = [];
+      try {
+        let deputyMusician = null;
+        if (depPrimary?.musicianId) {
+          deputyMusician = await Musician.findById(depPrimary.musicianId)
+            .select("firstName lastName profilePicture photoUrl tscProfileUrl functionBandVideoLinks originalBandVideoLinks")
+            .lean();
         }
+        if (deputyMusician) {
+          if (!deputyPhotoUrl)
+            deputyPhotoUrl = deputyMusician.profilePicture || deputyMusician.photoUrl || "";
+          if (!deputyProfileUrl)
+            deputyProfileUrl = deputyMusician.tscProfileUrl || `${SITE}musician/${deputyMusician._id}`;
 
-       await sendClientEmail({
-  actId: String(actId),
-  userId: clientUserId,        // 👈 added
-  to: clientEmail,             // still pass as a fallback
-  name: clientName,
-  subject: `${deputyName} can't wait to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
-  html: `
+          const fnVids = (deputyMusician.functionBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+          const origVids = (deputyMusician.originalBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+          deputyVideos = [...new Set([...fnVids, ...origVids])];
+        }
+      } catch (e) {
+        console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Deputy enrichment failed:", e?.message || e);
+      }
+
+      await sendClientEmail({
+        actId: String(actId),
+        userId: clientUserId,
+        to: clientEmail,
+        name: clientName,
+        bcc: ["hello@thesupremecollective.co.uk"],
+        subject: `${deputyName} can't wait to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
+        html: `
             <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
               <p>Hi ${(clientName || "there").split(" ")[0]},</p>
               <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
@@ -4685,28 +4721,32 @@ const clientUserId =
                      </div>`
                   : ""
               }
-              ${
-                deputyVideos?.length
-                  ? `<div style="margin-top:25px;">
-                       <h4 style="color:#111;">🎬 Watch ${deputyName} perform</h4>
-                       <ul style="list-style:none; padding-left:0;">
-                         ${deputyVideos.slice(0,3).map((v) => `<li style="margin-bottom:8px;"><a href="${v}" target="_blank" style="color:#ff6667;">${v}</a></li>`).join("")}
-                       </ul>
-                     </div>`
-                  : ""
-              }
-              ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; border-radius:8px; margin:20px 0;" />` : ""}
-              <p><a href="${deputyProfileUrl || profileUrl}" style="color:#ff6667; font-weight:600;">View Profile →</a></p>
+              ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />` : ""}
+              <p><a href="${deputyProfileUrl || profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
               ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
+              <h4 style="margin-top:25px;">Included in your quote:</h4>
+              <ul>
+                <li>${setsLine}</li>
+                ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
+                <li>Band arrival from 5pm and finish by midnight as standard</li>
+                <li>Or up to 7 hours on site if earlier arrival is needed</li>
+                ${offRepLine ? `<li>${offRepLine}</li>` : ""}
+                ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
+                <li>Travel to ${selectedAddress.split(",").slice(0,2).join(", ") || "TBC"}</li>
+                ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
+              </ul>
               <div style="margin-top:30px;">
-                <a href="${cartUrl}" style="background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600;">Book Now →</a>
+                <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
               </div>
+              <p style="margin-top:16px;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
+              <p>If you have any questions, just reply — we’re always happy to help.</p>
+              <p>Warmest wishes,<br/><strong>The Supreme Collective ✨</strong><br/><a href="https://www.thesupremecollective.co.uk" style="color:#888; text-decoration:none;">www.thesupremecollective.co.uk</a></p>
             </div>
           `,
-});
+      });
 
-        console.log("✅ [rebuildAndApplyAvailabilityBadge] Deputy-available client email sent.");
-      }
+      console.log("✅ [rebuildAndApplyAvailabilityBadge] Deputy-available client email sent.");
+    }
     
   } catch (e) {
     console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Client email block failed:", e?.message || e);
