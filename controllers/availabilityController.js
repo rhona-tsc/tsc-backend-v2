@@ -485,36 +485,84 @@ export function formatNiceDate(dateISO) {
 // ───────────────────────────────────────────────────────────────────────────────
 // sendClientEmail — with identity and URL logging
 // ───────────────────────────────────────────────────────────────────────────────
-export async function sendClientEmail({ actId, to, name, subject, html }) {
-  console.log("✉️ sendClientEmail START", { actId, to, name, subject });
+// Resolves recipient from a User id or an email, and always CCs hello@
+// Safe to keep in the same file; it lazily imports deps.
+export async function sendClientEmail({ actId, to, userId = null, name, subject, html }) {
+  console.log("✉️ sendClientEmail START", { actId, to, userId, name, subject });
 
   try {
+    // Lazy-load deps so we don't juggle top-level imports
+    const [{ sendEmail }, UserMod] = await Promise.all([
+      import("../utils/sendEmail.js"),
+      import("../models/userModel.js").catch(() => null),
+    ]);
+    const User = UserMod && (UserMod.default || UserMod.User || UserMod.user || null);
+
+    const isObjectId = (s) => typeof s === "string" && /^[0-9a-fA-F]{24}$/.test(s);
+    const isEmail    = (s) => typeof s === "string" && /.+@.+\..+/.test(s);
+
     const act = await Act.findById(actId).lean();
 
-    const recipient =
-      (to && to !== "hello@thesupremecollective.co.uk")
-        ? to
-        : (act?.contactEmail &&
-           act.contactEmail !== "hello@thesupremecollective.co.uk")
-        ? act.contactEmail
-        : process.env.NOTIFY_EMAIL || "hello@thesupremecollective.co.uk";
+    // Resolve the true recipient
+    let resolvedEmail = null;
+
+    // 1) explicit userId
+    if (!resolvedEmail && userId && isObjectId(userId) && User) {
+      try {
+        const u = await User.findById(userId).select("email").lean();
+        if (u?.email) resolvedEmail = String(u.email).trim().toLowerCase();
+      } catch (e) {
+        console.warn("⚠️ sendClientEmail: lookup by userId failed:", e?.message || e);
+      }
+    }
+
+    // 2) if "to" looks like an ObjectId, treat it as a userId
+    if (!resolvedEmail && isObjectId(to) && User) {
+      try {
+        const u = await User.findById(to).select("email").lean();
+        if (u?.email) resolvedEmail = String(u.email).trim().toLowerCase();
+      } catch (e) {
+        console.warn("⚠️ sendClientEmail: lookup by 'to' (objectId) failed:", e?.message || e);
+      }
+    }
+
+    // 3) plain email in "to"
+    if (!resolvedEmail && isEmail(to)) {
+      resolvedEmail = String(to).trim();
+    }
+
+    // 4) fallbacks
+    if (!resolvedEmail && isEmail(act?.contactEmail) && act.contactEmail !== "hello@thesupremecollective.co.uk") {
+      resolvedEmail = act.contactEmail.trim();
+    }
+    if (!resolvedEmail) {
+      resolvedEmail = process.env.NOTIFY_EMAIL || "hello@thesupremecollective.co.uk";
+    }
 
     console.log("📨 sendClientEmail recipient decision", {
       requestedTo: to,
+      userId,
       actContactEmail: act?.contactEmail,
-      finalRecipient: recipient,
+      finalRecipient: resolvedEmail,
     });
 
-    if (!recipient || recipient === "hello@thesupremecollective.co.uk") {
+    // Avoid emailing only the hello inbox as the "to"
+    if (!resolvedEmail || resolvedEmail === "hello@thesupremecollective.co.uk") {
       console.warn("⚠️ No valid client recipient found, skipping sendEmail");
       return { success: false, skipped: true };
     }
 
-    await sendEmail(recipient, subject, html, "hello@thesupremecollective.co.uk");
+    // Always CC the TSC inbox
+    await sendEmail({
+      to: [resolvedEmail],
+      cc: ["hello@thesupremecollective.co.uk"],
+      subject,
+      html,
+    });
 
     console.log("✅ sendClientEmail OK", {
       actName: act?.tscName || act?.name,
-      recipient,
+      recipient: resolvedEmail,
       subject,
     });
     return { success: true };
@@ -1086,7 +1134,6 @@ export const clearavailabilityBadges = async (req, res) => {
 
 // -------------------- Utilities --------------------
 
-
 const mapTwilioToEnquiryStatus = (s) => {
   console.log(
     `🟢  (availabilityController.js) mapTwilioToEnquiryStatus START at ${new Date().toISOString()}`,
@@ -1101,53 +1148,6 @@ const mapTwilioToEnquiryStatus = (s) => {
   if (v === "undelivered") return "undelivered";
   if (v === "failed") return "failed";
   return "queued";
-};
-
-// --- Helper: fetch county fee from object or Map (case-insensitive) ---
-const getCountyFeeValue = (fees, county) => {
-  if (!fees || !county) return 0;
-  const key = String(county).toLowerCase().trim();
-  try {
-    // Map-like
-    if (typeof fees.get === "function") {
-      const v = fees.get(key);
-      return Number(v || 0);
-    }
-    // Plain object
-    if (typeof fees === "object") {
-      const direct = fees[key];
-      if (direct != null) return Number(direct);
-      const compact = fees[key.replace(/\s+/g, " ")];
-      if (compact != null) return Number(compact);
-      const dashed = fees[key.replace(/\s+/g, "-")];
-      if (dashed != null) return Number(dashed);
-    }
-  } catch {}
-  return 0;
-};
-
-// --- Helper: pick best available musician picture URL ---
-const pickPictureUrl = (o = {}) =>
-  (o.photoUrl ||
-    o.musicianProfileImageUpload ||
-    o.musicianProfileImage ||
-    o.profileImage ||
-    o.profilePicture ||
-    o.imageUrl ||
-    "");
-
-// --- Helper: lightweight name normalizer used for WA template vars ---
-const normalizeNameBits = (displayLike) => {
-  const fallback = { firstName: "Musician", lastName: "", displayName: "Musician" };
-  if (!displayLike) return fallback;
-  const s = String(displayLike).trim();
-  if (!s) return fallback;
-  const parts = s.split(/\s+/);
-  return {
-    firstName: parts[0] || "Musician",
-    lastName: parts.length > 1 ? parts.slice(1).join(" ") : "",
-    displayName: s,
-  };
 };
 
 const BASE_URL = (
@@ -2144,6 +2144,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
         // ⛳ INSERT-ONLY META — keep clean
         const setOnInsert = {
           actId,
+          clientUserId: body?.userId || null,
           lineupId: lineup?._id || null,
           dateISO,
           phone,
@@ -2165,6 +2166,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
           musicianId: realMusicianId,
           musicianName: displayNameForLead,
           musicianEmail: enriched.email || "",
+          clientUserId: body?.userId || null,
           photoUrl: enriched.photoUrl || enriched.profilePicture || "",
           address: fullFormattedAddress,
           formattedAddress: fullFormattedAddress,
@@ -2341,8 +2343,9 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       : `${targetMember.firstName || ""} ${targetMember.lastName || ""}`.trim();
 
     const canonicalPhoto =
-      pickPictureUrl(canonical) ||
-      pickPictureUrl(enrichedMember) ||
+      pickPic(canonical) ||
+      enrichedMember?.photoUrl ||
+      enrichedMember?.profilePicture ||
       "";
 
     const selectedName = String(
@@ -2557,6 +2560,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       actId,
       lineupId: lineup?._id || null,
       dateISO,
+    clientUserId: body?.userId || null,
       phone,
       v2: true,
       enquiryId,
@@ -2578,6 +2582,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       formattedDate,
       clientName: resolvedClientName || "",
       clientEmail: resolvedClientEmail || "",
+      clientUserId: body?.userId || null,
       actName: act?.tscName || act?.name || "",
       duties: body?.inheritedDuties || targetMember.instrument || "Performance",
       fee: String(finalFee),
@@ -4505,16 +4510,21 @@ const presentBadgePrimary = (slot = null) => {
     const leadPrimary = leadSlot ? presentBadgePrimary(leadSlot) : null;
     const depPrimary = deputySlot ? presentBadgePrimary(deputySlot) : null;
 
-    console.log("✉️ [rebuildAndApplyAvailabilityBadge] Email decision context", {
-      clientName,
-      clientEmail,
-      selectedAddress,
-      leadPrimary,
-      deputyPrimary: depPrimary,
-    });
+ console.log("✉️ [rebuildAndApplyAvailabilityBadge] Email decision context", {
+  clientName,
+  clientEmail,
+  selectedAddress,
+  leadPrimary,
+  deputyPrimary: depPrimary,
+});
 
-    // Lazy import (if you use this util)
-    let sendClientEmail = null;
+// Try to discover the client user id from any availability row we have
+const clientUserId =
+  availabilityRecord?.userId ||
+  availabilityRecord?.clientUserId ||
+  (allRows.find((r) => r?.userId)?.userId) ||
+  (allRows.find((r) => r?.clientUserId)?.clientUserId) ||
+  null;
   
 
     const heroImg =
@@ -4523,7 +4533,7 @@ const presentBadgePrimary = (slot = null) => {
       actDoc.coverImage?.url ||
       "";
 
-    if (sendClientEmail) {
+    
       // Lead available → good-news email
       if (leadPrimary?.available && leadPrimary?.isDeputy === false) {
         const vocalistFirst = leadPrimary.firstName || "our lead vocalist";
@@ -4532,12 +4542,13 @@ const presentBadgePrimary = (slot = null) => {
           to: clientEmail,
         });
 
-        await sendClientEmail({
-          actId: String(actId),
-          subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s lead vocalist is available`,
-          to: clientEmail,
-          name: clientName,
-          html: `
+       await sendClientEmail({
+  actId: String(actId),
+  userId: clientUserId,        // 👈 added
+  to: clientEmail,             // still pass as a fallback
+  name: clientName,
+  subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s lead vocalist is available`,
+  html: `
             <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
               <p>Hi ${(clientName || "there").split(" ")[0]},</p>
               <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
@@ -4602,12 +4613,14 @@ const presentBadgePrimary = (slot = null) => {
           console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Deputy enrichment failed:", e?.message || e);
         }
 
-        await sendClientEmail({
-          actId: String(actId),
-          subject: `${deputyName} is raring to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
-          to: clientEmail,
-          name: clientName,
-          html: `
+       await sendClientEmail({
+  actId: String(actId),
+  userId: clientUserId,        // 👈 added
+  to: clientEmail,             // still pass as a fallback
+  name: clientName,
+  subject: `${deputyName} can't wait to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
+  html: `...`
+}); `
             <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
               <p>Hi ${(clientName || "there").split(" ")[0]},</p>
               <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
@@ -4645,7 +4658,7 @@ const presentBadgePrimary = (slot = null) => {
 
         console.log("✅ [rebuildAndApplyAvailabilityBadge] Deputy-available client email sent.");
       }
-    }
+    
   } catch (e) {
     console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Client email block failed:", e?.message || e);
   }
