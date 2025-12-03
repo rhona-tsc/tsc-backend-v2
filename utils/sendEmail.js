@@ -16,7 +16,7 @@ const transporter = nodemailer.createTransport({
  * @param {Array} attachments - Optional array of attachments
  */
 // utils/sendEmail.js
-export async function sendEmail({ to, cc, bcc, subject, html, text, from }) {
+async function sendEmail({ to, cc, bcc, subject, html, text, from }) {
   const toArr = [to].flat().filter(Boolean);
   const ccArr = [cc].flat().filter(Boolean);
   const bccArr = [bcc].flat().filter(Boolean);
