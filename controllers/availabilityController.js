@@ -491,19 +491,25 @@ export async function sendClientEmail({ actId, to, userId = null, name, subject,
   console.log("✉️ sendClientEmail START", { actId, to, userId, name, subject });
 
   try {
-    // Lazy-load deps so we don't juggle top-level imports
-    const [{ sendEmail }, UserMod] = await Promise.all([
+    // Lazy-load deps so we don't juggle top-level imports or risk circulars
+    const [SendMod, UserMod] = await Promise.all([
       import("../utils/sendEmail.js"),
       import("../models/userModel.js").catch(() => null),
     ]);
+    const sendEmail = (SendMod && (SendMod.sendEmail || SendMod.default)) || null;
     const User = UserMod && (UserMod.default || UserMod.User || UserMod.user || null);
 
+    if (typeof sendEmail !== "function") {
+      console.error("❌ sendClientEmail: sendEmail() not available");
+      return { success: false, error: "sendEmail_not_available" };
+    }
+
     const isObjectId = (s) => typeof s === "string" && /^[0-9a-fA-F]{24}$/.test(s);
-    const isEmail    = (s) => typeof s === "string" && /.+@.+\..+/.test(s);
+    const isEmail    = (s) => typeof s === "string" && /\S+@\S+\.\S+/.test(s.trim());
 
     const act = await Act.findById(actId).lean();
 
-    // Resolve the true recipient
+    // ── Resolve the true recipient ────────────────────────────────────────────
     let resolvedEmail = null;
 
     // 1) explicit userId
@@ -528,47 +534,91 @@ export async function sendClientEmail({ actId, to, userId = null, name, subject,
 
     // 3) plain email in "to"
     if (!resolvedEmail && isEmail(to)) {
-      resolvedEmail = String(to).trim();
+      resolvedEmail = String(to).trim().toLowerCase();
     }
 
-    // 4) fallbacks
-    if (!resolvedEmail && isEmail(act?.contactEmail) && act.contactEmail !== "hello@thesupremecollective.co.uk") {
-      resolvedEmail = act.contactEmail.trim();
+    // 4) act contact email fallback (avoid using hello@ as the sole "to")
+    if (
+      !resolvedEmail &&
+      isEmail(act?.contactEmail) &&
+      String(act.contactEmail).trim().toLowerCase() !== "hello@thesupremecollective.co.uk"
+    ) {
+      resolvedEmail = String(act.contactEmail).trim().toLowerCase();
     }
-    if (!resolvedEmail) {
-      resolvedEmail = process.env.NOTIFY_EMAIL || "hello@thesupremecollective.co.uk";
-    }
+
+    // 5) final fallback from env (may still be hello@)
+    const envFallback = (process.env.NOTIFY_EMAIL || "").trim().toLowerCase();
+    const finalRecipient = resolvedEmail || envFallback;
 
     console.log("📨 sendClientEmail recipient decision", {
       requestedTo: to,
       userId,
       actContactEmail: act?.contactEmail,
-      finalRecipient: resolvedEmail,
+      finalRecipient,
+      sendEmailsFlag: process.env.SEND_EMAILS,
     });
 
-    // Avoid emailing only the hello inbox as the "to"
-    if (!resolvedEmail || resolvedEmail === "hello@thesupremecollective.co.uk") {
-      console.warn("⚠️ No valid client recipient found, skipping sendEmail");
-      return { success: false, skipped: true };
+    // Guard: don't send *only* to hello@
+    if (!finalRecipient || !isEmail(finalRecipient) || finalRecipient === "hello@thesupremecollective.co.uk") {
+      console.warn("⚠️ No valid client recipient (or only hello@). Skipping sendEmail.");
+      return { success: false, skipped: true, reason: "no_valid_client_recipient" };
     }
 
-    // Always CC the TSC inbox
-    await sendEmail({
-      to: [resolvedEmail],
+    // ── Actually send ────────────────────────────────────────────────────────
+    const result = await sendEmail({
+      to: [finalRecipient], // ensure array for strict normalizers
       cc: ["hello@thesupremecollective.co.uk"],
       subject,
       html,
+      from: process.env.DEFAULT_FROM || "hello@thesupremecollective.co.uk",
     });
 
-    console.log("✅ sendClientEmail OK", {
+    // ── Interpret low-level result explicitly ────────────────────────────────
+    if (result?.skipped) {
+      console.warn("🟠 sendClientEmail SKIPPED", {
+        reason: result.reason || "unknown",
+        finalRecipient,
+        subject,
+      });
+      return { success: false, skipped: true, reason: result.reason || "skipped" };
+    }
+
+    if (result?.dryRun) {
+      console.log("✉️ sendClientEmail DRY-RUN OK", {
+        recipients: result.recipients,
+        bccRecipients: result.bccRecipients,
+        subject,
+      });
+      return { success: true, dryRun: true };
+    }
+
+    if (!result?.ok) {
+      console.error("❌ sendClientEmail FAILED", {
+        finalRecipient,
+        subject,
+        accepted: result?.accepted,
+        rejected: result?.rejected,
+        response: result?.response,
+      });
+      return {
+        success: false,
+        error: "send_failed",
+        accepted: result?.accepted || [],
+        rejected: result?.rejected || [],
+      };
+    }
+
+    console.log("✅ sendClientEmail SENT", {
       actName: act?.tscName || act?.name,
-      recipient: resolvedEmail,
+      recipient: finalRecipient,
       subject,
+      messageId: result?.messageId,
     });
-    return { success: true };
+
+    return { success: true, messageId: result?.messageId };
   } catch (err) {
-    console.error("❌ sendClientEmail failed:", err.message);
-    return { success: false, error: err.message };
+    console.error("❌ sendClientEmail failed:", err?.message || err);
+    return { success: false, error: err?.message || String(err) };
   }
 }
 
