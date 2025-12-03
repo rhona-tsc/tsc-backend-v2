@@ -3529,7 +3529,7 @@ export const twilioInbound = async (req, res) => {
           // 📨 Courtesy cancellation email
           try {
             const { sendEmail } = await import("../utils/sendEmail.js");
-            const subject = `❌ ${act?.tscName || act?.name}: Diary Invite Cancelled for ${new Date(
+            const subject = `${act?.tscName || act?.name}: Diary Invite Cancelled for ${new Date(
               dateISO
             ).toLocaleDateString("en-GB")}`;
             const html = `
@@ -3537,7 +3537,7 @@ export const twilioInbound = async (req, res) => {
               <p>Your diary invite for <b>${act?.tscName || act?.name}</b> on <b>${new Date(
                 dateISO
               ).toLocaleDateString("en-GB")}</b> has been cancelled.</p>
-              <p>If your availability changes, reply "Yes" to the WhatsApp message to re-confirm.</p>
+              <p>If your availability changes, reply to this email to re-confirm.</p>
               <br/>
               <p>– The Supreme Collective Team</p>
             `;
@@ -4166,7 +4166,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
   }
 
   const actDoc = await Act.findById(actId)
-    .select("+availabilityBadgesMeta lineups tscName name formattedAddress venueAddress coverImage images description tscDescription paSystem lightingSystem extras numberOfSets lengthOfSets repertoire tscRepertoire selectedSongs repertoireByYear setlist")
+    .select("+availabilityBadgesMeta lineups tscName name formattedAddress venueAddress coverImage images profileImage description tscDescription paSystem lightingSystem extras numberOfSets lengthOfSets repertoire tscRepertoire selectedSongs repertoireByYear setlist offRepertoireRequests")
     .lean();
 
   console.log("📘 [rebuildAndApplyAvailabilityBadge] actDoc fetched", {
@@ -4579,8 +4579,16 @@ const clientUserId =
 const heroImg =
   (Array.isArray(actDoc.coverImage) && actDoc.coverImage[0]?.url) ||
   (Array.isArray(actDoc.images) && actDoc.images[0]?.url) ||
+  (Array.isArray(actDoc.profileImage) && actDoc.profileImage[0]?.url) ||
   actDoc.coverImage?.url ||
   "";
+
+console.log("🖼️ Email assets", {
+  heroImg,
+  hasTscDescription: !!actDoc.tscDescription,
+  hasDescription: !!actDoc.description,
+  offRepertoireRequests: actDoc?.offRepertoireRequests
+});
 
 // --- exact setlist wording + "from over N songs"
 const songCount = (() => {
@@ -4638,21 +4646,21 @@ const offRepLine =
                 <strong>${vocalistFirst}</strong> on lead vocals, and they’d love to perform for you and your guests.
               </p>
               ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />` : ""}
-              <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
+              <h3 style="color:#111;">${actDoc.tscName || actDoc.name}</h3>
               <p style="margin:6px 0 14px; color:#555;">${(actDoc.tscDescription || actDoc.description || "").toString()}</p>
               <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
               ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
               <h4 style="margin-top:25px;">Included in your quote:</h4>
-              <ul>
-                <li>${setsLine}</li>
-                ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
-                <li>Band arrival from 5pm and finish by midnight as standard</li>
-                <li>Or up to 7 hours on site if earlier arrival is needed</li>
-                ${offRepLine ? `<li>${offRepLine}</li>` : ""}
-                ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
-                <li>Travel to ${selectedAddress || "TBC"}</li>
-                ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
-              </ul>
+            <ul>
+  <li>${setsLine}</li>
+  ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
+  <li>Band arrival from 5pm and finish by midnight as standard</li>
+  <li>Or up to 7 hours on site if earlier arrival is needed</li>
+  ${offRepLine ? `<li>${offRepLine}</li>` : ""}
+  ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
+  ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
+  <li>Travel to ${selectedAddress || "TBC"}</li>
+</ul>
               <div style="margin-top:30px;">
                 <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
               </div>
@@ -4672,6 +4680,35 @@ const offRepLine =
         deputyName,
         to: clientEmail,
       });
+
+      // 🔎 Choose copy based on vocalist count in the *smallest* lineup
+      const isVocalistMember = (m = {}) => {
+        const s = String(m.instrument || m.role || "").toLowerCase();
+        return /vocal|singer/.test(s);
+      };
+
+      const smallestLineup = Array.isArray(actDoc?.lineups) && actDoc.lineups.length
+        ? actDoc.lineups
+            .slice()
+            .sort((a, b) => {
+              const ca = Array.isArray(a?.bandMembers)
+                ? a.bandMembers.filter((x) => x && (x.isEssential !== false)).length
+                : 0;
+              const cb = Array.isArray(b?.bandMembers)
+                ? b.bandMembers.filter((x) => x && (x.isEssential !== false)).length
+                : 0;
+              return ca - cb; // ascending → smallest first
+            })[0]
+        : null;
+
+      const vocalistCount = smallestLineup && Array.isArray(smallestLineup.bandMembers)
+        ? smallestLineup.bandMembers.filter((m) => (m?.isEssential !== false) && isVocalistMember(m)).length
+        : 1; // sensible default
+
+      const unavailableVocalistPrefix =
+        vocalistCount > 1
+          ? "One of the band's regular vocalists isn’t available for your date, but we’re delighted to confirm that"
+          : "The band's regular vocalist isn’t available for your date, but we’re delighted to confirm that";
 
       // Try to enrich deputy media/profile
       let deputyPhotoUrl = depPrimary.photoUrl || "";
@@ -4710,33 +4747,37 @@ const offRepLine =
               <p>Hi ${(clientName || "there").split(" ")[0]},</p>
               <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
               <p>
-                The band's regular lead vocalist isn’t available for your date, but we’re delighted to confirm that 
-                <strong>${deputyName}</strong> — one of the band's trusted deputy vocalists — is available to perform instead.
+                ${unavailableVocalistPrefix} <strong>${deputyName}</strong> — one of the band's trusted deputy vocalists — is available to perform instead.
               </p>
-              ${
-                deputyProfileUrl || deputyPhotoUrl
-                  ? `<div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
-                       <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyName}</h3>
-                       ${deputyPhotoUrl ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />` : ""}
-                     </div>`
-                  : ""
-              }
+  ${
+  deputyProfileUrl || deputyPhotoUrl
+    ? `<div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
+         <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyName}</h3>
+         ${deputyPhotoUrl ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />` : ""}
+         ${deputyProfileUrl ? `<p style="margin:6px 0 0;"><a href="${deputyProfileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View ${deputyName}'s profile →</a></p>` : ""}
+         <p style="margin:8px 0 0; color:#555;">
+           Please note: when a deputy vocalist is booked, the band will tailor the setlist to that vocalist’s repertoire.
+           There’s a large overlap with ${(actDoc.tscName || actDoc.name)}’s core repertoire and ${deputyName}’s repertoire, so you’ll still get the band’s signature crowd‑pleasers.
+         </p>
+       </div>`
+    : ""
+}
               ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />` : ""}
-              <h3 style="color:#111;">🎵 ${actDoc.tscName || actDoc.name}</h3>
+              <h3 style="color:#111;">${actDoc.tscName || actDoc.name}</h3>
               <p style="margin:6px 0 14px; color:#555;">${(actDoc.tscDescription || actDoc.description || "").toString()}</p>
               <p><a href="${deputyProfileUrl || profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
               ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
               <h4 style="margin-top:25px;">Included in your quote:</h4>
-              <ul>
-                <li>${setsLine}</li>
-                ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
-                <li>Band arrival from 5pm and finish by midnight as standard</li>
-                <li>Or up to 7 hours on site if earlier arrival is needed</li>
-                ${offRepLine ? `<li>${offRepLine}</li>` : ""}
-                ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
-                <li>Travel to ${selectedAddress || "TBC"}</li>
-                ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
-              </ul>
+             <ul>
+  <li>${setsLine}</li>
+  ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
+  <li>Band arrival from 5pm and finish by midnight as standard</li>
+  <li>Or up to 7 hours on site if earlier arrival is needed</li>
+  ${offRepLine ? `<li>${offRepLine}</li>` : ""}
+  ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
+  ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
+  <li>Travel to ${selectedAddress || "TBC"}</li>
+</ul>
               <div style="margin-top:30px;">
                 <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
               </div>
