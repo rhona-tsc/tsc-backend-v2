@@ -382,10 +382,50 @@ async function getDeputyById(req, res) {
 }
 
 const registerDeputy = async (req, res) => {
-  console.group("📩 NEW DEPUTY REGISTRATION REQUEST");
-  console.log("📨 Request received at:", new Date().toISOString());
-  console.log("📁 Multer req.files:", req.files);
-  console.log("🧾 req.body keys:", Object.keys(req.body || {}));
+  const reqId = req.get("x-request-id") || req.body?._requestId || `srv_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const startedAt = Date.now();
+
+  const safePreview = (obj, opts = {}) => {
+    const {
+      maxArray = 4,
+      maxString = 800,
+      elideKeys = ["password", "salt", "__v"],
+    } = opts;
+    const seen = new WeakSet();
+    const shrink = (v) => {
+      if (v && typeof v === "object") {
+        if (seen.has(v)) return "[Circular]";
+        seen.add(v);
+      }
+      if (Array.isArray(v)) {
+        const head = v.slice(0, maxArray).map(shrink);
+        const extra = v.length - head.length;
+        return extra > 0 ? [...head, `…(+${extra})`] : head;
+      }
+      if (v && typeof v === "object") {
+        const out = {};
+        for (const k of Object.keys(v)) {
+          if (elideKeys.includes(k)) continue;
+          out[k] = shrink(v[k]);
+        }
+        return out;
+      }
+      if (typeof v === "string" && v.length > maxString) {
+        return v.slice(0, maxString) + "…";
+      }
+      return v;
+    };
+    return shrink(obj);
+  };
+
+  console.group(`📩 NEW DEPUTY REGISTRATION REQUEST [${reqId}]`);
+  console.log("📨 receivedAt:", new Date().toISOString());
+  console.log("🧾 headers(x-request-id):", req.get("x-request-id"));
+  console.log("📁 multer files keys:", Object.keys(req.files || {}));
+  console.log(
+    "📦 raw body keys:",
+    Object.keys(req.body || {})
+  );
 
   try {
     const body = req.body;
@@ -415,10 +455,12 @@ const registerDeputy = async (req, res) => {
     email = email ? email.trim().toLowerCase() : null;
 
     if (!email) {
+      console.warn("⚠️ Missing email in request body");
+      console.groupEnd();
       return res.status(400).json({ success: false, message: "Email is required." });
     }
 
-    // find/create doc
+    // Find or create
     let musician = await musicianModel.findOne({ email });
     let createdNew = false;
     if (!musician) {
@@ -426,10 +468,10 @@ const registerDeputy = async (req, res) => {
       createdNew = true;
       console.log("🆕 Creating new musician:", email);
     } else {
-      console.log("🟡 Updating existing musician:", email);
+      console.log("🟡 Updating existing musician:", email, musician._id.toString());
     }
 
-    // parse blobs
+    // Parse payload blobs
     const basicInfo = safeParse(body.basicInfo, {});
     const address = safeParse(body.address, musician.address || {});
     const bank = safeParse(body.bank_account, musician.bank_account || {});
@@ -481,7 +523,6 @@ const registerDeputy = async (req, res) => {
     // mp3s: files OR JSON
     let coverMp3s = [];
     let originalMp3s = [];
-
     if (req.files?.coverMp3s?.length) {
       coverMp3s = req.files.coverMp3s.map((f) => ({ title: "", url: f.path }));
     } else {
@@ -492,7 +533,6 @@ const registerDeputy = async (req, res) => {
           .filter((m) => m.url);
       }
     }
-
     if (req.files?.originalMp3s?.length) {
       originalMp3s = req.files.originalMp3s.map((f) => ({ title: "", url: f.path }));
     } else {
@@ -503,6 +543,63 @@ const registerDeputy = async (req, res) => {
           .filter((m) => m.url);
       }
     }
+
+    // Log the parsed/normalized view (START snapshot)
+    const normalizedPreview = safePreview(
+      {
+        email,
+        basicInfo,
+        address,
+        bank,
+        academic_credentials,
+        agreementCheckboxes,
+        backline,
+        vocalMics,
+        inEarMonitoring,
+        instrumentMics,
+        speechMics,
+        instrumentation,
+        awards,
+        sessions,
+        social_media_links,
+        repertoire,
+        selectedSongs,
+        other_skills,
+        logistics,
+        functionBandVideoLinks,
+        tscApprovedFunctionBandVideoLinks,
+        originalBandVideoLinks,
+        tscApprovedOriginalBandVideoLinks,
+        cableLogistics,
+        extensionCableLogistics,
+        uplights,
+        tbars,
+        lightBars,
+        discoBall,
+        otherLighting,
+        paSpeakerSpecs,
+        mixingDesk,
+        floorMonitorSpecs,
+        djEquipment,
+        djEquipmentCategories,
+        djGearRequired,
+        instrumentSpecs,
+        digitalWardrobeBlackTie,
+        digitalWardrobeFormal,
+        digitalWardrobeSmartCasual,
+        digitalWardrobeSessionAllBlack,
+        additionalImages,
+        coverMp3sLen: coverMp3s.length,
+        originalMp3sLen: originalMp3s.length,
+        deputy_contract_agreed: body.deputy_contract_agreed,
+        deputy_contract_signed: body.deputy_contract_signed,
+        dateRegistered: body.dateRegistered,
+      },
+      { maxArray: 3 }
+    );
+    console.groupCollapsed(`🧪 START parsed payload [${reqId}]`);
+    console.log(normalizedPreview);
+    console.groupEnd();
 
     // simple fields
     musician.firstName = (body.firstName || basicInfo.firstName || musician.firstName || "").trim();
@@ -632,12 +729,22 @@ const registerDeputy = async (req, res) => {
     musician.markModified("vocals");
 
     const saved = await musician.save();
-    console.log("✅ Musician saved:", saved._id.toString());
+
+    // END snapshot: read back from DB to confirm persisted shape
+    const roundTrip = await musicianModel.findById(saved._id).lean();
+    console.groupCollapsed(`✅ SAVED & FETCHED BACK [${reqId}] id=${saved._id.toString()}`);
+    console.log("Saved keys:", Object.keys(saved.toObject ? saved.toObject() : saved));
+    console.log("Round-trip summary:", safePreview(roundTrip));
+    console.groupEnd();
+
+    const elapsed = Date.now() - startedAt;
+    console.log(`⏱️ Completed in ${elapsed}ms [${reqId}]`);
     console.groupEnd();
 
     return res.status(201).json({
       success: true,
       message: createdNew ? "Deputy submitted for approval" : "Deputy updated",
+      requestId: reqId,
       musician: {
         _id: saved._id,
         email: saved.email,
@@ -647,11 +754,12 @@ const registerDeputy = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("❌ Deputy registration failed:", err);
+    const elapsed = Date.now() - startedAt;
+    console.error(`❌ Deputy registration failed [${reqId}] after ${elapsed}ms:`, err);
     console.groupEnd();
     return res
       .status(400)
-      .json({ success: false, message: "Deputy registration failed", error: err.message });
+      .json({ success: false, message: "Deputy registration failed", error: err.message, requestId: reqId });
   }
 };
 
