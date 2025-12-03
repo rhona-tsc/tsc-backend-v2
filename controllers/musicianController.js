@@ -382,15 +382,14 @@ async function getDeputyById(req, res) {
 }
 
 const registerDeputy = async (req, res) => {
-  const reqId = req.get("x-request-id") || req.body?._requestId || `srv_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const reqId =
+    req.get("x-request-id") ||
+    req.body?._requestId ||
+    `srv_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   const startedAt = Date.now();
 
   const safePreview = (obj, opts = {}) => {
-    const {
-      maxArray = 4,
-      maxString = 800,
-      elideKeys = ["password", "salt", "__v"],
-    } = opts;
+    const { maxArray = 4, maxString = 800, elideKeys = ["password", "salt", "__v"] } = opts;
     const seen = new WeakSet();
     const shrink = (v) => {
       if (v && typeof v === "object") {
@@ -422,10 +421,7 @@ const registerDeputy = async (req, res) => {
   console.log("📨 receivedAt:", new Date().toISOString());
   console.log("🧾 headers(x-request-id):", req.get("x-request-id"));
   console.log("📁 multer files keys:", Object.keys(req.files || {}));
-  console.log(
-    "📦 raw body keys:",
-    Object.keys(req.body || {})
-  );
+  console.log("📦 raw body keys:", Object.keys(req.body || {}));
 
   try {
     const body = req.body;
@@ -492,10 +488,34 @@ const registerDeputy = async (req, res) => {
     const other_skills = safeParse(body.other_skills, []);
     const logistics = safeParse(body.logistics, []);
 
-    const functionBandVideoLinks = safeParse(body.functionBandVideoLinks, []);
-    const tscApprovedFunctionBandVideoLinks = safeParse(body.tscApprovedFunctionBandVideoLinks, []);
-    const originalBandVideoLinks = safeParse(body.originalBandVideoLinks, []);
-    const tscApprovedOriginalBandVideoLinks = safeParse(body.tscApprovedOriginalBandVideoLinks, []);
+    // ---- Video links: accept JSON array/string, normalize to [{title,url}] and drop empties
+    const parseArrayField = (v, fallback = []) => {
+      if (Array.isArray(v)) return v;
+      if (typeof v === "string") {
+        try {
+          return JSON.parse(v);
+        } catch {
+          return fallback;
+        }
+      }
+      return fallback;
+    };
+
+    const functionBandVideoLinks = parseArrayField(body.functionBandVideoLinks)
+      .map((x) => ({ title: (x?.title || "").trim(), url: (x?.url || "").trim() }))
+      .filter((x) => x.url);
+
+    const tscApprovedFunctionBandVideoLinks = parseArrayField(body.tscApprovedFunctionBandVideoLinks)
+      .map((x) => ({ title: (x?.title || "").trim(), url: (x?.url || "").trim() }))
+      .filter((x) => x.url);
+
+    const originalBandVideoLinks = parseArrayField(body.originalBandVideoLinks)
+      .map((x) => ({ title: (x?.title || "").trim(), url: (x?.url || "").trim() }))
+      .filter((x) => x.url);
+
+    const tscApprovedOriginalBandVideoLinks = parseArrayField(body.tscApprovedOriginalBandVideoLinks)
+      .map((x) => ({ title: (x?.title || "").trim(), url: (x?.url || "").trim() }))
+      .filter((x) => x.url);
 
     // lighting / PA
     const cableLogistics = safeParse(body.cableLogistics, []);
@@ -520,7 +540,7 @@ const registerDeputy = async (req, res) => {
     const digitalWardrobeSessionAllBlack = urlArray(body.digitalWardrobeSessionAllBlack);
     const additionalImages = urlArray(body.additionalImages);
 
-    // mp3s: files OR JSON
+    // ---- MP3s: files OR JSON
     let coverMp3s = [];
     let originalMp3s = [];
     if (req.files?.coverMp3s?.length) {
@@ -529,7 +549,9 @@ const registerDeputy = async (req, res) => {
       const coverMp3sBody = safeParse(body.coverMp3s, []);
       if (Array.isArray(coverMp3sBody)) {
         coverMp3s = coverMp3sBody
-          .map((x) => (typeof x === "string" ? { title: "", url: x } : { title: x?.title || "", url: x?.url || "" }))
+          .map((x) =>
+            typeof x === "string" ? { title: "", url: x } : { title: x?.title || "", url: x?.url || "" }
+          )
           .filter((m) => m.url);
       }
     }
@@ -539,7 +561,9 @@ const registerDeputy = async (req, res) => {
       const originalMp3sBody = safeParse(body.originalMp3s, []);
       if (Array.isArray(originalMp3sBody)) {
         originalMp3s = originalMp3sBody
-          .map((x) => (typeof x === "string" ? { title: "", url: x } : { title: x?.title || "", url: x?.url || "" }))
+          .map((x) =>
+            typeof x === "string" ? { title: "", url: x } : { title: x?.title || "", url: x?.url || "" }
+          )
           .filter((m) => m.url);
       }
     }
