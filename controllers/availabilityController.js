@@ -4636,7 +4636,7 @@ const offRepLine =
         to: clientEmail,
         name: clientName,
         bcc: ["hello@thesupremecollective.co.uk"],
-        subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s lead vocalist is available`,
+        subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s Lead Vocalist is available`,
         html: `
             <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
               <p>Hi ${(clientName || "there").split(" ")[0]},</p>
