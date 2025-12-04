@@ -6,13 +6,10 @@ import { getAvailableActIds } from '../controllers/actAvailabilityController.js'
 
 const userRouter = express.Router();
 
-userRouter.post('/register', registerUser);
-userRouter.post('/login', loginUser);
-userRouter.post("/user/forgot-password", forgotPassword);
-userRouter.post("/user/reset-password", resetPassword);
-
-// list (optimized: pagination + minimal fields + lean)
-userRouter.get('/list', async (req, res) => {
+// list (optimized: pagination + minimal fields + lean) — supports legacy /act/list too
+userRouter.get(['/list', '/act/list'], async (req, res) => {
+  const startedAt = Date.now();
+  const reqId = Math.random().toString(36).slice(2, 8);
   try {
     const {
       page = '1',          // 1-based page index
@@ -50,6 +47,14 @@ userRouter.get('/list', async (req, res) => {
           }
         : undefined; // allow caller to request full docs if needed
 
+    console.log(`🟣 [GET ${req.path}] START`, {
+      reqId,
+      query: req.query,
+      filter,
+      fields,
+      projectionKeys: projection ? Object.keys(projection) : 'ALL',
+    });
+
     const cursor = Act.find(filter)
       .select(projection)
       .sort({ bestseller: -1, createdAt: -1, _id: 1 })
@@ -62,6 +67,18 @@ userRouter.get('/list', async (req, res) => {
       Act.countDocuments(filter),
     ]);
 
+    const ms = Date.now() - startedAt;
+    console.log(`🟢 [GET ${req.path}] OK`, {
+      reqId,
+      page: pageNum,
+      limit: limitNum,
+      returned: items.length,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limitNum)),
+      ms,
+      ua: req.headers['user-agent'] || '',
+    });
+
     res.json({
       success: true,
       items,
@@ -71,10 +88,16 @@ userRouter.get('/list', async (req, res) => {
       totalPages: Math.max(1, Math.ceil(total / limitNum)),
     });
   } catch (error) {
-    console.error('❌ /list failed:', error);
+    const ms = Date.now() - startedAt;
+    console.error(`❌ [GET ${req.path}] FAIL`, { reqId, ms, error: error?.message || error });
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+userRouter.post('/register', registerUser);
+userRouter.post('/login', loginUser);
+userRouter.post("/user/forgot-password", forgotPassword);
+userRouter.post("/user/reset-password", resetPassword);
 
 // ✅ put the specific route BEFORE the catch-all param route
 userRouter.get('/acts-available', getAvailableActIds);
