@@ -6,16 +6,19 @@ import { getAvailableActIds } from '../controllers/actAvailabilityController.js'
 
 const userRouter = express.Router();
 
-// list (optimized: pagination + minimal fields + lean) — supports legacy /act/list too
-userRouter.get(['/list', '/act/list'], async (req, res) => {
-  const startedAt = Date.now();
-  const reqId = Math.random().toString(36).slice(2, 8);
+userRouter.post('/register', registerUser);
+userRouter.post('/login', loginUser);
+userRouter.post("/user/forgot-password", forgotPassword);
+userRouter.post("/user/reset-password", resetPassword);
+
+// list (optimized: pagination + minimal fields + lean)
+userRouter.get('/list', async (req, res) => {
   try {
     const {
       page = '1',          // 1-based page index
       limit = '24',        // page size (capped below)
       fields = 'min',      // 'min' = only fields needed by listing
-      status = '',         // no default filter; allow caller to choose
+      status = 'live',     // filter by status by default
       q,                   // optional search term across name fields
     } = req.query;
 
@@ -23,10 +26,7 @@ userRouter.get(['/list', '/act/list'], async (req, res) => {
     const limitNum = Math.min(60, Math.max(1, parseInt(limit, 10) || 24));
 
     const filter = {};
-    const statusNorm = (status || '').toString().trim().toLowerCase();
-    if (statusNorm && statusNorm !== 'all') {
-      filter.status = statusNorm;
-    }
+    if (status) filter.status = status;
     if (q && String(q).trim()) {
       const rx = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [{ tscName: rx }, { name: rx }];
@@ -50,15 +50,6 @@ userRouter.get(['/list', '/act/list'], async (req, res) => {
           }
         : undefined; // allow caller to request full docs if needed
 
-    console.log(`🟣 [GET ${req.path}] START`, {
-      reqId,
-      query: req.query,
-      appliedStatus: statusNorm || '(none)',
-      filter,
-      fields,
-      projectionKeys: projection ? Object.keys(projection) : 'ALL',
-    });
-
     const cursor = Act.find(filter)
       .select(projection)
       .sort({ bestseller: -1, createdAt: -1, _id: 1 })
@@ -71,18 +62,6 @@ userRouter.get(['/list', '/act/list'], async (req, res) => {
       Act.countDocuments(filter),
     ]);
 
-    const ms = Date.now() - startedAt;
-    console.log(`🟢 [GET ${req.path}] OK`, {
-      reqId,
-      page: pageNum,
-      limit: limitNum,
-      returned: items.length,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / limitNum)),
-      ms,
-      ua: req.headers['user-agent'] || '',
-    });
-
     res.json({
       success: true,
       items,
@@ -92,16 +71,10 @@ userRouter.get(['/list', '/act/list'], async (req, res) => {
       totalPages: Math.max(1, Math.ceil(total / limitNum)),
     });
   } catch (error) {
-    const ms = Date.now() - startedAt;
-    console.error(`❌ [GET ${req.path}] FAIL`, { reqId, ms, error: error?.message || error });
+    console.error('❌ /list failed:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
-
-userRouter.post('/register', registerUser);
-userRouter.post('/login', loginUser);
-userRouter.post("/user/forgot-password", forgotPassword);
-userRouter.post("/user/reset-password", resetPassword);
 
 // ✅ put the specific route BEFORE the catch-all param route
 userRouter.get('/acts-available', getAvailableActIds);
