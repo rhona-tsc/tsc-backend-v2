@@ -15,7 +15,7 @@ userRouter.get(['/list', '/act/list'], async (req, res) => {
       page = '1',          // 1-based page index
       limit = '24',        // page size (capped below)
       fields = 'min',      // 'min' = only fields needed by listing
-      status = 'live',     // filter by status by default
+      status = '',         // no default filter; allow caller to choose
       q,                   // optional search term across name fields
     } = req.query;
 
@@ -23,7 +23,10 @@ userRouter.get(['/list', '/act/list'], async (req, res) => {
     const limitNum = Math.min(60, Math.max(1, parseInt(limit, 10) || 24));
 
     const filter = {};
-    if (status) filter.status = status;
+    const statusNorm = (status || '').toString().trim().toLowerCase();
+    if (statusNorm && statusNorm !== 'all') {
+      filter.status = statusNorm;
+    }
     if (q && String(q).trim()) {
       const rx = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [{ tscName: rx }, { name: rx }];
@@ -50,6 +53,7 @@ userRouter.get(['/list', '/act/list'], async (req, res) => {
     console.log(`🟣 [GET ${req.path}] START`, {
       reqId,
       query: req.query,
+      appliedStatus: statusNorm || '(none)',
       filter,
       fields,
       projectionKeys: projection ? Object.keys(projection) : 'ALL',
