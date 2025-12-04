@@ -1073,16 +1073,23 @@ async function emailContractToClient({ pdfUrl, bookingRef, clientEmail, clientNa
     clientEmail,
   });
 
-  try {
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
+try {
+  const host = process.env.SMTP_HOST || "";
+  if (!host || /example\\.com$/i.test(host)) {
+    throw new Error(
+      `SMTP_HOST is not configured (current value: "${host || 'empty'}"). Set real SMTP credentials in env.`
+    );
+  }
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: String(process.env.SMTP_PORT || "") === "465", // only true for 465
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
 
     const mailOptions = {
       from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
@@ -2479,7 +2486,7 @@ try {
     try {
       await sendContractEmail({
         booking,
-        pdfBuffer, // ✅ the actual buffer variable you generated
+        pdfBuffer: generatedPdf,
       });
       console.log("📧 Contract email sent via helper", { to: targetEmail });
     } catch (helperErr) {
