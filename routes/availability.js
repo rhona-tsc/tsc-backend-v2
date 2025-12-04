@@ -177,9 +177,7 @@ const sseNoCompression = (req, res, next) => {
 };
 
 router.get("/subscribe", sseNoCompression, (req, res) => {
-  console.log(
-    `🔴 (routes/availability.js) /subscribe (SSE) START at ${new Date().toISOString()}`
-  );
+ 
 
   const STATIC_ALLOWED = new Set(
     [
@@ -216,14 +214,7 @@ router.get("/subscribe", sseNoCompression, (req, res) => {
     STATIC_ALLOWED.has(resolvedOrigin) ||
     NETLIFY_RE.test(resolvedOrigin);
 
-  console.log("🔐 (availability.js) SSE CORS check", {
-    originHeader,
-    refererHeader,
-    refererOrigin,
-    resolvedOrigin,
-    host: req.hostname,
-    allowed: isAllowed,
-  });
+
 
   if (!isAllowed) {
     console.warn("🚫 (availability.js) SSE origin blocked by CORS:", {
@@ -254,7 +245,6 @@ router.get("/subscribe", sseNoCompression, (req, res) => {
   }, 25000);
 
   sseClients.add(res);
-  console.log(`👥 SSE clients: ${sseClients.size}`);
 
   req.on("close", () => {
     clearInterval(heartbeat);

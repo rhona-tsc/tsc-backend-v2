@@ -81,98 +81,85 @@
       <div style="flex:1; min-width:0;">
         <div>
           <strong><%= it.actName %></strong>
-          <% // Enhanced lineup label with instruments
-            // Helper to extract, order, and join instruments (vocals first, drums last, remove duplicates)
-            function getInstrumentList(bandMembers) {
-              if (!Array.isArray(bandMembers)) return [];
-              // Extract all instruments, flatten if array
-              let all = [];
-              bandMembers.forEach(function(m) {
-                if (!m) return;
-                let inst = m.instrument || m.role || "";
-                if (Array.isArray(inst)) {
-                  all = all.concat(inst);
-                } else if (typeof inst === "string") {
-                  // Split by comma or &
-                  inst.split(/[,&]/).forEach(function(i) {
-                    let s = i.trim();
-                    if (s) all.push(s);
-                  });
-                }
-              });
-              // Normalize, remove empty, dedupe (case-insensitive)
-              let seen = {};
-              let deduped = [];
-              all.forEach(function(i) {
-                let norm = i.charAt(0).toUpperCase() + i.slice(1).toLowerCase();
-                // Alias: "Lead Vocalist" => "Lead Vocal", "Vocals" => "Vocal", "Singer" => "Vocal"
-                if (/singer|vocals?/i.test(norm)) norm = "Lead Vocal";
-                if (/drums?/i.test(norm)) norm = "Drums";
-                if (/bass/i.test(norm)) norm = "Bass";
-                if (/guitar/i.test(norm)) {
-                  if (/bass/i.test(norm)) norm = "Bass"; // "Bass Guitar" as "Bass"
-                  else norm = "Guitar";
-                }
-                if (!seen[norm]) {
-                  seen[norm] = 1;
-                  deduped.push(norm);
-                }
-              });
-              // Order: vocals first, drums last
-              let vocals = deduped.filter(i => /vocal/i.test(i));
-              let drums = deduped.filter(i => /drum/i.test(i));
-              let others = deduped.filter(i => !/vocal/i.test(i) && !/drum/i.test(i));
-              return [].concat(vocals, others, drums);
-            }
-            var instrumentsArr = getInstrumentList(it.bandMembers);
-            var instrumentsStr = instrumentsArr.length ? instrumentsArr.join(", ").replace(/, ([^,]*)$/, ' & $1') : "";
-          %>
-         
+
 <%
-  const size = it.lineupLabel || it.actSize || (it.bandMembers?.length || 0);
+  // ---- Normalised size label (avoid "6-Piece-Piece") ----
+  const rawSize = it.lineupLabel || it.actSize || (it.bandMembers?.length || 0);
+  let pieceLabel = '';
+  if (rawSize != null && rawSize !== '') {
+    let s = String(rawSize).trim();
+    // If label already contains "Piece", normalise to single "-Piece"
+    if (/piece/i.test(s)) {
+      s = s.replace(/\s+/g, ' ').replace(/\s*-/g, '-').replace(/-?piece$/i, '');
+      pieceLabel = `${s}-Piece`;
+    } else {
+      pieceLabel = `${s}-Piece`;
+    }
+    // Final de-dupe safeguard
+    pieceLabel = pieceLabel.replace(/-Piece-?Piece$/i, '-Piece');
+  }
 
-  const essentialInstruments = it.bandMembers
-    ?.filter(m => m.isEssential)
-    .map(m => m.instrument)
-    .filter(Boolean) || [];
+  // ---- Count essential instruments (preserve specific labels) ----
+  const essential = Array.isArray(it.bandMembers)
+    ? it.bandMembers.filter(m => m && m.isEssential)
+    : [];
 
-  const orderedInstruments = essentialInstruments.sort((a, b) => {
-    const aL = a.toLowerCase();
-    const bL = b.toLowerCase();
-    const isVocal = s => s.includes("vocal");
-    const isDrums = s => s === "drums";
-
-    if (isVocal(aL) && !isVocal(bL)) return -1;
-    if (!isVocal(aL) && isVocal(bL)) return 1;
-
-    if (isDrums(aL)) return 1;
-    if (isDrums(bL)) return -1;
-
-    return 0;
-  });
-
-  const formatWithAnd = (arr) => {
-    const unique = [...new Set(arr)];
-    if (unique.length === 0) return "";
-    if (unique.length === 1) return unique[0];
-    if (unique.length === 2) return `${unique[0]} & ${unique[1]}`;
-    return `${unique.slice(0, -1).join(", ")} & ${unique[unique.length - 1]}`;
+  const normaliseInst = (val) => {
+    if (!val) return '';
+    let t = String(val).trim();
+    // Standardise common instruments while preserving gendered vocal labels
+    if (/bass\s*guitar/i.test(t)) return 'Bass';
+    if (/\bkeys?|keyboard/i.test(t)) return 'Keys';
+    if (/guitars?/i.test(t) && !/bass/i.test(t)) return 'Guitar';
+    if (/drums?/i.test(t)) return 'Drums';
+    // Normalise generic vocals/singer to "Vocal" if no lead specified
+    if (/(^|\s)(singer|vocals?)($|\s)/i.test(t) && !/lead/i.test(t)) {
+      t = t.replace(/vocals?/i, 'Vocal').replace(/singer/i, 'Vocal');
+    }
+    // Title case
+    t = t.replace(/\b\w/g, c => c.toUpperCase());
+    return t;
   };
 
-  const roles = it.bandMembers?.flatMap(m =>
-    (m.additionalRoles || [])
-      .filter(r => r.isEssential)
-      .map(r => r.role)
-  ) || [];
+  const counts = {};
+  essential.forEach(m => {
+    const lbl = normaliseInst(m.instrument || m.role || '');
+    if (!lbl) return;
+    counts[lbl] = (counts[lbl] || 0) + 1;
+  });
 
-  const pieceLabel = `${size}-Piece`;
-  const instrumentList = formatWithAnd(orderedInstruments);
-  const rolesList = roles.length ? ` (including ${formatWithAnd(roles)} services)` : "";
+  // ---- Order: vocals first, others alpha, drums last ----
+  const labels = Object.keys(counts);
+  const vocals = labels.filter(l => /vocal/i.test(l));
+  const drums = labels.filter(l => /drums?/i.test(l));
+  const others = labels.filter(l => !/vocal/i.test(l) && !/drums?/i.test(l)).sort((a,b) => a.localeCompare(b));
+  const ordered = [...vocals, ...others, ...drums];
 
-  const description = `${pieceLabel}: ${instrumentList}${rolesList}`;
+  const formatWithCounts = (arr) => {
+    const parts = arr.map(l => counts[l] > 1 ? `${l} ×${counts[l]}` : l);
+    if (parts.length <= 2) return parts.join(' & ');
+    return parts.slice(0, -1).join(', ') + ' & ' + parts[parts.length - 1];
+  };
+  const instrumentList = formatWithCounts(ordered);
+
+  // ---- Essential additional roles → bracketed note ----
+  const rolesRaw = (Array.isArray(it.bandMembers) ? it.bandMembers : [])
+    .flatMap(m => (m.additionalRoles || []).filter(r => r.isEssential).map(r => r.role))
+    .filter(Boolean);
+  const uniqueRoles = Array.from(new Set(rolesRaw.map(r => String(r).trim())));
+  const formatRoles = (arr) => {
+    if (!arr.length) return '';
+    const pretty = arr.map(r => r.replace(/\b\w/g, c => c.toUpperCase()));
+    if (pretty.length <= 2) return pretty.join(' & ');
+    return pretty.slice(0, -1).join(', ') + ' & ' + pretty[pretty.length - 1];
+  };
+  const rolesList = uniqueRoles.length ? ` (including ${formatRoles(uniqueRoles)} services)` : '';
+
+  const description = `${pieceLabel ? pieceLabel + '; ' : ''}${instrumentList}${rolesList}`;
 %>
-<span><%= description %></span>
-<span><%= description %></span>
+<div style="margin-top:4px; font-size:14px; color:#111;">
+  <%= description %>
+</div>
 
         <% 
           // Determine if lineup has any vocalists

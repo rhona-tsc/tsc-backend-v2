@@ -4630,13 +4630,28 @@ const offRepLine =
         to: clientEmail,
       });
 
+      // Compute event date as "26th August 2026"
+      const eventDatePretty = (() => {
+        const d = new Date(dateISO);
+        if (isNaN(d)) return String(dateISO || "");
+        const day = d.getDate();
+        const j = day % 10, k = day % 100;
+        const suffix =
+          j === 1 && k !== 11 ? "st" :
+          j === 2 && k !== 12 ? "nd" :
+          j === 3 && k !== 13 ? "rd" : "th";
+        const month = d.toLocaleDateString("en-GB", { month: "long" });
+        const year = d.getFullYear();
+        return `${day}${suffix} ${month} ${year}`;
+      })();
+
       await sendClientEmail({
         actId: String(actId),
         userId: clientUserId,
         to: clientEmail,
         name: clientName,
         bcc: ["hello@thesupremecollective.co.uk"],
-        subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s Lead Vocalist is available`,
+        subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s Lead Vocalist is available for ${eventDatePretty}`,
         html: `
             <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
               <p>Hi ${(clientName || "there").split(" ")[0]},</p>
@@ -4741,7 +4756,7 @@ const offRepLine =
         to: clientEmail,
         name: clientName,
         bcc: ["hello@thesupremecollective.co.uk"],
-        subject: `${deputyName} can't wait to step in and perform for you with ${actDoc.tscName || actDoc.name}`,
+        subject: `${deputyName} is available to perform for you with ${actDoc.tscName || actDoc.name} on ${eventDatePretty}`,
         html: `
             <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
               <p>Hi ${(clientName || "there").split(" ")[0]},</p>

@@ -2470,24 +2470,26 @@ const stripe = await import("stripe").then((m) => new m.default(stripeSecret));
           console.warn("⚠ No secure_url returned from Cloudinary");
         }
 
-       // SEND EMAIL (primary helper + fallback)
+     // SEND EMAIL (primary helper + fallback)
 try {
   const targetEmail = booking?.userAddress?.email || booking?.userEmail || "";
   if (!targetEmail) {
     console.error("❌ No client email on booking — cannot send contract email");
   } else {
     try {
-      // Primary: shared helper (attaches PDF)
       await sendContractEmail({
         booking,
-        pdfBuffer: generatedPdf,
+        pdfBuffer, // ✅ the actual buffer variable you generated
       });
       console.log("📧 Contract email sent via helper", { to: targetEmail });
     } catch (helperErr) {
-      console.warn("⚠️ sendContractEmail failed, falling back to local SMTP:", helperErr?.message || helperErr);
-      // Fallback: link-only email using local SMTP function already in this file
+      console.warn(
+        "⚠️ sendContractEmail failed, falling back to local SMTP:",
+        helperErr?.message || helperErr
+      );
+
       await emailContractToClient({
-        pdfUrl: result?.secure_url || booking?.pdfUrl || "",
+        pdfUrl: booking?.pdfUrl || "", // ✅ don't reference out-of-scope `result`
         bookingRef: booking.bookingId,
         clientEmail: targetEmail,
         clientName: booking?.userAddress?.firstName || "Client",
