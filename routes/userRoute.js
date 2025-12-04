@@ -11,28 +11,30 @@ userRouter.post('/login', loginUser);
 userRouter.post("/user/forgot-password", forgotPassword);
 userRouter.post("/user/reset-password", resetPassword);
 
-// list (optimized: pagination + minimal fields + lean)
+// list
+// list
 userRouter.get('/list', async (req, res) => {
   try {
     const {
-      page = '1',          // 1-based page index
-      limit = '24',        // page size (capped below)
-      fields = 'min',      // 'min' = only fields needed by listing
-      status = 'live',     // filter by status by default
-      q,                   // optional search term across name fields
+      page = '1',
+      limit = '24',
+      fields = 'min',
+      status,             // optional override
+      q,
     } = req.query;
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.min(60, Math.max(1, parseInt(limit, 10) || 24));
 
     const filter = {};
-    if (status) filter.status = status;
+
+    if (status && status !== 'all') filter.status = status;
+
     if (q && String(q).trim()) {
       const rx = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [{ tscName: rx }, { name: rx }];
     }
 
-    // Minimal projection for listing cards
     const projection =
       fields === 'min'
         ? {
@@ -48,7 +50,7 @@ userRouter.get('/list', async (req, res) => {
             timesShortlisted: 1,
             'metrics.shortlists': 1,
           }
-        : undefined; // allow caller to request full docs if needed
+        : undefined;
 
     const cursor = Act.find(filter)
       .select(projection)
@@ -57,10 +59,7 @@ userRouter.get('/list', async (req, res) => {
       .limit(limitNum)
       .lean();
 
-    const [items, total] = await Promise.all([
-      cursor,
-      Act.countDocuments(filter),
-    ]);
+    const [items, total] = await Promise.all([cursor, Act.countDocuments(filter)]);
 
     res.json({
       success: true,
