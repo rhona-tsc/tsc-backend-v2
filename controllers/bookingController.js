@@ -2320,10 +2320,13 @@ export const completeBookingV2 = async (req, res) => {
   const t0 = Date.now();
 
   try {
-    // 0️⃣ Load Stripe Session
-    const stripe = await import("stripe").then(
-      (m) => new m.default(process.env.STRIPE_SECRET_KEY)
-    );
+ // 0️⃣ Load Stripe Session (support both env keys)
+const stripeSecret = process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY;
+if (!stripeSecret) {
+  throw new Error("Missing STRIPE secret key (STRIPE_SECRET_KEY_V2 or STRIPE_SECRET_KEY)");
+}
+const stripe = await import("stripe").then((m) => new m.default(stripeSecret));
+
     const session = await stripe.checkout.sessions.retrieve(session_id, {
       expand: ["payment_intent"],
     });
@@ -2467,20 +2470,34 @@ export const completeBookingV2 = async (req, res) => {
           console.warn("⚠ No secure_url returned from Cloudinary");
         }
 
-        // SEND EMAIL
-        try {
-          if (!booking?.userAddress?.email) {
-            console.error("❌ No client email on booking — cannot send contract email");
-          } else {
-            await sendContractEmail({
-              booking,
-              pdfBuffer: generatedPdf, // unified
-            });
-          }
-          console.log("📧 Contract email sent + PDF uploaded");
-        } catch (e) {
-          console.error("❌ Contract email failed:", e.message || e);
-        }
+       // SEND EMAIL (primary helper + fallback)
+try {
+  const targetEmail = booking?.userAddress?.email || booking?.userEmail || "";
+  if (!targetEmail) {
+    console.error("❌ No client email on booking — cannot send contract email");
+  } else {
+    try {
+      // Primary: shared helper (attaches PDF)
+      await sendContractEmail({
+        booking,
+        pdfBuffer: generatedPdf,
+      });
+      console.log("📧 Contract email sent via helper", { to: targetEmail });
+    } catch (helperErr) {
+      console.warn("⚠️ sendContractEmail failed, falling back to local SMTP:", helperErr?.message || helperErr);
+      // Fallback: link-only email using local SMTP function already in this file
+      await emailContractToClient({
+        pdfUrl: result?.secure_url || booking?.pdfUrl || "",
+        bookingRef: booking.bookingId,
+        clientEmail: targetEmail,
+        clientName: booking?.userAddress?.firstName || "Client",
+      });
+      console.log("📧 Fallback contract email sent (link-only)", { to: targetEmail });
+    }
+  }
+} catch (e) {
+  console.error("❌ Contract email (final) failed:", e.message || e);
+}
 
         console.log(`🎉 completeBookingV2 DONE in ${Date.now() - t0}ms`);
         return res.send("<h2>Your booking has been confirmed and the contract emailed to you.</h2>");
