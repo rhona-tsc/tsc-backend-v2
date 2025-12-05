@@ -3,6 +3,7 @@ import { loginUser, registerUser } from '../controllers/userController.js';
 import Act from '../models/actModel.js';
 import { forgotPassword, resetPassword } from "../controllers/authController.js";
 import { getAvailableActIds } from '../controllers/actAvailabilityController.js';
+import actCardModel from '../models/actCard.model.js';
 
 const userRouter = express.Router();
 
@@ -18,6 +19,25 @@ userRouter.get('/list', async (req, res) => {
     res.json({ success: true, acts });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// routes: app.use('/api/act', router);
+userRouter.get('/cards', async (req, res) => {
+  try {
+    const statuses = String(req.query.status || 'approved,live').split(',').map(s => s.trim());
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const sort = String(req.query.sort || '-createdAt');
+    const sortObj = sort.startsWith('-') ? { [sort.slice(1)]: -1 } : { [sort]: 1 };
+
+    // If you already have ActCard model, use that; otherwise use the aggregate below
+    const cards = await actCardModel.find({ status: { $in: statuses } })
+      .select('actId imageUrl basePrice loveCount name tscName availabilityBadge')
+      .sort(sortObj).limit(limit).lean();
+
+    return res.json({ success: true, acts: cards });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
   }
 });
 
