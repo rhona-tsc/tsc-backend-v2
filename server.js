@@ -6,7 +6,7 @@ import bodyParser from "body-parser";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import cron from "node-cron";
-
+import listEndpoints from "express-list-endpoints";
 import connectDB from "./config/mongodb.js";
 import connectCloudinary from "./config/connectCloudinary.js";
 import cloudinary from "./config/cloudinary.js";
@@ -15,7 +15,6 @@ import noticeRoutes from "./routes/noticeRoutes.js";
 import actPreSubmissionRoutes from "./routes/actPreSubmissionRoutes.js";
 import router from "./routes/debugRoutes.js";
 import shortlistRoutes from "./routes/shortlist.js";
-import boardBackfillRoutes from "./routes/boardBackfillRoutes.js";
 import invoiceRoutes from "./routes/invoiceRoutes.js";
 import userRouter from "./routes/userRoute.js";
 import musicianRouter from "./routes/musicianRoute.js";
@@ -26,7 +25,6 @@ import googleRoutes from "./routes/google.js";
 import calendarWebhook from "./routes/calendarWebhook.js";
 import authRoutes from "./routes/authRoutes.js";
 import moderationRoutes from "./routes/moderationRoutes.js";
-import userRoute from "./routes/userRoute.js";
 import debugRoutes from "./routes/debug.js";
 import musicianLoginRouter from "./routes/musicianLoginRoute.js";
 import allocationRoutes from "./routes/allocationRoutes.js";
@@ -34,10 +32,8 @@ import availabilityRoutes from "./routes/availability.js";
 import paymentsRouter from "./routes/payments.js";
 import musicianRoutes from "./routes/musicianRoute.js";
 import accountRouter from "./routes/accountRoute.js";
-import voiceIvr from "./routes/voiceIvr.js";
 import bookingBoardRoutes from "./routes/bookingBoardRoutes.js";
 import uploadRoutes from "./routes/upload.js";
-import notificationsRoutes from "./routes/notifications.js";
 import newsletterRoutes from "./routes/newsletterRoutes.js";
 import v2Routes from "./routes/v2.js";
 
@@ -46,15 +42,12 @@ import {
   handleGoogleWebhook,
 } from "./controllers/googleController.js";
 import {
-  rebuildAndApplyAvailabilityBadge,
   twilioInbound,
   twilioStatus,
   buildAvailabilityBadgeFromRows,
   processDueDeputyEscalations,
 } from "./controllers/availabilityController.js";
 import { getAvailableActIds } from "./controllers/actAvailabilityController.js";
-import { submitActSubmission } from "./controllers/actSubmissionController.js";
-
 import { startRemindersPoller } from "./services/remindersQueue.js";
 import { runChaseAndEscalation } from "./cron/chaseAndEscalate.js";
 import actModel from "./models/actModel.js";
@@ -302,44 +295,51 @@ app.post(
 // Start reminders queue
 startRemindersPoller({ intervalMs: 30000 });
 
-// Main API mounts (kept compatible with your existing paths)
-app.use("/api/user", userRouter);
-app.use("/api", userRoute);
-app.use("/api/acts", userRouter);
+/* -------------------------- Main API mounts (clean) ------------------------- */
 
+// Users / auth
+app.use("/api/user", userRouter);
+app.use("/api/auth", authRoutes);
+app.use("/api/account", accountRouter);
+
+// Musicians
 app.use("/api/musician", musicianRouter);
+app.use("/api/musician-login", musicianLoginRouter);
+
+// Acts (v2) – choose ONE canonical base. I’d recommend /api/act
+app.use("/api/act", actV2Routes);           // ← put act routes here
+// If you truly need a musician-scoped subset, keep this too:
 app.use("/api/musician/act-v2", actV2Routes);
 
+// Availability / shortlist
+app.use("/api/availability", availabilityRoutes);
+app.use("/api/shortlist", shortlistRoutes);
+
+// Bookings / payments / invoices
 app.use("/api/cart", cartRouter);
 app.use("/api/booking", bookingRoutes);
+app.use("/api/payments", paymentsRouter);
+app.use("/api/invoices", invoiceRoutes);
+app.use("/api/board/bookings", bookingBoardRoutes);
 
+// Newsletters / notices / feedback
+app.use("/api/newsletter", newsletterRoutes);
+app.use("/api/noticeboard", noticeRoutes);
+app.use("/api/feedback", feedbackRoutes);
+
+// Uploads
+app.use("/api/upload", uploadRoutes);
+
+// Google integrations
 app.use("/api/google", googleRoutes);
 app.use("/api/calendar", calendarWebhook);
 
-app.use("/api/auth", authRoutes);
+// Pre-submission & moderation
+app.use("/api/act-pre", actPreSubmissionRoutes);
 app.use("/api/moderation", moderationRoutes);
 
-app.use("/api/act", userRoute);
-app.use("/api/musician/trash-act", actV2Routes);
-app.use("/api", actV2Routes);
-
-app.use("/api/musician/account", accountRouter);
-app.use("/api/account", accountRouter);
-
-app.use("/voice", voiceIvr);
-app.use("/api/board/bookings", bookingBoardRoutes);
-app.use("/api", newsletterRoutes);
-app.use("/debug", debugRoutes);
-app.use("/api", boardBackfillRoutes);
-app.use("/api/invoices", invoiceRoutes);
-app.use("/api/notifications", notificationsRoutes);
-app.use("/api/act-submission", submitActSubmission);
-app.post("/api/rebuild-badge", rebuildAndApplyAvailabilityBadge);
-app.use("/api/availability", availabilityRoutes);
-app.use("/api/shortlist", shortlistRoutes);
-app.use("/api/feedback", feedbackRoutes);
-app.use("/api/noticeboard", noticeRoutes);
-app.use("/api/", actPreSubmissionRoutes);
+// Debug (scoped)
+app.use("/api/debug", debugRoutes);
 
 // Availability direct mount
 app.get("/api/availability/acts-available", async (req, res) => {
@@ -362,6 +362,9 @@ app.get("/", (_req, res) => {
 });
 app.use("/api/debug", debugRoutes);
 
+app.get("/debug/routes", (_req, res) => {
+  res.json(listEndpoints(app));
+});
 app.use("/api/allocations", allocationRoutes);
 app.use("/api/payments", paymentsRouter);
 app.get(

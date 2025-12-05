@@ -19,6 +19,7 @@ import {
   deleteActPermanently
 } from "../controllers/actV2Controller.js";
 import { updateActStatus } from "../controllers/actV2Controller.js";
+import { getActCards } from "../controllers/actCardsController.js";
 
 
 
@@ -40,6 +41,10 @@ router.put("/approve-pending-changes/:id", approvePendingChanges);
 router.put("/reject-pending-changes/:id", rejectPendingChanges);
 router.get("/moderation-count", getModerationCount);
 router.post("/update-status", updateActStatus);
+router.get("/cards", getActCards);  // → /api/act/cards
+
+
+
 
 // --- Compatibility alias for /api/v2/acts ---
 router.get("/acts", (req, res, next) => {
