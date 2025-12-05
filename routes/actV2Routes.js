@@ -19,7 +19,7 @@ import {
   deleteActPermanently
 } from "../controllers/actV2Controller.js";
 import { updateActStatus } from "../controllers/actV2Controller.js";
-import { getActCards } from "../controllers/actCardsController.js";
+import { getActCards } from "../controllers/actCardController.js";
 
 
 
