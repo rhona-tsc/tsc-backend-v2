@@ -1,4 +1,4 @@
-import { pickHeroImage } from "../lib/pickHeroImage.js"; // reuse your logic
+import pickHeroImage from "../../utils/pickHeroImage.js";
 import actCardModel from "../models/actCard.model.js";
 
 // ---------- helpers ----------
