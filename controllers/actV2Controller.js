@@ -262,29 +262,29 @@ export const getAllActsV2 = async (req, res) => {
     const pg = Math.max(parseInt(page, 10) || 1, 1);
     const skip = (pg - 1) * lim;
 
+    // ✅ Minimal, card-friendly projection.
+    //    (If fields is provided, that wins; otherwise we use this.)
     const projection =
       sanitizeFields(fields) || {
         _id: 1,
         name: 1,
         tscName: 1,
-        images: 1,
-        coverImage: 1,
-        createdAt: 1,
         status: 1,
-        amendment: 1,
+        createdAt: 1,
         numberOfSets: 1,
         lengthOfSets: 1,
         minimumIntervalLength: 1,
-        lineups: 1,
-        genres: 1,
+        "coverImage.url": 1,
+        "images.url": 1,
+        "profileImage.url": 1, // ← include profileImage
+        "lineups.base_fee": 1, // ← keep only what you need from lineups
+        genre: 1,              // ← schema key is "genre" not "genres"
       };
 
     const filter = {};
     if (includeTrashed !== "true") filter.status = { $ne: "trashed" };
 
-    /* ---------------------------------------------------------------------- */
-    /*  Status handling with special "approved_changes_pending" support       */
-    /* ---------------------------------------------------------------------- */
+    /* ---------------- Status logic (unchanged) ---------------- */
     const rawTokens = String(status || "")
       .split(",")
       .map(s => s.trim())
@@ -295,10 +295,8 @@ export const getAllActsV2 = async (req, res) => {
       tokensLC.includes("approved_changes_pending") ||
       tokensLC.includes("approved (changes pending)") ||
       tokensLC.includes("approved, changes pending") ||
-      // tolerate split tokens like "approved,changes pending"
       (tokensLC.includes("approved") && tokensLC.includes("changes pending"));
 
-    // keep only regular statuses (exclude special sentinel tokens)
     const allowed = new Set(["approved", "pending", "draft", "trashed", "rejected"]);
     const isSentinel = (s) =>
       /^approved(_|\s*\(|,\s*)changes\s*pending\)?$/i.test(s) ||
@@ -310,7 +308,6 @@ export const getAllActsV2 = async (req, res) => {
 
     if (normalStatuses.length) {
       if (filter.status) {
-        // merge existing "not trashed" with $in list
         filter.$and = [{ status: filter.status }, { status: { $in: normalStatuses } }];
         delete filter.status;
       } else {
@@ -324,23 +321,20 @@ export const getAllActsV2 = async (req, res) => {
         filter.$or.push(specialClause);
       } else {
         if (filter.status) {
-          // combine existing status condition with special clause via $or
           const existing = { status: filter.status };
           delete filter.status;
           filter.$or = [existing, specialClause];
         } else if (filter.$and) {
-          // already have $and (e.g., from merging "not trashed" with $in)
           filter.$or = [specialClause];
         } else {
           filter.$or = [specialClause];
         }
       }
     }
-    /* ---------------------------------------------------------------------- */
 
+    /* ---------------- Search (unchanged) ---------------- */
     if (q.trim()) {
       const re = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      // If an $or already exists (ownership or special clause), keep both via $and
       if (filter.$or) {
         filter.$and = filter.$and || [];
         filter.$and.push({ $or: [{ name: re }, { tscName: re }] });
@@ -349,6 +343,7 @@ export const getAllActsV2 = async (req, res) => {
       }
     }
 
+    /* ---------------- Ownership (unchanged) ---------------- */
     if (authUserRole === "musician") {
       if (!authUserId) {
         return res.status(401).json({ success: false, message: "Unauthorized: Missing user id" });
@@ -363,7 +358,6 @@ export const getAllActsV2 = async (req, res) => {
         { musicianId: uid },
         { owners: uid },
       ];
-      // Preserve any existing $or (search/special-status) by nesting via $and
       if (filter.$or) {
         filter.$and = filter.$and || [];
         filter.$and.push({ $or: ownOr });
@@ -410,29 +404,43 @@ export const getAllActsV2 = async (req, res) => {
       }
     }
 
-    const [total, acts] = await Promise.all([
+    const [total, actsRaw] = await Promise.all([
       actModel.countDocuments(filter),
       actModel.find(filter, projection).sort(sort).skip(skip).limit(lim).lean(),
     ]);
 
+    // ✅ Compute a single card-friendly image on the server
+    const items = actsRaw.map((doc) => {
+      const first =
+        doc?.coverImage?.[0]?.url ||
+        doc?.images?.[0]?.url ||
+        doc?.profileImage?.[0]?.url ||
+        "";
+      return { ...doc, cardImage: first };
+    });
+
     console.log("📡 [getAllActsV2] Filter used:", filter);
-    console.log("📦 [getAllActsV2] Returned acts:", acts.length);
-    if (acts.length > 0) {
+    console.log("📦 [getAllActsV2] Returned acts:", items.length);
+    if (items.length > 0) {
       console.log("🧾 Sample act data:", {
-        name: acts[0].name,
-        numberOfSets: acts[0].numberOfSets,
-        lengthOfSets: acts[0].lengthOfSets,
-        lineupsCount: acts[0].lineups?.length || 0,
+        name: items[0].name,
+        lineupsCount: items[0].lineups?.length || 0,
+        cardImage: items[0].cardImage || "(none)",
       });
     }
 
+    const totalPages = Math.ceil(total / lim);
+
+    // 🔁 Return in both shapes for compatibility
     res.json({
       success: true,
+      items,                 // ← preferred by your frontend logs
+      acts: items,           // ← legacy alias
       total,
       page: pg,
-      pageSize: acts.length,
-      hasMore: skip + acts.length < total,
-      acts,
+      limit: lim,
+      totalPages,
+      count: items.length,   // optional helper
     });
   } catch (err) {
     console.error("❌ Error fetching act list:", err);
