@@ -1,4 +1,5 @@
 import actModel from "../models/actModel.js"
+import { upsertActCardFromAct } from "./helpers/upsertActCardFromAct.js";
 
 // Treat numbers (0), booleans (false), and Date as meaningful.
 // Treat "", [], {} as empty; treat null/undefined as empty.
@@ -50,23 +51,21 @@ export const updateActV2 = async (req, res) => {
     const incoming = req.body || {};
     const isSubmit = incoming.submit === true || incoming.submit === "true";
 
-    // Decide final status
     let nextStatus = existingAct.status;
     if (isSubmit) {
       const wasApproved = existingAct.status === "approved" || existingAct.status === "live";
       nextStatus = wasApproved ? "Approved, changes pending" : "pending";
     }
 
-    // Support optional explicit clearing:
-    // { clearKeys: ['coverImage', 'lineups.0.bandMembers.2.deputies'] }
     const clearKeys = Array.isArray(incoming.clearKeys) ? incoming.clearKeys : [];
-    const $unset = clearKeys.reduce((acc, path) => { acc[path] = ""; return acc; }, {});
+    const $unset = clearKeys.reduce((acc, path) => {
+      acc[path] = "";
+      return acc;
+    }, {});
 
-    // For non-submit (autosave): non-destructive; only set meaningful fields
-    // For submit: allow full set (still filtered through buildSetDoc to avoid _id, etc.)
     const $set = buildSetDoc(incoming);
 
-    // Prevent client from changing ownership fields
+    // Guard immutable/ownerish fields
     delete $set.createdBy;
     delete $set.createdByRole;
     delete $set.owner;
@@ -76,11 +75,7 @@ export const updateActV2 = async (req, res) => {
     delete $set.musicianId;
     delete $set.owners;
 
-    // Never let client arbitrarily set status here; we control it
-    $set.status = nextStatus;
-
-    // Prevent replacing large subtrees with empties (already handled by buildSetDoc)
-    // Example: if incoming.images = [], it won’t be set on autosave (non-submit).
+    $set.status = nextStatus; // authoritative status
 
     const updatedAct = await actModel.findByIdAndUpdate(
       actId,
@@ -90,6 +85,11 @@ export const updateActV2 = async (req, res) => {
 
     if (!updatedAct) {
       return res.status(404).json({ error: "Act not found" });
+    }
+
+    // 🔄 Keep card in sync
+    try { await upsertActCardFromAct(updatedAct); } catch (e) {
+      console.warn("⚠️ Card upsert after update failed:", e.message);
     }
 
     res.status(200).json({ message: "Act updated successfully", act: updatedAct });
@@ -104,25 +104,33 @@ export const createActV2 = async (req, res) => {
   try {
     console.log("Creating Act V2 with data:", req.body);
     const data = req.body;
-    // Stamp with creating user
-    const authUserId = req.user?.id || req.user?._id || req.headers.userid || null;
+
+    const authUserId   = req.user?.id || req.user?._id || req.headers.userid || null;
     const authUserRole = req.user?.role || req.headers.userrole || null;
     const authUserEmail = req.user?.email || req.headers.useremail || null;
-    const authUserName = `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim();
-    // Log lightingSystem and setlist
+    const authUserName  = `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim();
+
     console.log("🔦 Creating act with lightingSystem:", data.lightingSystem);
     console.log("📜 Creating act with setlist:", data.setlist);
+
     const finalStatus = data.status || "pending";
     console.log("📌 Final status before save:", finalStatus);
+
     const newAct = new actModel({
       ...data,
       status: finalStatus,
-      ...(authUserId ? { createdBy: authUserId } : {}),
+      ...(authUserId   ? { createdBy: authUserId }   : {}),
       ...(authUserRole ? { createdByRole: authUserRole } : {}),
       ...(authUserEmail ? { createdByEmail: authUserEmail } : {}),
       ...(authUserName ? { createdByName: authUserName } : {}),
     });
+
     await newAct.save();
+
+    // 🔄 Upsert/refresh the lightweight card row
+    try { await upsertActCardFromAct(newAct); } catch (e) {
+      console.warn("⚠️ Card upsert after create failed:", e.message);
+    }
 
     res.status(201).json({ message: "Act created", id: newAct._id });
   } catch (err) {
@@ -152,8 +160,7 @@ export const createActV2 = async (req, res) => {
 export const saveActDraftV2 = async (req, res) => {
   try {
     const data = req.body || {};
-    // Force draft on autosave route
-    const status = "draft";
+    const status = "draft"; // force draft on autosave
 
     if (data._id) {
       const existing = await actModel.findById(data._id);
@@ -161,13 +168,14 @@ export const saveActDraftV2 = async (req, res) => {
         return res.status(404).json({ error: "Draft not found to update" });
       }
 
-      // Non-destructive: only set meaningful fields on autosave
       const $set = buildSetDoc(data);
       $set.status = status;
 
-      // Optional clears
       const clearKeys = Array.isArray(data.clearKeys) ? data.clearKeys : [];
-      const $unset = clearKeys.reduce((acc, path) => { acc[path] = ""; return acc; }, {});
+      const $unset = clearKeys.reduce((acc, path) => {
+        acc[path] = "";
+        return acc;
+      }, {});
 
       const updated = await actModel.findByIdAndUpdate(
         data._id,
@@ -175,12 +183,23 @@ export const saveActDraftV2 = async (req, res) => {
         { new: true }
       );
 
+      // 🔄 Keep card table consistent (service should ignore drafts if that’s your rule)
+      try { await upsertActCardFromAct(updated); } catch (e) {
+        console.warn("⚠️ Card upsert after draft update failed:", e.message);
+      }
+
       return res.status(200).json({ message: "Draft updated", _id: updated._id });
     } else {
       // Creating a new draft
       const toCreate = { ...data, status };
       const doc = new actModel(toCreate);
       await doc.save();
+
+      // 🔄 Card upsert (likely a no-op for draft)
+      try { await upsertActCardFromAct(doc); } catch (e) {
+        console.warn("⚠️ Card upsert after draft create failed:", e.message);
+      }
+
       return res.status(201).json({ message: "Draft created", _id: doc._id });
     }
   } catch (err) {
@@ -188,6 +207,7 @@ export const saveActDraftV2 = async (req, res) => {
     res.status(500).json({ error: "Failed to save act draft", details: err.message });
   }
 };
+
 
 // allow-list of safe fields to return
 // Add these fields to ALLOWED_FIELDS
