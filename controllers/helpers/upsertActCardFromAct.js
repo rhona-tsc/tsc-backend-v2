@@ -1,5 +1,4 @@
 import { pickHeroImage } from "../lib/pickHeroImage.js"; // reuse your logic
-import { computeSmallestLineupBase } from "../lib/computeBaseFee.js"; // below
 import actCardModel from "../models/actCard.model.js";
 
 // ---------- helpers ----------
