@@ -1,5 +1,5 @@
+import actCardModel from "../../models/actCard.model.js";
 import pickHeroImage from "../../utils/pickHeroImage.js";
-import actCardModel from "../models/actCard.model.js";
 
 // ---------- helpers ----------
 export function computeSmallestLineupBase(act) {
