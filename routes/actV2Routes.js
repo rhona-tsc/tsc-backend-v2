@@ -33,7 +33,8 @@ router.get("/trashed", getTrashedActs);
 router.delete('/delete-permanent', deleteActPermanently);
 router.post("/restore", restoreAct);
 router.get("/list", getAllActsV2);
-router.get("/:id", getActByIdV2);      
+router.get("/cards", getActCards); 
+router.get("/act/:id([0-9a-fA-F]{24})", getActByIdV2);  
 router.put("/update/:id", updateActV2);
 router.post("/security-update/:id", updateActV2); // same as update but for security
 router.get('/my-drafts', getMyDrafts);
@@ -42,7 +43,7 @@ router.put("/approve-pending-changes/:id", approvePendingChanges);
 router.put("/reject-pending-changes/:id", rejectPendingChanges);
 router.get("/moderation-count", getModerationCount);
 router.post("/update-status", updateActStatus);
-router.get("/cards", getActCards);  // → /api/act/cards
+ // → /api/act/cards
 
 
 

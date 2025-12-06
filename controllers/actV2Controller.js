@@ -140,6 +140,11 @@ export const createActV2 = async (req, res) => {
 };
 
   export const getActByIdV2 = async (req, res) => {
+      const { id } = req.params;
+  if (!mongoose.isValidObjectId(id)) {
+    return res.status(400).json({ success: false, error: "invalid_object_id" });
+  }
+  
     try {
       const actId = req.params.id;
   
