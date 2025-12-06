@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import actModel from "../models/actModel.js"
 import { upsertActCardFromAct } from "./helpers/upsertActCardFromAct.js";
 
