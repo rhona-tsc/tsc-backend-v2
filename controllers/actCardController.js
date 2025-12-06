@@ -24,13 +24,17 @@ export async function getActCards(req, res) {
           name: 1,
           tscName: 1,
 
-          // loveCount from multiple possible fields
-          loveCount: {
-            $ifNull: [
-              "$numberOfShortlistsIn",
-              { $ifNull: ["$timesShortlisted", 0] }
-            ]
-          },
+         loveCount: {
+  $max: [
+    0,
+    {
+      $ifNull: [
+        "$numberOfShortlistsIn",
+        { $ifNull: ["$timesShortlisted", 0] }
+      ]
+    }
+  ]
+},
 
           // candidate images: profileImage[0], coverImage[0], images[0]
           _img_prof: { $first: "$profileImage" },
