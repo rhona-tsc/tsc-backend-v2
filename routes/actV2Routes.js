@@ -35,6 +35,7 @@ router.post("/restore", restoreAct);
 router.get("/list", getAllActsV2);
 router.get("/cards", getActCards); 
 router.get("/act/:id([0-9a-fA-F]{24})", getActByIdV2);  
+router.get("/:id([0-9a-fA-F]{24})", getActByIdV2);
 router.put("/update/:id", updateActV2);
 router.post("/security-update/:id", updateActV2); // same as update but for security
 router.get('/my-drafts', getMyDrafts);
