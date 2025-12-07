@@ -51,6 +51,9 @@ import { getAvailableActIds } from "./controllers/actAvailabilityController.js";
 import { startRemindersPoller } from "./services/remindersQueue.js";
 import { runChaseAndEscalation } from "./cron/chaseAndEscalate.js";
 import actModel from "./models/actModel.js";
+import { searchMembers } from "@mailchimp/mailchimp_marketing";
+import { searchconsole } from "googleapis/build/src/apis/searchconsole/index.js";
+import { getFilterCards } from "./controllers/searchController.js";
 
 // Simple env debug
 console.log("ENV CHECK:", {
@@ -245,9 +248,13 @@ app.use(
   musicianLoginRouter
 );
 
-// v2 routes BEFORE actV2Routes
+
+
+// v2 (search/availability/travel)
 app.use("/api/v2", v2Routes);
-app.use("/api/v2", actV2Routes);
+// canonical ACT endpoints
+app.use("/api/act", actV2Routes);
+
 
 // Twilio webhook test endpoint
 app.post(
@@ -368,10 +375,7 @@ app.get("/debug/routes", (_req, res) => {
 });
 app.use("/api/allocations", allocationRoutes);
 app.use("/api/payments", paymentsRouter);
-app.get(
-  "/debug/musician-id?email=shamyra@thesupremecollective.co.uk",
-  router
-);
+
 
 // Upload & musician routes (duplicate kept for compatibility)
 app.use("/api/musician", musicianRoutes);
