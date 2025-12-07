@@ -9,10 +9,9 @@ const ActFilterCardSchema = new mongoose.Schema(
     status: { type: String, index: true },     // e.g. "approved", "live", ...
     isTest: { type: Boolean, default: false, index: true },
 
-    genres: { type: [String], index: true },   // ["Soul & Motown", ...]
-    lineupSizes: { type: [String], index: true }, // ["Solo","Duo","Trio","4-Piece",...]
-
-    instruments: { type: [String], index: true }, // canonical labels
+genres: [String],
+   lineupSizes: [String],
+    instruments: [String],
 
     // Wireless support by instrument
     wirelessByInstrument: { type: Map, of: Boolean },
@@ -73,6 +72,5 @@ ActFilterCardSchema.index({ pliAmount: 1 });
 ActFilterCardSchema.index({ minDb: 1 });
 
 
-const ActFilterCard = mongoose.models.ActFilterCard || mongoose.model("actFilterCard", ActFilterCardSchema);
-
+const ActFilterCard = mongoose.models.ActFilterCard || mongoose.model("ActFilterCard", ActFilterCardSchema);
 export default ActFilterCard;
