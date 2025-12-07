@@ -51,9 +51,7 @@ import { getAvailableActIds } from "./controllers/actAvailabilityController.js";
 import { startRemindersPoller } from "./services/remindersQueue.js";
 import { runChaseAndEscalation } from "./cron/chaseAndEscalate.js";
 import actModel from "./models/actModel.js";
-import { searchMembers } from "@mailchimp/mailchimp_marketing";
-import { searchconsole } from "googleapis/build/src/apis/searchconsole/index.js";
-import { getFilterCards } from "./controllers/searchController.js";
+
 
 // Simple env debug
 console.log("ENV CHECK:", {
