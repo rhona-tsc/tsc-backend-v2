@@ -2,12 +2,16 @@ import express from "express";
 import actCardModel from "../models/actCard.model.js";
 import actModel from "../models/actModel.js";
 import { upsertActCardFromAct } from "../services/actCard.service.js";
+import { searchActCards } from "../controllers/actCardController.js";
 
 const router = express.Router();
 
 /**
  * GET /api/act/cards?status=approved,live&sort=-createdAt&limit=200
  */
+
+router.post("/search", searchActCards);
+
 router.get("/cards", async (req, res) => {
   try {
     const { status, limit = 200, sort = "-createdAt", skip = 0 } = req.query;
