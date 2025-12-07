@@ -4,12 +4,14 @@ import { getAvailableActIds } from "../controllers/actAvailabilityController.js"
 import { getTravelData } from "../controllers/travelController.js";
 import { getFilterCards } from "../controllers/searchController.js";
 import { optionalAuthUser } from "../middleware/auth.js";
+import { searchActCards } from "../controllers/actCardController.js";
 
 const router = express.Router();
 
 router.get("/search/cards", optionalAuthUser, getFilterCards);
 router.get("/act-cards/search", optionalAuthUser, getFilterCards);
-
+// add this alongside your other v2 routes
+router.post("/act-cards/search", searchActCards);
 /**
  * GET /api/v2/availability/acts-by-dateV2?date=YYYY-MM-DD
  * Reuses your existing controller; no legacy aliasing.
