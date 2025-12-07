@@ -8,6 +8,7 @@ import { optionalAuthUser } from "../middleware/auth.js";
 const router = express.Router();
 
 router.get("/search/cards", optionalAuthUser, getFilterCards);
+router.get("/act-cards/search", optionalAuthUser, getFilterCards);
 
 /**
  * GET /api/v2/availability/acts-by-dateV2?date=YYYY-MM-DD
