@@ -71,4 +71,7 @@ ActFilterCardSchema.index({ lineupSizes: 1 });
 ActFilterCardSchema.index({ pliAmount: 1 });
 ActFilterCardSchema.index({ minDb: 1 });
 
-module.exports = mongoose.model("ActFilterCard", ActFilterCardSchema);
+
+const ActFilterCard = mongoose.models.ActFilterCard || mongoose.model("actFilterCard", ActFilterCardSchema);
+
+export default ActFilterCard;
