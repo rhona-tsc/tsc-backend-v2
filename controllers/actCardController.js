@@ -2,9 +2,47 @@
 import ActFilterCard from "../models/ActFilterCard.js";
 import actModel from "../models/actModel.js";
 
+/* -------------------------- helpers / constants -------------------------- */
+
+const APPROVED_LIKE = [
+  "approved",
+  "live",
+  "approved_changes_pending",
+  "live_changes_pending",
+];
+
+const normSize = (s = "") => {
+  const v = String(s).trim().toLowerCase();
+  if (v === "solo" || v === "1-piece") return "Solo";
+  if (v === "duo" || v === "2-piece") return "Duo";
+  if (v === "trio" || v === "3-piece") return "Trio";
+  if (/4-?piece/i.test(s)) return "4-Piece";
+  if (/5-?piece/i.test(s)) return "5-Piece";
+  if (/6-?piece/i.test(s)) return "6-Piece";
+  if (/7-?piece/i.test(s)) return "7-Piece";
+  if (/8-?piece/i.test(s)) return "8-Piece";
+  if (/9-?piece/i.test(s)) return "9-Piece";
+  if (/10/i.test(s)) return "10-Piece +";
+  return s;
+};
+
+const wirelessKey = (label = "") => {
+  const k = String(label).trim().toLowerCase();
+  if (k.startsWith("vocal")) return "vocal";
+  if (k.includes("sax")) return "saxophone";
+  return k; // guitar, bass, keytar, trumpet etc.
+};
+
+const normalizeExtraKey = (k = "") =>
+  String(k).toLowerCase().replace(/[^a-z0-9]+/g, "_");
+
+/* -------------------------------- getActCards ---------------------------- */
+/* Returns cards with extra fields needed for client-side filters */
 export async function getActCards(req, res) {
   try {
-    const statuses = String(req.query.status || "approved,live").split(",").map((s) => s.trim());
+    const statuses = String(req.query.status || "approved,live")
+      .split(",")
+      .map((s) => s.trim());
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const sort = String(req.query.sort || "-createdAt");
 
@@ -20,7 +58,7 @@ export async function getActCards(req, res) {
     const cards = await actModel.aggregate([
       { $match: { status: { $in: statuses } } },
 
-      // Keep only fields we need downstream
+      // Keep only fields we need downstream (+ add filterable fields)
       {
         $project: {
           actId: "$_id",
@@ -36,6 +74,17 @@ export async function getActCards(req, res) {
           countyFees: 1,
           useCountyTravelFee: 1,
           formattedPrice: 1,
+
+          // ✅ expose filterable fields to the client
+          genres: 1,
+          instruments: 1,
+          lineupSizes: 1,
+          pliAmount: 1,
+          pa: 1,
+          light: 1,
+          extras: 1,
+          status: 1,
+          isTest: 1,
         },
       },
 
@@ -88,7 +137,9 @@ export async function getActCards(req, res) {
                                   },
                                 },
                                 as: "r",
-                                in: { $toDouble: { $ifNull: ["$$r.additionalFee", 0] } },
+                                in: {
+                                  $toDouble: { $ifNull: ["$$r.additionalFee", 0] },
+                                },
                               },
                             },
                           },
@@ -145,7 +196,9 @@ export async function getActCards(req, res) {
       // Sort lineups by (membersLen asc, bareFee asc) and pick the smallest
       {
         $addFields: {
-          _sortedLineups: { $sortArray: { input: "$_lineupCalc", sortBy: { membersLen: 1, bareFee: 1 } } },
+          _sortedLineups: {
+            $sortArray: { input: "$_lineupCalc", sortBy: { membersLen: 1, bareFee: 1 } },
+          },
           _imageUrl: {
             $let: {
               vars: {
@@ -160,7 +213,11 @@ export async function getActCards(req, res) {
                   vars: {
                     firstNonEmpty: {
                       $first: {
-                        $filter: { input: "$$cands", as: "u", cond: { $gt: ["$$u", ""] } },
+                        $filter: {
+                          input: "$$cands",
+                          as: "u",
+                          cond: { $gt: ["$$u", ""] },
+                        },
                       },
                     },
                   },
@@ -189,10 +246,7 @@ export async function getActCards(req, res) {
         },
       },
 
-      // Final basePrice preference:
-      // 1) derived (member fees + essential roles + min county travel × non-managers)
-      // 2) min base_fee.total_fee from lineups (if present)
-      // 3) formattedPrice.total fallback (string like "£1200")
+      // Final basePrice preference
       {
         $addFields: {
           basePrice: {
@@ -243,8 +297,8 @@ export async function getActCards(req, res) {
     ]);
 
     res.set(
-      'Cache-Control',
-      'public, max-age=60, s-maxage=300, stale-while-revalidate=600'
+      "Cache-Control",
+      "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
     );
     return res.json({ success: true, acts: cards });
   } catch (e) {
@@ -252,34 +306,8 @@ export async function getActCards(req, res) {
   }
 }
 
-
-
-const normSize = (s='') => {
-  const v = String(s).trim().toLowerCase();
-  if (v === 'solo' || v === '1-piece') return 'Solo';
-  if (v === 'duo' || v === '2-piece') return 'Duo';
-  if (v === 'trio' || v === '3-piece') return 'Trio';
-  // Keep your display labels for the rest:
-  if (/4-?piece/i.test(s)) return '4-Piece';
-  if (/5-?piece/i.test(s)) return '5-Piece';
-  if (/6-?piece/i.test(s)) return '6-Piece';
-  if (/7-?piece/i.test(s)) return '7-Piece';
-  if (/8-?piece/i.test(s)) return '8-Piece';
-  if (/9-?piece/i.test(s)) return '9-Piece';
-  if (/10/i.test(s))      return '10-Piece +';
-  return s;
-};
-
-const wirelessKey = (label='') => {
-  const k = String(label).trim().toLowerCase();
-  if (k.startsWith('vocal')) return 'vocal';
-  if (k.includes('sax'))     return 'saxophone';
-  return k; // guitar, bass, keytar, trumpet etc.
-};
-
-const normalizeExtraKey = (k='') =>
-  String(k).toLowerCase().replace(/[^a-z0-9]+/g, '_');
-
+/* ------------------------------ searchActCards --------------------------- */
+/* Uses an aggregation so we can FLATTEN nested genre arrays and match them */
 export async function searchActCards(req, res) {
   try {
     const {
@@ -296,119 +324,179 @@ export async function searchActCards(req, res) {
       actSearch = [],
       songSearch = [],
       // visibility gates
-      includeStatuses = ["approved", "live", "approved_changes_pending", "live_changes_pending"],
+      includeStatuses = APPROVED_LIKE,
       excludeTests = true,
     } = req.body || {};
 
-    const q = { $and: [] };
+    /* ----------------------------- base $match ---------------------------- */
+    const and = [];
 
-    // status/isTest
     if (Array.isArray(includeStatuses) && includeStatuses.length) {
-      q.$and.push({ status: { $in: includeStatuses } });
+      and.push({ status: { $in: includeStatuses } });
     }
-    if (excludeTests) q.$and.push({ isTest: { $ne: true } });
-
-    // genres
-    if (genres.length) q.$and.push({ genres: { $in: genres } });
+    if (excludeTests) and.push({ isTest: { $ne: true } });
 
     // sizes
-    if (lineupSizes.length) {
-      const wanted = lineupSizes.map(normSize);
-      q.$and.push({ lineupSizes: { $in: wanted } });
+    if (lineupSizes?.length) {
+      and.push({ lineupSizes: { $in: lineupSizes.map(normSize) } });
     }
 
     // instruments (ANY)
-    if (instruments.length) q.$and.push({ instruments: { $in: instruments } });
+    if (instruments?.length) and.push({ instruments: { $in: instruments } });
 
     // wireless (ANY)
-    if (wireless.length) {
-      q.$and.push({
-        $or: wireless.map((w) => ({ [`wirelessByInstrument.${wirelessKey(w)}`]: true })),
+    if (wireless?.length) {
+      and.push({
+        $or: wireless.map((w) => ({
+          [`wirelessByInstrument.${wirelessKey(w)}`]: true,
+        })),
       });
     }
 
     // sound limiter toggles
-    const limiterToggles = new Set(soundLimiters.filter((v) => !/\d/.test(v)));
-    if (limiterToggles.has("electric_drums"))          q.$and.push({ hasElectricDrums: true });
-    if (limiterToggles.has("iems"))                    q.$and.push({ hasIEMs: true });
-    if (limiterToggles.has("can_you_make_act_acoustic")) q.$and.push({ canMakeAcoustic: true });
-    if (limiterToggles.has("remove_drums"))            q.$and.push({ canRemoveDrums: true });
+    const limiterToggles = new Set(
+      (soundLimiters || []).filter((v) => !/\d/.test(v))
+    );
+    if (limiterToggles.has("electric_drums")) and.push({ hasElectricDrums: true });
+    if (limiterToggles.has("iems")) and.push({ hasIEMs: true });
+    if (limiterToggles.has("can_you_make_act_acoustic"))
+      and.push({ canMakeAcoustic: true });
+    if (limiterToggles.has("remove_drums")) and.push({ canRemoveDrums: true });
 
     // dB threshold: include if card.minDb <= selectedDb
-    const dbNumbers = soundLimiters
+    const dbNumbers = (soundLimiters || [])
       .map((v) => (v.match(/\d+/) ? Number(v.match(/\d+/)[0]) : null))
       .filter((n) => Number.isFinite(n));
     if (dbNumbers.length) {
-      q.$and.push({ minDb: { $lte: Math.min(...dbNumbers) } });
+      and.push({ minDb: { $lte: Math.min(...dbNumbers) } });
     }
 
     // setup & soundcheck
-    if (setupAndSoundcheck.includes("setup_and_soundcheck_time_60min")) q.$and.push({ setupSupports60: true });
-    if (setupAndSoundcheck.includes("setup_and_soundcheck_time_90min")) q.$and.push({ setupSupports90: true });
-    if (setupAndSoundcheck.includes("speedy_setup"))                    q.$and.push({ hasSpeedySetup: true });
+    if (setupAndSoundcheck.includes("setup_and_soundcheck_time_60min"))
+      and.push({ setupSupports60: true });
+    if (setupAndSoundcheck.includes("setup_and_soundcheck_time_90min"))
+      and.push({ setupSupports90: true });
+    if (setupAndSoundcheck.includes("speedy_setup"))
+      and.push({ hasSpeedySetup: true });
 
     // PA & Lights (each block is OR; both blocks must pass if both selected)
-    const paWants = paAndLights.filter((k) => /_pa_/.test(k));
-    const lightWants = paAndLights.filter((k) => /_light_/.test(k));
-    const paMap = { small_pa_size: "pa.small",   medium_pa_size: "pa.medium",   large_pa_size: "pa.large" };
-    const ltMap = { small_light_size: "light.small", medium_light_size: "light.medium", large_light_size: "light.large" };
-    if (paWants.length) q.$and.push({ $or: paWants.map((k) => ({ [paMap[k]]: true })) });
-    if (lightWants.length) q.$and.push({ $or: lightWants.map((k) => ({ [ltMap[k]]: true })) });
+    const paWants = (paAndLights || []).filter((k) => /_pa_/.test(k));
+    const lightWants = (paAndLights || []).filter((k) => /_light_/.test(k));
+    const paMap = {
+      small_pa_size: "pa.small",
+      medium_pa_size: "pa.medium",
+      large_pa_size: "pa.large",
+    };
+    const ltMap = {
+      small_light_size: "light.small",
+      medium_light_size: "light.medium",
+      large_light_size: "light.large",
+    };
+    if (paWants.length)
+      and.push({ $or: paWants.map((k) => ({ [paMap[k]]: true })) });
+    if (lightWants.length)
+      and.push({ $or: lightWants.map((k) => ({ [ltMap[k]]: true })) });
 
     // PLI (acts pass if pliAmount >= MIN(selected))
-    if (pli.length) q.$and.push({ pliAmount: { $gte: Math.min(...pli.map(Number)) } });
+    if (pli?.length) and.push({ pliAmount: { $gte: Math.min(...pli.map(Number)) } });
 
     // extra services
-    if (extraServices.length) {
+    if (extraServices?.length) {
       const $ors = [];
       const has = (k) => $ors.push({ [`extras.${normalizeExtraKey(k)}`]: true });
-
       for (const k of extraServices) {
-        if (k === "ceremony_solo")        $ors.push({ "ceremony.solo": true });
-        else if (k === "duo_ceremony")    $ors.push({ "ceremony.duo": true });
-        else if (k === "trio_ceremony")   $ors.push({ "ceremony.trio": true });
-        else if (k === "four_piece_ceremony") $ors.push({ "ceremony.fourpiece": true });
-        else if (k === "afternoon_solo")  $ors.push({ "afternoon.solo": true });
-        else if (k === "afternoon_duo")   $ors.push({ "afternoon.duo": true });
-        else if (k === "afternoon_trio")  $ors.push({ "afternoon.trio": true });
-        else if (k === "afternoon_4piece")$ors.push({ "afternoon.fourpiece": true });
-        else has(k); // early_arrival, late_stay, extra_song, extra_sets, add_another_vocalist, sound_engineering_for_another_act, israeli_sets, etc.
+        if (k === "ceremony_solo") $ors.push({ "ceremony.solo": true });
+        else if (k === "duo_ceremony") $ors.push({ "ceremony.duo": true });
+        else if (k === "trio_ceremony") $ors.push({ "ceremony.trio": true });
+        else if (k === "four_piece_ceremony")
+          $ors.push({ "ceremony.fourpiece": true });
+        else if (k === "afternoon_solo") $ors.push({ "afternoon.solo": true });
+        else if (k === "afternoon_duo") $ors.push({ "afternoon.duo": true });
+        else if (k === "afternoon_trio") $ors.push({ "afternoon.trio": true });
+        else if (k === "afternoon_4piece")
+          $ors.push({ "afternoon.fourpiece": true });
+        else has(k);
       }
-      if ($ors.length) q.$and.push({ $or: $ors });
+      if ($ors.length) and.push({ $or: $ors });
     }
 
     // act name search (ANY of terms)
-    if (actSearch.length) {
+    if (actSearch?.length) {
       const terms = actSearch.filter(Boolean).map((s) => String(s).trim());
-      q.$and.push({
-        $or: [
-          { name:   { $regex: terms.join("|"),   $options: "i" } },
-          { tscName:{ $regex: terms.join("|"),   $options: "i" } },
-        ],
-      });
-    }
-
-    // song/artist search via tokens (ANY)
-    if (songSearch.length) {
-      const tokens = songSearch
-        .map((s) => String(s).toLowerCase().trim())
-        .filter(Boolean);
-      if (tokens.length) {
-        q.$and.push({
+      if (terms.length) {
+        and.push({
           $or: [
-            { repertoireTokens: { $in: tokens } },
-            { artistTokens:     { $in: tokens } },
+            { name: { $regex: terms.join("|"), $options: "i" } },
+            { tscName: { $regex: terms.join("|"), $options: "i" } },
           ],
         });
       }
     }
 
-    // If no AND parts added, match all
-    const mongo = q.$and.length ? q : {};
+    // song/artist search via tokens (ANY)
+    if (songSearch?.length) {
+      const tokens = songSearch
+        .map((s) => String(s).toLowerCase().trim())
+        .filter(Boolean);
+      if (tokens.length) {
+        and.push({
+          $or: [{ repertoireTokens: { $in: tokens } }, { artistTokens: { $in: tokens } }],
+        });
+      }
+    }
 
-    const cards = await ActFilterCard.find(mongo)
-      .select("_id actId status isTest")
-      .lean();
+    /* --------------------------- build aggregation ------------------------ */
+    const pipeline = [];
+
+    // base match
+    pipeline.push({ $match: and.length ? { $and: and } : {} });
+
+    // ✅ GENRES (handles array-of-arrays)
+    if (genres?.length) {
+      const wantRaw = genres.filter(Boolean);
+      const wantAnd = wantRaw.map((g) => g.replace(/&/g, "and"));
+      const want = Array.from(new Set([...wantRaw, ...wantAnd]));
+
+      // flatten one level: if genres is ["A","B"] or [["A","B"]], becomes ["A","B"]
+      pipeline.push({
+        $addFields: {
+          _genresFlat: {
+            $reduce: {
+              input: { $ifNull: ["$genres", []] },
+              initialValue: [],
+              in: {
+                $concatArrays: [
+                  "$$value",
+                  { $cond: [{ $isArray: "$$this" }, "$$this", ["$$this"] ] },
+                ],
+              },
+            },
+          },
+        },
+      });
+
+      // match any of the wanted labels (case-sensitive equality here; aliases cover "&"/"and")
+      pipeline.push({
+        $match: { _genresFlat: { $in: want } },
+      });
+    }
+
+    // select only what the client needs for intersection
+    pipeline.push({
+      $project: {
+        _id: 1,
+        actId: 1,
+        status: 1,
+        isTest: 1,
+      },
+    });
+
+    // TEMP debug (safe to keep; prints only in non-prod)
+    if (process.env.NODE_ENV !== "production") {
+      console.log("🔎 /api/v2/act-cards/search pipeline:", JSON.stringify(pipeline, null, 2));
+    }
+
+    const cards = await ActFilterCard.aggregate(pipeline);
 
     res.json({ ok: true, count: cards.length, cards });
   } catch (err) {
@@ -416,3 +504,5 @@ export async function searchActCards(req, res) {
     res.status(500).json({ ok: false, error: err.message });
   }
 }
+
+

@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node server.js",
     "server": "nodemon server.js",
-    "postinstall": "npx puppeteer browsers install chrome"
+    "postinstall": "npx puppeteer browsers install chrome",
+     "backfill:cards": "node ./scripts/backfillActCards.js",
+    "backfill:cards:missing": "node ./scripts/backfillActCards.js --only-missing",
+    "backfill:cards:all": "node ./scripts/backfillActCards.js --concurrency=12"
   },
   "author": "",
   "license": "ISC",
@@ -48,5 +51,6 @@
     "stripe": "^18.0.0",
     "twilio": "^5.5.2",
     "validator": "^13.15.0"
+    
   }
 }

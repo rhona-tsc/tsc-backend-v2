@@ -266,7 +266,39 @@ const parseStatuses = (statusStr = "") => {
   return Array.from(new Set(merged));
 };
 
+// at top of file (once)
+// import util from "util";
+
+// add at top of file if not already present:
+import util from "util";
+
 export const getAllActsV2 = async (req, res) => {
+  /* ───────────────────────── DEBUG HELPERS ───────────────────────── */
+  const now = () => new Date().toISOString();
+  const p = (obj, depth = 6) => {
+    try { return util.inspect(obj, { depth, colors: false, maxArrayLength: 200 }); }
+    catch { return String(obj); }
+  };
+  const group = (label) => { try { console.groupCollapsed(label); } catch {} };
+  const end = () => { try { console.groupEnd(); } catch {} };
+  const dbg = (...args) => console.log("🧭 [getAllActsV2]", ...args);
+
+  dbg(`⚡ start ${now()}`);
+  group("📥 Incoming request snapshot");
+  dbg("method:", req.method);
+  dbg("url:", req.originalUrl || req.url);
+  dbg("ip:", req.ip);
+  dbg("headers (subset):", p({
+    host: req.headers.host,
+    "user-agent": req.headers["user-agent"],
+    userid: req.headers.userid,
+    userrole: req.headers.userrole,
+    "x-scope": req.headers["x-scope"],
+  }));
+  dbg("query raw:", p(req.query));
+  end();
+
+  const T0 = Date.now();
   try {
     const {
       status = "",
@@ -278,18 +310,27 @@ export const getAllActsV2 = async (req, res) => {
       q = "",
     } = req.query;
 
-    const authUserId = req.user?.id || req.user?._id || req.headers.userid || null;
+    const authUserId   = req.user?.id || req.user?._id || req.headers.userid || null;
     const authUserRole = req.user?.role || req.headers.userrole || null;
     const mineFlag =
       String(req.query.mine || req.headers["x-scope"] || "").toLowerCase() === "mine" ||
       String(req.query.authorId || "").length > 0;
 
-    const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
-    const pg = Math.max(parseInt(page, 10) || 1, 1);
+    const lim  = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+    const pg   = Math.max(parseInt(page, 10) || 1, 1);
     const skip = (pg - 1) * lim;
 
-    // ✅ Minimal, card-friendly projection.
-    //    (If fields is provided, that wins; otherwise we use this.)
+    group("🧮 Parsed params");
+    dbg("status:", status);
+    dbg("fields:", fields || "(default projection)");
+    dbg("sort:", sort);
+    dbg("limit:", lim, "page:", pg, "skip:", skip);
+    dbg("includeTrashed:", includeTrashed);
+    dbg("search q:", q);
+    dbg("authUserId:", authUserId, "authUserRole:", authUserRole, "mineFlag:", mineFlag);
+    end();
+
+    /* ── Projection (include BOTH genre + genres for safety) ── */
     const projection =
       sanitizeFields(fields) || {
         _id: 1,
@@ -302,20 +343,26 @@ export const getAllActsV2 = async (req, res) => {
         minimumIntervalLength: 1,
         "coverImage.url": 1,
         "images.url": 1,
-        "profileImage.url": 1, // ← include profileImage
-        "lineups.base_fee": 1, // ← keep only what you need from lineups
-        genre: 1,              // ← schema key is "genre" not "genres"
+        "profileImage.url": 1,
+        "lineups.base_fee": 1,
+        lineups: 1,        // for counts in console table
+        genre: 1,          // singular field
+        genres: 1,         // ← plural (present in some docs)
       };
 
+    group("🧾 Projection in use");
+    dbg(p(projection));
+    end();
+
+    /* ── Filter building ── */
     const filter = {};
     if (includeTrashed !== "true") filter.status = { $ne: "trashed" };
 
-    /* ---------------- Status logic (unchanged) ---------------- */
-    const rawTokens = String(status || "")
-      .split(",")
-      .map(s => s.trim())
-      .filter(Boolean);
-    const tokensLC = rawTokens.map(s => s.toLowerCase());
+    group("🎛️ Status & special status parsing");
+    const rawTokens  = String(status || "").split(",").map(s => s.trim()).filter(Boolean);
+    const tokensLC   = rawTokens.map(s => s.toLowerCase());
+    dbg("rawTokens:", rawTokens);
+    dbg("tokensLC:", tokensLC);
 
     const wantsApprovedChangesPending =
       tokensLC.includes("approved_changes_pending") ||
@@ -323,14 +370,18 @@ export const getAllActsV2 = async (req, res) => {
       tokensLC.includes("approved, changes pending") ||
       (tokensLC.includes("approved") && tokensLC.includes("changes pending"));
 
-    const allowed = new Set(["approved", "pending", "draft", "trashed", "rejected"]);
+    const allowed    = new Set(["approved", "pending", "draft", "trashed", "rejected"]);
     const isSentinel = (s) =>
       /^approved(_|\s*\(|,\s*)changes\s*pending\)?$/i.test(s) ||
       s.toLowerCase() === "changes pending";
+
     const normalStatuses = rawTokens
       .filter(s => !isSentinel(s))
       .map(s => s.toLowerCase())
       .filter(s => allowed.has(s));
+
+    dbg("normalStatuses:", normalStatuses);
+    dbg("wantsApprovedChangesPending:", wantsApprovedChangesPending);
 
     if (normalStatuses.length) {
       if (filter.status) {
@@ -357,8 +408,10 @@ export const getAllActsV2 = async (req, res) => {
         }
       }
     }
+    dbg("filter after statuses:", p(filter));
+    end();
 
-    /* ---------------- Search (unchanged) ---------------- */
+    /* ── Text search ── */
     if (q.trim()) {
       const re = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
       if (filter.$or) {
@@ -367,22 +420,21 @@ export const getAllActsV2 = async (req, res) => {
       } else {
         filter.$or = [{ name: re }, { tscName: re }];
       }
+      dbg("added regex:", String(re));
     }
+    dbg("filter after search:", p(filter));
 
-    /* ---------------- Ownership (unchanged) ---------------- */
+    /* ── Ownership gating ── */
+    group("👤 Ownership gating");
     if (authUserRole === "musician") {
       if (!authUserId) {
+        dbg("❗ musician role without user id → 401");
         return res.status(401).json({ success: false, message: "Unauthorized: Missing user id" });
       }
-      const uid = String(authUserId);
+      const uid   = String(authUserId);
       const ownOr = [
-        { createdBy: uid },
-        { owner: uid },
-        { ownerId: uid },
-        { registeredBy: uid },
-        { userId: uid },
-        { musicianId: uid },
-        { owners: uid },
+        { createdBy: uid }, { owner: uid }, { ownerId: uid },
+        { registeredBy: uid }, { userId: uid }, { musicianId: uid }, { owners: uid },
       ];
       if (filter.$or) {
         filter.$and = filter.$and || [];
@@ -390,17 +442,13 @@ export const getAllActsV2 = async (req, res) => {
       } else {
         filter.$or = ownOr;
       }
+      dbg("applied musician ownership:", p({ uid }));
     } else if (mineFlag) {
       const uid = String(req.query.authorId || authUserId || "");
       if (uid) {
         const mineOr = [
-          { createdBy: uid },
-          { owner: uid },
-          { ownerId: uid },
-          { registeredBy: uid },
-          { userId: uid },
-          { musicianId: uid },
-          { owners: uid },
+          { createdBy: uid }, { owner: uid }, { ownerId: uid },
+          { registeredBy: uid }, { userId: uid }, { musicianId: uid }, { owners: uid },
         ];
         if (filter.$or) {
           filter.$and = filter.$and || [];
@@ -408,19 +456,16 @@ export const getAllActsV2 = async (req, res) => {
         } else {
           filter.$or = mineOr;
         }
+        dbg("applied mineFlag ownership:", p({ uid }));
+      } else {
+        dbg("mineFlag true but no uid available");
       }
     }
-
     if (req.query.authorId) {
       const authorId = String(req.query.authorId);
       const ownershipConditions = [
-        { createdBy: authorId },
-        { owner: authorId },
-        { ownerId: authorId },
-        { registeredBy: authorId },
-        { userId: authorId },
-        { musicianId: authorId },
-        { owners: authorId },
+        { createdBy: authorId }, { owner: authorId }, { ownerId: authorId },
+        { registeredBy: authorId }, { userId: authorId }, { musicianId: authorId }, { owners: authorId },
       ];
       if (filter.$or) {
         filter.$and = filter.$and || [];
@@ -428,48 +473,100 @@ export const getAllActsV2 = async (req, res) => {
       } else {
         filter.$or = ownershipConditions;
       }
+      dbg("explicit authorId ownership:", authorId);
     }
+    end();
 
-    const [total, actsRaw] = await Promise.all([
-      actModel.countDocuments(filter),
-      actModel.find(filter, projection).sort(sort).skip(skip).limit(lim).lean(),
-    ]);
+    group("🧩 FINAL Mongo params");
+    dbg("filter:", p(filter));
+    dbg("projection:", p(projection));
+    dbg("sort/skip/limit:", { sort, skip, lim });
+    end();
 
-    // ✅ Compute a single card-friendly image on the server
+    /* ── DB fetch ── */
+    const Tdb0 = Date.now();
+    let total = 0, actsRaw = [];
+    try {
+      [total, actsRaw] = await Promise.all([
+        actModel.countDocuments(filter),
+        actModel.find(filter, projection).sort(sort).skip(skip).limit(lim).lean(),
+      ]);
+    } catch (dbErr) {
+      dbg("❌ DB error during count/find:", dbErr?.message || dbErr);
+      throw dbErr;
+    }
+    const Tdb1 = Date.now();
+    dbg(`📊 DB timings: ${Tdb1 - Tdb0}ms (count + find in parallel)`);
+    dbg("📦 total matches:", total, "returned:", actsRaw.length);
+    dbg("🔑 keys of first raw doc:", actsRaw[0] ? Object.keys(actsRaw[0]) : "(none)");
+
+    /* ── Build items + genre diagnostics ── */
     const items = actsRaw.map((doc) => {
-      const first =
+      const cardImage =
         doc?.coverImage?.[0]?.url ||
         doc?.images?.[0]?.url ||
         doc?.profileImage?.[0]?.url ||
         "";
-      return { ...doc, cardImage: first };
+      // unify genres
+      const genresArr =
+        Array.isArray(doc?.genres) ? doc.genres
+        : Array.isArray(doc?.genre) ? doc.genre
+        : typeof doc?.genre === "string" ? [doc.genre]
+        : [];
+      return { ...doc, cardImage, genres: genresArr };
     });
 
-    console.log("📡 [getAllActsV2] Filter used:", filter);
-    console.log("📦 [getAllActsV2] Returned acts:", items.length);
-    if (items.length > 0) {
-      console.log("🧾 Sample act data:", {
-        name: items[0].name,
-        lineupsCount: items[0].lineups?.length || 0,
-        cardImage: items[0].cardImage || "(none)",
-      });
-    }
+    group("🔎 Sample rows (up to 10)");
+    console.table(
+      items.slice(0, 10).map((d, i) => ({
+        i,
+        id: String(d._id || ""),
+        name: d.tscName || d.name || "(untitled)",
+        status: d.status,
+        genres: (d.genres || []).join(" | "),
+        cardImage: d.cardImage ? "yes" : "no",
+        lineupsCount: Array.isArray(d.lineups) ? d.lineups.length : 0,
+      }))
+    );
+    end();
+
+    // quick genre stats
+    const allGenres = items.flatMap((d) => Array.isArray(d.genres) ? d.genres : []);
+    const genreCounts = allGenres.reduce((acc, g) => {
+      const key = String(g).trim();
+      if (!key) return acc;
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    group("🎼 Genre stats");
+    dbg("unique genres:", Object.keys(genreCounts).length);
+    console.table(
+      Object.entries(genreCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([g, n]) => ({ genre: g, count: n }))
+        .slice(0, 30)
+    );
+    end();
 
     const totalPages = Math.ceil(total / lim);
+    const Tend = Date.now();
+    dbg(`✅ success ${now()} • total=${total} page=${pg}/${totalPages} returned=${items.length} • ${Tend - T0}ms`);
 
-    // 🔁 Return in both shapes for compatibility
+    // Dual shape for compatibility
     res.json({
       success: true,
-      items,                 // ← preferred by your frontend logs
-      acts: items,           // ← legacy alias
+      items,
+      acts: items,
       total,
       page: pg,
       limit: lim,
       totalPages,
-      count: items.length,   // optional helper
+      count: items.length,
     });
   } catch (err) {
-    console.error("❌ Error fetching act list:", err);
+    const Tend = Date.now();
+    console.error("❌ Error in getAllActsV2:", err?.stack || err);
+    console.error("⏱️ elapsed:", Tend - T0, "ms");
     res.status(500).json({ success: false, message: "Failed to fetch acts" });
   }
 };
