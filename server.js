@@ -69,28 +69,23 @@ const port = process.env.PORT || 4000;
 
 app.set("trust proxy", 1); // Render/Cloudflare
 
-// ===== ✅ ADD THIS ORIGIN ALLOWLIST + CHECK FUNCTION FIRST =====
-
 // Host-based allowlist
 const ALLOWED_HOSTS = new Set([
   "localhost:5173",
-    "localhost:5173/",
   "localhost:5174",
-    "localhost:5174/",
   "admin.thesupremecollective.co.uk",
-    "admin.thesupremecollective.co.uk/",
-      "https://admin.thesupremecollective.co.uk",
-          "https://admin.thesupremecollective.co.uk/",
   "www.thesupremecollective.co.uk",
   "api.thesupremecollective.co.uk",
   "tsc2025.netlify.app",
   "tsc-backend-v2.onrender.com",
-    "tsc-backend-v2.onrender.com/",
   "tsc2025.onrender.com",
 ]);
 
+const ALLOW_HEADERS =
+  "Content-Type, Authorization, token, X-Requested-With, x-request-id";
+
 function isAllowedOrigin(origin) {
-  if (!origin) return true;
+  if (!origin) return true; // non-browser clients
   try {
     const url = new URL(origin);
     if (!/^https?:$/.test(url.protocol)) return false;
@@ -104,44 +99,47 @@ function isAllowedOrigin(origin) {
   }
 }
 
-// ===== 🧠 CORS CONFIG (NOW SAFE TO USE THE HELPERS) =====
+// Main CORS middleware
+app.use(
+  cors({
+    origin(origin, cb) {
+      if (!origin || isAllowedOrigin(origin)) {
+        cb(null, true);
+      } else {
+        cb(new Error("CORS blocked"), false);
+      }
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ALLOW_HEADERS.split(",").map((h) => h.trim()),
+    credentials: true,
+    optionsSuccessStatus: 204,
+  })
+);
 
-app.use(cors({
-  origin(origin, cb) {
-    if (!origin || isAllowedOrigin(origin)) {
-      cb(null, true);
-    } else {
-      cb(new Error("CORS blocked"), false);
-    }
-  },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "token", "X-Requested-With"],
-  credentials: true,
-  optionsSuccessStatus: 204,
-}));
-
-
-// ===== 🛰 FORCE HEADERS SO HOSTING LAYERS DON’T DROP PREFLIGHT =====
-
+// Force headers on all responses (helps behind Cloudflare / proxies)
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && isAllowedOrigin(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
   }
   res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Headers", ALLOW_HEADERS);
   res.setHeader("Vary", "Origin");
   next();
 });
 
-// ✅ Global preflight handler to override proxy-level blocking
+// Global preflight handler
 app.use((req, res, next) => {
   if (req.method === "OPTIONS") {
     const origin = req.headers.origin;
     if (origin && isAllowedOrigin(origin)) {
       res.header("Access-Control-Allow-Origin", origin);
     }
-    res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, token, X-Requested-With");
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    );
+    res.header("Access-Control-Allow-Headers", ALLOW_HEADERS);
     res.header("Access-Control-Allow-Credentials", "true");
     return res.sendStatus(204);
   }
