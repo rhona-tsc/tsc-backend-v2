@@ -30,6 +30,7 @@ const wirelessKey = (label = "") => {
   const k = String(label).trim().toLowerCase();
   if (k.startsWith("vocal")) return "vocal";
   if (k.includes("sax")) return "saxophone";
+  if (k.includes("gui")) return "guitar";
   return k; // guitar, bass, keytar, trumpet etc.
 };
 
@@ -345,12 +346,37 @@ export async function searchActCards(req, res) {
     if (instruments?.length) and.push({ instruments: { $in: instruments } });
 
     // wireless (ANY)
-    if (wireless?.length) {
+   /* if (wireless?.length) {
       and.push({
         $or: wireless.map((w) => ({
           [`wirelessByInstrument.${wirelessKey(w)}`]: true,
         })),
       });
+    }*/
+    if (wireless?.length) {
+      const wirelessOrArray = wireless.map((w) => ({
+        $expr: {
+          $gt: [
+            {
+              $size: {
+                $filter: {
+                  input: { $objectToArray: "$wirelessByInstrument" },
+                  as: "pair",
+                  cond: {
+                    $and: [
+                      { $eq: ["$$pair.v", true] },
+                      { $regexMatch: { input: "$$pair.k", regex: w, options: "i" } }
+                    ]
+                  }
+                }
+              }
+            },
+            0
+          ]
+        }
+      }));
+      console.log(" $or:", JSON.stringify(wirelessOrArray, null, 2));
+      and.push({ $or: wirelessOrArray });
     }
 
     // sound limiter toggles
