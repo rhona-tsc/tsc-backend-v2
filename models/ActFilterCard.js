@@ -1,60 +1,100 @@
+// models/actFilterCard.model.js
 import mongoose from "mongoose";
+import { v4 as uuidv4 } from "uuid";
 
+/* ---------- tiny embedded schemas (no _id) ---------- */
+const AdditionalRoleLiteSchema = new mongoose.Schema(
+  {
+    additionalFee: { type: Number, default: 0 },
+    isEssential: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
 
+const BandMemberLiteSchema = new mongoose.Schema(
+  {
+    fee: { type: Number, default: 0 },
+    additionalRoles: { type: [AdditionalRoleLiteSchema], default: [] },
+  },
+  { _id: false }
+);
+
+const BaseFeeLiteSchema = new mongoose.Schema(
+  {
+    act_size: { type: String },
+    total_fee: { type: Number },
+    fee_allocations: { type: Map, of: Number, default: {} },
+  },
+  { _id: false }
+);
+
+const LineupLiteSchema = new mongoose.Schema(
+  {
+    lineupId: { type: String, default: () => uuidv4(), index: true },
+    actSize: { type: String }, // e.g. "4-Piece"
+    bandMembers: { type: [BandMemberLiteSchema], default: [] },
+    base_fee: { type: [BaseFeeLiteSchema], default: [] },
+  },
+  { _id: false }
+);
+
+/* ----------------------- main schema ----------------------- */
 const ActFilterCardSchema = new mongoose.Schema(
   {
-    actId: { type: mongoose.Schema.Types.ObjectId, ref: "Act", index: true, required: true },
+    actId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Act",
+      index: true,
+      required: true,
+    },
+
+    // identity / status
     name: String,
     tscName: String,
-    status: { type: String, index: true },     // e.g. "approved", "live", ...
+    status: { type: String, index: true }, // approved/live/pending/draft
     isTest: { type: Boolean, default: false, index: true },
 
-genres: [String],
-   lineupSizes: [String],
-    instruments: [String],
+    /* 🔎 repertoire search */
+    repertoireTokens: { type: [String], default: [] }, // individual word tokens
+    artistTokens: { type: [String], default: [] },     // individual word tokens
+    songPhrases: { type: [String], default: [] },      // full song titles (lowercased)
+    artistPhrases: { type: [String], default: [] },    // full artist names (lowercased)
 
-    // Wireless support by instrument
-    wirelessByInstrument: { type: Map, of: Boolean },
+    /* taxonomy */
+    genres: { type: [String], default: [] },
+    lineupSizes: { type: [String], default: [] },
+    instruments: { type: [String], default: [] },
 
-    // Add these to your schema definition:
-repertoireTokens: [String],   // lowercased tokens of titles + artists
-artistTokens: [String],       // lowercased tokens of artists (optional)
+    /* wireless */
+    wirelessByInstrument: { type: Map, of: Boolean, default: {} },
 
-    // Sound limiter / stagecraft
+    /* tech / stagecraft */
     hasElectricDrums: Boolean,
     hasIEMs: Boolean,
     canMakeAcoustic: Boolean,
     canRemoveDrums: Boolean,
-    minDb: Number, // minimum workable dB across lineups
+    minDb: Number,
 
-    // Setup/Soundcheck
+    /* setup */
     setupSupports60: Boolean,
     setupSupports90: Boolean,
     hasSpeedySetup: Boolean,
 
-    // PA & Lights
-    pa: {
-      small: Boolean,
-      medium: Boolean,
-      large: Boolean,
-    },
-    light: {
-      small: Boolean,
-      medium: Boolean,
-      large: Boolean,
-    },
+    /* PA & lights */
+    pa: { small: Boolean, medium: Boolean, large: Boolean },
+    light: { small: Boolean, medium: Boolean, large: Boolean },
 
-    // PLI
+    /* compliance */
     pliAmount: Number,
 
-    // Extras presence flags
-    extras: { type: Map, of: Boolean }, // keys like "background_music_playlist", "add_another_vocalist", ...
+    /* extras flags */
+    extras: { type: Map, of: Boolean, default: {} },
 
-    // Ceremony & Afternoon
+    /* ceremony & afternoon */
     ceremony: { solo: Boolean, duo: Boolean, trio: Boolean, fourpiece: Boolean },
     afternoon: { solo: Boolean, duo: Boolean, trio: Boolean, fourpiece: Boolean },
 
-    // Travel summary (for UI hints)
+    /* travel summary */
     travelModel: {
       type: { type: String, enum: ["county", "per-mile", "mu", null], default: null },
       useCountyTravelFee: Boolean,
@@ -62,14 +102,15 @@ artistTokens: [String],       // lowercased tokens of artists (optional)
       hasCountyFees: Boolean,
     },
 
+    /* ✅ NEW: minimal lineups needed for local pricing fallback */
+    lineups: { type: [LineupLiteSchema], default: [] },
+
     smallestLineupSize: Number,
   },
-
-  
   { timestamps: true }
 );
 
-// Helpful compound indexes
+/* ------------------------- indexes ------------------------- */
 ActFilterCardSchema.index({ status: 1, isTest: 1 });
 ActFilterCardSchema.index({ genres: 1 });
 ActFilterCardSchema.index({ instruments: 1 });
@@ -77,16 +118,20 @@ ActFilterCardSchema.index({ lineupSizes: 1 });
 ActFilterCardSchema.index({ pliAmount: 1 });
 ActFilterCardSchema.index({ minDb: 1 });
 
-ActFilterCardSchema.index({ 'extras.$**': 1 });
-ActFilterCardSchema.index({ 'wirelessByInstrument.$**': 1 });
+ActFilterCardSchema.index({ "extras.$**": 1 });
+ActFilterCardSchema.index({ "wirelessByInstrument.$**": 1 });
 
-// Optional: simple name text index (for act name search)
-ActFilterCardSchema.index({ name: 'text', tscName: 'text' });
-
-// Simple array indexes to speed common queries:
+/* repertoire search */
 ActFilterCardSchema.index({ repertoireTokens: 1 });
 ActFilterCardSchema.index({ artistTokens: 1 });
+ActFilterCardSchema.index({ songPhrases: 1 });
+ActFilterCardSchema.index({ artistPhrases: 1 });
 
+/* optional name text index */
+ActFilterCardSchema.index({ name: "text", tscName: "text" });
 
-const ActFilterCard = mongoose.models.ActFilterCard || mongoose.model("ActFilterCard", ActFilterCardSchema);
+const ActFilterCard =
+  mongoose.models.ActFilterCard ||
+  mongoose.model("ActFilterCard", ActFilterCardSchema);
+
 export default ActFilterCard;

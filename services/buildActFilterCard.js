@@ -1,5 +1,6 @@
 // services/buildActFilterCard.js
 // ESM module
+import { v4 as uuidv4 } from "uuid";
 
 /* -------------------------- tiny safe helpers -------------------------- */
 const isNum = (v) => typeof v === "number" && Number.isFinite(v);
@@ -12,12 +13,6 @@ const norm = (s) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
-const pick = (obj, ...keys) => {
-  const out = {};
-  for (const k of keys) if (obj && obj[k] !== undefined) out[k] = obj[k];
-  return out;
-};
-
 /* -------------------------- image & base price ------------------------- */
 function pickCardImage(act) {
   return (
@@ -29,16 +24,27 @@ function pickCardImage(act) {
 }
 
 function computeBasePriceFromAct(act) {
-  const fees = (act?.lineups || [])
-    .map((l) => l?.base_fee?.total_fee ?? l?.total_fee ?? l?.base_fee)
-    .filter(isNum);
+  const fees = (act?.lineups || []).flatMap((l) => {
+    const bf = l?.base_fee;
+    if (Array.isArray(bf) && bf.length) {
+      return bf
+        .map((x) => Number(x?.total_fee ?? x))
+        .filter((n) => Number.isFinite(n));
+    }
+    const f1 = Number(l?.total_fee);
+    const f2 = Number(l?.base_fee);
+    return [f1, f2].filter((n) => Number.isFinite(n));
+  });
   return fees.length ? Math.min(...fees) : null;
 }
 
 /* ------------------------------ genres -------------------------------- */
 function extractGenres(act) {
-  // your act uses "genre" (array). Fall back to "genres".
-  const g = Array.isArray(act?.genre) ? act.genre : Array.isArray(act?.genres) ? act.genres : [];
+  const g = Array.isArray(act?.genre)
+    ? act.genre
+    : Array.isArray(act?.genres)
+    ? act.genres
+    : [];
   const cleaned = g.map((x) => String(x || "").trim()).filter(Boolean);
   return {
     genres: cleaned,
@@ -48,7 +54,6 @@ function extractGenres(act) {
 
 /* ---------------------------- lineups/meta ----------------------------- */
 function lineupSizes(act) {
-  // e.g. "4-Piece", "6-Piece"
   const sizes = new Set();
   for (const l of asArr(act?.lineups)) {
     const v = l?.actSize || l?.size || l?.label;
@@ -72,26 +77,23 @@ function smallestLineupSize(act) {
 
 /* ---------------------------- instruments ----------------------------- */
 function canonicalInstruments(act) {
-  // Normalise instrument names across lineups
   const set = new Set();
   for (const l of asArr(act?.lineups)) {
     for (const m of asArr(l?.bandMembers)) {
       const inst = m?.instrument || m?.role || m?.primaryInstrument;
-      if (inst) set.add(norm(inst).replace(/-/g, " ")); // store human-ish labels like "lead vocal"
+      if (inst) set.add(norm(inst).replace(/-/g, " "));
     }
   }
   return [...set];
 }
 
 function deriveWirelessMap(act) {
-  // map instrument -> boolean wireless
   const map = {};
   for (const l of asArr(act?.lineups)) {
     for (const m of asArr(l?.bandMembers)) {
       const inst =
         m?.instrument || m?.role || m?.primaryInstrument || "unknown";
       const key = norm(inst);
-      // sources of truth for "wireless" (be defensive)
       const w =
         !!m?.wireless ||
         !!m?.isWireless ||
@@ -105,7 +107,6 @@ function deriveWirelessMap(act) {
 
 /* ---------------------------- tech / flags ----------------------------- */
 function minDbFromLineups(act) {
-  // Look across plausible fields: l.db, l.dbMin, l.db?.min, l.minDb
   let min = null;
   for (const l of asArr(act?.lineups)) {
     const candidates = [
@@ -122,7 +123,6 @@ function minDbFromLineups(act) {
 }
 
 function setupFlags(act) {
-  // Heuristic: if act.lengthOfSets includes 60/90 OR explicit flags exist
   const lenArr = asArr(act?.lengthOfSets).map((n) => Number(n)).filter(isNum);
   const supports60 =
     lenArr.includes(60) ||
@@ -135,7 +135,6 @@ function setupFlags(act) {
     !!act?.actData?.supports90 ||
     !!act?.extras?.supports90;
 
-  // fast toggles (any truthy source)
   const hasElectricDrums =
     !!act?.hasElectricDrums ||
     !!act?.actData?.edrums ||
@@ -163,7 +162,6 @@ function setupFlags(act) {
 }
 
 function paLightFlags(act) {
-  // Preserve raw PA/lighting objects but also compute quick booleans
   const pa =
     act?.paSystem ||
     act?.pa ||
@@ -174,26 +172,20 @@ function paLightFlags(act) {
     act?.lighting ||
     {};
 
-  const hasPA = Boolean(
-    pa?.hasPA ??
-      pa?.provided ??
-      pa?.available ??
-      Object.keys(pa || {}).length
-  );
+  const hasPA =
+    !!pa?.hasPA || !!pa?.provided || !!pa?.available || Object.keys(pa || {}).length > 0;
 
-  const hasLighting = Boolean(
-    lighting?.hasLighting ??
-      lighting?.provided ??
-      lighting?.available ??
-      Object.keys(lighting || {}).length
-  );
+  const hasLighting =
+    !!lighting?.hasLighting ||
+    !!lighting?.provided ||
+    !!lighting?.available ||
+    Object.keys(lighting || {}).length > 0;
 
   return { pa, lighting, hasPA, hasLighting };
 }
 
 /* ------------------------------ extras --------------------------------- */
 function extrasFlags(act) {
-  // Return raw-ish extras object and a derived key list where value is truthy/price>0/complimentary
   const ex = act?.extras || {};
   const keys = new Set();
 
@@ -208,7 +200,6 @@ function extrasFlags(act) {
 
   for (const [k, v] of Object.entries(ex)) addKeyIf(k, v);
 
-  // also scan known structures like additional roles / flags that should be considered extras
   for (const l of asArr(act?.lineups)) {
     for (const role of asArr(l?.additionalRoles)) {
       if (role?.customRole && isNum(role?.fee)) {
@@ -254,6 +245,134 @@ function travelSummary(act) {
   };
 }
 
+/* -------------------------- lineups (lite) ----------------------------- */
+function buildLineupsLite(act) {
+  const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
+  return lineups.map((l) => ({
+    lineupId: l?.lineupId || l?._id?.toString?.() || uuidv4(),
+    actSize: l?.actSize || l?.size || l?.label || "",
+    bandMembers: (l?.bandMembers || []).map((m) => ({
+      fee: Number(m?.fee) || 0,
+      additionalRoles: (m?.additionalRoles || []).map((r) => ({
+        additionalFee: Number(r?.additionalFee ?? r?.fee) || 0,
+        isEssential: !!r?.isEssential,
+      })),
+    })),
+    base_fee: (l?.base_fee || []).map((b) => ({
+      act_size: b?.act_size || l?.actSize || "",
+      total_fee: Number(b?.total_fee ?? b) || 0,
+      fee_allocations: b?.fee_allocations || {},
+    })),
+  }));
+}
+
+/* ---------------------- repertoire tokenisation ----------------------- */
+function splitWords(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .split(/[^a-z0-9']+/)        // keep numbers & apostrophes
+    .filter(Boolean);
+}
+
+function buildRepertoireTokens(act) {
+  const songs = Array.isArray(act?.selectedSongs)
+    ? act.selectedSongs
+    : Array.isArray(act?.repertoire)
+    ? act.repertoire
+    : [];
+
+  const wordTokens = new Set();       // words from title + artist
+  const artistWordTokens = new Set(); // words from artist only
+  const songPhrases = new Set();      // full titles (lowercased)
+  const artistPhrases = new Set();    // full artist names (lowercased)
+
+  for (const s of songs) {
+    const title = String(s?.title || "").trim();
+    const artist = String(s?.artist || "").trim();
+
+    if (title) {
+      const t = title.toLowerCase();
+      songPhrases.add(t);
+      splitWords(title).forEach((w) => wordTokens.add(w));
+    }
+    if (artist) {
+      const a = artist.toLowerCase();
+      artistPhrases.add(a);
+      splitWords(artist).forEach((w) => {
+        wordTokens.add(w);
+        artistWordTokens.add(w);
+      });
+    }
+  }
+
+  return {
+    repertoireTokens: [...wordTokens],
+    artistTokens: [...artistWordTokens],
+    songPhrases: [...songPhrases],
+    artistPhrases: [...artistPhrases],
+  };
+}
+
+/* ----------------------------- main build ------------------------------ */
+// services/buildActFilterCard.js
+// ESM module
+
+
+const pick = (obj, ...keys) => {
+  const out = {};
+  for (const k of keys) if (obj && obj[k] !== undefined) out[k] = obj[k];
+  return out;
+};
+
+/* --------------------- snake_case extras normalizer -------------------- */
+const toSnake = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+
+const looksTruthy = (v) =>
+  v === true ||
+  v === "true" ||
+  v === 1 ||
+  v === "1" ||
+  (v && typeof v === "object" && (
+    Number(v.price) > 0 || v.complimentary === true || v.enabled === true
+  ));
+
+/** Normalize extras from the act into { [snake_key]: true } */
+function normalizeExtrasFromAct(act) {
+  const src = act?.extras || {};
+  const out = {};
+  const keyMap = {};
+
+  // direct extras on the act
+  for (const [k, v] of Object.entries(src)) {
+    const nk = toSnake(k);
+    keyMap[k] = nk;
+    if (looksTruthy(v)) out[nk] = true;
+  }
+
+  // also treat additional roles-with-fees as extras (optional)
+  for (const l of asArr(act?.lineups)) {
+    for (const r of asArr(l?.additionalRoles)) {
+      if (r?.customRole && Number(r?.fee) > 0) {
+        const nk = toSnake(`role_${r.customRole}`);
+        keyMap[`role:${r.customRole}`] = nk;
+        out[nk] = true;
+      }
+    }
+  }
+
+  return { extrasSnake: out, extrasKeysSnake: Object.keys(out), extrasKeyMap: keyMap };
+}
+
+
+
+
 /* ----------------------------- main build ------------------------------ */
 export function buildCard(act) {
   const { genres, genresNormalized } = extractGenres(act);
@@ -273,8 +392,8 @@ export function buildCard(act) {
   } = setupFlags(act);
 
   const { pa, lighting, hasPA, hasLighting } = paLightFlags(act);
-  const { extras, extrasKeys } = extrasFlags(act);
-  const { ceremony, afternoon, hasCeremonyOptions, hasAfternoonOptions } = ceremonyAfternoonFlags(act);
+  const { extrasSnake, extrasKeysSnake } = normalizeExtrasFromAct(act);
+  const { songPhrases, artistPhrases, repertoireTokens, artistTokens } = buildRepertoireTokens(act);
 
   return {
     // identity / status / hero
@@ -316,20 +435,37 @@ export function buildCard(act) {
     hasPA,
     hasLighting,
 
-    // extras
-    extras,
-    extrasKeys,
+    // extras (normalized to snake_case booleans)
+    extras: extrasSnake,          // { background_music_playlist: true, ... }
+    extrasKeys: extrasKeysSnake,  // ["background_music_playlist", ... ]
 
-    // ceremony / afternoon
-    ceremony,
-    afternoon,
-    hasCeremonyOptions,
-    hasAfternoonOptions,
+    // ceremony / afternoon (derived from act.extras too)
+    ceremony: {
+      solo: !!(act?.ceremony?.solo || act?.extras?.ceremony_solo),
+      duo: !!(act?.ceremony?.duo || act?.extras?.ceremony_duo),
+      trio: !!(act?.ceremony?.trio || act?.extras?.ceremony_trio),
+      fourpiece: !!(act?.ceremony?.fourPiece || act?.extras?.ceremony_4piece),
+    },
+    afternoon: {
+      solo: !!(act?.afternoon?.solo || act?.extras?.afternoon_solo),
+      duo: !!(act?.afternoon?.duo || act?.extras?.afternoon_duo),
+      trio: !!(act?.afternoon?.trio || act?.extras?.afternoon_trio),
+      fourpiece: !!(act?.afternoon?.fourPiece || act?.extras?.afternoon_4piece),
+    },
 
     // compliance
     pliAmount: Number(act?.pliAmount) || 0,
 
     // travel
     travelModel: travelSummary(act),
+
+    // lightweight lineups payload for cards
+    lineups: buildLineupsLite(act),
+
+    // repertoire search helpers
+    repertoireTokens, // word tokens from title + artist
+    artistTokens,     // word tokens from artist only
+    songPhrases,      // full song titles (lowercased)
+    artistPhrases,    // full artist names (lowercased)
   };
 }
