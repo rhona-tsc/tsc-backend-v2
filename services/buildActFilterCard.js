@@ -162,15 +162,8 @@ function setupFlags(act) {
 }
 
 function paLightFlags(act) {
-  const pa =
-    act?.paSystem ||
-    act?.pa ||
-    act?.sound ||
-    {};
-  const lighting =
-    act?.lightingSystem ||
-    act?.lighting ||
-    {};
+  const pa = act?.paSystem || act?.pa || act?.sound || {};
+  const lighting = act?.lightingSystem || act?.lighting || {};
 
   const hasPA =
     !!pa?.hasPA || !!pa?.provided || !!pa?.available || Object.keys(pa || {}).length > 0;
@@ -271,7 +264,7 @@ function splitWords(s) {
   return String(s || "")
     .toLowerCase()
     .replace(/&/g, "and")
-    .split(/[^a-z0-9']+/)        // keep numbers & apostrophes
+    .split(/[^a-z0-9']+/)
     .filter(Boolean);
 }
 
@@ -282,10 +275,10 @@ function buildRepertoireTokens(act) {
     ? act.repertoire
     : [];
 
-  const wordTokens = new Set();       // words from title + artist
-  const artistWordTokens = new Set(); // words from artist only
-  const songPhrases = new Set();      // full titles (lowercased)
-  const artistPhrases = new Set();    // full artist names (lowercased)
+  const wordTokens = new Set();
+  const artistWordTokens = new Set();
+  const songPhrases = new Set();
+  const artistPhrases = new Set();
 
   for (const s of songs) {
     const title = String(s?.title || "").trim();
@@ -315,17 +308,6 @@ function buildRepertoireTokens(act) {
 }
 
 /* ----------------------------- main build ------------------------------ */
-// services/buildActFilterCard.js
-// ESM module
-
-
-const pick = (obj, ...keys) => {
-  const out = {};
-  for (const k of keys) if (obj && obj[k] !== undefined) out[k] = obj[k];
-  return out;
-};
-
-/* --------------------- snake_case extras normalizer -------------------- */
 const toSnake = (s) =>
   String(s || "")
     .toLowerCase()
@@ -343,37 +325,24 @@ const looksTruthy = (v) =>
     Number(v.price) > 0 || v.complimentary === true || v.enabled === true
   ));
 
-/** Normalize extras from the act into { [snake_key]: true } */
 function normalizeExtrasFromAct(act) {
   const src = act?.extras || {};
   const out = {};
-  const keyMap = {};
-
-  // direct extras on the act
   for (const [k, v] of Object.entries(src)) {
     const nk = toSnake(k);
-    keyMap[k] = nk;
     if (looksTruthy(v)) out[nk] = true;
   }
-
-  // also treat additional roles-with-fees as extras (optional)
+  // roles-with-fees → extras keys
   for (const l of asArr(act?.lineups)) {
     for (const r of asArr(l?.additionalRoles)) {
       if (r?.customRole && Number(r?.fee) > 0) {
-        const nk = toSnake(`role_${r.customRole}`);
-        keyMap[`role:${r.customRole}`] = nk;
-        out[nk] = true;
+        out[toSnake(`role_${r.customRole}`)] = true;
       }
     }
   }
-
-  return { extrasSnake: out, extrasKeysSnake: Object.keys(out), extrasKeyMap: keyMap };
+  return { extrasSnake: out, extrasKeysSnake: Object.keys(out) };
 }
 
-
-
-
-/* ----------------------------- main build ------------------------------ */
 export function buildCard(act) {
   const { genres, genresNormalized } = extractGenres(act);
   const lineup_sizes = lineupSizes(act);
@@ -393,7 +362,16 @@ export function buildCard(act) {
 
   const { pa, lighting, hasPA, hasLighting } = paLightFlags(act);
   const { extrasSnake, extrasKeysSnake } = normalizeExtrasFromAct(act);
-  const { songPhrases, artistPhrases, repertoireTokens, artistTokens } = buildRepertoireTokens(act);
+  const { songPhrases, artistPhrases, repertoireTokens, artistTokens } =
+    buildRepertoireTokens(act);
+
+  // county fees (clean numeric map)
+  const countyFeesClean =
+    act?.countyFees && typeof act.countyFees === "object"
+      ? Object.fromEntries(
+          Object.entries(act.countyFees).map(([k, v]) => [k, Number(v) || 0])
+        )
+      : undefined;
 
   return {
     // identity / status / hero
@@ -404,7 +382,7 @@ export function buildCard(act) {
     isTest: !!(act?.isTest || act?.actData?.isTest),
     imageUrl: pickCardImage(act),
 
-    // pricing
+    // pricing helpers
     basePrice: computeBasePriceFromAct(act),
     loveCount: Number(act?.loveCount || 0),
     amendmentPending: Boolean(act?.amendment?.isPending ?? act?.amendmentPending),
@@ -426,8 +404,9 @@ export function buildCard(act) {
     canMakeAcoustic,
     canRemoveDrums,
     minDb: minDbFromLineups(act),
-    supports60,
-    supports90,
+    setupSupports60: supports60,
+    setupSupports90: supports90,
+    hasSpeedySetup: !!act?.extras?.speedy_setup,
 
     // PA / Lighting
     pa,
@@ -435,11 +414,11 @@ export function buildCard(act) {
     hasPA,
     hasLighting,
 
-    // extras (normalized to snake_case booleans)
-    extras: extrasSnake,          // { background_music_playlist: true, ... }
-    extrasKeys: extrasKeysSnake,  // ["background_music_playlist", ... ]
+    // extras
+    extras: extrasSnake,
+    extrasKeys: extrasKeysSnake,
 
-    // ceremony / afternoon (derived from act.extras too)
+    // ceremony / afternoon
     ceremony: {
       solo: !!(act?.ceremony?.solo || act?.extras?.ceremony_solo),
       duo: !!(act?.ceremony?.duo || act?.extras?.ceremony_duo),
@@ -456,16 +435,19 @@ export function buildCard(act) {
     // compliance
     pliAmount: Number(act?.pliAmount) || 0,
 
-    // travel
+    // travel (top-level fields for the frontend util) + summary
+    useCountyTravelFee: !!act?.useCountyTravelFee,
+    costPerMile: Number(act?.costPerMile) || 0,
+    countyFees: countyFeesClean,
     travelModel: travelSummary(act),
 
     // lightweight lineups payload for cards
     lineups: buildLineupsLite(act),
 
     // repertoire search helpers
-    repertoireTokens, // word tokens from title + artist
-    artistTokens,     // word tokens from artist only
-    songPhrases,      // full song titles (lowercased)
-    artistPhrases,    // full artist names (lowercased)
+    repertoireTokens,
+    artistTokens,
+    songPhrases,
+    artistPhrases,
   };
 }

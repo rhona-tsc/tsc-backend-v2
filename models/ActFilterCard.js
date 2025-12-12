@@ -54,6 +54,14 @@ const ActFilterCardSchema = new mongoose.Schema(
     status: { type: String, index: true }, // approved/live/pending/draft
     isTest: { type: Boolean, default: false, index: true },
 
+    // hero image (string URL)
+    imageUrl: { type: String, default: "" },
+
+    // pricing helpers
+    basePrice: { type: Number, default: null },
+    loveCount: { type: Number, default: 0 },
+    amendmentPending: { type: Boolean, default: false },
+
     /* 🔎 repertoire search */
     repertoireTokens: { type: [String], default: [] }, // individual word tokens
     artistTokens: { type: [String], default: [] },     // individual word tokens
@@ -89,12 +97,17 @@ const ActFilterCardSchema = new mongoose.Schema(
 
     /* extras flags */
     extras: { type: Map, of: Boolean, default: {} },
+    extrasKeys: { type: [String], default: [] },
 
     /* ceremony & afternoon */
     ceremony: { solo: Boolean, duo: Boolean, trio: Boolean, fourpiece: Boolean },
     afternoon: { solo: Boolean, duo: Boolean, trio: Boolean, fourpiece: Boolean },
 
-    /* travel summary */
+    /* travel (both top-level and summary for flexibility) */
+    useCountyTravelFee: { type: Boolean, default: false },
+    costPerMile: { type: Number, default: 0 },
+    countyFees: { type: Map, of: Number, default: undefined },
+
     travelModel: {
       type: { type: String, enum: ["county", "per-mile", "mu", null], default: null },
       useCountyTravelFee: Boolean,
@@ -102,10 +115,11 @@ const ActFilterCardSchema = new mongoose.Schema(
       hasCountyFees: Boolean,
     },
 
-    /* ✅ NEW: minimal lineups needed for local pricing fallback */
+    /* ✅ minimal lineups needed for local pricing fallback */
     lineups: { type: [LineupLiteSchema], default: [] },
 
     smallestLineupSize: Number,
+    genresNormalized: { type: [String], default: [] },
   },
   { timestamps: true }
 );
