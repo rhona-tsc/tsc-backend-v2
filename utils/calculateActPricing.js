@@ -887,6 +887,25 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
     selectedAddress,
   });
 
+  // 🔄 Normalize travel fields for acts OR actfiltercards (match frontend)
+const TRAVEL = act?.travelModel || {};
+const useCounty =
+  (act?.useCountyTravelFee ?? TRAVEL.useCountyTravelFee ?? (TRAVEL.type === "county")) === true;
+const countyFees = act?.countyFees ?? TRAVEL.countyFees ?? null;
+const costPerMileNorm = Number(act?.costPerMile ?? TRAVEL.costPerMile) || 0;
+
+const hasCountyTable = !!(useCounty && hasAnyCountyFees(countyFees) && derivedCounty);
+
+console.log("🗺️ Travel method decision:", {
+  decision: hasCountyTable ? "county" : (costPerMileNorm > 0 ? "cost_per_mile" : "mu_rates"),
+  reasons: {
+    useCounty,
+    hasCountyFees: hasAnyCountyFees(countyFees),
+    derivedCountyPresent: !!derivedCounty,
+    costPerMileNorm
+  }
+});
+
   // Northern detection
   const northernCounties = new Set([
     "ceredigion","cheshire","cleveland","conway","cumbria","denbighshire","derbyshire","durham",
@@ -959,17 +978,11 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
   const fee = perMemberFees.reduce((s, m) => s + (m.memberTotal || 0), 0);
   console.log("💸 Total base lineup fee:", fee);
 
-  // Travel method selection
-  const hasCountyTable =
-    !!(act?.useCountyTravelFee && hasAnyCountyFees(act?.countyFees) && derivedCounty);
-  console.log(
-    "🗺️ Travel method:",
-    hasCountyTable ? "County table" : act.costPerMile > 0 ? "Cost per mile" : "MU Rates"
-  );
+
 
   // County-fee path
   if (hasCountyTable) {
-    const feePerMemberRaw = getCountyFeeFromMap(act.countyFees, derivedCounty);
+    const feePerMemberRaw = getCountyFeeFromMap(countyFees, derivedCounty);
     const feePerMember = Number(feePerMemberRaw) || 0;
     console.log("📊 County travel fee per member:", feePerMember);
 
@@ -992,8 +1005,8 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
   }
 
   // Cost-per-mile path
-  if (!travelCalculated && Number(act.costPerMile) > 0) {
-    for (const m of travelEligibleMembers) {
+if (!travelCalculated && costPerMileNorm > 0) {
+      for (const m of travelEligibleMembers) {
       const postCode = getValidPostcode(m.postCode || m?.address || "");
       const destination =
         typeof selectedAddress === "string"
@@ -1014,11 +1027,11 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
       });
 
       const { miles } = await getTravelV2(postCode, destination, selectedDate);
-      const cost = (miles || 0) * Number(act.costPerMile) * 25;
+      const cost = (miles || 0) * costPerMileNorm * 2;
       console.log(`🛣️ ${m.firstName} travel CPM:`, {
         miles,
-        costPerMile: act.costPerMile,
-        factor: 25,
+        costPerMile: costPerMileNorm,
+        factor: 2,
         cost,
       });
 
@@ -1076,16 +1089,24 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
     travelCalculated = true;
   }
 
-  // Apply 25% uplift once
-  const totalPrice = Math.round((fee + travelFee) * 1.25);
-  console.log("✅ Final (single uplift 25%)", {
-    fee,
-    travelFee,
-    marginApplied: "25%",
-    totalPrice,
-    travelCalculated,
-  });
-  return { total: totalPrice, travelCalculated };
+// ✅ Apply 33% exactly once, like the frontend
+const subtotal = fee + travelFee;
+const finalTotal = Math.round(subtotal * 1.33);
+console.log("✅ Final (single uplift 33%)", {
+  fee,
+  travelFee,
+  subtotal,
+  marginApplied: "33%",
+  finalTotal,
+  travelCalculated,
+});
+return {
+  total: finalTotal,
+  travelCalculated,
+  baseFeeTotal: fee,
+  travelFeeTotal: travelFee,
+  marginApplied: 0.33,
+};
 };
 
 export default calculateActPricing;

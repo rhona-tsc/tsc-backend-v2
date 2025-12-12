@@ -4664,7 +4664,7 @@ const offRepLine =
               <h3 style="color:#111;">${actDoc.tscName || actDoc.name}</h3>
               <p style="margin:6px 0 14px; color:#555;">${(actDoc.tscDescription || actDoc.description || "").toString()}</p>
               <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
-              ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
+              ${lineupQuotes.length ? `<h4 style="margin-top:20px;">:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
               <h4 style="margin-top:25px;">Included in your quote:</h4>
             <ul>
   <li>${setsLine}</li>
