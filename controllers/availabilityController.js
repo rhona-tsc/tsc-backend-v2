@@ -4166,7 +4166,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
   }
 
   const actDoc = await Act.findById(actId)
-    .select("+availabilityBadgesMeta lineups tscName name formattedAddress venueAddress coverImage images profileImage description tscDescription paSystem lightingSystem extras numberOfSets lengthOfSets repertoire tscRepertoire selectedSongs repertoireByYear setlist offRepertoireRequests")
+    .select("+availabilityBadgesMeta lineups tscName name formattedAddress venueAddress coverImage images profileImage description tscDescription paSystem lightingSystem extras numberOfSets lengthOfSets repertoire tscRepertoire selectedSongs repertoireByYear setlist offRepertoireRequests useCountyTravelFee countyFees travelModel costPerMile")
     .lean();
 
   console.log("📘 [rebuildAndApplyAvailabilityBadge] actDoc fetched", {
