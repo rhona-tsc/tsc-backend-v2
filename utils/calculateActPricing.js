@@ -246,9 +246,24 @@ const getValidPostcode = (p) => {
 
 async function getTravelV2(origin, destination, dateISO) { /* … exactly as you had it … */ }
 
-// ───────────────────────────────────────────────────────────────────────────────
-// calculateActPricing (robust county mode + graceful fallback)
-// ───────────────────────────────────────────────────────────────────────────────
+// Pick a musician postcode robustly
+const pickMemberPostcode = (m = {}) => {
+  const raw =
+    m.postCode || m.postcode || m.homePostcode || m.postalCode ||
+    m?.address?.postcode || m?.address;
+  return getValidPostcode(raw);
+};
+
+// Pick a destination string/postcode robustly
+const pickDestinationString = (addr) => {
+  if (!addr) return "";
+  const raw = typeof addr === "string"
+    ? addr
+    : (addr.postcode || addr.postCode || addr.formattedAddress || addr.address || "");
+  // Prefer a clean postcode if present; fall back to the raw string
+  return getValidPostcode(raw) || String(raw || "");
+};
+
 // ───────────────────────────────────────────────────────────────────────────────
 // calculateActPricing (fixed: robust useCounty + safe travel fetch)
 // ───────────────────────────────────────────────────────────────────────────────
@@ -390,24 +405,23 @@ const calculateActPricing = async (
     selectedDate: selectedDate || null,
   });
 
-  // ── travel flags (robust) ───────────────────────────────────────────────────
-  const TRAVEL = act?.travelModel || {};
-  const useCountyRoot    = truthy(act?.useCountyTravelFee);
-  const useCountyModel   = truthy(TRAVEL?.useCountyTravelFee);
-  const useCountyByType  = String(TRAVEL?.type || act?.travelType || "").toLowerCase() === "county";
-  const useCounty        = !!(useCountyRoot || useCountyModel || useCountyByType);
+ // ── travel flags (simple) ─────────────────────────────────────────────────────
+const TRAVEL = act?.travelModel || {};
+const countyFees = act?.countyFees ?? TRAVEL?.countyFees ?? null;
 
-  const countyFees       = act?.countyFees ?? TRAVEL?.countyFees ?? null;
-  const costPerMileNorm  = Number(act?.costPerMile ?? TRAVEL?.costPerMile) || 0;
+// ✅ Only this matters now: if the act toggles county travel, we use county fees.
+// Otherwise we always use MU.
+const useCounty = truthy(act?.useCountyTravelFee) === true;
 
-  console.log("🌍 Travel flags (normalized):", {
-    useCounty,
-    useCounty_source: { root: act?.useCountyTravelFee, travelModel: TRAVEL?.useCountyTravelFee, travelType: TRAVEL?.type || act?.travelType },
-    hasCountyFees: hasAnyCountyFees(countyFees),
-    derivedCountyPresent: !!derivedCounty,
-    costPerMileNorm,
-    travelModelType: TRAVEL?.type ?? null,
-  });
+console.log("🌍 Travel flags (normalized):", {
+  useCounty,
+  derivedCountyPresent: !!derivedCounty,
+  hasCountyFees: hasAnyCountyFees(countyFees),
+});
+
+// ── travel decision (forced) ──────────────────────────────────────────────────
+let decision = useCounty ? "county" : "mu";
+
 
   if (useCounty && !derivedCounty) {
     console.warn("⚠️ useCounty=true but no derivedCounty");
@@ -461,7 +475,6 @@ const calculateActPricing = async (
   console.log("💸 Total base lineup fee:", baseFeeTotal);
 
   // ── decide travel method ────────────────────────────────────────────────────
-  let decision = "mu";
   if (useCounty && hasAnyCountyFees(countyFees) && derivedCounty) {
     decision = "county";
   } else if (costPerMileNorm > 0) {
@@ -469,76 +482,76 @@ const calculateActPricing = async (
   }
   console.log("🏷️ Travel method decision (initial):", decision);
 
-  // ── travel calc ─────────────────────────────────────────────────────────────
   let travelFee = 0;
-  let travelCalculated = false;
+let travelCalculated = false;
 
-  // County fees
-  if (decision === "county") {
+// County fees path
+if (decision === "county") {
+  if (!derivedCounty) {
+    console.warn("⚠️ useCounty=true but no derivedCounty → fallback to MU");
+    decision = "mu";
+  } else {
     const feePerMember = Number(getCountyFeeFromMap(countyFees, derivedCounty)) || 0;
     console.log("📊 County travel fee/member:", feePerMember, "(county:", derivedCounty, ")");
-    if (travelEligibleCount > 0) {
+    if (feePerMember > 0 && travelEligibleCount > 0) {
       travelFee = feePerMember * travelEligibleCount;
       travelCalculated = true;
+      console.log(`🚗 County travel total: £${travelFee} for ${travelEligibleCount} members`);
+    } else {
+      console.warn("⚠️ useCounty=true but fee missing/zero or no eligible members → fallback to MU");
+      decision = "mu";
     }
   }
+}
 
-  // If we still don't have travel and can't fetch or missing inputs, return base only
-  const needsFetch = (decision === "per-mile" || decision === "mu");
-  if (!travelCalculated && needsFetch && (!selectedAddress || !selectedDate)) {
+// MU path (only if not satisfied by county)
+if (!travelCalculated && decision === "mu") {
+  const destination = pickDestinationString(selectedAddress);
+  if (!destination || !selectedDate) {
     const finalTotal = Math.round(baseFeeTotal);
-    console.log("⚠️ No address/date for distance → returning base only:", finalTotal);
+    console.log("⚠️ No destination/date for MU distance → returning base only:", finalTotal);
     console.groupEnd();
     return { total: finalTotal, travelCalculated: false, decision, baseFeeTotal, travelFeeTotal: 0 };
   }
 
-  // Per-mile or MU via travel API
-  if (!travelCalculated && needsFetch) {
-    for (const m of travelEligibleMembers) {
-      const postCode = m.postCode;
-      const destination =
-        typeof selectedAddress === "string"
-          ? selectedAddress
-          : selectedAddress?.postcode || selectedAddress?.address || "";
-      if (!postCode || !destination) continue;
-
-      try {
-        const trip = await getTravelV2(postCode, destination, selectedDate);
-        if (!trip || (!trip.outbound && !trip.returnTrip)) {
-          console.warn("⚠️ travelV2 returned no legs for", postCode, "→ skipping");
-          continue;
-        }
-
-        if (decision === "per-mile") {
-          const miles = (trip?.miles || 0) * 2; // return trip
-          const cost = miles * costPerMileNorm;
-          console.log(`🛣️ ${m.firstName} per-mile: ${miles}mi × £${costPerMileNorm}/mi →`, cost);
-          travelFee += cost;
-        } else {
-          // MU rates
-          const out = trip.outbound;
-          const ret = trip.returnTrip;
-          const totalDistanceMiles = ((out?.distance?.value || 0) + (ret?.distance?.value || 0)) / 1609.34;
-          const totalDurationHours = ((out?.duration?.value || 0) + (ret?.duration?.value || 0)) / 3600;
-
-          const fuelFee = totalDistanceMiles * 0.56;
-          const timeFee = totalDurationHours * 13.23;
-          const lateFee = (ret?.duration?.value || 0) / 3600 > 1 ? 136 : 0;
-          const tollFee = (out?.fare?.value || 0) + (ret?.fare?.value || 0);
-          const cost = fuelFee + timeFee + lateFee + tollFee;
-
-          console.log(`🚕 MU Travel (${m.firstName})`, {
-            totalDistanceMiles, totalDurationHours, fuelFee, timeFee, lateFee, tollFee, cost,
-          });
-
-          travelFee += cost;
-        }
-      } catch (err) {
-        console.warn("⚠️ travelV2 failed for", m.firstName, "→ base only for this member:", err?.message || err);
-      }
+  for (const m of travelEligibleMembers) {
+    const origin = pickMemberPostcode(m);
+    if (!origin) {
+      console.warn(`⚪ Skipping MU travel for ${m.firstName || "member"} — no postcode`);
+      continue;
     }
-    travelCalculated = true; // we attempted; total may be partial if some members failed
+
+    try {
+      const trip = await getTravelV2(origin, destination, selectedDate);
+      if (!trip || (!trip.outbound && !trip.returnTrip)) {
+        console.warn("⚠️ travelV2 returned no legs", { origin, destination });
+        continue;
+      }
+
+      const out = trip.outbound;
+      const ret = trip.returnTrip;
+      const totalDistanceMiles = ((out?.distance?.value || 0) + (ret?.distance?.value || 0)) / 1609.34;
+      const totalDurationHours = ((out?.duration?.value || 0) + (ret?.duration?.value || 0)) / 3600;
+
+      const fuelFee = totalDistanceMiles * 0.56;
+      const timeFee = totalDurationHours * 13.23;
+      const lateFee = (ret?.duration?.value || 0) / 3600 > 1 ? 136 : 0;
+      const tollFee = (out?.fare?.value || 0) + (ret?.fare?.value || 0);
+      const cost = fuelFee + timeFee + lateFee + tollFee;
+
+      console.log(`🚕 MU Travel (${m.firstName || "member"})`, {
+        origin, destination, totalDistanceMiles, totalDurationHours, fuelFee, timeFee, lateFee, tollFee, cost,
+      });
+
+      travelFee += cost;
+    } catch (err) {
+      console.warn("⚠️ travelV2 failed for", m.firstName || "member", err?.message || err);
+    }
   }
+
+  travelCalculated = true;
+  console.log(`🚗 MU travel fee total: £${travelFee}`);
+}
 
   const travelFeeTotal = travelFee;
   console.log(`🚗 Travel fee total: £${travelFeeTotal}`);
