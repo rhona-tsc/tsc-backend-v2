@@ -544,12 +544,25 @@ const calculateActPricing = async (
   console.log(`🚗 Travel fee total: £${travelFeeTotal}`);
 
   const subtotal = baseFeeTotal + travelFeeTotal;
-  console.log(`🧮 Subtotal before rounding: £${subtotal}`);
+  console.log(`🧮 Subtotal before margin: £${subtotal}`);
 
-  const finalTotal = Math.round(subtotal);
-  console.log("✅ Final total price (rounded):", finalTotal);
+  // 🔖 33% margin
+  const marginMultiplier = Number(act?.pricing?.marginMultiplier ?? act?.marginMultiplier ?? 1.33);
+  const withMargin = subtotal * marginMultiplier;
 
-  const payload = { total: finalTotal, travelCalculated, decision, baseFeeTotal, travelFeeTotal };
+  const finalTotal = Math.round(withMargin);
+  console.log("✅ Final total price (with 33% margin, rounded):", finalTotal);
+
+  const payload = {
+    total: finalTotal,
+    travelCalculated,
+    decision,
+    baseFeeTotal,
+    travelFeeTotal,
+    marginMultiplier,
+    beforeMarginSubtotal: subtotal,
+    marginAddedApprox: Math.round(withMargin - subtotal),
+  };
   console.log("✅ Final summary:", payload);
   console.groupEnd();
   return payload;
