@@ -414,7 +414,7 @@ if (isTestAct) {
 
   // If county path didn't run and we don't have addr/date → return base+margin
   if (!travelCalculated && (!selectedAddress || !selectedDate)) {
-    const totalPrice = Math.ceil(fee / 0.75);
+    const totalPrice = Math.ceil(fee * 1.33);
         console.log("⚠️ No travel data → base + margin only", totalPrice);
     console.groupEnd();
 
@@ -466,7 +466,7 @@ if (isTestAct) {
   }
 
   // Gross with 25% margin
-  const totalPrice = Math.ceil((fee + travelFee) / 0.75);
+  const totalPrice = Math.ceil((fee + travelFee) * 1.33);
  console.log("✅ Final:", { fee, travelFee, marginApplied: 0.25, totalPrice, travelCalculated });
   console.groupEnd();
   return { total: totalPrice, travelCalculated };

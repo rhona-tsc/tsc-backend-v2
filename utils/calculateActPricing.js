@@ -982,7 +982,7 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
 
   // If county path didn't run and we don't have addr/date → base + margin only
   if (!travelCalculated && (!selectedAddress || !selectedDate)) {
-    const totalPrice = Math.ceil(fee / 0.75);
+    const totalPrice = Math.ceil(fee * 1.33);
     console.log("⚠️ No travel data → base + margin only", {
       totalPrice,
       selectedAddress,
