@@ -15,7 +15,7 @@ const normSize = (s = "") => {
   const v = String(s).trim().toLowerCase();
   if (v === "solo" || v === "1-piece") return "Solo";
   if (v === "duo" || v === "2-piece") return "Duo";
-  if (v === "trio" || v === "3-Piece") return "Trio";
+  if (/3-?piece/i.test(s)) return "Trio";
   if (/4-?piece/i.test(s)) return "4-Piece";
   if (/5-?piece/i.test(s)) return "5-Piece";
   if (/6-?piece/i.test(s)) return "6-Piece";
