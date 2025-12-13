@@ -40,7 +40,7 @@ export const autosaveMusicianForm = async (req, res) => {
     }
 
     // 4) upsert latest autosave
-    await MusicianAutosave.updateOne(
+    await musicianAutosaveModel.updateOne(
       { musicianId, formKey },
       { $set: { snapshot, snapshotHash, updatedAtIso } },
       { upsert: true }
