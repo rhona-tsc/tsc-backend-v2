@@ -11,9 +11,10 @@ import { uploader } from "../utils/cloudinary.js";
 import puppeteer from "puppeteer";
 import mongoose from "mongoose";
 import Song from "../models/songModel.js";
-import { postcodes as POSTCODE_MAP_ARR } from "../utils/postcodes.js"; 
+import { postcodes as POSTCODE_MAP_ARR } from "../utils/postcodes.js";
 
-const POSTCODE_MAP = (Array.isArray(POSTCODE_MAP_ARR) && POSTCODE_MAP_ARR[0]) || {};
+const POSTCODE_MAP =
+  (Array.isArray(POSTCODE_MAP_ARR) && POSTCODE_MAP_ARR[0]) || {};
 
 // ----------------------- Utilities -----------------------
 
@@ -27,7 +28,10 @@ const safeJSONParse = (data, fallback = undefined) => {
 };
 
 const sanitizeFileName = (name) =>
-  name.replace(/[^\w.-]/g, "_").replace(/_+/g, "_").toLowerCase();
+  name
+    .replace(/[^\w.-]/g, "_")
+    .replace(/_+/g, "_")
+    .toLowerCase();
 
 const uploadToCloudinary = (buffer, originalname, resourceType = "image") =>
   new Promise((resolve, reject) => {
@@ -154,161 +158,640 @@ const saveDeputyWithRetry = async ({ staleDoc, parsedData }) => {
 
 // --- Location helpers ---------------------------------------------
 
-
-
 // A small adjacency map (expand as needed)
 // All keys and values MUST be lowercased.
 const COUNTY_NEIGHBORS = {
   // ---------------- ENGLAND ----------------
-  "bedfordshire": ["buckinghamshire","hertfordshire","cambridgeshire","northamptonshire"],
-  "berkshire": ["oxfordshire","hampshire","surrey","greater london","buckinghamshire","wiltshire"],
-  "bristol": ["gloucestershire","somerset","wilts","wiltshire"], // “wilts” for tolerance
-  "buckinghamshire": ["oxfordshire","northamptonshire","bedfordshire","hertfordshire","greater london","berkshire"],
-  "cambridgeshire": ["lincolnshire","norfolk","suffolk","essex","hertfordshire","bedfordshire","northamptonshire","peterborough"],
-  "cheshire": ["merseyside","greater manchester","derbyshire","staffordshire","shropshire","flintshire"],
+  bedfordshire: [
+    "buckinghamshire",
+    "hertfordshire",
+    "cambridgeshire",
+    "northamptonshire",
+  ],
+  berkshire: [
+    "oxfordshire",
+    "hampshire",
+    "surrey",
+    "greater london",
+    "buckinghamshire",
+    "wiltshire",
+  ],
+  bristol: ["gloucestershire", "somerset", "wilts", "wiltshire"], // “wilts” for tolerance
+  buckinghamshire: [
+    "oxfordshire",
+    "northamptonshire",
+    "bedfordshire",
+    "hertfordshire",
+    "greater london",
+    "berkshire",
+  ],
+  cambridgeshire: [
+    "lincolnshire",
+    "norfolk",
+    "suffolk",
+    "essex",
+    "hertfordshire",
+    "bedfordshire",
+    "northamptonshire",
+    "peterborough",
+  ],
+  cheshire: [
+    "merseyside",
+    "greater manchester",
+    "derbyshire",
+    "staffordshire",
+    "shropshire",
+    "flintshire",
+  ],
   "city of london": ["greater london"],
-  "cornwall": ["devon","isles of scilly"],
-  "cumbria": ["northumberland","durham","north yorkshire","lancashire","dumfries and galloway","scottish borders"],
-  "derbyshire": ["greater manchester","west yorkshire","south yorkshire","nottinghamshire","leicestershire","staffordshire","cheshire"],
-  "devon": ["cornwall","somerset","dorset"],
-  "dorset": ["devon","somerset","wiltshire","hampshire"],
-  "durham": ["northumberland","tyne and wear","north yorkshire","cumbria"],
-  "east riding of yorkshire": ["north yorkshire","south yorkshire","lincolnshire","north lincolnshire"],
-  "east sussex": ["kent","surrey","west sussex"],
-  "essex": ["greater london","hertfordshire","cambridgeshire","suffolk","kent","thurrock"],
-  "gloucestershire": ["worcestershire","warwickshire","oxfordshire","wiltshire","bristol","south gloucestershire","somerset","herefordshire"],
-  "greater london": ["kent","surrey","berkshire","buckinghamshire","hertfordshire","essex","city of london"],
-  "greater manchester": ["merseyside","lancashire","west yorkshire","derbyshire","cheshire"],
-  "hampshire": ["dorset","wiltshire","berkshire","surrey","west sussex","isle of wight"],
-  "herefordshire": ["gloucestershire","worcestershire","shropshire","powys","monmouthshire"],
-  "hertfordshire": ["bedfordshire","buckinghamshire","greater london","essex","cambridgeshire"],
+  cornwall: ["devon", "isles of scilly"],
+  cumbria: [
+    "northumberland",
+    "durham",
+    "north yorkshire",
+    "lancashire",
+    "dumfries and galloway",
+    "scottish borders",
+  ],
+  derbyshire: [
+    "greater manchester",
+    "west yorkshire",
+    "south yorkshire",
+    "nottinghamshire",
+    "leicestershire",
+    "staffordshire",
+    "cheshire",
+  ],
+  devon: ["cornwall", "somerset", "dorset"],
+  dorset: ["devon", "somerset", "wiltshire", "hampshire"],
+  durham: ["northumberland", "tyne and wear", "north yorkshire", "cumbria"],
+  "east riding of yorkshire": [
+    "north yorkshire",
+    "south yorkshire",
+    "lincolnshire",
+    "north lincolnshire",
+  ],
+  "east sussex": ["kent", "surrey", "west sussex"],
+  essex: [
+    "greater london",
+    "hertfordshire",
+    "cambridgeshire",
+    "suffolk",
+    "kent",
+    "thurrock",
+  ],
+  gloucestershire: [
+    "worcestershire",
+    "warwickshire",
+    "oxfordshire",
+    "wiltshire",
+    "bristol",
+    "south gloucestershire",
+    "somerset",
+    "herefordshire",
+  ],
+  "greater london": [
+    "kent",
+    "surrey",
+    "berkshire",
+    "buckinghamshire",
+    "hertfordshire",
+    "essex",
+    "city of london",
+  ],
+  "greater manchester": [
+    "merseyside",
+    "lancashire",
+    "west yorkshire",
+    "derbyshire",
+    "cheshire",
+  ],
+  hampshire: [
+    "dorset",
+    "wiltshire",
+    "berkshire",
+    "surrey",
+    "west sussex",
+    "isle of wight",
+  ],
+  herefordshire: [
+    "gloucestershire",
+    "worcestershire",
+    "shropshire",
+    "powys",
+    "monmouthshire",
+  ],
+  hertfordshire: [
+    "bedfordshire",
+    "buckinghamshire",
+    "greater london",
+    "essex",
+    "cambridgeshire",
+  ],
   "isle of wight": ["hampshire"],
-  "kent": ["greater london","surrey","east sussex","essex","medway"],
-  "lancashire": ["cumbria","north yorkshire","west yorkshire","greater manchester","merseyside"],
-  "leicestershire": ["nottinghamshire","derbyshire","staffordshire","warwickshire","northamptonshire","rutland","lincolnshire"],
-  "lincolnshire": ["nottinghamshire","south yorkshire","east riding of yorkshire","north lincolnshire","cambridgeshire","rutland","leicestershire","northamptonshire","norfolk"],
-  "merseyside": ["lancashire","greater manchester","cheshire","flintshire"],
-  "norfolk": ["lincolnshire","cambridgeshire","suffolk"],
-  "north yorkshire": ["cumbria","durham","west yorkshire","south yorkshire","east riding of yorkshire","lancashire"],
-  "northamptonshire": ["leicestershire","rutland","cambridgeshire","bedfordshire","buckinghamshire","oxfordshire","warwickshire","lincolnshire"],
-  "northumberland": ["cumbria","durham","tyne and wear","scottish borders"],
-  "nottinghamshire": ["lincolnshire","south yorkshire","derbyshire","leicestershire"],
-  "oxfordshire": ["warwickshire","northamptonshire","buckinghamshire","berkshire","wiltshire","gloucestershire"],
-  "rutland": ["lincolnshire","leicestershire","northamptonshire"],
-  "shropshire": ["cheshire","staffordshire","worcestershire","herefordshire","powys","wrexham"],
-  "somerset": ["devon","dorset","wiltshire","gloucestershire","bristol"],
-  "south yorkshire": ["west yorkshire","north yorkshire","east riding of yorkshire","lincolnshire","nottinghamshire","derbyshire"],
-  "staffordshire": ["cheshire","derbyshire","leicestershire","warwickshire","west midlands","worcestershire","shropshire"],
-  "suffolk": ["norfolk","cambridgeshire","essex"],
-  "surrey": ["greater london","kent","east sussex","west sussex","hampshire","berkshire"],
-  "tyne and wear": ["northumberland","durham"],
-  "warwickshire": ["west midlands","worcestershire","gloucestershire","oxfordshire","northamptonshire","leicestershire","staffordshire"],
-  "west midlands": ["staffordshire","warwickshire","worcestershire","shropshire"],
-  "west sussex": ["surrey","east sussex","hampshire"],
-  "west yorkshire": ["lancashire","north yorkshire","south yorkshire","greater manchester"],
-  "wiltshire": ["gloucestershire","oxfordshire","berkshire","hampshire","dorset","somerset"],
-  "worcestershire": ["shropshire","staffordshire","west midlands","warwickshire","gloucestershire","herefordshire"],
+  kent: ["greater london", "surrey", "east sussex", "essex", "medway"],
+  lancashire: [
+    "cumbria",
+    "north yorkshire",
+    "west yorkshire",
+    "greater manchester",
+    "merseyside",
+  ],
+  leicestershire: [
+    "nottinghamshire",
+    "derbyshire",
+    "staffordshire",
+    "warwickshire",
+    "northamptonshire",
+    "rutland",
+    "lincolnshire",
+  ],
+  lincolnshire: [
+    "nottinghamshire",
+    "south yorkshire",
+    "east riding of yorkshire",
+    "north lincolnshire",
+    "cambridgeshire",
+    "rutland",
+    "leicestershire",
+    "northamptonshire",
+    "norfolk",
+  ],
+  merseyside: ["lancashire", "greater manchester", "cheshire", "flintshire"],
+  norfolk: ["lincolnshire", "cambridgeshire", "suffolk"],
+  "north yorkshire": [
+    "cumbria",
+    "durham",
+    "west yorkshire",
+    "south yorkshire",
+    "east riding of yorkshire",
+    "lancashire",
+  ],
+  northamptonshire: [
+    "leicestershire",
+    "rutland",
+    "cambridgeshire",
+    "bedfordshire",
+    "buckinghamshire",
+    "oxfordshire",
+    "warwickshire",
+    "lincolnshire",
+  ],
+  northumberland: ["cumbria", "durham", "tyne and wear", "scottish borders"],
+  nottinghamshire: [
+    "lincolnshire",
+    "south yorkshire",
+    "derbyshire",
+    "leicestershire",
+  ],
+  oxfordshire: [
+    "warwickshire",
+    "northamptonshire",
+    "buckinghamshire",
+    "berkshire",
+    "wiltshire",
+    "gloucestershire",
+  ],
+  rutland: ["lincolnshire", "leicestershire", "northamptonshire"],
+  shropshire: [
+    "cheshire",
+    "staffordshire",
+    "worcestershire",
+    "herefordshire",
+    "powys",
+    "wrexham",
+  ],
+  somerset: ["devon", "dorset", "wiltshire", "gloucestershire", "bristol"],
+  "south yorkshire": [
+    "west yorkshire",
+    "north yorkshire",
+    "east riding of yorkshire",
+    "lincolnshire",
+    "nottinghamshire",
+    "derbyshire",
+  ],
+  staffordshire: [
+    "cheshire",
+    "derbyshire",
+    "leicestershire",
+    "warwickshire",
+    "west midlands",
+    "worcestershire",
+    "shropshire",
+  ],
+  suffolk: ["norfolk", "cambridgeshire", "essex"],
+  surrey: [
+    "greater london",
+    "kent",
+    "east sussex",
+    "west sussex",
+    "hampshire",
+    "berkshire",
+  ],
+  "tyne and wear": ["northumberland", "durham"],
+  warwickshire: [
+    "west midlands",
+    "worcestershire",
+    "gloucestershire",
+    "oxfordshire",
+    "northamptonshire",
+    "leicestershire",
+    "staffordshire",
+  ],
+  "west midlands": [
+    "staffordshire",
+    "warwickshire",
+    "worcestershire",
+    "shropshire",
+  ],
+  "west sussex": ["surrey", "east sussex", "hampshire"],
+  "west yorkshire": [
+    "lancashire",
+    "north yorkshire",
+    "south yorkshire",
+    "greater manchester",
+  ],
+  wiltshire: [
+    "gloucestershire",
+    "oxfordshire",
+    "berkshire",
+    "hampshire",
+    "dorset",
+    "somerset",
+  ],
+  worcestershire: [
+    "shropshire",
+    "staffordshire",
+    "west midlands",
+    "warwickshire",
+    "gloucestershire",
+    "herefordshire",
+  ],
   "isles of scilly": ["cornwall"],
   // Unitary/associated (for tolerance in data you might have):
-  "peterborough": ["cambridgeshire","lincolnshire","northamptonshire","rutland"],
-  "south gloucestershire": ["bristol","gloucestershire"],
-  "north lincolnshire": ["lincolnshire","east riding of yorkshire","south yorkshire","nottinghamshire"],
-  "thurrock": ["essex"],
-  "medway": ["kent"],
+  peterborough: [
+    "cambridgeshire",
+    "lincolnshire",
+    "northamptonshire",
+    "rutland",
+  ],
+  "south gloucestershire": ["bristol", "gloucestershire"],
+  "north lincolnshire": [
+    "lincolnshire",
+    "east riding of yorkshire",
+    "south yorkshire",
+    "nottinghamshire",
+  ],
+  thurrock: ["essex"],
+  medway: ["kent"],
 
   // ---------------- WALES ----------------
-  "anglesey": ["gwynedd"],
-  "gwynedd": ["anglesey","conwy","denbighshire","powys","ceredigion"],
-  "conwy": ["gwynedd","denbighshire"],
-  "denbighshire": ["conwy","flintshire","wrexham","powys","gwynedd"],
-  "flintshire": ["denbighshire","wrexham","cheshire","merseyside"],
-  "wrexham": ["flintshire","denbighshire","powys","shropshire","cheshire"],
-  "ceredigion": ["gwynedd","powys","carmarthenshire","pembrokeshire"],
-  "pembrokeshire": ["ceredigion","carmarthenshire"],
-  "carmarthenshire": ["ceredigion","pembrokeshire","swansea","neath port talbot","powys"],
-  "swansea": ["carmarthenshire","neath port talbot"],
-  "neath port talbot": ["swansea","bridgend","rhondda cynon taf","powys"],
-  "bridgend": ["neath port talbot","rhondda cynon taf","vale of glamorgan"],
-  "rhondda cynon taf": ["bridgend","merthyr tydfil","caerphilly","cardiff","vale of glamorgan","neath port talbot","powys"],
-  "vale of glamorgan": ["cardiff","bridgend","rhondda cynon taf"],
-  "cardiff": ["vale of glamorgan","rhondda cynon taf","newport","caerphilly"],
-  "merthyr tydfil": ["rhondda cynon taf","powys","caerphilly"],
-  "caerphilly": ["cardiff","rhondda cynon taf","merthyr tydfil","blaenau gwent","torfaen","newport","powys"],
-  "blaenau gwent": ["monmouthshire","torfaen","caerphilly","merthyr tydfil","powys"],
-  "torfaen": ["monmouthshire","blaenau gwent","caerphilly","newport"],
-  "newport": ["monmouthshire","cardiff","caerphilly","torfaen","gloucestershire"],
-  "monmouthshire": ["newport","torfaen","blaenau gwent","powys","herefordshire","gloucestershire"],
-  "powys": ["gwynedd","ceredigion","carmarthenshire","rhondda cynon taf","merthyr tydfil","caerphilly","blaenau gwent","monmouthshire","shropshire","herefordshire","wrexham","denbighshire","neath port talbot"],
-  
+  anglesey: ["gwynedd"],
+  gwynedd: ["anglesey", "conwy", "denbighshire", "powys", "ceredigion"],
+  conwy: ["gwynedd", "denbighshire"],
+  denbighshire: ["conwy", "flintshire", "wrexham", "powys", "gwynedd"],
+  flintshire: ["denbighshire", "wrexham", "cheshire", "merseyside"],
+  wrexham: ["flintshire", "denbighshire", "powys", "shropshire", "cheshire"],
+  ceredigion: ["gwynedd", "powys", "carmarthenshire", "pembrokeshire"],
+  pembrokeshire: ["ceredigion", "carmarthenshire"],
+  carmarthenshire: [
+    "ceredigion",
+    "pembrokeshire",
+    "swansea",
+    "neath port talbot",
+    "powys",
+  ],
+  swansea: ["carmarthenshire", "neath port talbot"],
+  "neath port talbot": ["swansea", "bridgend", "rhondda cynon taf", "powys"],
+  bridgend: ["neath port talbot", "rhondda cynon taf", "vale of glamorgan"],
+  "rhondda cynon taf": [
+    "bridgend",
+    "merthyr tydfil",
+    "caerphilly",
+    "cardiff",
+    "vale of glamorgan",
+    "neath port talbot",
+    "powys",
+  ],
+  "vale of glamorgan": ["cardiff", "bridgend", "rhondda cynon taf"],
+  cardiff: ["vale of glamorgan", "rhondda cynon taf", "newport", "caerphilly"],
+  "merthyr tydfil": ["rhondda cynon taf", "powys", "caerphilly"],
+  caerphilly: [
+    "cardiff",
+    "rhondda cynon taf",
+    "merthyr tydfil",
+    "blaenau gwent",
+    "torfaen",
+    "newport",
+    "powys",
+  ],
+  "blaenau gwent": [
+    "monmouthshire",
+    "torfaen",
+    "caerphilly",
+    "merthyr tydfil",
+    "powys",
+  ],
+  torfaen: ["monmouthshire", "blaenau gwent", "caerphilly", "newport"],
+  newport: [
+    "monmouthshire",
+    "cardiff",
+    "caerphilly",
+    "torfaen",
+    "gloucestershire",
+  ],
+  monmouthshire: [
+    "newport",
+    "torfaen",
+    "blaenau gwent",
+    "powys",
+    "herefordshire",
+    "gloucestershire",
+  ],
+  powys: [
+    "gwynedd",
+    "ceredigion",
+    "carmarthenshire",
+    "rhondda cynon taf",
+    "merthyr tydfil",
+    "caerphilly",
+    "blaenau gwent",
+    "monmouthshire",
+    "shropshire",
+    "herefordshire",
+    "wrexham",
+    "denbighshire",
+    "neath port talbot",
+  ],
+
   // ---------------- SCOTLAND (high-level) ----------------
-  "scottish borders": ["dumfries and galloway","east lothian","midlothian","south lanarkshire","northumberland","cumbria"],
-  "dumfries and galloway": ["scottish borders","south ayrshire","east ayrshire","south lanarkshire","cumbria"],
-  "east lothian": ["midlothian","city of edinburgh","scottish borders"],
-  "midlothian": ["east lothian","city of edinburgh","west lothian","scottish borders"],
-  "west lothian": ["city of edinburgh","falkirk","north lanarkshire","south lanarkshire","midlothian"],
-  "city of edinburgh": ["east lothian","midlothian","west lothian","fife"],
-  "fife": ["city of edinburgh","perth and kinross","clackmannanshire","stirling","angus"],
-  "angus": ["fife","perth and kinross","aberdeenshire","dundee city"],
-  "dundee city": ["angus","perth and kinross"],
-  "aberdeenshire": ["angus","moray","highland","aberdeen city"],
+  "scottish borders": [
+    "dumfries and galloway",
+    "east lothian",
+    "midlothian",
+    "south lanarkshire",
+    "northumberland",
+    "cumbria",
+  ],
+  "dumfries and galloway": [
+    "scottish borders",
+    "south ayrshire",
+    "east ayrshire",
+    "south lanarkshire",
+    "cumbria",
+  ],
+  "east lothian": ["midlothian", "city of edinburgh", "scottish borders"],
+  midlothian: [
+    "east lothian",
+    "city of edinburgh",
+    "west lothian",
+    "scottish borders",
+  ],
+  "west lothian": [
+    "city of edinburgh",
+    "falkirk",
+    "north lanarkshire",
+    "south lanarkshire",
+    "midlothian",
+  ],
+  "city of edinburgh": ["east lothian", "midlothian", "west lothian", "fife"],
+  fife: [
+    "city of edinburgh",
+    "perth and kinross",
+    "clackmannanshire",
+    "stirling",
+    "angus",
+  ],
+  angus: ["fife", "perth and kinross", "aberdeenshire", "dundee city"],
+  "dundee city": ["angus", "perth and kinross"],
+  aberdeenshire: ["angus", "moray", "highland", "aberdeen city"],
   "aberdeen city": ["aberdeenshire"],
-  "moray": ["aberdeenshire","highland"],
-  "highland": ["moray","aberdeenshire","perth and kinross","argyll and bute","na h-eileanan siar"],
+  moray: ["aberdeenshire", "highland"],
+  highland: [
+    "moray",
+    "aberdeenshire",
+    "perth and kinross",
+    "argyll and bute",
+    "na h-eileanan siar",
+  ],
   "na h-eileanan siar": ["highland"],
-  "perth and kinross": ["highland","argyll and bute","stirling","fife","angus"],
-  "argyll and bute": ["highland","perth and kinross","stirling","west dunbartonshire","east dunbartonshire"],
-  "stirling": ["argyll and bute","perth and kinross","clackmannanshire","falkirk","north lanarkshire"],
-  "falkirk": ["stirling","west lothian","north lanarkshire","clackmannanshire"],
-  "clackmannanshire": ["stirling","fife"],
-  "north lanarkshire": ["west lothian","falkirk","stirling","argyll and bute","east dunbartonshire","glasgow city","south lanarkshire","west dunbartonshire"],
-  "south lanarkshire": ["north lanarkshire","glasgow city","east renfrewshire","east ayrshire","dumfries and galloway","scottish borders"],
-  "glasgow city": ["east dunbartonshire","west dunbartonshire","east renfrewshire","renfrewshire","north lanarkshire","south lanarkshire"],
-  "west dunbartonshire": ["argyll and bute","east dunbartonshire","glasgow city","renfrewshire"],
-  "east dunbartonshire": ["argyll and bute","west dunbartonshire","glasgow city","north lanarkshire"],
-  "renfrewshire": ["inverclyde","west dunbartonshire","glasgow city","east renfrewshire","north ayrshire"],
-  "east renfrewshire": ["glasgow city","renfrewshire","south lanarkshire","north ayrshire"],
-  "north ayrshire": ["renfrewshire","east renfrewshire","south ayrshire","argyll and bute"],
-  "south ayrshire": ["north ayrshire","east ayrshire","dumfries and galloway"],
-  "east ayrshire": ["south ayrshire","east renfrewshire","south lanarkshire","dumfries and galloway"],
-  "inverclyde": ["renfrewshire","north ayrshire"],
+  "perth and kinross": [
+    "highland",
+    "argyll and bute",
+    "stirling",
+    "fife",
+    "angus",
+  ],
+  "argyll and bute": [
+    "highland",
+    "perth and kinross",
+    "stirling",
+    "west dunbartonshire",
+    "east dunbartonshire",
+  ],
+  stirling: [
+    "argyll and bute",
+    "perth and kinross",
+    "clackmannanshire",
+    "falkirk",
+    "north lanarkshire",
+  ],
+  falkirk: [
+    "stirling",
+    "west lothian",
+    "north lanarkshire",
+    "clackmannanshire",
+  ],
+  clackmannanshire: ["stirling", "fife"],
+  "north lanarkshire": [
+    "west lothian",
+    "falkirk",
+    "stirling",
+    "argyll and bute",
+    "east dunbartonshire",
+    "glasgow city",
+    "south lanarkshire",
+    "west dunbartonshire",
+  ],
+  "south lanarkshire": [
+    "north lanarkshire",
+    "glasgow city",
+    "east renfrewshire",
+    "east ayrshire",
+    "dumfries and galloway",
+    "scottish borders",
+  ],
+  "glasgow city": [
+    "east dunbartonshire",
+    "west dunbartonshire",
+    "east renfrewshire",
+    "renfrewshire",
+    "north lanarkshire",
+    "south lanarkshire",
+  ],
+  "west dunbartonshire": [
+    "argyll and bute",
+    "east dunbartonshire",
+    "glasgow city",
+    "renfrewshire",
+  ],
+  "east dunbartonshire": [
+    "argyll and bute",
+    "west dunbartonshire",
+    "glasgow city",
+    "north lanarkshire",
+  ],
+  renfrewshire: [
+    "inverclyde",
+    "west dunbartonshire",
+    "glasgow city",
+    "east renfrewshire",
+    "north ayrshire",
+  ],
+  "east renfrewshire": [
+    "glasgow city",
+    "renfrewshire",
+    "south lanarkshire",
+    "north ayrshire",
+  ],
+  "north ayrshire": [
+    "renfrewshire",
+    "east renfrewshire",
+    "south ayrshire",
+    "argyll and bute",
+  ],
+  "south ayrshire": [
+    "north ayrshire",
+    "east ayrshire",
+    "dumfries and galloway",
+  ],
+  "east ayrshire": [
+    "south ayrshire",
+    "east renfrewshire",
+    "south lanarkshire",
+    "dumfries and galloway",
+  ],
+  inverclyde: ["renfrewshire", "north ayrshire"],
   "western isles": ["highland"], // alias for na h-eileanan siar
 
   // ---------------- NORTHERN IRELAND ----------------
-  "antrim and newtownabbey": ["causeway coast and glens","mid and east antrim","lisburn and castlereagh","belfast"],
-  "ards and north down": ["belfast","lisburn and castlereagh","newry mourne and down"],
-  "belfast": ["antrim and newtownabbey","lisburn and castlereagh","ards and north down"],
-  "causeway coast and glens": ["derry city and strabane","mid ulster","mid and east antrim","antrim and newtownabbey"],
-  "derry city and strabane": ["causeway coast and glens","mid ulster","fermanagh and omagh","donegal"], // includes ROI neighbor for tolerance
-  "fermanagh and omagh": ["derry city and strabane","mid ulster","armagh banbridge and craigavon","monaghan","leitrim","cavan"],
-  "lisburn and castlereagh": ["belfast","antrim and newtownabbey","mid and east antrim","armagh banbridge and craigavon","ards and north down","newry mourne and down"],
-  "mid and east antrim": ["antrim and newtownabbey","causeway coast and glens","mid ulster","lisburn and castlereagh"],
-  "mid ulster": ["causeway coast and glens","derry city and strabane","fermanagh and omagh","armagh banbridge and craigavon","mid and east antrim"],
-  "newry mourne and down": ["lisburn and castlereagh","ards and north down","armagh banbridge and craigavon","louth","monaghan"],
-  "armagh banbridge and craigavon": ["mid ulster","fermanagh and omagh","lisburn and castlereagh","newry mourne and down"],
+  "antrim and newtownabbey": [
+    "causeway coast and glens",
+    "mid and east antrim",
+    "lisburn and castlereagh",
+    "belfast",
+  ],
+  "ards and north down": [
+    "belfast",
+    "lisburn and castlereagh",
+    "newry mourne and down",
+  ],
+  belfast: [
+    "antrim and newtownabbey",
+    "lisburn and castlereagh",
+    "ards and north down",
+  ],
+  "causeway coast and glens": [
+    "derry city and strabane",
+    "mid ulster",
+    "mid and east antrim",
+    "antrim and newtownabbey",
+  ],
+  "derry city and strabane": [
+    "causeway coast and glens",
+    "mid ulster",
+    "fermanagh and omagh",
+    "donegal",
+  ], // includes ROI neighbor for tolerance
+  "fermanagh and omagh": [
+    "derry city and strabane",
+    "mid ulster",
+    "armagh banbridge and craigavon",
+    "monaghan",
+    "leitrim",
+    "cavan",
+  ],
+  "lisburn and castlereagh": [
+    "belfast",
+    "antrim and newtownabbey",
+    "mid and east antrim",
+    "armagh banbridge and craigavon",
+    "ards and north down",
+    "newry mourne and down",
+  ],
+  "mid and east antrim": [
+    "antrim and newtownabbey",
+    "causeway coast and glens",
+    "mid ulster",
+    "lisburn and castlereagh",
+  ],
+  "mid ulster": [
+    "causeway coast and glens",
+    "derry city and strabane",
+    "fermanagh and omagh",
+    "armagh banbridge and craigavon",
+    "mid and east antrim",
+  ],
+  "newry mourne and down": [
+    "lisburn and castlereagh",
+    "ards and north down",
+    "armagh banbridge and craigavon",
+    "louth",
+    "monaghan",
+  ],
+  "armagh banbridge and craigavon": [
+    "mid ulster",
+    "fermanagh and omagh",
+    "lisburn and castlereagh",
+    "newry mourne and down",
+  ],
 
   // -------- Optional synonyms (helps fuzzy inputs) --------
-  "wiltshire": ["gloucestershire","oxfordshire","berkshire","hampshire","dorset","somerset","bristol"],
-  "wilts": ["gloucestershire","oxfordshire","berkshire","hampshire","dorset","somerset","bristol"],
+  wiltshire: [
+    "gloucestershire",
+    "oxfordshire",
+    "berkshire",
+    "hampshire",
+    "dorset",
+    "somerset",
+    "bristol",
+  ],
+  wilts: [
+    "gloucestershire",
+    "oxfordshire",
+    "berkshire",
+    "hampshire",
+    "dorset",
+    "somerset",
+    "bristol",
+  ],
 };
 
-
-const _norm = (s = "") =>
-  String(s).trim().toLowerCase().replace(/\s+/g, " ");
-
-
+const _norm = (s = "") => String(s).trim().toLowerCase().replace(/\s+/g, " ");
 
 // lightweight aliasing for role “families”
 const roleAliases = {
-  "dj": ["dj with decks", "dj with mixing console", "dj with console", "curate setlist"],
+  dj: [
+    "dj with decks",
+    "dj with mixing console",
+    "dj with console",
+    "curate setlist",
+  ],
   "band leader": ["musical director", "md", "band management", "band manager"],
-  "sound engineering": ["sound engineer", "live audio recording", "pa & lights provision"],
+  "sound engineering": [
+    "sound engineer",
+    "live audio recording",
+    "pa & lights provision",
+  ],
   "client liaison": ["client liason", "client liaison"], // typos
 };
 
-
 // UK postcode area = leading letters (one or two letters at start)
 const postcodeArea = (postcode = "") => {
-  const m = String(postcode).toUpperCase().trim().match(/^([A-Z]{1,2})/);
+  const m = String(postcode)
+    .toUpperCase()
+    .trim()
+    .match(/^([A-Z]{1,2})/);
   return m ? m[1] : "";
 };
 
@@ -326,7 +809,7 @@ const computeProximity = (origin = {}, deputy = {}) => {
   if (oArea && dArea && oArea === dArea) return 0.75;
 
   // partial letter match on area (e.g., E vs EC) gives a small bump
-  if (oArea && dArea && (oArea[0] === dArea[0])) return 0.5;
+  if (oArea && dArea && oArea[0] === dArea[0]) return 0.5;
 
   return 0.0;
 };
@@ -344,7 +827,7 @@ const computeGenreFit = (act, dep) => {
   const coverage = inter / A.size;
 
   // Optional: keep a touch of Jaccard so we don't over-reward "everything" profiles
-  const jacc = (A.size && D.size) ? inter / (A.size + D.size - inter) : 0;
+  const jacc = A.size && D.size ? inter / (A.size + D.size - inter) : 0;
 
   // Heavier weight on coverage (feel free to tweak 0.8/0.2)
   return 0.8 * coverage + 0.2 * jacc;
@@ -358,7 +841,9 @@ async function getDeputyById(req, res) {
     const { id } = req.params;
 
     if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({ success: false, message: "Invalid musician id" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid musician id" });
     }
 
     // Optional: access control — allow self or agents
@@ -371,7 +856,9 @@ async function getDeputyById(req, res) {
 
     const deputy = await Musician.findById(id).lean();
     if (!deputy) {
-      return res.status(404).json({ success: false, message: "Musician not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Musician not found" });
     }
 
     return res.json({ success: true, deputy });
@@ -389,7 +876,11 @@ const registerDeputy = async (req, res) => {
   const startedAt = Date.now();
 
   const safePreview = (obj, opts = {}) => {
-    const { maxArray = 4, maxString = 800, elideKeys = ["password", "salt", "__v"] } = opts;
+    const {
+      maxArray = 4,
+      maxString = 800,
+      elideKeys = ["password", "salt", "__v"],
+    } = opts;
     const seen = new WeakSet();
     const shrink = (v) => {
       if (v && typeof v === "object") {
@@ -429,14 +920,15 @@ const registerDeputy = async (req, res) => {
     // helpers
     const safeParse = (v, fallback) => {
       try {
-        return v && typeof v === "string" ? JSON.parse(v) : (v ?? fallback);
+        return v && typeof v === "string" ? JSON.parse(v) : v ?? fallback;
       } catch {
         return fallback;
       }
     };
     const asArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
     const stringArray = (v) => asArray(v).map(String).filter(Boolean);
-    const urlArray = (v) => stringArray(v).filter((s) => /^https?:\/\//i.test(s));
+    const urlArray = (v) =>
+      stringArray(v).filter((s) => /^https?:\/\//i.test(s));
 
     // email from basicInfo or top-level
     let email = null;
@@ -453,7 +945,9 @@ const registerDeputy = async (req, res) => {
     if (!email) {
       console.warn("⚠️ Missing email in request body");
       console.groupEnd();
-      return res.status(400).json({ success: false, message: "Email is required." });
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is required." });
     }
 
     // Find or create
@@ -464,7 +958,11 @@ const registerDeputy = async (req, res) => {
       createdNew = true;
       console.log("🆕 Creating new musician:", email);
     } else {
-      console.log("🟡 Updating existing musician:", email, musician._id.toString());
+      console.log(
+        "🟡 Updating existing musician:",
+        email,
+        musician._id.toString()
+      );
     }
 
     // Parse payload blobs
@@ -482,11 +980,42 @@ const registerDeputy = async (req, res) => {
     const instrumentation = safeParse(body.instrumentation, []);
     const awards = safeParse(body.awards, []);
     const sessions = safeParse(body.sessions, []);
+    const function_bands_performed_with = safeParse(
+      body.function_bands_performed_with,
+      []
+    );
+    const original_bands_performed_with = safeParse(
+      body.original_bands_performed_with,
+      []
+    );
     const social_media_links = safeParse(body.social_media_links, []);
     const repertoire = safeParse(body.repertoire, []);
     const selectedSongs = safeParse(body.selectedSongs, []);
     const other_skills = safeParse(body.other_skills, []);
     const logistics = safeParse(body.logistics, []);
+
+    const normalizeBandRefs = (arr, nameKey, emailKey) =>
+      (Array.isArray(arr) ? arr : [])
+        .map((x) => ({
+          [nameKey]: String(x?.[nameKey] || "").trim(),
+          [emailKey]: String(x?.[emailKey] || "")
+            .trim()
+            .toLowerCase(),
+        }))
+        // keep row only if at least one field is present
+        .filter((x) => x[nameKey] || x[emailKey]);
+
+    const functionBandsClean = normalizeBandRefs(
+      function_bands_performed_with,
+      "function_band_name",
+      "function_band_leader_email"
+    );
+
+    const originalBandsClean = normalizeBandRefs(
+      original_bands_performed_with,
+      "original_band_name",
+      "original_band_leader_email"
+    );
 
     // ---- Video links: accept JSON array/string, normalize to [{title,url}] and drop empties
     const parseArrayField = (v, fallback = []) => {
@@ -501,20 +1030,76 @@ const registerDeputy = async (req, res) => {
       return fallback;
     };
 
+    // ✅ persist the nested basicInfo block too (so it saves in Mongo)
+    musician.basicInfo = {
+      firstName: String(
+        basicInfo?.firstName ??
+          body.firstName ??
+          musician.basicInfo?.firstName ??
+          musician.firstName ??
+          ""
+      ).trim(),
+
+      lastName: String(
+        basicInfo?.lastName ??
+          body.lastName ??
+          musician.basicInfo?.lastName ??
+          musician.lastName ??
+          ""
+      ).trim(),
+
+      phone: String(
+        basicInfo?.phone ??
+          body.phone ??
+          musician.basicInfo?.phone ??
+          musician.phone ??
+          ""
+      ).trim(),
+
+      // prefer the already-normalized `email` you computed above
+      email: String(
+        basicInfo?.email ??
+          body.email ??
+          musician.basicInfo?.email ??
+          email ??
+          ""
+      )
+        .trim()
+        .toLowerCase(),
+    };
+
+    musician.markModified("basicInfo");
+
     const functionBandVideoLinks = parseArrayField(body.functionBandVideoLinks)
-      .map((x) => ({ title: (x?.title || "").trim(), url: (x?.url || "").trim() }))
+      .map((x) => ({
+        title: (x?.title || "").trim(),
+        url: (x?.url || "").trim(),
+      }))
       .filter((x) => x.url);
 
-    const tscApprovedFunctionBandVideoLinks = parseArrayField(body.tscApprovedFunctionBandVideoLinks)
-      .map((x) => ({ title: (x?.title || "").trim(), url: (x?.url || "").trim() }))
+    const tscApprovedFunctionBandVideoLinks = parseArrayField(
+      body.tscApprovedFunctionBandVideoLinks
+    )
+      .map((x) => ({
+        title: (x?.title || "").trim(),
+        url: (x?.url || "").trim(),
+      }))
       .filter((x) => x.url);
 
     const originalBandVideoLinks = parseArrayField(body.originalBandVideoLinks)
-      .map((x) => ({ title: (x?.title || "").trim(), url: (x?.url || "").trim() }))
+      .map((x) => ({
+        title: (x?.title || "").trim(),
+        url: (x?.url || "").trim(),
+      }))
       .filter((x) => x.url);
 
-    const tscApprovedOriginalBandVideoLinks = parseArrayField(body.tscApprovedOriginalBandVideoLinks)
-      .map((x) => ({ title: (x?.title || "").trim(), url: (x?.url || "").trim() }))
+    const tscApprovedOriginalBandVideoLinks = parseArrayField(
+      body.tscApprovedOriginalBandVideoLinks
+    )
+      .map((x) => ({
+        title: (x?.title || "").trim(),
+        url: (x?.url || "").trim(),
+      }))
       .filter((x) => x.url);
 
     // lighting / PA
@@ -536,8 +1121,12 @@ const registerDeputy = async (req, res) => {
     // wardrobe / extra images as URL strings
     const digitalWardrobeBlackTie = urlArray(body.digitalWardrobeBlackTie);
     const digitalWardrobeFormal = urlArray(body.digitalWardrobeFormal);
-    const digitalWardrobeSmartCasual = urlArray(body.digitalWardrobeSmartCasual);
-    const digitalWardrobeSessionAllBlack = urlArray(body.digitalWardrobeSessionAllBlack);
+    const digitalWardrobeSmartCasual = urlArray(
+      body.digitalWardrobeSmartCasual
+    );
+    const digitalWardrobeSessionAllBlack = urlArray(
+      body.digitalWardrobeSessionAllBlack
+    );
     const additionalImages = urlArray(body.additionalImages);
 
     // ---- MP3s: files OR JSON
@@ -550,19 +1139,26 @@ const registerDeputy = async (req, res) => {
       if (Array.isArray(coverMp3sBody)) {
         coverMp3s = coverMp3sBody
           .map((x) =>
-            typeof x === "string" ? { title: "", url: x } : { title: x?.title || "", url: x?.url || "" }
+            typeof x === "string"
+              ? { title: "", url: x }
+              : { title: x?.title || "", url: x?.url || "" }
           )
           .filter((m) => m.url);
       }
     }
     if (req.files?.originalMp3s?.length) {
-      originalMp3s = req.files.originalMp3s.map((f) => ({ title: "", url: f.path }));
+      originalMp3s = req.files.originalMp3s.map((f) => ({
+        title: "",
+        url: f.path,
+      }));
     } else {
       const originalMp3sBody = safeParse(body.originalMp3s, []);
       if (Array.isArray(originalMp3sBody)) {
         originalMp3s = originalMp3sBody
           .map((x) =>
-            typeof x === "string" ? { title: "", url: x } : { title: x?.title || "", url: x?.url || "" }
+            typeof x === "string"
+              ? { title: "", url: x }
+              : { title: x?.title || "", url: x?.url || "" }
           )
           .filter((m) => m.url);
       }
@@ -585,6 +1181,8 @@ const registerDeputy = async (req, res) => {
         instrumentation,
         awards,
         sessions,
+        function_bands_performed_with: functionBandsClean,
+        original_bands_performed_with: originalBandsClean,
         social_media_links,
         repertoire,
         selectedSongs,
@@ -626,13 +1224,29 @@ const registerDeputy = async (req, res) => {
     console.groupEnd();
 
     // simple fields
-    musician.firstName = (body.firstName || basicInfo.firstName || musician.firstName || "").trim();
-    musician.lastName = (body.lastName || basicInfo.lastName || musician.lastName || "").trim();
-    musician.phone = (body.phone || basicInfo.phone || musician.phone || "").trim();
+    musician.firstName = (
+      body.firstName ||
+      basicInfo.firstName ||
+      musician.firstName ||
+      ""
+    ).trim();
+    musician.lastName = (
+      body.lastName ||
+      basicInfo.lastName ||
+      musician.lastName ||
+      ""
+    ).trim();
+    musician.phone = (
+      body.phone ||
+      basicInfo.phone ||
+      musician.phone ||
+      ""
+    ).trim();
     musician.role = body.role || musician.role || "musician";
     musician.status = musician.status || "pending";
     musician.bio = body.bio ?? musician.bio ?? "";
-    musician.tscApprovedBio = body.tscApprovedBio ?? musician.tscApprovedBio ?? "";
+    musician.tscApprovedBio =
+      body.tscApprovedBio ?? musician.tscApprovedBio ?? "";
     musician.tagLine = body.tagLine ?? musician.tagLine ?? "";
 
     if (body.dateRegistered) {
@@ -665,6 +1279,8 @@ const registerDeputy = async (req, res) => {
     musician.instrumentation = instrumentation;
     musician.awards = awards;
     musician.sessions = sessions;
+    musician.function_bands_performed_with = functionBandsClean;
+    musician.original_bands_performed_with = originalBandsClean;
     musician.social_media_links = social_media_links;
     musician.repertoire = repertoire;
     musician.selectedSongs = selectedSongs;
@@ -673,9 +1289,11 @@ const registerDeputy = async (req, res) => {
 
     // videos
     musician.functionBandVideoLinks = functionBandVideoLinks;
-    musician.tscApprovedFunctionBandVideoLinks = tscApprovedFunctionBandVideoLinks;
+    musician.tscApprovedFunctionBandVideoLinks =
+      tscApprovedFunctionBandVideoLinks;
     musician.originalBandVideoLinks = originalBandVideoLinks;
-    musician.tscApprovedOriginalBandVideoLinks = tscApprovedOriginalBandVideoLinks;
+    musician.tscApprovedOriginalBandVideoLinks =
+      tscApprovedOriginalBandVideoLinks;
 
     // lighting / PA
     musician.cableLogistics = cableLogistics;
@@ -707,28 +1325,47 @@ const registerDeputy = async (req, res) => {
     // vocals
     if (!musician.vocals) musician.vocals = {};
     const vocalsParsed = safeParse(body.vocals, {});
-    musician.vocals.type = Array.isArray(vocalsParsed.type) ? vocalsParsed.type : [];
+    musician.vocals.type = Array.isArray(vocalsParsed.type)
+      ? vocalsParsed.type
+      : [];
     musician.vocals.gender = vocalsParsed.gender || "";
     musician.vocals.range = vocalsParsed.range || "";
-    musician.vocals.rap = vocalsParsed.rap === true || vocalsParsed.rap === "true";
-    musician.vocals.genres = Array.isArray(vocalsParsed.genres) ? vocalsParsed.genres : [];
+    musician.vocals.rap =
+      vocalsParsed.rap === true || vocalsParsed.rap === "true";
+    musician.vocals.genres = Array.isArray(vocalsParsed.genres)
+      ? vocalsParsed.genres
+      : [];
 
     // profile & cover images (file or string URL)
     if (req.files?.profilePicture?.[0]?.buffer) {
       const f = req.files.profilePicture[0];
-      const up = await uploader(f.buffer, f.originalname || "profile.jpg", "musicians");
+      const up = await uploader(
+        f.buffer,
+        f.originalname || "profile.jpg",
+        "musicians"
+      );
       musician.profilePicture = up.secure_url;
       musician.profilePhoto = up.secure_url;
-    } else if (typeof body.profilePicture === "string" && body.profilePicture.trim()) {
+    } else if (
+      typeof body.profilePicture === "string" &&
+      body.profilePicture.trim()
+    ) {
       musician.profilePicture = body.profilePicture.trim();
       musician.profilePhoto = body.profilePicture.trim();
     }
 
     if (req.files?.coverHeroImage?.[0]?.buffer) {
       const f = req.files.coverHeroImage[0];
-      const up = await uploader(f.buffer, f.originalname || "cover-hero.jpg", "musicians");
+      const up = await uploader(
+        f.buffer,
+        f.originalname || "cover-hero.jpg",
+        "musicians"
+      );
       musician.coverHeroImage = up.secure_url;
-    } else if (typeof body.coverHeroImage === "string" && body.coverHeroImage.trim()) {
+    } else if (
+      typeof body.coverHeroImage === "string" &&
+      body.coverHeroImage.trim()
+    ) {
       musician.coverHeroImage = body.coverHeroImage.trim();
     }
 
@@ -740,6 +1377,8 @@ const registerDeputy = async (req, res) => {
     musician.markModified("instrumentation");
     musician.markModified("repertoire");
     musician.markModified("selectedSongs");
+    musician.markModified("function_bands_performed_with");
+    musician.markModified("original_bands_performed_with");
     musician.markModified("social_media_links");
     musician.markModified("functionBandVideoLinks");
     musician.markModified("tscApprovedFunctionBandVideoLinks");
@@ -758,8 +1397,13 @@ const registerDeputy = async (req, res) => {
 
     // END snapshot: read back from DB to confirm persisted shape
     const roundTrip = await musicianModel.findById(saved._id).lean();
-    console.groupCollapsed(`✅ SAVED & FETCHED BACK [${reqId}] id=${saved._id.toString()}`);
-    console.log("Saved keys:", Object.keys(saved.toObject ? saved.toObject() : saved));
+    console.groupCollapsed(
+      `✅ SAVED & FETCHED BACK [${reqId}] id=${saved._id.toString()}`
+    );
+    console.log(
+      "Saved keys:",
+      Object.keys(saved.toObject ? saved.toObject() : saved)
+    );
     console.log("Round-trip summary:", safePreview(roundTrip));
     console.groupEnd();
 
@@ -781,18 +1425,28 @@ const registerDeputy = async (req, res) => {
     });
   } catch (err) {
     const elapsed = Date.now() - startedAt;
-    console.error(`❌ Deputy registration failed [${reqId}] after ${elapsed}ms:`, err);
+    console.error(
+      `❌ Deputy registration failed [${reqId}] after ${elapsed}ms:`,
+      err
+    );
     console.groupEnd();
-    return res
-      .status(400)
-      .json({ success: false, message: "Deputy registration failed", error: err.message, requestId: reqId });
+    return res.status(400).json({
+      success: false,
+      message: "Deputy registration failed",
+      error: err.message,
+      requestId: reqId,
+    });
   }
 };
 
 const createToken = (user) =>
-  jwt.sign({ id: user._id, email: user.email, role: user.role }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
+  jwt.sign(
+    { id: user._id, email: user.email, role: user.role },
+    process.env.JWT_SECRET,
+    {
+      expiresIn: "7d",
+    }
+  );
 
 const getMyDrafts = async (req, res) => {
   try {
@@ -808,7 +1462,10 @@ const getMyDrafts = async (req, res) => {
 };
 
 const saveActDraft = async (req, res) => {
-  console.log("✅ Received saveDraft payload:", JSON.stringify(req.body, null, 2));
+  console.log(
+    "✅ Received saveDraft payload:",
+    JSON.stringify(req.body, null, 2)
+  );
   const { id } = req.body;
   const actData = req.body;
 
@@ -824,7 +1481,9 @@ const saveActDraft = async (req, res) => {
       act.status = "draft";
     }
 
-    res.status(200).json({ success: true, actId: act._id, message: "Draft saved" });
+    res
+      .status(200)
+      .json({ success: true, actId: act._id, message: "Draft saved" });
   } catch (err) {
     console.error("Error saving act draft:", err);
     res.status(500).json({ success: false, message: "Failed to save draft" });
@@ -860,7 +1519,8 @@ const saveAmendmentDraft = async (req, res) => {
 
   try {
     const act = await actModel.findById(id);
-    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
+    if (!act)
+      return res.status(404).json({ success: false, message: "Act not found" });
 
     if (act.status === "approved") {
       act.amendment = {
@@ -877,7 +1537,9 @@ const saveAmendmentDraft = async (req, res) => {
     }
   } catch (err) {
     console.error("❌ Error saving amendment draft:", err);
-    res.status(500).json({ success: false, message: "Failed to save amendment draft" });
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to save amendment draft" });
   }
 };
 
@@ -965,7 +1627,6 @@ const loginMusician = async (req, res) => {
       phone: user.phone,
       message: "Login successful",
     });
-
   } catch (error) {
     console.error("🔥 Login error:", error);
     return res.status(500).json({
@@ -1081,10 +1742,18 @@ const addAct = async (req, res) => {
     }
 
     if (pliFiles.length) {
-      pliFileUrl = await uploadToCloudinary(pliFiles[0].buffer, pliFiles[0].originalname, "raw");
+      pliFileUrl = await uploadToCloudinary(
+        pliFiles[0].buffer,
+        pliFiles[0].originalname,
+        "raw"
+      );
     }
     if (patFiles.length) {
-      patFileUrl = await uploadToCloudinary(patFiles[0].buffer, patFiles[0].originalname, "raw");
+      patFileUrl = await uploadToCloudinary(
+        patFiles[0].buffer,
+        patFiles[0].originalname,
+        "raw"
+      );
     }
     if (riskAssessments.length) {
       riskAssessmentUrl = await uploadToCloudinary(
@@ -1186,7 +1855,8 @@ const addAct = async (req, res) => {
       discountToClient: Number(discountToClient) || 0,
       isPercentage: req.body.isPercentage === "true",
       createdBy: req.user?._id,
-      createdByName: (req.user?.firstName || "") + " " + (req.user?.lastName || ""),
+      createdByName:
+        (req.user?.firstName || "") + " " + (req.user?.lastName || ""),
       createdByEmail: req.user?.email || "",
       dateRegistered: new Date(),
       base_fee: updatedFeeAllocations,
@@ -1267,7 +1937,8 @@ const updateActStatus = async (req, res) => {
       { new: true }
     );
 
-    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
+    if (!act)
+      return res.status(404).json({ success: false, message: "Act not found" });
 
     // If approved and createdBy exists, notify creator
     if (status === "approved" && act.createdBy) {
@@ -1288,7 +1959,9 @@ const updateActStatus = async (req, res) => {
           subject: "Your act has been approved 🎉",
           html: `
             <h2>Congratulations, ${user.firstName || "musician"}!</h2>
-            <p>Your act <strong>${act.name}</strong> has been reviewed and approved by our team.</p>
+            <p>Your act <strong>${
+              act.name
+            }</strong> has been reviewed and approved by our team.</p>
             <p>It's now live on The Supreme Collective platform!</p>
             <p>Thank you for joining us,<br/>The Supreme Collective Team</p>
           `,
@@ -1307,7 +1980,9 @@ const approveAmendment = async (req, res) => {
 
   const act = await actModel.findById(id);
   if (!act?.amendment?.isPending)
-    return res.status(400).json({ success: false, message: "No amendment pending" });
+    return res
+      .status(400)
+      .json({ success: false, message: "No amendment pending" });
 
   Object.assign(act, act.amendment.changes);
   act.amendment = {
@@ -1324,11 +1999,16 @@ const approveAmendment = async (req, res) => {
 // Pending deputies list / approve / reject
 const listPendingDeputies = async (req, res) => {
   try {
-    const deputies = await musicianModel.find({ status: "pending", role: "musician" });
+    const deputies = await musicianModel.find({
+      status: "pending",
+      role: "musician",
+    });
     res.json({ success: true, deputies });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: "Failed to fetch pending deputies" });
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch pending deputies" });
   }
 };
 
@@ -1339,7 +2019,9 @@ const approveDeputy = async (req, res) => {
     res.json({ success: true, message: "Deputy approved" });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: "Failed to approve deputy" });
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to approve deputy" });
   }
 };
 
@@ -1350,7 +2032,9 @@ const rejectDeputy = async (req, res) => {
     res.json({ success: true, message: "Deputy rejected" });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: "Failed to reject deputy" });
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to reject deputy" });
   }
 };
 
@@ -1358,7 +2042,8 @@ const rejectDeputy = async (req, res) => {
 const updateAct = async (req, res) => {
   try {
     const act = await actModel.findById(req.params.id);
-    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
+    if (!act)
+      return res.status(404).json({ success: false, message: "Act not found" });
 
     const {
       name,
@@ -1387,9 +2072,24 @@ const updateAct = async (req, res) => {
         images.map((img) => uploadToCloudinary(img.buffer, img.originalname))
       );
     }
-    if (pliFile) act.pliFile = await uploadToCloudinary(pliFile.buffer, pliFile.originalname, "raw");
-    if (patFile) act.patFile = await uploadToCloudinary(patFile.buffer, patFile.originalname, "raw");
-    if (riskFile) act.riskAssessment = await uploadToCloudinary(riskFile.buffer, riskFile.originalname, "raw");
+    if (pliFile)
+      act.pliFile = await uploadToCloudinary(
+        pliFile.buffer,
+        pliFile.originalname,
+        "raw"
+      );
+    if (patFile)
+      act.patFile = await uploadToCloudinary(
+        patFile.buffer,
+        patFile.originalname,
+        "raw"
+      );
+    if (riskFile)
+      act.riskAssessment = await uploadToCloudinary(
+        riskFile.buffer,
+        riskFile.originalname,
+        "raw"
+      );
     if (mp3Files.length) {
       act.mp3s = await Promise.all(
         mp3Files.map(async (file, i) => ({
@@ -1413,7 +2113,10 @@ const updateAct = async (req, res) => {
     act.genre = safeJSONParse(req.body.genre, act.genre);
     act.lineups = safeJSONParse(req.body.lineups, act.lineups);
     act.extras = safeJSONParse(req.body.extras, act.extras);
-    act.selectedSongs = safeJSONParse(req.body.selectedSongs, act.selectedSongs);
+    act.selectedSongs = safeJSONParse(
+      req.body.selectedSongs,
+      act.selectedSongs
+    );
 
     await act.save();
     res.json({ success: true, message: "Act updated", act });
@@ -1427,7 +2130,8 @@ const rejectAct = async (req, res) => {
   try {
     const { id } = req.body;
     const act = await actModel.findById(id);
-    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
+    if (!act)
+      return res.status(404).json({ success: false, message: "Act not found" });
 
     act.status = "rejected";
     await act.save();
@@ -1443,23 +2147,35 @@ const refreshAccessToken = async (req, res) => {
   try {
     const refreshToken = req.cookies?.refreshToken;
     if (!refreshToken) {
-      return res.status(401).json({ success: false, message: "No refresh token" });
+      return res
+        .status(401)
+        .json({ success: false, message: "No refresh token" });
     }
 
-    jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET, async (err, decoded) => {
-      if (err) return res.status(403).json({ success: false, message: "Invalid refresh token" });
+    jwt.verify(
+      refreshToken,
+      process.env.JWT_REFRESH_SECRET,
+      async (err, decoded) => {
+        if (err)
+          return res
+            .status(403)
+            .json({ success: false, message: "Invalid refresh token" });
 
-      const user = await musicianModel.findById(decoded.id);
-      if (!user) return res.status(404).json({ success: false, message: "User not found" });
+        const user = await musicianModel.findById(decoded.id);
+        if (!user)
+          return res
+            .status(404)
+            .json({ success: false, message: "User not found" });
 
-      const newAccessToken = jwt.sign(
-        { id: user._id, email: user.email, role: user.role },
-        process.env.JWT_SECRET,
-        { expiresIn: "15m" }
-      );
+        const newAccessToken = jwt.sign(
+          { id: user._id, email: user.email, role: user.role },
+          process.env.JWT_SECRET,
+          { expiresIn: "15m" }
+        );
 
-      return res.json({ success: true, token: newAccessToken });
-    });
+        return res.json({ success: true, token: newAccessToken });
+      }
+    );
   } catch (error) {
     console.error("Refresh error:", error);
     res.status(500).json({ success: false, message: "Server error" });
@@ -1480,15 +2196,20 @@ const emailContract = async (req, res) => {
   try {
     const { formData } = req.body;
     if (!formData || !formData.email) {
-      return res.status(400).json({ success: false, message: "Missing form data" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing form data" });
     }
 
     const browser = await puppeteer.launch({ headless: "new" });
     const page = await browser.newPage();
 
-    await page.setContent(formData.deputy_contract_text || "<p>No contract content</p>", {
-      waitUntil: "networkidle0",
-    });
+    await page.setContent(
+      formData.deputy_contract_text || "<p>No contract content</p>",
+      {
+        waitUntil: "networkidle0",
+      }
+    );
 
     const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
     await browser.close();
@@ -1516,10 +2237,14 @@ const emailContract = async (req, res) => {
 
     await transporter.sendMail(mailOptions);
 
-    res.status(200).json({ success: true, message: "Contract emailed successfully" });
+    res
+      .status(200)
+      .json({ success: true, message: "Contract emailed successfully" });
   } catch (err) {
     console.error("Email contract error:", err);
-    res.status(500).json({ success: false, message: "Failed to send contract" });
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to send contract" });
   }
 };
 
@@ -1537,11 +2262,16 @@ const appendDeputyRepertoire = async (req, res) => {
     console.log("🎯 appendDeputyRepertoire()");
     console.log("   • deputyId:", id);
     console.log("   • songs.length:", Array.isArray(songs) ? songs.length : 0);
-    console.log("   • songIds.length:", Array.isArray(songIds) ? songIds.length : 0);
+    console.log(
+      "   • songIds.length:",
+      Array.isArray(songIds) ? songIds.length : 0
+    );
 
     const deputy = await musicianModel.findById(id);
     if (!deputy) {
-      return res.status(404).json({ success: false, message: "Deputy not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy not found" });
     }
 
     // Normalize incoming songs to {title, artist, year, genre}
@@ -1555,31 +2285,39 @@ const appendDeputyRepertoire = async (req, res) => {
     let additions = [];
 
     if (Array.isArray(songs) && songs.length > 0) {
-      additions = songs.map(normalize).filter(s => s.title && s.artist);
+      additions = songs.map(normalize).filter((s) => s.title && s.artist);
     } else if (Array.isArray(songIds) && songIds.length > 0) {
       // Fallback: fetch from master list by ids, then map down to bare objects
-      const master = await Song.find({ _id: { $in: songIds } }, { title: 1, artist: 1, year: 1, genre: 1 }).lean();
-      additions = master.map(normalize).filter(s => s.title && s.artist);
+      const master = await Song.find(
+        { _id: { $in: songIds } },
+        { title: 1, artist: 1, year: 1, genre: 1 }
+      ).lean();
+      additions = master.map(normalize).filter((s) => s.title && s.artist);
     } else {
       return res.status(400).json({
         success: false,
-        message: "Provide either `songs` (array of objects) or `songIds` (array of ObjectIds)."
+        message:
+          "Provide either `songs` (array of objects) or `songIds` (array of ObjectIds).",
       });
     }
 
     // Build a dedupe set from existing deputy.repertoire
     const keyOf = (s) =>
-      `${(s.title || "").trim().toLowerCase()}|${(s.artist || "").trim().toLowerCase()}|${s.year || ""}`;
+      `${(s.title || "").trim().toLowerCase()}|${(s.artist || "")
+        .trim()
+        .toLowerCase()}|${s.year || ""}`;
 
     const existingKeys = new Set((deputy.repertoire || []).map(keyOf));
-    const uniqueAdditions = additions.filter(s => !existingKeys.has(keyOf(s)));
+    const uniqueAdditions = additions.filter(
+      (s) => !existingKeys.has(keyOf(s))
+    );
 
     if (uniqueAdditions.length === 0) {
       return res.json({
         success: true,
         added: 0,
         total: deputy.repertoire.length,
-        message: "No new songs to add (all duplicates)."
+        message: "No new songs to add (all duplicates).",
       });
     }
 
@@ -1588,7 +2326,9 @@ const appendDeputyRepertoire = async (req, res) => {
 
     await deputy.save();
 
-    console.log(`✅ Added ${uniqueAdditions.length} songs. New total: ${deputy.repertoire.length}`);
+    console.log(
+      `✅ Added ${uniqueAdditions.length} songs. New total: ${deputy.repertoire.length}`
+    );
 
     return res.json({
       success: true,
@@ -1602,32 +2342,47 @@ const appendDeputyRepertoire = async (req, res) => {
   }
 };
 
-
 // exact/alias map for roles (extend as you learn real data)
 const ROLE_ALIASES = {
   "band leader": ["musical director", "md"],
   "musical director": ["band leader", "md"],
-  "dj with decks": ["dj", "dj with mixing console", "dj with console", "dj with controller"],
+  "dj with decks": [
+    "dj",
+    "dj with mixing console",
+    "dj with console",
+    "dj with controller",
+  ],
   "dj with mixing console": ["dj", "dj with decks", "dj with controller"],
   "client liaison": ["client liason", "client-facing", "client facing"],
   "backing vocalist": ["backing vocals", "bv", "bv singer", "backing singer"],
   "lead vocalist": ["lead vocals", "lead singer"],
-"rap": ["rapper", "mc", "emcee", "can rap", "mc/rapper"],
-  "dj with decks": ["dj", "dj with mixing console", "dj with controller"],  
-  "sound engineering": ["sound engineer", "audio engineer", "foh", "front of house", "sound engineering with PA & lights provision"],
+  rap: ["rapper", "mc", "emcee", "can rap", "mc/rapper"],
+  "dj with decks": ["dj", "dj with mixing console", "dj with controller"],
+  "sound engineering": [
+    "sound engineer",
+    "audio engineer",
+    "foh",
+    "front of house",
+    "sound engineering with PA & lights provision",
+  ],
 };
 
-
-
 const aliasSet = new Map(
-  Object.entries(ROLE_ALIASES).map(([k, arr]) => [ _norm(k), new Set(arr.map(_norm)) ])
+  Object.entries(ROLE_ALIASES).map(([k, arr]) => [
+    _norm(k),
+    new Set(arr.map(_norm)),
+  ])
 );
 
-const tokens = (s) => _norm(s).split(/[^a-z0-9]+/).filter(Boolean);
+const tokens = (s) =>
+  _norm(s)
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
 
 // simple fuzzy: exact -> 1, alias -> 1, token Jaccard >= .5 -> 0.6, else 0
 const roleSimilarity = (a, b) => {
-  const A = _norm(a), B = _norm(b);
+  const A = _norm(a),
+    B = _norm(b);
   if (!A || !B) return 0;
 
   if (A === B) return 1;
@@ -1645,11 +2400,11 @@ const roleSimilarity = (a, b) => {
   return jaccard >= 0.5 ? 0.6 : 0;
 };
 
-
-
 // score desired (soft) roles with fuzzy similarity; returns [0..1]
 const softRoleScore = (musician, desired = []) => {
-  const skills = Array.isArray(musician?.other_skills) ? musician.other_skills.map(_norm) : [];
+  const skills = Array.isArray(musician?.other_skills)
+    ? musician.other_skills.map(_norm)
+    : [];
   if (!desired?.length || !skills.length) return 0;
 
   let total = 0;
@@ -1669,9 +2424,11 @@ const softRoleScore = (musician, desired = []) => {
 
     // small bonus for key vocal-related desires if musician actually qualifies
     if (/backing/.test(want)) {
-      const types = Array.isArray(musician?.vocals?.type) ? musician.vocals.type.map(_norm) : [];
-      if (types.some(t => /backing/.test(t))) best = Math.max(best, 1);
-      else if (types.some(t => /lead/.test(t))) best = Math.max(best, 0.8); // leads can usually provide BVs
+      const types = Array.isArray(musician?.vocals?.type)
+        ? musician.vocals.type.map(_norm)
+        : [];
+      if (types.some((t) => /backing/.test(t))) best = Math.max(best, 1);
+      else if (types.some((t) => /lead/.test(t))) best = Math.max(best, 0.8); // leads can usually provide BVs
     }
     if (/rap/.test(want)) {
       const rapVal = String(musician?.vocals?.rap ?? "").toLowerCase();
@@ -1688,24 +2445,27 @@ const softRoleScore = (musician, desired = []) => {
 
 // --- controller ------------------------------------------------------------
 // Canonicalise county keys to match POSTCODE_MAP keys
-const _countyKey = (name = "") => String(name).toLowerCase().replace(/\s+/g, "_");
+const _countyKey = (name = "") =>
+  String(name).toLowerCase().replace(/\s+/g, "_");
 
 // Return array of neighbouring counties: any county that shares at least one outward prefix
 const neighboursForCounty = (countyName = "") => {
   const key = _countyKey(countyName);
-  const mine = new Set((POSTCODE_MAP[key] || []).map(s => String(s).toUpperCase().trim()));
+  const mine = new Set(
+    (POSTCODE_MAP[key] || []).map((s) => String(s).toUpperCase().trim())
+  );
   if (!mine.size) return [];
 
   const out = new Set();
   for (const [cKey, prefixes] of Object.entries(POSTCODE_MAP)) {
     if (cKey === key) continue;
-    const hasOverlap = (prefixes || []).some(p => mine.has(String(p).toUpperCase().trim()));
+    const hasOverlap = (prefixes || []).some((p) =>
+      mine.has(String(p).toUpperCase().trim())
+    );
     if (hasOverlap) out.add(cKey);
   }
-  return Array.from(out).map(k => k.replace(/_/g, " ")); // back to display form
+  return Array.from(out).map((k) => k.replace(/_/g, " ")); // back to display form
 };
-
-
 
 /* -------------------- main handler -------------------- */
 const suggestDeputies = async (req, res) => {
@@ -1719,7 +2479,7 @@ const suggestDeputies = async (req, res) => {
       excludeIds = [],
       actRepertoire = [],
       actGenres = [],
-      originLocation = {},   // { county, postcode }
+      originLocation = {}, // { county, postcode }
       limit = 24,
       debug = false,
     } = req.body || {};
@@ -1731,73 +2491,89 @@ const suggestDeputies = async (req, res) => {
     // Collect all instrument labels (strings) from either string arrays or object arrays
     const _instrumentLabels = (m) => {
       const fromInst = Array.isArray(m?.instrumentation)
-        ? m.instrumentation.map(i => (typeof i === "string" ? i : i?.instrument || "")).filter(Boolean)
+        ? m.instrumentation
+            .map((i) => (typeof i === "string" ? i : i?.instrument || ""))
+            .filter(Boolean)
         : [];
       const fromInstruments = Array.isArray(m?.instruments)
-        ? m.instruments.map(i => (typeof i === "string" ? i : i?.instrument || "")).filter(Boolean)
+        ? m.instruments
+            .map((i) => (typeof i === "string" ? i : i?.instrument || ""))
+            .filter(Boolean)
         : [];
       return [...fromInst, ...fromInstruments].map(_norm).filter(Boolean);
     };
 
-    const _outward = (pc = "") => String(pc).toUpperCase().replace(/\s+/g, "").slice(0, 3); // e.g., "CM19" or "E11"
-const countyFromPostcode = (pc = "") => {
-  const ow = _outward(pc);
-  if (!ow) return "";
-  for (const [county, districts] of Object.entries(POSTCODE_MAP)) {
-    if (Array.isArray(districts) && districts.some(d => ow.startsWith(String(d).toUpperCase()))) {
-      return county.replace(/_/g, " "); // normalize e.g. "east_sussex"
-    }
-  }
-  return "";
-};
+    const _outward = (pc = "") =>
+      String(pc).toUpperCase().replace(/\s+/g, "").slice(0, 3); // e.g., "CM19" or "E11"
+    const countyFromPostcode = (pc = "") => {
+      const ow = _outward(pc);
+      if (!ow) return "";
+      for (const [county, districts] of Object.entries(POSTCODE_MAP)) {
+        if (
+          Array.isArray(districts) &&
+          districts.some((d) => ow.startsWith(String(d).toUpperCase()))
+        ) {
+          return county.replace(/_/g, " "); // normalize e.g. "east_sussex"
+        }
+      }
+      return "";
+    };
 
     // --- Title-only fuzzy matching --------------------------------------
-// Strip anything in parentheses, punctuation, collapse spaces, lower-case.
-// e.g. "(Simply) The Best" -> "the best"
-const _titleCore = (s="") => {
-  let t = String(s || "").toLowerCase();
-  t = t.replace(/\([^)]*\)/g, " ");       // remove (...) blocks
-  t = t.replace(/&/g, " and ");           // unify &
-  t = t.replace(/[^a-z0-9]+/g, " ");      // keep alnum as spaces
-  t = t.replace(/\bthe\b|\ba\b|\ban\b/g, " "); // drop common articles
-  t = t.replace(/\s+/g, " ").trim();
-  return t;
-};
+    // Strip anything in parentheses, punctuation, collapse spaces, lower-case.
+    // e.g. "(Simply) The Best" -> "the best"
+    const _titleCore = (s = "") => {
+      let t = String(s || "").toLowerCase();
+      t = t.replace(/\([^)]*\)/g, " "); // remove (...) blocks
+      t = t.replace(/&/g, " and "); // unify &
+      t = t.replace(/[^a-z0-9]+/g, " "); // keep alnum as spaces
+      t = t.replace(/\bthe\b|\ba\b|\ban\b/g, " "); // drop common articles
+      t = t.replace(/\s+/g, " ").trim();
+      return t;
+    };
 
-// key used for set lookups (title-only)
-const _titleKey = (song) => _titleCore(typeof song === "object" ? song?.title : song);
+    // key used for set lookups (title-only)
+    const _titleKey = (song) =>
+      _titleCore(typeof song === "object" ? song?.title : song);
 
-// quick token containment or near-equality:
-//  - exact title-core match, OR
-//  - one is a contiguous substring of the other, OR
-//  - they match after dropping a single token from either side
-const _titlesLooselyMatch = (aCore, bCore) => {
-  if (!aCore || !bCore) return false;
-  if (aCore === bCore) return true;
-  if (aCore.length >= 3 && (aCore.includes(bCore) || bCore.includes(aCore))) return true;
+    // quick token containment or near-equality:
+    //  - exact title-core match, OR
+    //  - one is a contiguous substring of the other, OR
+    //  - they match after dropping a single token from either side
+    const _titlesLooselyMatch = (aCore, bCore) => {
+      if (!aCore || !bCore) return false;
+      if (aCore === bCore) return true;
+      if (aCore.length >= 3 && (aCore.includes(bCore) || bCore.includes(aCore)))
+        return true;
 
-  const ta = aCore.split(" ");
-  const tb = bCore.split(" ");
-  const dropOne = (arr) => {
-    if (arr.length <= 1) return [""];
-    const out = [];
-    for (let i = 0; i < arr.length; i++) {
-      out.push(arr.slice(0, i).concat(arr.slice(i + 1)).join(" "));
-    }
-    return out.map(s => s.replace(/\s+/g, " ").trim());
-  };
+      const ta = aCore.split(" ");
+      const tb = bCore.split(" ");
+      const dropOne = (arr) => {
+        if (arr.length <= 1) return [""];
+        const out = [];
+        for (let i = 0; i < arr.length; i++) {
+          out.push(
+            arr
+              .slice(0, i)
+              .concat(arr.slice(i + 1))
+              .join(" ")
+          );
+        }
+        return out.map((s) => s.replace(/\s+/g, " ").trim());
+      };
 
-  const aDrop = new Set(dropOne(ta));
-  const bDrop = new Set(dropOne(tb));
-  if (aDrop.has(bCore) || bDrop.has(aCore)) return true;
+      const aDrop = new Set(dropOne(ta));
+      const bDrop = new Set(dropOne(tb));
+      if (aDrop.has(bCore) || bDrop.has(aCore)) return true;
 
-  // final cheap Jaccard check on tokens (>= 0.6)
-  const A = new Set(ta), B = new Set(tb);
-  let inter = 0;
-  for (const t of A) if (B.has(t)) inter++;
-  const jac = inter / (A.size + B.size - inter || 1);
-  return jac >= 0.6;
-};
+      // final cheap Jaccard check on tokens (>= 0.6)
+      const A = new Set(ta),
+        B = new Set(tb);
+      let inter = 0;
+      for (const t of A) if (B.has(t)) inter++;
+      const jac = inter / (A.size + B.size - inter || 1);
+      return jac >= 0.6;
+    };
 
     const songKeyNoYear = (s) => {
       if (!s) return "";
@@ -1813,37 +2589,44 @@ const _titlesLooselyMatch = (aCore, bCore) => {
 
     // Is a vocalist of any kind (lead/backing/rap allowed)
     const isVocalist = (m) => {
-      const types = Array.isArray(m?.vocals?.type) ? m.vocals.type.map(_norm) : [];
-      if (types.some(t => /vocal|singer|rap|mc/.test(t))) return true;
+      const types = Array.isArray(m?.vocals?.type)
+        ? m.vocals.type.map(_norm)
+        : [];
+      if (types.some((t) => /vocal|singer|rap|mc/.test(t))) return true;
 
       const inst = _instrumentLabels(m);
-      if (inst.some(s => /vocal|singer|rap|mc/.test(s))) return true;
+      if (inst.some((s) => /vocal|singer|rap|mc/.test(s))) return true;
 
       // Some profiles store rap as a boolean/string on vocals
       const rapVal = String(m?.vocals?.rap ?? "").toLowerCase();
       if (rapVal === "true" || rapVal === "yes") return true;
 
       // Other skills sometimes contain backing vocals / BV
-      const skills = Array.isArray(m?.other_skills) ? m.other_skills.map(_norm) : [];
-      if (skills.some(s => /backing\s*voc(al|als|alist)?|bv/.test(s))) return true;
+      const skills = Array.isArray(m?.other_skills)
+        ? m.other_skills.map(_norm)
+        : [];
+      if (skills.some((s) => /backing\s*voc(al|als|alist)?|bv/.test(s)))
+        return true;
 
       return false;
     };
 
-  const _getOtherSkills = (m) =>
-  (Array.isArray(m?.other_skills) ? m.other_skills : [])
-    .map((s) => (typeof s === "string" ? s : (s?.label || s?.name || s?.title || "")))
-    .map(_norm)
-    .filter(Boolean);
+    const _getOtherSkills = (m) =>
+      (Array.isArray(m?.other_skills) ? m.other_skills : [])
+        .map((s) =>
+          typeof s === "string" ? s : s?.label || s?.name || s?.title || ""
+        )
+        .map(_norm)
+        .filter(Boolean);
 
-const _hasAllRoles = (m, required = []) => {
-  if (!required.length) return true;
-  const skills = _getOtherSkills(m);
-  // pass if each required role has a close-enough match among deputy skills
-  return required.every((req) =>
-    skills.some((have) => roleSimilarity(have, req) >= 0.6) // 0.6 Jaccard threshold
-  );
-};
+    const _hasAllRoles = (m, required = []) => {
+      if (!required.length) return true;
+      const skills = _getOtherSkills(m);
+      // pass if each required role has a close-enough match among deputy skills
+      return required.every(
+        (req) => skills.some((have) => roleSimilarity(have, req) >= 0.6) // 0.6 Jaccard threshold
+      );
+    };
 
     const _matchesInstrument = (m, label) => {
       if (!label) return true;
@@ -1877,12 +2660,18 @@ const _hasAllRoles = (m, required = []) => {
         return x;
       };
       const labels = _instrumentLabels(m).map(canon);
-      return wanted.map(canon).some(w => labels.includes(w));
+      return wanted.map(canon).some((w) => labels.includes(w));
     };
 
     const ROLE_ALIASES = {
       "band management": ["manager", "md", "musical director"],
-      "sound engineering": ["sound engineer", "engineer", "audio tech", "foh", "sound engineering with PA & light provision"],
+      "sound engineering": [
+        "sound engineer",
+        "engineer",
+        "audio tech",
+        "foh",
+        "sound engineering with PA & light provision",
+      ],
       "backing vocals": ["backing vocalist", "bv", "backing singer"],
       "lead vocals": ["lead singer"],
       dj: ["disc jockey", "deejay"],
@@ -1909,35 +2698,42 @@ const _hasAllRoles = (m, required = []) => {
       return inter / (A.size + B.size - inter);
     };
 
-// Replace the existing computeGenreFit
-const computeGenreFit = (act, dep) => {
-  const A = new Set((act || []).map(_norm).filter(Boolean));   // act genres
-  const D = new Set((dep || []).map(_norm).filter(Boolean));   // deputy genres
-  if (!A.size) return 0;                                       // or 1 if you want "no genres" to be neutral
+    // Replace the existing computeGenreFit
+    const computeGenreFit = (act, dep) => {
+      const A = new Set((act || []).map(_norm).filter(Boolean)); // act genres
+      const D = new Set((dep || []).map(_norm).filter(Boolean)); // deputy genres
+      if (!A.size) return 0; // or 1 if you want "no genres" to be neutral
 
-  let inter = 0;
-  for (const g of A) if (D.has(g)) inter++;
-  // 1.0 when deputy covers all act genres
-  return inter / A.size;
-};
+      let inter = 0;
+      for (const g of A) if (D.has(g)) inter++;
+      // 1.0 when deputy covers all act genres
+      return inter / A.size;
+    };
     // 1.0 if same county; 0.6 if outward postcode matches; else 0
-// Update scoreLocation to accept neighbours
-const scoreLocation = ({ originCounty, originPostcode, deputyCounty, deputyPostcode, originNeighbours = [] }) => {
-  const oc = _norm(originCounty), dc = _norm(deputyCounty);
+    // Update scoreLocation to accept neighbours
+    const scoreLocation = ({
+      originCounty,
+      originPostcode,
+      deputyCounty,
+      deputyPostcode,
+      originNeighbours = [],
+    }) => {
+      const oc = _norm(originCounty),
+        dc = _norm(deputyCounty);
 
-  // same county
-  if (oc && dc && oc === dc) return 1;
+      // same county
+      if (oc && dc && oc === dc) return 1;
 
-  // neighbouring county
-  if (originNeighbours.some(n => _norm(n) === dc)) return 0.8;
+      // neighbouring county
+      if (originNeighbours.some((n) => _norm(n) === dc)) return 0.8;
 
-  // same outward letters (e.g., "CM" == "CM")
-  const op = _safe(originPostcode).toUpperCase();
-  const dp = _safe(deputyPostcode).toUpperCase();
-  if (op && dp && op.slice(0, 2) === dp.slice(0, 2)) return 0.6;
+      // same outward letters (e.g., "CM" == "CM")
+      const op = _safe(originPostcode).toUpperCase();
+      const dp = _safe(deputyPostcode).toUpperCase();
+      if (op && dp && op.slice(0, 2) === dp.slice(0, 2)) return 0.6;
 
-  return 0;
-};
+      return 0;
+    };
 
     // ----- normalize inputs -----
     const requiredRoles = (Array.isArray(essentialRoles) ? essentialRoles : [])
@@ -1967,182 +2763,223 @@ const scoreLocation = ({ originCounty, originPostcode, deputyCounty, deputyPostc
       Array.isArray(desiredRoles) ? desiredRoles : []
     );
 
-  // Build ACT title-only keys
-const actTitleKeys = new Set(
-  (Array.isArray(actRepertoire) ? actRepertoire : [])
-    .map(_titleKey)
-    .filter(Boolean)
-);
-// ----- fetch pool -----
-const baseFilter = {
-  role: "musician",
-  status: { $in: ["approved", "Approved, changes pending"] },
-  ...(excludeIds?.length ? { _id: { $nin: excludeIds } } : {}),
-};
-
-const pool = await musicianModel
-  .find(baseFilter, {
-    firstName: 1,
-    lastName: 1,
-    email: 1,
-    phone: 1,
-    profilePicture: 1,
-    additionalImages: 1,
-    instrumentation: 1,
-    instruments: 1,
-    vocals: 1,
-    other_skills: 1,
-    address: 1,
-    repertoire: 1,
-    selectedSongs: 1,
-    genres: 1,
-  })
-  .limit(300)
-  .lean();
-
-console.log("pool:", pool.length);
-let passRoles = 0, passVocal = 0, passInst = 0, passSec = 0, pushed = 0;
-
-const out = [];
-
-for (const m of pool) {
-  // HARD gates
-  if (!_hasAllRoles(m, requiredRoles)) continue;
-  passRoles++;
-
-  if (isVocalSlot) {
-    if (!isVocalist(m)) continue;
-    passVocal++;
-  } else {
-    if (!_matchesInstrument(m, instrument)) continue;
-    passInst++;
-  }
-
-  if (wantedSecondaries.length && !hasAnyInstrument(m, wantedSecondaries)) continue;
-  passSec++;
-
-  // ---------- Repertoire overlap (TITLE-ONLY fuzzy)
-  const depTitleKeysArr = [
-    ...(Array.isArray(m.repertoire) ? m.repertoire : []),
-    ...(Array.isArray(m.selectedSongs) ? m.selectedSongs : []),
-  ].map(_titleKey).filter(Boolean);
-
-  let overlap = 0;
-  if (actTitleKeys.size && depTitleKeysArr.length) {
-    const depExact = new Set(depTitleKeysArr);
-    for (const k of actTitleKeys) if (depExact.has(k)) overlap++;
-    if (overlap < actTitleKeys.size) {
-      const depArr = Array.from(depExact);
-      for (const ak of actTitleKeys) {
-        if (depExact.has(ak)) continue;
-        if (depArr.some(dk => _titlesLooselyMatch(ak, dk))) overlap++;
-      }
-    }
-  }
-  const songOverlapPct = actTitleKeys.size ? overlap / actTitleKeys.size : 0;
-
-  // ---------- Location score
- const originCountyRaw = _safe(originLocation?.county) || countyFromPostcode(_safe(originLocation?.postcode));
-const originPostcode  = _safe(originLocation?.postcode);
-
-// compute neighbours once per request (you can memoise outside the loop if you like)
-const originNeighbourCounties = neighboursForCounty(originCountyRaw);
-
-const deputyCountyRaw = _safe(m?.address?.county || m?.county) || countyFromPostcode(_safe(m?.address?.postcode || m?.postcode));
-const deputyPostcode  = _safe(m?.address?.postcode || m?.postcode);
-
-const locScore = scoreLocation({
-  originCounty: originCountyRaw,
-  originPostcode,
-  deputyCounty: deputyCountyRaw,
-  deputyPostcode,
-  originNeighbours: originNeighbourCounties,
-});
-
-  // ---------- Genres (pick a single canonical set once)
-  const vocalGenres =
-    Array.isArray(m?.vocals?.genres) ? m.vocals.genres
-    : typeof m?.vocals?.genres === "string" ? m.vocals.genres.split(",").map(s => s.trim())
-    : [];
-
-  const topGenres =
-    Array.isArray(m?.genres) ? m.genres
-    : typeof m?.genres === "string" ? m.genres.split(",").map(s => s.trim())
-    : [];
-
-  const depGenres = topGenres.length ? topGenres : vocalGenres; // canonical deputy genres
-  const genreFit = computeGenreFit(actGenres, depGenres);
-
-  // ---------- Weights & score
-  let wSongs = 0.75;
-  let wRoles = desiredRoleSet.size ? 0.10 : 0;
-  let wGenre = actGenres?.length ? 0.05 : 0;
-  let wLoc   = 0.10;
-  const wSum = wSongs + wRoles + wGenre + wLoc;
-  wSongs /= wSum; wRoles /= wSum; wGenre /= wSum; wLoc /= wSum;
-
-  const roleFit = 0; // TODO: compute from desiredRoleSet vs m.other_skills if you want
-  const rawScore = (wSongs * songOverlapPct) + (wRoles * roleFit) + (wGenre * genreFit) + (wLoc * locScore);
-  const matchPct = Math.round(Math.max(0, Math.min(1, rawScore)) * 100);
-
-  const item = {
-    _id: m._id,
-    email: m.email,
-    firstName: m.firstName,
-    lastName: m.lastName,
-    phone: m.phone,
-    profilePicture: m.profilePicture,
-    additionalImages: Array.isArray(m.additionalImages) ? m.additionalImages : [],
-    address: m.address || {},
-    repertoire: Array.isArray(m.repertoire) ? m.repertoire : [],
-    selectedSongs: Array.isArray(m.selectedSongs) ? m.selectedSongs : [],
-    genres: depGenres,                              // top-level canonical genres
-    vocals: { ...(m.vocals || {}), genres: vocalGenres }, // keep raw vocal genres here
-    other_skills: Array.isArray(m.other_skills) ? m.other_skills : [],
-    matchPct,
-  };
-
-  if (debug) {
-    const matchedSongs = [];
-    const depSet = new Set(depTitleKeysArr);
-    let taken = 0;
-    for (const ak of actTitleKeys) {
-      if (depSet.has(ak) || depTitleKeysArr.some(dk => _titlesLooselyMatch(ak, dk))) {
-        if (taken < 15) { matchedSongs.push({ titleCore: ak }); taken++; }
-      }
-    }
-    item._debug = {
-      actCount: actTitleKeys.size,
-      depCount: depTitleKeysArr.length,
-      overlapCount: overlap,
-      songOverlapPct,
-      genreFit,
-      locScore,
-      originLoc: { county: originCountyRaw, postcode: originPostcode },
-      deputyLoc: { county: deputyCountyRaw, postcode: deputyPostcode },
-      weights: { songs: wSongs, roles: wRoles, genre: wGenre, location: wLoc },
-      matchedSongs,
-      deputyVocalGenres: vocalGenres,
-      actGenres,
+    // Build ACT title-only keys
+    const actTitleKeys = new Set(
+      (Array.isArray(actRepertoire) ? actRepertoire : [])
+        .map(_titleKey)
+        .filter(Boolean)
+    );
+    // ----- fetch pool -----
+    const baseFilter = {
+      role: "musician",
+      status: { $in: ["approved", "Approved, changes pending"] },
+      ...(excludeIds?.length ? { _id: { $nin: excludeIds } } : {}),
     };
-  }
 
-  out.push(item);
-  pushed++;
-}
+    const pool = await musicianModel
+      .find(baseFilter, {
+        firstName: 1,
+        lastName: 1,
+        email: 1,
+        phone: 1,
+        profilePicture: 1,
+        additionalImages: 1,
+        instrumentation: 1,
+        instruments: 1,
+        vocals: 1,
+        other_skills: 1,
+        address: 1,
+        repertoire: 1,
+        selectedSongs: 1,
+        genres: 1,
+      })
+      .limit(300)
+      .lean();
 
-console.log({ passRoles, passVocal, passInst, passSec, pushed });
+    console.log("pool:", pool.length);
+    let passRoles = 0,
+      passVocal = 0,
+      passInst = 0,
+      passSec = 0,
+      pushed = 0;
 
-out.sort((a, b) => b.matchPct - a.matchPct || (a.lastName || "").localeCompare(b.lastName || ""));
+    const out = [];
 
-return res.json({
-  success: true,
-  musicians: out.slice(0, Math.max(1, parseInt(limit, 10) || 24)),
-});
+    for (const m of pool) {
+      // HARD gates
+      if (!_hasAllRoles(m, requiredRoles)) continue;
+      passRoles++;
+
+      if (isVocalSlot) {
+        if (!isVocalist(m)) continue;
+        passVocal++;
+      } else {
+        if (!_matchesInstrument(m, instrument)) continue;
+        passInst++;
+      }
+
+      if (wantedSecondaries.length && !hasAnyInstrument(m, wantedSecondaries))
+        continue;
+      passSec++;
+
+      // ---------- Repertoire overlap (TITLE-ONLY fuzzy)
+      const depTitleKeysArr = [
+        ...(Array.isArray(m.repertoire) ? m.repertoire : []),
+        ...(Array.isArray(m.selectedSongs) ? m.selectedSongs : []),
+      ]
+        .map(_titleKey)
+        .filter(Boolean);
+
+      let overlap = 0;
+      if (actTitleKeys.size && depTitleKeysArr.length) {
+        const depExact = new Set(depTitleKeysArr);
+        for (const k of actTitleKeys) if (depExact.has(k)) overlap++;
+        if (overlap < actTitleKeys.size) {
+          const depArr = Array.from(depExact);
+          for (const ak of actTitleKeys) {
+            if (depExact.has(ak)) continue;
+            if (depArr.some((dk) => _titlesLooselyMatch(ak, dk))) overlap++;
+          }
+        }
+      }
+      const songOverlapPct = actTitleKeys.size
+        ? overlap / actTitleKeys.size
+        : 0;
+
+      // ---------- Location score
+      const originCountyRaw =
+        _safe(originLocation?.county) ||
+        countyFromPostcode(_safe(originLocation?.postcode));
+      const originPostcode = _safe(originLocation?.postcode);
+
+      // compute neighbours once per request (you can memoise outside the loop if you like)
+      const originNeighbourCounties = neighboursForCounty(originCountyRaw);
+
+      const deputyCountyRaw =
+        _safe(m?.address?.county || m?.county) ||
+        countyFromPostcode(_safe(m?.address?.postcode || m?.postcode));
+      const deputyPostcode = _safe(m?.address?.postcode || m?.postcode);
+
+      const locScore = scoreLocation({
+        originCounty: originCountyRaw,
+        originPostcode,
+        deputyCounty: deputyCountyRaw,
+        deputyPostcode,
+        originNeighbours: originNeighbourCounties,
+      });
+
+      // ---------- Genres (pick a single canonical set once)
+      const vocalGenres = Array.isArray(m?.vocals?.genres)
+        ? m.vocals.genres
+        : typeof m?.vocals?.genres === "string"
+        ? m.vocals.genres.split(",").map((s) => s.trim())
+        : [];
+
+      const topGenres = Array.isArray(m?.genres)
+        ? m.genres
+        : typeof m?.genres === "string"
+        ? m.genres.split(",").map((s) => s.trim())
+        : [];
+
+      const depGenres = topGenres.length ? topGenres : vocalGenres; // canonical deputy genres
+      const genreFit = computeGenreFit(actGenres, depGenres);
+
+      // ---------- Weights & score
+      let wSongs = 0.75;
+      let wRoles = desiredRoleSet.size ? 0.1 : 0;
+      let wGenre = actGenres?.length ? 0.05 : 0;
+      let wLoc = 0.1;
+      const wSum = wSongs + wRoles + wGenre + wLoc;
+      wSongs /= wSum;
+      wRoles /= wSum;
+      wGenre /= wSum;
+      wLoc /= wSum;
+
+      const roleFit = 0; // TODO: compute from desiredRoleSet vs m.other_skills if you want
+      const rawScore =
+        wSongs * songOverlapPct +
+        wRoles * roleFit +
+        wGenre * genreFit +
+        wLoc * locScore;
+      const matchPct = Math.round(Math.max(0, Math.min(1, rawScore)) * 100);
+
+      const item = {
+        _id: m._id,
+        email: m.email,
+        firstName: m.firstName,
+        lastName: m.lastName,
+        phone: m.phone,
+        profilePicture: m.profilePicture,
+        additionalImages: Array.isArray(m.additionalImages)
+          ? m.additionalImages
+          : [],
+        address: m.address || {},
+        repertoire: Array.isArray(m.repertoire) ? m.repertoire : [],
+        selectedSongs: Array.isArray(m.selectedSongs) ? m.selectedSongs : [],
+        genres: depGenres, // top-level canonical genres
+        vocals: { ...(m.vocals || {}), genres: vocalGenres }, // keep raw vocal genres here
+        other_skills: Array.isArray(m.other_skills) ? m.other_skills : [],
+        matchPct,
+      };
+
+      if (debug) {
+        const matchedSongs = [];
+        const depSet = new Set(depTitleKeysArr);
+        let taken = 0;
+        for (const ak of actTitleKeys) {
+          if (
+            depSet.has(ak) ||
+            depTitleKeysArr.some((dk) => _titlesLooselyMatch(ak, dk))
+          ) {
+            if (taken < 15) {
+              matchedSongs.push({ titleCore: ak });
+              taken++;
+            }
+          }
+        }
+        item._debug = {
+          actCount: actTitleKeys.size,
+          depCount: depTitleKeysArr.length,
+          overlapCount: overlap,
+          songOverlapPct,
+          genreFit,
+          locScore,
+          originLoc: { county: originCountyRaw, postcode: originPostcode },
+          deputyLoc: { county: deputyCountyRaw, postcode: deputyPostcode },
+          weights: {
+            songs: wSongs,
+            roles: wRoles,
+            genre: wGenre,
+            location: wLoc,
+          },
+          matchedSongs,
+          deputyVocalGenres: vocalGenres,
+          actGenres,
+        };
+      }
+
+      out.push(item);
+      pushed++;
+    }
+
+    console.log({ passRoles, passVocal, passInst, passSec, pushed });
+
+    out.sort(
+      (a, b) =>
+        b.matchPct - a.matchPct ||
+        (a.lastName || "").localeCompare(b.lastName || "")
+    );
+
+    return res.json({
+      success: true,
+      musicians: out.slice(0, Math.max(1, parseInt(limit, 10) || 24)),
+    });
   } catch (err) {
     console.error("❌ suggestDeputies error:", err);
     // Return a safe shape so the UI doesn’t break
-    return res.status(200).json({ success: false, musicians: [], message: "Server error (safe)" });
+    return res
+      .status(200)
+      .json({ success: false, musicians: [], message: "Server error (safe)" });
   }
 };
 

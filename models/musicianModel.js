@@ -9,6 +9,8 @@ const musicianSchema = new mongoose.Schema(
     },
 
     tagLine: { type: String, maxlength: 160 },
+    tscApprovedBio: { type: String },
+    bio: { type: String },
     email: { type: String },
     firstName: { type: String },
     lastName: { type: String },
@@ -24,7 +26,22 @@ coverHeroImage: { type: String, default: null },
       phone: { type: String },
       email: { type: String },
     },
-
+functionBandVideoLinks: {
+  title: { type: String, default: "" },
+  url: { type: String, default: "" }
+},
+originalBandVideoLinks: {
+  title: { type: String, default: "" },
+  url: { type: String, default: "" }
+},
+tscApprovedFunctionBandVideoLinks: {
+  title: { type: String, default: "" },
+  url: { type: String, default: "" }
+},
+tscApprovedOriginalBandVideoLinks: {
+  title: { type: String, default: "" },
+  url: { type: String, default: "" }
+},
     agreementCheckboxes: [
       {
         termsAndConditions: { type: Boolean, default: false },
@@ -65,19 +82,12 @@ coverHeroImage: { type: String, default: null },
       }
     ],
 
-    function_bands_performed_with: [
-      {
-        function_band_name: { type: String, default: "" },
-        function_band_leader_email: { type: String, default: "" },
-      }
-    ],
-
-    original_bands_performed_with: [
-      {
-        original_band_name: { type: String, default: "" },
-        original_band_leader_email: { type: String, default: "" },
-      }
-    ],
+function_bands_performed_with: [
+  { function_band_name: String, function_band_leader_email: String }
+],
+original_bands_performed_with: [
+  { original_band_name: String, original_band_leader_email: String }
+],
 
     sessions: [
       {
@@ -211,13 +221,7 @@ range: {
       year: { type: String, default: null, set: v=>v===""?null:v }
     }],
 
-    pat: { type: Boolean, default: false },
-    patExpiry: { type: Date, default: null },
-    patFile: { type: String, default: null },
-    pli: { type: Boolean, default: false },
-    pliExpiry: { type: Date, default: null },
-    pliFile: { type: String, default: null },
-    pliAmount: { type: Number, default: null },
+  
 
     deputy_contract_signed: { type: String, default: null, set: v => v === "" ? null : v },
 

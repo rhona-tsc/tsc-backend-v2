@@ -16,6 +16,8 @@ import {
   rejectDeputy, updateAct, rejectAct, refreshAccessToken, logoutMusician, getDeputyById
 } from "../controllers/musicianController.js";
 import bookingModel from "../models/bookingModel.js";
+import { autosaveMusicianForm, listAutosaveHistory } from "../controllers/musicianAutosave.controller.js";
+
 
 const router = express.Router();
 
@@ -57,21 +59,53 @@ router.patch("/moderation/deputy/:id/save", verifyToken, async (req, res) => {
     const doc = await musicianModel.findById(id);
     if (!doc) return res.status(404).json({ success: false, message: "Musician not found" });
 
-    // Merge incoming updates (keep it simple – trust admin UI)
-    Object.assign(doc, updates);
+    // --- normalize band refs (same logic as registerDeputy) ---
+    const normalizeBandRefs = (arr, nameKey, emailKey) =>
+      (Array.isArray(arr) ? arr : [])
+        .map((x) => ({
+          [nameKey]: String(x?.[nameKey] || "").trim(),
+          [emailKey]: String(x?.[emailKey] || "").trim().toLowerCase(),
+        }))
+        .filter((x) => x[nameKey] || x[emailKey]);
 
-    // If the deputy was previously approved, mark as “Approved, changes pending”
+    if ("function_bands_performed_with" in updates) {
+      updates.function_bands_performed_with = normalizeBandRefs(
+        updates.function_bands_performed_with,
+        "function_band_name",
+        "function_band_leader_email"
+      );
+    }
+
+    if ("original_bands_performed_with" in updates) {
+      updates.original_bands_performed_with = normalizeBandRefs(
+        updates.original_bands_performed_with,
+        "original_band_name",
+        "original_band_leader_email"
+      );
+    }
+
+    // ✅ Use mongoose setter (casts + marks modified properly)
+    doc.set(updates);
+
+    // (extra safety for nested arrays/subdocs)
+    if ("function_bands_performed_with" in updates) doc.markModified("function_bands_performed_with");
+    if ("original_bands_performed_with" in updates) doc.markModified("original_bands_performed_with");
+
+    // Status tweak
     if ((doc.status || "").toLowerCase() === "approved") {
       doc.status = "Approved, changes pending";
     }
 
-    // If the deputy is still pending, keep as pending
     await doc.save();
+
+    console.log("PATCH keys:", Object.keys(req.body || {}));
+console.log("PATCH function_bands_performed_with:", req.body?.function_bands_performed_with);
+console.log("PATCH original_bands_performed_with:", req.body?.original_bands_performed_with);
 
     return res.json({
       success: true,
       message: "Deputy changes saved",
-      deputy: { _id: doc._id, email: doc.email, status: doc.status }
+      deputy: { _id: doc._id, email: doc.email, status: doc.status },
     });
   } catch (err) {
     console.error("❌ save deputy (moderation) failed:", err);
@@ -84,6 +118,11 @@ router.get("/pending-deputies", verifyToken, listPendingDeputies);
 router.post("/approve-deputy", verifyToken, approveDeputy);
 router.post("/reject-deputy", verifyToken, rejectDeputy);
 router.post("/email-contract", emailContract);
+
+
+/* ---------------- Autosave ---------------- */
+router.post("/autosave", verifyToken, autosaveMusicianForm);
+router.get("/autosave/history/:musicianId", verifyToken, listAutosaveHistory);
 
 /* ---------------- Musician profile & listing (READ-ONLY) ---------------- */
 // GET /api/musician?status=approved
