@@ -1,4 +1,4 @@
-import musicianAutosaveModel from "../models/MusicianAutosave.model.js";
+import MusicianAutosave from "../models/MusicianAutosave.model.js";
 import PreAutoSavedMusicianFormModel from "../models/PreAutoSavedMusicianForm.model.js";
 
 const MAX_HISTORY = 25;
@@ -12,7 +12,7 @@ export const autosaveMusicianForm = async (req, res) => {
     }
 
     // 1) get existing autosave (if any)
-    const existing = await musicianAutosaveModel.findOne({ musicianId, formKey }).lean();
+    const existing = await MusicianAutosave.findOne({ musicianId, formKey }).lean();
 
     // 2) if exists and differs, archive it BEFORE overwrite
     if (existing?.snapshot) {
@@ -40,7 +40,7 @@ export const autosaveMusicianForm = async (req, res) => {
     }
 
     // 4) upsert latest autosave
-    await musicianAutosaveModel.updateOne(
+    await MusicianAutosave.updateOne(
       { musicianId, formKey },
       { $set: { snapshot, snapshotHash, updatedAtIso } },
       { upsert: true }
