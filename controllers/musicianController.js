@@ -990,6 +990,8 @@ const registerDeputy = async (req, res) => {
     );
     const social_media_links = safeParse(body.social_media_links, []);
     const repertoire = safeParse(body.repertoire, []);
+    const customRepertoire =
+  typeof body.customRepertoire === "string" ? body.customRepertoire : "";
     const selectedSongs = safeParse(body.selectedSongs, []);
     const other_skills = safeParse(body.other_skills, []);
     const logistics = safeParse(body.logistics, []);
@@ -1282,7 +1284,8 @@ const registerDeputy = async (req, res) => {
     musician.function_bands_performed_with = functionBandsClean;
     musician.original_bands_performed_with = originalBandsClean;
     musician.social_media_links = social_media_links;
-    musician.repertoire = repertoire;
+musician.customRepertoire = customRepertoire;
+musician.repertoire = repertoire; 
     musician.selectedSongs = selectedSongs;
     musician.other_skills = other_skills;
     musician.logistics = logistics;
@@ -1375,7 +1378,7 @@ const registerDeputy = async (req, res) => {
     musician.markModified("instrumentMics");
     musician.markModified("speechMics");
     musician.markModified("instrumentation");
-    musician.markModified("repertoire");
+    musician.markModified("customRepertoire");
     musician.markModified("selectedSongs");
     musician.markModified("function_bands_performed_with");
     musician.markModified("original_bands_performed_with");
@@ -1703,6 +1706,7 @@ const addAct = async (req, res) => {
       []
     );
     const repertoireParsed = safeJSONParse(req.body.repertoire, []);
+    
     const selectedSongsParsed = safeJSONParse(req.body.selectedSongs, []);
     const usesGenericRiskAssessment =
       req.body.usesGenericRiskAssessment === "true";

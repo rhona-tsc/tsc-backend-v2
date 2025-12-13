@@ -207,19 +207,14 @@ range: {
     coverMp3s: { type: [{ title: String, url: String }], default: [] },
     originalMp3s: { type: [{ title: String, url: String }], default: [] },
 
-    repertoire: [{
-      title: { type: String, default: "" },
-      artist: { type: String, default: "" },
-      year: { type: Number, default: null, required: false, set: v=>v===""?null:v },
-      genre: { type: String, default: "" }
-    }],
-
+  customRepertoire: { type: String, default: "" },
     selectedSongs: [{
       title: { type: String, default: "" },
       artist: { type: String, default: "" },
       genre: { type: String, default: "" },
       year: { type: String, default: null, set: v=>v===""?null:v }
     }],
+  repertoire: { type: String, default: "" },
 
   
 
