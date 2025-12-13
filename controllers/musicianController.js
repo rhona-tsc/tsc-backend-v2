@@ -1340,37 +1340,29 @@ musician.repertoire = repertoire;
       : [];
 
     // profile & cover images (file or string URL)
-    if (req.files?.profilePicture?.[0]?.buffer) {
-      const f = req.files.profilePicture[0];
-      const up = await uploader(
-        f.buffer,
-        f.originalname || "profile.jpg",
-        "musicians"
-      );
-      musician.profilePicture = up.secure_url;
-      musician.profilePhoto = up.secure_url;
-    } else if (
-      typeof body.profilePicture === "string" &&
-      body.profilePicture.trim()
-    ) {
-      musician.profilePicture = body.profilePicture.trim();
-      musician.profilePhoto = body.profilePicture.trim();
-    }
+  if (req.files?.profilePicture?.[0]) {
+  const f = req.files.profilePicture[0];
 
-    if (req.files?.coverHeroImage?.[0]?.buffer) {
-      const f = req.files.coverHeroImage[0];
-      const up = await uploader(
-        f.buffer,
-        f.originalname || "cover-hero.jpg",
-        "musicians"
-      );
-      musician.coverHeroImage = up.secure_url;
-    } else if (
-      typeof body.coverHeroImage === "string" &&
-      body.coverHeroImage.trim()
-    ) {
-      musician.coverHeroImage = body.coverHeroImage.trim();
-    }
+  if (f.buffer) {
+    const up = await uploader(f.buffer, f.originalname || "profile.jpg", "musicians");
+    musician.profilePhoto = up.secure_url;
+  } else if (f.path && /^https?:\/\//i.test(f.path)) {
+    // multer-storage-cloudinary often gives a URL-ish path
+    musician.profilePhoto = f.path;
+  }
+}
+
+if (req.files?.coverHeroImage?.[0]) {
+  const f = req.files.coverHeroImage[0];
+
+  if (f.buffer) {
+    const up = await uploader(f.buffer, f.originalname || "cover.jpg", "musicians");
+    musician.coverHeroImage = up.secure_url;
+  } else if (f.path && /^https?:\/\//i.test(f.path)) {
+    // multer-storage-cloudinary often gives a URL-ish path
+    musician.coverHeroImage = f.path;
+  }
+}
 
     // mark modified where helpful
     musician.markModified("vocalMics");
