@@ -713,30 +713,24 @@ const registerDeputy = async (req, res) => {
     musician.vocals.rap = vocalsParsed.rap === true || vocalsParsed.rap === "true";
     musician.vocals.genres = Array.isArray(vocalsParsed.genres) ? vocalsParsed.genres : [];
 
-// profile & cover images (file or string URL)
-if (req.files?.profilePicture?.[0]?.buffer) {
-  const f = req.files.profilePicture[0];
-  const up = await uploadToCloudinary(
-    f.buffer,
-    f.originalname || "profile.jpg",
-    "image"
-  );
-  musician.profilePicture = up.secure_url;
-} else if (typeof body.profilePicture === "string" && body.profilePicture.trim()) {
-  musician.profilePicture = body.profilePicture.trim();
-}
+    // profile & cover images (file or string URL)
+    if (req.files?.profilePicture?.[0]?.buffer) {
+      const f = req.files.profilePicture[0];
+      const up = await uploader(f.buffer, f.originalname || "profile.jpg", "musicians");
+      musician.profilePicture = up.secure_url;
+      musician.profilePhoto = up.secure_url;
+    } else if (typeof body.profilePicture === "string" && body.profilePicture.trim()) {
+      musician.profilePicture = body.profilePicture.trim();
+      musician.profilePhoto = body.profilePicture.trim();
+    }
 
-if (req.files?.coverHeroImage?.[0]?.buffer) {
-  const f = req.files.coverHeroImage[0];
-  const up = await uploadToCloudinary(
-    f.buffer,
-    f.originalname || "cover-hero.jpg",
-    "image"
-  );
-  musician.coverHeroImage = up.secure_url;
-} else if (typeof body.coverHeroImage === "string" && body.coverHeroImage.trim()) {
-  musician.coverHeroImage = body.coverHeroImage.trim();
-}
+    if (req.files?.coverHeroImage?.[0]?.buffer) {
+      const f = req.files.coverHeroImage[0];
+      const up = await uploader(f.buffer, f.originalname || "cover-hero.jpg", "musicians");
+      musician.coverHeroImage = up.secure_url;
+    } else if (typeof body.coverHeroImage === "string" && body.coverHeroImage.trim()) {
+      musician.coverHeroImage = body.coverHeroImage.trim();
+    }
 
     // mark modified where helpful
     musician.markModified("vocalMics");
