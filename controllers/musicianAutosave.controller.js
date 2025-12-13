@@ -1,5 +1,5 @@
-import MusicianAutosave from "../models/MusicianAutosave.model.js";
-import PreAutoSavedMusicianForm from "../models/PreAutoSavedMusicianForm.model.js";
+import musicianAutosaveModel from "../models/MusicianAutosave.model.js";
+import PreAutoSavedMusicianFormModel from "../models/PreAutoSavedMusicianForm.model.js";
 
 const MAX_HISTORY = 25;
 
@@ -12,13 +12,13 @@ export const autosaveMusicianForm = async (req, res) => {
     }
 
     // 1) get existing autosave (if any)
-    const existing = await MusicianAutosave.findOne({ musicianId, formKey }).lean();
+    const existing = await musicianAutosaveModel.findOne({ musicianId, formKey }).lean();
 
     // 2) if exists and differs, archive it BEFORE overwrite
     if (existing?.snapshot) {
       const same = existing.snapshotHash && snapshotHash && existing.snapshotHash === snapshotHash;
       if (!same) {
-        await PreAutoSavedMusicianForm.create({
+        await PreAutoSavedMusicianFormModel.create({
           musicianId,
           formKey,
           snapshot: existing.snapshot,
@@ -27,14 +27,14 @@ export const autosaveMusicianForm = async (req, res) => {
         });
 
         // 3) keep history capped
-        const ids = await PreAutoSavedMusicianForm.find({ musicianId, formKey })
+        const ids = await PreAutoSavedMusicianFormModel.find({ musicianId, formKey })
           .sort({ createdAt: -1 })
           .skip(MAX_HISTORY)
           .select("_id")
           .lean();
 
         if (ids.length) {
-          await PreAutoSavedMusicianForm.deleteMany({ _id: { $in: ids.map((x) => x._id) } });
+          await PreAutoSavedMusicianFormModel.deleteMany({ _id: { $in: ids.map((x) => x._id) } });
         }
       }
     }
@@ -58,7 +58,7 @@ export const listAutosaveHistory = async (req, res) => {
     const { musicianId } = req.params;
     const { formKey = "deputy", limit = 25 } = req.query;
 
-    const rows = await PreAutoSavedMusicianForm.find({ musicianId, formKey })
+    const rows = await PreAutoSavedMusicianFormModel.find({ musicianId, formKey })
       .sort({ createdAt: -1 })
       .limit(Math.min(Number(limit) || 25, 100))
       .lean();
