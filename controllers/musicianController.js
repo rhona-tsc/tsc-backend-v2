@@ -1115,6 +1115,8 @@ const registerDeputy = async (req, res) => {
     const mixingDesk = safeParse(body.mixingDesk, []);
     const floorMonitorSpecs = safeParse(body.floorMonitorSpecs, []);
     const djEquipment = safeParse(body.djEquipment, []);
+    const additionalEquipment = safeParse(body.additionalEquipment, {});
+
     const djEquipmentCategories = safeParse(body.djEquipmentCategories, []);
     const djGearRequired = safeParse(body.djGearRequired, []);
     const instrumentSpecsRaw = safeParse(body.instrumentSpecs, []);
@@ -1315,7 +1317,7 @@ musician.customRepertoire = customRepertoire;
     musician.djEquipmentCategories = djEquipmentCategories;
     musician.djGearRequired = djGearRequired;
     musician.instrumentSpecs = instrumentSpecs;
-
+musician.additionalEquipment = additionalEquipment;
     // wardrobe/images
     musician.digitalWardrobeBlackTie = digitalWardrobeBlackTie;
     musician.digitalWardrobeFormal = digitalWardrobeFormal;
@@ -1407,6 +1409,21 @@ if (req.files?.coverHeroImage?.[0]) {
     musician.markModified("coverMp3s");
     musician.markModified("originalMp3s");
     musician.markModified("vocals");
+musician.markModified("cableLogistics");
+musician.markModified("extensionCableLogistics");
+musician.markModified("uplights");
+musician.markModified("tbars");
+musician.markModified("lightBars");
+musician.markModified("discoBall");
+musician.markModified("otherLighting");
+musician.markModified("paSpeakerSpecs");
+musician.markModified("mixingDesk");
+musician.markModified("floorMonitorSpecs");
+musician.markModified("djEquipment");
+musician.markModified("djEquipmentCategories");
+musician.markModified("djGearRequired");
+musician.markModified("backline");
+musician.markModified("additionalEquipment");
 
     const saved = await musician.save();
 
