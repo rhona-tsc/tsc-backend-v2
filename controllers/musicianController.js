@@ -1118,8 +1118,13 @@ const registerDeputy = async (req, res) => {
     const djEquipment = safeParse(body.djEquipment, []);
     const djEquipmentCategories = safeParse(body.djEquipmentCategories, []);
     const djGearRequired = safeParse(body.djGearRequired, []);
-    const instrumentSpecs = safeParse(body.instrumentSpecs, []);
-
+    const instrumentSpecsRaw = safeParse(body.instrumentSpecs, []);
+const instrumentSpecs = (Array.isArray(instrumentSpecsRaw) ? instrumentSpecsRaw : [])
+  .map((x) => ({
+    name: String(x?.name || "").trim(),
+    wattage: Number(x?.wattage || 0),
+  }))
+  .filter((x) => x.name || x.wattage > 0);
     // wardrobe / extra images as URL strings
     const digitalWardrobeBlackTie = urlArray(body.digitalWardrobeBlackTie);
     const digitalWardrobeFormal = urlArray(body.digitalWardrobeFormal);
@@ -1370,6 +1375,7 @@ if (req.files?.coverHeroImage?.[0]) {
     musician.markModified("instrumentMics");
     musician.markModified("speechMics");
     musician.markModified("instrumentation");
+    musician.markModified("instrumentSpecs");
     musician.markModified("customRepertoire");
     musician.markModified("selectedSongs");
     musician.markModified("function_bands_performed_with");
