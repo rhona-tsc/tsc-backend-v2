@@ -222,7 +222,6 @@ range: {
       genre: { type: String, default: "" },
       year: { type: String, default: null, set: v=>v===""?null:v }
     }],
-  repertoire: { type: String, default: "" },
 
   
 
