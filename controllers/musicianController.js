@@ -989,7 +989,6 @@ const registerDeputy = async (req, res) => {
       []
     );
     const social_media_links = safeParse(body.social_media_links, []);
-    const repertoire = safeParse(body.repertoire, []);
     const customRepertoire =
   typeof body.customRepertoire === "string" ? body.customRepertoire : "";
     const selectedSongs = safeParse(body.selectedSongs, []);
@@ -1191,7 +1190,6 @@ const instrumentSpecs = (Array.isArray(instrumentSpecsRaw) ? instrumentSpecsRaw 
         function_bands_performed_with: functionBandsClean,
         original_bands_performed_with: originalBandsClean,
         social_media_links,
-        repertoire,
         selectedSongs,
         other_skills,
         logistics,
@@ -1290,7 +1288,6 @@ const instrumentSpecs = (Array.isArray(instrumentSpecsRaw) ? instrumentSpecsRaw 
     musician.original_bands_performed_with = originalBandsClean;
     musician.social_media_links = social_media_links;
 musician.customRepertoire = customRepertoire;
-musician.repertoire = repertoire; 
     musician.selectedSongs = selectedSongs;
     musician.other_skills = other_skills;
     musician.logistics = logistics;
@@ -1703,11 +1700,8 @@ const addAct = async (req, res) => {
       req.body.minimumIntervalLength,
       []
     );
-    const repertoireParsed = safeJSONParse(req.body.repertoire, []);
     
     const selectedSongsParsed = safeJSONParse(req.body.selectedSongs, []);
-    const usesGenericRiskAssessment =
-      req.body.usesGenericRiskAssessment === "true";
 
     const images = req.files.images || [];
     const pliFiles = req.files.pliFile || [];
@@ -1837,7 +1831,6 @@ const addAct = async (req, res) => {
       lengthOfSets: lengthOfSetsParsed,
       minimumIntervalLength: minimumIntervalLengthParsed,
       customRepertoire,
-      repertoire: repertoireParsed,
       selectedSongs: selectedSongsParsed,
       pli: pli === "true",
       pliAmount: Number(pliAmount) || 0,
@@ -2250,12 +2243,7 @@ const emailContract = async (req, res) => {
   }
 };
 
-/**
- * POST /api/moderation/deputy/:id/repertoire/append
- * Body: { songIds: string[], selectedSongs?: {title,artist,genre,year}[] }
- * - Appends to repertoire (ObjectId[])
- * - Optionally merges into selectedSongs (array of objects, de-duped by title|artist|year)
- */
+
 const appendDeputyRepertoire = async (req, res) => {
   try {
     const { id } = req.params;
