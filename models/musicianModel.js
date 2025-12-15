@@ -26,22 +26,30 @@ coverHeroImage: { type: String, default: null },
       phone: { type: String },
       email: { type: String },
     },
-functionBandVideoLinks: {
-  title: { type: String, default: "" },
-  url: { type: String, default: "" }
-},
-originalBandVideoLinks: {
-  title: { type: String, default: "" },
-  url: { type: String, default: "" }
-},
-tscApprovedFunctionBandVideoLinks: {
-  title: { type: String, default: "" },
-  url: { type: String, default: "" }
-},
-tscApprovedOriginalBandVideoLinks: {
-  title: { type: String, default: "" },
-  url: { type: String, default: "" }
-},
+functionBandVideoLinks: [
+  {
+    title: { type: String, default: "" },
+    url: { type: String, default: "" },
+  },
+],
+originalBandVideoLinks: [
+  {
+    title: { type: String, default: "" },
+    url: { type: String, default: "" },
+  },
+],
+tscApprovedFunctionBandVideoLinks: [
+  {
+    title: { type: String, default: "" },
+    url: { type: String, default: "" },
+  },
+],
+tscApprovedOriginalBandVideoLinks: [
+  {
+    title: { type: String, default: "" },
+    url: { type: String, default: "" },
+  },
+],
     agreementCheckboxes: [
       {
         termsAndConditions: { type: Boolean, default: false },
