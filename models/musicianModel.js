@@ -186,8 +186,8 @@ range: {
     },
 
     speechMics: {
-      wireless_speech_mics: { type: String, default: null, set: v => v === "" ? null : v },
-      wired_speech_mics: { type: String, default: null, set: v => v === "" ? null : v }
+      wireless_speech_mic: { type: String, default: null, set: v => v === "" ? null : v },
+      wired_speech_mic: { type: String, default: null, set: v => v === "" ? null : v }
     },
 
     paSpeakerSpecs: [
@@ -205,7 +205,71 @@ range: {
     djGearRequired: [{ name: { type: String, default: "" }, quantity: { type: String, default: null, set: v=>v===""?null:v }, wattage: { type: Number, default: 0 } }],
     instrumentSpecs: [{ name: { type: String, default: "" }, wattage: { type: Number, default: 0 } }],
     djEquipment: [{ name: { type: String, default: "" }, quantity: { type: String, default: null, set: v=>v===""?null:v }, wattage: { type: Number, default: 0 } }],
+cableLogistics: [
+  {
+    length: { type: String, default: "" },
+    quantity: { type: String, default: "" },
+  },
+],
 
+extensionCableLogistics: [
+  {
+    length: { type: String, default: "" },
+    quantity: { type: String, default: "" },
+  },
+],
+
+uplights: [
+  {
+    quantity: { type: String, default: null, set: v => v === "" ? null : v },
+    wattage: { type: Number, default: 0 },
+  },
+],
+
+tbars: [
+  {
+    quantity: { type: String, default: null, set: v => v === "" ? null : v },
+    wattage: { type: Number, default: 0 },
+  },
+],
+
+lightBars: [
+  {
+    quantity: { type: String, default: null, set: v => v === "" ? null : v },
+    wattage: { type: Number, default: 0 },
+  },
+],
+
+discoBall: [
+  {
+    quantity: { type: String, default: null, set: v => v === "" ? null : v },
+    wattage: { type: Number, default: 0 },
+  },
+],
+
+otherLighting: [
+  {
+    name: { type: String, default: "" },
+    quantity: { type: String, default: null, set: v => v === "" ? null : v },
+    wattage: { type: Number, default: 0 },
+  },
+],
+
+djEquipmentCategories: [
+  {
+    hasDjTable: { type: Boolean, default: false },
+    hasDjBooth: { type: Boolean, default: false },
+    hasMixingConsole: { type: Boolean, default: false },
+    hasCdjs: { type: Boolean, default: false },
+    hasVinylDecks: { type: Boolean, default: false },
+  },
+],
+
+additionalEquipment: {
+  mic_stands: { type: String, default: null, set: v => v === "" ? null : v },
+  di_boxes: { type: String, default: null, set: v => v === "" ? null : v },
+  wireless_guitar_jacks: { type: String, default: null, set: v => v === "" ? null : v },
+},
     digitalWardrobeBlackTie: { type: [String], default: [] },
     digitalWardrobeFormal: { type: [String], default: [] },
     digitalWardrobeSmartCasual: { type: [String], default: [] },
