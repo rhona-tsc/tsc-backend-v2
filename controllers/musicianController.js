@@ -1424,7 +1424,8 @@ musician.markModified("djEquipmentCategories");
 musician.markModified("djGearRequired");
 musician.markModified("backline");
 musician.markModified("additionalEquipment");
-
+musician.bank_account = bank;
+musician.markModified("bank_account");
     const saved = await musician.save();
 
     // END snapshot: read back from DB to confirm persisted shape
