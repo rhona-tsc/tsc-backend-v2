@@ -1066,44 +1066,74 @@ export async function uploadAndEmailContract(pdfBuffer, booking) {
   }
 }
 
-async function emailContractToClient({ pdfUrl, bookingRef, clientEmail, clientName }) {
+
+export async function emailContractToClient({
+  pdfUrl,
+  bookingRef,
+  clientEmail,
+  clientName,
+}) {
   console.log("📧 [Email] Preparing to send contract email...", {
     pdfUrl,
     bookingRef,
     clientEmail,
   });
 
-try {
-  const host = process.env.SMTP_HOST || "";
-  if (!host || /example\\.com$/i.test(host)) {
-    throw new Error(
-      `SMTP_HOST is not configured (current value: "${host || 'empty'}"). Set real SMTP credentials in env.`
-    );
-  }
+  try {
+    const host = String(process.env.SMTP_HOST || "").trim();
+    const port = Number(process.env.SMTP_PORT || 587);
+    const user = String(process.env.SMTP_USER || "").trim();
+    const pass = String(process.env.SMTP_PASS || "").trim();
 
-  const transporter = nodemailer.createTransport({
-    host,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_PORT || "") === "465", // only true for 465
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
+    // ✅ hard guard: prevent placeholder config
+    if (!host) {
+      throw new Error(`SMTP_HOST is missing (empty). Set real SMTP credentials in env.`);
+    }
+    if (host.toLowerCase().includes("example.com")) {
+      throw new Error(
+        `SMTP_HOST is still a placeholder ("${host}"). Set a real SMTP host in env.`
+      );
+    }
+    if (!user || !pass) {
+      throw new Error(
+        `SMTP_USER/SMTP_PASS missing. Current user: "${user || "empty"}" (pass hidden).`
+      );
+    }
+
+    const secure = port === 465; // 465 = SSL, 587 = STARTTLS
+
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user, pass },
+      // optional but helpful on some hosts:
+      // requireTLS: port === 587,
+    });
+
+    const from =
+      String(process.env.SMTP_FROM || "").trim() ||
+      '"The Supreme Collective" <hello@thesupremecollective.co.uk>';
 
     const mailOptions = {
-      from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
+      from,
       to: clientEmail,
       subject: `Your Booking Contract – Ref ${bookingRef}`,
       html: `
-        <p>Hi ${clientName},</p>
+        <p>Hi ${clientName || "there"},</p>
         <p>Your contract is ready. You can download it using the link below:</p>
         <p><a href="${pdfUrl}">Download Contract PDF</a></p>
         <p>Thank you,<br/>The Supreme Collective Team</p>
       `,
     };
 
-    console.log("📨 [Email] Sending email via SMTP...");
+    console.log("📨 [Email] Sending email via SMTP...", {
+      host,
+      port,
+      secure,
+      from,
+      to: clientEmail,
+    });
 
     const info = await transporter.sendMail(mailOptions);
 
