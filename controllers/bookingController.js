@@ -494,9 +494,19 @@ function daysUntil(dateStr) {
 }
 
 function calcDeposit(totalGross) {
-    console.log(`🐣 (controllers/bookingController.js) calcDeposit called at`, new Date().toISOString(), { totalGross });
-  if (!totalGross || totalGross <= 0) return 0;
-return Math.round(Number(totalGross) * 0.25);}
+  console.log(
+    `🐣 (controllers/bookingController.js) calcDeposit called at`,
+    new Date().toISOString(),
+    { totalGross }
+  );
+  const gross = Number(totalGross || 0);
+  if (!gross || gross <= 0) return 0;
+
+  // Deposit is 33% of the (already-rounded) gross total, rounded to pennies
+  const depositRate = Number(process.env.TSC_DEPOSIT_RATE ?? 0.33);
+  const deposit = Math.round(gross * depositRate * 100) / 100;
+  return deposit;
+}
 
 const makeBookingId = (dateStr = new Date().toISOString(), lastName = 'TSC') => {
   console.log(`🐣 (controllers/bookingController.js) makeBookingId called at`, new Date().toISOString(), { dateStr, lastName });
@@ -724,7 +734,12 @@ async function upsertCalendarForConfirmedBooking({
 // ---------------- Stripe checkout → pending booking ----------------
 
 export const createCheckoutSession = async (req, res) => {
-  console.log(`🐣 (controllers/bookingController.js) createCheckoutSession called at`, new Date().toISOString(), { bodyKeys: Object.keys(req.body || {}) });
+  console.log(
+    `🐣 (controllers/bookingController.js) createCheckoutSession called at`,
+    new Date().toISOString(),
+    { bodyKeys: Object.keys(req.body || {}) }
+  );
+
   try {
     const {
       cartDetails,
@@ -764,22 +779,38 @@ export const createCheckoutSession = async (req, res) => {
       userEmail,
     });
 
+    // ----------------------------
+    // Helpers
+    // ----------------------------
+    const roundToPennies = (n) => Math.round(Number(n || 0) * 100) / 100;
+    const roundUpToPound = (n) => Math.ceil(Number(n || 0)); // 2201.15 -> 2202
+
+    const depositRate = Number(process.env.TSC_DEPOSIT_RATE ?? 0.33); // ✅ matches cart
+    const markupRate = Number(process.env.TSC_MARKUP_RATE ?? process.env.TSC_MARGIN_RATE ?? 0.33);
+    const markupFactor = 1 + markupRate;
+
+    const pretty = (n) =>
+      Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
     // Detect test acts
-const isTestActName = (name = "") => {
-  const n = name.toLowerCase();
-  return (
-    n.includes("test dancefloor magic") ||
-    n.includes("test soul allegiance") ||
-    n.includes("test motown magic")
-  );
-};
+    const isTestActName = (name = "") => {
+      const n = String(name || "").toLowerCase();
+      return (
+        n.includes("test dancefloor magic") ||
+        n.includes("test soul allegiance") ||
+        n.includes("test motown magic")
+      );
+    };
 
-// Detect test act lineup in Stripe-friendly item name
-const extractActName = (fullName = "") => {
-  // Example: "Booking: Test Dancefloor Magic - 4-Piece"
-  return fullName.replace("Booking:", "").split("-")[0].trim();
-};
+    // Detect test act lineup in Stripe-friendly item name
+    const extractActName = (fullName = "") => {
+      // Example: "Booking: Test Dancefloor Magic - 4-Piece"
+      return String(fullName || "").replace("Booking:", "").split("-")[0].trim();
+    };
 
+    // ----------------------------
+    // Sanitize items
+    // ----------------------------
     const safeItems = cartDetails
       .map((it) => ({
         name: String(it?.name || "").trim(),
@@ -795,66 +826,62 @@ const extractActName = (fullName = "") => {
           it.quantity > 0
       );
 
-      // 🔧 Force minimum 50p for test acts
-safeItems.forEach((it) => {
-  const actName = extractActName(it.name);
-
-  if (isTestActName(actName)) {
-    if (it.price < 0.50) {
-      console.log("⚠️ Test act uplift: price", it.price, "→ 0.50");
-      it.price = 0.50; // Convert to 50p
-    }
-  }
-});
+    // 🔧 Force minimum 50p for test acts (prevents Stripe <50p)
+    safeItems.forEach((it) => {
+      const actName = extractActName(it.name);
+      if (isTestActName(actName) && it.price < 0.5) {
+        console.log("⚠️ Test act uplift: price", it.price, "→ 0.50");
+        it.price = 0.5;
+      }
+    });
 
     if (safeItems.length === 0) {
       return res.status(400).json({ error: "No payable items found in cartDetails." });
     }
 
-// After applying test-act uplifts on safeItems:
-const roundToPennies = (n) => Math.round(Number(n || 0) * 100) / 100;
+    // ----------------------------
+    // Totals (NET -> GROSS -> ROUNDING)
+    // ----------------------------
+    const netTotal = roundToPennies(
+      safeItems.reduce((sum, it) => sum + Number(it.price || 0) * Number(it.quantity || 1), 0)
+    );
 
-// Net total as received (often "before margin")
-const netTotal = roundToPennies(
-  safeItems.reduce((sum, it) => sum + Number(it.price || 0) * Number(it.quantity || 1), 0)
-);
+    const isTestBooking = safeItems.some((it) => isTestActName(extractActName(it.name)));
+    const pricesIncludeMargin = req.body?.pricesIncludeMargin === true;
 
-// Detect test bookings (keep these ultra-low and predictable)
-const isTestBooking = safeItems.some((it) => isTestActName(extractActName(it.name)));
+    // Only apply markup if:
+    // - not a test booking, AND
+    // - FE hasn’t already sent gross prices
+    const applyMarkup = !isTestBooking && !pricesIncludeMargin;
 
-// Optional switch from FE to prevent double-margin if you later start sending gross prices
-const pricesIncludeMargin = req.body?.pricesIncludeMargin === true;
+    const grossUnrounded = applyMarkup ? netTotal * markupFactor : netTotal;
 
-// NOTE: "margin" vs "markup"
-// - Markup: sell = cost * (1 + markupRate)
-// - Margin: margin = (sell - cost) / sell
-// Sitewide you’ve been using ~x1.33, which is a 33% markup (~24.8% margin).
-const markupRate = Number(process.env.TSC_MARKUP_RATE ?? process.env.TSC_MARGIN_RATE ?? 0.33);
-const markupFactor = 1 + markupRate;
-const applyMarkup = !isTestBooking && !pricesIncludeMargin;
+    // ✅ Match cart: round UP to the nearest £1
+    let grossTotal = roundUpToPound(grossUnrounded);
 
-let grossTotal = applyMarkup ? roundToPennies(netTotal * markupFactor) : netTotal;
-// ⛑️ Safety: ensure grossTotal is never below 0.50 for test acts
-if (isTestBooking && grossTotal < 0.50) {
-  console.log("⚠️ Uplifting grossTotal", grossTotal, "→ 0.50 minimum");
-  grossTotal = 0.50;
-}
+    // ⛑️ Safety: ensure whole-pound minimum is at least £1 for tests
+    if (isTestBooking && grossTotal < 1) {
+      console.log("⚠️ Uplifting grossTotal", grossTotal, "→ 1.00 minimum");
+      grossTotal = 1;
+    }
 
-let depositGross = calcDeposit(grossTotal);
+    // ✅ Deposit must be exactly 33% of the rounded gross total (like cart)
+    const depositGross = roundToPennies(grossTotal * depositRate);
 
+    // ----------------------------
+    // Payment mode logic
+    // ----------------------------
     const dte = daysUntil(date);
     const requiresFull = dte != null && dte <= 28;
     const clientHint = paymentMode === "full" || paymentMode === "deposit" ? paymentMode : null;
     const finalMode = requiresFull ? "full" : clientHint || "deposit";
-const chargeGross = finalMode === "full" ? grossTotal : depositGross;
 
-// Stripe hard safety rule:
-if (!Number.isFinite(chargeGross) || chargeGross < 0.50) {
-  return res.status(400).json({ error: "Calculated charge amount is invalid." });
-}
+    const chargeGross = finalMode === "full" ? grossTotal : depositGross;
 
-    const pretty = (n) =>
-      Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Stripe hard safety rule:
+    if (!Number.isFinite(chargeGross) || chargeGross < 0.5) {
+      return res.status(400).json({ error: "Calculated charge amount is invalid." });
+    }
 
     const bits = [];
     if (eventType) bits.push(eventType);
@@ -877,8 +904,10 @@ if (!Number.isFinite(chargeGross) || chargeGross < 0.50) {
 
     console.log("🧮 Charge decision", {
       netTotal,
+      grossUnrounded: roundToPennies(grossUnrounded),
       grossTotal,
       depositGross,
+      depositRate,
       daysUntilEvent: dte,
       requiresFull,
       clientHint,
@@ -886,15 +915,14 @@ if (!Number.isFinite(chargeGross) || chargeGross < 0.50) {
       chargeGross,
       pricesIncludeMargin,
       markupRate,
-markupFactor,
-applyMarkup,
+      markupFactor,
+      applyMarkup,
       origin,
       success_url,
       cancel_url,
     });
 
-        const bookingId = makeBookingId(date, customer?.lastName || "TSC");
-
+    const bookingId = makeBookingId(date, customer?.lastName || "TSC");
 
     const session = await stripeInstance.checkout.sessions.create({
       mode: "payment",
@@ -920,13 +948,12 @@ applyMarkup,
         gross_total_major: String(grossTotal),
         deposit_major: String(depositGross),
 
-        // margin debug
-        
-
-markup_rate: String(markupRate),
-markup_factor: String(markupFactor),
-prices_include_margin: String(pricesIncludeMargin),
-applied_markup: String(applyMarkup),
+        // debug
+        deposit_rate: String(depositRate),
+        markup_rate: String(markupRate),
+        markup_factor: String(markupFactor),
+        prices_include_margin: String(pricesIncludeMargin),
+        applied_markup: String(applyMarkup),
 
         event_type: eventType || "",
         event_date: date || "",
@@ -946,64 +973,50 @@ applied_markup: String(applyMarkup),
     });
 
     const performanceTimes = normalizePerf(
-      (req.body.performanceTimes && typeof req.body.performanceTimes === "object")
+      req.body.performanceTimes && typeof req.body.performanceTimes === "object"
         ? req.body.performanceTimes
         : {}
     );
 
-const actsSummaryWithPerf = Array.isArray(actsSummary)
-  ? await Promise.all(
-      actsSummary.map(async (it) => {
-        const selectedVocalist = it.selectedVocalist || null;
+    const actsSummaryWithPerf = Array.isArray(actsSummary)
+      ? await Promise.all(
+          actsSummary.map(async (it) => {
+            const selectedVocalist = it.selectedVocalist || null;
 
-        let selectedVocalistName = null;
-        if (selectedVocalist?.musicianId) {
-          selectedVocalistName = await lookupMusicianName(selectedVocalist.musicianId);
-        }
+            let selectedVocalistName = null;
+            if (selectedVocalist?.musicianId) {
+              selectedVocalistName = await lookupMusicianName(selectedVocalist.musicianId);
+            }
 
-        const bandMembersFlat =
-          Array.isArray(it.bandMembers) ? it.bandMembers
-          : (Array.isArray(it.lineup?.bandMembers) ? it.lineup.bandMembers : []);
+            const bandMembersFlat =
+              Array.isArray(it.bandMembers)
+                ? it.bandMembers
+                : Array.isArray(it.lineup?.bandMembers)
+                  ? it.lineup.bandMembers
+                  : [];
 
-        return {
-          ...it,
-          performance: normalizePerf(it.performance || performanceTimes),
+            return {
+              ...it,
+              performance: normalizePerf(it.performance || performanceTimes),
 
-          // ✅ ensure contract always has a consistent place to read from
-          bandMembers: bandMembersFlat,
-          actSize: it.actSize || it.lineup?.actSize || it.lineupLabel || "",
+              // ✅ consistent
+              bandMembers: bandMembersFlat,
+              actSize: it.actSize || it.lineup?.actSize || it.lineupLabel || "",
 
-          selectedVocalist,
-          selectedVocalistName,
-        };
-      })
-    )
-  : [];
-
+              selectedVocalist,
+              selectedVocalistName,
+            };
+          })
+        )
+      : [];
 
     // ✅ Adjust deposit logic for full payments
     const fixedDeposit = finalMode === "full" ? 0 : depositGross;
-console.log("🧾 [Checkout] actsSummary[0] incoming keys:", Object.keys((actsSummary && actsSummary[0]) || {}));
-console.log("🧾 [Checkout] actsSummaryWithPerf[0] to be saved:", {
-  hasBandMembersTop: Array.isArray(actsSummaryWithPerf?.[0]?.bandMembers),
-  bandMembersTopLen: Array.isArray(actsSummaryWithPerf?.[0]?.bandMembers)
-    ? actsSummaryWithPerf[0].bandMembers.length
-    : 0,
-  hasLineupObj: !!actsSummaryWithPerf?.[0]?.lineup,
-  lineupKeys: actsSummaryWithPerf?.[0]?.lineup ? Object.keys(actsSummaryWithPerf[0].lineup) : [],
-  lineupBandMembersLen: Array.isArray(actsSummaryWithPerf?.[0]?.lineup?.bandMembers)
-    ? actsSummaryWithPerf[0].lineup.bandMembers.length
-    : 0,
-});
+
     await Booking.create({
       bookingId,
-
-      // per-item perf block (patched)
       actsSummary: actsSummaryWithPerf || actsSummary || [],
-
-      // top-level canonical performance times (always present)
       performanceTimes,
-
       venueAddress: venueAddress || venue || "",
       eventType,
       venue,
@@ -1017,24 +1030,12 @@ console.log("🧾 [Checkout] actsSummaryWithPerf[0] to be saved:", {
       userEmail,
       totals: {
         fullAmount: grossTotal,
-        depositAmount: fixedDeposit, // ✅ fixes £41 issue
+        depositAmount: fixedDeposit,
         chargedAmount: chargeGross,
         chargeMode: finalMode,
       },
     });
-const created = await Booking.findOne({ bookingId }).lean();
 
-console.log("🧾 [Checkout] booking stored actsSummary[0]:", {
-  hasBandMembersTop: Array.isArray(created?.actsSummary?.[0]?.bandMembers),
-  bandMembersTopLen: Array.isArray(created?.actsSummary?.[0]?.bandMembers)
-    ? created.actsSummary[0].bandMembers.length
-    : 0,
-  hasLineupObj: !!created?.actsSummary?.[0]?.lineup,
-  lineupKeys: created?.actsSummary?.[0]?.lineup ? Object.keys(created.actsSummary[0].lineup) : [],
-  lineupBandMembersLen: Array.isArray(created?.actsSummary?.[0]?.lineup?.bandMembers)
-    ? created.actsSummary[0].lineup.bandMembers.length
-    : 0,
-});
     console.log(`✅ Booking created: ${bookingId}`);
     return res.json({ url: session.url });
   } catch (err) {
@@ -1788,11 +1789,11 @@ export const createBooking = async (req, res) => {
     // What was charged now?
     const chargedAmountMajor = typeof amount === "number"
       ? amount
-      : (requiresFullPayment ? fee : Math.round(fee * 0.2)); // fallback: 20% deposit if caller didn’t send totals
+      : (requiresFullPayment ? fee : Math.round(fee * 0.33 * 100) / 100); // fallback: 33% deposit if caller didn’t send totals
 
     const safeTotals = {
       fullAmount: Number(totals?.fullAmount ?? fee) || 0,
-      depositAmount: Number(totals?.depositAmount ?? Math.round(fee * 0.2)) || 0,
+      depositAmount: Number(totals?.depositAmount ?? (Math.round(fee * 0.33 * 100) / 100)) || 0,
       chargedAmount: Number(totals?.chargedAmount ?? chargedAmountMajor) || 0,
       chargeMode: requiresFullPayment ? "full" : "deposit",
       isLessThanFourWeeks: requiresFullPayment,
