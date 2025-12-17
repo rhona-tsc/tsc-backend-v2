@@ -2446,7 +2446,31 @@ const stripe = await import("stripe").then((m) => new m.default(stripeSecret));
     // 8️⃣ CONTRACT GENERATION – EJS
     // ------------------------------------------------
     const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
+// ✅ Debug: what the contract renderer is receiving
+const actsSummaryToRender = booking?.actsSummary || [];
 
+console.log("🧾 [Contract] actsSummary count:", Array.isArray(actsSummaryToRender) ? actsSummaryToRender.length : 0);
+
+if (Array.isArray(actsSummaryToRender) && actsSummaryToRender.length) {
+  const it = actsSummaryToRender[0];
+
+  console.log("🧾 [Contract] actsSummary[0] keys:", Object.keys(it || {}));
+
+  console.log("🧾 [Contract] actsSummary[0] shape:", {
+    actName: it?.actName || it?.tscName || it?.name,
+    lineupLabel: it?.lineupLabel,
+    actSizeTopLevel: it?.actSize,
+    hasTopLevelBandMembers: Array.isArray(it?.bandMembers),
+    topLevelBandMembersLen: Array.isArray(it?.bandMembers) ? it.bandMembers.length : 0,
+    hasNestedLineup: !!it?.lineup,
+    nestedLineupKeys: it?.lineup ? Object.keys(it.lineup) : [],
+    hasNestedBandMembers: Array.isArray(it?.lineup?.bandMembers),
+    nestedBandMembersLen: Array.isArray(it?.lineup?.bandMembers) ? it.lineup.bandMembers.length : 0,
+    nestedInstruments: Array.isArray(it?.lineup?.bandMembers)
+      ? it.lineup.bandMembers.map(m => m?.instrument).filter(Boolean)
+      : [],
+  });
+}
     let html;
     try {
       html = await ejs.renderFile(templatePath, {
