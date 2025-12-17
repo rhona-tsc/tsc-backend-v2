@@ -931,16 +931,21 @@ const actsSummaryWithPerf = Array.isArray(actsSummary)
 
         let selectedVocalistName = null;
         if (selectedVocalist?.musicianId) {
-          selectedVocalistName = await lookupMusicianName(
-            selectedVocalist.musicianId
-          );
+          selectedVocalistName = await lookupMusicianName(selectedVocalist.musicianId);
         }
+
+        const bandMembersFlat =
+          Array.isArray(it.bandMembers) ? it.bandMembers
+          : (Array.isArray(it.lineup?.bandMembers) ? it.lineup.bandMembers : []);
 
         return {
           ...it,
           performance: normalizePerf(it.performance || performanceTimes),
 
-          // carry over vocalist info
+          // ✅ ensure contract always has a consistent place to read from
+          bandMembers: bandMembersFlat,
+          actSize: it.actSize || it.lineup?.actSize || it.lineupLabel || "",
+
           selectedVocalist,
           selectedVocalistName,
         };
@@ -951,7 +956,18 @@ const actsSummaryWithPerf = Array.isArray(actsSummary)
 
     // ✅ Adjust deposit logic for full payments
     const fixedDeposit = finalMode === "full" ? 0 : depositGross;
-
+console.log("🧾 [Checkout] actsSummary[0] incoming keys:", Object.keys((actsSummary && actsSummary[0]) || {}));
+console.log("🧾 [Checkout] actsSummaryWithPerf[0] to be saved:", {
+  hasBandMembersTop: Array.isArray(actsSummaryWithPerf?.[0]?.bandMembers),
+  bandMembersTopLen: Array.isArray(actsSummaryWithPerf?.[0]?.bandMembers)
+    ? actsSummaryWithPerf[0].bandMembers.length
+    : 0,
+  hasLineupObj: !!actsSummaryWithPerf?.[0]?.lineup,
+  lineupKeys: actsSummaryWithPerf?.[0]?.lineup ? Object.keys(actsSummaryWithPerf[0].lineup) : [],
+  lineupBandMembersLen: Array.isArray(actsSummaryWithPerf?.[0]?.lineup?.bandMembers)
+    ? actsSummaryWithPerf[0].lineup.bandMembers.length
+    : 0,
+});
     await Booking.create({
       bookingId,
 
@@ -979,7 +995,19 @@ const actsSummaryWithPerf = Array.isArray(actsSummary)
         chargeMode: finalMode,
       },
     });
+const created = await Booking.findOne({ bookingId }).lean();
 
+console.log("🧾 [Checkout] booking stored actsSummary[0]:", {
+  hasBandMembersTop: Array.isArray(created?.actsSummary?.[0]?.bandMembers),
+  bandMembersTopLen: Array.isArray(created?.actsSummary?.[0]?.bandMembers)
+    ? created.actsSummary[0].bandMembers.length
+    : 0,
+  hasLineupObj: !!created?.actsSummary?.[0]?.lineup,
+  lineupKeys: created?.actsSummary?.[0]?.lineup ? Object.keys(created.actsSummary[0].lineup) : [],
+  lineupBandMembersLen: Array.isArray(created?.actsSummary?.[0]?.lineup?.bandMembers)
+    ? created.actsSummary[0].lineup.bandMembers.length
+    : 0,
+});
     console.log(`✅ Booking created: ${bookingId}`);
     return res.json({ url: session.url });
   } catch (err) {
@@ -1916,7 +1944,7 @@ const markMusicianAsPaid = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing bookingId or musicianId" });
     }
 
-    const booking = await bookingModel.findById(bookingId);
+   const booking = await Booking.findOne({ bookingId }).lean();
     if (!booking) {
       return res.status(404).json({ success: false, message: "Booking not found" });
     }
@@ -2452,24 +2480,21 @@ const actsSummaryToRender = booking?.actsSummary || [];
 console.log("🧾 [Contract] actsSummary count:", Array.isArray(actsSummaryToRender) ? actsSummaryToRender.length : 0);
 
 if (Array.isArray(actsSummaryToRender) && actsSummaryToRender.length) {
-  const it = actsSummaryToRender[0];
+ const it = actsSummaryToRender[0];
+const itObj = typeof it?.toObject === "function" ? it.toObject() : it;
 
-  console.log("🧾 [Contract] actsSummary[0] keys:", Object.keys(it || {}));
+console.log("🧾 [Contract] actsSummary[0] keys:", Object.keys(itObj || {}));
 
-  console.log("🧾 [Contract] actsSummary[0] shape:", {
-    actName: it?.actName || it?.tscName || it?.name,
-    lineupLabel: it?.lineupLabel,
-    actSizeTopLevel: it?.actSize,
-    hasTopLevelBandMembers: Array.isArray(it?.bandMembers),
-    topLevelBandMembersLen: Array.isArray(it?.bandMembers) ? it.bandMembers.length : 0,
-    hasNestedLineup: !!it?.lineup,
-    nestedLineupKeys: it?.lineup ? Object.keys(it.lineup) : [],
-    hasNestedBandMembers: Array.isArray(it?.lineup?.bandMembers),
-    nestedBandMembersLen: Array.isArray(it?.lineup?.bandMembers) ? it.lineup.bandMembers.length : 0,
-    nestedInstruments: Array.isArray(it?.lineup?.bandMembers)
-      ? it.lineup.bandMembers.map(m => m?.instrument).filter(Boolean)
-      : [],
-  });
+console.log("🧾 [Contract] actsSummary[0] shape:", {
+  actName: itObj?.actName || itObj?.tscName || itObj?.name,
+  lineupLabel: itObj?.lineupLabel,
+  hasTopLevelBandMembers: Array.isArray(itObj?.bandMembers),
+  topLevelBandMembersLen: Array.isArray(itObj?.bandMembers) ? itObj.bandMembers.length : 0,
+  hasNestedLineup: !!itObj?.lineup,
+  nestedLineupKeys: itObj?.lineup ? Object.keys(itObj.lineup) : [],
+  hasNestedBandMembers: Array.isArray(itObj?.lineup?.bandMembers),
+  nestedBandMembersLen: Array.isArray(itObj?.lineup?.bandMembers) ? itObj.lineup.bandMembers.length : 0,
+});
 }
     let html;
     try {

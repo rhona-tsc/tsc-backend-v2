@@ -110,11 +110,15 @@ const ActSummarySchema = new mongoose.Schema(
     lineupLabel: String,
     bandSize: Number,
     image: mongoose.Schema.Types.Mixed,
-chosenVocalists: [
-  {
-    musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician" },
-  },
-],
+
+    chosenVocalists: [
+      { musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician" } },
+    ],
+
+    // ✅ ADD THESE (so contracts can display full lineup)
+    bandMembers: { type: [mongoose.Schema.Types.Mixed], default: [] }, // flat list used by EJS
+    lineup: { type: mongoose.Schema.Types.Mixed, default: null },      // optional snapshot object
+
     quantity: { type: Number, default: 1 },
     prices: {
       base: { type: Number, default: 0 },
@@ -126,13 +130,13 @@ chosenVocalists: [
     selectedExtras: [ExtraSchema],
     performance: PerformanceSchema,
     dismissedExtras: [String],
-    afternoonSets: [mongoose.Schema.Types.Mixed],
+    selectedAfternoonSets: [mongoose.Schema.Types.Mixed],
     allLineups: [mongoose.Schema.Types.Mixed],
 
     bandPointOfContact: {
       name: String,
       role: String,
-      phone: String, // real phone (not shown to client)
+      phone: String,
     },
     contactProxy: ProxyContactSchema,
   },
