@@ -531,4 +531,28 @@ router.get("/dashboard/:id", verifyToken, async (req, res) => {
   }
 });
 
+/* ---------------- Legacy profile aliases (public) ----------------
+   Some older frontend builds call these endpoints:
+   - GET /api/musicians/:id
+   - GET /api/musician/:id
+   - GET /api/musician/get/:id
+   Canonical endpoint is: GET /api/musician/profile/:id
+*/
+
+const readMusicianById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const doc = await musicianModel.findById(id).lean();
+    if (!doc) return res.status(404).json({ message: "Musician not found" });
+    return res.json(doc);
+  } catch (err) {
+    console.error("❌ Error fetching musician profile (legacy):", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Legacy aliases
+router.get("/get/:id", readMusicianById);
+router.get("/:id", readMusicianById);
+
 export default router;

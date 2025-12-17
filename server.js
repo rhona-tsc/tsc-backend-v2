@@ -308,6 +308,7 @@ app.use("/api/account", accountRouter);
 
 // Musicians
 app.use("/api/musician", musicianRouter);
+app.use("/api/musicians", musicianRouter); // legacy plural alias
 app.use("/api/musician-login", musicianLoginRouter);
 
 // Acts (v2) – choose ONE canonical base. I’d recommend /api/act

@@ -812,25 +812,35 @@ safeItems.forEach((it) => {
     }
 
 // After applying test-act uplifts on safeItems:
-let grossTotal = safeItems.reduce((sum, it) => sum + it.price * it.quantity, 0);
+const roundToPennies = (n) => Math.round(Number(n || 0) * 100) / 100;
 
-// ⛑️ Safety: ensure grossTotal is never below 0.50 for test acts
-const isTestBooking = safeItems.some(it =>
-  isTestActName(extractActName(it.name))
+// Net total as received (often "before margin")
+const netTotal = roundToPennies(
+  safeItems.reduce((sum, it) => sum + Number(it.price || 0) * Number(it.quantity || 1), 0)
 );
 
+// Detect test bookings (keep these ultra-low and predictable)
+const isTestBooking = safeItems.some((it) => isTestActName(extractActName(it.name)));
+
+// Optional switch from FE to prevent double-margin if you later start sending gross prices
+const pricesIncludeMargin = req.body?.pricesIncludeMargin === true;
+
+// NOTE: "margin" vs "markup"
+// - Markup: sell = cost * (1 + markupRate)
+// - Margin: margin = (sell - cost) / sell
+// Sitewide you’ve been using ~x1.33, which is a 33% markup (~24.8% margin).
+const markupRate = Number(process.env.TSC_MARKUP_RATE ?? process.env.TSC_MARGIN_RATE ?? 0.33);
+const markupFactor = 1 + markupRate;
+const applyMarkup = !isTestBooking && !pricesIncludeMargin;
+
+let grossTotal = applyMarkup ? roundToPennies(netTotal * markupFactor) : netTotal;
+// ⛑️ Safety: ensure grossTotal is never below 0.50 for test acts
 if (isTestBooking && grossTotal < 0.50) {
   console.log("⚠️ Uplifting grossTotal", grossTotal, "→ 0.50 minimum");
-  grossTotal = 0.50;   // ✔️ Now allowed
+  grossTotal = 0.50;
 }
 
 let depositGross = calcDeposit(grossTotal);
-
-// Stripe min charge 50p
-if (isTestBooking && depositGross < 0.50) {
-  console.log("⚠️ Uplifting deposit", depositGross, "→ 0.50 minimum");
-  depositGross = 0.50;
-}
 
     const dte = daysUntil(date);
     const requiresFull = dte != null && dte <= 28;
@@ -866,6 +876,7 @@ if (!Number.isFinite(chargeGross) || chargeGross < 0.50) {
     const cancel_url = requireAbsoluteUrl(`${origin}/cart`);
 
     console.log("🧮 Charge decision", {
+      netTotal,
       grossTotal,
       depositGross,
       daysUntilEvent: dte,
@@ -873,6 +884,10 @@ if (!Number.isFinite(chargeGross) || chargeGross < 0.50) {
       clientHint,
       finalMode,
       chargeGross,
+      pricesIncludeMargin,
+      markupRate,
+markupFactor,
+applyMarkup,
       origin,
       success_url,
       cancel_url,
@@ -897,10 +912,22 @@ if (!Number.isFinite(chargeGross) || chargeGross < 0.50) {
         },
       ],
       metadata: {
-        booking_ref: bookingId, 
+        booking_ref: bookingId,
         booking_mode: finalMode,
+
+        // totals (major units)
+        net_total_major: String(netTotal),
         gross_total_major: String(grossTotal),
         deposit_major: String(depositGross),
+
+        // margin debug
+        
+
+markup_rate: String(markupRate),
+markup_factor: String(markupFactor),
+prices_include_margin: String(pricesIncludeMargin),
+applied_markup: String(applyMarkup),
+
         event_type: eventType || "",
         event_date: date || "",
         venue: venue || "",
