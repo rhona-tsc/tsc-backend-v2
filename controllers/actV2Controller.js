@@ -37,6 +37,9 @@ const buildSetDoc = (obj, prefix = "", out = {}) => {
   return out;
 };
 
+// Helper to validate ObjectIds
+const isValidObjectId = (v) => mongoose.isValidObjectId(String(v || ""));
+
 export const updateActV2 = async (req, res) => {
   try {
     const actId = req.params.id;
@@ -104,23 +107,56 @@ export const updateActV2 = async (req, res) => {
 export const createActV2 = async (req, res) => {
   try {
     console.log("Creating Act V2 with data:", req.body);
-    const data = req.body;
 
-    const authUserId   = req.user?.id || req.user?._id || req.headers.userid || null;
+    const data = req.body || {};
+
+    // Never trust client-sent ownership fields
+    const cleaned = { ...data };
+    delete cleaned.createdBy;
+    delete cleaned.createdByRole;
+    delete cleaned.createdByEmail;
+    delete cleaned.createdByName;
+    delete cleaned.owner;
+    delete cleaned.ownerId;
+    delete cleaned.registeredBy;
+    delete cleaned.userId;
+    delete cleaned.musicianId;
+    delete cleaned.owners;
+
+    // Resolve auth identity (must be an ObjectId for createdBy)
+    const headerUserId = req.headers.userid || req.headers.userId || null;
+    const candidateId = req.user?.id || req.user?._id || headerUserId || null;
+    const authUserId = isValidObjectId(candidateId) ? String(candidateId) : null;
+
     const authUserRole = req.user?.role || req.headers.userrole || null;
     const authUserEmail = req.user?.email || req.headers.useremail || null;
-    const authUserName  = `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim();
+    const authUserName = `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim();
 
-    console.log("🔦 Creating act with lightingSystem:", data.lightingSystem);
-    console.log("📜 Creating act with setlist:", data.setlist);
+    console.log("🔦 Creating act with lightingSystem:", cleaned.lightingSystem);
+    console.log("📜 Creating act with setlist:", cleaned.setlist);
 
-    const finalStatus = data.status || "pending";
+    // If we can't identify the creator as an ObjectId, fail fast.
+    // This prevents accidental saving of an email into createdBy.
+    if (!authUserId) {
+      console.warn("🚫 createActV2 blocked: missing/invalid auth user id", {
+        candidateId,
+        headerUserId,
+        decoded: req.user ? { id: req.user.id, _id: req.user._id, role: req.user.role } : null,
+      });
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized: missing or invalid user id for createdBy",
+      });
+    }
+
+    // Status: allow draft/pending etc from client, but default to pending
+    const finalStatus = cleaned.status || "pending";
     console.log("📌 Final status before save:", finalStatus);
 
     const newAct = new actModel({
-      ...data,
+      ...cleaned,
       status: finalStatus,
-      ...(authUserId   ? { createdBy: authUserId }   : {}),
+      createdBy: authUserId,
       ...(authUserRole ? { createdByRole: authUserRole } : {}),
       ...(authUserEmail ? { createdByEmail: authUserEmail } : {}),
       ...(authUserName ? { createdByName: authUserName } : {}),
@@ -129,14 +165,16 @@ export const createActV2 = async (req, res) => {
     await newAct.save();
 
     // 🔄 Upsert/refresh the lightweight card row
-    try { await upsertActCardFromAct(newAct); } catch (e) {
+    try {
+      await upsertActCardFromAct(newAct);
+    } catch (e) {
       console.warn("⚠️ Card upsert after create failed:", e.message);
     }
 
-    res.status(201).json({ message: "Act created", id: newAct._id });
+    return res.status(201).json({ success: true, message: "Act created", id: newAct._id });
   } catch (err) {
     console.error("❌ Failed to create act:", err);
-    res.status(500).json({ error: "Failed to create act", details: err.message });
+    return res.status(500).json({ success: false, error: "Failed to create act", details: err.message });
   }
 };
 
@@ -197,7 +235,29 @@ export const saveActDraftV2 = async (req, res) => {
       return res.status(200).json({ message: "Draft updated", _id: updated._id });
     } else {
       // Creating a new draft
-      const toCreate = { ...data, status };
+      const headerUserId = req.headers.userid || req.headers.userId || null;
+      const candidateId = req.user?.id || req.user?._id || headerUserId || null;
+      const authUserId = isValidObjectId(candidateId) ? String(candidateId) : null;
+
+      const toCreate = {
+        ...data,
+        status,
+        ...(authUserId ? { createdBy: authUserId } : {}),
+        ...(req.user?.role ? { createdByRole: req.user.role } : {}),
+        ...(req.user?.email ? { createdByEmail: req.user.email } : {}),
+        ...((req.user?.firstName || req.user?.lastName)
+          ? { createdByName: `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim() }
+          : {}),
+      };
+
+      // Never trust client-sent ownership fields
+      delete toCreate.owner;
+      delete toCreate.ownerId;
+      delete toCreate.registeredBy;
+      delete toCreate.userId;
+      delete toCreate.musicianId;
+      delete toCreate.owners;
+
       const doc = new actModel(toCreate);
       await doc.save();
 
