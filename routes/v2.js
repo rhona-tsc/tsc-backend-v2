@@ -9,34 +9,7 @@ import { searchActCards } from "../controllers/actCardController.js";
 
 const router = express.Router();
 
-/* ─────────────────────────── DEBUG HELPERS ─────────────────────────── */
-const inspect = (obj, depth = 6) =>
-  util.inspect(obj, { depth, colors: false, maxArrayLength: 100 });
 
-const rid = () => Math.random().toString(36).slice(2, 8);
-
-// Global logger for every /api/v2 hit
-router.use((req, res, next) => {
-  req._rid = req._rid || rid();
-  const t0 = Date.now();
-  req._t0 = t0;
-  console.log(`🧭 [v2][${req._rid}] ${req.method} ${req.originalUrl}`);
-  console.log(
-    `   ↳ ip=${req.ip} ua=${(req.headers["user-agent"] || "").slice(0, 120)}`
-  );
-  if (Object.keys(req.query || {}).length)
-    console.log("   ↳ query:", inspect(req.query));
-  if (Object.keys(req.params || {}).length)
-    console.log("   ↳ params:", inspect(req.params));
-
-  res.on("finish", () => {
-    const ms = Date.now() - t0;
-    console.log(
-      `✅ [v2][${req._rid}] ${res.statusCode} ${req.method} ${req.originalUrl} • ${ms}ms`
-    );
-  });
-  next();
-});
 
 // small middleware to print auth context after optionalAuthUser
 const afterAuth = (label) => (req, _res, next) => {
@@ -51,13 +24,11 @@ const afterAuth = (label) => (req, _res, next) => {
 
 // wrapper to time & log controller entry/exit
 const wrap = (label, fn) => async (req, res, next) => {
-  const t0 = Date.now();
-  console.log(`▶️  [v2][${req._rid}] ${label} start`);
+
+  
   try {
     const out = await fn(req, res, next);
-    console.log(
-      `⏹️  [v2][${req._rid}] ${label} end • ${Date.now() - t0}ms`
-    );
+  
     return out;
   } catch (err) {
     console.error(
