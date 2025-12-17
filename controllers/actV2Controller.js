@@ -141,7 +141,9 @@ export const createActV2 = async (req, res) => {
       console.warn("🚫 createActV2 blocked: missing/invalid auth user id", {
         candidateId,
         headerUserId,
-        decoded: req.user ? { id: req.user.id, _id: req.user._id, role: req.user.role } : null,
+        decoded: req.user
+          ? { id: req.user.id, _id: req.user._id, role: req.user.role, email: req.user.email }
+          : null,
       });
       return res.status(401).json({
         success: false,
@@ -171,10 +173,14 @@ export const createActV2 = async (req, res) => {
       console.warn("⚠️ Card upsert after create failed:", e.message);
     }
 
-    return res.status(201).json({ success: true, message: "Act created", id: newAct._id });
+    return res
+      .status(201)
+      .json({ success: true, message: "Act created", id: newAct._id });
   } catch (err) {
     console.error("❌ Failed to create act:", err);
-    return res.status(500).json({ success: false, error: "Failed to create act", details: err.message });
+    return res
+      .status(500)
+      .json({ success: false, error: "Failed to create act", details: err.message });
   }
 };
 

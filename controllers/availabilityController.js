@@ -489,6 +489,31 @@ export function formatNiceDate(dateISO) {
 // Safe to keep in the same file; it lazily imports deps.
 export async function sendClientEmail({ actId, to, userId = null, name, subject, html, allowHello = false,  }) {
   console.log("✉️ sendClientEmail START", { actId, to, userId, name, subject });
+// Normalize SMTP envs (prevents app-password whitespace/newline issues)
+// Never log secrets – only safe metadata.
+if (process.env.GMAIL_USER) {
+  process.env.GMAIL_USER = String(process.env.GMAIL_USER).trim().toLowerCase();
+}
+
+// app passwords often get pasted as "xxxx xxxx xxxx xxxx"
+if (process.env.GMAIL_PASS) {
+  process.env.GMAIL_PASS = String(process.env.GMAIL_PASS).replace(/\s+/g, "");
+}
+
+// support alt naming too
+if (process.env.GMAIL_APP_PASSWORD && !process.env.GMAIL_PASS) {
+  process.env.GMAIL_PASS = String(process.env.GMAIL_APP_PASSWORD).replace(/\s+/g, "");
+}
+
+// if some code uses EMAIL_* instead of GMAIL_*
+if (!process.env.EMAIL_USER && process.env.GMAIL_USER) process.env.EMAIL_USER = process.env.GMAIL_USER;
+if (!process.env.EMAIL_PASS && process.env.GMAIL_PASS) process.env.EMAIL_PASS = process.env.GMAIL_PASS;
+
+console.log("🔐 sendClientEmail SMTP env snapshot", {
+  smtpUser: process.env.GMAIL_USER || process.env.EMAIL_USER || undefined,
+  smtpPassLen: String(process.env.GMAIL_PASS || process.env.EMAIL_PASS || "").length || 0,
+  defaultFrom: process.env.DEFAULT_FROM || undefined,
+});
 
   try {
     // Lazy-load deps so we don't juggle top-level imports or risk circulars
@@ -568,13 +593,17 @@ export async function sendClientEmail({ actId, to, userId = null, name, subject,
     return { success: false, skipped: true, reason: "no_valid_client_recipient" };
   }
 
-  const result = await sendEmail({
-    to: [finalRecipient],
-    bcc: ["hello@thesupremecollective.co.uk"],
-    subject,
-    html,
-    from: process.env.DEFAULT_FROM || "hello@thesupremecollective.co.uk",
-  });
+const fromAddr = (process.env.DEFAULT_FROM || "hello@thesupremecollective.co.uk").trim();
+
+const result = await sendEmail({
+  to: [finalRecipient],
+  bcc: ["hello@thesupremecollective.co.uk"],
+  subject,
+  html,
+  // This can be the alias address — SMTP auth should still be rhona@
+  from: fromAddr,
+  replyTo: "hello@thesupremecollective.co.uk",
+});
 
     // ── Interpret low-level result explicitly ────────────────────────────────
     if (result?.skipped) {

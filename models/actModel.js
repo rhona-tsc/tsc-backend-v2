@@ -179,7 +179,7 @@ const actSchema = new mongoose.Schema(
     timesBooked: { type: Number, default: 0 },
     numberOfShortlistsIn: { type: Number, default: 0 },
     discountToClient: { type: Number, default: 0 },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "user" },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "musician" },
     createdByName: { type: String, index: true }, // ✅ indexed for faster lookup
     createdByEmail: { type: String, index: true }, // ✅ indexed for search/filter
     useMUTravelRates: { type: Boolean },
