@@ -487,7 +487,7 @@ export function formatNiceDate(dateISO) {
 // ───────────────────────────────────────────────────────────────────────────────
 // Resolves recipient from a User id or an email, and always CCs hello@
 // Safe to keep in the same file; it lazily imports deps.
-export async function sendClientEmail({ actId, to, userId = null, name, subject, html }) {
+export async function sendClientEmail({ actId, to, userId = null, name, subject, html, allowHello = false,  }) {
   console.log("✉️ sendClientEmail START", { actId, to, userId, name, subject });
 
   try {
@@ -558,20 +558,23 @@ export async function sendClientEmail({ actId, to, userId = null, name, subject,
       sendEmailsFlag: process.env.SEND_EMAILS,
     });
 
-    // Guard: don't send *only* to hello@
-    if (!finalRecipient || !isEmail(finalRecipient) || finalRecipient === "hello@thesupremecollective.co.uk") {
-      console.warn("⚠️ No valid client recipient (or only hello@). Skipping sendEmail.");
-      return { success: false, skipped: true, reason: "no_valid_client_recipient" };
-    }
+     // Guard: don't send *only* to hello@ unless explicitly allowed
+  if (
+    !finalRecipient ||
+    !isEmail(finalRecipient) ||
+    (!allowHello && finalRecipient === "hello@thesupremecollective.co.uk")
+  ) {
+    console.warn("⚠️ No valid client recipient (or only hello@). Skipping sendEmail.");
+    return { success: false, skipped: true, reason: "no_valid_client_recipient" };
+  }
 
-    // ── Actually send ────────────────────────────────────────────────────────
-    const result = await sendEmail({
-      to: [finalRecipient], // ensure array for strict normalizers
-      bcc: ["hello@thesupremecollective.co.uk"],
-      subject,
-      html,
-      from: process.env.DEFAULT_FROM || "hello@thesupremecollective.co.uk",
-    });
+  const result = await sendEmail({
+    to: [finalRecipient],
+    bcc: ["hello@thesupremecollective.co.uk"],
+    subject,
+    html,
+    from: process.env.DEFAULT_FROM || "hello@thesupremecollective.co.uk",
+  });
 
     // ── Interpret low-level result explicitly ────────────────────────────────
     if (result?.skipped) {
@@ -1809,6 +1812,20 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   const body = isExpress ? reqOrArgs.body : reqOrArgs;
   const res = isExpress ? maybeRes : null;
 
+  // Normalize request object (this function is called both as an Express handler and as an internal helper)
+const reqObj = isExpress ? reqOrArgs : {};
+
+// Prefer auth-derived userId when available; fall back to body
+const authUserIdRaw = reqObj?.user?._id || reqObj?.userId || null;
+const bodyUserIdRaw =
+  body?.userId || body?.user?._id || body?.user?.id || body?.userIdFromToken || null;
+
+const authUserId = authUserIdRaw ? String(authUserIdRaw) : null;
+const bodyUserId = bodyUserIdRaw ? String(bodyUserIdRaw) : null;
+const clientUserId = authUserId || bodyUserId || null;
+
+const hasAuthHeader = isExpress ? !!reqObj?.headers?.authorization : false;
+
   try {
     const {
       actId,
@@ -1833,6 +1850,13 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       "http://localhost:5174"
     ).replace(/\/$/, "");
 
+ console.log("🧾 [triggerAvailabilityRequest] identity snapshot", {
+  isExpress,
+  bodyUserId,
+  authUserId,
+  clientUserId,
+  hasAuthHeader,
+});
     /* -------------------------------------------------------------- */
     /* 🔢 Enquiry + slotIndex base                                    */
     /* -------------------------------------------------------------- */
@@ -1857,27 +1881,27 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     let resolvedClientName = clientName || "";
     let resolvedClientEmail = clientEmail || "";
 
-    const userId =
-      body?.userId || body?.user?._id || body?.user?.id || body?.userIdFromToken;
+   const userIdForEnrichment = clientUserId;
 
-    if (!resolvedClientEmail && userId) {
-      try {
-        const userDoc = await userModel
-          .findById(userId)
-          .select("firstName surname email")
-          .lean();
+if (!resolvedClientEmail && userIdForEnrichment) {
+  try {
+    const userDoc = await userModel
+      .findById(userIdForEnrichment)
+      .select("firstName surname email")
+      .lean();
 
-        if (userDoc) {
-          resolvedClientName = `${userDoc.firstName || ""} ${userDoc.surname || ""}`.trim();
-          resolvedClientEmail = userDoc.email || "";
-          console.log(
-            `📧 Enriched client details from userId: ${resolvedClientName} <${resolvedClientEmail}>`
-          );
-        }
-      } catch (err) {
-        console.warn("⚠️ Failed to enrich client from userId:", err.message);
-      }
+    if (userDoc) {
+      resolvedClientName = `${userDoc.firstName || ""} ${userDoc.surname || ""}`.trim();
+      resolvedClientEmail = userDoc.email || "";
+      console.log(
+        `📧 Enriched client details from userId: ${resolvedClientName} <${resolvedClientEmail}>`,
+        { userIdForEnrichment, source: authUserId ? "auth" : "body" }
+      );
     }
+  } catch (err) {
+    console.warn("⚠️ Failed to enrich client from userId:", err.message);
+  }
+}
 
     /* -------------------------------------------------------------- */
     /* 📅 Basic act + date resolution                                 */
@@ -1950,6 +1974,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       lineupId,
       dateISO,
       isDeputy,
+            clientUserId,
       selectedVocalistName,
       vocalistName,
       address: address || null,
@@ -2194,7 +2219,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
         // ⛳ INSERT-ONLY META — keep clean
         const setOnInsert = {
           actId,
-          clientUserId: body?.userId || null,
+clientUserId: clientUserId || null,
           lineupId: lineup?._id || null,
           dateISO,
           phone,
@@ -2216,7 +2241,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
           musicianId: realMusicianId,
           musicianName: displayNameForLead,
           musicianEmail: enriched.email || "",
-          clientUserId: body?.userId || null,
+clientUserId: clientUserId || null,
           photoUrl: enriched.photoUrl || enriched.profilePicture || "",
           address: fullFormattedAddress,
           formattedAddress: fullFormattedAddress,
@@ -2251,6 +2276,15 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
           slotIndex: slotIndexForThis,
           requestId,
         });
+console.log("🧾 [triggerAvailabilityRequest/multi] about to upsert availability row", {
+  actId,
+  dateISO,
+  slotIndex: slotIndexForThis,
+  phone,
+  willStoreUserId: clientUserId || null,
+  willStoreClientEmail: resolvedClientEmail || null,
+  willStoreClientName: resolvedClientName || null,
+});
 
         const savedLead = await AvailabilityModel.findOneAndUpdate(
           query,
@@ -2610,7 +2644,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       actId,
       lineupId: lineup?._id || null,
       dateISO,
-    clientUserId: body?.userId || null,
+clientUserId: clientUserId || null,
       phone,
       v2: true,
       enquiryId,
@@ -2632,7 +2666,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       formattedDate,
       clientName: resolvedClientName || "",
       clientEmail: resolvedClientEmail || "",
-      clientUserId: body?.userId || null,
+clientUserId: clientUserId || null,
       actName: act?.tscName || act?.name || "",
       duties: body?.inheritedDuties || targetMember.instrument || "Performance",
       fee: String(finalFee),
@@ -2672,7 +2706,16 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       slotIndex: singleSlotIndex,
       requestId,
     });
-
+console.log("🧾 [triggerAvailabilityRequest/single] about to upsert availability row", {
+  actId,
+  dateISO,
+  slotIndex: singleSlotIndex,
+  phone,
+  willStoreUserId: clientUserId || null,
+  willStoreClientEmail: resolvedClientEmail || null,
+  willStoreClientName: resolvedClientName || null,
+  isDeputy: !!isDeputy,
+});
     const saved = await AvailabilityModel.findOneAndUpdate(
       query,
       { $setOnInsert: setOnInsert, $set: setAlways },
@@ -4248,13 +4291,16 @@ if (missingIds.length) {
 
   // Pull rows for optional email + safe summaries
   const availRows = await AvailabilityModel.find({ actId, dateISO }).lean();
-  console.log("📥 Availability rows at rebuild:", availRows.map(r => ({
-    id: r._id,
-    musicianId: r.musicianId,
-    reply: r.reply,
-    slotIndex: r.slotIndex,
-    updatedAt: r.updatedAt
-  })));
+console.log("📥 Availability rows FULL identity snapshot:", availRows.map(r => ({
+  id: String(r._id),
+  slotIndex: r.slotIndex,
+  reply: r.reply,
+  userId: r.userId || r.clientUserId || null,
+  clientEmail: r.clientEmail || null,
+  clientName: r.clientName || null,
+  createdAt: r.createdAt,
+  updatedAt: r.updatedAt,
+})));
 
   // If no badge → clear
   if (!badge) {
@@ -4579,6 +4625,13 @@ try {
     (allRows.find((r) => r?.clientUserId)?.clientUserId) ||
     null;
 
+    console.log("🧠 [rebuild] resolved client identity", {
+  availabilityRecordId: availabilityRecord?._id ? String(availabilityRecord._id) : null,
+  resolvedClientUserId: clientUserId || null,
+  resolvedClientEmail: clientEmail || null,
+  resolvedClientName: clientName || null,
+});
+
   const heroImg =
     (Array.isArray(actDoc.coverImage) && actDoc.coverImage[0]?.url) ||
     (Array.isArray(actDoc.images) && actDoc.images[0]?.url) ||
@@ -4631,6 +4684,7 @@ try {
       userId: clientUserId,
       to: clientEmail,
       name: clientName,
+      allowHello: true,
       bcc: ["hello@thesupremecollective.co.uk"],
       subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s Lead Vocalist is available for ${eventDatePretty}`,
       html: `
