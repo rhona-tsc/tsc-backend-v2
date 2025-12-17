@@ -9,9 +9,9 @@ const normUser = (v) => String(v || "").trim().toLowerCase();
 const normPass = (v) => String(v || "").replace(/\s+/g, ""); // remove ALL whitespace
 
 function getTransporter() {
-  const user = normUser(process.env.GMAIL_USER || process.env.EMAIL_USER);
+  const user = normUser(process.env.GMAIL_AVAIL_USER || process.env.EMAIL_USER);
   const pass = normPass(
-    process.env.GMAIL_PASS ||
+    process.env.GMAIL_AVAIL_PASS ||
       process.env.EMAIL_PASS ||
       process.env.GMAIL_APP_PASSWORD
   );

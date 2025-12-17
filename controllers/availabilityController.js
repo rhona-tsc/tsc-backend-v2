@@ -491,27 +491,18 @@ export async function sendClientEmail({ actId, to, userId = null, name, subject,
   console.log("✉️ sendClientEmail START", { actId, to, userId, name, subject });
 // Normalize SMTP envs (prevents app-password whitespace/newline issues)
 // Never log secrets – only safe metadata.
-if (process.env.GMAIL_USER) {
-  process.env.GMAIL_USER = String(process.env.GMAIL_USER).trim().toLowerCase();
+if (process.env.GMAIL_AVAIL_USER) {
+  process.env.GMAIL_AVAIL_USER = String(process.env.GMAIL_AVAIL_USER).trim().toLowerCase();
 }
 
 // app passwords often get pasted as "xxxx xxxx xxxx xxxx"
-if (process.env.GMAIL_PASS) {
-  process.env.GMAIL_PASS = String(process.env.GMAIL_PASS).replace(/\s+/g, "");
+if (process.env.GMAIL_AVAIL_PASS) {
+  process.env.GMAIL_AVAIL_PASS = String(process.env.GMAIL_AVAIL_PASS).replace(/\s+/g, "");
 }
-
-// support alt naming too
-if (process.env.GMAIL_APP_PASSWORD && !process.env.GMAIL_PASS) {
-  process.env.GMAIL_PASS = String(process.env.GMAIL_APP_PASSWORD).replace(/\s+/g, "");
-}
-
-// if some code uses EMAIL_* instead of GMAIL_*
-if (!process.env.EMAIL_USER && process.env.GMAIL_USER) process.env.EMAIL_USER = process.env.GMAIL_USER;
-if (!process.env.EMAIL_PASS && process.env.GMAIL_PASS) process.env.EMAIL_PASS = process.env.GMAIL_PASS;
 
 console.log("🔐 sendClientEmail SMTP env snapshot", {
-  smtpUser: process.env.GMAIL_USER || process.env.EMAIL_USER || undefined,
-  smtpPassLen: String(process.env.GMAIL_PASS || process.env.EMAIL_PASS || "").length || 0,
+  smtpUser: process.env.GMAIL_AVAIL_USER || process.env.EMAIL_USER || undefined,
+  smtpPassLen: String(process.env.GMAIL_AVAIL_PASS || process.env.EMAIL_PASS || "").length || 0,
   defaultFrom: process.env.DEFAULT_FROM || undefined,
 });
 
