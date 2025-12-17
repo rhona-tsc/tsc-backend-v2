@@ -161,9 +161,7 @@ router.get(
   wrap("GET /travel/travel-data", async (req, res) => {
     try {
       const { origin, destination, date } = req.query || {};
-      console.log(
-        `🛣️  [v2][${req._rid}] travel-data origin=${origin} destination=${destination} date=${date}`
-      );
+  
       // Delegates; controller validates and returns normalized shape
       return await getTravelData(req, res);
     } catch (err) {
