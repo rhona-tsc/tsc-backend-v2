@@ -143,7 +143,7 @@ const musicianSchema = new mongoose.Schema(
 
       gender: {
         type: String,
-        enum: ["Male", "Female", "Other", ""],
+        enum: ["Male", "Female", "Other", "Non-Binary",""],
         default: "",
       },
       range: {
