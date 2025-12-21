@@ -67,8 +67,9 @@ const port = process.env.PORT || 4000;
 /*                               CORS (VERY TOP)                              */
 /* -------------------------------------------------------------------------- */
 
-app.set("trust proxy", 1);
+app.set("trust proxy", 1); // Render/Cloudflare
 
+// Host-based allowlist
 const ALLOWED_HOSTS = new Set([
   "localhost:5173",
   "localhost:5174",
@@ -84,7 +85,7 @@ const ALLOW_HEADERS =
   "Content-Type, Authorization, token, X-Requested-With, x-request-id";
 
 function isAllowedOrigin(origin) {
-  if (!origin) return true;
+  if (!origin) return true; // non-browser clients
   try {
     const url = new URL(origin);
     if (!/^https?:$/.test(url.protocol)) return false;
@@ -98,58 +99,22 @@ function isAllowedOrigin(origin) {
   }
 }
 
-const corsOptions = {
-  origin(origin, cb) {
-    const ok = !origin || isAllowedOrigin(origin);
-    if (origin) console.log("🟨 CORS origin check", { origin, ok });
-    if (!ok) console.warn("⛔ CORS blocked origin:", origin);
-    return cb(null, ok); // ✅ NEVER pass an Error here
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ALLOW_HEADERS.split(",").map((h) => h.trim()),
-  optionsSuccessStatus: 204,
-};
-
-// ✅ Hard-stop OPTIONS so preflights can never bubble into routes/error handlers
-app.use((req, res, next) => {
-  if (req.method !== "OPTIONS") return next();
-
-  const origin = req.headers.origin;
-  const ok = !origin || isAllowedOrigin(origin);
-
-  const isSuggest = (req.originalUrl || "").includes("/api/musician/suggest");
-
-  if (isSuggest) {
-    console.log("🟦 OPTIONS preflight", {
-      host: req.headers.host,
-      url: req.originalUrl,
-      origin,
-      acrm: req.headers["access-control-request-method"],
-      acrh: req.headers["access-control-request-headers"],
-      ok,
-    });
-  }
-
-  // If allowed, respond with full CORS preflight headers
-  if (origin && ok) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-    res.setHeader("Access-Control-Allow-Headers", ALLOW_HEADERS);
-    res.setHeader(
-      "Access-Control-Allow-Methods",
-      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-    );
-    return res.sendStatus(204);
-  }
-
-  // If notFC/blocked origin: return 204 without ACAO so the browser blocks, but we never 500.
-  return res.sendStatus(204);
-});
-
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+// Main CORS middleware
+app.use(
+  cors({
+    origin(origin, cb) {
+      if (!origin || isAllowedOrigin(origin)) {
+        cb(null, true);
+      } else {
+        cb(new Error("CORS blocked"), false);
+      }
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ALLOW_HEADERS.split(",").map((h) => h.trim()),
+    credentials: true,
+    optionsSuccessStatus: 204,
+  })
+);
 
 // Force headers on all responses (helps behind Cloudflare / proxies)
 app.use((req, res, next) => {
@@ -163,7 +128,23 @@ app.use((req, res, next) => {
   next();
 });
 
-
+// Global preflight handler
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") {
+    const origin = req.headers.origin;
+    if (origin && isAllowedOrigin(origin)) {
+      res.header("Access-Control-Allow-Origin", origin);
+    }
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    );
+    res.header("Access-Control-Allow-Headers", ALLOW_HEADERS);
+    res.header("Access-Control-Allow-Credentials", "true");
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 
 /* -------------------------------------------------------------------------- */
@@ -325,19 +306,9 @@ app.use("/api/user", userRouter);
 app.use("/api/auth", authRoutes);
 app.use("/api/account", accountRouter);
 
-
-const logMusicianSuggest = (label) => (req, _res, next) => {
-  if (req.method === "OPTIONS" && (req.originalUrl || "").includes("/api/musician/suggest")) {
-    console.log(`🟪 ${label} saw OPTIONS`, { url: req.originalUrl, origin: req.headers.origin });
-  }
-  next();
-};
-
 // Musicians
-app.use("/api/musician", logMusicianSuggest("musicianRouter"), musicianRouter);
-app.use("/api/musician", logMusicianSuggest("musicianRoutes"), musicianRoutes);
+app.use("/api/musician", musicianRouter);
 
-app.use("/api/musicians", musicianRouter); // legacy plural alias
 app.use("/api/musician-login", musicianLoginRouter);
 
 // Acts (v2) – choose ONE canonical base. I’d recommend /api/act
@@ -402,6 +373,11 @@ app.get("/debug/routes", (_req, res) => {
 });
 app.use("/api/allocations", allocationRoutes);
 app.use("/api/payments", paymentsRouter);
+
+
+// Upload & musician routes (duplicate kept for compatibility)
+app.use("/api/musician", musicianRoutes);
+app.use("/api/upload", uploadRoutes);
 
 /* -------------------------------------------------------------------------- */
 /*                            Global error handler                            */
