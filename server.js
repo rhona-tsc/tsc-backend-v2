@@ -111,17 +111,37 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 
-app.use((req, _res, next) => {
-  if (req.method === "OPTIONS") {
-    console.log("🟦 OPTIONS preflight", {
-      host: req.headers.host,
-      url: req.originalUrl,
-      origin: req.headers.origin,
-      acrm: req.headers["access-control-request-method"],
-      acrh: req.headers["access-control-request-headers"],
-    });
+// ✅ Hard-stop OPTIONS so preflights can never bubble into routes/error handlers
+app.use((req, res, next) => {
+  if (req.method !== "OPTIONS") return next();
+
+  const origin = req.headers.origin;
+  const ok = !origin || isAllowedOrigin(origin);
+
+  console.log("🟦 OPTIONS preflight", {
+    host: req.headers.host,
+    url: req.originalUrl,
+    origin,
+    acrm: req.headers["access-control-request-method"],
+    acrh: req.headers["access-control-request-headers"],
+    ok,
+  });
+
+  // If allowed, respond with full CORS preflight headers
+  if (origin && ok) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Headers", ALLOW_HEADERS);
+    res.setHeader(
+      "Access-Control-Allow-Methods",
+      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    );
+    return res.sendStatus(204);
   }
-  next();
+
+  // If notFC/blocked origin: return 204 without ACAO so the browser blocks, but we never 500.
+  return res.sendStatus(204);
 });
 
 app.use(cors(corsOptions));
