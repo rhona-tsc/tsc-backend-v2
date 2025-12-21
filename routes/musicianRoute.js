@@ -217,6 +217,8 @@ router.post("/pending-song", async (req, res) => {
   }
 });
 
+router.post("/suggest", suggestDeputies);
+
 router.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     console.error('❌ MulterError:', err.code, 'field =', err.field);
