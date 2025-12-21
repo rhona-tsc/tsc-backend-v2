@@ -69,7 +69,6 @@ const port = process.env.PORT || 4000;
 
 app.set("trust proxy", 1);
 
-// Host-based allowlist
 const ALLOWED_HOSTS = new Set([
   "localhost:5173",
   "localhost:5174",
@@ -85,11 +84,10 @@ const ALLOW_HEADERS =
   "Content-Type, Authorization, token, X-Requested-With, x-request-id";
 
 function isAllowedOrigin(origin) {
-  if (!origin) return true; // non-browser clients
+  if (!origin) return true;
   try {
     const url = new URL(origin);
     if (!/^https?:$/.test(url.protocol)) return false;
-
     return (
       ALLOWED_HOSTS.has(url.host) ||
       url.host.endsWith(".netlify.app") ||
@@ -105,9 +103,8 @@ const corsOptions = {
     if (!origin) return cb(null, true);
     if (isAllowedOrigin(origin)) return cb(null, true);
 
-    // IMPORTANT: don't throw (prevents 500 on OPTIONS)
     console.warn("⛔ CORS blocked origin:", origin);
-    return cb(null, false);
+    return cb(null, false); // ✅ DO NOT throw (prevents 500)
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

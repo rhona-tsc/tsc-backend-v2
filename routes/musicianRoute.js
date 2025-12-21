@@ -342,7 +342,6 @@ router.get("/musicians/suggest", async (req, res) => {
 
 router.post("/moderation/deputy/:id/repertoire/append", appendDeputyRepertoire);
 
-router.post("/suggest", suggestDeputies);
 
 // GET /api/musician/stats/:id
 router.get("/stats/:id", verifyToken, async (req, res) => {
