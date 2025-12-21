@@ -100,17 +100,29 @@ function isAllowedOrigin(origin) {
 
 const corsOptions = {
   origin(origin, cb) {
-    if (!origin) return cb(null, true);
-    if (isAllowedOrigin(origin)) return cb(null, true);
-
-    console.warn("⛔ CORS blocked origin:", origin);
-    return cb(null, false); // ✅ DO NOT throw (prevents 500)
+    const ok = !origin || isAllowedOrigin(origin);
+    if (origin) console.log("🟨 CORS origin check", { origin, ok });
+    if (!ok) console.warn("⛔ CORS blocked origin:", origin);
+    return cb(null, ok); // ✅ NEVER pass an Error here
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ALLOW_HEADERS.split(",").map((h) => h.trim()),
   optionsSuccessStatus: 204,
 };
+
+app.use((req, _res, next) => {
+  if (req.method === "OPTIONS") {
+    console.log("🟦 OPTIONS preflight", {
+      host: req.headers.host,
+      url: req.originalUrl,
+      origin: req.headers.origin,
+      acrm: req.headers["access-control-request-method"],
+      acrh: req.headers["access-control-request-headers"],
+    });
+  }
+  next();
+});
 
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
@@ -291,6 +303,16 @@ app.use("/api/account", accountRouter);
 
 // Musicians
 app.use("/api/musician", musicianRouter);
+app.use(
+  "/api/musician",
+  (req, res, next) => {
+    // If the first router already handled the request, don't run a second time.
+    if (res.headersSent) return;
+    next();
+  },
+  musicianRoutes
+);
+
 app.use("/api/musicians", musicianRouter); // legacy plural alias
 app.use("/api/musician-login", musicianLoginRouter);
 
@@ -356,11 +378,6 @@ app.get("/debug/routes", (_req, res) => {
 });
 app.use("/api/allocations", allocationRoutes);
 app.use("/api/payments", paymentsRouter);
-
-
-// Upload & musician routes (duplicate kept for compatibility)
-app.use("/api/musician", musicianRoutes);
-app.use("/api/upload", uploadRoutes);
 
 /* -------------------------------------------------------------------------- */
 /*                            Global error handler                            */
