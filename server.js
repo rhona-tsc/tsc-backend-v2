@@ -118,14 +118,18 @@ app.use((req, res, next) => {
   const origin = req.headers.origin;
   const ok = !origin || isAllowedOrigin(origin);
 
-  console.log("🟦 OPTIONS preflight", {
-    host: req.headers.host,
-    url: req.originalUrl,
-    origin,
-    acrm: req.headers["access-control-request-method"],
-    acrh: req.headers["access-control-request-headers"],
-    ok,
-  });
+  const isSuggest = (req.originalUrl || "").includes("/api/musician/suggest");
+
+  if (isSuggest) {
+    console.log("🟦 OPTIONS preflight", {
+      host: req.headers.host,
+      url: req.originalUrl,
+      origin,
+      acrm: req.headers["access-control-request-method"],
+      acrh: req.headers["access-control-request-headers"],
+      ok,
+    });
+  }
 
   // If allowed, respond with full CORS preflight headers
   if (origin && ok) {
@@ -321,17 +325,17 @@ app.use("/api/user", userRouter);
 app.use("/api/auth", authRoutes);
 app.use("/api/account", accountRouter);
 
+
+const logMusicianSuggest = (label) => (req, _res, next) => {
+  if (req.method === "OPTIONS" && (req.originalUrl || "").includes("/api/musician/suggest")) {
+    console.log(`🟪 ${label} saw OPTIONS`, { url: req.originalUrl, origin: req.headers.origin });
+  }
+  next();
+};
+
 // Musicians
-app.use("/api/musician", musicianRouter);
-app.use(
-  "/api/musician",
-  (req, res, next) => {
-    // If the first router already handled the request, don't run a second time.
-    if (res.headersSent) return;
-    next();
-  },
-  musicianRoutes
-);
+app.use("/api/musician", logMusicianSuggest("musicianRouter"), musicianRouter);
+app.use("/api/musician", logMusicianSuggest("musicianRoutes"), musicianRoutes);
 
 app.use("/api/musicians", musicianRouter); // legacy plural alias
 app.use("/api/musician-login", musicianLoginRouter);
