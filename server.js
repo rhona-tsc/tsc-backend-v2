@@ -67,7 +67,7 @@ const port = process.env.PORT || 4000;
 /*                               CORS (VERY TOP)                              */
 /* -------------------------------------------------------------------------- */
 
-app.set("trust proxy", 1); // Render/Cloudflare
+app.set("trust proxy", 1);
 
 // Host-based allowlist
 const ALLOWED_HOSTS = new Set([
@@ -89,6 +89,7 @@ function isAllowedOrigin(origin) {
   try {
     const url = new URL(origin);
     if (!/^https?:$/.test(url.protocol)) return false;
+
     return (
       ALLOWED_HOSTS.has(url.host) ||
       url.host.endsWith(".netlify.app") ||
@@ -99,22 +100,23 @@ function isAllowedOrigin(origin) {
   }
 }
 
-// Main CORS middleware
-app.use(
-  cors({
-    origin(origin, cb) {
-      if (!origin || isAllowedOrigin(origin)) {
-        cb(null, true);
-      } else {
-        cb(new Error("CORS blocked"), false);
-      }
-    },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ALLOW_HEADERS.split(",").map((h) => h.trim()),
-    credentials: true,
-    optionsSuccessStatus: 204,
-  })
-);
+const corsOptions = {
+  origin(origin, cb) {
+    if (!origin) return cb(null, true);
+    if (isAllowedOrigin(origin)) return cb(null, true);
+
+    // IMPORTANT: don't throw (prevents 500 on OPTIONS)
+    console.warn("⛔ CORS blocked origin:", origin);
+    return cb(null, false);
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ALLOW_HEADERS.split(",").map((h) => h.trim()),
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 // Force headers on all responses (helps behind Cloudflare / proxies)
 app.use((req, res, next) => {
@@ -128,23 +130,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Global preflight handler
-app.use((req, res, next) => {
-  if (req.method === "OPTIONS") {
-    const origin = req.headers.origin;
-    if (origin && isAllowedOrigin(origin)) {
-      res.header("Access-Control-Allow-Origin", origin);
-    }
-    res.header(
-      "Access-Control-Allow-Methods",
-      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-    );
-    res.header("Access-Control-Allow-Headers", ALLOW_HEADERS);
-    res.header("Access-Control-Allow-Credentials", "true");
-    return res.sendStatus(204);
-  }
-  next();
-});
+
 
 
 /* -------------------------------------------------------------------------- */
