@@ -2509,11 +2509,13 @@ const suggestDeputies = async (req, res) => {
       debug = false,
     } = req.body || {};
 
+    // Make logs easy to scan per request
+    const reqTag = `[suggestDeputies:${Date.now().toString(36)}]`;
+
     // ----- helpers (local, safe) -----
     const _norm = (s) => (typeof s === "string" ? s.trim().toLowerCase() : "");
     const _safe = (v) => (v == null ? "" : String(v));
 
-    // Collect all instrument labels (strings) from either string arrays or object arrays
     const _instrumentLabels = (m) => {
       const fromInst = Array.isArray(m?.instrumentation)
         ? m.instrumentation
@@ -2529,7 +2531,8 @@ const suggestDeputies = async (req, res) => {
     };
 
     const _outward = (pc = "") =>
-      String(pc).toUpperCase().replace(/\s+/g, "").slice(0, 3); // e.g., "CM19" or "E11"
+      String(pc).toUpperCase().replace(/\s+/g, "").slice(0, 3);
+
     const countyFromPostcode = (pc = "") => {
       const ow = _outward(pc);
       if (!ow) return "";
@@ -2538,33 +2541,26 @@ const suggestDeputies = async (req, res) => {
           Array.isArray(districts) &&
           districts.some((d) => ow.startsWith(String(d).toUpperCase()))
         ) {
-          return county.replace(/_/g, " "); // normalize e.g. "east_sussex"
+          return county.replace(/_/g, " ");
         }
       }
       return "";
     };
 
     // --- Title-only fuzzy matching --------------------------------------
-    // Strip anything in parentheses, punctuation, collapse spaces, lower-case.
-    // e.g. "(Simply) The Best" -> "the best"
     const _titleCore = (s = "") => {
       let t = String(s || "").toLowerCase();
-      t = t.replace(/\([^)]*\)/g, " "); // remove (...) blocks
-      t = t.replace(/&/g, " and "); // unify &
-      t = t.replace(/[^a-z0-9]+/g, " "); // keep alnum as spaces
-      t = t.replace(/\bthe\b|\ba\b|\ban\b/g, " "); // drop common articles
+      t = t.replace(/\([^)]*\)/g, " ");
+      t = t.replace(/&/g, " and ");
+      t = t.replace(/[^a-z0-9]+/g, " ");
+      t = t.replace(/\bthe\b|\ba\b|\ban\b/g, " ");
       t = t.replace(/\s+/g, " ").trim();
       return t;
     };
 
-    // key used for set lookups (title-only)
     const _titleKey = (song) =>
       _titleCore(typeof song === "object" ? song?.title : song);
 
-    // quick token containment or near-equality:
-    //  - exact title-core match, OR
-    //  - one is a contiguous substring of the other, OR
-    //  - they match after dropping a single token from either side
     const _titlesLooselyMatch = (aCore, bCore) => {
       if (!aCore || !bCore) return false;
       if (aCore === bCore) return true;
@@ -2591,7 +2587,6 @@ const suggestDeputies = async (req, res) => {
       const bDrop = new Set(dropOne(tb));
       if (aDrop.has(bCore) || bDrop.has(aCore)) return true;
 
-      // final cheap Jaccard check on tokens (>= 0.6)
       const A = new Set(ta),
         B = new Set(tb);
       let inter = 0;
@@ -2600,19 +2595,6 @@ const suggestDeputies = async (req, res) => {
       return jac >= 0.6;
     };
 
-    const songKeyNoYear = (s) => {
-      if (!s) return "";
-      if (typeof s === "object") {
-        const t = (s.title || "").trim();
-        const a = (s.artist || "").trim();
-        return t && a ? `${t}|${a}`.toLowerCase() : "";
-      }
-      const str = String(s).trim();
-      const m = str.match(/^(.*?)\s*-\s*(.*?)(?:\s*\(\d{4}\))?$/);
-      return m ? `${m[1]}|${m[2]}`.toLowerCase() : str.toLowerCase();
-    };
-
-    // Is a vocalist of any kind (lead/backing/rap allowed)
     const isVocalist = (m) => {
       const types = Array.isArray(m?.vocals?.type)
         ? m.vocals.type.map(_norm)
@@ -2622,11 +2604,9 @@ const suggestDeputies = async (req, res) => {
       const inst = _instrumentLabels(m);
       if (inst.some((s) => /vocal|singer|rap|mc/.test(s))) return true;
 
-      // Some profiles store rap as a boolean/string on vocals
       const rapVal = String(m?.vocals?.rap ?? "").toLowerCase();
       if (rapVal === "true" || rapVal === "yes") return true;
 
-      // Other skills sometimes contain backing vocals / BV
       const skills = Array.isArray(m?.other_skills)
         ? m.other_skills.map(_norm)
         : [];
@@ -2647,9 +2627,8 @@ const suggestDeputies = async (req, res) => {
     const _hasAllRoles = (m, required = []) => {
       if (!required.length) return true;
       const skills = _getOtherSkills(m);
-      // pass if each required role has a close-enough match among deputy skills
-      return required.every(
-        (req) => skills.some((have) => roleSimilarity(have, req) >= 0.6) // 0.6 Jaccard threshold
+      return required.every((req) =>
+        skills.some((have) => roleSimilarity(have, req) >= 0.6)
       );
     };
 
@@ -2657,7 +2636,6 @@ const suggestDeputies = async (req, res) => {
       if (!label) return true;
       const Lraw = _norm(label);
 
-      // Map some common UI labels to canonical tokens
       const canon = (s) => {
         let x = _norm(s);
         if (/lead.*vocal|vocalist|singer|rap|mc/.test(x)) x = "vocal";
@@ -2669,8 +2647,6 @@ const suggestDeputies = async (req, res) => {
 
       const L = canon(Lraw);
       const list = _instrumentLabels(m).map(canon);
-
-      // soft contains both ways to survive pluralisation / wording
       return list.some((i) => i.includes(L) || L.includes(i));
     };
 
@@ -2714,28 +2690,15 @@ const suggestDeputies = async (req, res) => {
       return out;
     };
 
-    const jaccard = (a, b) => {
-      const A = new Set((a || []).map(_norm).filter(Boolean));
-      const B = new Set((b || []).map(_norm).filter(Boolean));
-      if (!A.size || !B.size) return 0;
-      let inter = 0;
-      for (const x of A) if (B.has(x)) inter++;
-      return inter / (A.size + B.size - inter);
-    };
-
-    // Replace the existing computeGenreFit
     const computeGenreFit = (act, dep) => {
-      const A = new Set((act || []).map(_norm).filter(Boolean)); // act genres
-      const D = new Set((dep || []).map(_norm).filter(Boolean)); // deputy genres
-      if (!A.size) return 0; // or 1 if you want "no genres" to be neutral
-
+      const A = new Set((act || []).map(_norm).filter(Boolean));
+      const D = new Set((dep || []).map(_norm).filter(Boolean));
+      if (!A.size) return 0;
       let inter = 0;
       for (const g of A) if (D.has(g)) inter++;
-      // 1.0 when deputy covers all act genres
       return inter / A.size;
     };
-    // 1.0 if same county; 0.6 if outward postcode matches; else 0
-    // Update scoreLocation to accept neighbours
+
     const scoreLocation = ({
       originCounty,
       originPostcode,
@@ -2746,13 +2709,9 @@ const suggestDeputies = async (req, res) => {
       const oc = _norm(originCounty),
         dc = _norm(deputyCounty);
 
-      // same county
       if (oc && dc && oc === dc) return 1;
-
-      // neighbouring county
       if (originNeighbours.some((n) => _norm(n) === dc)) return 0.8;
 
-      // same outward letters (e.g., "CM" == "CM")
       const op = _safe(originPostcode).toUpperCase();
       const dp = _safe(deputyPostcode).toUpperCase();
       if (op && dp && op.slice(0, 2) === dp.slice(0, 2)) return 0.6;
@@ -2765,7 +2724,6 @@ const suggestDeputies = async (req, res) => {
       .map(_norm)
       .filter(Boolean);
 
-    // Infer secondary instruments if none were provided
     let inferredSecondaries = [];
     if (!Array.isArray(secondaryInstruments) || !secondaryInstruments.length) {
       const slot = _norm(instrument);
@@ -2779,6 +2737,7 @@ const suggestDeputies = async (req, res) => {
       if (/drum|cajon|percussion/.test(slot)) maybe.push("drums");
       inferredSecondaries = maybe;
     }
+
     const wantedSecondaries =
       Array.isArray(secondaryInstruments) && secondaryInstruments.length
         ? secondaryInstruments.map(_norm)
@@ -2788,12 +2747,28 @@ const suggestDeputies = async (req, res) => {
       Array.isArray(desiredRoles) ? desiredRoles : []
     );
 
-    // Build ACT title-only keys
     const actTitleKeys = new Set(
       (Array.isArray(actRepertoire) ? actRepertoire : [])
         .map(_titleKey)
         .filter(Boolean)
     );
+
+    if (debug) {
+      console.log(`${reqTag} 🔍 request`, {
+        instrument,
+        isVocalSlot,
+        requiredRoles,
+        desiredRolesCount: Array.isArray(desiredRoles) ? desiredRoles.length : 0,
+        wantedSecondaries,
+        excludeIdsCount: Array.isArray(excludeIds) ? excludeIds.length : 0,
+        actRepertoireCount: Array.isArray(actRepertoire) ? actRepertoire.length : 0,
+        actTitleKeysCount: actTitleKeys.size,
+        actGenres,
+        originLocation,
+        limit,
+      });
+    }
+
     // ----- fetch pool -----
     const baseFilter = {
       role: "musician",
@@ -2807,8 +2782,16 @@ const suggestDeputies = async (req, res) => {
         lastName: 1,
         email: 1,
         phone: 1,
+        phoneNumber: 1,
+
+        // ✅ Image fields (support schema drift)
         profilePicture: 1,
+        profilePhoto: 1,
+        profileImage: 1,
+        profilePic: 1,
+        profile_picture: 1,
         additionalImages: 1,
+
         instrumentation: 1,
         instruments: 1,
         vocals: 1,
@@ -2821,7 +2804,30 @@ const suggestDeputies = async (req, res) => {
       .limit(300)
       .lean();
 
-    console.log("pool:", pool.length);
+    if (debug) {
+      const imgStats = {
+        pool: pool.length,
+        has_profilePicture: 0,
+        has_profilePhoto: 0,
+        has_profileImage: 0,
+        has_profilePic: 0,
+        has_profile_picture: 0,
+        has_additional0: 0,
+      };
+
+      for (const m of pool) {
+        if (m?.profilePicture) imgStats.has_profilePicture++;
+        if (m?.profilePhoto) imgStats.has_profilePhoto++;
+        if (m?.profileImage) imgStats.has_profileImage++;
+        if (m?.profilePic) imgStats.has_profilePic++;
+        if (m?.profile_picture) imgStats.has_profile_picture++;
+        if (Array.isArray(m?.additionalImages) && m.additionalImages[0])
+          imgStats.has_additional0++;
+      }
+
+      console.log(`${reqTag} 🖼️ image field stats`, imgStats);
+    }
+
     let passRoles = 0,
       passVocal = 0,
       passInst = 0,
@@ -2829,6 +2835,7 @@ const suggestDeputies = async (req, res) => {
       pushed = 0;
 
     const out = [];
+    let missingPicLogged = 0;
 
     for (const m of pool) {
       // HARD gates
@@ -2877,7 +2884,6 @@ const suggestDeputies = async (req, res) => {
         countyFromPostcode(_safe(originLocation?.postcode));
       const originPostcode = _safe(originLocation?.postcode);
 
-      // compute neighbours once per request (you can memoise outside the loop if you like)
       const originNeighbourCounties = neighboursForCounty(originCountyRaw);
 
       const deputyCountyRaw =
@@ -2893,7 +2899,7 @@ const suggestDeputies = async (req, res) => {
         originNeighbours: originNeighbourCounties,
       });
 
-      // ---------- Genres (pick a single canonical set once)
+      // ---------- Genres
       const vocalGenres = Array.isArray(m?.vocals?.genres)
         ? m.vocals.genres
         : typeof m?.vocals?.genres === "string"
@@ -2906,7 +2912,7 @@ const suggestDeputies = async (req, res) => {
         ? m.genres.split(",").map((s) => s.trim())
         : [];
 
-      const depGenres = topGenres.length ? topGenres : vocalGenres; // canonical deputy genres
+      const depGenres = topGenres.length ? topGenres : vocalGenres;
       const genreFit = computeGenreFit(actGenres, depGenres);
 
       // ---------- Weights & score
@@ -2920,7 +2926,7 @@ const suggestDeputies = async (req, res) => {
       wGenre /= wSum;
       wLoc /= wSum;
 
-      const roleFit = 0; // TODO: compute from desiredRoleSet vs m.other_skills if you want
+      const roleFit = 0;
       const rawScore =
         wSongs * songOverlapPct +
         wRoles * roleFit +
@@ -2928,39 +2934,56 @@ const suggestDeputies = async (req, res) => {
         wLoc * locScore;
       const matchPct = Math.round(Math.max(0, Math.min(1, rawScore)) * 100);
 
-    const item = {
-  id: String(m._id),          // ✅ add this
-  _id: m._id,                 // optional keep
-  email: m.email,
-  firstName: m.firstName,
-  lastName: m.lastName,
-  phoneNumber: m.phone || "", // ✅ add this (or map from m.phoneNumber if that’s your schema)
-  profilePicture: m.profilePicture,
-  additionalImages: Array.isArray(m.additionalImages) ? m.additionalImages : [],
-  address: m.address || {},
-  repertoire: Array.isArray(m.repertoire) ? m.repertoire : [],
-  selectedSongs: Array.isArray(m.selectedSongs) ? m.selectedSongs : [],
-  genres: depGenres,
-  vocals: { ...(m.vocals || {}), genres: vocalGenres },
-  other_skills: Array.isArray(m.other_skills) ? m.other_skills : [],
-  matchPct,
-};
+      // ✅ Resolve image with fallbacks (this is the key fix)
+      const resolvedProfilePicture =
+        m?.profilePicture ||
+        m?.profilePhoto ||
+        m?.profileImage ||
+        m?.profilePic ||
+        m?.profile_picture ||
+        (Array.isArray(m?.additionalImages) ? m.additionalImages[0] : "") ||
+        "";
+
+      if (debug && !resolvedProfilePicture && missingPicLogged < 12) {
+        missingPicLogged++;
+        console.log(`${reqTag} ❌ missing pic`, {
+          id: String(m._id),
+          name: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
+          profilePicture: m?.profilePicture,
+          profilePhoto: m?.profilePhoto,
+          profileImage: m?.profileImage,
+          profilePic: m?.profilePic,
+          profile_picture: m?.profile_picture,
+          additional0: Array.isArray(m?.additionalImages) ? m.additionalImages[0] : undefined,
+        });
+      }
+
+      const item = {
+        id: String(m._id),
+        _id: m._id,
+
+        email: m.email,
+        firstName: m.firstName,
+        lastName: m.lastName,
+
+        phoneNumber: m.phoneNumber || m.phone || "",
+
+        // ✅ always give the UI the resolved URL in the field it expects
+        profilePicture: resolvedProfilePicture,
+        // optional: keep raw fields for debugging / future migrations
+        profilePhoto: m?.profilePhoto,
+        additionalImages: Array.isArray(m.additionalImages) ? m.additionalImages : [],
+
+        address: m.address || {},
+        repertoire: Array.isArray(m.repertoire) ? m.repertoire : [],
+        selectedSongs: Array.isArray(m.selectedSongs) ? m.selectedSongs : [],
+        genres: depGenres,
+        vocals: { ...(m.vocals || {}), genres: vocalGenres },
+        other_skills: Array.isArray(m.other_skills) ? m.other_skills : [],
+        matchPct,
+      };
 
       if (debug) {
-        const matchedSongs = [];
-        const depSet = new Set(depTitleKeysArr);
-        let taken = 0;
-        for (const ak of actTitleKeys) {
-          if (
-            depSet.has(ak) ||
-            depTitleKeysArr.some((dk) => _titlesLooselyMatch(ak, dk))
-          ) {
-            if (taken < 15) {
-              matchedSongs.push({ titleCore: ak });
-              taken++;
-            }
-          }
-        }
         item._debug = {
           actCount: actTitleKeys.size,
           depCount: depTitleKeysArr.length,
@@ -2970,15 +2993,7 @@ const suggestDeputies = async (req, res) => {
           locScore,
           originLoc: { county: originCountyRaw, postcode: originPostcode },
           deputyLoc: { county: deputyCountyRaw, postcode: deputyPostcode },
-          weights: {
-            songs: wSongs,
-            roles: wRoles,
-            genre: wGenre,
-            location: wLoc,
-          },
-          matchedSongs,
-          deputyVocalGenres: vocalGenres,
-          actGenres,
+          weights: { songs: wSongs, roles: wRoles, genre: wGenre, location: wLoc },
         };
       }
 
@@ -2986,7 +3001,9 @@ const suggestDeputies = async (req, res) => {
       pushed++;
     }
 
-    console.log({ passRoles, passVocal, passInst, passSec, pushed });
+    if (debug) {
+      console.log(`${reqTag} ✅ gates`, { passRoles, passVocal, passInst, passSec, pushed });
+    }
 
     out.sort(
       (a, b) =>
@@ -3000,7 +3017,6 @@ const suggestDeputies = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ suggestDeputies error:", err);
-    // Return a safe shape so the UI doesn’t break
     return res
       .status(200)
       .json({ success: false, musicians: [], message: "Server error (safe)" });
