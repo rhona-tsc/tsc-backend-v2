@@ -2928,24 +2928,23 @@ const suggestDeputies = async (req, res) => {
         wLoc * locScore;
       const matchPct = Math.round(Math.max(0, Math.min(1, rawScore)) * 100);
 
-      const item = {
-        _id: m._id,
-        email: m.email,
-        firstName: m.firstName,
-        lastName: m.lastName,
-        phone: m.phone,
-        profilePicture: m.profilePicture,
-        additionalImages: Array.isArray(m.additionalImages)
-          ? m.additionalImages
-          : [],
-        address: m.address || {},
-        repertoire: Array.isArray(m.repertoire) ? m.repertoire : [],
-        selectedSongs: Array.isArray(m.selectedSongs) ? m.selectedSongs : [],
-        genres: depGenres, // top-level canonical genres
-        vocals: { ...(m.vocals || {}), genres: vocalGenres }, // keep raw vocal genres here
-        other_skills: Array.isArray(m.other_skills) ? m.other_skills : [],
-        matchPct,
-      };
+    const item = {
+  id: String(m._id),          // ✅ add this
+  _id: m._id,                 // optional keep
+  email: m.email,
+  firstName: m.firstName,
+  lastName: m.lastName,
+  phoneNumber: m.phone || "", // ✅ add this (or map from m.phoneNumber if that’s your schema)
+  profilePicture: m.profilePicture,
+  additionalImages: Array.isArray(m.additionalImages) ? m.additionalImages : [],
+  address: m.address || {},
+  repertoire: Array.isArray(m.repertoire) ? m.repertoire : [],
+  selectedSongs: Array.isArray(m.selectedSongs) ? m.selectedSongs : [],
+  genres: depGenres,
+  vocals: { ...(m.vocals || {}), genres: vocalGenres },
+  other_skills: Array.isArray(m.other_skills) ? m.other_skills : [],
+  matchPct,
+};
 
       if (debug) {
         const matchedSongs = [];
