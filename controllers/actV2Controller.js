@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import actModel from "../models/actModel.js"
 import { upsertActCardFromAct } from "./helpers/upsertActCardFromAct.js";
+import util from "util";
 
 // Treat numbers (0), booleans (false), and Date as meaningful.
 // Treat "", [], {} as empty; treat null/undefined as empty.
@@ -13,6 +14,24 @@ const isMeaningful = (v) => {
   if (typeof v === "number") return true;  // 0 is meaningful
   if (typeof v === "boolean") return true; // false is meaningful
   return true;
+};
+
+const hasDeputiesAnywhere = (obj) => {
+  try {
+    const lineups = obj?.lineups;
+    if (!Array.isArray(lineups)) return false;
+    return lineups.some((l) =>
+      Array.isArray(l?.bandMembers) &&
+      l.bandMembers.some((m) => Array.isArray(m?.deputies) && m.deputies.length >= 0)
+    );
+  } catch {
+    return false;
+  }
+};
+
+const findSetKeysContaining = (setObj, needle = "deputies") => {
+  if (!setObj || typeof setObj !== "object") return [];
+  return Object.keys(setObj).filter((k) => k.toLowerCase().includes(needle.toLowerCase()));
 };
 
 // Build a flat $set object from a (possibly nested) payload,
@@ -53,6 +72,14 @@ export const updateActV2 = async (req, res) => {
     }
 
     const incoming = req.body || {};
+
+    console.log("🧪 updateActV2 incoming has lineups?", Array.isArray(incoming.lineups));
+console.log("🧪 updateActV2 incoming has deputies anywhere?", hasDeputiesAnywhere(incoming));
+
+if (Array.isArray(incoming.lineups) && incoming.lineups[0]?.bandMembers?.[0]) {
+  console.log("🧪 sample incoming deputies[0]:", incoming.lineups[0].bandMembers[0].deputies?.[0]);
+}
+
     const isSubmit = incoming.submit === true || incoming.submit === "true";
 
     let nextStatus = existingAct.status;
@@ -68,6 +95,12 @@ export const updateActV2 = async (req, res) => {
     }, {});
 
     const $set = buildSetDoc(incoming);
+
+    const deputySetKeys = findSetKeysContaining($set, "deputies");
+console.log("🧪 buildSetDoc produced deputies keys:", deputySetKeys);
+
+// helpful: confirm whether you're setting whole lineups vs dotted paths
+console.log("🧪 buildSetDoc sets 'lineups' directly?", Object.prototype.hasOwnProperty.call($set, "lineups"));
 
     // Guard immutable/ownerish fields
     delete $set.createdBy;
@@ -86,6 +119,11 @@ export const updateActV2 = async (req, res) => {
       Object.keys($unset).length ? { $set, $unset } : { $set },
       { new: true, runValidators: true }
     );
+
+    console.log("✅ updateActV2 updatedAct has deputies anywhere?", hasDeputiesAnywhere(updatedAct));
+if (updatedAct?.lineups?.[0]?.bandMembers?.[0]) {
+  console.log("✅ sample saved deputies[0]:", updatedAct.lineups[0].bandMembers[0].deputies?.[0]);
+}
 
     if (!updatedAct) {
       return res.status(404).json({ error: "Act not found" });
@@ -218,7 +256,18 @@ export const saveActDraftV2 = async (req, res) => {
         return res.status(404).json({ error: "Draft not found to update" });
       }
 
+      console.log("🧪 saveActDraftV2 incoming has lineups?", Array.isArray(data.lineups));
+console.log("🧪 saveActDraftV2 incoming has deputies anywhere?", hasDeputiesAnywhere(data));
+if (Array.isArray(data.lineups) && data.lineups[0]?.bandMembers?.[0]) {
+  console.log("🧪 draft sample incoming deputies[0]:", data.lineups[0].bandMembers[0].deputies?.[0]);
+}
+
       const $set = buildSetDoc(data);
+
+      const deputySetKeys = findSetKeysContaining($set, "deputies");
+console.log("🧪 draft buildSetDoc produced deputies keys:", deputySetKeys);
+console.log("🧪 draft buildSetDoc sets 'lineups' directly?", Object.prototype.hasOwnProperty.call($set, "lineups"));
+
       $set.status = status;
 
       const clearKeys = Array.isArray(data.clearKeys) ? data.clearKeys : [];
@@ -232,6 +281,11 @@ export const saveActDraftV2 = async (req, res) => {
         Object.keys($unset).length ? { $set, $unset } : { $set },
         { new: true }
       );
+
+      console.log("✅ draft updated has deputies anywhere?", hasDeputiesAnywhere(updated));
+if (updated?.lineups?.[0]?.bandMembers?.[0]) {
+  console.log("✅ draft sample saved deputies[0]:", updated.lineups[0].bandMembers[0].deputies?.[0]);
+}
 
       // 🔄 Keep card table consistent (service should ignore drafts if that’s your rule)
       try { await upsertActCardFromAct(updated); } catch (e) {
@@ -332,11 +386,7 @@ const parseStatuses = (statusStr = "") => {
   return Array.from(new Set(merged));
 };
 
-// at top of file (once)
-// import util from "util";
 
-// add at top of file if not already present:
-import util from "util";
 
 export const getAllActsV2 = async (req, res) => {
   /* ───────────────────────── DEBUG HELPERS ───────────────────────── */

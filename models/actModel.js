@@ -339,11 +339,18 @@ musicianProfileImageUpload: { type: String },
             maxDJHoursPerDay: { type: Number },
             deputies: [
               {
-                firstName: { type: String },
-                lastName: { type: String },
-                phoneNumber: { type: String },
-                phoneNormalized: { type: String },
-                email: { type: String },
+                 id: { type: String },          // you use id/_id interchangeably in UI
+    _id: { type: String },         // keep if you're passing it
+    musicianId: { type: String },  // optional
+
+    // manual deputies
+    clientKey: { type: String },   // used for stable keys in your UI
+    // firstName: { type: String },
+                  firstName: { type: String, default: "" },
+    lastName: { type: String, default: "" },
+    email: { type: String, default: "" },
+    phoneNumber: { type: String, default: "" },
+    image: { type: String, default: "" },
               },
             ],
           },
