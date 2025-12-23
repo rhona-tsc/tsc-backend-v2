@@ -2632,7 +2632,11 @@ const suggestDeputies = async (req, res) => {
       );
     };
 
-const canon = (s) => {
+    const _matchesInstrument = (m, label) => {
+      if (!label) return true;
+      const Lraw = _norm(label);
+
+      const canon = (s) => {
   let x = _norm(s);
 
   // vocals
@@ -2653,41 +2657,61 @@ const canon = (s) => {
   return x;
 };
 
-const _matchesInstrument = (m, label) => {
-  if (!label) return true;
-  const Lraw = _norm(label);
-  const L = canon(Lraw);
-  const list = _instrumentLabels(m).map(canon);
-  return list.some((i) => i.includes(L) || L.includes(i));
+      const L = canon(Lraw);
+      const list = _instrumentLabels(m).map(canon);
+      return list.some((i) => i.includes(L) || L.includes(i));
+    };
+
+    const hasAnyInstrument = (m, wanted) => {
+      if (!wanted?.length) return true;
+    const canon = (s) => {
+  let x = _norm(s);
+
+  if (/lead.*vocal|vocalist|singer|rap|mc/.test(x)) return "vocal";
+
+  // bass BEFORE guitar
+  if (/bass\s*guitar|bassist|electric\s*bass|acoustic\s*bass|\bbass\b/.test(x)) return "bass";
+
+  if (/guitar/.test(x)) return "guitar";
+
+  if (/keys|keyboard|piano/.test(x)) return "keyboard";
+  if (/drum|cajon|percussion/.test(x)) return "drums";
+  if (/sax/.test(x)) return "saxophone";
+  if (/trumpet/.test(x)) return "trumpet";
+  if (/trombone/.test(x)) return "trombone";
+
+  return x;
 };
 
-const hasAnyInstrument = (m, wanted) => {
-  if (!wanted?.length) return true;
-  const ROLE_ALIASES = {
-    "band management": ["manager", "md", "musical director"],
-    "sound engineering": [
-      "sound engineer",
-      "engineer",
-      "audio tech",
-      "foh",
-      "sound engineering with PA & light provision",
-    ],
-    "backing vocals": ["backing vocalist", "bv", "backing singer"],
-    "lead vocals": ["lead singer"],
-    dj: ["disc jockey", "deejay"],
-    rap: ["rapper", "mc", "emcee"],
-  };
+const labels = _instrumentLabels(m).map(canon);
+return wanted.map(canon).some((w) => labels.includes(w));
+    };
 
-  const expandDesiredRoles = (arr = []) => {
-    const out = new Set();
-    arr.forEach((r) => {
-      const k = _norm(r);
-      if (!k) return;
-      out.add(k);
-      (ROLE_ALIASES[k] || []).forEach((a) => out.add(_norm(a)));
-    });
-    return out;
-  };
+    const ROLE_ALIASES = {
+      "band management": ["manager", "md", "musical director"],
+      "sound engineering": [
+        "sound engineer",
+        "engineer",
+        "audio tech",
+        "foh",
+        "sound engineering with PA & light provision",
+      ],
+      "backing vocals": ["backing vocalist", "bv", "backing singer"],
+      "lead vocals": ["lead singer"],
+      dj: ["disc jockey", "deejay"],
+      rap: ["rapper", "mc", "emcee"],
+    };
+
+    const expandDesiredRoles = (arr = []) => {
+      const out = new Set();
+      arr.forEach((r) => {
+        const k = _norm(r);
+        if (!k) return;
+        out.add(k);
+        (ROLE_ALIASES[k] || []).forEach((a) => out.add(_norm(a)));
+      });
+      return out;
+    };
 
     const computeGenreFit = (act, dep) => {
       const A = new Set((act || []).map(_norm).filter(Boolean));
