@@ -2637,13 +2637,25 @@ const suggestDeputies = async (req, res) => {
       const Lraw = _norm(label);
 
       const canon = (s) => {
-        let x = _norm(s);
-        if (/lead.*vocal|vocalist|singer|rap|mc/.test(x)) x = "vocal";
-        if (/bass\s*guitar|bassist/.test(x)) x = "bass";
-        if (/keys|keyboard|piano/.test(x)) x = "keyboard";
-        if (/drum|cajon|percussion/.test(x)) x = "drums";
-        return x;
-      };
+  let x = _norm(s);
+
+  // vocals
+  if (/lead.*vocal|vocalist|singer|rap|mc/.test(x)) return "vocal";
+
+  // bass BEFORE guitar (so "bass guitar" doesn't become "guitar")
+  if (/bass\s*guitar|bassist|electric\s*bass|acoustic\s*bass|\bbass\b/.test(x)) return "bass";
+
+  // guitar (covers electric/acoustic/etc)
+  if (/guitar/.test(x)) return "guitar";
+
+  if (/keys|keyboard|piano/.test(x)) return "keyboard";
+  if (/drum|cajon|percussion/.test(x)) return "drums";
+  if (/sax/.test(x)) return "saxophone";
+  if (/trumpet/.test(x)) return "trumpet";
+  if (/trombone/.test(x)) return "trombone";
+
+  return x;
+};
 
       const L = canon(Lraw);
       const list = _instrumentLabels(m).map(canon);
@@ -2652,17 +2664,20 @@ const suggestDeputies = async (req, res) => {
 
     const hasAnyInstrument = (m, wanted) => {
       if (!wanted?.length) return true;
-      const canon = (s) => {
-        let x = _norm(s);
-        if (/lead.*vocal|vocalist|singer|rap|mc/.test(x)) x = "vocal";
-        if (/bass\s*guitar|bassist/.test(x)) x = "bass";
-        if (/keys|keyboard|piano/.test(x)) x = "keyboard";
-        if (/drum|cajon|percussion/.test(x)) x = "drums";
-        return x;
-      };
-      const labels = _instrumentLabels(m).map(canon);
-      return wanted.map(canon).some((w) => labels.includes(w));
-    };
+     const canon = (s) => {
+  let x = _norm(s);
+
+  if (/lead.*vocal|vocalist|singer|rap|mc/.test(x)) return "vocal";
+  if (/bass\s*guitar|bassist|electric\s*bass|acoustic\s*bass|\bbass\b/.test(x)) return "bass";
+  if (/guitar/.test(x)) return "guitar";
+  if (/keys|keyboard|piano/.test(x)) return "keyboard";
+  if (/drum|cajon|percussion/.test(x)) return "drums";
+  if (/sax/.test(x)) return "saxophone";
+  if (/trumpet/.test(x)) return "trumpet";
+  if (/trombone/.test(x)) return "trombone";
+
+  return x;
+};
 
     const ROLE_ALIASES = {
       "band management": ["manager", "md", "musical director"],
