@@ -854,7 +854,7 @@ async function getDeputyById(req, res) {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
-    const deputy = await Musician.findById(id).lean();
+    const deputy = await musicianModel.findById(id).lean();
     if (!deputy) {
       return res
         .status(404)
