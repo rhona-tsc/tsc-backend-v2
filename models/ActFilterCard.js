@@ -114,7 +114,7 @@ const ActFilterCardSchema = new mongoose.Schema(
       costPerMile: Number,
       hasCountyFees: Boolean,
     },
-
+bestseller: { type: Boolean, default: false, index: true },
     /* ✅ minimal lineups needed for local pricing fallback */
     lineups: { type: [LineupLiteSchema], default: [] },
 

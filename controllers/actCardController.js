@@ -75,7 +75,9 @@ export async function getActCards(req, res) {
           useCountyTravelFee: 1,
           formattedPrice: 1,
 
-          // ✅ expose filterable fields to the client
+           createdAt: 1,
+    updatedAt: 1,
+    bestseller: 1, 
           genres: 1,
           instruments: 1,
           lineupSizes: 1,
