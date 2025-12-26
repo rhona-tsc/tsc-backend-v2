@@ -62,18 +62,6 @@ function computeCardBasePrice(act) {
   };
 }
 
-const { basePrice, breakdown } = computeCardBasePrice(act);
-
-if (String(process.env.DEBUG_CARD_PRICING || "").toLowerCase() === "true") {
-  console.log("💷[ActCard] basePrice computed", {
-    actId: String(act?._id || ""),
-    name: act?.tscName || act?.name,
-    useCountyTravelFee: !!act?.useCountyTravelFee,
-    basePrice,
-    breakdown,
-  });
-}
-
 /* -------------------------- tiny safe helpers -------------------------- */
 const isNum = (v) => typeof v === "number" && Number.isFinite(v);
 const asArr = (v) => (Array.isArray(v) ? v : v ? [v] : []);
@@ -427,6 +415,30 @@ export function buildCard(act) {
     supports60,
     supports90,
     hasElectricDrums,
+export function buildCard(act) {
+  const { basePrice, breakdown } = computeCardBasePrice(act);
+
+  if (String(process.env.DEBUG_CARD_PRICING || "").toLowerCase() === "true") {
+    console.log("💷[ActCard] basePrice computed", {
+      actId: String(act?._id || ""),
+      name: act?.tscName || act?.name,
+      useCountyTravelFee: !!act?.useCountyTravelFee,
+      basePrice,
+      breakdown,
+    });
+  }
+
+  const { genres, genresNormalized } = extractGenres(act);
+  const lineup_sizes = lineupSizes(act);
+  const wirelessByInstrument = deriveWirelessMap(act);
+  const wirelessInstruments = Object.entries(wirelessByInstrument)
+    .filter(([, v]) => !!v)
+    .map(([k]) => k.replace(/-/g, " "));
+
+  const {
+    supports60,
+    supports90,
+    hasElectricDrums,
     hasIEMs,
     canMakeAcoustic,
     canRemoveDrums,
@@ -446,18 +458,6 @@ export function buildCard(act) {
       : undefined;
 
   return {
-    // identity / status / hero
-    actId: act?._id,
-    tscName: act?.tscName || act?.name || "",
-    name: act?.name || "",
-    status: act?.status || "draft",
-    isTest: !!(act?.isTest || act?.actData?.isTest),
-    imageUrl: pickCardImage(act),
-
-    // pricing helpers
-    basePrice: computeBasePriceFromAct(act),
-    loveCount: Number(act?.loveCount || 0),
-    amendmentPending: Boolean(act?.amendment?.isPending ?? act?.amendmentPending),
 
     // genres
     genres,
