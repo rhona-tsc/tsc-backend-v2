@@ -404,18 +404,6 @@ function normalizeExtrasFromAct(act) {
 }
 
 export function buildCard(act) {
-  const { genres, genresNormalized } = extractGenres(act);
-  const lineup_sizes = lineupSizes(act);
-  const wirelessByInstrument = deriveWirelessMap(act);
-  const wirelessInstruments = Object.entries(wirelessByInstrument)
-    .filter(([, v]) => !!v)
-    .map(([k]) => k.replace(/-/g, " "));
-
-  const {
-    supports60,
-    supports90,
-    hasElectricDrums,
-export function buildCard(act) {
   const { basePrice, breakdown } = computeCardBasePrice(act);
 
   if (String(process.env.DEBUG_CARD_PRICING || "").toLowerCase() === "true") {
@@ -449,6 +437,9 @@ export function buildCard(act) {
   const { songPhrases, artistPhrases, repertoireTokens, artistTokens } =
     buildRepertoireTokens(act);
 
+  const { ceremony, afternoon, hasCeremonyOptions, hasAfternoonOptions } =
+    ceremonyAfternoonFlags(act);
+
   // county fees (clean numeric map)
   const countyFeesClean =
     act?.countyFees && typeof act.countyFees === "object"
@@ -457,7 +448,28 @@ export function buildCard(act) {
         )
       : undefined;
 
+  // Prefer explicitly-set manual display price, else derived basePrice
+  const minDisplayPrice = isNum(act?.minDisplayPrice)
+    ? Number(act.minDisplayPrice)
+    : Number(basePrice) || 0;
+
   return {
+    // identity / display
+    actId: String(act?._id || act?.id || ""),
+    name: act?.name || act?.tscName || "",
+    tscName: act?.tscName || act?.name || "",
+    slug: act?.slug || "",
+    imageUrl: pickCardImage(act),
+
+    // pricing
+    basePrice: Number(basePrice) || 0,
+    minDisplayPrice,
+
+    // simple stats / flags (safe defaults)
+    loveCount: Number(act?.loveCount ?? act?.numberOfShortlistsIn ?? 0) || 0,
+    status: act?.status || "",
+    bestseller: !!act?.bestseller,
+    isTest: !!act?.isTest,
 
     // genres
     genres,
@@ -491,23 +503,15 @@ export function buildCard(act) {
     extrasKeys: extrasKeysSnake,
 
     // ceremony / afternoon
-    ceremony: {
-      solo: !!(act?.ceremony?.solo || act?.extras?.ceremony_solo),
-      duo: !!(act?.ceremony?.duo || act?.extras?.ceremony_duo),
-      trio: !!(act?.ceremony?.trio || act?.extras?.ceremony_trio),
-      fourpiece: !!(act?.ceremony?.fourPiece || act?.extras?.ceremony_4piece),
-    },
-    afternoon: {
-      solo: !!(act?.afternoon?.solo || act?.extras?.afternoon_solo),
-      duo: !!(act?.afternoon?.duo || act?.extras?.afternoon_duo),
-      trio: !!(act?.afternoon?.trio || act?.extras?.afternoon_trio),
-      fourpiece: !!(act?.afternoon?.fourPiece || act?.extras?.afternoon_4piece),
-    },
+    ceremony,
+    afternoon,
+    hasCeremonyOptions,
+    hasAfternoonOptions,
 
     // compliance
     pliAmount: Number(act?.pliAmount) || 0,
 
-    // travel (top-level fields for the frontend util) + summary
+    // travel (top-level fields for frontend util) + summary
     useCountyTravelFee: !!act?.useCountyTravelFee,
     costPerMile: Number(act?.costPerMile) || 0,
     countyFees: countyFeesClean,
