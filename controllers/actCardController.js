@@ -78,6 +78,12 @@ minDisplayPrice:1,
            createdAt: 1,
     updatedAt: 1,
     bestseller: 1, 
+    loveCount: {
+  $ifNull: [
+    "$loveCount",
+    { $ifNull: ["$timesShortlisted", { $ifNull: ["$numberOfShortlistsIn", 0] }] }
+  ]
+},
           genres: 1,
           instruments: 1,
           lineupSizes: 1,
