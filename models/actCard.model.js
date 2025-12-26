@@ -22,7 +22,7 @@ const ActCardSchema = new Schema(
     status: { type: String, index: true }, // approved/pending/draft/trashed
     isTest: { type: Boolean, default: false, index: true },
     imageUrl: { type: String, default: "" },
-
+minDisplayPrice: { type: Number, default: null, index: true },
     // Pricing / engagement
     basePrice: { type: Number, default: null, index: true }, // smallest lineup total (with margin)
     loveCount: { type: Number, default: 0 },

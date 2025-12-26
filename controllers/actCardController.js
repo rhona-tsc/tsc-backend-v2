@@ -74,7 +74,7 @@ export async function getActCards(req, res) {
           countyFees: 1,
           useCountyTravelFee: 1,
           formattedPrice: 1,
-
+minDisplayPrice:1,
            createdAt: 1,
     updatedAt: 1,
     bestseller: 1, 

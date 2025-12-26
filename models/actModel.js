@@ -238,7 +238,7 @@ const actSchema = new mongoose.Schema(
     },
 
     costPerMile: { type: Number },
-
+minDisplayPrice: { type: Number, default: null },
     extras: {
       type: Map,
       of: new mongoose.Schema({
