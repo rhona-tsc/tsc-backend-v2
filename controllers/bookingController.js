@@ -1413,7 +1413,7 @@ try {
   twoWeeksBefore.setDate(twoWeeksBefore.getDate() - 14);
 
   const eventSheetUrl = `${
-    process.env.FRONTEND_BASE_URL || "http://localhost:5174"
+    process.env.FRONTEND_URL || "http://localhost:5174"
   }/event-sheet/${order.bookingId}`;
 
   // Your main body (unchanged), with signature appended
