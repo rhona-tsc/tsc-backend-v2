@@ -73,9 +73,13 @@ app.set("trust proxy", 1); // Render/Cloudflare
 const ALLOWED_HOSTS = new Set([
   "localhost:5173",
   "localhost:5174",
+
+  // ✅ Allow apex + subdomains
+  "thesupremecollective.co.uk",
   "admin.thesupremecollective.co.uk",
   "www.thesupremecollective.co.uk",
   "api.thesupremecollective.co.uk",
+
   "tsc2025.netlify.app",
   "tsc-backend-v2.onrender.com",
   "tsc2025.onrender.com",
@@ -91,6 +95,8 @@ function isAllowedOrigin(origin) {
     if (!/^https?:$/.test(url.protocol)) return false;
     return (
       ALLOWED_HOSTS.has(url.host) ||
+      url.hostname === "thesupremecollective.co.uk" ||
+      url.hostname.endsWith(".thesupremecollective.co.uk") ||
       url.host.endsWith(".netlify.app") ||
       url.host.includes("localhost")
     );
