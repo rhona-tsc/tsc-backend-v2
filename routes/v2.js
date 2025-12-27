@@ -1,6 +1,6 @@
 // backend/routes/v2.js
 import express from "express";
-import util from "util";
+import { inspect } from "util";
 import { getAvailableActIds } from "../controllers/actAvailabilityController.js";
 import { getTravelData } from "../controllers/travelController.js";
 import { getFilterCards } from "../controllers/searchController.js";
