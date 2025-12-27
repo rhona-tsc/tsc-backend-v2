@@ -2413,12 +2413,12 @@ export const completeBookingV2 = async (req, res) => {
   const t0 = Date.now();
 
   try {
- // 0️⃣ Load Stripe Session (support both env keys)
-const stripeSecret = process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY;
-if (!stripeSecret) {
-  throw new Error("Missing STRIPE secret key (STRIPE_SECRET_KEY_V2 or STRIPE_SECRET_KEY)");
-}
-const stripe = await import("stripe").then((m) => new m.default(stripeSecret));
+    // 0️⃣ Load Stripe Session (support both env keys)
+    const stripeSecret = process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY;
+    if (!stripeSecret) {
+      throw new Error("Missing STRIPE secret key (STRIPE_SECRET_KEY_V2 or STRIPE_SECRET_KEY)");
+    }
+    const stripe = await import("stripe").then((m) => new m.default(stripeSecret));
 
     const session = await stripe.checkout.sessions.retrieve(session_id, {
       expand: ["payment_intent"],
@@ -2439,15 +2439,8 @@ const stripe = await import("stripe").then((m) => new m.default(stripeSecret));
     if (booking.date) booking.eventDateISO = toDateISO(booking.date);
 
     // 2️⃣ Resolve identifiers
-    const actId =
-      booking.act ||
-      booking?.actsSummary?.[0]?.actId ||
-      null;
-
-    const lineupId =
-      booking.lineupId ||
-      booking?.actsSummary?.[0]?.lineupId ||
-      null;
+    const actId = booking.act || booking?.actsSummary?.[0]?.actId || null;
+    const lineupId = booking.lineupId || booking?.actsSummary?.[0]?.lineupId || null;
 
     console.log("Resolved actId/lineupId:", { actId, lineupId });
 
@@ -2502,39 +2495,57 @@ const stripe = await import("stripe").then((m) => new m.default(stripeSecret));
     // 8️⃣ CONTRACT GENERATION – EJS
     // ------------------------------------------------
     const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
-// ✅ Debug: what the contract renderer is receiving
-const actsSummaryToRender = booking?.actsSummary || [];
 
-console.log("🧾 [Contract] actsSummary count:", Array.isArray(actsSummaryToRender) ? actsSummaryToRender.length : 0);
+    // ✅ Debug: what the contract renderer is receiving
+    const actsSummaryToRender = booking?.actsSummary || [];
+    console.log(
+      "🧾 [Contract] actsSummary count:",
+      Array.isArray(actsSummaryToRender) ? actsSummaryToRender.length : 0
+    );
 
-if (Array.isArray(actsSummaryToRender) && actsSummaryToRender.length) {
- const it = actsSummaryToRender[0];
-const itObj = typeof it?.toObject === "function" ? it.toObject() : it;
+    if (Array.isArray(actsSummaryToRender) && actsSummaryToRender.length) {
+      const it = actsSummaryToRender[0];
+      const itObj = typeof it?.toObject === "function" ? it.toObject() : it;
 
-console.log("🧾 [Contract] actsSummary[0] keys:", Object.keys(itObj || {}));
+      console.log("🧾 [Contract] actsSummary[0] keys:", Object.keys(itObj || {}));
 
-console.log("🧾 [Contract] actsSummary[0] shape:", {
-  actName: itObj?.actName || itObj?.tscName || itObj?.name,
-  lineupLabel: itObj?.lineupLabel,
-  hasTopLevelBandMembers: Array.isArray(itObj?.bandMembers),
-  topLevelBandMembersLen: Array.isArray(itObj?.bandMembers) ? itObj.bandMembers.length : 0,
-  hasNestedLineup: !!itObj?.lineup,
-  nestedLineupKeys: itObj?.lineup ? Object.keys(itObj.lineup) : [],
-  hasNestedBandMembers: Array.isArray(itObj?.lineup?.bandMembers),
-  nestedBandMembersLen: Array.isArray(itObj?.lineup?.bandMembers) ? itObj.lineup.bandMembers.length : 0,
-});
-}
+      console.log("🧾 [Contract] actsSummary[0] shape:", {
+        actName: itObj?.actName || itObj?.tscName || itObj?.name,
+        lineupLabel: itObj?.lineupLabel,
+        hasTopLevelBandMembers: Array.isArray(itObj?.bandMembers),
+        topLevelBandMembersLen: Array.isArray(itObj?.bandMembers) ? itObj.bandMembers.length : 0,
+        hasNestedLineup: !!itObj?.lineup,
+        nestedLineupKeys: itObj?.lineup ? Object.keys(itObj.lineup) : [],
+        hasNestedBandMembers: Array.isArray(itObj?.lineup?.bandMembers),
+        nestedBandMembersLen: Array.isArray(itObj?.lineup?.bandMembers)
+          ? itObj.lineup.bandMembers.length
+          : 0,
+      });
+    }
+
+    // ✅ NEW: Normalised totals for contract rendering
+    const totals = booking.totals || {};
+
     let html;
     try {
       html = await ejs.renderFile(templatePath, {
         bookingId: booking.bookingId,
         userAddress: booking.userAddress,
         actsSummary: booking.actsSummary,
-        total: booking.totals?.fullAmount ?? booking.amount,
-        deposit: booking.totals?.depositAmount ?? booking.amount,
+
+        // ✅ pass totals so EJS can check chargeMode if you want
+        totals,
+
+        // ✅ total = full contract value
+        total: Number(totals.fullAmount ?? 0),
+
+        // ✅ deposit = what was actually charged (deposit OR full)
+        deposit: Number(totals.chargedAmount ?? 0),
+
         signatureUrl: booking.signatureUrl,
         logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
       });
+
       console.log("[completeBookingV2] ✓ EJS rendered", { htmlLen: html?.length || 0 });
     } catch (e) {
       console.error("✖ EJS render failed:", e?.message);
@@ -2550,6 +2561,7 @@ console.log("🧾 [Contract] actsSummary[0] shape:", {
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       });
+
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: "load" });
 
@@ -2584,36 +2596,36 @@ console.log("🧾 [Contract] actsSummary[0] shape:", {
           console.warn("⚠ No secure_url returned from Cloudinary");
         }
 
-     // SEND EMAIL (primary helper + fallback)
-try {
-  const targetEmail = booking?.userAddress?.email || booking?.userEmail || "";
-  if (!targetEmail) {
-    console.error("❌ No client email on booking — cannot send contract email");
-  } else {
-    try {
-      await sendContractEmail({
-        booking,
-        pdfBuffer: generatedPdf,
-      });
-      console.log("📧 Contract email sent via helper", { to: targetEmail });
-    } catch (helperErr) {
-      console.warn(
-        "⚠️ sendContractEmail failed, falling back to local SMTP:",
-        helperErr?.message || helperErr
-      );
+        // SEND EMAIL (primary helper + fallback)
+        try {
+          const targetEmail = booking?.userAddress?.email || booking?.userEmail || "";
+          if (!targetEmail) {
+            console.error("❌ No client email on booking — cannot send contract email");
+          } else {
+            try {
+              await sendContractEmail({
+                booking,
+                pdfBuffer: generatedPdf,
+              });
+              console.log("📧 Contract email sent via helper", { to: targetEmail });
+            } catch (helperErr) {
+              console.warn(
+                "⚠️ sendContractEmail failed, falling back to local SMTP:",
+                helperErr?.message || helperErr
+              );
 
-      await emailContractToClient({
-        pdfUrl: booking?.pdfUrl || "", // ✅ don't reference out-of-scope `result`
-        bookingRef: booking.bookingId,
-        clientEmail: targetEmail,
-        clientName: booking?.userAddress?.firstName || "Client",
-      });
-      console.log("📧 Fallback contract email sent (link-only)", { to: targetEmail });
-    }
-  }
-} catch (e) {
-  console.error("❌ Contract email (final) failed:", e.message || e);
-}
+              await emailContractToClient({
+                pdfUrl: booking?.pdfUrl || "", // ✅ don't reference out-of-scope `result`
+                bookingRef: booking.bookingId,
+                clientEmail: targetEmail,
+                clientName: booking?.userAddress?.firstName || "Client",
+              });
+              console.log("📧 Fallback contract email sent (link-only)", { to: targetEmail });
+            }
+          }
+        } catch (e) {
+          console.error("❌ Contract email (final) failed:", e.message || e);
+        }
 
         console.log(`🎉 completeBookingV2 DONE in ${Date.now() - t0}ms`);
         return res.send("<h2>Your booking has been confirmed and the contract emailed to you.</h2>");
@@ -2625,15 +2637,11 @@ try {
     // 1️⃣1️⃣ Clear cart
     try {
       if (booking.userId) {
-        await userModel.updateOne(
-          { _id: booking.userId },
-          { $set: { cartData: {} } }
-        );
+        await userModel.updateOne({ _id: booking.userId }, { $set: { cartData: {} } });
       }
     } catch (e) {
       console.warn("⚠ Failed to clear cart:", e?.message);
     }
-
   } catch (err) {
     console.error("❌ completeBookingV2 FATAL:", err);
     return res.status(500).json({ success: false, message: err.message });

@@ -56,14 +56,29 @@
 <body>
   <img src="https://res.cloudinary.com/dvcgr3fyd/image/upload/v1762950219/4_tt3cay.png" alt="The Supreme Collective Logo" class="header-logo" />
   <div class="title">THE <span style="color:#ff6667">CONTRACT</span></div>
+<%
+  const t = totals || {};
+  const mode = String(t.chargeMode || "").toLowerCase();
+  const isFull = mode === "full";
 
+  const fullAmount = Number(t.fullAmount ?? total ?? 0);
+  const chargedAmount = Number(t.chargedAmount ?? deposit ?? 0);
+
+  // What you want to SHOW on the contract
+  const bookingTotalDisplay = isFull ? chargedAmount : fullAmount;
+
+  // Deposit line formatting
+  const depositDisplay = isFull ? "Paid" : `£${chargedAmount.toFixed(2)}`;
+
+  // Outstanding
+  const outstanding = isFull ? 0 : Math.max(0, fullAmount - chargedAmount);
+%>
     <div class="contract-section" aria-label="Booking contract terms">
       <p class="subtitle">
         Booking ID: <strong><%= bookingId %></strong><br/>
         Client: <%= userAddress?.firstName %> <%= userAddress?.lastName %><br/>
         Act(/s): <%= (actsSummary||[]).map(a => a.actName || a.name).join(", ") %>
-        Total: £<%= (total||0).toLocaleString("en-GB") %>, Deposit: £<%= (deposit||0).toLocaleString("en-GB") %>
-      </p>
+Total: £<%= bookingTotalDisplay.toFixed(2) %>, Deposit paid: <%= depositDisplay %>      </p>
 
       <hr style="margin:24px 0"/>
 
@@ -240,18 +255,18 @@
   <hr style="margin:12px 0"/>
 
   <div style="font-size:14px;">
-    <div style="display:flex; justify-content:space-between;">
-      <span>Booking total</span>
-      <span>£<%= Number(total||0).toFixed(2) %></span>
-    </div>
-    <div style="display:flex; justify-content:space-between;">
-      <span>Deposit paid</span>
-      <span>£<%= Number(deposit||0).toFixed(2) %></span>
-    </div>
-    <div style="display:flex; justify-content:space-between; font-weight:700; margin-top:8px;">
-      <span>Outstanding Balance</span>
-      <span>£<%= Math.max(0, Number(total||0) - Number(deposit||0)).toFixed(2) %></span>
-    </div>
+  <div style="display:flex; justify-content:space-between;">
+  <span>Booking total</span>
+  <span>£<%= bookingTotalDisplay.toFixed(2) %></span>
+</div>
+<div style="display:flex; justify-content:space-between;">
+  <span>Deposit paid</span>
+  <span><%= depositDisplay %></span>
+</div>
+<div style="display:flex; justify-content:space-between; font-weight:700; margin-top:8px;">
+  <span>Outstanding Balance</span>
+  <span>£<%= outstanding.toFixed(2) %></span>
+</div>
   </div>
 <% } %>
 
