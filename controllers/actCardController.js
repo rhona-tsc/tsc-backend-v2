@@ -43,6 +43,7 @@ export async function getActCards(req, res) {
     const statuses = String(req.query.status || "approved,live")
       .split(",")
       .map((s) => s.trim());
+
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const sort = String(req.query.sort || "-createdAt");
 
@@ -58,34 +59,49 @@ export async function getActCards(req, res) {
     const cards = await actModel.aggregate([
       { $match: { status: { $in: statuses } } },
 
-      // Keep only fields we need downstream (+ add filterable fields)
+      // ✅ Include both possible schema names so we can normalize later
       {
         $project: {
           actId: "$_id",
           name: 1,
           tscName: 1,
+
           numberOfShortlistsIn: 1,
           timesShortlisted: 1,
           availabilityBadge: 1,
+
           profileImage: 1,
           coverImage: 1,
           images: 1,
           lineups: 1,
+
           countyFees: 1,
           useCountyTravelFee: 1,
+
           formattedPrice: 1,
-minDisplayPrice:1,
-           createdAt: 1,
-    updatedAt: 1,
-    bestseller: 1, 
-    loveCount: {
-  $ifNull: [
-    "$loveCount",
-    { $ifNull: ["$timesShortlisted", { $ifNull: ["$numberOfShortlistsIn", 0] }] }
-  ]
-},
+          minDisplayPrice: 1,
+
+          createdAt: 1,
+          updatedAt: 1,
+          bestseller: 1,
+
+          loveCount: {
+            $ifNull: [
+              "$loveCount",
+              { $ifNull: ["$timesShortlisted", { $ifNull: ["$numberOfShortlistsIn", 0] }] },
+            ],
+          },
+
+          // 👇 IMPORTANT: your cards currently have none of these
           genres: 1,
+          genre: 1,                 // ✅ add
           instruments: 1,
+          instrumentation: 1,       // ✅ add
+
+          vocalist: 1,              // ✅ add
+          leadVocalist: 1,          // ✅ add
+          leadRole: 1,              // ✅ add
+
           lineupSizes: 1,
           pliAmount: 1,
           pa: 1,
@@ -102,6 +118,7 @@ minDisplayPrice:1,
           _img_prof: { $first: "$profileImage" },
           _img_cover: { $first: "$coverImage" },
           _img_any: { $first: "$images" },
+
           _baseFees: {
             $map: {
               input: { $ifNull: ["$lineups", []] },
@@ -117,7 +134,223 @@ minDisplayPrice:1,
         },
       },
 
-      // Derive: smallest lineup bare member fee + essential roles, travel headcount, min county fee
+      // ✅ Normalize genres + instruments so frontend always gets arrays
+      {
+        $addFields: {
+          _genresRaw: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ["$genres", []] } }, 0] },
+              "$genres",
+              { $ifNull: ["$genre", []] },
+            ],
+          },
+          _instrumentsRaw: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ["$instruments", []] } }, 0] },
+              "$instruments",
+              { $ifNull: ["$instrumentation", []] },
+            ],
+          },
+
+          genres: {
+            $cond: [
+              { $isArray: "$_genresRaw" },
+              "$_genresRaw",
+              {
+                $cond: [
+                  { $and: [{ $ne: ["$_genresRaw", null] }, { $ne: ["$_genresRaw", ""] }] },
+                  {
+                    $map: {
+                      input: { $split: [{ $toString: "$_genresRaw" }, ","] },
+                      as: "g",
+                      in: { $trim: { input: "$$g" } },
+                    },
+                  },
+                  [],
+                ],
+              },
+            ],
+          },
+
+          instruments: {
+            $cond: [
+              { $isArray: "$_instrumentsRaw" },
+              "$_instrumentsRaw",
+              {
+                $cond: [
+                  { $and: [{ $ne: ["$_instrumentsRaw", null] }, { $ne: ["$_instrumentsRaw", ""] }] },
+                  {
+                    $map: {
+                      input: { $split: [{ $toString: "$_instrumentsRaw" }, ","] },
+                      as: "i",
+                      in: { $trim: { input: "$$i" } },
+                    },
+                  },
+                  [],
+                ],
+              },
+            ],
+          },
+        },
+      },
+
+      // ✅ Derive leadRole from smallest lineup (so vocalist-guitarist works)
+      {
+        $addFields: {
+          _lineupsWithSize: {
+            $map: {
+              input: { $ifNull: ["$lineups", []] },
+              as: "l",
+              in: {
+                lineup: "$$l",
+                membersLen: { $size: { $ifNull: ["$$l.bandMembers", []] } },
+              },
+            },
+          },
+          _sortedLineupDocs: {
+            $sortArray: { input: "$_lineupsWithSize", sortBy: { membersLen: 1 } },
+          },
+          _smallestLineupDoc: { $first: "$_sortedLineupDocs" },
+        },
+      },
+
+      {
+        $addFields: {
+          _membersSmallest: { $ifNull: ["$_smallestLineupDoc.lineup.bandMembers", []] },
+
+          // Any vocalist?
+          _vocalists: {
+            $filter: {
+              input: { $ifNull: ["$_smallestLineupDoc.lineup.bandMembers", []] },
+              as: "m",
+              cond: {
+                $regexMatch: {
+                  input: {
+                    $toLower: {
+                      $toString: {
+                        $ifNull: [
+                          "$$m.customRole",
+                          { $ifNull: ["$$m.role", { $ifNull: ["$$m.instrument", ""] }] },
+                        ],
+                      },
+                    },
+                  },
+                  regex: /vocal|singer/,
+                },
+              },
+            },
+          },
+        },
+      },
+
+      {
+        $addFields: {
+          _bestVocalist: {
+            $let: {
+              vars: {
+                compoundVocals: {
+                  $filter: {
+                    input: "$_vocalists",
+                    as: "m",
+                    cond: {
+                      $regexMatch: {
+                        input: {
+                          $toLower: {
+                            $toString: {
+                              $ifNull: [
+                                "$$m.customRole",
+                                { $ifNull: ["$$m.role", { $ifNull: ["$$m.instrument", ""] }] },
+                              ],
+                            },
+                          },
+                        },
+                        regex: /guitar|gtr|keys|keyboard|piano|dj|sax|trumpet|violin|perc|bongos/,
+                      },
+                    },
+                  },
+                },
+              },
+              in: {
+                $ifNull: [
+                  { $first: "$$compoundVocals" },
+                  { $ifNull: [{ $first: "$_vocalists" }, { $first: "$_membersSmallest" }] },
+                ],
+              },
+            },
+          },
+        },
+      },
+
+      {
+        $addFields: {
+          _bestRoleStr: {
+            $trim: {
+              input: {
+                $toString: {
+                  $ifNull: [
+                    "$_bestVocalist.customRole",
+                    { $ifNull: ["$_bestVocalist.role", { $ifNull: ["$_bestVocalist.instrument", ""] }] },
+                  ],
+                },
+              },
+            },
+          },
+
+          // Only set derived leadRole if explicit leadRole is missing/blank
+          leadRole: {
+            $let: {
+              vars: {
+                explicit: { $trim: { input: { $toString: { $ifNull: ["$leadRole", ""] } } } },
+                best: { $toLower: "$_bestRoleStr" },
+              },
+              in: {
+                $cond: [
+                  { $gt: [{ $strLenCP: "$$explicit" }, 0] },
+                  "$$explicit",
+                  {
+                    $cond: [
+                      {
+                        $and: [
+                          { $regexMatch: { input: "$$best", regex: /vocal|singer/ } },
+                          { $regexMatch: { input: "$$best", regex: /guitar|gtr/ } },
+                        ],
+                      },
+                      "Vocalist-Guitarist",
+                      {
+                        $cond: [
+                          { $regexMatch: { input: "$$best", regex: /vocal|singer/ } },
+                          "Vocalist",
+                          "",
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+
+          // Also set a simple vocalist flag if you want (optional but helpful)
+          vocalist: {
+            $let: {
+              vars: {
+                explicitV: { $trim: { input: { $toString: { $ifNull: ["$vocalist", ""] } } } },
+              },
+              in: {
+                $cond: [
+                  { $gt: [{ $strLenCP: "$$explicitV" }, 0] },
+                  "$$explicitV",
+                  {
+                    $cond: [{ $gt: [{ $size: "$_vocalists" }, 0] }, "Vocalist", ""],
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+
+      // --- Your existing fee/travel logic unchanged ---
       {
         $addFields: {
           _lineupCalc: {
@@ -145,9 +378,7 @@ minDisplayPrice:1,
                                   },
                                 },
                                 as: "r",
-                                in: {
-                                  $toDouble: { $ifNull: ["$$r.additionalFee", 0] },
-                                },
+                                in: { $toDouble: { $ifNull: ["$$r.additionalFee", 0] } },
                               },
                             },
                           },
@@ -201,7 +432,6 @@ minDisplayPrice:1,
         },
       },
 
-      // Sort lineups by (membersLen asc, bareFee asc) and pick the smallest
       {
         $addFields: {
           _sortedLineups: {
@@ -238,7 +468,6 @@ minDisplayPrice:1,
       },
       { $addFields: { _smallest: { $first: "$_sortedLineups" } } },
 
-      // Compose derived totals
       {
         $addFields: {
           _derivedBase: { $ifNull: ["$_smallest.bareFee", null] },
@@ -254,7 +483,6 @@ minDisplayPrice:1,
         },
       },
 
-      // Final basePrice preference
       {
         $addFields: {
           basePrice: {
@@ -290,6 +518,16 @@ minDisplayPrice:1,
           _minCountyFee: 0,
           _derivedBase: 0,
           _derivedTravel: 0,
+          _lineupsWithSize: 0,
+          _sortedLineupDocs: 0,
+          _smallestLineupDoc: 0,
+          _membersSmallest: 0,
+          _vocalists: 0,
+          _bestVocalist: 0,
+          _bestRoleStr: 0,
+          _genresRaw: 0,
+          _instrumentsRaw: 0,
+
           profileImage: 0,
           coverImage: 0,
           images: 0,
@@ -297,6 +535,10 @@ minDisplayPrice:1,
           countyFees: 0,
           useCountyTravelFee: 0,
           formattedPrice: 0,
+
+          // optional: you can also hide raw schema names if you want
+          genre: 0,
+          instrumentation: 0,
         },
       },
 
@@ -304,16 +546,12 @@ minDisplayPrice:1,
       { $limit: limit },
     ]);
 
-    res.set(
-      "Cache-Control",
-      "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
-    );
+    res.set("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=600");
     return res.json({ success: true, acts: cards });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }
 }
-
 /* ------------------------------ searchActCards --------------------------- */
 /* Uses an aggregation so we can FLATTEN nested genre arrays and match them */
 export async function searchActCards(req, res) {
