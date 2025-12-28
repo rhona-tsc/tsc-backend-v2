@@ -6,6 +6,8 @@ import {
   getUserShortlist,
 } from "../controllers/shortlistController.js";
 import { triggerAvailabilityRequest } from "../controllers/availabilityController.js";
+import requireAdminDashboard from "../middleware/requireAdminDashboard.js";
+import { getAllShortlistsAdmin } from "../controllers/agentDashboardController.js";
 
 
 
@@ -95,6 +97,7 @@ router.patch("/act/:id/decrement-shortlist", async (req, res) => {
   }
 });
 
+router.get("/all", requireAdminDashboard, getAllShortlistsAdmin);
 
 /* -------------------------------------------------------------------------- */
 /* 🟡 POST /add — Add or toggle shortlist + trigger availability              */

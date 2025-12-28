@@ -36,6 +36,7 @@ import bookingBoardRoutes from "./routes/bookingBoardRoutes.js";
 import uploadRoutes from "./routes/upload.js";
 import newsletterRoutes from "./routes/newsletterRoutes.js";
 import v2Routes from "./routes/v2.js";
+import agentDashboardRoutes from "./routes/agentDashboardRoutes.js";
 
 import {
   watchCalendar,
@@ -258,7 +259,7 @@ app.use("/api/v2", v2Routes);
 // canonical ACT endpoints
 app.use("/api/act", actV2Routes);
 
-
+app.use("/api/agent-dashboard", agentDashboardRoutes);
 
 // Twilio webhook test endpoint
 app.post(
