@@ -349,7 +349,8 @@ app.use("/api/google", googleRoutes);
 app.use("/api/calendar", calendarWebhook);
 
 // Pre-submission & moderation
-app.use("/api/act-pre", actPreSubmissionRoutes);
+app.use("/api/act-presubmissions", actPreSubmissionRoutes);
+app.use("/api/user/all", agentDashboardRoutes);
 app.use("/api/moderation", moderationRoutes);
 
 // Debug (scoped)
