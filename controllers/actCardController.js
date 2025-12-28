@@ -620,8 +620,7 @@ if (djSel.length) {
     ).filter(Boolean);
 
     for (const c of candidates) {
-      ors.push({ [`extras.${c}`]: true });
-    }
+ors.push({ [`extras.${c}`]: { $exists: true, $ne: false } });    }
   }
 
   and.push({ $or: ors });
