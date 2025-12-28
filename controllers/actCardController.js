@@ -617,69 +617,89 @@ export async function searchActCards(req, res) {
     const andBeforeDj = [...and];
 
     const asStringArray = (v) => {
-  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
-  if (typeof v === "string") {
-    // allow JSON string arrays OR comma-separated strings
-    const s = v.trim();
-    if (!s) return [];
-    try {
-      const parsed = JSON.parse(s);
-      if (Array.isArray(parsed)) return parsed.map((x) => String(x).trim()).filter(Boolean);
-    } catch (_) {}
-    return s.split(",").map((x) => x.trim()).filter(Boolean);
-  }
-  return [];
-};
+      if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
+      if (typeof v === "string") {
+        // allow JSON string arrays OR comma-separated strings
+        const s = v.trim();
+        if (!s) return [];
+        try {
+          const parsed = JSON.parse(s);
+          if (Array.isArray(parsed))
+            return parsed.map((x) => String(x).trim()).filter(Boolean);
+        } catch (_) {}
+        return s
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean);
+      }
+      return [];
+    };
 
-const djSelRaw = asStringArray(req.body?.djServices).length
-  ? asStringArray(req.body?.djServices)
-  : asStringArray(req.body?.dj_services);
+    // Accept either `djServices` (preferred) or legacy `dj_services`
+    const djSelRaw = asStringArray(djServices).length
+      ? asStringArray(djServices)
+      : asStringArray(req.body?.dj_services);
 
-const djSel = djSelRaw.map((s) => String(s || "").trim()).filter(Boolean);
-console.log("🎛️ [searchActCards] DJ selection", { djSelRaw, djSel });
-
-if (debug) {
-  console.log("🎛️ [searchActCards] DJ selection", { djSelRaw, djSel });
-}
-
-if (djSel.length) {
-  const ors = [];
-
-  if (debug) {
-    console.log("🧩 [searchActCards] Building DJ OR clauses", { djSel });
-  }
-
-  // If you also store DJ services in arrays on the card
-  ors.push({ djServices: { $in: djSel } });
-  ors.push({ dj_services: { $in: djSel } });
-  ors.push({ djServiceOptions: { $in: djSel } });
-
-  // Extras flags: try raw + lowercase + normalized
-  for (const k of djSel) {
-    const candidates = Array.from(
-      new Set([
-        k,
-        k.toLowerCase(),
-        normalizeExtraKey(k),               // your existing helper
-        normalizeExtraKey(k.toLowerCase()),
-      ])
-    ).filter(Boolean);
+    const djSel = djSelRaw.map((s) => String(s || "").trim()).filter(Boolean);
 
     if (debug) {
-      console.log("🔑 [searchActCards] DJ key candidates", { k, candidates });
+      console.log("🎛️ [searchActCards] DJ selection", { djSelRaw, djSel });
     }
 
-    for (const c of candidates) {
-      ors.push({ [`extras.${c}`]: { $exists: true, $ne: false } });
+    // Mirrors the frontend `hasExtra` idea: treat an extra as enabled if it's:
+    // - boolean true
+    // - a positive number
+    // - an object with { enabled: true } or { price/amount > 0 } or { complimentary: true }
+    const buildExtraEnabledOrs = (basePath) => [
+      { [basePath]: true },
+      { [basePath]: { $gt: 0 } },
+      { [`${basePath}.enabled`]: true },
+      { [`${basePath}.isEnabled`]: true },
+      { [`${basePath}.complimentary`]: true },
+      { [`${basePath}.isComplimentary`]: true },
+      { [`${basePath}.price`]: { $gt: 0 } },
+      { [`${basePath}.amount`]: { $gt: 0 } },
+    ];
+
+    if (djSel.length) {
+      const ors = [];
+
+      if (debug) {
+        console.log("🧩 [searchActCards] Building DJ OR clauses", { djSel });
+      }
+
+      // If you also store DJ services in arrays on the card
+      ors.push({ djServices: { $in: djSel } });
+      ors.push({ dj_services: { $in: djSel } });
+      ors.push({ djServiceOptions: { $in: djSel } });
+
+      // Extras: try raw + lowercase + normalized key variants
+      for (const k of djSel) {
+        const candidates = Array.from(
+          new Set([
+            k,
+            k.toLowerCase(),
+            normalizeExtraKey(k),
+            normalizeExtraKey(k.toLowerCase()),
+          ])
+        ).filter(Boolean);
+
+        if (debug) {
+          console.log("🔑 [searchActCards] DJ key candidates", { k, candidates });
+        }
+
+        for (const c of candidates) {
+          const basePath = `extras.${c}`;
+          ors.push(...buildExtraEnabledOrs(basePath));
+        }
+      }
+
+      if (debug) {
+        console.log("🧮 [searchActCards] DJ OR clauses count", { count: ors.length });
+      }
+
+      and.push({ $or: ors });
     }
-  }
-
-  if (debug) {
-    console.log("🧮 [searchActCards] DJ OR clauses count", { count: ors.length });
-  }
-
-  and.push({ $or: ors });
-}
 /* ---------------------------------------------------------------------- */
 
     // wireless (ANY)
