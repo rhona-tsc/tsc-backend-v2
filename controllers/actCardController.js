@@ -616,14 +616,27 @@ export async function searchActCards(req, res) {
     // snapshot of AND conditions before DJ filter
     const andBeforeDj = [...and];
 
-    /* -------------------------- DJ SERVICES (FIX) --------------------------- */
-const djSelRaw = Array.isArray(djServices)
-  ? djServices
-  : Array.isArray(req.body?.dj_services)
-  ? req.body.dj_services
-  : [];
+    const asStringArray = (v) => {
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
+  if (typeof v === "string") {
+    // allow JSON string arrays OR comma-separated strings
+    const s = v.trim();
+    if (!s) return [];
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) return parsed.map((x) => String(x).trim()).filter(Boolean);
+    } catch (_) {}
+    return s.split(",").map((x) => x.trim()).filter(Boolean);
+  }
+  return [];
+};
+
+const djSelRaw = asStringArray(req.body?.djServices).length
+  ? asStringArray(req.body?.djServices)
+  : asStringArray(req.body?.dj_services);
 
 const djSel = djSelRaw.map((s) => String(s || "").trim()).filter(Boolean);
+console.log("🎛️ [searchActCards] DJ selection", { djSelRaw, djSel });
 
 if (debug) {
   console.log("🎛️ [searchActCards] DJ selection", { djSelRaw, djSel });
