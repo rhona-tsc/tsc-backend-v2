@@ -564,6 +564,7 @@ export async function searchActCards(req, res) {
       wireless = [],
       soundLimiters = [],
       setupAndSoundcheck = [],
+      djServices = [], 
       paAndLights = [],
       pli = [],
       extraServices = [],
@@ -589,6 +590,43 @@ export async function searchActCards(req, res) {
 
     // instruments (ANY)
     if (instruments?.length) and.push({ instruments: { $in: instruments } });
+
+    /* -------------------------- DJ SERVICES (FIX) --------------------------- */
+const djSelRaw = Array.isArray(djServices)
+  ? djServices
+  : Array.isArray(req.body?.dj_services)
+  ? req.body.dj_services
+  : [];
+
+const djSel = djSelRaw.map((s) => String(s || "").trim()).filter(Boolean);
+
+if (djSel.length) {
+  const ors = [];
+
+  // If you also store DJ services in arrays on the card
+  ors.push({ djServices: { $in: djSel } });
+  ors.push({ dj_services: { $in: djSel } });
+  ors.push({ djServiceOptions: { $in: djSel } });
+
+  // Extras flags: try raw + lowercase + normalized
+  for (const k of djSel) {
+    const candidates = Array.from(
+      new Set([
+        k,
+        k.toLowerCase(),
+        normalizeExtraKey(k),               // your existing helper
+        normalizeExtraKey(k.toLowerCase()),
+      ])
+    ).filter(Boolean);
+
+    for (const c of candidates) {
+      ors.push({ [`extras.${c}`]: true });
+    }
+  }
+
+  and.push({ $or: ors });
+}
+/* ---------------------------------------------------------------------- */
 
     // wireless (ANY)
     if (wireless?.length) {
