@@ -575,6 +575,28 @@ export async function searchActCards(req, res) {
       excludeTests = true,
     } = req.body || {};
 
+    // Optional debug logging (enable with ?debug=1 or body.debug=1)
+    const debug = String(req.query?.debug || req.body?.debug || "") === "1";
+
+    if (debug) {
+      console.log("🧾 [searchActCards] DEBUG payload", {
+        genres,
+        lineupSizes,
+        instruments,
+        wireless,
+        soundLimiters,
+        setupAndSoundcheck,
+        djServices,
+        paAndLights,
+        pli,
+        extraServices,
+        actSearch,
+        songSearch,
+        includeStatuses,
+        excludeTests,
+      });
+    }
+
     /* ----------------------------- base $match ---------------------------- */
     const and = [];
 
@@ -591,6 +613,9 @@ export async function searchActCards(req, res) {
     // instruments (ANY)
     if (instruments?.length) and.push({ instruments: { $in: instruments } });
 
+    // snapshot of AND conditions before DJ filter
+    const andBeforeDj = [...and];
+
     /* -------------------------- DJ SERVICES (FIX) --------------------------- */
 const djSelRaw = Array.isArray(djServices)
   ? djServices
@@ -600,8 +625,16 @@ const djSelRaw = Array.isArray(djServices)
 
 const djSel = djSelRaw.map((s) => String(s || "").trim()).filter(Boolean);
 
+if (debug) {
+  console.log("🎛️ [searchActCards] DJ selection", { djSelRaw, djSel });
+}
+
 if (djSel.length) {
   const ors = [];
+
+  if (debug) {
+    console.log("🧩 [searchActCards] Building DJ OR clauses", { djSel });
+  }
 
   // If you also store DJ services in arrays on the card
   ors.push({ djServices: { $in: djSel } });
@@ -619,8 +652,17 @@ if (djSel.length) {
       ])
     ).filter(Boolean);
 
+    if (debug) {
+      console.log("🔑 [searchActCards] DJ key candidates", { k, candidates });
+    }
+
     for (const c of candidates) {
-ors.push({ [`extras.${c}`]: { $exists: true, $ne: false } });    }
+      ors.push({ [`extras.${c}`]: { $exists: true, $ne: false } });
+    }
+  }
+
+  if (debug) {
+    console.log("🧮 [searchActCards] DJ OR clauses count", { count: ors.length });
   }
 
   and.push({ $or: ors });
@@ -734,6 +776,51 @@ ors.push({ [`extras.${c}`]: { $exists: true, $ne: false } });    }
     // base match
     pipeline.push({ $match: and.length ? { $and: and } : {} });
 
+    if (debug) {
+      const matchNoDj = andBeforeDj.length ? { $and: andBeforeDj } : {};
+      const matchWithDj = and.length ? { $and: and } : {};
+
+      const sampleNoDj = await ActFilterCard.findOne(matchNoDj)
+        .select({ _id: 1, actId: 1, name: 1, tscName: 1, status: 1, extras: 1, genres: 1, instruments: 1, lineupSizes: 1 })
+        .lean();
+
+      const sampleWithDj = await ActFilterCard.findOne(matchWithDj)
+        .select({ _id: 1, actId: 1, name: 1, tscName: 1, status: 1, extras: 1 })
+        .lean();
+
+      console.log("🧪 [searchActCards] Sample (no DJ filter)", {
+        hasSample: !!sampleNoDj,
+        id: sampleNoDj?._id,
+        actId: sampleNoDj?.actId,
+        name: sampleNoDj?.name || sampleNoDj?.tscName,
+        keys: sampleNoDj ? Object.keys(sampleNoDj) : [],
+        extrasKeys: sampleNoDj?.extras ? Object.keys(sampleNoDj.extras) : [],
+      });
+
+      console.log("🧪 [searchActCards] Sample (WITH DJ filter)", {
+        hasSample: !!sampleWithDj,
+        id: sampleWithDj?._id,
+        actId: sampleWithDj?.actId,
+        name: sampleWithDj?.name || sampleWithDj?.tscName,
+        extrasKeys: sampleWithDj?.extras ? Object.keys(sampleWithDj.extras) : [],
+      });
+
+      // If nothing matches with DJ filter, check whether the collection even stores extras at all
+      if (!sampleWithDj) {
+        const anyExtras = await ActFilterCard.findOne({ extras: { $exists: true } })
+          .select({ _id: 1, actId: 1, name: 1, tscName: 1, extras: 1 })
+          .lean();
+
+        console.log("🧯 [searchActCards] No matches w/ DJ filter — sanity check any extras exist", {
+          hasAny: !!anyExtras,
+          anyId: anyExtras?._id,
+          anyActId: anyExtras?.actId,
+          anyName: anyExtras?.name || anyExtras?.tscName,
+          anyExtrasKeys: anyExtras?.extras ? Object.keys(anyExtras.extras) : [],
+        });
+      }
+    }
+
     // ✅ GENRES (handles array-of-arrays)
     if (genres?.length) {
       const wantRaw = genres.filter(Boolean);
@@ -780,6 +867,13 @@ ors.push({ [`extras.${c}`]: { $exists: true, $ne: false } });    }
     }
 
     const cards = await ActFilterCard.aggregate(pipeline);
+
+    if (debug) {
+      console.log("✅ [searchActCards] RESULT", {
+        count: cards.length,
+        firstIds: cards.slice(0, 5).map((c) => String(c.actId || c._id || "")),
+      });
+    }
 
     res.json({ ok: true, count: cards.length, cards });
   } catch (err) {
