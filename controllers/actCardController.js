@@ -504,6 +504,75 @@ export async function getActCards(req, res) {
         },
       },
 
+      // 🔗 Pull filter-card fields (extras / DJ services / normalized arrays) so client-side filters work
+      {
+        $lookup: {
+          from: ActFilterCard.collection.name,
+          localField: "actId",
+          foreignField: "actId",
+          as: "_filterCard",
+        },
+      },
+      { $addFields: { _filterCard: { $first: "$_filterCard" } } },
+      {
+        $addFields: {
+          // Prefer act fields if present, otherwise fall back to ActFilterCard
+          genres: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ["$genres", []] } }, 0] },
+              "$genres",
+              { $ifNull: ["$_filterCard.genres", []] },
+            ],
+          },
+          instruments: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ["$instruments", []] } }, 0] },
+              "$instruments",
+              { $ifNull: ["$_filterCard.instruments", []] },
+            ],
+          },
+          lineupSizes: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ["$lineupSizes", []] } }, 0] },
+              "$lineupSizes",
+              { $ifNull: ["$_filterCard.lineupSizes", []] },
+            ],
+          },
+
+          // Ensure `extras` is present (many client filters depend on this)
+          extras: {
+            $cond: [
+              {
+                $gt: [
+                  {
+                    $size: {
+                      $objectToArray: {
+                        $ifNull: ["$extras", {}],
+                      },
+                    },
+                  },
+                  0,
+                ],
+              },
+              "$extras",
+              { $ifNull: ["$_filterCard.extras", {}] },
+            ],
+          },
+
+          // DJ services can exist in different schema shapes — keep them all
+          djServices: { $ifNull: ["$djServices", { $ifNull: ["$_filterCard.djServices", []] }] },
+          dj_services: { $ifNull: ["$dj_services", { $ifNull: ["$_filterCard.dj_services", []] }] },
+          djServiceOptions: {
+            $ifNull: ["$djServiceOptions", { $ifNull: ["$_filterCard.djServiceOptions", []] }],
+          },
+
+          // Other fields sometimes used by filters
+          pliAmount: { $ifNull: ["$pliAmount", "$_filterCard.pliAmount"] },
+          pa: { $ifNull: ["$pa", "$_filterCard.pa"] },
+          light: { $ifNull: ["$light", "$_filterCard.light"] },
+        },
+      },
+
       // Tidy up
       {
         $project: {
@@ -539,6 +608,7 @@ export async function getActCards(req, res) {
           // optional: you can also hide raw schema names if you want
           genre: 0,
           instrumentation: 0,
+          _filterCard: 0,
         },
       },
 
