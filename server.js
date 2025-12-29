@@ -256,8 +256,7 @@ app.use(
 
 // v2 (search/availability/travel)
 app.use("/api/v2", v2Routes);
-// canonical ACT endpoints
-app.use("/api/act", actV2Routes);
+
 
 app.use("/api/agent-dashboard", agentDashboardRoutes);
 

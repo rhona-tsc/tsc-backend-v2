@@ -80,7 +80,7 @@ export async function getActCards(req, res) {
 
           formattedPrice: 1,
           minDisplayPrice: 1,
-
+extras: 1,
           createdAt: 1,
           updatedAt: 1,
           bestseller: 1,
@@ -106,7 +106,6 @@ export async function getActCards(req, res) {
           pliAmount: 1,
           pa: 1,
           light: 1,
-          extras: 1,
           status: 1,
           isTest: 1,
         },
@@ -559,12 +558,7 @@ export async function getActCards(req, res) {
             ],
           },
 
-          // DJ services can exist in different schema shapes — keep them all
-          djServices: { $ifNull: ["$djServices", { $ifNull: ["$_filterCard.djServices", []] }] },
-          dj_services: { $ifNull: ["$dj_services", { $ifNull: ["$_filterCard.dj_services", []] }] },
-          djServiceOptions: {
-            $ifNull: ["$djServiceOptions", { $ifNull: ["$_filterCard.djServiceOptions", []] }],
-          },
+     
 
           // Other fields sometimes used by filters
           pliAmount: { $ifNull: ["$pliAmount", "$_filterCard.pliAmount"] },
@@ -634,7 +628,7 @@ export async function searchActCards(req, res) {
       wireless = [],
       soundLimiters = [],
       setupAndSoundcheck = [],
-      djServices = [], 
+      djServices = [],
       paAndLights = [],
       pli = [],
       extraServices = [],
@@ -770,7 +764,8 @@ export async function searchActCards(req, res) {
 
       and.push({ $or: ors });
     }
-/* ---------------------------------------------------------------------- */
+
+    /* ---------------------------------------------------------------------- */
 
     // wireless (ANY)
     if (wireless?.length) {
@@ -868,7 +863,10 @@ export async function searchActCards(req, res) {
         .filter(Boolean);
       if (tokens.length) {
         and.push({
-          $or: [{ repertoireTokens: { $in: tokens } }, { artistTokens: { $in: tokens } }],
+          $or: [
+            { repertoireTokens: { $in: tokens } },
+            { artistTokens: { $in: tokens } },
+          ],
         });
       }
     }
@@ -884,11 +882,34 @@ export async function searchActCards(req, res) {
       const matchWithDj = and.length ? { $and: and } : {};
 
       const sampleNoDj = await ActFilterCard.findOne(matchNoDj)
-        .select({ _id: 1, actId: 1, name: 1, tscName: 1, status: 1, extras: 1, genres: 1, instruments: 1, lineupSizes: 1 })
+        .select({
+          _id: 1,
+          actId: 1,
+          name: 1,
+          tscName: 1,
+          status: 1,
+          extras: 1,
+          genres: 1,
+          instruments: 1,
+          lineupSizes: 1,
+          djServices: 1,
+          dj_services: 1,
+          djServiceOptions: 1,
+        })
         .lean();
 
       const sampleWithDj = await ActFilterCard.findOne(matchWithDj)
-        .select({ _id: 1, actId: 1, name: 1, tscName: 1, status: 1, extras: 1 })
+        .select({
+          _id: 1,
+          actId: 1,
+          name: 1,
+          tscName: 1,
+          status: 1,
+          extras: 1,
+          djServices: 1,
+          dj_services: 1,
+          djServiceOptions: 1,
+        })
         .lean();
 
       console.log("🧪 [searchActCards] Sample (no DJ filter)", {
@@ -898,6 +919,9 @@ export async function searchActCards(req, res) {
         name: sampleNoDj?.name || sampleNoDj?.tscName,
         keys: sampleNoDj ? Object.keys(sampleNoDj) : [],
         extrasKeys: sampleNoDj?.extras ? Object.keys(sampleNoDj.extras) : [],
+        djServices: sampleNoDj?.djServices,
+        dj_services: sampleNoDj?.dj_services,
+        djServiceOptions: sampleNoDj?.djServiceOptions,
       });
 
       console.log("🧪 [searchActCards] Sample (WITH DJ filter)", {
@@ -906,12 +930,24 @@ export async function searchActCards(req, res) {
         actId: sampleWithDj?.actId,
         name: sampleWithDj?.name || sampleWithDj?.tscName,
         extrasKeys: sampleWithDj?.extras ? Object.keys(sampleWithDj.extras) : [],
+        djServices: sampleWithDj?.djServices,
+        dj_services: sampleWithDj?.dj_services,
+        djServiceOptions: sampleWithDj?.djServiceOptions,
       });
 
       // If nothing matches with DJ filter, check whether the collection even stores extras at all
       if (!sampleWithDj) {
         const anyExtras = await ActFilterCard.findOne({ extras: { $exists: true } })
-          .select({ _id: 1, actId: 1, name: 1, tscName: 1, extras: 1 })
+          .select({
+            _id: 1,
+            actId: 1,
+            name: 1,
+            tscName: 1,
+            extras: 1,
+            djServices: 1,
+            dj_services: 1,
+            djServiceOptions: 1,
+          })
           .lean();
 
         console.log("🧯 [searchActCards] No matches w/ DJ filter — sanity check any extras exist", {
@@ -920,6 +956,9 @@ export async function searchActCards(req, res) {
           anyActId: anyExtras?.actId,
           anyName: anyExtras?.name || anyExtras?.tscName,
           anyExtrasKeys: anyExtras?.extras ? Object.keys(anyExtras.extras) : [],
+          anyDjServices: anyExtras?.djServices,
+          anyDj_services: anyExtras?.dj_services,
+          anyDjServiceOptions: anyExtras?.djServiceOptions,
         });
       }
     }
@@ -940,7 +979,7 @@ export async function searchActCards(req, res) {
               in: {
                 $concatArrays: [
                   "$$value",
-                  { $cond: [{ $isArray: "$$this" }, "$$this", ["$$this"] ] },
+                  { $cond: [{ $isArray: "$$this" }, "$$this", ["$$this"]] },
                 ],
               },
             },
@@ -954,14 +993,30 @@ export async function searchActCards(req, res) {
       });
     }
 
-    // select only what the client needs for intersection
+    // ✅ Return a richer payload ONLY in debug mode so you can inspect shapes/keys
     pipeline.push({
-      $project: {
-        _id: 1,
-        actId: 1,
-        status: 1,
-        isTest: 1,
-      },
+      $project: debug
+        ? {
+            _id: 1,
+            actId: 1,
+            name: 1,
+            tscName: 1,
+            status: 1,
+            isTest: 1,
+            genres: 1,
+            instruments: 1,
+            lineupSizes: 1,
+            extras: 1,
+            djServices: 1,
+            dj_services: 1,
+            djServiceOptions: 1,
+          }
+        : {
+            _id: 1,
+            actId: 1,
+            status: 1,
+            isTest: 1,
+          },
     });
 
     // TEMP debug (safe to keep; prints only in non-prod)
@@ -974,7 +1029,8 @@ export async function searchActCards(req, res) {
     if (debug) {
       console.log("✅ [searchActCards] RESULT", {
         count: cards.length,
-        firstIds: cards.slice(0, 5).map((c) => String(c.actId || c._id || "")),
+        first: cards[0] || null,
+        firstIds: cards.slice(0, 10).map((c) => String(c.actId || c._id || "")),
       });
     }
 
