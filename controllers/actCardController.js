@@ -1041,6 +1041,40 @@ export async function searchActCards(req, res) {
           ].forEach((k) => candidatesSet.add(k));
         }
 
+        // ✅ Special-case: when the UI filter is "Bass", also match common wireless keys you use
+        // across acts (and their casings / hyphen variants).
+        // Examples you want matched:
+        // - Vocalist-Bassist
+        // - Electric-Bassist
+        // - Electric Bass
+        // - Bass Guitar
+        // - Acoustic Bass
+        // - Vocalist-Acoustic Bassist
+        if (canonLower === "bass" || /\bbass\b/.test(rawLower)) {
+          [
+            "Bass",
+            "bass",
+            "Bass Guitar",
+            "bass guitar",
+            "Electric Bass",
+            "electric bass",
+            "Electric Bassist",
+            "electric bassist",
+            "Electric-Bassist",
+            "electric-bassist",
+            "Acoustic Bass",
+            "acoustic bass",
+            "Acoustic Bassist",
+            "acoustic bassist",
+            "Vocalist-Bassist",
+            "vocalist-bassist",
+            "Vocalist-Acoustic Bassist",
+            "vocalist-acoustic bassist",
+            "Vocalist-Acoustic-Bassist",
+            "vocalist-acoustic-bassist",
+          ].forEach((k) => candidatesSet.add(k));
+        }
+
         const candidates = Array.from(candidatesSet).filter(Boolean);
 
         for (const key of candidates) {
