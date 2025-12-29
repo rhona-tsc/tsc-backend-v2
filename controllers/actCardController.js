@@ -640,18 +640,31 @@ extras: 1,
       const has = (re) => lower.some((p) => re.test(p));
 
       if (has(/vocal|singer/)) tags.add("Vocalist");
-      // Only tag as "Male Vocalist" when it is explicitly a *lead* male vocal role
-      // (prevents matching looser male vocal harmony / backing vocal type strings)
+
+      // ✅ Male Vocalist (STRICT lead only)
+      // Matches: "Male Lead Vocalist", "Male Lead Vocal", "Lead Male Vocalist", "Lead Male Vocal",
+      // and optionally " / Rapper".
       if (
         has(
-          /\b(?:male\s*lead|lead\s*male)\s*(?:vocal(?:ist)?|singer)(?:\s*\/\s*rapper)?\b/
+          /\b(?:male\s*lead\s*vocal(?:ist)?|lead\s*male\s*vocal(?:ist)?)(?:\s*\/\s*rapper)?\b/
         )
       ) {
         tags.add("Male Vocalist");
       }
-      if (has(/(lead\s*)?female\s*(vocal|singer)|female\s*lead\s*(vocal|singer)/))
+
+      // Female vocalist (kept as-is)
+      if (has(/(lead\s*)?female\s*(vocal|singer)|female\s*lead\s*(vocal|singer)/)) {
         tags.add("Female Vocalist");
+      }
+
+      // ✅ MC / Rapper (this WILL pick up "Lead Female Vocal / Rapper" etc)
       if (has(/\bmc\b|m\/?c|rapper/)) tags.add("MC/Rapper");
+
+      // ✅ Guitar category (Electric/Acoustic Guitar + Vocalist-Guitarist)
+      // Avoids Bass Guitar by only matching acoustic/electric or vocalist-guitarist.
+      if (has(/\b(?:acoustic|electric)\s*guitar\b|\bvocalist[-\s]*guitarist\b/)) {
+        tags.add("Guitar");
+      }
 
       return Array.from(tags);
     };
@@ -746,7 +759,7 @@ export async function searchActCards(req, res) {
           ors.push({
             instruments: {
               $regex:
-                /\b(?:male\s*lead|lead\s*male)\s*(?:vocal(?:ist)?|singer)(?:\s*\/\s*rapper)?\b/i,
+                /\b(?:male\s*lead\s*vocal(?:ist)?|lead\s*male\s*vocal(?:ist)?)(?:\s*\/\s*rapper)?\b/i,
             },
           });
           continue;
@@ -757,6 +770,16 @@ export async function searchActCards(req, res) {
           ors.push({
             instruments: {
               $regex: /(lead\s*)?female\s*(vocal|singer)|female\s*lead\s*(vocal|singer)/i,
+            },
+          });
+          continue;
+        }
+
+        // Guitar category (matches Electric/Acoustic Guitar + Vocalist-Guitarist)
+        if (k === "guitar") {
+          ors.push({
+            instruments: {
+              $regex: /\b(?:acoustic|electric)\s*guitar\b|\bvocalist[-\s]*guitarist\b/i,
             },
           });
           continue;
