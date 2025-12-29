@@ -1028,6 +1028,57 @@ export async function searchActCards(req, res) {
           titleCaseWords(canonLower),
         ]);
 
+        // ✅ Special-case: when the UI filter is "Vocal"/"Vocalist", also match role-like keys
+        // you may store in wirelessByInstrument (e.g. "Lead Female Vocal / Rapper").
+        if (canonLower === "vocal" || /\bvocal\b|\bvocalist\b|\bsinger\b/.test(rawLower)) {
+          [
+            "Vocal",
+            "vocal",
+            "Vocalist",
+            "vocalist",
+            "Singer",
+            "singer",
+            "Lead Vocal",
+            "lead vocal",
+            "Lead Vocalist",
+            "lead vocalist",
+            "Lead Singer",
+            "lead singer",
+
+            // Female lead variants
+            "Lead Female Vocal",
+            "lead female vocal",
+            "Lead Female Vocalist",
+            "lead female vocalist",
+            "Female Lead Vocal",
+            "female lead vocal",
+            "Female Lead Vocalist",
+            "female lead vocalist",
+            "Lead Female Vocal / Rapper",
+            "lead female vocal / rapper",
+            "Lead Female Vocal/Rapper",
+            "lead female vocal/rapper",
+            "Lead Female Vocal - Rapper",
+            "lead female vocal - rapper",
+
+            // Male lead variants
+            "Lead Male Vocal",
+            "lead male vocal",
+            "Lead Male Vocalist",
+            "lead male vocalist",
+            "Male Lead Vocal",
+            "male lead vocal",
+            "Male Lead Vocalist",
+            "male lead vocalist",
+            "Lead Male Vocal / Rapper",
+            "lead male vocal / rapper",
+            "Lead Male Vocal/Rapper",
+            "lead male vocal/rapper",
+            "Lead Male Vocal - Rapper",
+            "lead male vocal - rapper",
+          ].forEach((k) => candidatesSet.add(k));
+        }
+
         // ✅ Special-case: when the UI filter is "Guitar", also match wireless keys like
         // "Electric Guitar" and "Acoustic Guitar" (and their casings).
         if (canonLower === "guitar" || /guitar/.test(rawLower)) {
