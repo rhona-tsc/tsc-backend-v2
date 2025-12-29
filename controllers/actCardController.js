@@ -997,11 +997,17 @@ export async function searchActCards(req, res) {
     /* ---------------------------------------------------------------------- */
 
     // wireless (ANY)
-    // NOTE: ActFilterCard.wirelessByInstrument keys may be TitleCase (e.g. "Saxophone")
-    // while UI sends labels and our canonical mapper returns lowercase (e.g. "saxophone").
-    // Mongo field names are case-sensitive, so we try multiple candidates.
+    // NOTE: ActFilterCard.wirelessByInstrument keys may be stored in various casings / labels
+    // (e.g. "Saxophone", "Electric Guitar", "Acoustic Guitar"). Mongo field names are case-sensitive,
+    // so we try multiple candidates.
     if (wireless?.length) {
-      const mkTitle = (s = "") => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+      const titleCaseWords = (s = "") =>
+        String(s || "")
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+          .join(" ");
 
       const clauses = [];
 
@@ -1009,18 +1015,33 @@ export async function searchActCards(req, res) {
         const raw = String(w || "").trim();
         if (!raw) continue;
 
-        const canon = wirelessKey(raw); // e.g. "saxophone"
+        const rawLower = raw.toLowerCase();
+        const canon = wirelessKey(raw); // e.g. "saxophone" or "guitar"
+        const canonLower = String(canon || "").toLowerCase();
 
-        const candidates = Array.from(
-          new Set([
-            raw,
-            raw.toLowerCase(),
-            mkTitle(raw.toLowerCase()),
-            canon,
-            String(canon || "").toLowerCase(),
-            mkTitle(String(canon || "").toLowerCase()),
-          ])
-        ).filter(Boolean);
+        const candidatesSet = new Set([
+          raw,
+          rawLower,
+          titleCaseWords(rawLower),
+          canon,
+          canonLower,
+          titleCaseWords(canonLower),
+        ]);
+
+        // ✅ Special-case: when the UI filter is "Guitar", also match wireless keys like
+        // "Electric Guitar" and "Acoustic Guitar" (and their casings).
+        if (canonLower === "guitar" || /guitar/.test(rawLower)) {
+          [
+            "Guitar",
+            "guitar",
+            "Electric Guitar",
+            "electric guitar",
+            "Acoustic Guitar",
+            "acoustic guitar",
+          ].forEach((k) => candidatesSet.add(k));
+        }
+
+        const candidates = Array.from(candidatesSet).filter(Boolean);
 
         for (const key of candidates) {
           clauses.push({ [`wirelessByInstrument.${key}`]: true });
