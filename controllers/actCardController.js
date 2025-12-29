@@ -666,6 +666,14 @@ extras: 1,
         tags.add("Guitar");
       }
 
+      // ✅ Bass category (Acoustic/Electric/Double Bass + Bass Guitar)
+      // Includes common variants and avoids accidental matches like "bassoon".
+      if (
+        has(/\b(?:acoustic|electric|double)\s*bass\b|\bbass\s*guitar\b|\bvocalist[-\s]*bassist\b|\bbassist\b/)
+      ) {
+        tags.add("Bass");
+      }
+
       return Array.from(tags);
     };
 
@@ -780,6 +788,17 @@ export async function searchActCards(req, res) {
           ors.push({
             instruments: {
               $regex: /\b(?:acoustic|electric)\s*guitar\b|\bvocalist[-\s]*guitarist\b/i,
+            },
+          });
+          continue;
+        }
+
+        // Bass category (matches Acoustic/Electric/Double Bass + Bass Guitar)
+        if (k === "bass") {
+          ors.push({
+            instruments: {
+              $regex:
+                /\b(?:acoustic|electric|double)\s*bass\b|\bbass\s*guitar\b|\bvocalist[-\s]*bassist\b|\bbassist\b/i,
             },
           });
           continue;
