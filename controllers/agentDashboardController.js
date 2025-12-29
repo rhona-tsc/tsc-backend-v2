@@ -162,3 +162,39 @@ export async function getAllShortlistsAdmin(req, res) {
     return res.status(500).json({ success: false, message: e.message });
   }
 }
+
+// controllers/agentDashboardController.js
+export async function getAllUsersAdmin(req, res) {
+  try {
+    const limit = Math.min(Number(req.query.limit || 200), 1000);
+    const page = Math.max(Number(req.query.page || 1), 1);
+    const skip = (page - 1) * limit;
+
+    const includeActs = String(req.query.includeActs || "true") === "true";
+
+    let q = userModel
+      .find({})
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .select(
+        "_id name firstName lastName surname email phone createdAt eventDate date eventLocation location address shortlistedActs"
+      );
+
+    // This works if your schema is `shortlistedActs: [{ type: ObjectId, ref: 'Act' }]`
+    if (includeActs) {
+      q = q.populate({ path: "shortlistedActs", select: "_id name tscName" });
+    }
+
+    const users = await q.lean();
+
+    return res.json({
+      success: true,
+      users,
+      meta: { page, limit, count: users.length },
+    });
+  } catch (e) {
+    console.error("getAllUsersAdmin error:", e);
+    return res.status(500).json({ success: false, message: e.message });
+  }
+}
