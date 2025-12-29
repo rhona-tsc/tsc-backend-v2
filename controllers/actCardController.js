@@ -28,9 +28,18 @@ const normSize = (s = "") => {
 
 const wirelessKey = (label = "") => {
   const k = String(label).trim().toLowerCase();
+  if (!k) return "";
+
+  // Stable canonical keys (lowercase) — DB keys may be TitleCase; we'll handle that in the query.
   if (k.startsWith("vocal")) return "vocal";
   if (k.includes("sax")) return "saxophone";
-  return k; // guitar, bass, keytar, trumpet etc.
+  if (k.includes("trumpet")) return "trumpet";
+  if (k.includes("bass")) return "bass";
+  if (k.includes("guitar")) return "guitar";
+  if (k.includes("keyboard") || k.includes("keytar") || k.includes("keys")) return "keyboard";
+
+  // Fallback: keep the normalized label
+  return k;
 };
 
 const normalizeExtraKey = (k = "") =>
@@ -988,12 +997,39 @@ export async function searchActCards(req, res) {
     /* ---------------------------------------------------------------------- */
 
     // wireless (ANY)
+    // NOTE: ActFilterCard.wirelessByInstrument keys may be TitleCase (e.g. "Saxophone")
+    // while UI sends labels and our canonical mapper returns lowercase (e.g. "saxophone").
+    // Mongo field names are case-sensitive, so we try multiple candidates.
     if (wireless?.length) {
-      and.push({
-        $or: wireless.map((w) => ({
-          [`wirelessByInstrument.${wirelessKey(w)}`]: true,
-        })),
-      });
+      const mkTitle = (s = "") => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+
+      const clauses = [];
+
+      for (const w of wireless) {
+        const raw = String(w || "").trim();
+        if (!raw) continue;
+
+        const canon = wirelessKey(raw); // e.g. "saxophone"
+
+        const candidates = Array.from(
+          new Set([
+            raw,
+            raw.toLowerCase(),
+            mkTitle(raw.toLowerCase()),
+            canon,
+            String(canon || "").toLowerCase(),
+            mkTitle(String(canon || "").toLowerCase()),
+          ])
+        ).filter(Boolean);
+
+        for (const key of candidates) {
+          clauses.push({ [`wirelessByInstrument.${key}`]: true });
+        }
+      }
+
+      if (clauses.length) {
+        and.push({ $or: clauses });
+      }
     }
 
     // sound limiter toggles
