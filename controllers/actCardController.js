@@ -641,6 +641,16 @@ extras: 1,
 
       if (has(/vocal|singer/)) tags.add("Vocalist");
 
+      // ✅ Vocalist-Guitarist (covers Vocalist-Guitarist, Vocalist-Acoustic Guitarist, etc)
+      // Any role string that contains both a vocalist term and a guitar term.
+      if (
+        has(
+          /\b(vocal|vocalist|singer)\b.*\b(guitar|guitarist)\b|\b(guitar|guitarist)\b.*\b(vocal|vocalist|singer)\b/
+        )
+      ) {
+        tags.add("Vocalist-Guitarist");
+      }
+
       // ✅ Lead Vocalist (any gender): any role containing both "lead" and a vocal term
       // Examples matched:
       // - "Lead Male Vocal / Rapper"
@@ -774,6 +784,17 @@ export async function searchActCards(req, res) {
 
       for (const sel of want) {
         const k = sel.toLowerCase();
+
+        // ✅ Vocalist-Guitarist (also matches Vocalist-Acoustic Guitarist / Vocalist-Electric Guitarist)
+        if (k === "vocalist-guitarist" || k === "vocalist guitarist") {
+          ors.push({
+            instruments: {
+              $regex:
+                /\b(vocal|vocalist|singer)\b.*\b(guitar|guitarist)\b|\b(guitar|guitarist)\b.*\b(vocal|vocalist|singer)\b/i,
+            },
+          });
+          continue;
+        }
 
         // Lead Vocalist (any gender): must contain both "lead" and a vocal term
         if (k === "lead vocalist" || k === "lead vocal" || k === "lead singer") {
