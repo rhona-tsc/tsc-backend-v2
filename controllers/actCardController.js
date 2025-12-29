@@ -640,8 +640,15 @@ extras: 1,
       const has = (re) => lower.some((p) => re.test(p));
 
       if (has(/vocal|singer/)) tags.add("Vocalist");
-      if (has(/(lead\s*)?male\s*(vocal|singer)|male\s*lead\s*(vocal|singer)/))
+      // Only tag as "Male Vocalist" when it is explicitly a *lead* male vocal role
+      // (prevents matching looser male vocal harmony / backing vocal type strings)
+      if (
+        has(
+          /\b(?:male\s*lead|lead\s*male)\s*(?:vocal(?:ist)?|singer)(?:\s*\/\s*rapper)?\b/
+        )
+      ) {
         tags.add("Male Vocalist");
+      }
       if (has(/(lead\s*)?female\s*(vocal|singer)|female\s*lead\s*(vocal|singer)/))
         tags.add("Female Vocalist");
       if (has(/\bmc\b|m\/?c|rapper/)) tags.add("MC/Rapper");
@@ -733,11 +740,13 @@ export async function searchActCards(req, res) {
       for (const sel of want) {
         const k = sel.toLowerCase();
 
-        // Male vocalist
+        // Male vocalist (STRICT): only match lead male vocal roles
+        // e.g. "Male Lead Vocalist", "Lead Male Vocal / Rapper", "Male Lead Vocal"
         if (k === "male vocalist" || k === "male vocal" || k === "lead male vocal") {
           ors.push({
             instruments: {
-              $regex: /(lead\s*)?male\s*(vocal|singer)|male\s*lead\s*(vocal|singer)/i,
+              $regex:
+                /\b(?:male\s*lead|lead\s*male)\s*(?:vocal(?:ist)?|singer)(?:\s*\/\s*rapper)?\b/i,
             },
           });
           continue;
