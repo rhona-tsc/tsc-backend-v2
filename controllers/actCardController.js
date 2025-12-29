@@ -660,10 +660,14 @@ extras: 1,
       // ✅ MC / Rapper (this WILL pick up "Lead Female Vocal / Rapper" etc)
       if (has(/\bmc\b|m\/?c|rapper/)) tags.add("MC/Rapper");
 
-      // ✅ Guitar category (Electric/Acoustic Guitar + Vocalist-Guitarist)
-      // Avoids Bass Guitar by only matching acoustic/electric or vocalist-guitarist.
-      if (has(/\b(?:acoustic|electric)\s*guitar\b|\bvocalist[-\s]*guitarist\b/)) {
-        tags.add("Guitar");
+      // ✅ Electric / Acoustic Guitar (strict)
+      // "Electric Guitar" must NOT match "Acoustic Guitar".
+      if (has(/\belectric\s*guitar\b|\belectric\s*guitarist\b/)) {
+        tags.add("Electric Guitar");
+      }
+
+      if (has(/\bacoustic\s*guitar\b|\bacoustic\s*guitarist\b/)) {
+        tags.add("Acoustic Guitar");
       }
 
       // ✅ Bass category (Acoustic/Electric/Double Bass + Bass Guitar)
@@ -783,7 +787,27 @@ export async function searchActCards(req, res) {
           continue;
         }
 
-        // Guitar category (matches Electric/Acoustic Guitar + Vocalist-Guitarist)
+        // Electric Guitar (STRICT) — must not match Acoustic Guitar
+        if (k === "electric guitar") {
+          ors.push({
+            instruments: {
+              $regex: /\belectric\s*guitar\b|\belectric\s*guitarist\b/i,
+            },
+          });
+          continue;
+        }
+
+        // Acoustic Guitar (STRICT)
+        if (k === "acoustic guitar") {
+          ors.push({
+            instruments: {
+              $regex: /\bacoustic\s*guitar\b|\bacoustic\s*guitarist\b/i,
+            },
+          });
+          continue;
+        }
+
+        // Legacy "Guitar" (broad) — keep for backwards compatibility if anything still sends "Guitar"
         if (k === "guitar") {
           ors.push({
             instruments: {
