@@ -350,8 +350,8 @@ app.use("/api/calendar", calendarWebhook);
 
 // Pre-submission & moderation
 app.use("/api/act-presubmissions", actPreSubmissionRoutes);
-app.use("/api/user/all", agentDashboardRoutes);
 app.use("/api/moderation", moderationRoutes);
+app.use("/api/agent-dashboard", agentDashboardRoutes);
 
 // Debug (scoped)
 app.use("/api/debug", debugRoutes);

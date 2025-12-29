@@ -4,6 +4,8 @@ import Act from '../models/actModel.js';
 import { forgotPassword, resetPassword } from "../controllers/authController.js";
 import { getAvailableActIds } from '../controllers/actAvailabilityController.js';
 import actCardModel from '../models/actCard.model.js';
+import requireAdminDashboard from '../middleware/requireAdminDashboard.js';
+import userModel from '../models/userModel.js';
 
 const userRouter = express.Router();
 
@@ -53,6 +55,20 @@ userRouter.get('/:id([0-9a-fA-F]{24})', async (req, res) => {
   } catch (err) {
     console.error('❌ Error fetching act:', err);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+userRouter.get("/all", requireAdminDashboard, async (req, res) => {
+  try {
+    const users = await userModel
+      .find({})
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json({ success: true, users });
+  } catch (e) {
+    console.error("GET /api/user/all error:", e);
+    return res.status(500).json({ success: false, message: e.message });
   }
 });
 

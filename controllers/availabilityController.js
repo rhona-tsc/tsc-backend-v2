@@ -4426,7 +4426,7 @@ try {
   let clientName = (allRows.find((r) => r.clientName)?.clientName) || "there";
 
   const SITE_RAW =
-    process.env.FRONTEND_URL || "https://meek-biscotti-8d5020.netlify.app/";
+    process.env.FRONTEND_URL || "https://thesupremecollective.co.uk/";
   const SITE = SITE_RAW.endsWith("/") ? SITE_RAW : `${SITE_RAW}/`;
 
   const selectedAddress =
