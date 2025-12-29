@@ -172,7 +172,11 @@ export const createActV2 = async (req, res) => {
 
     console.log("🔦 Creating act with lightingSystem:", cleaned.lightingSystem);
     console.log("📜 Creating act with setlist:", cleaned.setlist);
-
+console.log("🧾 auth check", {
+  hasReqUser: !!req.user,
+  reqUser: req.user,
+  useridHeader: req.headers.userid,
+});
     // If we can't identify the creator as an ObjectId, fail fast.
     // This prevents accidental saving of an email into createdBy.
     if (!authUserId) {

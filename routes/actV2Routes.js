@@ -24,6 +24,7 @@ import {
 } from "../controllers/actV2Controller.js";
 
 import { getActCards } from "../controllers/actCardController.js";
+import requireAnyAuth from "../middleware/requireAnyAuth.js";
 
 /* ------------------------------- LOG HELPERS ------------------------------ */
 const inspect = (obj, depth = 6) =>
@@ -240,7 +241,9 @@ const filterDataInline = async (req, res) => {
 
 /* --------------------------------- Routes -------------------------------- */
 router.post("/save-draft", wrap("POST /save-draft", saveActDraftV2));
-router.post("/create", wrap("POST /create", createActV2));
+router.post("/create", requireAnyAuth, wrap("POST /create", createActV2));
+router.put("/update/:id", requireAnyAuth, wrap("PUT /update/:id", updateActV2));
+
 router.post("/trash", wrap("POST /trash", trashAct));
 router.get("/trashed", wrap("GET /trashed", getTrashedActs));
 router.delete("/delete-permanent", wrap("DELETE /delete-permanent", deleteActPermanently));
@@ -249,7 +252,7 @@ router.get("/list", wrap("GET /list", getAllActsV2));
 router.get("/cards", wrap("GET /cards", getActCards));
 
 router.get("/:id([0-9a-fA-F]{24})", wrap("GET /:id", getActByIdV2));
-router.put("/update/:id", wrap("PUT /update/:id", updateActV2));
+
 router.post("/security-update/:id", wrap("POST /security-update/:id", updateActV2));
 router.get("/my-drafts", wrap("GET /my-drafts", getMyDrafts));
 router.put("/save-pending-changes/:id", wrap("PUT /save-pending-changes/:id", savePendingChanges));
