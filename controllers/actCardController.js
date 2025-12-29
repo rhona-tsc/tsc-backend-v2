@@ -610,6 +610,53 @@ extras: 1,
       { $limit: limit },
     ]);
 
+    // 🔧 Normalize + tag vocalist roles so instrument filters like
+    // "Male Vocalist" and "MC/Rapper" work even when the raw role is
+    // "Lead Male Vocal / Rapper".
+    const splitInstrumentParts = (val) => {
+      const parts = [];
+      const push = (s) => {
+        const t = String(s || "").trim();
+        if (!t) return;
+        // Some cards store instruments as one big string using pipes.
+        // Split on pipes first, then commas.
+        t.split("|").forEach((chunk) => {
+          String(chunk)
+            .split(",")
+            .forEach((c) => {
+              const u = String(c || "").trim();
+              if (u) parts.push(u);
+            });
+        });
+      };
+      if (Array.isArray(val)) val.forEach(push);
+      else push(val);
+      return parts;
+    };
+
+    const deriveVocalTags = (parts) => {
+      const tags = new Set();
+      const lower = (parts || []).map((p) => String(p).toLowerCase());
+      const has = (re) => lower.some((p) => re.test(p));
+
+      if (has(/vocal|singer/)) tags.add("Vocalist");
+      if (has(/(lead\s*)?male\s*(vocal|singer)|male\s*lead\s*(vocal|singer)/))
+        tags.add("Male Vocalist");
+      if (has(/(lead\s*)?female\s*(vocal|singer)|female\s*lead\s*(vocal|singer)/))
+        tags.add("Female Vocalist");
+      if (has(/\bmc\b|m\/?c|rapper/)) tags.add("MC/Rapper");
+
+      return Array.from(tags);
+    };
+
+    for (const c of cards) {
+      const parts = splitInstrumentParts(c?.instruments);
+      const tags = deriveVocalTags(parts);
+      // Preserve original parts but add the normalized tags.
+      const merged = Array.from(new Set([...(parts || []), ...(tags || [])])).filter(Boolean);
+      if (merged.length) c.instruments = merged;
+    }
+
     res.set("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=600");
     return res.json({ success: true, acts: cards });
   } catch (e) {
@@ -674,8 +721,64 @@ export async function searchActCards(req, res) {
       and.push({ lineupSizes: { $in: lineupSizes.map(normSize) } });
     }
 
-    // instruments (ANY)
-    if (instruments?.length) and.push({ instruments: { $in: instruments } });
+    // instruments (ANY) — supports category labels like "Male Vocalist" / "MC/Rapper"
+    // by matching common synonyms inside stored instrument strings (e.g. "Lead Male Vocal / Rapper").
+    if (instruments?.length) {
+      const want = instruments
+        .map((s) => String(s || "").trim())
+        .filter(Boolean);
+
+      const ors = [];
+
+      for (const sel of want) {
+        const k = sel.toLowerCase();
+
+        // Male vocalist
+        if (k === "male vocalist" || k === "male vocal" || k === "lead male vocal") {
+          ors.push({
+            instruments: {
+              $regex: /(lead\s*)?male\s*(vocal|singer)|male\s*lead\s*(vocal|singer)/i,
+            },
+          });
+          continue;
+        }
+
+        // Female vocalist
+        if (k === "female vocalist" || k === "female vocal" || k === "lead female vocal") {
+          ors.push({
+            instruments: {
+              $regex: /(lead\s*)?female\s*(vocal|singer)|female\s*lead\s*(vocal|singer)/i,
+            },
+          });
+          continue;
+        }
+
+        // Rapper / MC
+        if (k === "mc/rapper" || k === "rapper" || k === "mc") {
+          ors.push({
+            instruments: {
+              $regex: /(\bmc\b|m\/?c|rapper)/i,
+            },
+          });
+          continue;
+        }
+
+        // Generic vocalist
+        if (k === "vocalist" || k === "singer") {
+          ors.push({
+            instruments: {
+              $regex: /(vocal|singer)/i,
+            },
+          });
+          continue;
+        }
+
+        // Default: exact match against array elements
+        ors.push({ instruments: sel });
+      }
+
+      if (ors.length) and.push({ $or: ors });
+    }
 
     // snapshot of AND conditions before DJ filter
     const andBeforeDj = [...and];
