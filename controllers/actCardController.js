@@ -641,6 +641,16 @@ extras: 1,
 
       if (has(/vocal|singer/)) tags.add("Vocalist");
 
+      // ✅ Lead Vocalist (any gender): any role containing both "lead" and a vocal term
+      // Examples matched:
+      // - "Lead Male Vocal / Rapper"
+      // - "Lead Female Vocal"
+      // - "Male Lead Vocalist"
+      // - "Lead Vocal"
+      if (has(/\blead\b.*\b(vocal|vocalist|singer)\b|\b(vocal|vocalist|singer)\b.*\blead\b/)) {
+        tags.add("Lead Vocalist");
+      }
+
       // ✅ Male Vocalist (STRICT lead only)
       // Matches: "Male Lead Vocalist", "Male Lead Vocal", "Lead Male Vocalist", "Lead Male Vocal",
       // and optionally " / Rapper".
@@ -764,6 +774,17 @@ export async function searchActCards(req, res) {
 
       for (const sel of want) {
         const k = sel.toLowerCase();
+
+        // Lead Vocalist (any gender): must contain both "lead" and a vocal term
+        if (k === "lead vocalist" || k === "lead vocal" || k === "lead singer") {
+          ors.push({
+            instruments: {
+              $regex:
+                /\blead\b.*\b(vocal|vocalist|singer)\b|\b(vocal|vocalist|singer)\b.*\blead\b/i,
+            },
+          });
+          continue;
+        }
 
         // Male vocalist (STRICT): only match lead male vocal roles
         // e.g. "Male Lead Vocalist", "Lead Male Vocal / Rapper", "Male Lead Vocal"
