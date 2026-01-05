@@ -87,7 +87,7 @@ const ALLOWED_HOSTS = new Set([
 ]);
 
 const ALLOW_HEADERS =
-  "Content-Type, Authorization, token, X-Requested-With, x-request-id";
+  "Content-Type, Authorization, token, X-Requested-With, x-request-id, Useremail, Userid, Userrole, useremail, userid, userrole";
 
 function isAllowedOrigin(origin) {
   if (!origin) return true; // non-browser clients
