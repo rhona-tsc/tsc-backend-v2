@@ -37,6 +37,7 @@ import uploadRoutes from "./routes/upload.js";
 import newsletterRoutes from "./routes/newsletterRoutes.js";
 import v2Routes from "./routes/v2.js";
 import agentDashboardRoutes from "./routes/agentDashboardRoutes.js";
+import sitemapRoutes from "./routes/sitemapRoutes.js";
 
 import {
   watchCalendar,
@@ -252,7 +253,7 @@ app.use(
   musicianLoginRouter
 );
 
-
+app.use("/api/sitemap", sitemapRoutes);
 
 // v2 (search/availability/travel)
 app.use("/api/v2", v2Routes);
