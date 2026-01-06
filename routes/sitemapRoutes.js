@@ -6,7 +6,7 @@ const router = express.Router();
 router.get("/act-ids", async (req, res) => {
   // Adjust the filter to match what “live” means in your DB
   const acts = await actModel
-    .find({ status: "live" })
+    .find({ status: "approved" })
     .select("_id")
     .lean();
 
