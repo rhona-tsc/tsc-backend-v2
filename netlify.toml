@@ -28,3 +28,18 @@ conditions = { Host = ["*.ngrok-free.app", "*.ngrok.io"] }
 for = "/*"
 [headers.values]
 X-Backend-Policy = "Only Render backend allowed — ngrok blocked"
+
+[[redirects]]
+from = "/sitemap.xml"
+to = "/sitemap.xml"
+status = 200
+
+[[redirects]]
+from = "/robots.txt"
+to = "/robots.txt"
+status = 200
+
+[[redirects]]
+from = "/*"
+to = "/index.html"
+status = 200
