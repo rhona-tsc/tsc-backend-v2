@@ -2,6 +2,9 @@
 import mongoose from "mongoose";
 import { v4 as uuidv4 } from "uuid";
 
+
+
+
 /* ---------- tiny embedded schemas (no _id) ---------- */
 const AdditionalRoleLiteSchema = new mongoose.Schema(
   {
@@ -51,6 +54,8 @@ const ActFilterCardSchema = new mongoose.Schema(
     // identity / status
     name: String,
     tscName: String,
+    slug: { type: String, default: "" },
+
     status: { type: String, index: true }, // approved/live/pending/draft
     isTest: { type: Boolean, default: false, index: true },
 
@@ -143,6 +148,26 @@ ActFilterCardSchema.index({ artistPhrases: 1 });
 
 /* optional name text index */
 ActFilterCardSchema.index({ name: "text", tscName: "text" });
+
+function slugifyName(raw = "") {
+  return String(raw || "")
+    .trim()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+ActFilterCardSchema.pre("save", function ensureSlug(next) {
+  // Only set slug if missing
+  if ((!this.slug || String(this.slug).trim() === "") && this.tscName) {
+    this.slug = slugifyName(this.tscName);
+  }
+  next();
+});
 
 const ActFilterCard =
   mongoose.models.ActFilterCard ||
