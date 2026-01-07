@@ -14,6 +14,7 @@ import {
   getActByIdV2,
   updateActV2,
   getAllActsV2,
+  getActBySlugV2,
   getMyDrafts,
   getModerationCount,
   trashAct,
@@ -250,7 +251,7 @@ router.delete("/delete-permanent", wrap("DELETE /delete-permanent", deleteActPer
 router.post("/restore", wrap("POST /restore", restoreAct));
 router.get("/list", wrap("GET /list", getAllActsV2));
 router.get("/cards", wrap("GET /cards", getActCards));
-
+router.get("/:slug", wrap("GET /:slug", getActBySlugV2));
 router.get("/:id([0-9a-fA-F]{24})", wrap("GET /:id", getActByIdV2));
 
 router.post("/security-update/:id", wrap("POST /security-update/:id", updateActV2));

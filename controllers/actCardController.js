@@ -69,56 +69,57 @@ export async function getActCards(req, res) {
       { $match: { status: { $in: statuses } } },
 
       // ✅ Include both possible schema names so we can normalize later
-      {
-        $project: {
-          actId: "$_id",
-          name: 1,
-          tscName: 1,
+    {
+  $project: {
+    actId: "$_id",
+    name: 1,
+    tscName: 1,
+    slug: 1, // ✅ ADD THIS
 
-          numberOfShortlistsIn: 1,
-          timesShortlisted: 1,
-          availabilityBadge: 1,
+    numberOfShortlistsIn: 1,
+    timesShortlisted: 1,
+    availabilityBadge: 1,
 
-          profileImage: 1,
-          coverImage: 1,
-          images: 1,
-          lineups: 1,
+    profileImage: 1,
+    coverImage: 1,
+    images: 1,
+    lineups: 1,
 
-          countyFees: 1,
-          useCountyTravelFee: 1,
+    countyFees: 1,
+    useCountyTravelFee: 1,
 
-          formattedPrice: 1,
-          minDisplayPrice: 1,
-extras: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          bestseller: 1,
+    formattedPrice: 1,
+    minDisplayPrice: 1,
+    extras: 1,
 
-          loveCount: {
-            $ifNull: [
-              "$loveCount",
-              { $ifNull: ["$timesShortlisted", { $ifNull: ["$numberOfShortlistsIn", 0] }] },
-            ],
-          },
+    createdAt: 1,
+    updatedAt: 1,
+    bestseller: 1,
 
-          // 👇 IMPORTANT: your cards currently have none of these
-          genres: 1,
-          genre: 1,                 // ✅ add
-          instruments: 1,
-          instrumentation: 1,       // ✅ add
+    loveCount: {
+      $ifNull: [
+        "$loveCount",
+        { $ifNull: ["$timesShortlisted", { $ifNull: ["$numberOfShortlistsIn", 0] }] },
+      ],
+    },
 
-          vocalist: 1,              // ✅ add
-          leadVocalist: 1,          // ✅ add
-          leadRole: 1,              // ✅ add
+    genres: 1,
+    genre: 1,
+    instruments: 1,
+    instrumentation: 1,
 
-          lineupSizes: 1,
-          pliAmount: 1,
-          pa: 1,
-          light: 1,
-          status: 1,
-          isTest: 1,
-        },
-      },
+    vocalist: 1,
+    leadVocalist: 1,
+    leadRole: 1,
+
+    lineupSizes: 1,
+    pliAmount: 1,
+    pa: 1,
+    light: 1,
+    status: 1,
+    isTest: 1,
+  },
+},
 
       // Candidate images & base_fee snapshot
       {
@@ -141,6 +142,12 @@ extras: 1,
           },
         },
       },
+
+      {
+  $addFields: {
+    slug: { $ifNull: ["$slug", "$_filterCard.slug"] },
+  },
+},
 
       // ✅ Normalize genres + instruments so frontend always gets arrays
       {

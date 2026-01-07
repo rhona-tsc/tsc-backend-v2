@@ -73,6 +73,7 @@ const actSchema = new mongoose.Schema(
   {
     name: { type: String },
     tscName: { type: String },
+slug: { type: String, default: "" },
     description: { type: String },
     tscDescription: { type: String },
     tscBio: { type: String },
@@ -379,7 +380,25 @@ availabilityBadges: {
 );
 
 
+function slugifyName(raw = "") {
+  return String(raw || "")
+    .trim()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
 
+actSchema.pre("save", function ensureSlug(next) {
+  // Only set slug if missing
+  if ((!this.slug || String(this.slug).trim() === "") && this.tscName) {
+    this.slug = slugifyName(this.tscName);
+  }
+  next();
+});
 
 
 // --- helper: E.164-ish normaliser (+44…)
@@ -473,7 +492,7 @@ actSchema.index({
   "lineups.bandMembers.deputies.email": 1,
   "lineups.bandMembers.deputies.phoneNormalized": 1
 });
-
+actSchema.index({ slug: 1 }, { unique: true, sparse: true });
 // Acts by status
 actSchema.index({ status: 1 });
 

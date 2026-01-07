@@ -390,7 +390,25 @@ const parseStatuses = (statusStr = "") => {
   return Array.from(new Set(merged));
 };
 
+export const getActBySlugV2 = async (req, res) => {
+  try {
+    const { slug: key } = req.params;
 
+    // ✅ If it's an ObjectId, treat it as an id
+    const act = mongoose.isValidObjectId(key)
+      ? await actModel.findById(key).lean()
+      : await actModel.findOne({ slug: key }).lean();
+
+    if (!act) {
+      return res.status(404).json({ success: false, message: "Act not found" });
+    }
+
+    return res.json({ success: true, act });
+  } catch (err) {
+    console.error("getActBySlugV2 error:", err?.message || err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
 
 export const getAllActsV2 = async (req, res) => {
   /* ───────────────────────── DEBUG HELPERS ───────────────────────── */
