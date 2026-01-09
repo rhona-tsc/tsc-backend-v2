@@ -1827,6 +1827,23 @@ const extractUKPostcode = (s = "") => {
   return m ? m[1].replace(/\s+/, " ") : "";
 };
 
+async function findDateLevelUnavailable({ dateISO, canonicalId, phone }) {
+  const or = [];
+  if (canonicalId) or.push({ musicianId: canonicalId });
+  if (phone) or.push({ phone });
+
+  if (!or.length) return null;
+
+  return AvailabilityModel.findOne({
+    v2: true,
+    dateISO,
+    reply: "unavailable",
+    $or: or,
+  })
+    .sort({ updatedAt: -1, createdAt: -1 })
+    .lean();
+}
+
 export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   const isExpress = !!maybeRes;
   const body = isExpress ? reqOrArgs.body : reqOrArgs;
@@ -2101,7 +2118,12 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
     if (!isDeputy && vocalists.length > 1) {
       const results = [];
 
+      // ✅ Date-level block per vocalist slot (lead only)
+
+
       for (let i = 0; i < vocalists.length; i++) {
+
+        
         const vMember = vocalists[i];
         const slotIndexForThis = i;
 
@@ -2110,6 +2132,43 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
           console.warn(`⚠️ Skipping vocalist ${vMember.firstName} — no phone number`);
           continue;
         }
+
+        const dateLevelUnavailable = await findDateLevelUnavailable({
+  dateISO,
+  canonicalId: realMusicianId, // use the best id you have for that vocalist
+  phone,
+});
+
+if (dateLevelUnavailable) {
+  console.log("🚫 Date-level UNAVAILABLE (multi) — skip WA, escalate deputies", {
+    slotIndex: slotIndexForThis,
+    dateISO,
+    phone,
+    realMusicianId: String(realMusicianId || ""),
+  });
+
+  await notifyDeputies({
+    actId,
+    lineupId: lineup?._id || lineupId || null,
+    dateISO,
+    formattedAddress: fullFormattedAddress,
+    clientName: resolvedClientName || "",
+    clientEmail: resolvedClientEmail || "",
+    slotIndex: slotIndexForThis,
+    skipDuplicateCheck: true,
+    skipIfUnavailable: false,
+  });
+
+  results.push({
+    name: vMember.firstName,
+    slotIndex: slotIndexForThis,
+    phone,
+    reusedExisting: true,
+    existingReply: "unavailable (date-level)",
+  });
+
+  continue;
+}
 
         let enriched = { ...vMember };
         try {
@@ -2204,6 +2263,8 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
         } catch (e) {
           console.warn("⚠️ Prior-reply check (multi) failed:", e?.message || e);
         }
+
+        
 
         const finalFee = await feeForMember(vMember);
 
@@ -2458,6 +2519,44 @@ console.log("🧾 [triggerAvailabilityRequest/multi] about to upsert availabilit
         `${targetMember?.firstName || ""} ${targetMember?.lastName || ""}`
     ).trim();
 
+    const singleSlotIndex = typeof body.slotIndex === "number" ? body.slotIndex : 0;
+
+    // ✅ Date-level block: if already unavailable for this date, skip lead WhatsApp and go deputies
+if (!isDeputy) {
+  const dateLevelUnavailable = await findDateLevelUnavailable({
+    dateISO,
+    canonicalId,
+    phone,
+  });
+
+  if (dateLevelUnavailable) {
+    console.log(
+      "🚫 Date-level UNAVAILABLE found — skipping lead WhatsApp, escalating to deputies",
+      {
+        dateISO,
+        phone,
+        canonicalId: String(canonicalId || ""),
+        priorId: String(dateLevelUnavailable._id || ""),
+      }
+    );
+
+    await notifyDeputies({
+      actId,
+      lineupId: lineup?._id || lineupId || null,
+      dateISO,
+      formattedAddress: fullFormattedAddress,
+      clientName: resolvedClientName || "",
+      clientEmail: resolvedClientEmail || "",
+      slotIndex: singleSlotIndex,
+      skipDuplicateCheck: true,
+      skipIfUnavailable: false,
+    });
+
+    if (res)
+      return res.json({ success: true, sent: 0, skipped: "date-level-unavailable" });
+    return { success: true, sent: 0, skipped: "date-level-unavailable" };
+  }
+}
     /* -------------------------------------------------------------- */
     /* 🛡️ Prior-reply check (same date + same location)               */
     /* -------------------------------------------------------------- */
@@ -2651,7 +2750,6 @@ console.log("🧾 [triggerAvailabilityRequest/multi] about to upsert availabilit
     /* -------------------------------------------------------------- */
     /* ✅ Upsert availability record (single lead / deputy)           */
     /* -------------------------------------------------------------- */
-    const singleSlotIndex = typeof body.slotIndex === "number" ? body.slotIndex : 0;
 
     const now = new Date();
     const query = { actId, dateISO, phone, slotIndex: singleSlotIndex };
