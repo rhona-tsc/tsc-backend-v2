@@ -18,6 +18,73 @@ import User from "../models/userModel.js";
 
 const router = express.Router();
 
+
+// ---------------------- helpers for availability routes ----------------------
+const toISODateOnlySafe = (v) => {
+  if (!v) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return String(v);
+  const d = new Date(v);
+  if (isNaN(d)) return null;
+  return d.toISOString().slice(0, 10);
+};
+
+const normalizeAvailabilityBody = (body = {}) => {
+  const actId = body.actId || body.act_id || body.act?._id || body.act?.id || null;
+  const lineupId =
+    body.lineupId || body.lineup_id || body.lineup?._id || body.lineup?.id || null;
+
+  const dateISO =
+    toISODateOnlySafe(body.dateISO) ||
+    toISODateOnlySafe(body.date) ||
+    toISODateOnlySafe(body.selectedDate) ||
+    null;
+
+  const formattedAddress =
+    (body.formattedAddress || body.address || body.selectedAddress || "").trim();
+
+  const clientEmail = (body.clientEmail || body.email || "").trim().toLowerCase();
+  const clientName = (body.clientName || body.name || "").trim();
+
+  const enquiryId =
+    body.enquiryId ||
+    body.shortlistId ||
+    body.requestId ||
+    body.parentKey ||
+    null;
+
+  const enquiryRef = (body.enquiryRef || "").trim();
+
+  const slotIndex =
+    typeof body.slotIndex === "number"
+      ? body.slotIndex
+      : typeof body.slotIndex === "string" && body.slotIndex !== ""
+      ? Number(body.slotIndex)
+      : undefined;
+
+  const userId =
+    body.userId || body.user?._id || body.user?.id || body.userIdFromToken || undefined;
+
+  const incrementShortlist =
+    typeof body.incrementShortlist === "boolean" ? body.incrementShortlist : true;
+
+  return {
+    actId,
+    lineupId: lineupId || undefined,
+    dateISO,
+    formattedAddress,
+    address: formattedAddress, // keep both for backwards compatibility
+    clientEmail,
+    clientName,
+    enquiryId,
+    enquiryRef: enquiryRef || undefined,
+    slotIndex: Number.isFinite(slotIndex) ? slotIndex : undefined,
+    userId,
+    incrementShortlist,
+    // keep any extra fields passed in (e.g. skipDuplicateCheck, source)
+    ...body,
+  };
+};
+
 /* -------------------------------------------------------------------------- */
 /* 🟩 GET /check-latest                                                       */
 /* -------------------------------------------------------------------------- */
@@ -259,48 +326,44 @@ router.get("/subscribe", sseNoCompression, (req, res) => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* 🟢 POST /request – Trigger WhatsApp availability check                     */
+/* 🟢 POST /request – Trigger WhatsApp availability check (+ shortlist inc)   */
 /* -------------------------------------------------------------------------- */
-
 router.post("/request", async (req, res) => {
-  console.log(`🟢 (availability.js) /request START at ${new Date().toISOString()}`, req.body);
+  console.log(
+    `🟢 (availability.js) /request START at ${new Date().toISOString()}`,
+    { bodyKeys: Object.keys(req.body || {}) }
+  );
 
   try {
-   const {
-  actId,
-  date,
-  address,
-  selectedDate,
-  selectedAddress,
-} = req.body;
+    const payload = normalizeAvailabilityBody(req.body || {});
 
-const finalDate = date || selectedDate;
-const finalAddress = address || selectedAddress;
-
-if (!actId || !finalDate) {
-  return res.status(400).json({ success: false, message: "Missing actId/date" });
-}
-
-console.log(`📅 Availability request triggered for act=${actId} on ${finalDate}`);
-
-const fakeReq = { body: { actId, date: finalDate, address: finalAddress } };
-    const fakeRes = {
-      status: (code) => ({
-        json: (obj) => ({ code, ...obj }),
-      }),
-      json: (obj) => obj,
-    };
-
-    const result = await triggerAvailabilityRequest(fakeReq, fakeRes);
-
-    if (result?.success) {
-      console.log(`✅ WhatsApp message sent successfully`, result);
-      return res.json({ success: true, message: "WhatsApp request sent", result });
-    } else {
-      console.warn(`⚠️ WhatsApp send failed`, result);
-      return res.status(500).json({ success: false, message: "WhatsApp send failed" });
+    if (!payload.actId || !payload.dateISO) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing actId/dateISO" });
     }
 
+    const result = await triggerAvailabilityRequest(payload);
+
+    if (!result?.success) {
+      console.warn("⚠️ /request triggerAvailabilityRequest failed", result);
+      return res.status(500).json({
+        success: false,
+        message: result?.error || "Availability request failed",
+        result,
+      });
+    }
+
+    // ✅ increment timesShortlisted if desired (defaults true)
+    if (payload.incrementShortlist) {
+      try {
+        await Act.findByIdAndUpdate(payload.actId, { $inc: { timesShortlisted: 1 } });
+      } catch (e) {
+        console.warn("⚠️ /request could not increment timesShortlisted:", e?.message);
+      }
+    }
+
+    return res.json({ success: true, result });
   } catch (err) {
     console.error("❌ (availability.js) /request error:", err);
     return res.status(500).json({ success: false, message: err.message });
@@ -415,6 +478,63 @@ router.patch("/act/:id/decrement-shortlist", async (req, res) => {
   } catch (err) {
     console.error("❌ decrement-shortlist error:", err);
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* 🟣 POST /request-on-behalf – Admin/agent trigger (manual enquiry etc.)     */
+/* -------------------------------------------------------------------------- */
+router.post("/request-on-behalf", async (req, res) => {
+  console.log(
+    `🟣 (availability.js) /request-on-behalf START at ${new Date().toISOString()}`,
+    { bodyKeys: Object.keys(req.body || {}) }
+  );
+
+  try {
+    const payload = normalizeAvailabilityBody(req.body || {});
+
+    if (!payload.actId || !payload.dateISO) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing actId/dateISO" });
+    }
+    if (!payload.formattedAddress) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing formattedAddress/address" });
+    }
+    if (!payload.clientEmail) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing clientEmail" });
+    }
+
+    // Call your controller as INTERNAL helper (no Express res),
+    // so we can also do extra stuff (like increment shortlist) here safely.
+    const result = await triggerAvailabilityRequest(payload);
+
+    if (!result?.success) {
+      console.warn("⚠️ /request-on-behalf triggerAvailabilityRequest failed", result);
+      return res.status(500).json({
+        success: false,
+        message: result?.error || "Availability request failed",
+        result,
+      });
+    }
+
+    // Optional: increment shortlist counter on the act (defaults to true)
+    if (payload.incrementShortlist) {
+      try {
+        await Act.findByIdAndUpdate(payload.actId, { $inc: { timesShortlisted: 1 } });
+      } catch (e) {
+        console.warn("⚠️ /request-on-behalf could not increment timesShortlisted:", e?.message);
+      }
+    }
+
+    return res.json({ success: true, result });
+  } catch (err) {
+    console.error("❌ (availability.js) /request-on-behalf error:", err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 
