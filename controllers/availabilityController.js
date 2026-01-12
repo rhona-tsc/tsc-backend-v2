@@ -2160,15 +2160,39 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
         const vMember = vocalists[i];
         const slotIndexForThis = i;
 
-        const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
-        if (!phone) {
-          console.warn(`⚠️ Skipping vocalist ${vMember.firstName} — no phone number`);
-          continue;
-        }
+       const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
+if (!phone) {
+  console.warn(`⚠️ Skipping vocalist ${vMember.firstName} — no phone number`);
+  continue;
+}
 
-        const dateLevelUnavailable = await findDateLevelUnavailable({
+// ✅ Resolve a real musicianId BEFORE date-level checks (fixes TDZ)
+let musicianDoc = null;
+try {
+  if (vMember.musicianId) {
+    musicianDoc = await Musician.findById(vMember.musicianId).lean();
+  }
+  if (!musicianDoc) {
+    const cleanPhone = phone;
+    musicianDoc = await Musician.findOne({
+      $or: [
+        { phoneNormalized: cleanPhone },
+        { phone: cleanPhone },
+        { phoneNumber: cleanPhone },
+      ],
+    }).lean();
+  }
+} catch (err) {
+  console.warn("⚠️ Failed to fetch real musician:", err.message);
+}
+
+const realMusicianId =
+  musicianDoc?._id || vMember.musicianId || vMember._id || null;
+
+// ✅ NOW safe to use realMusicianId
+const dateLevelUnavailable = await findDateLevelUnavailable({
   dateISO,
-  canonicalId: realMusicianId, // use the best id you have for that vocalist
+  canonicalId: realMusicianId,
   phone,
 });
 
@@ -2202,8 +2226,7 @@ if (dateLevelUnavailable) {
 
   continue;
 }
-
-        let enriched = { ...vMember };
+let enriched = musicianDoc ? { ...musicianDoc, ...vMember } : { ...vMember };
         try {
           if (vMember?.musicianId) {
             const mus = await Musician.findById(vMember.musicianId).lean();
@@ -2301,28 +2324,7 @@ if (dateLevelUnavailable) {
 
         const finalFee = await feeForMember(vMember);
 
-        // Resolve a real musicianId if possible
-        let musicianDoc = null;
-        try {
-          if (vMember.musicianId) {
-            musicianDoc = await Musician.findById(vMember.musicianId).lean();
-          }
-          if (!musicianDoc) {
-            const cleanPhone = phone;
-            musicianDoc = await Musician.findOne({
-              $or: [
-                { phoneNormalized: cleanPhone },
-                { phone: cleanPhone },
-                { phoneNumber: cleanPhone },
-              ],
-            }).lean();
-          }
-        } catch (err) {
-          console.warn("⚠️ Failed to fetch real musician:", err.message);
-        }
-
-        const realMusicianId =
-          musicianDoc?._id || vMember.musicianId || vMember._id || null;
+      
 
         const now = new Date();
         const query = { actId, dateISO, phone, slotIndex: slotIndexForThis };
