@@ -888,27 +888,53 @@ export async function notifyDeputies({
     slotIndex,
   });
 
-  // Try to inherit fee from a lead who is not unavailable/no
+    // ✅ Inherit context from the lead row for this slot (fee + client identity + enquiryId)
   let inheritedFee = null;
+  let inheritedClientName = clientName || "";
+  let inheritedClientEmail = clientEmail || "";
+  let inheritedEnquiryId = null;
+  let inheritedClientUserId = null;
+
   try {
-    const leadAvailability = await AvailabilityModel.findOne({
+    const leadRow = await AvailabilityModel.findOne({
       actId,
       dateISO,
       isDeputy: { $ne: true },
       ...(slotIndex !== null ? { slotIndex } : {}),
-      reply: { $nin: ["unavailable", "no"] },
     })
-      .sort({ createdAt: -1 })
+      .sort({ updatedAt: -1, createdAt: -1 })
       .lean();
 
-    if (leadAvailability?.fee) {
-      inheritedFee = Number(leadAvailability.fee);
-      console.log("💾 [notifyDeputies] Using lead fee", { inheritedFee });
+    if (leadRow) {
+      inheritedEnquiryId = leadRow.enquiryId || null;
+      inheritedClientUserId = leadRow.clientUserId || leadRow.userId || null;
+
+      // Only fill if missing
+      if (!inheritedClientName && leadRow.clientName) inheritedClientName = leadRow.clientName;
+      if (!inheritedClientEmail && leadRow.clientEmail) inheritedClientEmail = leadRow.clientEmail;
+
+      // Fee inherit (avoid lead rows that already said no/unavailable)
+      if (leadRow.reply !== "unavailable" && leadRow.reply !== "no" && leadRow.fee) {
+        inheritedFee = Number(leadRow.fee);
+        console.log("💾 [notifyDeputies] Inherited lead row context", {
+          inheritedFee,
+          inheritedClientName,
+          inheritedClientEmail,
+          inheritedEnquiryId,
+          inheritedClientUserId,
+        });
+      } else {
+        console.log("ℹ️ [notifyDeputies] Lead row found but fee not inherited (reply/no fee)", {
+          reply: leadRow.reply,
+          fee: leadRow.fee,
+        });
+      }
     }
   } catch (err) {
-    console.warn("⚠️ [notifyDeputies] Lead fee lookup failed:", err?.message);
+    console.warn("⚠️ [notifyDeputies] Lead context lookup failed:", err?.message);
   }
 
+  // Fallback fee from act data if still missing
   if (!inheritedFee && targetVocalists[0]?.fee) {
     inheritedFee = Number(targetVocalists[0].fee);
     console.log("💾 [notifyDeputies] Fallback fee from act data", { inheritedFee });
@@ -958,15 +984,22 @@ export async function notifyDeputies({
         inheritedFee,
       });
 
-      await triggerAvailabilityRequest({
+          await triggerAvailabilityRequest({
         actId,
         lineupId,
         dateISO,
         slotIndex,
         formattedAddress,
 
-        clientName,
-        clientEmail,
+        // ✅ ALWAYS pass client context to deputy rows
+        clientName: inheritedClientName,
+        clientEmail: inheritedClientEmail,
+
+        // ✅ Ensure deputy rows get linked to the same enquiry/slot thread
+        enquiryId: inheritedEnquiryId,
+
+        // ✅ Helps triggerAvailabilityRequest enrichment if email missing
+        userId: inheritedClientUserId,
 
         isDeputy: true,
         selectedVocalistName: deputyDisplayName || vocalistDisplayName || "",
@@ -4508,23 +4541,23 @@ const nameSnap = safeFirstLast(toNameString(primaryName));
       badge,
     });
   }
-
 /* ===================== Client emails block (with eventDatePretty hoisted) ===================== */
 
 // Client emails (wrap in try/catch so badge persistence never fails because of email)
 try {
   const allRows = availRows;
+
   const availabilityRecord = allRows
     .slice()
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0];
 
+  // ✅ Prefer any real client email/name on any row; fallback to hello@
   let clientEmail =
     (allRows.find((r) => r.clientEmail && r.clientEmail.includes("@"))?.clientEmail) ||
     "hello@thesupremecollective.co.uk";
   let clientName = (allRows.find((r) => r.clientName)?.clientName) || "there";
 
-  const SITE_RAW =
-    process.env.FRONTEND_URL || "https://thesupremecollective.co.uk/";
+  const SITE_RAW = process.env.FRONTEND_URL || "https://thesupremecollective.co.uk/";
   const SITE = SITE_RAW.endsWith("/") ? SITE_RAW : `${SITE_RAW}/`;
 
   const selectedAddress =
@@ -4743,12 +4776,12 @@ try {
     (allRows.find((r) => r?.clientUserId)?.clientUserId) ||
     null;
 
-    console.log("🧠 [rebuild] resolved client identity", {
-  availabilityRecordId: availabilityRecord?._id ? String(availabilityRecord._id) : null,
-  resolvedClientUserId: clientUserId || null,
-  resolvedClientEmail: clientEmail || null,
-  resolvedClientName: clientName || null,
-});
+  console.log("🧠 [rebuild] resolved client identity", {
+    availabilityRecordId: availabilityRecord?._id ? String(availabilityRecord._id) : null,
+    resolvedClientUserId: clientUserId || null,
+    resolvedClientEmail: clientEmail || null,
+    resolvedClientName: clientName || null,
+  });
 
   const heroImg =
     (Array.isArray(actDoc.coverImage) && actDoc.coverImage[0]?.url) ||
@@ -4792,163 +4825,240 @@ try {
           : `${offRepCount} additional ‘off-repertoire’ song requests (e.g. often the first dance or your favourite songs)`)
       : "";
 
-  // Lead available → good-news email
-  if (leadPrimary?.available && leadPrimary?.isDeputy === false) {
-    const vocalistFirst = leadPrimary.firstName || "our lead vocalist";
-    console.log("📧 Sending LEAD-available email", { vocalistFirst, to: clientEmail });
+  /* ===================== ✅ NEW: send per-slot (lead + deputy) with idempotency ===================== */
 
-    await sendClientEmail({
-      actId: String(actId),
-      userId: clientUserId,
-      to: clientEmail,
-      name: clientName,
-      allowHello: true,
-      bcc: ["hello@thesupremecollective.co.uk"],
-      subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s Lead Vocalist is available for ${eventDatePretty}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
-          <p>Hi ${(clientName || "there").split(" ")[0]},</p>
-          <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
-          <p>
-            We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with
-            <strong>${vocalistFirst}</strong> on lead vocals, and they’d love to perform for you and your guests.
-          </p>
-          ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />` : ""}
-          <h3 style="color:#111;">${actDoc.tscName || actDoc.name}</h3>
-          <p style="margin:6px 0 14px; color:#555;">${(actDoc.tscDescription || actDoc.description || "").toString()}</p>
-          <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
-          ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
-          <h4 style="margin-top:25px;">Included in your quote:</h4>
-          <ul>
-            <li>${setsLine}</li>
-            ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
-            <li>Band arrival from 5pm and finish by midnight as standard</li>
-            <li>Or up to 7 hours on site if earlier arrival is needed</li>
-            ${offRepLine ? `<li>${offRepLine}</li>` : ""}
-            ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
-            ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
-            <li>Travel to ${selectedAddress || "TBC"}</li>
-          </ul>
-          <div style="margin-top:30px;">
-            <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
-          </div>
-          <p style="margin-top:16px;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
-          <p>If you have any questions, just reply — we’re always happy to help.</p>
-          <p>Warmest wishes,<br/><strong>The Supreme Collective ✨</strong><br/><a href="https://www.thesupremecollective.co.uk" style="color:#888; text-decoration:none;">www.thesupremecollective.co.uk</a></p>
-        </div>
-      `,
-    });
+  // Pull idempotency map (prevents repeat sends on rebuilds)
+  const alreadySent =
+    actDoc?.availabilityBadgesMeta?.[dateISO]?.clientEmailsSent || {};
 
-    console.log("✅ Client email sent (lead available).");
-  }
-  // Deputy covering → deputy-available email
-  else if (depPrimary?.available && depPrimary?.isDeputy === true) {
-    const deputyName = depPrimary.displayName || depPrimary.firstName || "one of our vocalists";
-    console.log("📧 Sending DEPUTY-available email", { deputyName, to: clientEmail });
+  const markSent = async (slotIdx, kind) => {
+    const path = `availabilityBadgesMeta.${dateISO}.clientEmailsSent.${slotIdx}.${kind}`;
+    await Act.updateOne(
+      { _id: actId },
+      { $set: { [path]: new Date().toISOString() } }
+    );
+  };
 
-    const isVocalistMember = (m = {}) => /vocal|singer/i.test(String(m.instrument || m.role || ""));
-    const smallestLineup = Array.isArray(actDoc?.lineups) && actDoc.lineups.length
-      ? actDoc.lineups
-          .slice()
-          .sort((a, b) => {
-            const ca = Array.isArray(a?.bandMembers)
-              ? a.bandMembers.filter((x) => x && (x.isEssential !== false)).length
-              : 0;
-            const cb = Array.isArray(b?.bandMembers)
-              ? b.bandMembers.filter((x) => x && (x.isEssential !== false)).length
-              : 0;
-            return ca - cb;
-          })[0]
-      : null;
+  // Helpers: robust per-slot checks (reuses your existing intent)
+  const slotIsLeadAvailable = (s) => {
+    const leadSaysYes = s?.state === "yes" && s?.covering !== "deputy";
+    const primaryIsLead =
+      s?.primary && s.primary.isDeputy === false &&
+      (s.primary.available === true || s?.state === "yes") &&
+      (isHttp(s?.primary?.photoUrl) || isHttp(s?.photoUrl));
+    return !!(leadSaysYes || primaryIsLead);
+  };
 
-    const vocalistCount = smallestLineup && Array.isArray(smallestLineup.bandMembers)
-      ? smallestLineup.bandMembers.filter((m) => (m?.isEssential !== false) && isVocalistMember(m)).length
-      : 1;
+  const slotIsDeputyCovering = (s) => {
+    const primaryDeputyCover =
+      s?.covering === "deputy" &&
+      s?.primary?.isDeputy === true &&
+      isHttp(s?.primary?.photoUrl);
 
-    const unavailableVocalistPrefix =
-      vocalistCount > 1
-        ? "One of the band's regular vocalists isn’t available for your date, but we’re delighted to confirm that"
-        : "The band's regular vocalist isn’t available for your date, but we’re delighted to confirm that";
+    const yesDeputyWithPhoto = Array.isArray(s?.deputies) &&
+      s.deputies.some((d) => d?.state === "yes" && isHttp(d?.photoUrl));
 
-    let deputyPhotoUrl = depPrimary.photoUrl || "";
-    let deputyProfileUrl = depPrimary.profileUrl || "";
-    let deputyVideos = [];
-    try {
-      let deputyMusician = null;
-      if (depPrimary?.musicianId) {
-        deputyMusician = await Musician.findById(depPrimary.musicianId)
-          .select("firstName lastName profilePicture photoUrl tscProfileUrl functionBandVideoLinks originalBandVideoLinks")
-          .lean();
+    return !!(primaryDeputyCover || yesDeputyWithPhoto);
+  };
+
+  for (const slot of slotsArr) {
+    const slotIdx = typeof slot?.slotIndex === "number" ? slot.slotIndex : null;
+    if (slotIdx === null) continue;
+
+    // ✅ LEAD email for this slot
+    if (slotIsLeadAvailable(slot)) {
+      const leadInfo = presentBadgePrimary(slot);
+      if (leadInfo?.available && leadInfo?.isDeputy === false) {
+        if (alreadySent?.[slotIdx]?.lead) {
+          console.log("✉️ [rebuild] Skipping LEAD email (already sent)", { slotIdx });
+        } else {
+          const vocalistFirst = leadInfo.firstName || "our lead vocalist";
+          console.log("📧 Sending LEAD-available email (per slot)", { slotIdx, vocalistFirst, to: clientEmail });
+
+          await sendClientEmail({
+            actId: String(actId),
+            userId: clientUserId,
+            to: clientEmail,
+            name: clientName,
+            allowHello: true,
+            bcc: ["hello@thesupremecollective.co.uk"],
+            subject: `Good news — ${(actDoc.tscName || actDoc.name)}'s Lead Vocalist is available for ${eventDatePretty}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
+                <p>Hi ${(clientName || "there").split(" ")[0]},</p>
+                <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
+                <p>
+                  We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with
+                  <strong>${vocalistFirst}</strong> on lead vocals, and they’d love to perform for you and your guests.
+                </p>
+                ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />` : ""}
+                <h3 style="color:#111;">${actDoc.tscName || actDoc.name}</h3>
+                <p style="margin:6px 0 14px; color:#555;">${(actDoc.tscDescription || actDoc.description || "").toString()}</p>
+                <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
+                ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
+                <h4 style="margin-top:25px;">Included in your quote:</h4>
+                <ul>
+                  <li>${setsLine}</li>
+                  ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
+                  <li>Band arrival from 5pm and finish by midnight as standard</li>
+                  <li>Or up to 7 hours on site if earlier arrival is needed</li>
+                  ${offRepLine ? `<li>${offRepLine}</li>` : ""}
+                  ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
+                  ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
+                  <li>Travel to ${selectedAddress || "TBC"}</li>
+                </ul>
+                <div style="margin-top:30px;">
+                  <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
+                </div>
+                <p style="margin-top:16px;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
+                <p>If you have any questions, just reply — we’re always happy to help.</p>
+                <p>Warmest wishes,<br/><strong>The Supreme Collective ✨</strong><br/><a href="https://www.thesupremecollective.co.uk" style="color:#888; text-decoration:none;">www.thesupremecollective.co.uk</a></p>
+              </div>
+            `,
+          });
+
+          await markSent(slotIdx, "lead");
+          console.log("✅ Client email sent (lead available, per slot).", { slotIdx });
+        }
       }
-      if (deputyMusician) {
-        if (!deputyPhotoUrl)
-          deputyPhotoUrl = deputyMusician.profilePicture || deputyMusician.photoUrl || "";
-        if (!deputyProfileUrl)
-          deputyProfileUrl = deputyMusician.tscProfileUrl || `${SITE}musician/${deputyMusician._id}`;
 
-        const fnVids = (deputyMusician.functionBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
-        const origVids = (deputyMusician.originalBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
-        deputyVideos = [...new Set([...fnVids, ...origVids])];
-      }
-    } catch (e) {
-      console.warn("⚠️ Deputy enrichment failed:", e?.message || e);
+      // slot handled; continue
+      continue;
     }
 
-    await sendClientEmail({
-      actId: String(actId),
-      userId: clientUserId,
-      to: clientEmail,
-      name: clientName,
-      bcc: ["hello@thesupremecollective.co.uk"],
-      subject: `${deputyName} is available to perform for you with ${actDoc.tscName || actDoc.name} on ${eventDatePretty}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
-          <p>Hi ${(clientName || "there").split(" ")[0]},</p>
-          <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
-          <p>
-            ${unavailableVocalistPrefix} <strong>${deputyName}</strong> — one of the band's trusted deputy vocalists — is available to perform instead.
-          </p>
-          ${
-            deputyProfileUrl || deputyPhotoUrl
-              ? `<div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
-                   <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyName}</h3>
-                   ${deputyPhotoUrl ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />` : ""}
-                   ${deputyProfileUrl ? `<p style="margin:6px 0 0;"><a href="${deputyProfileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View ${deputyName}'s profile →</a></p>` : ""}
-                   <p style="margin:8px 0 0; color:#555;">
-                     Please note: when a deputy vocalist is booked, the band will tailor the setlist to that vocalist’s repertoire.
-                     There’s a large overlap with ${(actDoc.tscName || actDoc.name)}’s core repertoire and ${deputyName}’s repertoire, so you’ll still get the band’s signature crowd-pleasers.
-                   </p>
-                 </div>`
-              : ""
-          }
-          ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />` : ""}
-          <h3 style="color:#111;">${actDoc.tscName || actDoc.name}</h3>
-          <p style="margin:6px 0 14px; color:#555;">${(actDoc.tscDescription || actDoc.description || "").toString()}</p>
-          <p><a href="${deputyProfileUrl || profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
-          ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
-          <h4 style="margin-top:25px;">Included in your quote:</h4>
-          <ul>
-            <li>${setsLine}</li>
-            ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
-            <li>Band arrival from 5pm and finish by midnight as standard</li>
-            <li>Or up to 7 hours on site if earlier arrival is needed</li>
-            ${offRepLine ? `<li>${offRepLine}</li>` : ""}
-            ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
-            ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
-            <li>Travel to ${selectedAddress || "TBC"}</li>
-          </ul>
-          <div style="margin-top:30px;">
-            <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
-          </div>
-          <p style="margin-top:16px;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
-          <p>If you have any questions, just reply — we’re always happy to help.</p>
-          <p>Warmest wishes,<br/><strong>The Supreme Collective ✨</strong><br/><a href="https://www.thesupremecollective.co.uk" style="color:#888; text-decoration:none;">www.thesupremecollective.co.uk</a></p>
-        </div>
-      `,
-    });
+    // ✅ DEPUTY email for this slot (only if lead isn’t available for this slot)
+    if (slotIsDeputyCovering(slot)) {
+      const depInfo = presentBadgePrimary(slot);
+      if (depInfo?.available && depInfo?.isDeputy === true) {
+        if (alreadySent?.[slotIdx]?.deputy) {
+          console.log("✉️ [rebuild] Skipping DEPUTY email (already sent)", { slotIdx });
+        } else {
+          const deputyName = depInfo.displayName || depInfo.firstName || "one of our vocalists";
+          console.log("📧 Sending DEPUTY-available email (per slot)", { slotIdx, deputyName, to: clientEmail });
 
-    console.log("✅ Deputy-available client email sent.");
+          const isVocalistMember = (m = {}) => /vocal|singer/i.test(String(m.instrument || m.role || ""));
+          const smallestLineup = Array.isArray(actDoc?.lineups) && actDoc.lineups.length
+            ? actDoc.lineups
+                .slice()
+                .sort((a, b) => {
+                  const ca = Array.isArray(a?.bandMembers)
+                    ? a.bandMembers.filter((x) => x && (x.isEssential !== false)).length
+                    : 0;
+                  const cb = Array.isArray(b?.bandMembers)
+                    ? b.bandMembers.filter((x) => x && (x.isEssential !== false)).length
+                    : 0;
+                  return ca - cb;
+                })[0]
+            : null;
+
+          const vocalistCount = smallestLineup && Array.isArray(smallestLineup.bandMembers)
+            ? smallestLineup.bandMembers.filter((m) => (m?.isEssential !== false) && isVocalistMember(m)).length
+            : 1;
+
+          const unavailableVocalistPrefix =
+            vocalistCount > 1
+              ? "One of the band's regular vocalists isn’t available for your date, but we’re delighted to confirm that"
+              : "The band's regular vocalist isn’t available for your date, but we’re delighted to confirm that";
+
+          let deputyPhotoUrl = depInfo.photoUrl || "";
+          let deputyProfileUrl = depInfo.profileUrl || "";
+          let deputyVideos = [];
+          try {
+            let deputyMusician = null;
+            if (depInfo?.musicianId) {
+              deputyMusician = await Musician.findById(depInfo.musicianId)
+                .select("firstName lastName profilePicture photoUrl tscProfileUrl functionBandVideoLinks originalBandVideoLinks")
+                .lean();
+            }
+            if (deputyMusician) {
+              if (!deputyPhotoUrl)
+                deputyPhotoUrl = deputyMusician.profilePicture || deputyMusician.photoUrl || "";
+              if (!deputyProfileUrl)
+                deputyProfileUrl = deputyMusician.tscProfileUrl || `${SITE}musician/${deputyMusician._id}`;
+
+              const fnVids = (deputyMusician.functionBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+              const origVids = (deputyMusician.originalBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+              deputyVideos = [...new Set([...fnVids, ...origVids])];
+            }
+          } catch (e) {
+            console.warn("⚠️ Deputy enrichment failed:", e?.message || e);
+          }
+
+          await sendClientEmail({
+            actId: String(actId),
+            userId: clientUserId,
+            to: clientEmail,
+            name: clientName,
+            bcc: ["hello@thesupremecollective.co.uk"],
+            subject: `${deputyName} is available to perform for you with ${actDoc.tscName || actDoc.name} on ${eventDatePretty}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
+                <p>Hi ${(clientName || "there").split(" ")[0]},</p>
+                <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
+                <p>
+                  ${unavailableVocalistPrefix} <strong>${deputyName}</strong> — one of the band's trusted deputy vocalists — is available to perform instead.
+                </p>
+                ${
+                  deputyProfileUrl || deputyPhotoUrl
+                    ? `<div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
+                         <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyName}</h3>
+                         ${deputyPhotoUrl ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />` : ""}
+                         ${deputyProfileUrl ? `<p style="margin:6px 0 0;"><a href="${deputyProfileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View ${deputyName}'s profile →</a></p>` : ""}
+                         <p style="margin:8px 0 0; color:#555;">
+                           Please note: when a deputy vocalist is booked, the band will tailor the setlist to that vocalist’s repertoire.
+                           There’s a large overlap with ${(actDoc.tscName || actDoc.name)}’s core repertoire and ${deputyName}’s repertoire, so you’ll still get the band’s signature crowd-pleasers.
+                         </p>
+                       </div>`
+                    : ""
+                }
+                ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />` : ""}
+                <h3 style="color:#111;">${actDoc.tscName || actDoc.name}</h3>
+                <p style="margin:6px 0 14px; color:#555;">${(actDoc.tscDescription || actDoc.description || "").toString()}</p>
+                <p><a href="${deputyProfileUrl || profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
+                ${lineupQuotes.length ? `<h4 style="margin-top:20px;">Lineup options:</h4><ul>${lineupQuotes.map(l => `<li>${l.html}</li>`).join("")}</ul>` : ""}
+                <h4 style="margin-top:25px;">Included in your quote:</h4>
+                <ul>
+                  <li>${setsLine}</li>
+                  ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
+                  <li>Band arrival from 5pm and finish by midnight as standard</li>
+                  <li>Or up to 7 hours on site if earlier arrival is needed</li>
+                  ${offRepLine ? `<li>${offRepLine}</li>` : ""}
+                  ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
+                  ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
+                  <li>Travel to ${selectedAddress || "TBC"}</li>
+                </ul>
+                <div style="margin-top:30px;">
+                  <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
+                </div>
+                <p style="margin-top:16px;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
+                <p>If you have any questions, just reply — we’re always happy to help.</p>
+                <p>Warmest wishes,<br/><strong>The Supreme Collective ✨</strong><br/><a href="https://www.thesupremecollective.co.uk" style="color:#888; text-decoration:none;">www.thesupremecollective.co.uk</a></p>
+              </div>
+            `,
+          });
+
+          await markSent(slotIdx, "deputy");
+          console.log("✅ Deputy-available client email sent (per slot).", { slotIdx });
+
+          // Keep your deputyVideos var (currently unused) to avoid losing any logic you had in-flight
+          if (Array.isArray(deputyVideos) && deputyVideos.length) {
+            console.log("🎬 Deputy videos discovered (unused in email template)", {
+              slotIdx,
+              count: deputyVideos.length,
+            });
+          }
+        }
+      }
+
+      // slot handled; continue
+      continue;
+    }
   }
+
+  /* ===================== (kept) legacy single-slot computed primaries ===================== */
+  // These are still useful for logs/back-compat; we don't rely on them for sending anymore.
+  // leadPrimary / depPrimary remain computed above and logged already.
+
 } catch (e) {
   console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Client email block failed:", e?.message || e);
 }
