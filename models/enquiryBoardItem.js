@@ -1,24 +1,33 @@
+// models/enquiryBoardItem.js
 import mongoose from "mongoose";
 
 const EnquiryBoardItemSchema = new mongoose.Schema(
   {
     // Identifiers / reference
-    enquiryRef: { type: String, index: true },            // human-friendly ref (not unique)
-    enquiryId: { type: mongoose.Types.ObjectId, ref: "Enquiry" }, // optional link to a core enquiry
+    enquiryRef: { type: String, index: true },
+    enquiryId: { type: mongoose.Types.ObjectId, ref: "Enquiry" },
+
+    // ✅ Add these so we can trigger availability properly
+    actId: { type: mongoose.Types.ObjectId, ref: "Act", index: true }, // <-- IMPORTANT
+    lineupId: { type: String, index: true },                           // optional (string/uuid)
+
+    // ✅ Client identity (for sending emails!)
+    clientName: { type: String },
+    clientEmail: { type: String, index: true },
 
     // Source (agent)
-    agent: { type: String, index: true },                 // e.g. "Direct", "Encore", etc.
+    agent: { type: String, index: true },
 
     // Dates
-    enquiryDateISO: { type: String, index: true },        // "YYYY-MM-DD"
-    eventDateISO: { type: String, index: true },          // "YYYY-MM-DD"
+    enquiryDateISO: { type: String, index: true },
+    eventDateISO: { type: String, index: true },
 
-    // Act names
+    // Act names (still useful for quick viewing/search)
     actName: { type: String, index: true },
     actTscName: { type: String, index: true },
 
     // Location
-    address: { type: String },                            // venue/address
+    address: { type: String },
     county: { type: String, index: true },
 
     // Notes + status
@@ -31,12 +40,12 @@ const EnquiryBoardItemSchema = new mongoose.Schema(
     },
 
     // Money (potentials)
-    grossValue: { type: Number, default: 0 },             // potential gross booking value £
-    netCommission: { type: Number, default: 0 },          // potential commission amount £ (e.g., 25%)
+    grossValue: { type: Number, default: 0 },
+    netCommission: { type: Number, default: 0 },
 
     // Quoted details
-    bandSize: { type: Number, default: 0 },               // band size quoted (excludes manager)
-    maxBudget: { type: Number },                          // client's maximum budget (if provided)
+    bandSize: { type: Number, default: 0 },
+    maxBudget: { type: Number },
   },
   { timestamps: true }
 );

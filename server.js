@@ -38,6 +38,7 @@ import newsletterRoutes from "./routes/newsletterRoutes.js";
 import v2Routes from "./routes/v2.js";
 import agentDashboardRoutes from "./routes/agentDashboardRoutes.js";
 import sitemapRoutes from "./routes/sitemapRoutes.js";
+import enquiryBoardRoutes from "./routes/enquiryBoardRoutes.js";
 
 import {
   watchCalendar,
@@ -325,9 +326,10 @@ app.use("/api/act", actV2Routes);           // ← put act routes here
 // If you truly need a musician-scoped subset, keep this too:
 app.use("/api/musician/act-v2", actV2Routes);
 
-// Availability / shortlist
+// Availability / shortlist / enquiries
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/shortlist", shortlistRoutes);
+app.use("/api/board/enquiries", enquiryBoardRoutes);
 
 // Bookings / payments / invoices
 app.use("/api/cart", cartRouter);
