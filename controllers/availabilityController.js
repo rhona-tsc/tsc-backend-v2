@@ -1883,18 +1883,18 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   const res = isExpress ? maybeRes : null;
 
   // Normalize request object (this function is called both as an Express handler and as an internal helper)
-const reqObj = isExpress ? reqOrArgs : {};
+  const reqObj = isExpress ? reqOrArgs : {};
 
-// Prefer auth-derived userId when available; fall back to body
-const authUserIdRaw = reqObj?.user?._id || reqObj?.userId || null;
-const bodyUserIdRaw =
-  body?.userId || body?.user?._id || body?.user?.id || body?.userIdFromToken || null;
+  // Prefer auth-derived userId when available; fall back to body
+  const authUserIdRaw = reqObj?.user?._id || reqObj?.userId || null;
+  const bodyUserIdRaw =
+    body?.userId || body?.user?._id || body?.user?.id || body?.userIdFromToken || null;
 
-const authUserId = authUserIdRaw ? String(authUserIdRaw) : null;
-const bodyUserId = bodyUserIdRaw ? String(bodyUserIdRaw) : null;
-const clientUserId = authUserId || bodyUserId || null;
+  const authUserId = authUserIdRaw ? String(authUserIdRaw) : null;
+  const bodyUserId = bodyUserIdRaw ? String(bodyUserIdRaw) : null;
+  const clientUserId = authUserId || bodyUserId || null;
 
-const hasAuthHeader = isExpress ? !!reqObj?.headers?.authorization : false;
+  const hasAuthHeader = isExpress ? !!reqObj?.headers?.authorization : false;
 
   try {
     const {
@@ -1920,13 +1920,14 @@ const hasAuthHeader = isExpress ? !!reqObj?.headers?.authorization : false;
       "http://localhost:5174"
     ).replace(/\/$/, "");
 
- console.log("🧾 [triggerAvailabilityRequest] identity snapshot", {
-  isExpress,
-  bodyUserId,
-  authUserId,
-  clientUserId,
-  hasAuthHeader,
-});
+    console.log("🧾 [triggerAvailabilityRequest] identity snapshot", {
+      isExpress,
+      bodyUserId,
+      authUserId,
+      clientUserId,
+      hasAuthHeader,
+    });
+
     /* -------------------------------------------------------------- */
     /* 🔢 Enquiry + slotIndex base                                    */
     /* -------------------------------------------------------------- */
@@ -1937,13 +1938,9 @@ const hasAuthHeader = isExpress ? !!reqObj?.headers?.authorization : false;
       console.warn("⚠️ No enquiryId provided — slotIndex grouping may fail");
     }
 
-    const existingForEnquiry = enquiryId
-      ? await AvailabilityModel.find({ enquiryId }).lean()
-      : [];
-
+    const existingForEnquiry = enquiryId ? await AvailabilityModel.find({ enquiryId }).lean() : [];
     const slotIndexBase = existingForEnquiry.length; // just FYI
-    const slotIndexFromBody =
-      typeof body.slotIndex === "number" ? body.slotIndex : null;
+    const slotIndexFromBody = typeof body.slotIndex === "number" ? body.slotIndex : null;
 
     /* -------------------------------------------------------------- */
     /* 🧭 Enrich clientName/email                                     */
@@ -1951,27 +1948,27 @@ const hasAuthHeader = isExpress ? !!reqObj?.headers?.authorization : false;
     let resolvedClientName = clientName || "";
     let resolvedClientEmail = clientEmail || "";
 
-   const userIdForEnrichment = clientUserId;
+    const userIdForEnrichment = clientUserId;
 
-if (!resolvedClientEmail && userIdForEnrichment) {
-  try {
-    const userDoc = await userModel
-      .findById(userIdForEnrichment)
-      .select("firstName surname email")
-      .lean();
+    if (!resolvedClientEmail && userIdForEnrichment) {
+      try {
+        const userDoc = await userModel
+          .findById(userIdForEnrichment)
+          .select("firstName surname email")
+          .lean();
 
-    if (userDoc) {
-      resolvedClientName = `${userDoc.firstName || ""} ${userDoc.surname || ""}`.trim();
-      resolvedClientEmail = userDoc.email || "";
-      console.log(
-        `📧 Enriched client details from userId: ${resolvedClientName} <${resolvedClientEmail}>`,
-        { userIdForEnrichment, source: authUserId ? "auth" : "body" }
-      );
+        if (userDoc) {
+          resolvedClientName = `${userDoc.firstName || ""} ${userDoc.surname || ""}`.trim();
+          resolvedClientEmail = userDoc.email || "";
+          console.log(
+            `📧 Enriched client details from userId: ${resolvedClientName} <${resolvedClientEmail}>`,
+            { userIdForEnrichment, source: authUserId ? "auth" : "body" }
+          );
+        }
+      } catch (err) {
+        console.warn("⚠️ Failed to enrich client from userId:", err.message);
+      }
     }
-  } catch (err) {
-    console.warn("⚠️ Failed to enrich client from userId:", err.message);
-  }
-}
 
     /* -------------------------------------------------------------- */
     /* 📅 Basic act + date resolution                                 */
@@ -1983,51 +1980,52 @@ if (!resolvedClientEmail && userIdForEnrichment) {
     if (!act) throw new Error("Act not found");
 
     // Title-case helper tuned for UK place names
-function toTitleCaseCounty(s = "") {
-  const exceptions = new Set(["of", "and", "the", "upon", "on", "by", "in"]);
-  const fixups = {
-    "east riding of yorkshire": "East Riding of Yorkshire",
-    "city of london": "City of London",
-    "isle of wight": "Isle of Wight",
-    "na h-eileanan siar": "Na h-Eileanan Siar",
-  };
+    function toTitleCaseCounty(s = "") {
+      const exceptions = new Set(["of", "and", "the", "upon", "on", "by", "in"]);
+      const fixups = {
+        "east riding of yorkshire": "East Riding of Yorkshire",
+        "city of london": "City of London",
+        "isle of wight": "Isle of Wight",
+        "na h-eileanan siar": "Na h-Eileanan Siar",
+      };
 
-  const raw = String(s || "").trim();
-  if (!raw) return "";
+      const raw = String(s || "").trim();
+      if (!raw) return "";
 
-  const lower = raw.toLowerCase();
-  if (fixups[lower]) return fixups[lower];
+      const lower = raw.toLowerCase();
+      if (fixups[lower]) return fixups[lower];
 
-  // keep spaces, hyphens, and apostrophes as separators but preserved
-  return lower
-    .split(/([\s\-’'])/)
-    .map((part, idx) => {
-      if (/^[\s\-’']$/.test(part)) return part;          // keep separator
-      if (idx !== 0 && exceptions.has(part)) return part; // small words
-      return part.charAt(0).toUpperCase() + part.slice(1);
-    })
-    // Mc/Mac prefixes (simple pass)
-    .join("")
-    .replace(/\bMc([a-z])/g, (_, c) => "Mc" + c.toUpperCase())
-    .replace(/\bMac([a-z])/g, (_, c) => "Mac" + c.toUpperCase());
-}
+      // keep spaces, hyphens, and apostrophes as separators but preserved
+      return lower
+        .split(/([\s\-’'])/)
+        .map((part, idx) => {
+          if (/^[\s\-’']$/.test(part)) return part; // keep separator
+          if (idx !== 0 && exceptions.has(part)) return part; // small words
+          return part.charAt(0).toUpperCase() + part.slice(1);
+        })
+        // Mc/Mac prefixes (simple pass)
+        .join("")
+        .replace(/\bMc([a-z])/g, (_, c) => "Mc" + c.toUpperCase())
+        .replace(/\bMac([a-z])/g, (_, c) => "Mac" + c.toUpperCase());
+    }
 
     // derive addresses
     const fullFormattedAddress =
       formattedAddress || address || act?.formattedAddress || act?.venueAddress || "TBC";
 
-const { county: derivedCountyRaw } = countyFromAddress(fullFormattedAddress) || {};
-const derivedCounty = toTitleCaseCounty(derivedCountyRaw);
-const derivedPostcode = extractUKPostcode(fullFormattedAddress);
+    const { county: derivedCountyRaw } = countyFromAddress(fullFormattedAddress) || {};
+    const derivedCounty = toTitleCaseCounty(derivedCountyRaw);
+    const derivedPostcode = extractUKPostcode(fullFormattedAddress);
 
-const shortAddress = [derivedCounty, derivedPostcode].filter(Boolean).join(", ") || "TBC";
+    const shortAddress =
+      [derivedCounty, derivedPostcode].filter(Boolean).join(", ") || "TBC";
 
-console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
-  shortAddress,
-  derivedCounty,
-  derivedPostcode,
-  fullFormattedAddress,
-});
+    console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
+      shortAddress,
+      derivedCounty,
+      derivedPostcode,
+      fullFormattedAddress,
+    });
 
     const metaAddress = fullFormattedAddress || shortAddress || "TBC";
 
@@ -2044,7 +2042,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
       lineupId,
       dateISO,
       isDeputy,
-            clientUserId,
+      clientUserId,
       selectedVocalistName,
       vocalistName,
       address: address || null,
@@ -2063,8 +2061,7 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
     const lineup = lineupId
       ? lineups.find(
           (l) =>
-            String(l._id) === String(lineupId) ||
-            String(l.lineupId) === String(lineupId)
+            String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId)
         )
       : lineups[0];
 
@@ -2144,99 +2141,91 @@ console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
     /* -------------------------------------------------------------- */
     /* 🎤 MULTI-VOCALIST HANDLING (Lead only)                         */
     /* -------------------------------------------------------------- */
-    const vocalists = members.filter((m) =>
-      (m.instrument || "").toLowerCase().includes("vocal")
-    );
+    const vocalists = members.filter((m) => (m.instrument || "").toLowerCase().includes("vocal"));
 
     if (!isDeputy && vocalists.length > 1) {
       const results = [];
 
-      // ✅ Date-level block per vocalist slot (lead only)
-
-
       for (let i = 0; i < vocalists.length; i++) {
-
-        
         const vMember = vocalists[i];
         const slotIndexForThis = i;
 
-       const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
-if (!phone) {
-  console.warn(`⚠️ Skipping vocalist ${vMember.firstName} — no phone number`);
-  continue;
-}
+        const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
+        if (!phone) {
+          console.warn(`⚠️ Skipping vocalist ${vMember.firstName} — no phone number`);
+          continue;
+        }
 
-// ✅ Resolve a real musicianId BEFORE date-level checks (fixes TDZ)
-let musicianDoc = null;
-try {
-  if (vMember.musicianId) {
-    musicianDoc = await Musician.findById(vMember.musicianId).lean();
-  }
-  if (!musicianDoc) {
-    const cleanPhone = phone;
-    musicianDoc = await Musician.findOne({
-      $or: [
-        { phoneNormalized: cleanPhone },
-        { phone: cleanPhone },
-        { phoneNumber: cleanPhone },
-      ],
-    }).lean();
-  }
-} catch (err) {
-  console.warn("⚠️ Failed to fetch real musician:", err.message);
-}
+        // ✅ BULLETPROOF TDZ FIX:
+        // Pre-declare realMusicianId so it can never be referenced before init.
+        let musicianDoc = null;
+        let realMusicianId = vMember?.musicianId || vMember?._id || null;
 
-const realMusicianId =
-  musicianDoc?._id || vMember.musicianId || vMember._id || null;
+        try {
+          if (vMember.musicianId) {
+            musicianDoc = await Musician.findById(vMember.musicianId).lean();
+          }
+          if (!musicianDoc) {
+            musicianDoc = await Musician.findOne({
+              $or: [
+                { phoneNormalized: phone },
+                { phone: phone },
+                { phoneNumber: phone },
+              ],
+            }).lean();
+          }
+        } catch (err) {
+          console.warn("⚠️ Failed to fetch real musician:", err.message);
+        }
 
-// ✅ NOW safe to use realMusicianId
-const dateLevelUnavailable = await findDateLevelUnavailable({
-  dateISO,
-  canonicalId: realMusicianId,
-  phone,
-});
+        realMusicianId = musicianDoc?._id || realMusicianId;
 
-if (dateLevelUnavailable) {
-  console.log("🚫 Date-level UNAVAILABLE (multi) — skip WA, escalate deputies", {
-    slotIndex: slotIndexForThis,
-    dateISO,
-    phone,
-    realMusicianId: String(realMusicianId || ""),
-  });
+        // ✅ NOW safe to use realMusicianId anywhere below
+        const dateLevelUnavailable = await findDateLevelUnavailable({
+          dateISO,
+          canonicalId: realMusicianId,
+          phone,
+        });
 
-  await notifyDeputies({
-    actId,
-    lineupId: lineup?._id || lineupId || null,
-    dateISO,
-    formattedAddress: fullFormattedAddress,
-    clientName: resolvedClientName || "",
-    clientEmail: resolvedClientEmail || "",
-    slotIndex: slotIndexForThis,
-    skipDuplicateCheck: true,
-    skipIfUnavailable: false,
-  });
+        if (dateLevelUnavailable) {
+          console.log("🚫 Date-level UNAVAILABLE (multi) — skip WA, escalate deputies", {
+            slotIndex: slotIndexForThis,
+            dateISO,
+            phone,
+            realMusicianId: String(realMusicianId || ""),
+          });
 
-  results.push({
-    name: vMember.firstName,
-    slotIndex: slotIndexForThis,
-    phone,
-    reusedExisting: true,
-    existingReply: "unavailable (date-level)",
-  });
+          await notifyDeputies({
+            actId,
+            lineupId: lineup?._id || lineupId || null,
+            dateISO,
+            formattedAddress: fullFormattedAddress,
+            clientName: resolvedClientName || "",
+            clientEmail: resolvedClientEmail || "",
+            slotIndex: slotIndexForThis,
+            skipDuplicateCheck: true,
+            skipIfUnavailable: false,
+          });
 
-  continue;
-}
-let enriched = musicianDoc ? { ...musicianDoc, ...vMember } : { ...vMember };
+          results.push({
+            name: vMember.firstName,
+            slotIndex: slotIndexForThis,
+            phone,
+            reusedExisting: true,
+            existingReply: "unavailable (date-level)",
+          });
+
+          continue;
+        }
+
+        let enriched = musicianDoc ? { ...musicianDoc, ...vMember } : { ...vMember };
         try {
           if (vMember?.musicianId) {
             const mus = await Musician.findById(vMember.musicianId).lean();
             if (mus) enriched = { ...mus, ...enriched };
           }
         } catch (err) {
-          console.warn(
-            `⚠️ Failed to enrich vocalist ${vMember.firstName}:`,
-            err.message
-          );
+          console.warn(`⚠️ Failed to enrich vocalist ${vMember.firstName}:`, err.message);
         }
 
         // 🧯 PRIOR-REPLY CHECK (per-slot)
@@ -2254,19 +2243,13 @@ let enriched = musicianDoc ? { ...musicianDoc, ...vMember } : { ...vMember };
 
           if (
             prior &&
-            addressesRoughlyEqual(
-              prior.formattedAddress || prior.address || "",
-              fullFormattedAddress
-            )
+            addressesRoughlyEqual(prior.formattedAddress || prior.address || "", fullFormattedAddress)
           ) {
-            console.log(
-              "ℹ️ Using existing reply (multi-vocalist) — skipping WA send",
-              {
-                slotIndex: slotIndexForThis,
-                reply: prior.reply,
-                phone,
-              }
-            );
+            console.log("ℹ️ Using existing reply (multi-vocalist) — skipping WA send", {
+              slotIndex: slotIndexForThis,
+              reply: prior.reply,
+              phone,
+            });
 
             if (prior.reply === "unavailable" || prior.reply === "no") {
               await notifyDeputies({
@@ -2300,10 +2283,7 @@ let enriched = musicianDoc ? { ...musicianDoc, ...vMember } : { ...vMember };
                   });
                 }
               } catch (e) {
-                console.warn(
-                  "⚠️ Badge refresh (existing YES) failed:",
-                  e?.message || e
-                );
+                console.warn("⚠️ Badge refresh (existing YES) failed:", e?.message || e);
               }
             }
 
@@ -2320,11 +2300,7 @@ let enriched = musicianDoc ? { ...musicianDoc, ...vMember } : { ...vMember };
           console.warn("⚠️ Prior-reply check (multi) failed:", e?.message || e);
         }
 
-        
-
         const finalFee = await feeForMember(vMember);
-
-      
 
         const now = new Date();
         const query = { actId, dateISO, phone, slotIndex: slotIndexForThis };
@@ -2335,7 +2311,7 @@ let enriched = musicianDoc ? { ...musicianDoc, ...vMember } : { ...vMember };
         // ⛳ INSERT-ONLY META — keep clean
         const setOnInsert = {
           actId,
-clientUserId: clientUserId || null,
+          clientUserId: clientUserId || null,
           lineupId: lineup?._id || null,
           dateISO,
           phone,
@@ -2357,7 +2333,7 @@ clientUserId: clientUserId || null,
           musicianId: realMusicianId,
           musicianName: displayNameForLead,
           musicianEmail: enriched.email || "",
-clientUserId: clientUserId || null,
+          clientUserId: clientUserId || null,
           photoUrl: enriched.photoUrl || enriched.profilePicture || "",
           address: fullFormattedAddress,
           formattedAddress: fullFormattedAddress,
@@ -2371,9 +2347,7 @@ clientUserId: clientUserId || null,
           selectedVocalistName: displayNameForLead,
           selectedVocalistId: realMusicianId || null,
           vocalistName: displayNameForLead,
-          profileUrl: realMusicianId
-            ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}`
-            : "",
+          profileUrl: realMusicianId ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}` : "",
           requestId, // ← set here (no $setOnInsert duplicate)
         };
 
@@ -2392,15 +2366,16 @@ clientUserId: clientUserId || null,
           slotIndex: slotIndexForThis,
           requestId,
         });
-console.log("🧾 [triggerAvailabilityRequest/multi] about to upsert availability row", {
-  actId,
-  dateISO,
-  slotIndex: slotIndexForThis,
-  phone,
-  willStoreUserId: clientUserId || null,
-  willStoreClientEmail: resolvedClientEmail || null,
-  willStoreClientName: resolvedClientName || null,
-});
+
+        console.log("🧾 [triggerAvailabilityRequest/multi] about to upsert availability row", {
+          actId,
+          dateISO,
+          slotIndex: slotIndexForThis,
+          phone,
+          willStoreUserId: clientUserId || null,
+          willStoreClientEmail: resolvedClientEmail || null,
+          willStoreClientName: resolvedClientName || null,
+        });
 
         const savedLead = await AvailabilityModel.findOneAndUpdate(
           query,
@@ -2457,10 +2432,7 @@ console.log("🧾 [triggerAvailabilityRequest/multi] about to upsert availabilit
             { $set: { messageSidOut: msg?.sid || null } }
           );
         } catch (e) {
-          console.warn(
-            "⚠️ Could not persist messageSidOut (multi):",
-            e?.message || e
-          );
+          console.warn("⚠️ Could not persist messageSidOut (multi):", e?.message || e);
         }
 
         // ⏰ Schedule deputy escalation for THIS lead vocalist (inside loop scope)
@@ -2484,11 +2456,11 @@ console.log("🧾 [triggerAvailabilityRequest/multi] about to upsert availabilit
           sid: msg?.sid || null,
         });
       }
-// after sending the WA to this LEAD vocalist (multi-vocalist path)
-      console.log(`✅ Multi-vocalist availability triggered for:`, results);
+
+        console.log(`✅ Multi-vocalist availability triggered for:`, results);
       if (res) return res.json({ success: true, sent: results.length, details: results });
       return { success: true, sent: results.length, details: results };
-    }
+    } // ✅ CLOSES: if (!isDeputy && vocalists.length > 1)
 
     /* -------------------------------------------------------------- */
     /* 🎤 SINGLE VOCALIST / DEPUTY PATH                               */
@@ -2523,10 +2495,8 @@ console.log("🧾 [triggerAvailabilityRequest/multi] about to upsert availabilit
       targetMember.musicianId = deputy.id;
     }
 
-    targetMember.email =
-      enrichedMember.email || targetMember.email || null;
-    targetMember.musicianId =
-      enrichedMember._id || targetMember.musicianId || null;
+    targetMember.email = enrichedMember.email || targetMember.email || null;
+    targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
 
     const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
     if (!phone) throw new Error("Missing phone");
@@ -2534,8 +2504,8 @@ console.log("🧾 [triggerAvailabilityRequest/multi] about to upsert availabilit
     // 🔎 Canonical musician from Musicians collection (by phone)
     const canonical = await findCanonicalMusicianByPhone(phone);
 
-    // Prefer canonical-from-phone; fall back to any enriched/act ids
-    const canonicalId =
+    // ✅ Resolve a real musicianId BEFORE date-level checks (aligns with multi-vocalist path)
+    const realMusicianId =
       canonical?._id || enrichedMember?._id || targetMember?.musicianId || null;
 
     const canonicalName = canonical
@@ -2557,41 +2527,46 @@ console.log("🧾 [triggerAvailabilityRequest/multi] about to upsert availabilit
     const singleSlotIndex = typeof body.slotIndex === "number" ? body.slotIndex : 0;
 
     // ✅ Date-level block: if already unavailable for this date, skip lead WhatsApp and go deputies
-if (!isDeputy) {
-  const dateLevelUnavailable = await findDateLevelUnavailable({
-    dateISO,
-    canonicalId,
-    phone,
-  });
-
-  if (dateLevelUnavailable) {
-    console.log(
-      "🚫 Date-level UNAVAILABLE found — skipping lead WhatsApp, escalating to deputies",
-      {
+    if (!isDeputy) {
+      const dateLevelUnavailable = await findDateLevelUnavailable({
         dateISO,
+        canonicalId: realMusicianId, // ✅ use realMusicianId
         phone,
-        canonicalId: String(canonicalId || ""),
-        priorId: String(dateLevelUnavailable._id || ""),
+      });
+
+      if (dateLevelUnavailable) {
+        console.log(
+          "🚫 Date-level UNAVAILABLE found — skipping lead WhatsApp, escalating to deputies",
+          {
+            dateISO,
+            phone,
+            canonicalId: String(realMusicianId || ""),
+            priorId: String(dateLevelUnavailable._id || ""),
+          }
+        );
+
+        await notifyDeputies({
+          actId,
+          lineupId: lineup?._id || lineupId || null,
+          dateISO,
+          formattedAddress: fullFormattedAddress,
+          clientName: resolvedClientName || "",
+          clientEmail: resolvedClientEmail || "",
+          slotIndex: singleSlotIndex,
+          skipDuplicateCheck: true,
+          skipIfUnavailable: false,
+        });
+
+        if (res)
+          return res.json({
+            success: true,
+            sent: 0,
+            skipped: "date-level-unavailable",
+          });
+        return { success: true, sent: 0, skipped: "date-level-unavailable" };
       }
-    );
+    }
 
-    await notifyDeputies({
-      actId,
-      lineupId: lineup?._id || lineupId || null,
-      dateISO,
-      formattedAddress: fullFormattedAddress,
-      clientName: resolvedClientName || "",
-      clientEmail: resolvedClientEmail || "",
-      slotIndex: singleSlotIndex,
-      skipDuplicateCheck: true,
-      skipIfUnavailable: false,
-    });
-
-    if (res)
-      return res.json({ success: true, sent: 0, skipped: "date-level-unavailable" });
-    return { success: true, sent: 0, skipped: "date-level-unavailable" };
-  }
-}
     /* -------------------------------------------------------------- */
     /* 🛡️ Prior-reply check (same date + same location)               */
     /* -------------------------------------------------------------- */
@@ -2641,7 +2616,10 @@ if (!isDeputy) {
             });
           }
         } catch (e) {
-          console.warn("⚠️ Badge refresh (existing YES) failed:", e?.message || e);
+          console.warn(
+            "⚠️ Badge refresh (existing YES) failed:",
+            e?.message || e
+          );
         }
       }
 
@@ -2653,14 +2631,14 @@ if (!isDeputy) {
           formattedAddress: fullFormattedAddress,
           clientName: resolvedClientName || "",
           clientEmail: resolvedClientEmail || "",
-          slotIndex:
-            typeof body.slotIndex === "number" ? body.slotIndex : null,
+          slotIndex: typeof body.slotIndex === "number" ? body.slotIndex : null,
           skipDuplicateCheck: true,
           skipIfUnavailable: false,
         });
       }
 
-      if (res) return res.json({ success: true, sent: 0, usedExisting: prior.reply });
+      if (res)
+        return res.json({ success: true, sent: 0, usedExisting: prior.reply });
       return { success: true, sent: 0, usedExisting: prior.reply };
     }
 
@@ -2683,7 +2661,12 @@ if (!isDeputy) {
         "⚠️ Duplicate availability request detected — skipping WhatsApp send",
         strongGuardQuery
       );
-      if (res) return res.json({ success: true, sent: 0, skipped: "duplicate-strong" });
+      if (res)
+        return res.json({
+          success: true,
+          sent: 0,
+          skipped: "duplicate-strong",
+        });
       return { success: true, sent: 0, skipped: "duplicate-strong" };
     }
 
@@ -2761,14 +2744,19 @@ if (!isDeputy) {
       v2: true,
     }).lean();
 
-    if (existing && !skipDuplicateCheck && ["unavailable", "no"].includes(existing.reply)) {
+    if (
+      existing &&
+      !skipDuplicateCheck &&
+      ["unavailable", "no"].includes(existing.reply)
+    ) {
       console.log("🚫 Skipping — musician already unavailable/no", {
         actId,
         dateISO,
         phone: existing.phone,
         reply: existing.reply,
       });
-      if (res) return res.json({ success: true, sent: 0, skipped: existing.reply });
+      if (res)
+        return res.json({ success: true, sent: 0, skipped: existing.reply });
       return { success: true, sent: 0, skipped: existing.reply };
     }
 
@@ -2778,14 +2766,14 @@ if (!isDeputy) {
         dateISO,
         phone: existing.phone,
       });
-      if (res) return res.json({ success: true, sent: 0, skipped: "duplicate" });
+      if (res)
+        return res.json({ success: true, sent: 0, skipped: "duplicate" });
       return { success: true, sent: 0, skipped: "duplicate" };
     }
 
     /* -------------------------------------------------------------- */
     /* ✅ Upsert availability record (single lead / deputy)           */
     /* -------------------------------------------------------------- */
-
     const now = new Date();
     const query = { actId, dateISO, phone, slotIndex: singleSlotIndex };
 
@@ -2797,7 +2785,7 @@ if (!isDeputy) {
       actId,
       lineupId: lineup?._id || null,
       dateISO,
-clientUserId: clientUserId || null,
+      clientUserId: clientUserId || null,
       phone,
       v2: true,
       enquiryId,
@@ -2810,7 +2798,7 @@ clientUserId: clientUserId || null,
     // 🔁 ALWAYS-UPDATE FIELDS (requestId ONLY HERE → avoids conflict)
     const setAlways = {
       isDeputy: !!isDeputy,
-      musicianId: canonicalId,
+      musicianId: realMusicianId, // ✅ use realMusicianId
       musicianName: canonicalName,
       musicianEmail: canonical?.email || targetMember.email || "",
       photoUrl: canonicalPhoto,
@@ -2819,14 +2807,16 @@ clientUserId: clientUserId || null,
       formattedDate,
       clientName: resolvedClientName || "",
       clientEmail: resolvedClientEmail || "",
-clientUserId: clientUserId || null,
+      clientUserId: clientUserId || null,
       actName: act?.tscName || act?.name || "",
       duties: body?.inheritedDuties || targetMember.instrument || "Performance",
       fee: String(finalFee),
       updatedAt: now,
-      profileUrl: canonicalId ? `${PUBLIC_SITE_BASE}/musician/${canonicalId}` : "",
+      profileUrl: realMusicianId
+        ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}`
+        : "",
       selectedVocalistName: selectedName,
-      selectedVocalistId: canonicalId || null,
+      selectedVocalistId: realMusicianId || null, // ✅ use realMusicianId
       vocalistName: vocalistName || selectedName || "",
       requestId, // ← here (not in $setOnInsert)
     };
@@ -2854,21 +2844,26 @@ clientUserId: clientUserId || null,
       shortAddress,
       photoUrl: setAlways.photoUrl || "",
       profileUrl: setAlways.profileUrl || "",
-      musicianId: canonicalId || null,
+      musicianId: realMusicianId || null,
       phone,
       slotIndex: singleSlotIndex,
       requestId,
     });
-console.log("🧾 [triggerAvailabilityRequest/single] about to upsert availability row", {
-  actId,
-  dateISO,
-  slotIndex: singleSlotIndex,
-  phone,
-  willStoreUserId: clientUserId || null,
-  willStoreClientEmail: resolvedClientEmail || null,
-  willStoreClientName: resolvedClientName || null,
-  isDeputy: !!isDeputy,
-});
+
+    console.log(
+      "🧾 [triggerAvailabilityRequest/single] about to upsert availability row",
+      {
+        actId,
+        dateISO,
+        slotIndex: singleSlotIndex,
+        phone,
+        willStoreUserId: clientUserId || null,
+        willStoreClientEmail: resolvedClientEmail || null,
+        willStoreClientName: resolvedClientName || null,
+        isDeputy: !!isDeputy,
+      }
+    );
+
     const saved = await AvailabilityModel.findOneAndUpdate(
       query,
       { $setOnInsert: setOnInsert, $set: setAlways },
@@ -2945,25 +2940,22 @@ console.log("🧾 [triggerAvailabilityRequest/single] about to upsert availabili
         { $set: { messageSidOut: msg?.sid || null } }
       );
     } catch (e) {
-      console.warn(
-        "⚠️ Could not persist messageSidOut (single):",
-        e?.message || e
-      );
+      console.warn("⚠️ Could not persist messageSidOut (single):", e?.message || e);
     }
 
     if (!isDeputy) {
-  await scheduleDeputyEscalation({
-    availabilityId: saved?._id || null,
-    actId,
-    lineupId: lineup?._id || lineupId || null,
-    dateISO,
-    phone,
-    slotIndex: singleSlotIndex,
-    formattedAddress: fullFormattedAddress,
-    clientName: resolvedClientName || "",
-    clientEmail: resolvedClientEmail || "",
-  });
-}
+      await scheduleDeputyEscalation({
+        availabilityId: saved?._id || null,
+        actId,
+        lineupId: lineup?._id || lineupId || null,
+        dateISO,
+        phone,
+        slotIndex: singleSlotIndex,
+        formattedAddress: fullFormattedAddress,
+        clientName: resolvedClientName || "",
+        clientEmail: resolvedClientEmail || "",
+      });
+    }
 
     console.log(`📲 WhatsApp sent successfully — ${feeStr}`);
     if (res) return res.json({ success: true, sent: 1 });
