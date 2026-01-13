@@ -871,12 +871,20 @@ export const createCheckoutSession = async (req, res) => {
     // ----------------------------
     // Payment mode logic
     // ----------------------------
-    const dte = daysUntil(date);
-    const requiresFull = dte != null && dte <= 28;
-    const clientHint = paymentMode === "full" || paymentMode === "deposit" ? paymentMode : null;
-    const finalMode = requiresFull ? "full" : clientHint || "deposit";
+   // ----------------------------
+// Payment mode logic
+// ----------------------------
+const dte = daysUntil(date);
+const requiresFull = dte != null && dte <= 28;
+const clientHint =
+  paymentMode === "full" || paymentMode === "deposit" ? paymentMode : null;
 
-    const chargeGross = finalMode === "full" ? grossTotal : depositGross;
+let finalMode = requiresFull ? "full" : clientHint || "deposit";
+
+// ✅ force FULL for test bookings so we never try to charge a <50p deposit
+if (isTestBooking) finalMode = "full";
+
+const chargeGross = finalMode === "full" ? grossTotal : depositGross;
 
     // Stripe hard safety rule:
     if (!Number.isFinite(chargeGross) || chargeGross < 0.5) {

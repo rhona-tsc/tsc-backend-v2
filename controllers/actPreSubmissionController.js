@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import ActPreSubmission from "../models/ActPreSubmissionModel.js";
 import { generateInviteCode } from "../utils/generateInviteCode.js";
 import { sendActApprovalEmail } from "../utils/sendActApprovalEmail.js";
@@ -193,5 +194,31 @@ export const getActPreSubmissionCount = async (req, res) => {
   } catch (err) {
     console.error("getActPreSubmissionCount:", err);
     res.status(500).json({ success: false });
+  }
+};
+
+export const getOnePreSubmission = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid id" });
+    }
+
+    const sub = await ActPreSubmission.findById(id).lean();
+
+    if (!sub) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Not found" });
+    }
+
+    return res.json({ success: true, submission: sub });
+  } catch (err) {
+    console.error("getOnePreSubmission error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || "Server error",
+    });
   }
 };
