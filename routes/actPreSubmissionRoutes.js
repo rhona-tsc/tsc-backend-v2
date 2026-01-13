@@ -6,8 +6,10 @@ import {
   rejectActPreSubmission,
   validateActInviteCode,
   markInviteCodeUsed,
-  getActPreSubmissionCount
+  getActPreSubmissionCount,
+  getOnePreSubmission
 } from "../controllers/actPreSubmissionController.js";
+import requireAdminDashboard from "../middleware/requireAdminDashboard.js";
 
 const router = express.Router();
 
@@ -17,6 +19,7 @@ router.post("/submit", submitActPreSubmission);
 // agent view
 router.get("/pending", getPendingActPreSubmissions);
 router.get("/pending-count", getActPreSubmissionCount);
+router.get("/:id", requireAdminDashboard, getOnePreSubmission);
 
 // approval flow
 router.post("/approve/:id", approveActPreSubmission);
