@@ -93,13 +93,12 @@ Total: £<%= bookingTotalDisplay.toFixed(2) %>, Deposit paid: <%= depositDisplay
   <% actsSummary.forEach(function(it){ %>
     <div style="display:flex; gap:12px; align-items:flex-start; margin:10px 0;">
       <% if (it.image && it.image.url) { %>
-        <img src="<%= it.image.url %>" alt="<%= it.tscName %>" style="width:80px; height:80px; object-fit:cover; border-radius:6px;"
+        <img src="<%= it.image.url %>" alt="<%= it.tscName || it.actName || it.name || '' %>" style="width:80px; height:80px; object-fit:cover; border-radius:6px;"
              onerror="this.style.display='none'"/>
       <% } %>
       <div style="flex:1; min-width:0;">
         <div>
-          <strong><%= it.tscName %></strong>
-
+<strong><%= it.tscName || it.actName || it.name || "—" %></strong>
 <%
   // ---- Normalised size label (avoid "6-Piece-Piece") ----
   const rawSize = it.lineupLabel || it.actSize || (it.bandMembers?.length || 0);
@@ -284,13 +283,16 @@ Total: £<%= bookingTotalDisplay.toFixed(2) %>, Deposit paid: <%= depositDisplay
       <p><strong>Client Authorisation</strong></p>
       <p>
         By signing below, you confirm that you are the authorised signatory for contract <%= bookingId || 'TBC' %>
-        (<%= (actsSummary||[]).map(a => a.tscName || a.tscName).join(", ") %>, <%= new Date().toLocaleDateString('en-GB') %>) and agree to be bound by The Supreme Collective’s Terms and Conditions of booking.
+        (<%= (actsSummary || [])
+  .map(a => a?.tscName || a?.actName || a?.name || "—")
+  .join(", ")
+%>, <%= new Date().toLocaleDateString('en-GB') %>)%>, <%= new Date().toLocaleDateString('en-GB') %>) and agree to be bound by The Supreme Collective’s Terms and Conditions of booking.
       </p>
 
       <p><strong>Agent Authorisation</strong></p>
       <p>
         Company Name: The Supreme Collective<br/>
-        Artist Name(/s): <%= (actsSummary||[]).map(a => a.tscName || a.tscName).join(", ") %>
+        Artist Name(/s): <%= (actsSummary||[]).map(a => a?.tscName || a?.actName || a?.name || "—").join(", ") %>
       </p>
 
       <p><strong>The Supreme Collective - Terms and Conditions of Booking</strong></p>
