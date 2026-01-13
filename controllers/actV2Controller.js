@@ -495,58 +495,70 @@ export const getAllActsV2 = async (req, res) => {
     const filter = {};
     if (includeTrashed !== "true") filter.status = { $ne: "trashed" };
 
-    group("🎛️ Status & special status parsing");
-    const rawTokens  = String(status || "").split(",").map(s => s.trim()).filter(Boolean);
-    const tokensLC   = rawTokens.map(s => s.toLowerCase());
-    dbg("rawTokens:", rawTokens);
-    dbg("tokensLC:", tokensLC);
+   /* ── Status & special status parsing ── */
+group("🎛️ Status & special status parsing");
 
-    const wantsApprovedChangesPending =
-      tokensLC.includes("approved_changes_pending") ||
-      tokensLC.includes("approved (changes pending)") ||
-      tokensLC.includes("approved, changes pending") ||
-      (tokensLC.includes("approved") && tokensLC.includes("changes pending"));
+// ✅ support repeated ?status=... params (array) OR CSV string
+const statusValues = Array.isArray(req.query.status)
+  ? req.query.status
+  : String(req.query.status || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-    const allowed    = new Set(["approved", "pending", "draft", "trashed", "rejected"]);
-    const isSentinel = (s) =>
-      /^approved(_|\s*\(|,\s*)changes\s*pending\)?$/i.test(s) ||
-      s.toLowerCase() === "changes pending";
+const rawTokens = statusValues.map((s) => String(s).trim()).filter(Boolean);
+const tokensLC = rawTokens.map((s) => s.toLowerCase());
 
-    const normalStatuses = rawTokens
-      .filter(s => !isSentinel(s))
-      .map(s => s.toLowerCase())
-      .filter(s => allowed.has(s));
+dbg("rawTokens:", rawTokens);
+dbg("tokensLC:", tokensLC);
 
-    dbg("normalStatuses:", normalStatuses);
-    dbg("wantsApprovedChangesPending:", wantsApprovedChangesPending);
+const wantsApprovedChangesPending =
+  tokensLC.includes("approved_changes_pending") ||
+  tokensLC.includes("approved (changes pending)") ||
+  tokensLC.includes("approved, changes pending") ||
+  (tokensLC.includes("approved") && tokensLC.includes("changes pending"));
 
-    if (normalStatuses.length) {
-      if (filter.status) {
-        filter.$and = [{ status: filter.status }, { status: { $in: normalStatuses } }];
-        delete filter.status;
-      } else {
-        filter.status = { $in: normalStatuses };
-      }
-    }
+// ✅ include your real statuses here
+const allowed = new Set([
+  "approved",
+  "pending",
+  "draft",
+  "trashed",
+  "rejected",
+  "live_changes_pending", // ✅ you’re using this in the FE
+]);
 
-    if (wantsApprovedChangesPending) {
-      const specialClause = { $and: [{ status: "approved" }, { "amendment.isPending": true }] };
-      if (filter.$or) {
-        filter.$or.push(specialClause);
-      } else {
-        if (filter.status) {
-          const existing = { status: filter.status };
-          delete filter.status;
-          filter.$or = [existing, specialClause];
-        } else if (filter.$and) {
-          filter.$or = [specialClause];
-        } else {
-          filter.$or = [specialClause];
-        }
-      }
-    }
-    dbg("filter after statuses:", p(filter));
-    end();
+// treat these as “sentinel” values (not real status field values)
+const isSentinel = (s) =>
+  /^approved(_|\s*\(|,\s*)changes\s*pending\)?$/i.test(s) ||
+  s.toLowerCase() === "changes pending";
+
+const normalStatuses = rawTokens
+  .filter((s) => !isSentinel(s))
+  .map((s) => s.toLowerCase())
+  .filter((s) => allowed.has(s));
+
+dbg("normalStatuses:", normalStatuses);
+dbg("wantsApprovedChangesPending:", wantsApprovedChangesPending);
+
+// apply status filtering
+if (normalStatuses.length) {
+  if (filter.status) {
+    filter.$and = [{ status: filter.status }, { status: { $in: normalStatuses } }];
+    delete filter.status;
+  } else {
+    filter.status = { $in: normalStatuses };
+  }
+}
+
+if (wantsApprovedChangesPending) {
+  const specialClause = { $and: [{ status: "approved" }, { "amendment.isPending": true }] };
+  if (filter.$or) filter.$or.push(specialClause);
+  else filter.$or = [specialClause];
+}
+
+dbg("filter after statuses:", p(filter));
+end();
 
     /* ── Text search ── */
     if (q.trim()) {
