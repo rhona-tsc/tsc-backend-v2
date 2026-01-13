@@ -77,7 +77,10 @@
       <p class="subtitle">
         Booking ID: <strong><%= bookingId %></strong><br/>
         Client: <%= userAddress?.firstName %> <%= userAddress?.lastName %><br/>
-        Act(/s): <%= (actsSummary||[]).map(a => tscName || a.tscName).join(", ") %>
+        Act(/s): <%= (actsSummary || [])
+  .map(a => a?.tscName || a?.actName || a?.name || "—")
+  .join(", ")
+%>
 Total: £<%= bookingTotalDisplay.toFixed(2) %>, Deposit paid: <%= depositDisplay %>      </p>
 
       <hr style="margin:24px 0"/>
