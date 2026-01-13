@@ -90,7 +90,7 @@ const ALLOWED_HOSTS = new Set([
 
 const ALLOW_HEADERS =
   "Content-Type, Authorization, token, Cache-Control, Pragma, X-Requested-With, x-request-id, Useremail, Userid, Userrole, useremail, userid, userrole";
-  
+
 function isAllowedOrigin(origin) {
   if (!origin) return true; // non-browser clients
   try {
@@ -351,7 +351,7 @@ app.use("/api/google", googleRoutes);
 app.use("/api/calendar", calendarWebhook);
 
 // Pre-submission & moderation
-app.use("/api/act-presubmissions", actPreSubmissionRoutes);
+app.use("/api/act-pre-submissions", actPreSubmissionRoutes);
 app.use("/api/moderation", moderationRoutes);
 app.use("/api/agent-dashboard", agentDashboardRoutes);
 
