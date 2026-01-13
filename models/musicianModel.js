@@ -1,5 +1,15 @@
 import mongoose from "mongoose";
 
+const normE164 = (raw = "") => {
+  let v = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+  if (!v) return "";
+  if (v.startsWith("+")) return v;
+  if (/^44\d+$/.test(v)) return `+${v}`;
+  if (/^0\d{10}$/.test(v)) return `+44${v.slice(1)}`;
+  if (/^\d{10,13}$/.test(v)) return v.startsWith("44") ? `+${v}` : `+44${v.replace(/^0?/, "")}`;
+  return v;
+};
+
 const musicianSchema = new mongoose.Schema(
   {
     role: {
@@ -7,6 +17,7 @@ const musicianSchema = new mongoose.Schema(
       enum: ["musician", "agent"],
       default: "musician",
     },
+    musicianId: { type: mongoose.Schema.Types.ObjectId, index: true },
 
     tagLine: { type: String, maxlength: 160 },
     tscApprovedBio: { type: String },
@@ -277,8 +288,25 @@ const musicianSchema = new mongoose.Schema(
     dateRegistered: { type: Date, default: Date.now },
   },
 
-  { minimize: false, minimize: false, strict: true }
+  { minimize: false, strict: true }
 );
+
+musicianSchema.pre("validate", function (next) {
+  if (!this.musicianId) this.musicianId = this._id;
+
+  if (this.phone) {
+    const n = normE164(this.phone);
+    if (!this.phoneNormalized || this.phoneNormalized !== n) this.phoneNormalized = n;
+  }
+
+  if (!this.basicInfo) this.basicInfo = {};
+  if (!this.basicInfo.firstName) this.basicInfo.firstName = this.firstName || "";
+  if (!this.basicInfo.lastName) this.basicInfo.lastName = this.lastName || "";
+  if (!this.basicInfo.phone) this.basicInfo.phone = this.phone || "";
+  if (!this.basicInfo.email) this.basicInfo.email = this.email || "";
+
+  next();
+});
 
 musicianSchema.index({ status: 1 });
 musicianSchema.index({ "instrumentation.instrument": 1 });
