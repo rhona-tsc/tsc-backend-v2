@@ -28,7 +28,7 @@ export const sendActApprovalEmail = async (email, name, code) => {
 
     <p>You can click the link below — the code will be auto-filled:</p>
 
-    <a href="${process.env.FRONTEND_URL}/add-act-2?code=${code}" 
+    <a href="admin.thesupremecollective.co.uk/add-act-2?code=${code}" 
        style="color:#ff6667;font-weight:bold;">
       Open Act Submission Form
     </a>

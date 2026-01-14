@@ -17,8 +17,8 @@ const ActPreSubmissionSchema = new mongoose.Schema({
 
   status: { type: String, default: "pending" }, // pending / approved / rejected
   inviteCode: { type: String, default: null },
-  inviteCodeUsed: { type: Boolean, default: false },
-
+inviteCodeHash: { type: String, index: true, unique: true, sparse: true },
+inviteCodeUsed: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 

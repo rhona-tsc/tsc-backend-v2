@@ -1,20 +1,32 @@
 import mongoose from "mongoose";
 import ActPreSubmission from "../models/ActPreSubmissionModel.js";
-import { generateInviteCode } from "../utils/generateInviteCode.js";
 import { sendActApprovalEmail } from "../utils/sendActApprovalEmail.js";
 import musicianModel from "../models/musicianModel.js";
 
-async function generateUniqueInviteCode() {
-  // simple collision guard
-  for (let i = 0; i < 10; i++) {
-    const code = generateInviteCode();
-    const exists = await ActPreSubmission.exists({ inviteCode: code });
-    if (!exists) return code;
-  }
-  // extremely unlikely fallback
-  return generateInviteCode();
+import crypto from "crypto";
+
+function generateInviteCode() {
+  const raw = crypto.randomBytes(9).toString("base64url").toUpperCase();
+  const clean = raw.replace(/[^A-Z0-9]/g, "").slice(0, 16);
+  return `TSC-${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8, 12)}`;
 }
 
+function hashCode(code) {
+  return crypto.createHash("sha256").update(code).digest("hex");
+}
+
+export async function generateUniqueInviteCode() {
+  for (let i = 0; i < 10; i++) {
+    const code = generateInviteCode();
+    const inviteCodeHash = hashCode(code);
+
+    const exists = await ActPreSubmission.exists({ inviteCodeHash });
+    if (!exists) return { code, inviteCodeHash };
+  }
+
+  const code = generateInviteCode();
+  return { code, inviteCodeHash: hashCode(code) };
+}
 
 export const submitActPreSubmission = async (req, res) => {
   try {
@@ -144,13 +156,14 @@ export const approveActPreSubmission = async (req, res) => {
     if (!sub) return res.status(404).json({ success: false, message: "Not found" });
 
     // ✅ If already approved and code exists, don't regenerate (idempotent)
-    if (sub.status === "approved" && sub.inviteCode) {
-      // still try send email if missing / not sent etc (optional)
-      if (sub.musicianEmail) {
-        await sendActApprovalEmail(sub.musicianEmail, sub.musicianName, sub.actName, sub.inviteCode);
-      }
-      return res.json({ success: true, sub });
-    }
+if (sub.status === "approved" && sub.inviteCodeHash) {
+  // You *cannot* re-email the code because you don't store plaintext.
+  // So either:
+  // A) return success and show "code already generated" in UI
+  // B) generate a new code and overwrite hash (recommended if you want re-send)
+  return res.json({ success: true, sub });
+}      // still try send email if missing / not sent etc (optional)
+     
 
     // ✅ Backfill musician email/name if missing
     let musicianEmail = String(sub.musicianEmail || "").trim();
@@ -192,14 +205,29 @@ export const approveActPreSubmission = async (req, res) => {
       });
     }
 
-    const code = await generateUniqueInviteCode();
+        const { code, inviteCodeHash } = await generateUniqueInviteCode();
 
-    // ✅ Update submission
+    // ✅ Update submission (store hash only)
     sub.status = "approved";
-    sub.inviteCode = code;
+    sub.inviteCodeHash = inviteCodeHash;
+    sub.inviteCodeUsed = false;
+
+    // keep your backfilled info
     sub.musicianEmail = musicianEmail || sub.musicianEmail;
     sub.musicianName = musicianName || sub.musicianName;
+
+    // (optional) for legacy compatibility you can blank inviteCode
+    // sub.inviteCode = undefined;
+
     await sub.save();
+
+    // ✅ Send email (plaintext code ONLY goes to user)
+    await sendActApprovalEmail(
+      recipientEmail,
+      musicianName || "there",
+      sub.actName || "your act",
+      code
+    );
 
     // ✅ Send email (invite code)
     await sendActApprovalEmail(
@@ -238,31 +266,41 @@ export const rejectActPreSubmission = async (req, res) => {
 export const validateActInviteCode = async (req, res) => {
   try {
     const { code, musicianId } = req.body;
-
-    const sub = await ActPreSubmission.findOne({
-      inviteCode: code,
-      musicianId,
-      status: "approved",
-      inviteCodeUsed: false
-    });
-
-    if (!sub) {
+    const trimmed = String(code || "").trim().toUpperCase();
+    if (!trimmed || !musicianId) {
       return res.json({ success: false, valid: false });
     }
+
+    const inviteCodeHash = hashCode(trimmed);
+
+    const sub = await ActPreSubmission.findOne({
+      inviteCodeHash,
+      musicianId,
+      status: "approved",
+      inviteCodeUsed: false,
+    }).lean();
+
+    if (!sub) return res.json({ success: false, valid: false });
 
     return res.json({ success: true, valid: true, actName: sub.actName });
   } catch (err) {
     console.error("validateActInviteCode:", err);
-    res.status(500).json({ success: false });
+    return res.status(500).json({ success: false, valid: false });
   }
 };
 
 export const markInviteCodeUsed = async (req, res) => {
   try {
     const { code, musicianId } = req.body;
+    const trimmed = String(code || "").trim().toUpperCase();
+    if (!trimmed || !musicianId) {
+      return res.status(400).json({ success: false, message: "Missing code or musicianId" });
+    }
+
+    const inviteCodeHash = hashCode(trimmed);
 
     const sub = await ActPreSubmission.findOneAndUpdate(
-      { inviteCode: code, musicianId },
+      { inviteCodeHash, musicianId, inviteCodeUsed: false },
       { inviteCodeUsed: true },
       { new: true }
     );
@@ -270,7 +308,7 @@ export const markInviteCodeUsed = async (req, res) => {
     return res.json({ success: true, sub });
   } catch (err) {
     console.error("markInviteCodeUsed:", err);
-    res.status(500).json({ success: false });
+    return res.status(500).json({ success: false });
   }
 };
 
