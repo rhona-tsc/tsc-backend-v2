@@ -2,6 +2,19 @@ import mongoose from "mongoose";
 import ActPreSubmission from "../models/ActPreSubmissionModel.js";
 import { generateInviteCode } from "../utils/generateInviteCode.js";
 import { sendActApprovalEmail } from "../utils/sendActApprovalEmail.js";
+import musicianModel from "../models/musicianModel.js";
+
+async function generateUniqueInviteCode() {
+  // simple collision guard
+  for (let i = 0; i < 10; i++) {
+    const code = generateInviteCode();
+    const exists = await ActPreSubmission.exists({ inviteCode: code });
+    if (!exists) return code;
+  }
+  // extremely unlikely fallback
+  return generateInviteCode();
+}
+
 
 export const submitActPreSubmission = async (req, res) => {
   try {
@@ -106,26 +119,83 @@ export const approveActPreSubmission = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const code = generateInviteCode();
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid id" });
+    }
 
-    const sub = await ActPreSubmission.findByIdAndUpdate(
-      id,
-      {
-        status: "approved",
-        inviteCode: code
-      },
-      { new: true }
-    );
-
+    const sub = await ActPreSubmission.findById(id);
     if (!sub) return res.status(404).json({ success: false, message: "Not found" });
 
-    // send email to musician
-    await sendActApprovalEmail(sub.musicianEmail, sub.musicianName, sub.actName, code);
+    // ✅ If already approved and code exists, don't regenerate (idempotent)
+    if (sub.status === "approved" && sub.inviteCode) {
+      // still try send email if missing / not sent etc (optional)
+      if (sub.musicianEmail) {
+        await sendActApprovalEmail(sub.musicianEmail, sub.musicianName, sub.actName, sub.inviteCode);
+      }
+      return res.json({ success: true, sub });
+    }
+
+    // ✅ Backfill musician email/name if missing
+    let musicianEmail = String(sub.musicianEmail || "").trim();
+    let musicianName = String(sub.musicianName || "").trim();
+
+    if (!musicianEmail || !musicianName) {
+      const m = await musicianModel
+        .findById(sub.musicianId)
+        .select("basicInfo firstName lastName email")
+        .lean();
+
+      const emailFromMusician =
+        String(m?.basicInfo?.email || m?.email || "").trim();
+
+      const nameFromMusician =
+        String(
+          m?.basicInfo?.firstName || m?.firstName || ""
+        ).trim();
+
+      // last name optional
+      const lastFromMusician =
+        String(
+          m?.basicInfo?.lastName || m?.lastName || ""
+        ).trim();
+
+      if (!musicianEmail && emailFromMusician) musicianEmail = emailFromMusician;
+      if (!musicianName) musicianName = [nameFromMusician, lastFromMusician].filter(Boolean).join(" ").trim();
+    }
+
+    // ✅ Pick best recipient: bandLeaderEmail > musicianEmail
+    const recipientEmail =
+      String(sub.bandLeaderEmail || "").trim() || musicianEmail;
+
+    if (!recipientEmail) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Cannot approve: no email found on submission and could not resolve from musicianId.",
+      });
+    }
+
+    const code = await generateUniqueInviteCode();
+
+    // ✅ Update submission
+    sub.status = "approved";
+    sub.inviteCode = code;
+    sub.musicianEmail = musicianEmail || sub.musicianEmail;
+    sub.musicianName = musicianName || sub.musicianName;
+    await sub.save();
+
+    // ✅ Send email (invite code)
+    await sendActApprovalEmail(
+      recipientEmail,
+      musicianName || "there",
+      sub.actName || "your act",
+      code
+    );
 
     return res.json({ success: true, sub });
   } catch (err) {
     console.error("approveActPreSubmission:", err);
-    res.status(500).json({ success: false });
+    return res.status(500).json({ success: false, message: err?.message || "Server error" });
   }
 };
 
