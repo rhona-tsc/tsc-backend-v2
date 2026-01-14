@@ -151,6 +151,7 @@ export const getOrCreateBalanceLink = async (req, res) => {
       }],
       success_url: `${origin}/event-sheet/${ref}?balancePaid=1&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url:  `${origin}/event-sheet/${ref}?balanceCanceled=1`,
+      allow_promotion_codes: true,
       metadata: { category: "balance", bookingId: ref },
     });
 

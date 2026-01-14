@@ -937,6 +937,7 @@ const chargeGross = finalMode === "full" ? grossTotal : depositGross;
       payment_method_types: ["card"],
       success_url,
       cancel_url,
+      allow_promotion_codes: true,
       line_items: [
         {
           quantity: 1,

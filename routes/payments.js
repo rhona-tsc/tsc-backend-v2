@@ -62,6 +62,7 @@ router.post("/parking-checkout", async (req, res) => {
       ],
   success_url: `${origin}/event-sheet/${bookingId}?parkingPaid=1&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/event-sheet/${bookingId}?parkingCanceled=1`,
+      allow_promotion_codes: true,
       metadata: { ...metadata, bookingId: String(bookingId || "") },
     });
 
