@@ -77,10 +77,27 @@ export const submitActPreSubmission = async (req, res) => {
       });
     }
 
+    // If name/email missing, look them up from DB
+let finalMusicianName = musicianName;
+let finalMusicianEmail = musicianEmail;
+
+if (!finalMusicianName || !finalMusicianEmail) {
+  const u = await musicianModel
+    .findById(musicianId)
+    .select("firstName lastName email");
+
+  if (u) {
+    finalMusicianEmail = finalMusicianEmail || u.email || "";
+    finalMusicianName =
+      finalMusicianName ||
+      [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
+  }
+}
+
     const submission = await ActPreSubmission.create({
-      musicianId,
-      musicianName,
-      musicianEmail,
+       musicianId,
+  musicianName: finalMusicianName || "",
+  musicianEmail: finalMusicianEmail || "",
       actName,
       videoLink1,
       videoLink2,

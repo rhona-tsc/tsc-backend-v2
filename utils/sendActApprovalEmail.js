@@ -39,7 +39,7 @@ export const sendActApprovalEmail = async (email, name, code) => {
   `;
 
   await transporter.sendMail({
-    from: `"The Supreme Collective" <${process.env.EMAIL_USER}>`,
+    from: `"Subissions" <submissions@thesupremecollective.co.uk>`,
     to: email,
     subject: "You're Approved 🎉",
     html
@@ -63,7 +63,7 @@ export const sendActRejectionEmail = async (email, name) => {
   `;
 
   await transporter.sendMail({
-    from: `"The Supreme Collective" <${process.env.EMAIL_USER}>`,
+    from: `"Subissions" <submissions@thesupremecollective.co.uk>`,
     to: email,
     subject: "Your Act Submission",
     html
