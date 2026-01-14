@@ -15,13 +15,12 @@ export const sendActApprovalEmail = async (email, name, code) => {
   const html = `
     <p>Hi ${name},</p>
 
-    <p>Thanks so much for submitting your act to The Supreme Collective’s Musicians Dashboard — 
+    <p>Thanks so much for submitting your act to The Supreme Collective — 
     we really appreciate your time.</p>
 
-    <p>We’re delighted to let you know that your act has been 
-    <strong>approved as a potential fit for TSC</strong>! 🎉</p>
+    <p>We’re delighted to let you know that <strong>we'd love to have you join</strong> us on TSC, having reviewed your pre-submission. 🎉</p>
 
-    <p>We can’t wait to get your act listed. To get started, use your invitation code:</p>
+    <p>We can’t wait to get your act listed. To get started, use your invitation code to submit your act in full:</p>
 
     <h2 style="background:#000;color:#fff;padding:10px;display:inline-block;border-radius:6px;">
       ${code}
@@ -42,7 +41,7 @@ export const sendActApprovalEmail = async (email, name, code) => {
   await transporter.sendMail({
     from: `"The Supreme Collective" <${process.env.EMAIL_USER}>`,
     to: email,
-    subject: "You're invited to submit your act to TSC 🎤",
+    subject: "You're Approved 🎉",
     html
   });
 };
@@ -66,7 +65,7 @@ export const sendActRejectionEmail = async (email, name) => {
   await transporter.sendMail({
     from: `"The Supreme Collective" <${process.env.EMAIL_USER}>`,
     to: email,
-    subject: "Your TSC Act Submission",
+    subject: "Your Act Submission",
     html
   });
 };
