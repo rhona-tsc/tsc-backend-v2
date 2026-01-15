@@ -460,6 +460,9 @@ router.get("/act-v2/my-drafts", verifyToken, async (req, res) => {
   }
 });
 
+router.post("/update-status", updateActStatus);
+
+
 router.get("/dashboard/:id", verifyToken, async (req, res) => {
   try {
     const musicianId = req.params.id;
