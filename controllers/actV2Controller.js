@@ -16,6 +16,8 @@ const isMeaningful = (v) => {
   return true;
 };
 
+
+
 const hasDeputiesAnywhere = (obj) => {
   try {
     const lineups = obj?.lineups;
@@ -498,7 +500,7 @@ export const getAllActsV2 = async (req, res) => {
    /* ── Status & special status parsing ── */
 group("🎛️ Status & special status parsing");
 
-// ✅ support repeated ?status=... params (array) OR CSV string
+/* ── Status & special status parsing ── */
 const statusValues = Array.isArray(req.query.status)
   ? req.query.status
   : String(req.query.status || "")
@@ -509,10 +511,6 @@ const statusValues = Array.isArray(req.query.status)
 const rawTokens = statusValues.map((s) => String(s).trim()).filter(Boolean);
 const tokensLC = rawTokens.map((s) => s.toLowerCase());
 
-dbg("rawTokens:", rawTokens);
-dbg("tokensLC:", tokensLC);
-
-// ✅ allowed “real” status values (must match DB values)
 const allowed = new Set([
   "approved",
   "pending",
@@ -520,32 +518,27 @@ const allowed = new Set([
   "trashed",
   "rejected",
   "live_changes_pending",
-  // If you *literally* store this exact string in DB, add it here in the SAME CASE:
+  // include literal DB value IF you really store it like this:
   "Approved, changes pending",
 ]);
 
-// treat these as “sentinel” values (not real status field values)
 const isSentinel = (s) =>
   /^approved(_|\s*\(|,\s*)changes\s*pending\)?$/i.test(s) ||
   s.toLowerCase() === "changes pending";
 
+// IMPORTANT: keep exact case for statuses that are mixed-case in DB
 let normalStatuses = rawTokens
   .filter((s) => !isSentinel(s))
-  // IMPORTANT: don't force lowercase unless your DB stores lowercase
   .map((s) => s.trim())
   .filter((s) => allowed.has(s));
 
-// Special meaning: "approved changes pending" should also match your amendment flag
 const wantsApprovedChangesPending =
   tokensLC.includes("approved_changes_pending") ||
   tokensLC.includes("approved (changes pending)") ||
   tokensLC.includes("approved, changes pending") ||
   (tokensLC.includes("approved") && tokensLC.includes("changes pending"));
 
-dbg("normalStatuses:", normalStatuses);
-dbg("wantsApprovedChangesPending:", wantsApprovedChangesPending);
-
-// apply status filtering
+// Apply status filter
 if (normalStatuses.length) {
   if (filter.status) {
     filter.$and = [{ status: filter.status }, { status: { $in: normalStatuses } }];
@@ -555,6 +548,7 @@ if (normalStatuses.length) {
   }
 }
 
+// Optional special meaning (only if you actually use amendment.isPending)
 if (wantsApprovedChangesPending) {
   const specialClause = { $and: [{ status: "approved" }, { "amendment.isPending": true }] };
   if (filter.$or) filter.$or.push(specialClause);
