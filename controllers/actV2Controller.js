@@ -512,18 +512,7 @@ const tokensLC = rawTokens.map((s) => s.toLowerCase());
 dbg("rawTokens:", rawTokens);
 dbg("tokensLC:", tokensLC);
 
-const wantsApprovedChangesPending =
-  tokensLC.includes("approved_changes_pending") ||
-  tokensLC.includes("approved (changes pending)") ||
-  tokensLC.includes("approved, changes pending") ||
-  (tokensLC.includes("approved") && tokensLC.includes("changes pending"));
-
-// 👇 if they used the literal status in DB, include it too
-if (tokensLC.includes("approved, changes pending")) {
-  normalStatuses.push("approved, changes pending"); // ← NOTE: this is a literal string
-}
-
-// ✅ include your real statuses here
+// ✅ allowed “real” status values (must match DB values)
 const allowed = new Set([
   "approved",
   "pending",
@@ -531,7 +520,8 @@ const allowed = new Set([
   "trashed",
   "rejected",
   "live_changes_pending",
-  "approved, changes pending", // ✅ add this if it exists in DB
+  // If you *literally* store this exact string in DB, add it here in the SAME CASE:
+  "Approved, changes pending",
 ]);
 
 // treat these as “sentinel” values (not real status field values)
@@ -539,10 +529,18 @@ const isSentinel = (s) =>
   /^approved(_|\s*\(|,\s*)changes\s*pending\)?$/i.test(s) ||
   s.toLowerCase() === "changes pending";
 
-const normalStatuses = rawTokens
+let normalStatuses = rawTokens
   .filter((s) => !isSentinel(s))
-  .map((s) => s.toLowerCase())
+  // IMPORTANT: don't force lowercase unless your DB stores lowercase
+  .map((s) => s.trim())
   .filter((s) => allowed.has(s));
+
+// Special meaning: "approved changes pending" should also match your amendment flag
+const wantsApprovedChangesPending =
+  tokensLC.includes("approved_changes_pending") ||
+  tokensLC.includes("approved (changes pending)") ||
+  tokensLC.includes("approved, changes pending") ||
+  (tokensLC.includes("approved") && tokensLC.includes("changes pending"));
 
 dbg("normalStatuses:", normalStatuses);
 dbg("wantsApprovedChangesPending:", wantsApprovedChangesPending);
