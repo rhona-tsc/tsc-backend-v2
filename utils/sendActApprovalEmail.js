@@ -22,11 +22,7 @@ export const sendActApprovalEmail = async (email, name, code) => {
 
     <p>We can’t wait to get your act listed. To get started, use your invitation code to submit your act in full:</p>
 
-    <h2 style="background:#000;color:#fff;padding:10px;display:inline-block;border-radius:6px;">
-      ${code}
-    </h2>
-
-    <p>You can click the link below — the code will be auto-filled:</p>
+    <p>You can click the link below to open your act submission form:</p>
 
     <a href="admin.thesupremecollective.co.uk/add-act-2?code=${code}" 
        style="color:#ff6667;font-weight:bold;">
