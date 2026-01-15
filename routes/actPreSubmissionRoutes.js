@@ -19,7 +19,7 @@ router.post("/submit", submitActPreSubmission);
 
 // agent view
 router.get("/pending", requireAdminDashboard, getPendingActPreSubmissions);
-router.get("/pending-count", requireAdminDashboard, getActPreSubmissionCount);
+router.get("/pending-count", getActPreSubmissionCount);
 router.get("/:id", requireAdminDashboard, getOnePreSubmission);
 
 // approval flow (✅ protect)
