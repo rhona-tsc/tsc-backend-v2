@@ -518,6 +518,11 @@ const wantsApprovedChangesPending =
   tokensLC.includes("approved, changes pending") ||
   (tokensLC.includes("approved") && tokensLC.includes("changes pending"));
 
+// 👇 if they used the literal status in DB, include it too
+if (tokensLC.includes("approved, changes pending")) {
+  normalStatuses.push("approved, changes pending"); // ← NOTE: this is a literal string
+}
+
 // ✅ include your real statuses here
 const allowed = new Set([
   "approved",
@@ -525,7 +530,8 @@ const allowed = new Set([
   "draft",
   "trashed",
   "rejected",
-  "live_changes_pending", // ✅ you’re using this in the FE
+  "live_changes_pending",
+  "approved, changes pending", // ✅ add this if it exists in DB
 ]);
 
 // treat these as “sentinel” values (not real status field values)
