@@ -369,10 +369,18 @@ musicianProfileImageUpload: { type: String },
         ],
       },
     ],
-    availabilityByDate: { type: [ActAvailabilitySchema], default: [] },
+  availabilityByDate: { type: [ActAvailabilitySchema], default: [] },
+
+// ✅ stores idempotency + email send history etc (not the badge itself)
+availabilityBadgesMeta: {
+  type: mongoose.Schema.Types.Mixed,
+  default: {},
+  select: false,
+},
+
 availabilityBadges: {
   type: Map,
-  of: availabilityBadgesSchema, // same sub-schema as current one
+  of: availabilityBadgesSchema,
   default: {},
 },
   },
