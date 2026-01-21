@@ -76,7 +76,15 @@
     <div class="contract-section" aria-label="Booking contract terms">
       <p class="subtitle">
         Booking ID: <strong><%= bookingId %></strong><br/>
+        Contract Issued On: <strong><%= new Date().toLocaleDateString("en-GB") %></strong>
         Client: <%= userAddress?.firstName %> <%= userAddress?.lastName %><br/>
+        Venue: <%= venue || "TBC" %><br/>
+<% if (eventDate) { %>
+  Event Date: <%= new Date(eventDate).toLocaleDateString("en-GB") %><br/>
+<% } %>
+<% if (eventType) { %>
+  Event Type: <%= eventType %><br/>
+<% } %>
         Act(/s): <%= (actsSummary || [])
   .map(a => a?.tscName || a?.actName || a?.name || "—")
   .join(", ")
@@ -121,22 +129,36 @@ Total: £<%= bookingTotalDisplay.toFixed(2) %>, Deposit paid: <%= depositDisplay
     ? it.bandMembers.filter(m => m && m.isEssential)
     : [];
 
-  const normaliseInst = (val) => {
-    if (!val) return '';
-    let t = String(val).trim();
-    // Standardise common instruments while preserving gendered vocal labels
-    if (/bass\s*guitar/i.test(t)) return 'Bass';
-    if (/\bkeys?|keyboard/i.test(t)) return 'Keys';
-    if (/guitars?/i.test(t) && !/bass/i.test(t)) return 'Guitar';
-    if (/drums?/i.test(t)) return 'Drums';
-    // Normalise generic vocals/singer to "Vocal" if no lead specified
-    if (/(^|\s)(singer|vocals?)($|\s)/i.test(t) && !/lead/i.test(t)) {
-      t = t.replace(/vocals?/i, 'Vocal').replace(/singer/i, 'Vocal');
-    }
-    // Title case
-    t = t.replace(/\b\w/g, c => c.toUpperCase());
-    return t;
-  };
+ const normaliseInst = (val) => {
+  if (!val) return "";
+  let t = String(val).trim();
+
+  // ✅ Preserve vocalist-guitarist style roles
+  const hasVocal = /vocal|singer/i.test(t);
+  const hasGuitar = /guitar/i.test(t);
+
+  if (hasVocal && hasGuitar) {
+    // keep acoustic/electric nuance if present
+    if (/acoustic/i.test(t)) return "Vocalist-Acoustic Guitarist";
+    if (/electric/i.test(t)) return "Vocalist-Electric Guitarist";
+    return "Vocalist-Guitarist";
+  }
+
+  // Standardise common instruments
+  if (/bass\s*guitar/i.test(t)) return "Bass";
+  if (/\bkeys?|keyboard/i.test(t)) return "Keys";
+  if (/guitars?/i.test(t) && !/bass/i.test(t)) return "Guitar";
+  if (/drums?/i.test(t)) return "Drums";
+
+  // Normalise generic vocals (only when not already "lead ...")
+  if (/(^|\s)(singer|vocals?)($|\s)/i.test(t) && !/lead/i.test(t)) {
+    return "Vocal";
+  }
+
+  // Title case fallback
+  t = t.replace(/\b\w/g, (c) => c.toUpperCase());
+  return t;
+};
 
   const counts = {};
   essential.forEach(m => {
@@ -172,8 +194,7 @@ Total: £<%= bookingTotalDisplay.toFixed(2) %>, Deposit paid: <%= depositDisplay
   };
   const rolesList = uniqueRoles.length ? ` (including ${formatRoles(uniqueRoles)} services)` : '';
 
-  const description = `${pieceLabel ? pieceLabel + '; ' : ''}${instrumentList}${rolesList}`;
-%>
+const description = `${pieceLabel ? pieceLabel + ': ' : ''}${instrumentList}${rolesList}`;%>
 <div style="margin-top:4px; font-size:14px; color:#111;">
   <%= description %>
 </div>
@@ -286,7 +307,7 @@ Total: £<%= bookingTotalDisplay.toFixed(2) %>, Deposit paid: <%= depositDisplay
         (<%= (actsSummary || [])
   .map(a => a?.tscName || a?.actName || a?.name || "—")
   .join(", ")
-%>, <%= new Date().toLocaleDateString('en-GB') %>)%>, <%= new Date().toLocaleDateString('en-GB') %>) and agree to be bound by The Supreme Collective’s Terms and Conditions of booking.
+%>, <%= new Date().toLocaleDateString('en-GB') %> and agree to be bound by The Supreme Collective’s Terms and Conditions of booking.
       </p>
 
       <p><strong>Agent Authorisation</strong></p>

@@ -103,15 +103,29 @@ export async function sendContractEmail({ booking, pdfBuffer }) {
   const bodyHtml = `
     <p>Hi ${booking?.userAddress?.firstName || ""},</p>
 
-    <p>Thank you for booking <strong>${tscName}</strong>! They’re very much looking forward to performing for you and your guests.</p>
+    <p>Thank you for booking <strong>${tscName}</strong>! They’re very much looking forward to performing for you and your guests, and we’re excited to make sure we’ve got all the fine details so ${tscName} can put on a stellar show for you.</p>
 
-    <p>When you’re ready, please click through to your <a href="${eventSheetUrl}"><strong>Event Sheet</strong></a> and kindly fill in the blanks — it will auto-save.</p>
+    <p>When you’re ready, please click through to your <a href="${eventSheetUrl}"><strong>Event Sheet</strong></a> and kindly fill in the blanks — you can check things off as you go, and it will auto-save.</p>
+
+    <p>Also, please feel free to email or WhatsApp us if you have any urgent questions or requests. Or, you can schedule a call directly in our calendar:
+      <a href="https://calendly.com/thesupremecollective/call">https://calendly.com/thesupremecollective/call</a>
+    </p>
+
+    <p>The invoice for the balance, which is due 2 weeks before the performance, can be found on the Event Sheet.</p>
 
     <p><strong>Key dates for your diary</strong>:</p>
     <ul>
-      <li>Song suggestions / first dance due by <strong>${fmt(fourWeeksBefore)}</strong></li>
-      <li>Completed Event Sheet and balance due by <strong>${fmt(twoWeeksBefore)}</strong></li>
+      <li>Song suggestions and Off-repertoire request due by <strong>${fmt(
+        fourWeeksBefore
+      )}</strong></li>
+      <li>Completed Event Sheet (including playlists) and balance due by <strong>${fmt(
+        twoWeeksBefore
+      )}</strong></li>
     </ul>
+
+    <p>You’ll also receive a few emails from us in the run-up to the performance date as reminders to submit information on the Event Sheet, just to keep everything on track for you and ${tscName}.</p>
+
+    <p>Hopefully everything makes sense — but any questions, don’t hesitate!</p>
 
     <p>Warmest wishes,<br/><strong>The Supreme Collective</strong> 💫</p>
   `;

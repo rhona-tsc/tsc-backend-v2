@@ -1328,6 +1328,10 @@ const completeBooking = async (req, res) => {
       html = await ejs.renderFile(templatePath, {
         bookingId: order.bookingId,
         userAddress: order.userAddress,
+        venueAddress: order.venueAddress,
+        eventType: order.eventType,
+        date: order.date,
+        performanceTimes: order.performanceTimes,
         actsSummary: order.actsSummary,
         total: order.totals?.fullAmount ?? order.amount,
         deposit: order.totals?.depositAmount ?? order.amount,
@@ -1422,7 +1426,7 @@ try {
   twoWeeksBefore.setDate(twoWeeksBefore.getDate() - 14);
 
   const eventSheetUrl = `${
-    process.env.FRONTEND_URL || "http://localhost:5174"
+    process.env.FRONTEND_URL || "http://thesupremecollective.co.uk"
   }/event-sheet/${order.bookingId}`;
 
   // Your main body (unchanged), with signature appended
@@ -2541,6 +2545,11 @@ export const completeBookingV2 = async (req, res) => {
         bookingId: booking.bookingId,
         userAddress: booking.userAddress,
         actsSummary: booking.actsSummary,
+        eventDateISO: booking.eventDateISO,
+        venueAddress: booking.venueAddress || booking.venue || "",
+        performanceTimes: booking.performanceTimes || {},
+        notes: booking.notes || "",
+        createdAt: booking.createdAt,
 
         // ✅ pass totals so EJS can check chargeMode if you want
         totals,

@@ -20,7 +20,7 @@ export const sendActApprovalEmail = async (email, name, code) => {
 
     <p>We’re delighted to let you know that <strong>we'd love to have you join</strong> us on TSC, having reviewed your pre-submission. 🎉</p>
 
-    <p>We can’t wait to get your act listed. To get started, use your invitation code to submit your act in full:</p>
+    <p>We can’t wait to get your act listed.</p>
 
     <p>You can click the link below to open your act submission form:</p>
 

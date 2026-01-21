@@ -3615,6 +3615,73 @@ export const twilioInbound = async (req, res) => {
         if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
           console.log("🚫 UNAVAILABLE reply received via WhatsApp");
 
+// 🔎 Only send cancellation email if they previously confirmed YES for THIS enquiry (date + location)
+const addressKey = (s = "") =>
+  String(s || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+const thisAddr =
+  addressKey(updated.formattedAddress || "") ||
+  addressKey(act?.formattedAddress || "") ||
+  "tbc";
+
+// identify the musician consistently
+const identity = {
+  actId: updated.actId?._id || updated.actId,
+  dateISO: updated.dateISO,
+  v2: true,
+  $or: [
+    ...(updated?.musicianId ? [{ musicianId: updated.musicianId }] : []),
+    ...(sender ? [{ phone: sender }] : []),
+    ...(emailForInvite ? [{ musicianEmail: String(emailForInvite).toLowerCase() }] : []),
+  ],
+};
+
+// find a prior "confirmed" row for SAME location
+const previouslyConfirmedRow = await AvailabilityModel.findOne({
+  ...identity,
+  // same location where possible (exact match on formattedAddress; we also do a key compare below)
+  ...(updated.formattedAddress ? { formattedAddress: updated.formattedAddress } : {}),
+  $or: [
+    { reply: "yes" },
+    { calendarEventId: { $exists: true, $ne: null } },
+    { calendarInviteSentAt: { $exists: true, $ne: null } },
+    { calendarStatus: { $in: ["needsAction", "accepted", "tentative"] } },
+  ],
+})
+  .sort({ repliedAt: -1, updatedAt: -1, createdAt: -1 })
+  .lean();
+
+// if formattedAddress wasn’t present / exact match didn’t hit, do a looser match:
+let shouldSendCancellationEmail = false;
+let cancelEventId = null;
+
+if (previouslyConfirmedRow) {
+  // if we *can* compare address keys, enforce it
+  const prevAddr = addressKey(previouslyConfirmedRow.formattedAddress || "");
+  const addrMatches = !prevAddr || prevAddr === thisAddr;
+
+  if (addrMatches) {
+    shouldSendCancellationEmail = true;
+    cancelEventId = previouslyConfirmedRow.calendarEventId || null;
+  }
+}
+
+// If THIS row itself already has a calendar event id, that's enough to justify cancel+email
+if (!shouldSendCancellationEmail && updated?.calendarEventId) {
+  shouldSendCancellationEmail = true;
+  cancelEventId = updated.calendarEventId;
+}
+
+console.log("📧 [twilioInbound] Cancellation email gate", {
+  shouldSendCancellationEmail,
+  thisAddr,
+  matchedRowId: previouslyConfirmedRow?._id ? String(previouslyConfirmedRow._id) : null,
+  cancelEventId,
+});
+
           await AvailabilityModel.updateMany(
             {
               musicianEmail: (emailForInvite || "").toLowerCase(),
@@ -3633,17 +3700,21 @@ export const twilioInbound = async (req, res) => {
             `🚫 Marked all enquiries for ${emailForInvite} on ${updated.dateISO} as unavailable`
           );
 
-          // 🗓️ Cancel calendar event if exists
-          try {
-            const { cancelCalendarInvite } = await import("./googleController.js");
-            await cancelCalendarInvite({
-              eventId: updated.calendarEventId,
-              dateISO: updated.dateISO,
-              email: emailForInvite,
-            });
-          } catch (err) {
-            console.error("❌ Failed to cancel shared event:", err.message);
-          }
+       
+// 🗓️ Cancel calendar event (ONLY if they previously confirmed / had invite)
+if (shouldSendCancellationEmail && cancelEventId) {
+  try {
+    const { cancelCalendarInvite } = await import("./googleController.js");
+    await cancelCalendarInvite({
+      eventId: cancelEventId,
+      dateISO: updated.dateISO,
+      email: emailForInvite,
+    });
+    console.log("🗓️ Cancelled calendar invite", { cancelEventId, emailForInvite });
+  } catch (err) {
+    console.error("❌ Failed to cancel shared event:", err.message);
+  }
+}
 
           // 🔔 Rebuild badge immediately
           let rebuilt = null;
@@ -3714,40 +3785,41 @@ export const twilioInbound = async (req, res) => {
   slotIndex,
 });
 
-          // 📨 Courtesy cancellation email
-          try {
-            const { sendEmail } = await import("../utils/sendEmail.js");
-            const subject = `${act?.tscName || act?.name}: Diary Invite Cancelled for ${new Date(
-              dateISO
-            ).toLocaleDateString("en-GB")}`;
-            const html = `
-              <p><strong>${updated?.musicianName || musician?.firstName || "Lead Musician"}</strong>,</p>
-              <p>Your diary invite for <b>${act?.tscName || act?.name}</b> on <b>${new Date(
-                dateISO
-              ).toLocaleDateString("en-GB")}</b> has been cancelled.</p>
-              <p>If your availability changes, reply to this email to re-confirm.</p>
-              <br/>
-              <p>– The Supreme Collective Team</p>
-            `;
+        // 📨 Courtesy cancellation email (ONLY if they previously confirmed / had invite)
+if (shouldSendCancellationEmail) {
+  try {
+    const { sendEmail } = await import("../utils/sendEmail.js");
 
-            const leadEmail = (emailForInvite || "").trim();
-            const recipients = [leadEmail].filter((e) => e && e.includes("@"));
+    const subject = `${act?.tscName || act?.name}: Diary Invite Cancelled for ${new Date(dateISO).toLocaleDateString("en-GB")}`;
+    const html = `
+      <p><strong>${updated?.musicianName || musician?.firstName || "Musician"}</strong>,</p>
+      <p>Thanks for letting us know — we’ve updated your availability.</p>
+      <p>Your diary invite for <b>${act?.tscName || act?.name}</b> on <b>${new Date(dateISO).toLocaleDateString("en-GB")}</b> has been cancelled.</p>
+      <p>If your availability changes, just reply to the WhatsApp message to re-confirm.</p>
+      <br/>
+      <p>– The Supreme Collective Team</p>
+    `;
 
-            if (recipients.length > 0) {
-              console.log("📧 Preparing to send cancellation email:", recipients);
-              await sendEmail({
-                to: recipients,
-                bcc: ["hello@thesupremecollective.co.uk"],
-                subject,
-                html,
-              });
-              console.log(`✅ Cancellation email sent successfully to: ${recipients.join(", ")}`);
-            } else {
-              console.warn("⚠️ Skipping cancellation email — no valid recipients found.");
-            }
-          } catch (emailErr) {
-            console.error("❌ Failed to send cancellation email:", emailErr.message);
-          }
+    const leadEmail = (emailForInvite || "").trim();
+    const recipients = [leadEmail].filter((e) => e && e.includes("@"));
+
+    if (recipients.length) {
+      await sendEmail({
+        to: recipients,
+        bcc: ["hello@thesupremecollective.co.uk"],
+        subject,
+        html,
+      });
+      console.log("✅ Cancellation email sent", { to: recipients });
+    } else {
+      console.warn("⚠️ Skipping cancellation email — no valid recipient");
+    }
+  } catch (emailErr) {
+    console.error("❌ Failed to send cancellation email:", emailErr.message);
+  }
+} else {
+  console.log("📭 Skipping cancellation email (no prior YES/invite for this enquiry).");
+}
 
           // 🔒 Lock meta so lead badge stays cleared if appropriate
           const update = {
@@ -4855,6 +4927,30 @@ try {
     return !!(primaryDeputyCover || yesDeputyWithPhoto);
   };
 
+  let vocalistPhotoUrl = actDoc.photo || "";
+          let deputyProfileUrl = depInfo.profileUrl || "";
+          let deputyVideos = [];
+          try {
+            let deputyMusician = null;
+            if (depInfo?.musicianId) {
+              deputyMusician = await Musician.findById(depInfo.musicianId)
+                .select("firstName lastName profilePicture photoUrl tscProfileUrl functionBandVideoLinks originalBandVideoLinks")
+                .lean();
+            }
+            if (deputyMusician) {
+              if (!deputyPhotoUrl)
+                deputyPhotoUrl = deputyMusician.profilePicture || deputyMusician.photoUrl || "";
+              if (!deputyProfileUrl)
+                deputyProfileUrl = deputyMusician.tscProfileUrl || `${SITE}musician/${deputyMusician._id}`;
+
+              const fnVids = (deputyMusician.functionBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+              const origVids = (deputyMusician.originalBandVideoLinks || []).filter(v => v?.url).map(v => v.url);
+              deputyVideos = [...new Set([...fnVids, ...origVids])];
+            }
+          } catch (e) {
+            console.warn("⚠️ Deputy enrichment failed:", e?.message || e);
+          }
+
   for (const slot of slotsArr) {
     const slotIdx = typeof slot?.slotIndex === "number" ? slot.slotIndex : null;
     if (slotIdx === null) continue;
@@ -4885,6 +4981,22 @@ try {
                   We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with
                   <strong>${vocalistFirst}</strong> on lead vocals, and they’d love to perform for you and your guests.
                 </p>
+
+                This is <strong>${vocalistFirst}</strong> - you can learn more about them and their experience by clickign through to their profiles below:
+                  ${
+                  deputyProfileUrl || deputyPhotoUrl
+                    ? `<div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
+                         <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyName}</h3>
+                         ${deputyPhotoUrl ? `<img src="${deputyPhotoUrl}" alt="${deputyName}" style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px;" />` : ""}
+                         ${deputyProfileUrl ? `<p style="margin:6px 0 0;"><a href="${deputyProfileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View ${deputyName}'s profile →</a></p>` : ""}
+                         <p style="margin:8px 0 0; color:#555;">
+                           Please note: when a deputy vocalist is booked, the band will tailor the setlist to that vocalist’s repertoire.
+                           There’s a large overlap with ${(actDoc.tscName || actDoc.name)}’s core repertoire and ${deputyName}’s repertoire, so you’ll still get the band’s signature crowd-pleasers.
+                         </p>
+                       </div>`
+                    : ""
+                }
+
                 ${heroImg ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />` : ""}
                 <h3 style="color:#111;">${actDoc.tscName || actDoc.name}</h3>
                 <p style="margin:6px 0 14px; color:#555;">${(actDoc.tscDescription || actDoc.description || "").toString()}</p>
