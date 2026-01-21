@@ -9,7 +9,7 @@ const availabilitySchema = new mongoose.Schema(
     actName: { type: String, default: "" },
     clientName: { type: String, default: "" },
     clientEmail: { type: String, default: "" },
-
+requestKey: { type: String, index: true },
     actId: { type: mongoose.Schema.Types.ObjectId, ref: "act", index: true },
     lineupId: { type: mongoose.Schema.Types.ObjectId, ref: "Lineup", index: true },
     musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician", index: true },
@@ -99,7 +99,7 @@ requestId: { type: String, index: true },
 availabilitySchema.index(
   {
     actId: 1,
-    
+    requestKey: 1,
     lineupId: 1,
     dateISO: 1,
     phone: 1,
