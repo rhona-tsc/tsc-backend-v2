@@ -4198,15 +4198,58 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     reply: { $in: ["yes", "no", "unavailable", null] },
     v2: true,
   })
-    .select("musicianId slotIndex reply updatedAt repliedAt isDeputy photoUrl phone musicianEmail formattedAddress vocalistName musicianName selectedVocalistName")
+    .select(
+      [
+        "musicianId",
+        "slotIndex",
+        "reply",
+        "updatedAt",
+        "repliedAt",
+        "isDeputy",
+        "photoUrl",
+        "profileUrl", // ✅ you referenced this later but weren't selecting it
+        "phone",
+        "musicianEmail",
+        "formattedAddress",
+        "vocalistName",
+        "musicianName",
+        "selectedVocalistName",
+      ].join(" ")
+    )
     .lean();
 
-  // Build a cache of musician display names for fallback name resolution
-  const ids = [...new Set(rows.map((r) => String(r.musicianId)).filter(Boolean))];
-  const musDocs = await Musician.find({ _id: { $in: ids } })
-    .select("firstName lastName displayName preferredName name")
-    .lean();
-  const musById = Object.fromEntries(musDocs.map((m) => [String(m._id), m]));
+  console.log(
+    "📥 buildBadge: availability rows (identity snapshot):",
+    rows.map((r) => ({
+      slotIndex: r.slotIndex,
+      reply: r.reply,
+      updatedAt: r.updatedAt,
+      isDeputy: r.isDeputy,
+      musicianId: r.musicianId,
+      vocalistName: r.vocalistName,
+      photoUrl: r.photoUrl,
+      profileUrl: r.profileUrl,
+      phone: r.phone,
+      formattedAddress: r.formattedAddress,
+    }))
+  );
+
+  if (!rows.length) return null;
+
+  // ---------- helpers ----------
+  const normaliseUrl = (u) => {
+    if (typeof u !== "string") return null;
+    const s = u.trim();
+    if (!s) return null;
+    if (s.startsWith("//")) return `https:${s}`;
+    if (/^res\.cloudinary\.com\//i.test(s)) return `https://${s}`;
+    return s;
+  };
+
+  const isHttp = (u) => {
+    const s = normaliseUrl(u);
+    return typeof s === "string" && /^https?:\/\//i.test(s);
+  };
 
   const pickDisplayName = (m) => {
     if (!m) return "";
@@ -4217,48 +4260,32 @@ export async function buildAvailabilityBadgeFromRows({ actId, dateISO, hasLineup
     return `${fn} ${ln}`.trim();
   };
 
-  const normaliseUrl = (u) => {
-  if (typeof u !== "string") return null;
-  const s = u.trim();
-  if (!s) return null;
+  const firstLast = (s = "") => {
+    const str = String(s || "").trim().replace(/\s+/g, " ");
+    if (!str) return { firstName: "", lastName: "", displayName: "" };
+    const parts = str.split(" ");
+    const firstName = parts[0] || "";
+    const lastName = parts.length > 1 ? parts[parts.length - 1] : "";
+    const displayName = lastName ? `${firstName} ${String(lastName[0] || "").toUpperCase()}` : firstName;
+    return { firstName, lastName, displayName };
+  };
+  // ---------- end helpers ----------
 
-  // protocol-relative
-  if (s.startsWith("//")) return `https:${s}`;
-
-  // bare cloudinary host (or any bare host)
-  if (/^res\.cloudinary\.com\//i.test(s)) return `https://${s}`;
-
-  return s;
-};
-
-
-
-  console.log("📥 buildBadge: availability rows (identity snapshot):", rows.map(r => ({
-    slotIndex: r.slotIndex,
-    reply: r.reply,
-    updatedAt: r.updatedAt,
-    isDeputy: r.isDeputy,
-    musicianId: r.musicianId,
-    vocalistName: r.vocalistName,
-    photoUrl: r.photoUrl,
-    profileUrl: r.profileUrl,
-    phone: r.phone,
-    formattedAddress: r.formattedAddress,
-  })));
-
-  if (!rows.length) return null;
+  // Cache musician docs for name fallbacks
+  const ids = [...new Set(rows.map((r) => String(r.musicianId)).filter(Boolean))];
+  const musDocs = await Musician.find({ _id: { $in: ids } })
+    .select("firstName lastName displayName preferredName name")
+    .lean();
+  const musById = Object.fromEntries(musDocs.map((m) => [String(m._id), m]));
 
   const groupedBySlot = rows.reduce((acc, row) => {
     const key = String(row.slotIndex ?? 0);
     (acc[key] ||= []).push(row);
     return acc;
   }, {});
+
   console.log("📦 buildBadge: rows grouped by slot:", Object.keys(groupedBySlot));
 
-const isHttp = (u) => {
-  const s = normaliseUrl(u);
-  return typeof s === "string" && /^https?:\/\//i.test(s);
-};
   const slots = [];
   const orderedKeys = Object.keys(groupedBySlot).sort((a, b) => Number(a) - Number(b));
 
@@ -4266,13 +4293,15 @@ const isHttp = (u) => {
     const slotRows = groupedBySlot[slotKey];
     console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows.length);
 
-    const leadRows   = slotRows.filter(r => r.isDeputy !== true);
-    const deputyRows = slotRows.filter(r => r.isDeputy === true);
+    const leadRows = slotRows.filter((r) => r.isDeputy !== true);
+    const deputyRows = slotRows.filter((r) => r.isDeputy === true);
 
-    const leadReply = leadRows
-      .filter(r => ["yes", "no", "unavailable"].includes(r.reply))
-      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
+    const leadReply =
+      leadRows
+        .filter((r) => ["yes", "no", "unavailable"].includes(r.reply))
+        .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0] || null;
 
+    // Resolve lead display bits (photo/profile) if possible
     let leadDisplayBits = null;
     if (leadReply?.musicianId) {
       try {
@@ -4282,24 +4311,25 @@ const isHttp = (u) => {
       }
     }
 
-const leadPhoto = normaliseUrl(leadDisplayBits?.photoUrl || leadReply?.photoUrl || null);
-const leadProfile = leadDisplayBits?.profileUrl || leadReply?.profileUrl || "";
+    const leadPhoto = normaliseUrl(leadDisplayBits?.photoUrl || leadReply?.photoUrl || null);
+    const leadProfile = leadDisplayBits?.profileUrl || leadReply?.profileUrl || "";
 
-const leadBits = leadReply
-  ? {
-      musicianId: String(leadDisplayBits?.musicianId || leadReply?.musicianId || ""),
-      photoUrl: isHttp(leadPhoto) ? leadPhoto : null,
-      profileUrl: leadProfile || "",
-      setAt: leadReply?.updatedAt || null,
-      state: leadReply?.reply || "pending",
-      available: leadReply?.reply === "yes",
-      isDeputy: false,
-    }
-  : null;
+    const leadBits = leadReply
+      ? {
+          musicianId: String(leadDisplayBits?.musicianId || leadReply?.musicianId || ""),
+          photoUrl: isHttp(leadPhoto) ? leadPhoto : null,
+          profileUrl: leadProfile || "",
+          setAt: leadReply?.updatedAt || null,
+          state: leadReply?.reply || "pending",
+          available: leadReply?.reply === "yes",
+          isDeputy: false,
+        }
+      : null;
 
     // Deputies (sorted latest first)
-    const deputyRowsSorted = deputyRows.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
-    const depPhoto = normaliseUrl(bits?.photoUrl || r?.photoUrl || null);
+    const deputyRowsSorted = deputyRows.sort(
+      (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)
+    );
 
     const deputies = [];
     for (const r of deputyRowsSorted) {
@@ -4309,18 +4339,27 @@ const leadBits = leadReply
           phone: r.phone,
           email: r.musicianEmail,
         });
+
+        // ✅ FIX: depPhoto computed INSIDE loop, using the bits/r that exist here
+        const depPhoto = normaliseUrl(bits?.photoUrl || r?.photoUrl || null);
+        const depProfile = bits?.profileUrl || r?.profileUrl || "";
+
         deputies.push({
           slotIndex: Number(slotKey),
           isDeputy: true,
           musicianId: String(bits?.musicianId || r.musicianId || ""),
           photoUrl: isHttp(depPhoto) ? depPhoto : null,
-  profileUrl: bits?.profileUrl || "",
-          vocalistName:
-            (bits?.resolvedName ||
-             r?.selectedVocalistName ||
-             r?.vocalistName ||
-             pickDisplayName(musById[String(r.musicianId)]) ||
-             "").trim(),
+          profileUrl: depProfile || "",
+          vocalistName: String(
+            (
+              bits?.resolvedName ||
+              r?.selectedVocalistName ||
+              r?.vocalistName ||
+              pickDisplayName(musById[String(r.musicianId)]) ||
+              r?.musicianName ||
+              ""
+            ) || ""
+          ).trim(),
           state: r.reply ?? null,
           available: r.reply === "yes",
           setAt: r.updatedAt || null,
@@ -4330,56 +4369,59 @@ const leadBits = leadReply
         console.warn("getDeputyDisplayBits (deputy) failed:", e?.message, r?.musicianId);
       }
     }
-console.log("🖼️ PHOTO CHECK", {
-  slotKey,
-  lead_from_bits: leadDisplayBits?.photoUrl,
-  lead_from_row: leadReply?.photoUrl,
-  lead_final: leadPhoto,
-  lead_isHttp: isHttp(leadPhoto),
-});
+
+    console.log("🖼️ PHOTO CHECK", {
+      slotKey,
+      lead_from_bits: leadDisplayBits?.photoUrl,
+      lead_from_row: leadReply?.photoUrl,
+      lead_final: leadPhoto,
+      lead_isHttp: isHttp(leadPhoto),
+      deputies_with_photos: deputies.filter((d) => isHttp(d.photoUrl)).length,
+    });
+
     const leadAvailable = leadBits?.available === true;
-    const coveringYes = deputies.find(d => d.available && isHttp(d.photoUrl));
-    const firstDepWithPhoto = deputies.find(d => isHttp(d.photoUrl));
 
+    // Prefer a deputy who said YES and has a photo if lead not available
+    const coveringYesDeputy = deputies.find((d) => d.available && isHttp(d.photoUrl));
+    const firstDeputyWithPhoto = deputies.find((d) => isHttp(d.photoUrl));
+
+    // Primary visual for badge
     let primary = null;
-    if (!leadAvailable && coveringYes) {
-      primary = coveringYes; // deputy with YES
-    } else if (leadAvailable && isHttp(leadBits?.photoUrl)) {
-      primary = leadBits; // lead with photo
-    } else if (!leadAvailable && firstDepWithPhoto) {
-      primary = firstDepWithPhoto; // fallback visual
-    } else if (isHttp(leadBits?.photoUrl)) {
-      primary = leadBits; // last resort photo
-    }
+    if (!leadAvailable && coveringYesDeputy) primary = coveringYesDeputy;
+    else if (leadAvailable && isHttp(leadBits?.photoUrl)) primary = leadBits;
+    else if (!leadAvailable && firstDeputyWithPhoto) primary = firstDeputyWithPhoto;
+    else if (isHttp(leadBits?.photoUrl)) primary = leadBits;
 
-    // Choose name for the slot (use cached musician docs as fallback, avoid per-slot DB queries)
-    const leadMus = leadReply?.musicianId
-      ? musById[String(leadReply.musicianId)] || null
-      : null;
+    // Choose lead name for slot label
+    const leadMus = leadReply?.musicianId ? musById[String(leadReply.musicianId)] || null : null;
 
-    const chosenName =
-      (leadReply?.selectedVocalistName ||
-       leadReply?.vocalistName ||
-       leadReply?.musicianName ||
-       pickDisplayName(leadMus) ||
-       "").trim();
+    const chosenName = String(
+      (
+        leadReply?.selectedVocalistName ||
+        leadReply?.vocalistName ||
+        leadReply?.musicianName ||
+        pickDisplayName(leadMus) ||
+        ""
+      ) || ""
+    ).trim();
 
-    if (leadBits && leadDisplayBits) {
-      leadBits.vocalistName = chosenName;
-    }
+    if (leadBits) leadBits.vocalistName = chosenName;
 
     const slotObj = {
       slotIndex: Number(slotKey),
-      isDeputy: false, // legacy
+
+      // legacy top-level fields (kept because your downstream uses them)
+      isDeputy: false,
       vocalistName: chosenName,
       musicianId: leadBits?.musicianId ?? (leadReply ? String(leadReply.musicianId) : null),
       photoUrl: leadBits?.photoUrl || null,
       profileUrl: leadBits?.profileUrl || "",
+
+      // new/structured data
       deputies,
       setAt: leadReply?.updatedAt || null,
       state: leadReply?.reply || "pending",
-
-      available: Boolean(leadAvailable || coveringYes),
+      available: Boolean(leadAvailable || (coveringYesDeputy && coveringYesDeputy.available)),
       covering: primary?.isDeputy ? "deputy" : "lead",
       primary: primary
         ? {
@@ -4388,12 +4430,11 @@ console.log("🖼️ PHOTO CHECK", {
             profileUrl: primary.profileUrl || "",
             setAt: primary.setAt || null,
             isDeputy: Boolean(primary.isDeputy),
-            available: Boolean(primary.available ?? (primary.isDeputy ? primary.available : leadAvailable)),
+            available: Boolean(primary.available),
           }
         : null,
     };
 
-    // Identity snapshot for this slot
     const idSnap = firstLast(slotObj.vocalistName);
     console.log("👤 SlotSummary", {
       musicianId: slotObj.musicianId,
@@ -4401,32 +4442,29 @@ console.log("🖼️ PHOTO CHECK", {
       lastName: idSnap.lastName,
       displayName: idSnap.displayName,
       vocalistDisplayName: slotObj.vocalistName,
-      phone: (leadReply?.phone || null),
       photoUrl: slotObj.photoUrl,
       profileUrl: slotObj.profileUrl,
-      setAt: slotObj.setAt,
-      isDeputy: slotObj.isDeputy,
       available: slotObj.available,
+      covering: slotObj.covering,
       slotIndex: slotObj.slotIndex,
     });
 
     slots.push(slotObj);
   }
 
-  // Pick an address from any row
-  const anyAddress = rows.find(r => r.formattedAddress)?.formattedAddress || "TBC";
+  const anyAddress = rows.find((r) => r.formattedAddress)?.formattedAddress || "TBC";
   const badge = { dateISO, address: anyAddress, active: true, slots };
 
   console.log("💜 FINAL BADGE (identity snapshot):", {
     dateISO: badge.dateISO,
     address: badge.address,
-    slots: badge.slots.map(s => ({
+    slots: badge.slots.map((s) => ({
       slotIndex: s.slotIndex,
       vocalistName: s.vocalistName,
       available: s.available,
       covering: s.covering,
       primary: s.primary ? { musicianId: s.primary.musicianId } : null,
-    }))
+    })),
   });
 
   return badge;
@@ -5273,24 +5311,23 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
 export async function getAvailabilityBadge(req, res) {
   try {
     const { actId, dateISO } = req.params;
-    console.log("🎯 [getAvailabilityBadge] Fetching badge for:", {
-      actId,
-      dateISO,
-    });
+
+    console.log("🎯 [getAvailabilityBadge] Fetching badge for:", { actId, dateISO });
 
     if (!actId || !dateISO) {
       return res.status(400).json({ error: "Missing actId or dateISO" });
     }
 
-    const act = await Act.findById(actId)
-      .select("formattedAddress lineups")
+    // Fetch once (we need meta lock + hasLineups)
+    const actDoc = await Act.findById(actId)
+      .select("+availabilityBadgesMeta formattedAddress lineups hasLineups")
       .lean();
-    if (!act) {
+
+    if (!actDoc) {
       return res.status(404).json({ error: "Act not found" });
     }
 
     // 🚫 Skip rebuild if lead marked unavailable
-    const actDoc = await Act.findById(actId).lean();
     if (actDoc?.availabilityBadgesMeta?.[dateISO]?.lockedByLeadUnavailable) {
       console.log(`⏭️ Skipping rebuild — lead unavailable lock active for ${dateISO}`);
       return res.json({ badge: null, skipped: true, reason: "lead_unavailable_lock" });
@@ -5302,16 +5339,21 @@ export async function getAvailabilityBadge(req, res) {
       hasLineups: actDoc?.hasLineups ?? true,
     });
 
-    
     if (!badge) {
       console.log("🪶 No badge found for act/date:", { actId, dateISO });
       return res.json({ badge: null });
     }
 
-    console.log("✅ [getAvailabilityBadge] Returning badge:", badge);
+    console.log("✅ [getAvailabilityBadge] Returning badge:", {
+      actId,
+      dateISO,
+      slots: badge?.slots?.length || 0,
+      address: badge?.address,
+    });
+
     return res.json({ badge });
   } catch (err) {
     console.error("❌ [getAvailabilityBadge] Error:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 }
