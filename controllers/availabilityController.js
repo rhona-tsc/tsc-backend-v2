@@ -5631,6 +5631,12 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     const alreadySent =
       actDoc?.availabilityBadgesMeta?.[dateISO]?.clientEmailsSent || {};
 
+      console.log("🧾 [rebuild] alreadySent snapshot", {
+  dateISO,
+  alreadySentKeys: Object.keys(alreadySent || {}),
+  alreadySent,
+});
+
     const markSent = async (slotIdx, kind) => {
       const path = `availabilityBadgesMeta.${dateISO}.clientEmailsSent.${slotIdx}.${kind}`;
       await Act.updateOne(
