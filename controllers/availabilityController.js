@@ -487,24 +487,42 @@ export function formatNiceDate(dateISO) {
 // ───────────────────────────────────────────────────────────────────────────────
 // Resolves recipient from a User id or an email, and always CCs hello@
 // Safe to keep in the same file; it lazily imports deps.
-export async function sendClientEmail({ actId, to, userId = null, name, subject, html, allowHello = false,  }) {
+export async function sendClientEmail({
+  actId,
+  to,
+  userId = null,
+  name,
+  subject,
+  html,
+  allowHello = false,
+}) {
   console.log("✉️ sendClientEmail START", { actId, to, userId, name, subject });
-// Normalize SMTP envs (prevents app-password whitespace/newline issues)
-// Never log secrets – only safe metadata.
-if (process.env.GMAIL_AVAIL_USER) {
-  process.env.GMAIL_AVAIL_USER = String(process.env.GMAIL_AVAIL_USER).trim().toLowerCase();
-}
 
-// app passwords often get pasted as "xxxx xxxx xxxx xxxx"
-if (process.env.GMAIL_AVAIL_PASS) {
-  process.env.GMAIL_AVAIL_PASS = String(process.env.GMAIL_AVAIL_PASS).replace(/\s+/g, "");
-}
+  const HELLO = "hello@thesupremecollective.co.uk";
 
-console.log("🔐 sendClientEmail SMTP env snapshot", {
-  smtpUser: process.env.GMAIL_AVAIL_USER || process.env.EMAIL_USER || undefined,
-  smtpPassLen: String(process.env.GMAIL_AVAIL_PASS || process.env.EMAIL_PASS || "").length || 0,
-  defaultFrom: process.env.DEFAULT_FROM || undefined,
-});
+  // Normalize SMTP envs (prevents app-password whitespace/newline issues)
+  // Never log secrets – only safe metadata.
+  if (process.env.GMAIL_AVAIL_USER) {
+    process.env.GMAIL_AVAIL_USER = String(process.env.GMAIL_AVAIL_USER)
+      .trim()
+      .toLowerCase();
+  }
+
+  // app passwords often get pasted as "xxxx xxxx xxxx xxxx"
+  if (process.env.GMAIL_AVAIL_PASS) {
+    process.env.GMAIL_AVAIL_PASS = String(process.env.GMAIL_AVAIL_PASS).replace(
+      /\s+/g,
+      ""
+    );
+  }
+
+  console.log("🔐 sendClientEmail SMTP env snapshot", {
+    smtpUser: process.env.GMAIL_AVAIL_USER || process.env.EMAIL_USER || undefined,
+    smtpPassLen:
+      String(process.env.GMAIL_AVAIL_PASS || process.env.EMAIL_PASS || "").length ||
+      0,
+    defaultFrom: process.env.DEFAULT_FROM || undefined,
+  });
 
   try {
     // Lazy-load deps so we don't juggle top-level imports or risk circulars
@@ -512,6 +530,7 @@ console.log("🔐 sendClientEmail SMTP env snapshot", {
       import("../utils/sendEmail.js"),
       import("../models/userModel.js").catch(() => null),
     ]);
+
     const sendEmail = (SendMod && (SendMod.sendEmail || SendMod.default)) || null;
     const User = UserMod && (UserMod.default || UserMod.User || UserMod.user || null);
 
@@ -521,7 +540,10 @@ console.log("🔐 sendClientEmail SMTP env snapshot", {
     }
 
     const isObjectId = (s) => typeof s === "string" && /^[0-9a-fA-F]{24}$/.test(s);
-    const isEmail    = (s) => typeof s === "string" && /\S+@\S+\.\S+/.test(s.trim());
+    const isEmail = (s) =>
+      typeof s === "string" && /\S+@\S+\.\S+/.test(String(s).trim());
+
+    const requestedTo = String(to || "").trim().toLowerCase();
 
     const act = await Act.findById(actId).lean();
 
@@ -544,7 +566,10 @@ console.log("🔐 sendClientEmail SMTP env snapshot", {
         const u = await User.findById(to).select("email").lean();
         if (u?.email) resolvedEmail = String(u.email).trim().toLowerCase();
       } catch (e) {
-        console.warn("⚠️ sendClientEmail: lookup by 'to' (objectId) failed:", e?.message || e);
+        console.warn(
+          "⚠️ sendClientEmail: lookup by 'to' (objectId) failed:",
+          e?.message || e
+        );
       }
     }
 
@@ -557,7 +582,7 @@ console.log("🔐 sendClientEmail SMTP env snapshot", {
     if (
       !resolvedEmail &&
       isEmail(act?.contactEmail) &&
-      String(act.contactEmail).trim().toLowerCase() !== "hello@thesupremecollective.co.uk"
+      String(act.contactEmail).trim().toLowerCase() !== HELLO
     ) {
       resolvedEmail = String(act.contactEmail).trim().toLowerCase();
     }
@@ -566,35 +591,50 @@ console.log("🔐 sendClientEmail SMTP env snapshot", {
     const envFallback = (process.env.NOTIFY_EMAIL || "").trim().toLowerCase();
     const finalRecipient = resolvedEmail || envFallback;
 
+    const isHelloRecipient = finalRecipient === HELLO;
+
+    // ✅ Allow hello@ if:
+    // - caller explicitly passed allowHello
+    // - OR the request is explicitly targeting hello@ (your testing case)
+    // - OR you opt-in via env
+    // - OR you're not in production (handy for dev/staging)
+    const allowHelloEffective =
+      allowHello === true ||
+      requestedTo === HELLO ||
+      process.env.ALLOW_HELLO_EMAILS === "true" ||
+      process.env.NODE_ENV !== "production";
+
     console.log("📨 sendClientEmail recipient decision", {
-      requestedTo: to,
+      requestedTo,
       userId,
       actContactEmail: act?.contactEmail,
       finalRecipient,
+      allowHello,
+      allowHelloEffective,
       sendEmailsFlag: process.env.SEND_EMAILS,
     });
 
-     // Guard: don't send *only* to hello@ unless explicitly allowed
-  if (
-    !finalRecipient ||
-    !isEmail(finalRecipient) ||
-    (!allowHello && finalRecipient === "hello@thesupremecollective.co.uk")
-  ) {
-    console.warn("⚠️ No valid client recipient (or only hello@). Skipping sendEmail.");
-    return { success: false, skipped: true, reason: "no_valid_client_recipient" };
-  }
+    // Guard: don't send *only* to hello@ unless explicitly allowed
+    if (!finalRecipient || !isEmail(finalRecipient) || (!allowHelloEffective && isHelloRecipient)) {
+      console.warn("⚠️ No valid client recipient (or only hello@). Skipping sendEmail.", {
+        requestedTo,
+        finalRecipient,
+        allowHelloEffective,
+      });
+      return { success: false, skipped: true, reason: "no_valid_client_recipient" };
+    }
 
-const fromAddr = (process.env.DEFAULT_FROM || "hello@thesupremecollective.co.uk").trim();
+    const fromAddr = (process.env.DEFAULT_FROM || HELLO).trim();
 
-const result = await sendEmail({
-  to: [finalRecipient],
-  bcc: ["hello@thesupremecollective.co.uk"],
-  subject,
-  html,
-  // This can be the alias address — SMTP auth should still be rhona@
-  from: fromAddr,
-  replyTo: "hello@thesupremecollective.co.uk",
-});
+    const result = await sendEmail({
+      to: [finalRecipient],
+      bcc: [HELLO],
+      subject,
+      html,
+      // This can be the alias address — SMTP auth should still be rhona@
+      from: fromAddr,
+      replyTo: HELLO,
+    });
 
     // ── Interpret low-level result explicitly ────────────────────────────────
     if (result?.skipped) {
