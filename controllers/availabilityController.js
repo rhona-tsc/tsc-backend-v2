@@ -3031,69 +3031,57 @@ const query = { actId, dateISO, phone, slotIndex: slotIndexForThis, requestKey }
     }
 
     /* -------------------------------------------------------------- */
-    /* 🧮 Final Fee Logic (including deputy inheritedFee)             */
-    /* -------------------------------------------------------------- */
-    let finalFee;
+/* 🧮 Final Fee Logic (including deputy inheritedFee)             */
+/* -------------------------------------------------------------- */
+let finalFee;
 
-    if (isDeputy && inheritedFee) {
-      const parsed =
-        parseFloat(String(inheritedFee).replace(/[^\d.]/g, "")) || 0;
-      let inheritedTotal = parsed;
+if (isDeputy && inheritedFee != null) {
+  const parsedBase =
+    parseFloat(String(inheritedFee).replace(/[^\d.]/g, "")) || 0;
 
-      if (inheritedTotal < 350) {
-        console.log(
-          "🧭 Inherited fee seems base-only — adding travel component for deputy",
-        );
+  const inheritedFeeIncludesTravel = body?.inheritedFeeIncludesTravel === true;
 
-        const { county: selectedCounty } =
-          countyFromAddress(fullFormattedAddress);
-        const selectedDate = dateISO;
+  let travelFee = 0;
+  let travelSource = "none";
 
-        let travelFee = 0;
-        let travelSource = "none";
+  if (!inheritedFeeIncludesTravel) {
+    const { county: selectedCounty } = countyFromAddress(fullFormattedAddress);
+    const selectedDate = dateISO;
 
-        if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
-          const raw = getCountyFeeValue(act.countyFees, selectedCounty);
-          const val = Number(raw);
-          if (Number.isFinite(val) && val > 0) {
-            travelFee = Math.ceil(val);
-            travelSource = "county";
-          }
-        }
-
-        if (travelSource === "none") {
-          const computed = await computeMemberTravelFee({
-            act,
-            member: deputy,
-            selectedCounty,
-            selectedAddress: fullFormattedAddress,
-            selectedDate,
-          });
-          travelFee = Math.max(0, Math.ceil(Number(computed || 0)));
-          travelSource = "computed";
-        }
-
-        inheritedTotal += travelFee;
-        console.log("💷 Deputy travel applied:", {
-          travelFee,
-          travelSource,
-          inheritedTotal,
-        });
+    if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
+      const raw = getCountyFeeValue(act.countyFees, selectedCounty);
+      const val = Number(raw);
+      if (Number.isFinite(val) && val > 0) {
+        travelFee = Math.ceil(val);
+        travelSource = "county";
       }
-
-      finalFee = Math.round(inheritedTotal);
-      console.log(`🪙 Deputy inherited total (incl. travel): £${finalFee}`);
-    } else {
-      finalFee = await feeForMember(targetMember);
     }
 
-    console.log("🐛 triggerAvailabilityRequest progress checkpoint", {
-      actId,
-      isDeputy,
-      targetMember: targetMember?.firstName,
-      phone: targetMember?.phone,
-      finalFee,
-    });
+    if (travelSource === "none") {
+      const computed = await computeMemberTravelFee({
+        act,
+        member: targetMember, // ✅ deputy's own postcode travel
+        selectedCounty,
+        selectedAddress: fullFormattedAddress,
+        selectedDate,
+      });
+      travelFee = Math.max(0, Math.ceil(Number(computed || 0)));
+      travelSource = "computed";
+    }
+  }
+
+  finalFee = Math.round(parsedBase + travelFee);
+
+  console.log("💷 Deputy fee (inherit + travel)", {
+    parsedBase,
+    inheritedFeeIncludesTravel,
+    travelFee,
+    travelSource,
+    finalFee,
+  });
+} else {
+  finalFee = await feeForMember(targetMember);
+}
 
     /* -------------------------------------------------------------- */
     /* 🛡️ Skip if already replied unavailable / no                    */
@@ -5920,14 +5908,51 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
             });
 
             const deputyNameFull =
-              deputyCard.name ||
-              depInfo.vocalistDisplayName ||
-              depInfo.displayName ||
-              depInfo.firstName ||
-              "one of our vocalists";
+  deputyCard.name ||
+  depInfo.vocalistDisplayName ||
+  depInfo.displayName ||
+  depInfo.firstName ||
+  "one of our vocalists";
 
-            const deputyShort =
-              shortDisplayName(deputyNameFull) || deputyNameFull;
+const deputyShort = shortDisplayName(deputyNameFull) || deputyNameFull;
+
+// 🔎 DEBUG: why is deputyShort not shortened?
+{
+  const raw = String(deputyNameFull || "");
+  const cleaned = raw.trim().replace(/\s+/g, " ");
+  const parts = cleaned ? cleaned.split(" ") : [];
+  console.log("🧩 [DEPUTY NAME DEBUG]", {
+    slotIdx,
+    deputyNameFull_raw: raw,
+    deputyNameFull_cleaned: cleaned,
+    parts,
+    partsCount: parts.length,
+    firstToken: parts[0] || "",
+    lastToken: parts[parts.length - 1] || "",
+    shortDisplayName_result: shortDisplayName(deputyNameFull),
+    deputyShort_final: deputyShort,
+    sourcePicked: deputyCard.name
+      ? "deputyCard.name"
+      : depInfo.vocalistDisplayName
+        ? "depInfo.vocalistDisplayName"
+        : depInfo.displayName
+          ? "depInfo.displayName"
+          : depInfo.firstName
+            ? "depInfo.firstName"
+            : "fallback",
+    deputyCard: {
+      name: deputyCard?.name || "",
+      profileUrl: deputyCard?.profileUrl || "",
+      hasPhoto: !!deputyCard?.photoUrl,
+    },
+    depInfo: {
+      vocalistDisplayName: depInfo?.vocalistDisplayName || "",
+      displayName: depInfo?.displayName || "",
+      firstName: depInfo?.firstName || "",
+      lastName: depInfo?.lastName || "",
+    },
+  });
+}
 
             console.log("📧 Sending DEPUTY-available email (per slot)", {
               slotIdx,
