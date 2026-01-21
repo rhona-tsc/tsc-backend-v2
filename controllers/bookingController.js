@@ -797,7 +797,7 @@ export const createCheckoutSession = async (req, res) => {
       const n = String(name || "").toLowerCase();
       return (
         n.includes("test dancefloor magic") ||
-        n.includes("tscname test soul allegiance") ||
+        n.includes("test soul allegiance") ||
         n.includes("test motown magic")
       );
     };
