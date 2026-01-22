@@ -2541,28 +2541,30 @@ export const completeBookingV2 = async (req, res) => {
 
     let html;
     try {
-      html = await ejs.renderFile(templatePath, {
-        bookingId: booking.bookingId,
-        userAddress: booking.userAddress,
-        actsSummary: booking.actsSummary,
-        eventDateISO: booking.eventDateISO,
-        venueAddress: booking.venueAddress || booking.venue || "",
-        performanceTimes: booking.performanceTimes || {},
-        notes: booking.notes || "",
-        createdAt: booking.createdAt,
+     html = await ejs.renderFile(templatePath, {
+  bookingId: booking.bookingId,
+  userAddress: booking.userAddress,
+  actsSummary: booking.actsSummary,
 
-        // ✅ pass totals so EJS can check chargeMode if you want
-        totals,
+  // ✅ ADD THESE
+  venue: booking.venue || booking.venueAddress || "",
+  venueAddress: booking.venueAddress || booking.venue || "",
 
-        // ✅ total = full contract value
-        total: Number(totals.fullAmount ?? 0),
+  // ✅ also: your EJS is checking `eventDate` but you pass `eventDateISO`
+  eventDate: booking.date || booking.eventDateISO || null,
+  eventType: booking.eventType || "",
 
-        // ✅ deposit = what was actually charged (deposit OR full)
-        deposit: Number(totals.chargedAmount ?? 0),
+  performanceTimes: booking.performanceTimes || {},
+  notes: booking.notes || "",
+  createdAt: booking.createdAt,
 
-        signatureUrl: booking.signatureUrl,
-        logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
-      });
+  totals: booking.totals || {},
+  total: Number(totals.fullAmount ?? 0),
+  deposit: Number(totals.chargedAmount ?? 0),
+
+  signatureUrl: booking.signatureUrl,
+  logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
+});
 
       console.log("[completeBookingV2] ✓ EJS rendered", { htmlLen: html?.length || 0 });
     } catch (e) {

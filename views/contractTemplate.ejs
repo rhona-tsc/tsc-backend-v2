@@ -76,9 +76,21 @@
     <div class="contract-section" aria-label="Booking contract terms">
       <p class="subtitle">
         Booking ID: <strong><%= bookingId %></strong><br/>
-        Contract Issued On: <strong><%= new Date().toLocaleDateString("en-GB") %></strong>
-        Client: <%= userAddress?.firstName %> <%= userAddress?.lastName %><br/>
-        Venue: <%= venue || "TBC" %><br/>
+        Contract Issued On: <strong><%= new Date().toLocaleDateString("en-GB") %></strong><br/>
+Client: <%= [userAddress?.firstName, userAddress?.lastName].filter(Boolean).join(" ") || "—" %><br/>
+        Client Address: <%= userAddress
+  ? [
+      userAddress.street,
+      userAddress.city,
+      userAddress.county,
+      userAddress.postcode,
+      userAddress.country,
+    ]
+      .map(v => String(v || "").trim())
+      .filter(Boolean)
+      .join(", ")
+  : "—" %><br/>
+Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "TBC") %><br/>
 <% if (eventDate) { %>
   Event Date: <%= new Date(eventDate).toLocaleDateString("en-GB") %><br/>
 <% } %>
