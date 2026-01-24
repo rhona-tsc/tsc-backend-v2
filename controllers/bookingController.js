@@ -2544,6 +2544,7 @@ export const completeBookingV2 = async (req, res) => {
      html = await ejs.renderFile(templatePath, {
   bookingId: booking.bookingId,
   userAddress: booking.userAddress,
+  
   actsSummary: booking.actsSummary,
 
   // ✅ ADD THESE
