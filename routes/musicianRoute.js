@@ -17,7 +17,7 @@ import {
 } from "../controllers/musicianController.js";
 import bookingModel from "../models/bookingModel.js";
 import { autosaveMusicianForm, listAutosaveHistory } from "../controllers/musicianAutosave.controller.js";
-
+import bcrypt from "bcryptjs";
 
 const router = express.Router();
 
@@ -46,6 +46,124 @@ router.post("/auth/register", registerMusician);
 router.post("/auth/login", loginMusician);
 router.post("/auth/refresh", refreshAccessToken);
 router.post("/auth/logout", logoutMusician);
+
+/* ---------------- Account (musician) ---------------- */
+// Base: /api/musician/account/*
+
+const getAuthUserId = (req) =>
+  req.user?.id || req.user?._id || req.user?.userId || req.user?.musicianId;
+
+const hashPassword = async (pw) => {
+  const salt = await bcrypt.genSalt(10);
+  return bcrypt.hash(String(pw), salt);
+};
+
+// POST /api/musician/account/change-password
+router.post("/account/change-password", verifyToken, async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    const currentPassword = String(req.body?.currentPassword || "");
+    const newPassword = String(req.body?.newPassword || "");
+
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorised." });
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: "currentPassword and newPassword are required." });
+    }
+    if (newPassword.length < 8) {
+      return res.status(422).json({ success: false, message: "New password must be at least 8 characters." });
+    }
+
+    const user = await musicianModel.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    if (!user.password) {
+      return res.status(400).json({
+        success: false,
+        message: "No password set yet. Please use the reset/set password flow.",
+      });
+    }
+
+    const ok = await bcrypt.compare(currentPassword, user.password);
+    if (!ok) return res.status(401).json({ success: false, message: "Current password is incorrect." });
+
+    user.password = await hashPassword(newPassword);
+    user.mustChangePassword = false;
+    user.hasSetPassword = true;
+    user.passwordLastChangedAt = new Date();
+    await user.save();
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("❌ /account/change-password failed:", err);
+    return res.status(500).json({ success: false, message: "Password update failed." });
+  }
+});
+
+// POST /api/musician/account/change-email
+router.post("/account/change-email", verifyToken, async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    const newEmail = String(req.body?.newEmail || "").trim().toLowerCase();
+    const currentPassword = String(req.body?.currentPassword || "");
+
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorised." });
+    if (!newEmail || !currentPassword) {
+      return res.status(400).json({ success: false, message: "newEmail and currentPassword are required." });
+    }
+    if (!/.+@.+\..+/.test(newEmail)) {
+      return res.status(422).json({ success: false, message: "Please enter a valid email address." });
+    }
+
+    const user = await musicianModel.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    const ok = await bcrypt.compare(currentPassword, user.password || "");
+    if (!ok) return res.status(401).json({ success: false, message: "Current password is incorrect." });
+
+    const existing = await musicianModel.findOne({ email: newEmail, _id: { $ne: user._id } });
+    if (existing) return res.status(409).json({ success: false, message: "That email is already in use." });
+
+    user.email = newEmail;
+    if (!user.basicInfo) user.basicInfo = {};
+    user.basicInfo.email = newEmail;
+
+    await user.save();
+    return res.json({ success: true, email: newEmail });
+  } catch (err) {
+    console.error("❌ /account/change-email failed:", err);
+    return res.status(500).json({ success: false, message: "Email update failed." });
+  }
+});
+
+// POST /api/musician/account/change-phone
+router.post("/account/change-phone", verifyToken, async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    const newPhone = String(req.body?.newPhone || "").trim();
+    const currentPassword = String(req.body?.currentPassword || "");
+
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorised." });
+    if (!newPhone || !currentPassword) {
+      return res.status(400).json({ success: false, message: "newPhone and currentPassword are required." });
+    }
+
+    const user = await musicianModel.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    const ok = await bcrypt.compare(currentPassword, user.password || "");
+    if (!ok) return res.status(401).json({ success: false, message: "Current password is incorrect." });
+
+    user.phone = newPhone;
+    if (!user.basicInfo) user.basicInfo = {};
+    user.basicInfo.phone = newPhone;
+
+    await user.save(); // your pre('validate') will update phoneNormalized
+    return res.json({ success: true, phone: newPhone });
+  } catch (err) {
+    console.error("❌ /account/change-phone failed:", err);
+    return res.status(500).json({ success: false, message: "Phone update failed." });
+  }
+});
 
 /* ---------------- Deputy registration ---------------- */
 router.post("/moderation/register-deputy", uploadFields, registerDeputy);
