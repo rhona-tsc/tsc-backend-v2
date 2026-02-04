@@ -4,7 +4,6 @@ import validator from "validator";
 import musicianModel from "../models/musicianModel.js";
 
 const createToken = (user) => {
-  // ⚠️ Do NOT include password (or other sensitive data) in JWT
   return jwt.sign(
     {
       id: user._id,
@@ -24,18 +23,16 @@ const loginMusician = async (req, res) => {
     const rawEmail = (req.body?.email || "").trim();
     const password = req.body?.password || "";
 
-    console.log("🔐 Incoming login request:", { email: rawEmail });
-
     if (!rawEmail || !password) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Email and password are required" });
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
     }
 
     const email = rawEmail.toLowerCase();
 
-    // 🔑 Agent backdoor (explicit, env-gated). Useful for bootstrapping/admin.
-    // Matches only if BOTH email and password match the env values.
+    // Agent backdoor (env-gated)
     const agentEmail = (process.env.AGENT_EMAIL || "").trim().toLowerCase();
     const agentPass = process.env.AGENT_PASSWORD || "";
     if (agentEmail && agentPass && email === agentEmail && password === agentPass) {
@@ -47,6 +44,7 @@ const loginMusician = async (req, res) => {
         lastName: "",
         phone: "",
       });
+
       return res.status(200).json({
         success: true,
         token,
@@ -56,35 +54,36 @@ const loginMusician = async (req, res) => {
         lastName: "",
         phone: "",
         userId: "agent",
+        mustChangePassword: false,
         message: "Logged in via agent override",
       });
     }
 
-    // If your schema has password with select:false, this makes sure it's included:
     const user = await musicianModel.findOne({ email }).select("+password");
 
     if (!user) {
-      // Enhanced: explicit reason we failed
-      return res
-        .status(404)
-        .json({ success: false, message: "No account found for that email" });
+      return res.status(404).json({
+        success: false,
+        message: "No account found for that email",
+      });
     }
 
     if (!user.password) {
-      // Account exists but no credential stored
-      return res
-        .status(422)
-        .json({ success: false, message: "Account has no password set" });
+      return res.status(422).json({
+        success: false,
+        message: "Account has no password set",
+      });
     }
 
     const match = await bcrypt.compare(password, user.password);
     if (!match) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Incorrect password" });
+      return res.status(401).json({
+        success: false,
+        message: "Incorrect password",
+      });
     }
 
-    // Special-case role for a particular email without mutating the doc
+    // Special-case role without mutating doc
     const effectiveRole =
       user.email === "hello@thesupremecollective.co.uk" ? "agent" : user.role;
 
@@ -96,10 +95,7 @@ const loginMusician = async (req, res) => {
       lastName: user.lastName,
       phone: user.phone,
     });
-    console.log(
-      "ACAO header being sent(backedn/controllers/musicianLoginController.js):",
-      res.getHeader("Access-Control-Allow-Origin")
-    );
+
     return res.json({
       success: true,
       token,
@@ -109,6 +105,7 @@ const loginMusician = async (req, res) => {
       lastName: user.lastName || "",
       phone: user.phone || "",
       userId: user._id,
+      mustChangePassword: !!user.mustChangePassword, // ✅ ADD THIS
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -116,7 +113,6 @@ const loginMusician = async (req, res) => {
   }
 };
 
-// Musician registration
 const registerMusician = async (req, res) => {
   try {
     const firstName = (req.body?.firstName || "").trim();
@@ -155,7 +151,9 @@ const registerMusician = async (req, res) => {
       email,
       phone,
       password: hashedPassword,
-      // role: "musician", // uncomment if you want to force default role here
+      mustChangePassword: false,
+      hasSetPassword: true,
+      passwordLastChangedAt: new Date(),
     });
 
     const user = await newMusician.save();
@@ -170,6 +168,7 @@ const registerMusician = async (req, res) => {
       lastName: user.lastName || "",
       phone: user.phone || "",
       userId: user._id,
+      mustChangePassword: !!user.mustChangePassword,
       message: "Registration successful",
     });
   } catch (error) {

@@ -22,8 +22,9 @@ const musicianSchema = new mongoose.Schema(
     tagLine: { type: String, maxlength: 160 },
     tscApprovedBio: { type: String },
     bio: { type: String },
-    email: { type: String },
-    firstName: { type: String },
+ // ✅ recommended: normalize in controllers, but adding index helps
+    email: { type: String, index: true },
+        firstName: { type: String },
     lastName: { type: String },
     phone: { type: String, index: true },
     phoneNormalized: { type: String, index: true },
@@ -31,6 +32,26 @@ const musicianSchema = new mongoose.Schema(
     password: { type: String },
     profilePhoto: { type: String, default: null },
     coverHeroImage: { type: String, default: null },
+
+     // ----------------------------
+    // ✅ NEW: Invite + Reset fields
+    // ----------------------------
+
+    // Invite / first-time set password
+    inviteTokenHash: { type: String, default: null, index: true },
+    inviteTokenExpires: { type: Date, default: null, index: true },
+
+    // Forgot password reset
+    resetTokenHash: { type: String, default: null, index: true },
+    resetTokenExpires: { type: Date, default: null, index: true },
+
+    // Force redirect to Security / force reset on next login
+    mustChangePassword: { type: Boolean, default: false },
+
+    // Helpful flags for UX / dashboards
+    hasSetPassword: { type: Boolean, default: false },
+    passwordLastChangedAt: { type: Date, default: null },
+
 
     basicInfo: {
       firstName: { type: String },
