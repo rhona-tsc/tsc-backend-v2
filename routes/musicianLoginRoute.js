@@ -7,7 +7,21 @@ import nodemailer from "nodemailer";
 import musicianModel from "../models/musicianModel.js";
 import { loginMusician, registerMusician } from "../controllers/musicianLoginController.js";
 
+
 const musicianLoginRouter = express.Router();
+
+// Normalise frontend URL (avoid double/missing slashes)
+const FRONTEND_URL = String(process.env.FRONTEND_URL || "").replace(/\/$/, "");
+
+// Email "From" identity (prefer env, fallback to hello@)
+const FROM_EMAIL = String(
+  process.env.EMAIL_FROM || "hello@thesupremecollective.co.uk"
+).trim();
+const FROM_NAME = String(
+  process.env.SMTP_FROM_NAME || "The Supreme Collective"
+).trim();
+const FROM_HEADER = FROM_NAME ? `${FROM_NAME} <${FROM_EMAIL}>` : FROM_EMAIL;
+const REPLY_TO = String(process.env.SMTP_REPLY_TO || FROM_EMAIL).trim();
 
 function sha256(input) {
   return crypto.createHash("sha256").update(input).digest("hex");
@@ -51,7 +65,8 @@ const transporter = nodemailer.createTransport({
 
 async function sendEmail({ to, subject, html }) {
   await transporter.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    from: FROM_HEADER,
+    replyTo: REPLY_TO,
     to,
     subject,
     html,
@@ -80,7 +95,7 @@ musicianLoginRouter.post("/invite", requireAdminAuth, async (req, res) => {
     user.mustChangePassword = true;
     await user.save();
 
-    const link = `${process.env.FRONTEND_URL}/set-password?token=${rawToken}&email=${encodeURIComponent(
+    const link = `${FRONTEND_URL}/set-password?token=${rawToken}&email=${encodeURIComponent(
       user.email
     )}`;
 
@@ -167,7 +182,7 @@ musicianLoginRouter.post("/forgot-password", async (req, res) => {
     user.resetTokenExpires = new Date(Date.now() + 60 * 60 * 1000); // 1h
     await user.save();
 
-    const link = `${process.env.FRONTEND_URL}/reset-password?token=${rawToken}&email=${encodeURIComponent(
+    const link = `${FRONTEND_URL}/reset-password?token=${rawToken}&email=${encodeURIComponent(
       user.email
     )}`;
 
