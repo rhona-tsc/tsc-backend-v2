@@ -11,8 +11,8 @@ const userRouter = express.Router();
 
 userRouter.post('/register', registerUser);
 userRouter.post('/login', loginUser);
-userRouter.post("/user/forgot-password", forgotPassword);
-userRouter.post("/user/reset-password", resetPassword);
+userRouter.post("/forgot-password", forgotPassword);
+userRouter.post("/reset-password", resetPassword);
 
 // list
 userRouter.get('/list', async (req, res) => {

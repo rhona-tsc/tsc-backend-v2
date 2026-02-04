@@ -11,7 +11,8 @@ export async function forgotPassword(req, res) {
     const { email } = req.body || {};
     if (!email) return res.status(400).json({ success: false, message: "Email is required" });
 
-    const user = await userModel.findOne({ email: String(email).toLowerCase() });
+    const normEmail = String(email || "").trim().toLowerCase();
+    const user = await userModel.findOne({ email: normEmail });
     // Always return 200 to avoid email enumeration
     if (!user) return res.json({ success: true, message: "If that email exists, a reset link has been sent." });
 
@@ -41,11 +42,16 @@ export async function resetPassword(req, res) {
     if (!token || !email || !newPassword) {
       return res.status(400).json({ success: false, message: "Missing token/email/password" });
     }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ success: false, message: "Password must be at least 8 characters." });
+    }
 
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-    const user = await User.findOne({
-      email: String(email).toLowerCase(),
+    const normEmail = String(email || "").trim().toLowerCase();
+
+    const user = await userModel.findOne({
+      email: normEmail,
       resetPasswordToken: tokenHash,
       resetPasswordExpires: { $gt: new Date() },
     });
