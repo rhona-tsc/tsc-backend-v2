@@ -145,16 +145,80 @@ musicianLoginRouter.post("/invite", requireAdminAuth, async (req, res) => {
       user.email
     )}`;
 
-    await sendEmail({
-      to: user.email,
-      subject: "Set up your Supreme Collective portal access",
-      html: `
-        <p>Hi ${user.firstName || ""},</p>
-        <p>Your portal access is ready. Please set your password here:</p>
-        <p><a href="${link}">Set your password</a></p>
-        <p>This link expires in 24 hours.</p>
-      `,
-    });
+  const LOGO_URL =
+  process.env.PORTAL_EMAIL_LOGO_URL ||
+  "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1770227002/TSC_email_logo_e6o5m5.png"; // <- replace or set env
+
+const safeName =
+  (user.firstName || user.lastName)
+    ? `${user.firstName || ""} ${user.lastName || ""}`.trim()
+    : "";
+
+await sendEmail({
+  to: user.email,
+  subject: "Your Supreme Collective Portal Access",
+  html: `
+  <div style="background:#f6f6f6;padding:32px 12px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="width:100%;max-width:640px;">
+      <tr>
+        <td style="padding:0 0 14px 0;text-align:center;">
+          <img src="${LOGO_URL}" alt="The Supreme Collective" style="max-width:180px;height:auto;display:inline-block;margin:0 auto;" />
+        </td>
+      </tr>
+
+      <tr>
+        <td style="background:#ffffff;border-radius:14px;padding:26px 22px;box-shadow:0 8px 24px rgba(0,0,0,0.06);border:1px solid #eee;">
+          <h1 style="margin:0 0 10px 0;font-size:20px;line-height:1.25;color:#111;">
+            Welcome${safeName ? `, ${safeName}` : ""} 👋
+          </h1>
+
+          <p style="margin:0 0 14px 0;color:#333;font-size:14.5px;line-height:1.6;">
+            Your <strong>Supreme Collective musician portal</strong> is ready. Please set your password using the button below:
+          </p>
+
+          <div style="text-align:center;margin:18px 0 18px 0;">
+            <a href="${link}"
+              style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:700;font-size:14.5px;">
+              Set your password
+            </a>
+          </div>
+
+          <p style="margin:0 0 14px 0;color:#333;font-size:14.5px;line-height:1.6;">
+            <strong>Why this matters:</strong> keeping your profile up to date helps us match you to the best-fit enquiries — and it can help you
+            <strong>rank higher for deputy gigs</strong>.
+          </p>
+
+          <div style="background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px 14px;margin:0 0 14px 0;">
+            <p style="margin:0 0 8px 0;color:#111;font-size:14.5px;font-weight:700;">
+              Please take 5 minutes to:
+            </p>
+            <ul style="margin:0;padding-left:18px;color:#333;font-size:14.5px;line-height:1.65;">
+              <li><strong>Update your repertoire</strong> (aim for at least 30 songs so we can place you confidently)</li>
+              <li><strong>Add/refresh your bio</strong> so clients can get to know you better</li>
+              <li><strong>Add skills & talents</strong> (e.g. BV’s, MD, DJ, sound, playback, doubling instruments) — this improves your match score</li>
+            </ul>
+          </div>
+
+          <p style="margin:0 0 10px 0;color:#333;font-size:13.5px;line-height:1.6;">
+            <strong>Heads up:</strong> this link expires in <strong>24 hours</strong>.
+          </p>
+
+          <p style="margin:0 0 0 0;color:#666;font-size:12.5px;line-height:1.6;">
+            Button not working? Copy and paste this link into your browser:<br/>
+            <a href="${link}" style="color:#ff6667;text-decoration:underline;word-break:break-all;">${link}</a>
+          </p>
+        </td>
+      </tr>
+
+      <tr>
+        <td style="padding:14px 6px 0 6px;text-align:center;color:#999;font-size:12px;line-height:1.5;">
+          The Supreme Collective • Please reply to this email if you need a hand getting set up.
+        </td>
+      </tr>
+    </table>
+  </div>
+  `,
+});
 
     res.json({ success: true });
   } catch (err) {
@@ -395,8 +459,7 @@ musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
 
     const users = await musicianModel
       .find(q)
-      .select("email firstName lastName hasSetPassword password onboardingInvitedAt onboardingStatus lastLoginAt")
-      .limit(LIMIT)
+.select("_id email firstName lastName hasSetPassword password onboardingInvitedAt onboardingStatus lastLoginAt inviteTokenExpires")      .limit(LIMIT)
       .lean();
 
     const report = {
