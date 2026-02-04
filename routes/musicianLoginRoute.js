@@ -11,7 +11,7 @@ import { loginMusician, registerMusician } from "../controllers/musicianLoginCon
 const musicianLoginRouter = express.Router();
 
 // Normalise frontend URL (avoid double/missing slashes)
-const FRONTEND_URL = String(process.env.FRONTEND_URL || "").replace(/\/$/, "");
+const FRONTEND_URL = String(process.env.ADMIN.FRONTEND_URL || "").replace(/\/$/, "");
 
 // Email "From" identity (prefer env, fallback to hello@)
 const FROM_EMAIL = String(
