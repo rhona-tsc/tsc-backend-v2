@@ -52,6 +52,25 @@ const musicianSchema = new mongoose.Schema(
     hasSetPassword: { type: Boolean, default: false },
     passwordLastChangedAt: { type: Date, default: null },
 
+    // ----------------------------
+    // ✅ NEW: Onboarding / chase tracking
+    // Onboarding complete when:
+    // - hasSetPassword === true
+    // - repertoire.length >= 30
+    // - bio is non-empty
+    // ----------------------------
+    onboardingStatus: {
+      type: String,
+      enum: ["not_started", "invited", "in_progress", "completed"],
+      default: "not_started",
+      index: true,
+    },
+
+onboardingInvitedAt: { type: Date, default: null, index: true },
+lastLoginAt: { type: Date, default: null, index: true },
+    onboardingCompletedAt: { type: Date, default: null, index: true },
+    onboardingReminderCount: { type: Number, default: 0 },
+    onboardingLastRemindedAt: { type: Date, default: null, index: true },
 
     basicInfo: {
       firstName: { type: String },
@@ -325,6 +344,33 @@ musicianSchema.pre("validate", function (next) {
   if (!this.basicInfo.lastName) this.basicInfo.lastName = this.lastName || "";
   if (!this.basicInfo.phone) this.basicInfo.phone = this.phone || "";
   if (!this.basicInfo.email) this.basicInfo.email = this.email || "";
+
+ // ✅ Auto-compute onboarding status (Option B logic)
+const bioText = String(this.bio || "").trim();
+const repCount = Array.isArray(this.repertoire) ? this.repertoire.length : 0;
+const hasPw = this.hasSetPassword === true;
+
+const onboardingComplete = hasPw && repCount >= 30 && bioText.length > 0;
+
+if (onboardingComplete) {
+  this.onboardingStatus = "completed";
+  if (!this.onboardingCompletedAt) this.onboardingCompletedAt = new Date();
+} else {
+  // invited = invitedAt exists AND lastLoginAt is null
+  if (this.onboardingInvitedAt && !this.lastLoginAt) {
+    this.onboardingStatus = "invited";
+  }
+  // in_progress = they've logged in at least once but aren't complete
+  else if (this.lastLoginAt) {
+    this.onboardingStatus = "in_progress";
+  } else {
+    this.onboardingStatus = "not_started";
+  }
+
+  // if requirements no longer met, clear completedAt
+  if (this.onboardingCompletedAt) this.onboardingCompletedAt = null;
+
+  }
 
   next();
 });

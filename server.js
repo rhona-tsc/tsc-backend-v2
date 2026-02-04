@@ -39,6 +39,7 @@ import v2Routes from "./routes/v2.js";
 import agentDashboardRoutes from "./routes/agentDashboardRoutes.js";
 import sitemapRoutes from "./routes/sitemapRoutes.js";
 import enquiryBoardRoutes from "./routes/enquiryBoardRoutes.js";
+import { runOnboardingChase } from "./cron/onboardingChase.js";
 
 import {
   watchCalendar,
@@ -318,8 +319,6 @@ app.use("/api/account", accountRouter);
 // Musicians
 app.use("/api/musician", musicianRouter);
 
-app.use("/api/musician-login", musicianLoginRouter);
-
 // Acts (v2) – choose ONE canonical base. I’d recommend /api/act
 app.use("/api/act", actV2Routes);           // ← put act routes here
 
@@ -414,6 +413,33 @@ if (process.env.ENABLE_DEFERRED_AVAILABILITY !== "0") {
     );
   }, 2 * 60 * 1000);
 }
+
+// Weekly onboarding chase: Mondays 10:00 London time
+cron.schedule(
+  "0 10 * * 1",
+  async () => {
+    try {
+      const report = await runOnboardingChase({
+        limit: 200,
+        dryRun: false,
+        includePending: false,   // only approved by default
+        onlyVocalists: false,    // set true if you want just vocalists
+      });
+
+      console.log("✅ [CRON] Onboarding chase done:", {
+        matched: report.matched,
+        emailed: report.emailed,
+        remindedSetPassword: report.remindedSetPassword,
+        remindedLogin: report.remindedLogin,
+        skippedComplete: report.skippedComplete,
+        errors: report.errors,
+      });
+    } catch (e) {
+      console.error("❌ [CRON] Onboarding chase failed:", e?.message || e);
+    }
+  },
+  { timezone: "Europe/London" }
+);
 
 // routes
 app.get("/api/availability/process-deferred", async (req, res) => {
