@@ -161,9 +161,13 @@ await sendEmail({
   <div style="background:#f6f6f6;padding:32px 12px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="width:100%;max-width:640px;">
       <tr>
-        <td style="padding:0 0 14px 0;text-align:center;">
-          <img src="${LOGO_URL}" alt="The Supreme Collective" style="max-width:180px;height:auto;display:inline-block;margin:0 auto;" />
-        </td>
+<td style="padding:10px 0 20px 0;text-align:center;">
+<img
+  src="${LOGO_URL}"
+  alt="The Supreme Collective"
+  width="520"
+  style="width:100%;max-width:520px;height:auto;display:block;margin:0 auto;"
+/>        </td>
       </tr>
 
       <tr>
@@ -178,26 +182,25 @@ await sendEmail({
 
           <div style="text-align:center;margin:18px 0 18px 0;">
             <a href="${link}"
-              style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:700;font-size:14.5px;">
-              Set your password
+style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:12px;font-weight:800;font-size:15px;">              Set your password
             </a>
           </div>
 
-          <p style="margin:0 0 14px 0;color:#333;font-size:14.5px;line-height:1.6;">
-            <strong>Why this matters:</strong> keeping your profile up to date helps us match you to the best-fit enquiries — and it can help you
-            <strong>rank higher for deputy gigs</strong>.
-          </p>
+        <p style="margin:0 0 14px 0;color:#333;font-size:14.5px;line-height:1.6;">
+  <strong>Why this matters:</strong> keeping your profile up to date helps clients get a feel for who they’re booking — and it helps us
+  <strong>propose you as a deputy</strong> for other acts that join The Supreme Collective over time.
+</p>
 
-          <div style="background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px 14px;margin:0 0 14px 0;">
-            <p style="margin:0 0 8px 0;color:#111;font-size:14.5px;font-weight:700;">
-              Please take 5 minutes to:
-            </p>
-            <ul style="margin:0;padding-left:18px;color:#333;font-size:14.5px;line-height:1.65;">
-              <li><strong>Update your repertoire</strong> (aim for at least 30 songs so we can place you confidently)</li>
-              <li><strong>Add/refresh your bio</strong> so clients can get to know you better</li>
-              <li><strong>Add skills & talents</strong> (e.g. BV’s, MD, DJ, sound, playback, doubling instruments) — this improves your match score</li>
-            </ul>
-          </div>
+<div style="background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px 14px;margin:0 0 14px 0;">
+  <p style="margin:0 0 8px 0;color:#111;font-size:14.5px;font-weight:700;">
+    Please take 5 minutes to:
+  </p>
+  <ul style="margin:0;padding-left:18px;color:#333;font-size:14.5px;line-height:1.65;">
+    <li><strong>Update your repertoire</strong> (aim for at least <strong>30 songs</strong> — enough material to comfortably cover a <strong>2-hour performance</strong>)</li>
+    <li><strong>Add your bio</strong> so clients can get to know you better</li>
+    <li><strong>Add skills & talents</strong> (e.g. BV’s, MD, DJ, sound engineering, band leading, doubling on instruments) — this improves your match score and showcases you in the best light when clients are choosing a band</li>
+  </ul>
+</div>
 
           <p style="margin:0 0 10px 0;color:#333;font-size:13.5px;line-height:1.6;">
             <strong>Heads up:</strong> this link expires in <strong>24 hours</strong>.
