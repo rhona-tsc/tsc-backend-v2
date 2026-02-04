@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
-import musicianLoginRouter from "./routes/musicianLoginRouter.js";
+import musicianLoginRouter from "./routes/musicianLoginRoute.js";
 
 dotenv.config();
 
