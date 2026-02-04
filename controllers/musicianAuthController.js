@@ -5,7 +5,7 @@ import musicianModel from "../models/musicianModel.js";
 import { sendResetEmail } from "../utils/mailer.js";
 
 
-const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:5174").replace(/\/$/, "");
+const FRONTEND_URL = (process.env.ADMIN.FRONTEND_URL || "http://localhost:5174").replace(/\/$/, "");
 
 function sha256(input) {
   return crypto.createHash("sha256").update(input).digest("hex");
