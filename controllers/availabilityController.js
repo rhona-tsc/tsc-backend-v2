@@ -391,7 +391,7 @@ const normalize44 = (raw = "") =>
     .replace(/^(\+44|44|0)/, "+44");
 
 
-    
+
 /* ========================================================================== */
 /* 👤 findCanonicalMusicianByPhone                                            */
 /* ========================================================================== */
@@ -2086,13 +2086,7 @@ async function findDateLevelUnavailable({ dateISO, canonicalId, phone }) {
     .lean();
 }
 
-import crypto from "crypto";
-import mongoose from "mongoose";
-import Act from "../models/actModel.js";
-import AvailabilityModel from "../models/availabilityModel.js";
-import Musician from "../models/musicianModel.js";
-import { triggerAvailabilityRequest } from "./triggerAvailabilityRequest.js";
-// import { normalizePhone } from "../utils/normalizePhone.js"; // wherever yours lives
+
 
 export const ensureVocalistAvailabilityForLineup = async (req, res) => {
   try {
