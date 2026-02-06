@@ -1,5 +1,5 @@
 import express from "express";
-import { rebuildAndApplyAvailabilityBadge } from "../controllers/availabilityController";
+import { rebuildAndApplyAvailabilityBadge } from "../controllers/availabilityController.js";
 
 const adminRoutes = express.Router();
 
