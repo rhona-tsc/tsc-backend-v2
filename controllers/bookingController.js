@@ -740,6 +740,40 @@ export const createCheckoutSession = async (req, res) => {
     { bodyKeys: Object.keys(req.body || {}) }
   );
 
+  // ----------------------------
+  // Helpers (keep inside to avoid missing imports)
+  // ----------------------------
+  const roundToPennies = (n) => Math.round(Number(n || 0) * 100) / 100;
+  const roundUpToPound = (n) => Math.ceil(Number(n || 0)); // 2201.15 -> 2202
+
+  const daysUntil = (dateStr) => {
+    if (!dateStr) return null;
+    const now = new Date();
+    const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const ev = new Date(dateStr);
+    const d1 = new Date(ev.getFullYear(), ev.getMonth(), ev.getDate());
+    return Math.ceil((d1 - d0) / (1000 * 60 * 60 * 24));
+  };
+
+  const pretty = (n) =>
+    Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Detect test acts
+  const isTestActName = (name = "") => {
+    const n = String(name || "").toLowerCase();
+    return (
+      n.includes("test dancefloor magic") ||
+      n.includes("test soul allegiance") ||
+      n.includes("test motown magic")
+    );
+  };
+
+  // Detect test act lineup in Stripe-friendly item name
+  const extractActName = (fullName = "") => {
+    // Example: "Booking: Test Dancefloor Magic - 4-Piece"
+    return String(fullName || "").replace("Booking:", "").split("-")[0].trim();
+  };
+
   try {
     const {
       cartDetails,
@@ -752,6 +786,9 @@ export const createCheckoutSession = async (req, res) => {
       signature,
       paymentMode,
       userId: bodyUserId,
+
+      // FE sets this to true when it sends the final UI total already
+      pricesIncludeMargin,
     } = req.body;
 
     const authUserId = req.user?._id || req.user?.id || null;
@@ -777,36 +814,17 @@ export const createCheckoutSession = async (req, res) => {
       paymentMode,
       userId,
       userEmail,
+      pricesIncludeMargin: pricesIncludeMargin === true,
     });
 
     // ----------------------------
-    // Helpers
+    // Rates
     // ----------------------------
-    const roundToPennies = (n) => Math.round(Number(n || 0) * 100) / 100;
-    const roundUpToPound = (n) => Math.ceil(Number(n || 0)); // 2201.15 -> 2202
+    const depositRate = Number(process.env.TSC_DEPOSIT_RATE ?? 0.33);
 
-    const depositRate = Number(process.env.TSC_DEPOSIT_RATE ?? 0.33); // ✅ matches cart
+    // Markup is now optional because FE can send a final UI total
     const markupRate = Number(process.env.TSC_MARKUP_RATE ?? process.env.TSC_MARGIN_RATE ?? 0.33);
     const markupFactor = 1 + markupRate;
-
-    const pretty = (n) =>
-      Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-    // Detect test acts
-    const isTestActName = (name = "") => {
-      const n = String(name || "").toLowerCase();
-      return (
-        n.includes("test dancefloor magic") ||
-        n.includes("test soul allegiance") ||
-        n.includes("test motown magic")
-      );
-    };
-
-    // Detect test act lineup in Stripe-friendly item name
-    const extractActName = (fullName = "") => {
-      // Example: "Booking: Test Dancefloor Magic - 4-Piece"
-      return String(fullName || "").replace("Booking:", "").split("-")[0].trim();
-    };
 
     // ----------------------------
     // Sanitize items
@@ -826,6 +844,10 @@ export const createCheckoutSession = async (req, res) => {
           it.quantity > 0
       );
 
+    if (safeItems.length === 0) {
+      return res.status(400).json({ error: "No payable items found in cartDetails." });
+    }
+
     // 🔧 Force minimum 50p for test acts (prevents Stripe <50p)
     safeItems.forEach((it) => {
       const actName = extractActName(it.name);
@@ -835,24 +857,23 @@ export const createCheckoutSession = async (req, res) => {
       }
     });
 
-    if (safeItems.length === 0) {
-      return res.status(400).json({ error: "No payable items found in cartDetails." });
-    }
-
     // ----------------------------
     // Totals (NET -> GROSS -> ROUNDING)
+    //
+    // IMPORTANT:
+    // - If FE sends a single cart-total line item, netTotal is already the UI total.
+    // - We round UP to whole pounds to match your cart behaviour.
     // ----------------------------
     const netTotal = roundToPennies(
       safeItems.reduce((sum, it) => sum + Number(it.price || 0) * Number(it.quantity || 1), 0)
     );
 
     const isTestBooking = safeItems.some((it) => isTestActName(extractActName(it.name)));
-    const pricesIncludeMargin = req.body?.pricesIncludeMargin === true;
 
     // Only apply markup if:
     // - not a test booking, AND
-    // - FE hasn’t already sent gross prices
-    const applyMarkup = !isTestBooking && !pricesIncludeMargin;
+    // - FE did NOT already include margin
+    const applyMarkup = !isTestBooking && pricesIncludeMargin !== true;
 
     const grossUnrounded = applyMarkup ? netTotal * markupFactor : netTotal;
 
@@ -860,37 +881,33 @@ export const createCheckoutSession = async (req, res) => {
     let grossTotal = roundUpToPound(grossUnrounded);
 
     // ⛑️ Safety: ensure whole-pound minimum is at least £1 for tests
-    if (isTestBooking && grossTotal < 1) {
-      console.log("⚠️ Uplifting grossTotal", grossTotal, "→ 1.00 minimum");
-      grossTotal = 1;
-    }
+    if (isTestBooking && grossTotal < 1) grossTotal = 1;
 
-    // ✅ Deposit must be exactly 33% of the rounded gross total (like cart)
+    // ✅ Deposit must be exactly 33% of the rounded gross total
     const depositGross = roundToPennies(grossTotal * depositRate);
 
     // ----------------------------
     // Payment mode logic
     // ----------------------------
-   // ----------------------------
-// Payment mode logic
-// ----------------------------
-const dte = daysUntil(date);
-const requiresFull = dte != null && dte <= 28;
-const clientHint =
-  paymentMode === "full" || paymentMode === "deposit" ? paymentMode : null;
+    const dte = daysUntil(date);
+    const requiresFull = dte != null && dte <= 28;
+    const clientHint = paymentMode === "full" || paymentMode === "deposit" ? paymentMode : null;
 
-let finalMode = requiresFull ? "full" : clientHint || "deposit";
+    let finalMode = requiresFull ? "full" : clientHint || "deposit";
 
-// ✅ force FULL for test bookings so we never try to charge a <50p deposit
-if (isTestBooking) finalMode = "full";
+    // ✅ force FULL for test bookings so we never try to charge a <50p deposit
+    if (isTestBooking) finalMode = "full";
 
-const chargeGross = finalMode === "full" ? grossTotal : depositGross;
+    const chargeGross = finalMode === "full" ? grossTotal : depositGross;
 
     // Stripe hard safety rule:
     if (!Number.isFinite(chargeGross) || chargeGross < 0.5) {
       return res.status(400).json({ error: "Calculated charge amount is invalid." });
     }
 
+    // ----------------------------
+    // Stripe line item naming
+    // ----------------------------
     const bits = [];
     if (eventType) bits.push(eventType);
     if (date) bits.push(new Date(date).toDateString());
@@ -921,7 +938,7 @@ const chargeGross = finalMode === "full" ? grossTotal : depositGross;
       clientHint,
       finalMode,
       chargeGross,
-      pricesIncludeMargin,
+      pricesIncludeMargin: pricesIncludeMargin === true,
       markupRate,
       markupFactor,
       applyMarkup,
@@ -961,7 +978,7 @@ const chargeGross = finalMode === "full" ? grossTotal : depositGross;
         deposit_rate: String(depositRate),
         markup_rate: String(markupRate),
         markup_factor: String(markupFactor),
-        prices_include_margin: String(pricesIncludeMargin),
+        prices_include_margin: String(pricesIncludeMargin === true),
         applied_markup: String(applyMarkup),
 
         event_type: eventType || "",
@@ -1001,8 +1018,8 @@ const chargeGross = finalMode === "full" ? grossTotal : depositGross;
               Array.isArray(it.bandMembers)
                 ? it.bandMembers
                 : Array.isArray(it.lineup?.bandMembers)
-                  ? it.lineup.bandMembers
-                  : [];
+                ? it.lineup.bandMembers
+                : [];
 
             return {
               ...it,
