@@ -6019,6 +6019,8 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     };
 
     const slotsArr = Array.isArray(badge?.slots) ? badge.slots : [];
+    // If any lead is available anywhere on this badge, suppress deputy client emails
+    const anyLeadAvailable = slotsArr.some(slotIsLeadAvailable);
 
     // Pick a "primary" person for the email from a slot (lead or deputy)
     const presentBadgePrimary = (slot = null) => {
@@ -6261,7 +6263,8 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       }
 
       /* -------------------------- DEPUTY AVAILABLE -------------------------- */
-      if (slotIsDeputyCovering(slot)) {
+      // Only email deputy if NO lead is available anywhere (badges still show deputy coverage per slot)
+      if (!anyLeadAvailable && slotIsDeputyCovering(slot)) {
         const depInfo = presentBadgePrimary(slot);
 
         if (depInfo?.available && depInfo?.isDeputy === true) {

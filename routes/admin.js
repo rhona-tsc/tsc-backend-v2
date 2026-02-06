@@ -1,11 +1,17 @@
 import express from "express";
-import { rebuildAndApplyAvailabilityBadge } from "./availabilityController";
+import { rebuildAndApplyAvailabilityBadge } from "../controllers/availabilityController";
 
-const router = express.Router();
+const adminRoutes = express.Router();
 
-router.post("/admin/rebuild-badge", async (req, res) => {
-  const { actId, dateISO } = req.body;
-  const result = await rebuildAndApplyAvailabilityBadge({ actId, dateISO });
-  res.json(result);
+adminRoutes.post("/admin/rebuild-badge", async (req, res) => {
+  try {
+    const { actId, dateISO } = req.body;
+    const result = await rebuildAndApplyAvailabilityBadge({ actId, dateISO });
+    res.json(result);
+  } catch (err) {
+    console.error("❌ /admin/rebuild-badge failed", err);
+    res.status(500).json({ success: false, message: err.message || "Server error" });
+  }
 });
-export default router;
+
+export default adminRoutes;
