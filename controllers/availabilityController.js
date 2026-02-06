@@ -16,6 +16,9 @@ import { computeMemberMessageFee } from "./helpersForCorrectFee.js";
 import { makeShortId } from "../utils/makeShortId.js";
 import crypto from "crypto"; // at top of file if not already
 
+const isValid24 = (v) =>
+  typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
+
 // Debugging: log AvailabilityModel structure at runtime
 console.log("📘 [twilioInbound] AvailabilityModel inspection:");
 if (AvailabilityModel?.schema?.paths) {
@@ -387,6 +390,8 @@ const normalize44 = (raw = "") =>
     .replace(/\s+/g, "")
     .replace(/^(\+44|44|0)/, "+44");
 
+
+    
 /* ========================================================================== */
 /* 👤 findCanonicalMusicianByPhone                                            */
 /* ========================================================================== */
@@ -2081,6 +2086,14 @@ async function findDateLevelUnavailable({ dateISO, canonicalId, phone }) {
     .lean();
 }
 
+import crypto from "crypto";
+import mongoose from "mongoose";
+import Act from "../models/actModel.js";
+import AvailabilityModel from "../models/availabilityModel.js";
+import Musician from "../models/musicianModel.js";
+import { triggerAvailabilityRequest } from "./triggerAvailabilityRequest.js";
+// import { normalizePhone } from "../utils/normalizePhone.js"; // wherever yours lives
+
 export const ensureVocalistAvailabilityForLineup = async (req, res) => {
   try {
     const {
@@ -2102,21 +2115,28 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
 
     const fullAddress = formattedAddress || address || "TBC";
     if (!actId || !resolvedDateISO || !fullAddress) {
-      return res.status(400).json({ success: false, message: "Missing actId/dateISO/address" });
+      return res.status(400).json({
+        success: false,
+        message: "Missing actId/dateISO/address",
+      });
     }
 
     // Prefer auth user when available
     const authUserId = req?.user?._id ? String(req.user._id) : null;
     const clientUserId = authUserId || (clientUserIdBody ? String(clientUserIdBody) : null);
 
-    // Pull the act + lineup
+    // Pull act + lineup
     const act = await Act.findById(actId).lean();
     if (!act) return res.status(404).json({ success: false, message: "Act not found" });
 
     const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
     const lineup =
       (lineupId
-        ? lineups.find((l) => String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId))
+        ? lineups.find(
+            (l) =>
+              String(l._id) === String(lineupId) ||
+              String(l.lineupId) === String(lineupId),
+          )
         : null) || lineups[0];
 
     if (!lineup) {
@@ -2124,9 +2144,22 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
     }
 
     const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
-    const vocalists = members.filter((m) => (m.instrument || "").toLowerCase().includes("vocal"));
 
-    if (!vocalists.length) {
+    // ✅ include MC/Rapper as a "vocal contact"
+    const isVocalContact = (m) => {
+      const inst = String(m?.instrument || "").toLowerCase();
+      return (
+        inst.includes("vocal") ||
+        inst.includes("rapper") ||
+        inst.includes("mc") ||
+        inst.includes("vox") ||
+        inst.includes("singer")
+      );
+    };
+
+    const contacts = members.filter(isVocalContact);
+
+    if (!contacts.length) {
       return res.json({ success: true, ensured: 0, reused: 0, triggered: 0, details: [] });
     }
 
@@ -2151,8 +2184,6 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
       return A2 && B2 && (A2 === B2 || A2.includes(B2) || B2.includes(A2));
     };
 
-    // NOTE: use the SAME requestKey generator that triggerAvailabilityRequest uses.
-    // If you keep makeRequestKey inside triggerAvailabilityRequest, copy that exact logic here.
     const normalizeAddrStrict = (s = "") =>
       String(s || "")
         .toLowerCase()
@@ -2180,7 +2211,25 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
       address: fullAddress,
     });
 
-    const results = [];
+    // ✅ Resolve canonical musician by email/phone (NEVER use bandMember _id)
+    const findCanonicalMusician = async ({ email, phone }) => {
+      const e = String(email || "").trim().toLowerCase();
+      const p = normalizePhone(phone || "");
+
+      if (e) {
+        const byEmail = await Musician.findOne({ email: e }).select("_id email phoneNumber phone").lean();
+        if (byEmail?._id) return byEmail;
+      }
+
+      if (p) {
+        const byPhone = await Musician.findOne({
+          $or: [{ phoneNumber: p }, { phone: p }],
+        }).select("_id email phoneNumber phone").lean();
+        if (byPhone?._id) return byPhone;
+      }
+
+      return null;
+    };
 
     // 🔎 Fast pull: all rows for this act/date (so we can reuse quickly)
     const existingRows = await AvailabilityModel.find({
@@ -2188,51 +2237,81 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
       dateISO: resolvedDateISO,
       v2: true,
     })
-      .select("musicianId phone slotIndex reply updatedAt repliedAt isDeputy formattedAddress requestKey status photoUrl profileUrl musicianName vocalistName selectedVocalistName duties fee musicianEmail")
+      .select(
+        "musicianId phone musicianEmail slotIndex reply updatedAt repliedAt isDeputy formattedAddress requestKey status photoUrl profileUrl musicianName vocalistName selectedVocalistName duties fee",
+      )
       .lean();
 
-    for (let i = 0; i < vocalists.length; i++) {
-      const v = vocalists[i];
+    // ✅ stable ordering (so slotIndex doesn’t jump around)
+    const sortedContacts = [...contacts].sort((a, b) => {
+      const ai = String(a.instrument || "").toLowerCase();
+      const bi = String(b.instrument || "").toLowerCase();
+      if (ai !== bi) return ai.localeCompare(bi);
+      const ae = String(a.email || "").toLowerCase();
+      const be = String(b.email || "").toLowerCase();
+      if (ae !== be) return ae.localeCompare(be);
+      const ap = normalizePhone(a.phoneNumber || a.phone || "");
+      const bp = normalizePhone(b.phoneNumber || b.phone || "");
+      return ap.localeCompare(bp);
+    });
+
+    const results = [];
+
+    for (let i = 0; i < sortedContacts.length; i++) {
+      const v = sortedContacts[i];
       const slotIndex = i;
 
-      // Canonical musician id is critical for reuse
-      let canonicalId = v?.musicianId || v?._id || null;
+      const email = String(v.email || "").trim().toLowerCase();
+      const phone = normalizePhone(v.phoneNumber || v.phone || "");
 
-      // Try to canonicalise by phone if needed
-      const phone = normalizePhone(v.phone || v.phoneNumber || "");
-      if (!canonicalId && phone) {
-        const canonical = await findCanonicalMusicianByPhone(phone);
-        canonicalId = canonical?._id || null;
-      }
+      const canonical = await findCanonicalMusician({ email, phone });
+      const canonicalId = canonical?._id || null;
 
-      // 1) If slot row already exists for this requestKey + slotIndex and matches this musician, do nothing
+      // 1) If slot row already exists for this requestKey+slotIndex for this person, do nothing
       const hasSlotAlready = existingRows.find((r) => {
         const sameSlot = Number(r.slotIndex ?? -1) === slotIndex;
         const sameReq = String(r.requestKey || "") === String(requestKey || "");
-        const sameMus = canonicalId && r.musicianId ? String(r.musicianId) === String(canonicalId) : false;
-        return sameSlot && sameReq && sameMus;
+
+        // Prefer canonicalId match if we have it
+        if (canonicalId && r.musicianId) {
+          return sameSlot && sameReq && String(r.musicianId) === String(canonicalId);
+        }
+
+        // Otherwise fallback to phone/email match
+        const samePhone = phone && r.phone && normalizePhone(r.phone) === phone;
+        const sameEmail = email && r.musicianEmail && String(r.musicianEmail).toLowerCase() === email;
+        return sameSlot && sameReq && (samePhone || sameEmail);
       });
 
       if (hasSlotAlready) {
-        results.push({ slotIndex, action: "exists", musicianId: String(canonicalId || ""), reply: hasSlotAlready.reply || null });
+        results.push({
+          slotIndex,
+          action: "exists",
+          musicianId: canonicalId ? String(canonicalId) : null,
+          reply: hasSlotAlready.reply || null,
+        });
         continue;
       }
 
-      // 2) Reuse: find any prior row for same musician + same location (any slotIndex, any requestKey)
+      // 2) Reuse any prior decisive reply for same person + roughly same location
       let reusable = null;
-      if (canonicalId) {
-        const candidates = existingRows
-          .filter((r) => r.musicianId && String(r.musicianId) === String(canonicalId))
-          .filter((r) => r.reply && ["yes", "no", "unavailable", "noloc", "nolocation"].includes(r.reply))
-          .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
 
-        reusable = candidates.find((r) =>
-          addressesRoughlyEqual(r.formattedAddress || "", fullAddress),
-        );
-      }
+      const candidates = existingRows
+        .filter((r) => {
+          const decisive = r.reply && ["yes", "no", "unavailable", "noloc", "nolocation"].includes(r.reply);
+          if (!decisive) return false;
+
+          if (canonicalId && r.musicianId) return String(r.musicianId) === String(canonicalId);
+
+          const samePhone = phone && r.phone && normalizePhone(r.phone) === phone;
+          const sameEmail = email && r.musicianEmail && String(r.musicianEmail).toLowerCase() === email;
+          return samePhone || sameEmail;
+        })
+        .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+
+      reusable = candidates.find((r) => addressesRoughlyEqual(r.formattedAddress || "", fullAddress));
 
       if (reusable) {
-        // ✅ Upsert slot row with reused reply, no WhatsApp send
         const now = new Date();
 
         await AvailabilityModel.findOneAndUpdate(
@@ -2253,8 +2332,9 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
             },
             $set: {
               isDeputy: false,
-              musicianId: reusable.musicianId,
+              musicianId: canonicalId || reusable.musicianId || null,
               phone: reusable.phone || phone || null,
+              musicianEmail: reusable.musicianEmail || email || "",
               reply: reusable.reply,
               repliedAt: reusable.repliedAt || reusable.updatedAt || now,
               updatedAt: now,
@@ -2262,12 +2342,11 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
               address: fullAddress,
               photoUrl: reusable.photoUrl || "",
               profileUrl: reusable.profileUrl || "",
-              musicianName: reusable.musicianName || v.firstName || "",
+              musicianName: reusable.musicianName || `${v.firstName || ""} ${v.lastName || ""}`.trim(),
               vocalistName: reusable.vocalistName || reusable.selectedVocalistName || "",
               selectedVocalistName: reusable.selectedVocalistName || "",
               duties: reusable.duties || v.instrument || "Vocalist",
               fee: reusable.fee || "",
-              musicianEmail: reusable.musicianEmail || "",
               clientName: clientName || "",
               clientEmail: clientEmail || "",
             },
@@ -2278,14 +2357,14 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
         results.push({
           slotIndex,
           action: "reused",
-          musicianId: String(canonicalId || ""),
+          musicianId: canonicalId ? String(canonicalId) : null,
           reusedFrom: String(reusable._id),
           reply: reusable.reply,
         });
         continue;
       }
 
-      // 3) Otherwise trigger WhatsApp for THIS vocalist slot (targeted)
+      // 3) Otherwise trigger WhatsApp for this contact
       const trigRes = await triggerAvailabilityRequest(
         {
           actId,
@@ -2300,9 +2379,11 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
           slotIndex,
           targetMember: {
             ...v,
-            musicianId: canonicalId || v?.musicianId || null,
+            // ✅ store canonical musician id if we found it
+            musicianId: canonicalId ? String(canonicalId) : null,
+            musicianEmail: email || null,
+            phone: phone || null,
           },
-          // Important: allow triggerAvailabilityRequest to run its guards
           skipDuplicateCheck: !!skipDuplicateCheck,
         },
         null,
@@ -2311,20 +2392,20 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
       results.push({
         slotIndex,
         action: "triggered",
-        musicianId: String(canonicalId || ""),
+        musicianId: canonicalId ? String(canonicalId) : null,
         trigger: trigRes?.success ? "ok" : "failed",
       });
     }
 
-    const reused = results.filter((r) => r.action === "reused").length;
-    const triggered = results.filter((r) => r.action === "triggered").length;
+    const reusedCount = results.filter((r) => r.action === "reused").length;
+    const triggeredCount = results.filter((r) => r.action === "triggered").length;
 
     return res.json({
       success: true,
       requestKey,
       ensured: results.length,
-      reused,
-      triggered,
+      reused: reusedCount,
+      triggered: triggeredCount,
       details: results,
     });
   } catch (err) {
@@ -5056,6 +5137,8 @@ export const makeAvailabilityBroadcaster = (broadcastFn) => {
   };
 };
 
+
+
 export async function buildAvailabilityBadgeFromRows({
   actId,
   dateISO,
@@ -5107,10 +5190,10 @@ export async function buildAvailabilityBadgeFromRows({
       isDeputy: r.isDeputy,
       musicianId: r.musicianId,
       vocalistName: r.vocalistName,
-      photoUrl: r.photoUrl,
-      profileUrl: r.profileUrl,
+      musicianName: r.musicianName,
+      selectedVocalistName: r.selectedVocalistName,
       phone: r.phone,
-      formattedAddress: r.formattedAddress,
+      musicianEmail: r.musicianEmail,
     })),
   );
 
@@ -5153,15 +5236,32 @@ export async function buildAvailabilityBadgeFromRows({
       : firstName;
     return { firstName, lastName, displayName };
   };
+
+  // Prefer whatever “human label” exists on the row if musician lookup fails
+  const fallbackRowName = (r) =>
+    String(
+      r?.selectedVocalistName ||
+        r?.vocalistName ||
+        r?.musicianName ||
+        "",
+    ).trim();
   // ---------- end helpers ----------
 
-  // Cache musician docs for name fallbacks
+  // ✅ Cache musician docs for name fallbacks (ONLY valid ObjectIds)
   const ids = [
-    ...new Set(rows.map(r => r.musicianId).filter(Boolean).map(String)),
+    ...new Set(
+      rows
+        .map((r) => (r?.musicianId ? String(r.musicianId) : ""))
+        .filter((id) => isValid24(id)),
+    ),
   ];
-  const musDocs = await Musician.find({ _id: { $in: ids } })
-    .select("firstName lastName displayName preferredName name")
-    .lean();
+
+  const musDocs = ids.length
+    ? await Musician.find({ _id: { $in: ids } })
+        .select("firstName lastName displayName preferredName name")
+        .lean()
+    : [];
+
   const musById = Object.fromEntries(musDocs.map((m) => [String(m._id), m]));
 
   // Group by slotIndex (default 0)
@@ -5200,6 +5300,8 @@ export async function buildAvailabilityBadgeFromRows({
       try {
         leadDisplayBits = await getDeputyDisplayBits({
           musicianId: leadReply.musicianId,
+          phone: leadReply.phone,
+          email: leadReply.musicianEmail,
         });
       } catch (e) {
         console.warn("getDeputyDisplayBits (lead) failed:", e?.message);
@@ -5271,17 +5373,8 @@ export async function buildAvailabilityBadgeFromRows({
       }
     }
 
-    console.log("🖼️ PHOTO CHECK", {
-      slotKey,
-      lead_from_bits: leadDisplayBits?.photoUrl,
-      lead_from_row: leadReply?.photoUrl,
-      lead_final: leadPhoto,
-      lead_isHttp: isHttp(leadPhoto),
-      deputies_with_photos: deputies.filter((d) => isHttp(d.photoUrl)).length,
-    });
-
     // --- slot status ---
-    const leadState = leadReply?.reply || "pending"; // yes | no | unavailable | noloc | nolocation | pending
+    const leadState = leadReply?.reply || "pending";
     const anyYesDeputy = deputies.some((d) => d.available);
     const anyDeputy = deputies.length > 0;
 
@@ -5290,8 +5383,8 @@ export async function buildAvailabilityBadgeFromRows({
     );
     const firstDeputyWithPhoto = deputies.find((d) => isHttp(d.photoUrl));
 
-    // --- covering state (separate from primary visual) ---
-    let covering = "none"; // lead | deputy | pending_deputies | none
+    // --- covering state ---
+    let covering = "none";
     if (leadState === "yes") covering = "lead";
     else if (anyYesDeputy) covering = "deputy";
     else if (leadState !== "pending" && anyDeputy) covering = "pending_deputies";
@@ -5307,13 +5400,10 @@ export async function buildAvailabilityBadgeFromRows({
           ? "lead_no"
           : leadState === "noloc" || leadState === "nolocation"
             ? "lead_no_location"
-            : leadState === "pending"
-              ? "none"
-              : "lead_other";
+            : "none";
 
     // --- primary visual ---
     let primary = null;
-
     if (leadState === "yes" && isHttp(leadBits?.photoUrl)) {
       primary = leadBits;
     } else if (anyYesDeputy) {
@@ -5321,7 +5411,6 @@ export async function buildAvailabilityBadgeFromRows({
     } else if (leadState !== "yes" && anyDeputy) {
       primary = firstDeputyWithPhoto || deputies[0] || null;
     } else if (isHttp(leadBits?.photoUrl)) {
-      // safe fallback: show lead headshot if no deputies exist
       primary = leadBits;
     }
 
@@ -5335,33 +5424,33 @@ export async function buildAvailabilityBadgeFromRows({
         leadReply?.vocalistName ||
         leadReply?.musicianName ||
         pickDisplayName(leadMus) ||
+        (leadReply ? fallbackRowName(leadReply) : "") ||
         "",
     ).trim();
 
     if (leadBits) leadBits.vocalistName = chosenName;
 
-    // --- precompute legacy fields to mirror primary ---
+    // --- legacy fields to mirror primary ---
     const legacyIsDeputy = Boolean(primary?.isDeputy);
     const legacyVocalistName = String(primary?.vocalistName || chosenName || "").trim();
     const legacyMusicianId =
       (primary?.musicianId && String(primary.musicianId)) ||
       leadBits?.musicianId ||
-      (leadReply ? String(leadReply.musicianId) : null);
+      (leadReply?.musicianId ? String(leadReply.musicianId) : null);
     const legacyPhotoUrl = primary?.photoUrl || leadBits?.photoUrl || null;
     const legacyProfileUrl = primary?.profileUrl || leadBits?.profileUrl || "";
 
-    // --- final slot object ---
     const slotObj = {
       slotIndex: Number(slotKey),
 
-      // legacy fields (kept) — mirror primary to avoid UI regressions
+      // legacy
       isDeputy: legacyIsDeputy,
       vocalistName: legacyVocalistName,
       musicianId: legacyMusicianId,
       photoUrl: legacyPhotoUrl,
       profileUrl: legacyProfileUrl,
 
-      // structured fields
+      // structured
       deputies,
       setAt: leadReply?.updatedAt || null,
       state: leadState,
@@ -5399,11 +5488,11 @@ export async function buildAvailabilityBadgeFromRows({
       slotIndex: slotObj.slotIndex,
     });
 
-    // ✅ THIS WAS MISSING IN YOUR VERSION
     slots.push(slotObj);
-  } // ✅ CLOSES for (slotKey)
+  }
 
-  const anyAddress = rows.find((r) => r.formattedAddress)?.formattedAddress || "TBC";
+  const anyAddress =
+    rows.find((r) => r.formattedAddress)?.formattedAddress || "TBC";
   const badge = { dateISO, address: anyAddress, active: true, slots };
 
   console.log("💜 FINAL BADGE (identity snapshot):", {
