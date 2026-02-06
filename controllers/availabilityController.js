@@ -5437,7 +5437,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
 
   const actDoc = await Act.findById(actId)
     .select(
-      "+availabilityBadgesMeta lineups tscName name formattedAddress venueAddress " +
+      "+availabilityBadgesMeta lineups tscName name slug tscSlug formattedAddress venueAddress " +
         "coverImage images profileImage description tscDescription paSystem lightingSystem " +
         "extras numberOfSets lengthOfSets repertoire tscRepertoire selectedSongs repertoireByYear " +
         "setlist offRepertoireRequests useCountyTravelFee countyFees travelModel costPerMile",
@@ -5807,8 +5807,26 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       actDoc?.venueAddress ||
       "TBC";
 
-    const profileUrl = `${SITE}act/${actDoc._id}`;
-    const cartUrl = `${SITE}act/${actDoc._id}?date=${dateISO}&address=${encodeURIComponent(
+    // Prefer slug URLs for nicer links (fallback to _id)
+    const slugify = (v = "") =>
+      String(v || "")
+        .trim()
+        .toLowerCase()
+        .replace(/&/g, "and")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+
+    const actSlug =
+      (typeof actDoc?.slug === "string" && actDoc.slug.trim() ? actDoc.slug.trim() : "") ||
+      (typeof actDoc?.tscSlug === "string" && actDoc.tscSlug.trim()
+        ? actDoc.tscSlug.trim()
+        : "") ||
+      slugify(actDoc?.tscName || actDoc?.name || "");
+
+    const actPath = actSlug ? `${SITE}act/${actSlug}` : `${SITE}act/${actDoc._id}`;
+
+    const profileUrl = actPath;
+    const cartUrl = `${actPath}?date=${encodeURIComponent(dateISO)}&address=${encodeURIComponent(
       selectedAddress,
     )}`;
 
