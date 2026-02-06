@@ -8,6 +8,7 @@ import {
   clearavailabilityBadges,
   triggerAvailabilityRequest,
   twilioStatus,
+  ensureVocalistAvailabilityForLineup,
 } from "../controllers/availabilityController.js";
 import { makeAvailabilityBroadcaster } from "../controllers/availabilityController.js";
 import { applyFeaturedBadgeOnYesV3 } from "../controllers/applyFeaturedBadgeOnYesV2.js";
@@ -369,6 +370,9 @@ router.post("/request", async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 });
+
+// routes/availabilityRoutes.js (or wherever)
+router.post("/ensure-vocalists", ensureVocalistAvailabilityForLineup);
 
 /* -------------------------------------------------------------------------- */
 /* 🟡 PATCH /act/:id/increment-shortlist – increment shortlist counter        */

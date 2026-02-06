@@ -2081,6 +2081,258 @@ async function findDateLevelUnavailable({ dateISO, canonicalId, phone }) {
     .lean();
 }
 
+export const ensureVocalistAvailabilityForLineup = async (req, res) => {
+  try {
+    const {
+      actId,
+      lineupId,
+      dateISO,
+      date,
+      formattedAddress,
+      address,
+      enquiryId = null,
+      clientUserId: clientUserIdBody = null,
+      clientName = "",
+      clientEmail = "",
+      skipDuplicateCheck = false,
+    } = req.body || {};
+
+    const resolvedDateISO =
+      dateISO || (date ? new Date(date).toISOString().slice(0, 10) : null);
+
+    const fullAddress = formattedAddress || address || "TBC";
+    if (!actId || !resolvedDateISO || !fullAddress) {
+      return res.status(400).json({ success: false, message: "Missing actId/dateISO/address" });
+    }
+
+    // Prefer auth user when available
+    const authUserId = req?.user?._id ? String(req.user._id) : null;
+    const clientUserId = authUserId || (clientUserIdBody ? String(clientUserIdBody) : null);
+
+    // Pull the act + lineup
+    const act = await Act.findById(actId).lean();
+    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
+
+    const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
+    const lineup =
+      (lineupId
+        ? lineups.find((l) => String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId))
+        : null) || lineups[0];
+
+    if (!lineup) {
+      return res.status(400).json({ success: false, message: "Lineup not found" });
+    }
+
+    const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+    const vocalists = members.filter((m) => (m.instrument || "").toLowerCase().includes("vocal"));
+
+    if (!vocalists.length) {
+      return res.json({ success: true, ensured: 0, reused: 0, triggered: 0, details: [] });
+    }
+
+    // ---- helpers (local) ----
+    const normalizeAddr = (s = "") =>
+      String(s || "")
+        .toLowerCase()
+        .replace(/\buk\b/g, "")
+        .replace(/\s+/g, " ")
+        .replace(/,\s*/g, ",")
+        .trim();
+
+    const lastTwoParts = (s = "") => normalizeAddr(s).split(",").slice(-2).join(",");
+
+    const addressesRoughlyEqual = (a = "", b = "") => {
+      if (!a || !b) return false;
+      const A = normalizeAddr(a);
+      const B = normalizeAddr(b);
+      if (A === B) return true;
+      const A2 = lastTwoParts(a);
+      const B2 = lastTwoParts(b);
+      return A2 && B2 && (A2 === B2 || A2.includes(B2) || B2.includes(A2));
+    };
+
+    // NOTE: use the SAME requestKey generator that triggerAvailabilityRequest uses.
+    // If you keep makeRequestKey inside triggerAvailabilityRequest, copy that exact logic here.
+    const normalizeAddrStrict = (s = "") =>
+      String(s || "")
+        .toLowerCase()
+        .replace(/\buk\b/g, "")
+        .replace(/\s+/g, " ")
+        .replace(/,\s*/g, ",")
+        .trim();
+
+    const makeRequestKey = ({ scope, actId, dateISO, address }) => {
+      const raw = [
+        String(scope || "anon").trim(),
+        String(actId || "").trim(),
+        String(dateISO || "").trim(),
+        normalizeAddrStrict(address || ""),
+      ].join("|");
+
+      return crypto.createHash("sha1").update(raw).digest("hex").slice(0, 16);
+    };
+
+    const requestScope = enquiryId || clientUserId || "anon";
+    const requestKey = makeRequestKey({
+      scope: requestScope,
+      actId,
+      dateISO: resolvedDateISO,
+      address: fullAddress,
+    });
+
+    const results = [];
+
+    // 🔎 Fast pull: all rows for this act/date (so we can reuse quickly)
+    const existingRows = await AvailabilityModel.find({
+      actId,
+      dateISO: resolvedDateISO,
+      v2: true,
+    })
+      .select("musicianId phone slotIndex reply updatedAt repliedAt isDeputy formattedAddress requestKey status photoUrl profileUrl musicianName vocalistName selectedVocalistName duties fee musicianEmail")
+      .lean();
+
+    for (let i = 0; i < vocalists.length; i++) {
+      const v = vocalists[i];
+      const slotIndex = i;
+
+      // Canonical musician id is critical for reuse
+      let canonicalId = v?.musicianId || v?._id || null;
+
+      // Try to canonicalise by phone if needed
+      const phone = normalizePhone(v.phone || v.phoneNumber || "");
+      if (!canonicalId && phone) {
+        const canonical = await findCanonicalMusicianByPhone(phone);
+        canonicalId = canonical?._id || null;
+      }
+
+      // 1) If slot row already exists for this requestKey + slotIndex and matches this musician, do nothing
+      const hasSlotAlready = existingRows.find((r) => {
+        const sameSlot = Number(r.slotIndex ?? -1) === slotIndex;
+        const sameReq = String(r.requestKey || "") === String(requestKey || "");
+        const sameMus = canonicalId && r.musicianId ? String(r.musicianId) === String(canonicalId) : false;
+        return sameSlot && sameReq && sameMus;
+      });
+
+      if (hasSlotAlready) {
+        results.push({ slotIndex, action: "exists", musicianId: String(canonicalId || ""), reply: hasSlotAlready.reply || null });
+        continue;
+      }
+
+      // 2) Reuse: find any prior row for same musician + same location (any slotIndex, any requestKey)
+      let reusable = null;
+      if (canonicalId) {
+        const candidates = existingRows
+          .filter((r) => r.musicianId && String(r.musicianId) === String(canonicalId))
+          .filter((r) => r.reply && ["yes", "no", "unavailable", "noloc", "nolocation"].includes(r.reply))
+          .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+
+        reusable = candidates.find((r) =>
+          addressesRoughlyEqual(r.formattedAddress || "", fullAddress),
+        );
+      }
+
+      if (reusable) {
+        // ✅ Upsert slot row with reused reply, no WhatsApp send
+        const now = new Date();
+
+        await AvailabilityModel.findOneAndUpdate(
+          { actId, dateISO: resolvedDateISO, requestKey, slotIndex },
+          {
+            $setOnInsert: {
+              actId,
+              lineupId: lineup?._id || null,
+              dateISO: resolvedDateISO,
+              requestKey,
+              enquiryId: enquiryId || null,
+              clientUserId: clientUserId || null,
+              slotIndex,
+              v2: true,
+              createdAt: now,
+              status: "reused",
+              reusedFromAvailabilityId: reusable._id,
+            },
+            $set: {
+              isDeputy: false,
+              musicianId: reusable.musicianId,
+              phone: reusable.phone || phone || null,
+              reply: reusable.reply,
+              repliedAt: reusable.repliedAt || reusable.updatedAt || now,
+              updatedAt: now,
+              formattedAddress: fullAddress,
+              address: fullAddress,
+              photoUrl: reusable.photoUrl || "",
+              profileUrl: reusable.profileUrl || "",
+              musicianName: reusable.musicianName || v.firstName || "",
+              vocalistName: reusable.vocalistName || reusable.selectedVocalistName || "",
+              selectedVocalistName: reusable.selectedVocalistName || "",
+              duties: reusable.duties || v.instrument || "Vocalist",
+              fee: reusable.fee || "",
+              musicianEmail: reusable.musicianEmail || "",
+              clientName: clientName || "",
+              clientEmail: clientEmail || "",
+            },
+          },
+          { upsert: true, new: true },
+        );
+
+        results.push({
+          slotIndex,
+          action: "reused",
+          musicianId: String(canonicalId || ""),
+          reusedFrom: String(reusable._id),
+          reply: reusable.reply,
+        });
+        continue;
+      }
+
+      // 3) Otherwise trigger WhatsApp for THIS vocalist slot (targeted)
+      const trigRes = await triggerAvailabilityRequest(
+        {
+          actId,
+          lineupId: lineup?._id || lineupId || null,
+          dateISO: resolvedDateISO,
+          formattedAddress: fullAddress,
+          address: fullAddress,
+          enquiryId: enquiryId || null,
+          userId: clientUserId || null,
+          clientName,
+          clientEmail,
+          slotIndex,
+          targetMember: {
+            ...v,
+            musicianId: canonicalId || v?.musicianId || null,
+          },
+          // Important: allow triggerAvailabilityRequest to run its guards
+          skipDuplicateCheck: !!skipDuplicateCheck,
+        },
+        null,
+      );
+
+      results.push({
+        slotIndex,
+        action: "triggered",
+        musicianId: String(canonicalId || ""),
+        trigger: trigRes?.success ? "ok" : "failed",
+      });
+    }
+
+    const reused = results.filter((r) => r.action === "reused").length;
+    const triggered = results.filter((r) => r.action === "triggered").length;
+
+    return res.json({
+      success: true,
+      requestKey,
+      ensured: results.length,
+      reused,
+      triggered,
+      details: results,
+    });
+  } catch (err) {
+    console.error("❌ ensureVocalistAvailabilityForLineup error:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   const isExpress = !!maybeRes;
   const body = isExpress ? reqOrArgs.body : reqOrArgs;
@@ -2327,45 +2579,63 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       fullFormattedAddress,
     });
 
-    // ✅ EARLY DUPLICATE GUARD (prevents re-trigger on shortlist/cart browsing)
-    if (!skipDuplicateCheck) {
-      const existingRequest = await AvailabilityModel.findOne({
-        actId,
-        dateISO,
-        v2: true,
+    
+      // ✅ EARLY DUPLICATE GUARD (slot-aware; prevents resend when user clicks around)
+if (!skipDuplicateCheck) {
+  const slotGuard =
+    typeof body.slotIndex === "number" ? { slotIndex: body.slotIndex } : {};
+
+  const phoneGuard = (() => {
+    const p = normalizePhone(
+      body?.targetMember?.phone ||
+        body?.targetMember?.phoneNumber ||
+        body?.phone ||
+        ""
+    );
+    return p ? { phone: p } : {};
+  })();
+
+  const musicianGuard = body?.targetMember?.musicianId
+    ? { musicianId: body.targetMember.musicianId }
+    : body?.targetMusicianId
+      ? { musicianId: body.targetMusicianId }
+      : {};
+
+  const existingRequest = await AvailabilityModel.findOne({
+    actId,
+    dateISO,
+    v2: true,
+    requestKey,
+    ...slotGuard,
+    // if we can, guard per musician/phone too
+    ...(Object.keys(musicianGuard).length ? musicianGuard : {}),
+    ...(Object.keys(phoneGuard).length ? phoneGuard : {}),
+    status: { $in: ["sent", "queued"] },
+  })
+    .select("_id status createdAt updatedAt enquiryId clientUserId slotIndex phone musicianId")
+    .lean();
+
+  if (existingRequest) {
+    console.log("🛑 [triggerAvailabilityRequest] already requested — skipping", {
+      requestKey,
+      existingId: String(existingRequest._id),
+      status: existingRequest.status,
+      slotIndex: existingRequest.slotIndex,
+      phone: existingRequest.phone,
+      musicianId: existingRequest.musicianId,
+    });
+
+    if (res) {
+      return res.json({
+        success: true,
+        sent: 0,
+        skipped: "already_requested_for_slot",
         requestKey,
-        status: { $in: ["sent", "queued"] }, // adjust if you use other statuses
-      })
-        .select("_id status createdAt updatedAt enquiryId clientUserId")
-        .lean();
-
-      if (existingRequest) {
-        console.log(
-          "🛑 [triggerAvailabilityRequest] already requested — skipping",
-          {
-            requestKey,
-            existingId: String(existingRequest._id),
-            status: existingRequest.status,
-            createdAt: existingRequest.createdAt,
-          },
-        );
-
-        if (res) {
-          return res.json({
-            success: true,
-            sent: 0,
-            skipped: "already_requested_for_date_location",
-            requestKey,
-          });
-        }
-        return {
-          success: true,
-          sent: 0,
-          skipped: "already_requested_for_date_location",
-          requestKey,
-        };
-      }
+      });
     }
+    return { success: true, sent: 0, skipped: "already_requested_for_slot", requestKey };
+  }
+}
 
     /* -------------------------------------------------------------- */
     /* 🎵 Lineup + members                                            */
@@ -2824,9 +3094,15 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     /* -------------------------------------------------------------- */
     /* 🎤 SINGLE VOCALIST / DEPUTY PATH                               */
     /* -------------------------------------------------------------- */
-    const targetMember = isDeputy
-      ? deputy
-      : findVocalistPhone(act, lineup?._id || lineupId)?.vocalist;
+   // ✅ Allow caller to explicitly target a vocalist member (for lineup-change ensures)
+const targetedFromBody =
+  body?.targetMember ||
+  body?.targetVocalist ||
+  null;
+
+const targetMember = isDeputy
+  ? deputy
+  : targetedFromBody || findVocalistPhone(act, lineup?._id || lineupId)?.vocalist;
 
     if (!targetMember) throw new Error("No valid member found");
 
@@ -3664,8 +3940,10 @@ export const twilioInbound = async (req, res) => {
         } catch {}
 
         if (requestId) requestId = requestId.toUpperCase();
-        if (!reply) reply = "no"; // very defensive default
-
+if (!reply) {
+  console.log("ℹ️ Unclassified inbound message — ignoring", { bodyText, btnText, btnId });
+  return;
+}
         const sender = normE164(fromRaw);
 
         console.log("📥 [twilioInbound] RAW SNAPSHOT", {
@@ -3722,7 +4000,7 @@ export const twilioInbound = async (req, res) => {
 
         if (!updated && repliedSid) {
           updated = await AvailabilityModel.findOneAndUpdate(
-            { outboundSid: repliedSid },
+             { messageSidOut: repliedSid },
             {
               $set: {
                 reply,
@@ -4345,26 +4623,23 @@ export const twilioInbound = async (req, res) => {
             );
           }
 
-          // 🔒 Lock meta so lead badge stays cleared if appropriate
-          const update = {
-            $unset: {
-              [`availabilityBadges.${dateISO}`]: "",
-              [`availabilityBadges.${dateISO}_tbc`]: "",
-            },
-          };
-          if (
-            !isDeputy &&
-            ["unavailable", "no", "noloc", "nolocation"].includes(reply)
-          ) {
-            update.$set = {
-              [`availabilityBadgesMeta.${dateISO}.lockedByLeadUnavailable`]: true,
-            };
-          }
-          await Act.updateOne({ _id: actId }, update);
-          console.log(
-            "🔒 Lead marked UNAVAILABLE — badge locked for date:",
-            dateISO,
-          );
+       // ✅ Record lead unavailable state, but DO NOT lock or clear badge
+if (!isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply)) {
+  await Act.updateOne(
+    { _id: actId },
+    {
+      $set: {
+        [`availabilityBadgesMeta.${dateISO}.leadReply`]: reply, // or "unavailable"
+        [`availabilityBadgesMeta.${dateISO}.leadUnavailableAt`]: new Date(),
+      },
+      $unset: {
+        // if you previously used the lock, remove it so badge can build again
+        [`availabilityBadgesMeta.${dateISO}.lockedByLeadUnavailable`]: "",
+      },
+    },
+  );
+  console.log("🟠 Lead marked unavailable (state saved, no lock):", dateISO);
+}
 
           // 📡 SSE: push rebuilt badge to clients
           if (rebuilt?.badge && global.availabilityNotify?.badgeUpdated) {
@@ -4795,8 +5070,13 @@ export async function buildAvailabilityBadgeFromRows({
   const rows = await AvailabilityModel.find({
     actId,
     dateISO,
-    reply: { $in: ["yes", "no", "unavailable", null] },
     v2: true,
+    $or: [
+      { reply: { $in: ["yes", "no", "unavailable", "noloc", "nolocation"] } },
+      { reply: null },
+      { reply: "" },
+      { reply: { $exists: false } },
+    ],
   })
     .select(
       [
@@ -4807,7 +5087,7 @@ export async function buildAvailabilityBadgeFromRows({
         "repliedAt",
         "isDeputy",
         "photoUrl",
-        "profileUrl", // ✅ you referenced this later but weren't selecting it
+        "profileUrl",
         "phone",
         "musicianEmail",
         "formattedAddress",
@@ -4877,23 +5157,21 @@ export async function buildAvailabilityBadgeFromRows({
 
   // Cache musician docs for name fallbacks
   const ids = [
-    ...new Set(rows.map((r) => String(r.musicianId)).filter(Boolean)),
+    ...new Set(rows.map(r => r.musicianId).filter(Boolean).map(String)),
   ];
   const musDocs = await Musician.find({ _id: { $in: ids } })
     .select("firstName lastName displayName preferredName name")
     .lean();
   const musById = Object.fromEntries(musDocs.map((m) => [String(m._id), m]));
 
+  // Group by slotIndex (default 0)
   const groupedBySlot = rows.reduce((acc, row) => {
     const key = String(row.slotIndex ?? 0);
     (acc[key] ||= []).push(row);
     return acc;
   }, {});
 
-  console.log(
-    "📦 buildBadge: rows grouped by slot:",
-    Object.keys(groupedBySlot),
-  );
+  console.log("📦 buildBadge: rows grouped by slot:", Object.keys(groupedBySlot));
 
   const slots = [];
   const orderedKeys = Object.keys(groupedBySlot).sort(
@@ -4901,18 +5179,20 @@ export async function buildAvailabilityBadgeFromRows({
   );
 
   for (const slotKey of orderedKeys) {
-    const slotRows = groupedBySlot[slotKey];
+    const slotRows = groupedBySlot[slotKey] || [];
     console.log(`🟨 SLOT ${slotKey} — raw rows:`, slotRows.length);
 
     const leadRows = slotRows.filter((r) => r.isDeputy !== true);
     const deputyRows = slotRows.filter((r) => r.isDeputy === true);
 
+    // Treat noloc/nolocation as a negative lead state
     const leadReply =
       leadRows
-        .filter((r) => ["yes", "no", "unavailable"].includes(r.reply))
-        .sort(
-          (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0),
-        )[0] || null;
+        .filter((r) =>
+          ["yes", "no", "unavailable", "noloc", "nolocation"].includes(r.reply),
+        )
+        .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0] ||
+      null;
 
     // Resolve lead display bits (photo/profile) if possible
     let leadDisplayBits = null;
@@ -4947,7 +5227,7 @@ export async function buildAvailabilityBadgeFromRows({
       : null;
 
     // Deputies (sorted latest first)
-    const deputyRowsSorted = deputyRows.sort(
+    const deputyRowsSorted = [...deputyRows].sort(
       (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0),
     );
 
@@ -4960,7 +5240,6 @@ export async function buildAvailabilityBadgeFromRows({
           email: r.musicianEmail,
         });
 
-        // ✅ FIX: depPhoto computed INSIDE loop, using the bits/r that exist here
         const depPhoto = normaliseUrl(bits?.photoUrl || r?.photoUrl || null);
         const depProfile = bits?.profileUrl || r?.profileUrl || "";
 
@@ -4976,7 +5255,6 @@ export async function buildAvailabilityBadgeFromRows({
               r?.vocalistName ||
               pickDisplayName(musById[String(r.musicianId)]) ||
               r?.musicianName ||
-              "" ||
               "",
           ).trim(),
           state: r.reply ?? null,
@@ -5002,23 +5280,52 @@ export async function buildAvailabilityBadgeFromRows({
       deputies_with_photos: deputies.filter((d) => isHttp(d.photoUrl)).length,
     });
 
-    const leadAvailable = leadBits?.available === true;
+    // --- slot status ---
+    const leadState = leadReply?.reply || "pending"; // yes | no | unavailable | noloc | nolocation | pending
+    const anyYesDeputy = deputies.some((d) => d.available);
+    const anyDeputy = deputies.length > 0;
 
-    // Prefer a deputy who said YES and has a photo if lead not available
     const coveringYesDeputy = deputies.find(
       (d) => d.available && isHttp(d.photoUrl),
     );
     const firstDeputyWithPhoto = deputies.find((d) => isHttp(d.photoUrl));
 
-    // Primary visual for badge
-    let primary = null;
-    if (!leadAvailable && coveringYesDeputy) primary = coveringYesDeputy;
-    else if (leadAvailable && isHttp(leadBits?.photoUrl)) primary = leadBits;
-    else if (!leadAvailable && firstDeputyWithPhoto)
-      primary = firstDeputyWithPhoto;
-    else if (isHttp(leadBits?.photoUrl)) primary = leadBits;
+    // --- covering state (separate from primary visual) ---
+    let covering = "none"; // lead | deputy | pending_deputies | none
+    if (leadState === "yes") covering = "lead";
+    else if (anyYesDeputy) covering = "deputy";
+    else if (leadState !== "pending" && anyDeputy) covering = "pending_deputies";
 
-    // Choose lead name for slot label
+    // --- escalation ---
+    const escalationActive =
+      leadState !== "yes" && leadState !== "pending" && anyDeputy && !anyYesDeputy;
+
+    const escalationReason =
+      leadState === "unavailable"
+        ? "lead_unavailable"
+        : leadState === "no"
+          ? "lead_no"
+          : leadState === "noloc" || leadState === "nolocation"
+            ? "lead_no_location"
+            : leadState === "pending"
+              ? "none"
+              : "lead_other";
+
+    // --- primary visual ---
+    let primary = null;
+
+    if (leadState === "yes" && isHttp(leadBits?.photoUrl)) {
+      primary = leadBits;
+    } else if (anyYesDeputy) {
+      primary = coveringYesDeputy || deputies.find((d) => d.available) || null;
+    } else if (leadState !== "yes" && anyDeputy) {
+      primary = firstDeputyWithPhoto || deputies[0] || null;
+    } else if (isHttp(leadBits?.photoUrl)) {
+      // safe fallback: show lead headshot if no deputies exist
+      primary = leadBits;
+    }
+
+    // --- choose lead name for slot label ---
     const leadMus = leadReply?.musicianId
       ? musById[String(leadReply.musicianId)] || null
       : null;
@@ -5028,35 +5335,47 @@ export async function buildAvailabilityBadgeFromRows({
         leadReply?.vocalistName ||
         leadReply?.musicianName ||
         pickDisplayName(leadMus) ||
-        "" ||
         "",
     ).trim();
 
     if (leadBits) leadBits.vocalistName = chosenName;
 
+    // --- precompute legacy fields to mirror primary ---
+    const legacyIsDeputy = Boolean(primary?.isDeputy);
+    const legacyVocalistName = String(primary?.vocalistName || chosenName || "").trim();
+    const legacyMusicianId =
+      (primary?.musicianId && String(primary.musicianId)) ||
+      leadBits?.musicianId ||
+      (leadReply ? String(leadReply.musicianId) : null);
+    const legacyPhotoUrl = primary?.photoUrl || leadBits?.photoUrl || null;
+    const legacyProfileUrl = primary?.profileUrl || leadBits?.profileUrl || "";
+
+    // --- final slot object ---
     const slotObj = {
       slotIndex: Number(slotKey),
 
-      // legacy top-level fields (kept because your downstream uses them)
-      isDeputy: false,
-      vocalistName: chosenName,
-      musicianId:
-        leadBits?.musicianId ??
-        (leadReply ? String(leadReply.musicianId) : null),
-      photoUrl: leadBits?.photoUrl || null,
-      profileUrl: leadBits?.profileUrl || "",
+      // legacy fields (kept) — mirror primary to avoid UI regressions
+      isDeputy: legacyIsDeputy,
+      vocalistName: legacyVocalistName,
+      musicianId: legacyMusicianId,
+      photoUrl: legacyPhotoUrl,
+      profileUrl: legacyProfileUrl,
 
-      // new/structured data
+      // structured fields
       deputies,
       setAt: leadReply?.updatedAt || null,
-      state: leadReply?.reply || "pending",
-      available: Boolean(
-        leadAvailable || (coveringYesDeputy && coveringYesDeputy.available),
-      ),
-      covering: primary?.isDeputy ? "deputy" : "lead",
+      state: leadState,
+      escalation: {
+        active: escalationActive,
+        reason: escalationReason,
+      },
+      covering,
+      available: leadState === "yes" || anyYesDeputy,
+
       primary: primary
         ? {
             musicianId: primary.musicianId || null,
+            vocalistName: String(primary.vocalistName || "").trim(),
             photoUrl: primary.photoUrl || null,
             profileUrl: primary.profileUrl || "",
             setAt: primary.setAt || null,
@@ -5080,11 +5399,11 @@ export async function buildAvailabilityBadgeFromRows({
       slotIndex: slotObj.slotIndex,
     });
 
+    // ✅ THIS WAS MISSING IN YOUR VERSION
     slots.push(slotObj);
-  }
+  } // ✅ CLOSES for (slotKey)
 
-  const anyAddress =
-    rows.find((r) => r.formattedAddress)?.formattedAddress || "TBC";
+  const anyAddress = rows.find((r) => r.formattedAddress)?.formattedAddress || "TBC";
   const badge = { dateISO, address: anyAddress, active: true, slots };
 
   console.log("💜 FINAL BADGE (identity snapshot):", {
@@ -6208,37 +6527,19 @@ export async function getAvailabilityBadge(req, res) {
       return res.status(404).json({ error: "Act not found" });
     }
 
-    // 🚫 Skip rebuild if lead marked unavailable
-    if (actDoc?.availabilityBadgesMeta?.[dateISO]?.lockedByLeadUnavailable) {
-      console.log(
-        `⏭️ Skipping rebuild — lead unavailable lock active for ${dateISO}`,
-      );
-      return res.json({
-        badge: null,
-        skipped: true,
-        reason: "lead_unavailable_lock",
-      });
-    }
+   const leadUnavailable =
+  !!actDoc?.availabilityBadgesMeta?.[dateISO]?.lockedByLeadUnavailable;
 
-    const badge = await buildAvailabilityBadgeFromRows({
-      actId,
-      dateISO,
-      hasLineups: actDoc?.hasLineups ?? true,
-    });
+// ✅ don’t skip building — pass the signal down so UI can show “lead unavailable” state
+const badge = await buildAvailabilityBadgeFromRows({
+  actId,
+  dateISO,
+  hasLineups: actDoc?.hasLineups ?? true,
+  leadUnavailable,
+});
 
-    if (!badge) {
-      console.log("🪶 No badge found for act/date:", { actId, dateISO });
-      return res.json({ badge: null });
-    }
+return res.json({ badge: badge || null, leadUnavailable });
 
-    console.log("✅ [getAvailabilityBadge] Returning badge:", {
-      actId,
-      dateISO,
-      slots: badge?.slots?.length || 0,
-      address: badge?.address,
-    });
-
-    return res.json({ badge });
   } catch (err) {
     console.error("❌ [getAvailabilityBadge] Error:", err);
     return res.status(500).json({ error: err.message });
