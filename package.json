@@ -15,6 +15,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@getaddress/autocomplete": "^3.1.6",
     "@googlemaps/js-api-loader": "^1.16.10",
     "@mailchimp/mailchimp_marketing": "^3.0.80",
     "@sparticuz/chromium": "^141.0.0",
