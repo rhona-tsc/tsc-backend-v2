@@ -89,7 +89,11 @@ router.get("/address/autocomplete", async (req, res) => {
 
     const key = process.env.GETADDRESS_API_KEY;
     if (!key) return res.status(500).json({ message: "GETADDRESS_API_KEY not set" });
-
+console.log("🔑 GETADDRESS_API_KEY check:", {
+  exists: !!process.env.GETADDRESS_API_KEY,
+  len: String(process.env.GETADDRESS_API_KEY || "").length,
+  startsWith: String(process.env.GETADDRESS_API_KEY || "").slice(0, 6),
+});
     // getAddress.io Autocomplete
     // Docs: https://documentation.getaddress.io/ (Autocomplete)
     const url = `https://api.getaddress.io/autocomplete/${encodeURIComponent(
