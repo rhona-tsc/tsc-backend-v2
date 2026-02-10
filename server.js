@@ -330,7 +330,7 @@ app.use("/api/musician/act-v2", actV2Routes);
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/shortlist", shortlistRoutes);
 app.use("/api/board/enquiries", enquiryBoardRoutes);
-app.use("/api", adminRoutes);
+
 
 // Bookings / payments / invoices
 app.use("/api/cart", cartRouter);
@@ -390,7 +390,7 @@ app.use("/api/payments", paymentsRouter);
 // Upload & musician routes (duplicate kept for compatibility)
 app.use("/api/musician", musicianRoutes);
 app.use("/api/upload", uploadRoutes);
-
+app.use("/api", adminRoutes);
 /* -------------------------------------------------------------------------- */
 /*                            Global error handler                            */
 /* -------------------------------------------------------------------------- */
