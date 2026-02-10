@@ -2,6 +2,8 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import musicianModel from "../models/musicianModel.js";
+import { requestOtp } from "./auth.js";
+import { verifyOtp } from "../controllers/authController.js";
 
 const router = express.Router();
 
@@ -44,5 +46,8 @@ router.post("/logout", (req, res) => {
     });
     res.json({ success: true, message: "Logged out successfully" });
   });
+
+  router.post("/request-otp", requestOtp);
+router.post("/verify-otp", verifyOtp);
 
 export default router;

@@ -84,6 +84,7 @@ export async function getActCards(req, res) {
     coverImage: 1,
     images: 1,
     lineups: 1,
+    reviews: 1,
 
     countyFees: 1,
     useCountyTravelFee: 1,
@@ -120,6 +121,47 @@ export async function getActCards(req, res) {
     isTest: 1,
   },
 },
+      // ✅ Reviews: normalize + derive summary fields for UI (preview panel / cards)
+      {
+        $addFields: {
+          reviews: { $ifNull: ["$reviews", []] },
+          reviewCount: { $size: { $ifNull: ["$reviews", []] } },
+          _reviewRatings: {
+            $filter: {
+              input: {
+                $map: {
+                  input: { $ifNull: ["$reviews", []] },
+                  as: "r",
+                  in: {
+                    $convert: {
+                      input: "$$r.rating",
+                      to: "double",
+                      onError: null,
+                      onNull: null,
+                    },
+                  },
+                },
+              },
+              as: "n",
+              cond: { $and: [{ $ne: ["$$n", null] }, { $gt: ["$$n", 0] }] },
+            },
+          },
+        },
+      },
+      {
+        $addFields: {
+          averageRating: {
+            $cond: [
+              { $gt: [{ $size: "$_reviewRatings" }, 0] },
+              { $round: [{ $avg: "$_reviewRatings" }, 1] },
+              0,
+            ],
+          },
+          // Keep a small preview array for lightweight UI usage
+          reviewsPreview: { $slice: ["$reviews", 3] },
+        },
+      },
+      { $project: { _reviewRatings: 0 } },
 
       // Candidate images & base_fee snapshot
       {

@@ -33,3 +33,24 @@ export async function sendResetEmail({ to, resetUrl }) {
     html,
   });
 }
+
+export async function sendOtpEmail({ to, code }) {
+  const transporter = makeTransport();
+  const from = process.env.EMAIL_FROM || "TSC <no-reply@thesupremecollective.co.uk>";
+
+  const html = `
+    <p>Hi there,</p>
+    <p>Your verification code is:</p>
+    <p style="font-size: 22px; font-weight: 700; letter-spacing: 2px;">${code}</p>
+    <p>This code expires in 10 minutes.</p>
+    <p>If you didn’t request this, you can ignore this email.</p>
+    <p>— The Supreme Collective</p>
+  `;
+
+  await transporter.sendMail({
+    from,
+    to,
+    subject: "Your verification code",
+    html,
+  });
+}

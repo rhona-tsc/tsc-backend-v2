@@ -47,6 +47,14 @@
       width: 200px;
       height: auto;
     }
+    .act-image {
+  width: 120px;          /* pick what you want */
+  height: 150px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+  flex: 0 0 auto;        /* prevents flex stretching */
+}
     .contract-section { line-height:1.5; }
     ul { margin:0.5rem 1rem; }
     table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
@@ -99,6 +107,11 @@ Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "T
   .map(a => a?.tscName || a?.actName || a?.name || "—")
   .join(", ")
 %>
+<%
+  const eventDateDisplay = eventDate
+    ? new Date(eventDate).toLocaleDateString("en-GB")
+    : "TBC";
+%>
  </p>
 
       <hr style="margin:24px 0"/>
@@ -111,9 +124,13 @@ Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "T
   <% actsSummary.forEach(function(it){ %>
     <div style="display:flex; gap:12px; align-items:flex-start; margin:10px 0;">
       <% if (it.image && it.image.url) { %>
-        <img src="<%= it.image.url %>" alt="<%= it.tscName || it.actName || it.name || '' %>" style="width:160; height:200; object-fit:cover; border-radius:6px;"
-             onerror="this.style.display='none'"/>
-      <% } %>
+  <img
+    src="<%= it.image.url %>"
+    alt="<%= it.tscName || it.actName || it.name || '' %>"
+    class="act-image"
+    onerror="this.style.display='none'"
+  />
+<% } %>
       <div style="flex:1; min-width:0;">
         <div>
 <strong><%= it.tscName || it.actName || it.name || "—" %></strong>
@@ -313,11 +330,13 @@ const description = `${pieceLabel ? pieceLabel + ': ' : ''}${instrumentList}${ro
 
       <p><strong>Client Authorisation</strong></p>
       <p>
-        By signing below, you confirm that you are the authorised signatory for contract <%= bookingId || 'TBC' %>
-        (<%= (actsSummary || [])
-  .map(a => a?.tscName || a?.actName || a?.name || "—")
-  .join(", ")
-%>, <%= new Date().toLocaleDateString('en-GB') %> and agree to be bound by The Supreme Collective’s Terms and Conditions of booking.
+       <p>
+  By signing below, you confirm that you are the authorised signatory for contract <%= bookingId || 'TBC' %>
+  (<%= (actsSummary || [])
+    .map(a => a?.tscName || a?.actName || a?.name || "—")
+    .join(", ")
+  %>, <%= eventDateDisplay %>) and agree to be bound by The Supreme Collective’s Terms and Conditions of booking.
+</p>
       </p>
 
       <p><strong>Agent Authorisation</strong></p>
@@ -440,10 +459,10 @@ const description = `${pieceLabel ? pieceLabel + ': ' : ''}${instrumentList}${ro
       <p><strong>16 | Terms Acceptance</strong></p>
       <p>By signing the contract, you agree to all Terms and Conditions listed above.</p>
     </div>
-  </body>
-<footer style="margin-top: 60px; font-size: 12px; color: #666; text-align: center; border-top: 1px solid #ccc; padding-top: 10px;">
+    <footer style="margin-top: 60px; font-size: 12px; color: #666; text-align: center; border-top: 1px solid #ccc; padding-top: 10px;">
   <p>The Supreme Collective Ltd</p>
   <p>Tel: +44 7594 223200 | Email: hello@thesupremecollective.co.uk</p>
   <p>Address: Cramond, Reeves Lane, Roydon, CM19 5LE</p>
   <p>Company Number: 16883956</p>
 </footer>
+  </body>

@@ -3,8 +3,73 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import userModel from "../models/userModel.js";
 import { sendResetEmail } from "../utils/mailer.js";
+import jwt from "jsonwebtoken";
+import OtpToken from "../models/OtpToken.js";
+
+const signJwt = (user) =>
+  jwt.sign(
+    {
+      userId: user._id,
+      email: user.email,
+      firstName: user.firstName || "",
+      lastName: user.lastName || "",
+      phone: user.phone || "",
+      role: user.role || "client",
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "30d" }
+  );
+
+  const hashCode = (email, code) =>
+  crypto
+    .createHash("sha256")
+    .update(`${email}:${code}:${process.env.OTP_SECRET}`)
+    .digest("hex");
 
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:5174").replace(/\/$/, "");
+
+
+export const verifyOtp = async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const code = String(req.body.code || "").trim();
+
+    if (!email || !code) return res.status(400).json({ success: false, message: "missing_fields" });
+
+    const rec = await OtpToken.findOne({ email });
+    if (!rec) return res.status(400).json({ success: false, message: "invalid_code" });
+    if (rec.expiresAt.getTime() < Date.now()) return res.status(400).json({ success: false, message: "expired_code" });
+
+    if ((rec.attempts || 0) >= 5) return res.status(429).json({ success: false, message: "too_many_attempts" });
+
+    const incomingHash = hashCode(email, code);
+    if (incomingHash !== rec.codeHash) {
+      rec.attempts = (rec.attempts || 0) + 1;
+      await rec.save();
+      return res.status(400).json({ success: false, message: "invalid_code" });
+    }
+
+    // ✅ OTP valid: consume token
+    await OtpToken.deleteOne({ email });
+
+    // ✅ Find or create user
+    let user = await User.findOne({ email });
+    if (!user) {
+      user = await User.create({ email, role: "client" }); // you can extend later
+    }
+
+    const token = signJwt(user);
+
+    return res.json({
+      success: true,
+      token,
+      userId: user._id,
+      email: user.email,
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: "verify_failed" });
+  }
+};
 
 export async function forgotPassword(req, res) {
   try {

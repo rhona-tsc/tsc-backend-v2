@@ -113,6 +113,7 @@ const filterDataInline = async (req, res) => {
         [
           "name",
           "tscName",
+          "slug",
           "status",
           "isTest",
           "genre",
@@ -129,6 +130,7 @@ const filterDataInline = async (req, res) => {
           "useCountyTravelFee",
           "countyFees",
           "costPerMile",
+          "reviews",
         ].join(" ")
       )
       .lean();
@@ -174,6 +176,18 @@ const filterDataInline = async (req, res) => {
           (Array.isArray(a?.profileImage) && a.profileImage.length)
       );
 
+      // Reviews summary (avoid shipping full reviews array in card payload)
+      const verifiedReviews = Array.isArray(a?.reviews)
+        ? a.reviews.filter((r) => (r?.verified ?? true) && Number.isFinite(r?.rating))
+        : [];
+
+      const reviewCount = verifiedReviews.length;
+      const averageRating = reviewCount
+        ? Math.round(
+            (verifiedReviews.reduce((sum, r) => sum + Number(r.rating || 0), 0) / reviewCount) * 10
+          ) / 10
+        : 0;
+
       const extras = (() => {
         const raw = a?.extras;
         if (!raw) return [];
@@ -199,6 +213,7 @@ const filterDataInline = async (req, res) => {
 
       return {
         id: String(a?._id || ""),
+        slug: a?.slug || "",
         name: a?.name || a?.tscName || "",
         status: a?.status || "",
         isTest: !!a?.isTest,
@@ -213,6 +228,8 @@ const filterDataInline = async (req, res) => {
         pliAmount: a?.pli?.amount || a?.pli?.value || "",
         extrasKeys: extras,
         travelMode,
+        reviewCount,
+        averageRating,
       };
     });
 
@@ -229,6 +246,8 @@ const filterDataInline = async (req, res) => {
         instr: (x.instruments || []).slice(0, 5).join("|"),
         sizes: (x.lineupSizes || []).join(","),
         extrasN: (x.extrasKeys || []).length,
+        reviews: x.reviewCount,
+        rating: x.averageRating,
         travel: x.travelMode,
       }))
     );
@@ -252,8 +271,7 @@ router.post("/restore", wrap("POST /restore", restoreAct));
 router.get("/list", wrap("GET /list", getAllActsV2));
 router.get("/cards", wrap("GET /cards", getActCards));
 
-router.get("/:id([0-9a-fA-F]{24})", wrap("GET /:id", getActByIdV2));
-router.get("/:slug", wrap("GET /:slug", getActBySlugV2));
+
 router.post("/security-update/:id", wrap("POST /security-update/:id", updateActV2));
 router.get("/my-drafts", wrap("GET /my-drafts", getMyDrafts));
 router.put("/save-pending-changes/:id", wrap("PUT /save-pending-changes/:id", savePendingChanges));
@@ -282,5 +300,8 @@ router.get(
   },
   wrap("GET /acts/:id", getActByIdV2)
 );
+
+router.get("/:id([0-9a-fA-F]{24})", wrap("GET /:id", getActByIdV2));
+router.get("/:slug", wrap("GET /:slug", getActBySlugV2));
 
 export default router;

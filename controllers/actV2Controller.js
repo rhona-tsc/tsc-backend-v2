@@ -228,27 +228,97 @@ console.log("🧾 auth check", {
   }
 };
 
-  export const getActByIdV2 = async (req, res) => {
-      const { id } = req.params;
+export const getActByIdV2 = async (req, res) => {
+  const { id } = req.params;
+
   if (!mongoose.isValidObjectId(id)) {
     return res.status(400).json({ success: false, error: "invalid_object_id" });
   }
-  
-    try {
-      const actId = req.params.id;
-  
-      const act = await actModel.findById(actId);
-  
-      if (!act) {
-        return res.status(404).json({ error: "Act not found" });
-      }
-  
-      res.status(200).json(act);
-    } catch (err) {
-      console.error("❌ Error fetching act:", err);
-      res.status(500).json({ error: "Failed to fetch act" });
+
+  try {
+    const withReviewsRaw = req.query.withReviews;
+    const withReviews =
+      withReviewsRaw === undefined
+        ? true
+        : !["0", "false", "no"].includes(String(withReviewsRaw).toLowerCase());
+
+    let q = actModel.findById(id);
+
+    // Optional: let you call /api/act/:id?withReviews=false for lightweight fetches
+    if (!withReviews) {
+      q = q.select("-reviews -tscReviews -testimonials");
     }
-  };
+
+    const act = await q.lean();
+
+    if (!act) {
+      return res.status(404).json({ success: false, error: "not_found" });
+    }
+
+    // ✅ Ensure consistent rating fields on the single-act payload too.
+    // The DB may not store averageRating/reviewCount on the main act doc,
+    // but the frontend expects them.
+    const pickReviewsArray = (doc) => {
+      if (Array.isArray(doc?.reviews) && doc.reviews.length) return doc.reviews;
+      if (Array.isArray(doc?.tscReviews) && doc.tscReviews.length) return doc.tscReviews;
+      if (Array.isArray(doc?.testimonials) && doc.testimonials.length) return doc.testimonials;
+      return [];
+    };
+
+    const picked = pickReviewsArray(act);
+
+    const derivedCount = picked.length;
+    const derivedAvg = (() => {
+      if (!picked.length) return null;
+      const nums = picked
+        .map((r) => Number(r?.rating))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (!nums.length) return null;
+      const sum = nums.reduce((a, b) => a + b, 0);
+      // nearest 0.5
+      return Math.round((sum / nums.length) * 2) / 2;
+    })();
+
+    const storedAvg = Number.isFinite(Number(act?.averageRating))
+      ? Math.round(Number(act.averageRating) * 2) / 2
+      : null;
+
+    const storedCount = Number.isFinite(Number(act?.reviewCount))
+      ? Number(act.reviewCount)
+      : null;
+
+    const ensuredAverageRating = storedAvg ?? derivedAvg ?? 0;
+    const ensuredReviewCount = storedCount ?? derivedCount ?? 0;
+
+    // Some frontend paths expect actId; mirror _id for compatibility.
+    const ensuredActId = act?.actId || String(act?._id || "");
+
+    // Mutate the lean object safely
+    act.averageRating = ensuredAverageRating;
+    act.reviewCount = ensuredReviewCount;
+    act.actId = ensuredActId;
+
+    console.log("🧪[getActByIdV2] ensured rating summary:", {
+      _id: act?._id,
+      actId: act?.actId,
+      name: act?.name,
+      tscName: act?.tscName,
+      storedAvg,
+      storedCount,
+      derivedAvg,
+      derivedCount,
+      averageRating: act?.averageRating,
+      reviewCount: act?.reviewCount,
+      hasReviews: Array.isArray(act?.reviews),
+      reviewsLen: Array.isArray(act?.reviews) ? act.reviews.length : null,
+    });
+
+    return res.status(200).json({ success: true, act });
+  } catch (err) {
+    console.error("❌ Error fetching act:", err);
+    return res.status(500).json({ success: false, error: "failed_to_fetch_act" });
+  }
+};
 
 
 export const saveActDraftV2 = async (req, res) => {
@@ -364,6 +434,9 @@ const ALLOWED_FIELDS = new Set([
   "base_fee",
   "bio",
   "description",
+  // --- added for review summaries
+  "averageRating",
+  "reviewCount",
 ]);
 
 const sanitizeFields = (fieldsStr = "") => {
@@ -487,6 +560,12 @@ export const getAllActsV2 = async (req, res) => {
         "lineups.base_fee": 1,
         genre: 1,          // singular field
         genres: 1,         // ← plural (present in some docs)
+        // --- review summary fields
+        averageRating: 1,
+        reviewCount: 1,
+        "reviews.rating": 1,
+        "tscReviews.rating": 1,
+        "testimonials.rating": 1,
       };
 
     group("🧾 Projection in use");
@@ -654,13 +733,66 @@ end();
         doc?.images?.[0]?.url ||
         doc?.profileImage?.[0]?.url ||
         "";
+
       // unify genres
       const genresArr =
-        Array.isArray(doc?.genres) ? doc.genres
-        : Array.isArray(doc?.genre) ? doc.genre
-        : typeof doc?.genre === "string" ? [doc.genre]
-        : [];
-      return { ...doc, cardImage, genres: genresArr };
+        Array.isArray(doc?.genres)
+          ? doc.genres
+          : Array.isArray(doc?.genre)
+            ? doc.genre
+            : typeof doc?.genre === "string"
+              ? [doc.genre]
+              : [];
+
+      // ------------------------------
+      // Reviews summary (lightweight)
+      // Prefer stored fields if present; otherwise derive from rating arrays.
+      // We do NOT return full reviews arrays in this list endpoint.
+      // ------------------------------
+      const pickReviewsArray = () => {
+        if (Array.isArray(doc?.reviews) && doc.reviews.length) return doc.reviews;
+        if (Array.isArray(doc?.tscReviews) && doc.tscReviews.length) return doc.tscReviews;
+        if (Array.isArray(doc?.testimonials) && doc.testimonials.length) return doc.testimonials;
+        return [];
+      };
+
+      const picked = pickReviewsArray();
+
+      const derivedCount = picked.length;
+      const derivedAvg = (() => {
+        if (!picked.length) return null;
+        const nums = picked
+          .map((r) => Number(r?.rating))
+          .filter((n) => Number.isFinite(n) && n > 0);
+        if (!nums.length) return null;
+        const sum = nums.reduce((a, b) => a + b, 0);
+        // nearest 0.5
+        return Math.round((sum / nums.length) * 2) / 2;
+      })();
+
+      const avg = Number.isFinite(Number(doc?.averageRating))
+        ? Math.round(Number(doc.averageRating) * 2) / 2
+        : derivedAvg;
+
+      const count = Number.isFinite(Number(doc?.reviewCount))
+        ? Number(doc.reviewCount)
+        : derivedCount;
+
+      // return lightweight doc (strip arrays)
+      const out = {
+        ...doc,
+        cardImage,
+        genres: genresArr,
+        averageRating: avg ?? 0,
+        reviewCount: count ?? 0,
+      };
+
+      // Ensure we don't ship review arrays in list payload
+      delete out.reviews;
+      delete out.tscReviews;
+      delete out.testimonials;
+
+      return out;
     });
 
     group("🔎 Sample rows (up to 10)");

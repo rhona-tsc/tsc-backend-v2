@@ -2107,11 +2107,26 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
     const resolvedDateISO =
       dateISO || (date ? new Date(date).toISOString().slice(0, 10) : null);
 
-    const fullAddress = formattedAddress || address || "TBC";
-    if (!actId || !resolvedDateISO || !fullAddress) {
+    // IMPORTANT: do not send/ensure availability requests without a real location
+    const fullAddress = (formattedAddress || address || "").trim();
+
+    if (!actId || !resolvedDateISO) {
       return res.status(400).json({
         success: false,
-        message: "Missing actId/dateISO/address",
+        message: "Missing actId/dateISO",
+      });
+    }
+
+    // If we don't have a real address string, do nothing (avoid spamming musicians with TBC)
+    if (!fullAddress || /^tbc$/i.test(fullAddress)) {
+      return res.json({
+        success: true,
+        ensured: 0,
+        reused: 0,
+        triggered: 0,
+        skipped: "missing-address",
+        message: "No formattedAddress/address provided; availability requests not sent.",
+        details: [],
       });
     }
 
@@ -2584,11 +2599,34 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
     // derive addresses
     const fullFormattedAddress =
-      formattedAddress ||
-      address ||
-      act?.formattedAddress ||
-      act?.venueAddress ||
-      "TBC";
+      (formattedAddress ||
+        address ||
+        act?.formattedAddress ||
+        act?.venueAddress ||
+        "").trim();
+
+    // Hard block: do not message musicians if we don't have a real location
+    if (!fullFormattedAddress || /^tbc$/i.test(fullFormattedAddress)) {
+      console.warn(
+        "🛑 [triggerAvailabilityRequest] Missing venue address/postcode — blocking WhatsApp send",
+        {
+          actId,
+          lineupId,
+          dateISO: dISO || (date ? new Date(date).toISOString().slice(0, 10) : null),
+          formattedAddress: formattedAddress || null,
+          address: address || null,
+        },
+      );
+
+      if (res) {
+        return res.json({
+          success: true,
+          sent: 0,
+          skipped: "missing-address",
+        });
+      }
+      return { success: true, sent: 0, skipped: "missing-address" };
+    }
 
     const { county: derivedCountyRaw } =
       countyFromAddress(fullFormattedAddress) || {};
