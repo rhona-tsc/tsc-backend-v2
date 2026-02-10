@@ -1589,6 +1589,73 @@ export const getBookingByRef = async (req, res) => {
   }
 };
 
+
+export const previewContractHtml = async (req, res) => {
+  try {
+    const bookingId = req.params.id;
+
+    const booking = await Booking.findById(bookingId).lean();
+    if (!booking) return res.status(404).send("Booking not found");
+
+    // IMPORTANT: Ensure your template gets the same variables it expects
+    const viewPath = path.join(process.cwd(), "views", "contract.ejs"); // adjust path
+    const html = await ejs.renderFile(viewPath, {
+      ...booking,
+      bookingId: booking._id?.toString?.() || bookingId,
+      totals: booking.totals || {},
+      deposit: booking.deposit || 0,
+      total: booking.total || booking.totalAmount || 0,
+      // add any other fields your template expects
+    });
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.status(200).send(html);
+  } catch (err) {
+    console.error("previewContractHtml error:", err);
+    return res.status(500).json({ message: "Failed to render contract HTML" });
+  }
+};
+
+export const generateContractPdf = async (req, res) => {
+  try {
+    const bookingId = req.params.id;
+
+    const booking = await Booking.findById(bookingId).lean();
+    if (!booking) return res.status(404).send("Booking not found");
+
+    const viewPath = path.join(process.cwd(), "views", "contract.ejs"); // adjust path
+    const html = await ejs.renderFile(viewPath, {
+      ...booking,
+      bookingId: booking._id?.toString?.() || bookingId,
+      totals: booking.totals || {},
+      deposit: booking.deposit || 0,
+      total: booking.total || booking.totalAmount || 0,
+    });
+
+    const browser = await puppeteer.launch({
+      headless: "new",
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
+
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "12mm", right: "12mm", bottom: "12mm", left: "12mm" },
+    });
+
+    await browser.close();
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="contract-${bookingId}.pdf"`);
+    return res.status(200).send(pdfBuffer);
+  } catch (err) {
+    console.error("generateContractPdf error:", err);
+    return res.status(500).json({ message: "Failed to generate contract PDF" });
+  }
+};
 // ---------------- status update (admin) ----------------
 
 const updateStatus = async (req,res) => {

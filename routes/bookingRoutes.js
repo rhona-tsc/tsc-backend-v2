@@ -9,7 +9,9 @@ import {
   getBookingByRef,
   updateEventSheet,
   ensureEmergencyContact,
-  completeBookingV2
+  completeBookingV2,
+  previewContractHtml,
+  generateContractPdf
 } from "../controllers/bookingController.js";
 import Booking from "../models/bookingModel.js";
 import mongoose from "mongoose";
@@ -46,6 +48,13 @@ router.get("/booking-complete", (req, res, next) => {
   });
   next();
 }, completeBookingV2);
+
+// --------------------------------------------------------------------------
+// Contract preview/pdf aliases (allows calling /api/bookings/:id/contract/*
+// if this router is mounted at /api/bookings)
+// --------------------------------------------------------------------------
+router.get("/:id/contract/preview", previewContractHtml);
+router.get("/:id/contract/pdf", generateContractPdf);
 
 /* -------------------------------------------------------------------------- */
 /*              GET /user/:userId                                             */

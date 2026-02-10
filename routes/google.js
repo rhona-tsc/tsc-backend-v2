@@ -30,6 +30,41 @@ router.get("/oauth2callback", (req, res, next) => {
 }, oauth2Callback);
 
 /* -------------------------------------------------------------------------- */
+/*                            ADDRESS.IO                            */
+/* -------------------------------------------------------------------------- */
+
+router.get("/address/lookup", async (req, res) => {
+  try {
+    const postcodeRaw = String(req.query.postcode || "").trim();
+    const postcode = postcodeRaw.replace(/\s+/g, " ").toUpperCase();
+
+    if (!postcode) return res.status(400).json({ message: "postcode is required" });
+
+    const key = process.env.GETADDRESS_API_KEY;
+    if (!key) return res.status(500).json({ message: "GETADDRESS_API_KEY not set" });
+
+    // getAddress.io: find addresses for postcode
+    const url = `https://api.getaddress.io/find/${encodeURIComponent(postcode)}?api-key=${encodeURIComponent(key)}`;
+
+    const { data } = await axios.get(url, { timeout: 8000 });
+
+    // data.addresses is usually an array of comma-separated address strings
+    return res.json({
+      postcode: data.postcode || postcode,
+      addresses: Array.isArray(data.addresses) ? data.addresses : [],
+    });
+  } catch (err) {
+    const status = err?.response?.status || 500;
+    const message =
+      err?.response?.data?.Message ||
+      err?.response?.data?.message ||
+      err?.message ||
+      "Lookup failed";
+    return res.status(status).json({ message });
+  }
+});
+
+/* -------------------------------------------------------------------------- */
 /*                            POST /webhook                                   */
 /* -------------------------------------------------------------------------- */
 router.post("/webhook", async (req, res) => {
