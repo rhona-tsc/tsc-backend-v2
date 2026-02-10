@@ -98,7 +98,7 @@ console.log("🔑 GETADDRESS_API_KEY check:", {
     // Docs: https://documentation.getaddress.io/ (Autocomplete)
     const url = `https://api.getaddress.io/autocomplete/${encodeURIComponent(
       term
-    )}?api-key=${encodeURIComponent(key)}&top=10&all=true&show-postcode=true`;
+    )}?api-key=${encodeURIComponent(key)}&top=6&all=true&show-postcode=true`;
 
     const { data } = await axios.get(url, { timeout: 8000 });
 
@@ -106,12 +106,19 @@ console.log("🔑 GETADDRESS_API_KEY check:", {
       suggestions: Array.isArray(data?.suggestions) ? data.suggestions : [],
     });
   } catch (err) {
+    console.error("❌ getAddress autocomplete failed:", {
+      status: err?.response?.status,
+      data: err?.response?.data,
+      message: err?.message,
+    });
+
     const status = err?.response?.status || 500;
     const message =
       err?.response?.data?.Message ||
       err?.response?.data?.message ||
       err?.message ||
       "Autocomplete failed";
+
     return res.status(status).json({ message });
   }
 });
