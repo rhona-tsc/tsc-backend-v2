@@ -47,14 +47,6 @@
       width: 200px;
       height: auto;
     }
-    .act-image {
-  width: 120px;          /* pick what you want */
-  height: 150px;
-  object-fit: cover;
-  border-radius: 6px;
-  display: block;
-  flex: 0 0 auto;        /* prevents flex stretching */
-}
     .contract-section { line-height:1.5; }
     ul { margin:0.5rem 1rem; }
     table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
@@ -123,105 +115,62 @@ Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "T
 <% } else { %>
   <% actsSummary.forEach(function(it){ %>
     <div style="display:flex; gap:12px; align-items:flex-start; margin:10px 0;">
-      <% if (it.image && it.image.url) { %>
-  <img
-    src="<%= it.image.url %>"
-    alt="<%= it.tscName || it.actName || it.name || '' %>"
-    class="act-image"
-    onerror="this.style.display='none'"
-  />
-<% } %>
       <div style="flex:1; min-width:0;">
         <div>
 <strong><%= it.tscName || it.actName || it.name || "—" %></strong>
 <%
-  // ---- Normalised size label (avoid "6-Piece-Piece") ----
-  const rawSize = it.lineupLabel || it.actSize || (it.bandMembers?.length || 0);
-  let pieceLabel = '';
-  if (rawSize != null && rawSize !== '') {
-    let s = String(rawSize).trim();
-    // If label already contains "Piece", normalise to single "-Piece"
-    if (/piece/i.test(s)) {
-      s = s.replace(/\s+/g, ' ').replace(/\s*-/g, '-').replace(/-?piece$/i, '');
-      pieceLabel = `${s}-Piece`;
+  // Lineup description to match generateDescription() ordering:
+  // - vocals first
+  // - drums last
+  // - otherwise preserve existing order
+  if (!it || !Array.isArray(it.bandMembers)) {
+    var description = "Select a Lineup";
+  } else {
+    const count = it.actSize || it.bandMembers.length;
+
+    const instruments = it.bandMembers
+      .filter((m) => m && m.isEssential)
+      .map((m) => m.instrument)
+      .filter(Boolean);
+
+    instruments.sort((a, b) => {
+      const aLower = String(a).toLowerCase();
+      const bLower = String(b).toLowerCase();
+      const isVocal = (str) => str.includes("vocal");
+      const isDrums = (str) => str === "drums";
+
+      if (isVocal(aLower) && !isVocal(bLower)) return -1;
+      if (!isVocal(aLower) && isVocal(bLower)) return 1;
+      if (isDrums(aLower)) return 1;
+      if (isDrums(bLower)) return -1;
+      return 0;
+    });
+
+    const formatWithAnd = (arr) => {
+      const unique = [...new Set(arr)];
+      if (unique.length === 0) return "";
+      if (unique.length === 1) return unique[0];
+      if (unique.length === 2) return `${unique[0]} & ${unique[1]}`;
+      return `${unique.slice(0, -1).join(", ")} & ${unique[unique.length - 1]}`;
+    };
+
+    const roles = it.bandMembers.flatMap((member) =>
+      (member.additionalRoles || [])
+        .filter((r) => r.isEssential)
+        .map((r) => r.role || "Unnamed Service")
+    );
+
+    if (count === 0) {
+      var description = "Add a Lineup";
     } else {
-      pieceLabel = `${s}-Piece`;
+      const instrumentsStr = formatWithAnd(instruments);
+      const rolesStr = roles.length
+        ? ` (including ${formatWithAnd(roles)} services)`
+        : "";
+      var description = `${count}: ${instrumentsStr}${rolesStr}`;
     }
-    // Final de-dupe safeguard
-    pieceLabel = pieceLabel.replace(/-Piece-?Piece$/i, '-Piece');
   }
-
-  // ---- Count essential instruments (preserve specific labels) ----
-  const essential = Array.isArray(it.bandMembers)
-    ? it.bandMembers.filter(m => m && m.isEssential)
-    : [];
-
- const normaliseInst = (val) => {
-  if (!val) return "";
-  let t = String(val).trim();
-
-  // ✅ Preserve vocalist-guitarist style roles
-  const hasVocal = /vocal|singer/i.test(t);
-  const hasGuitar = /guitar/i.test(t);
-
-  if (hasVocal && hasGuitar) {
-    // keep acoustic/electric nuance if present
-    if (/acoustic/i.test(t)) return "Vocalist-Acoustic Guitarist";
-    if (/electric/i.test(t)) return "Vocalist-Electric Guitarist";
-    return "Vocalist-Guitarist";
-  }
-
-  // Standardise common instruments
-  if (/bass\s*guitar/i.test(t)) return "Bass";
-  if (/\bkeys?|keyboard/i.test(t)) return "Keys";
-  if (/guitars?/i.test(t) && !/bass/i.test(t)) return "Guitar";
-  if (/drums?/i.test(t)) return "Drums";
-
-  // Normalise generic vocals (only when not already "lead ...")
-  if (/(^|\s)(singer|vocals?)($|\s)/i.test(t) && !/lead/i.test(t)) {
-    return "Vocal";
-  }
-
-  // Title case fallback
-  t = t.replace(/\b\w/g, (c) => c.toUpperCase());
-  return t;
-};
-
-  const counts = {};
-  essential.forEach(m => {
-    const lbl = normaliseInst(m.instrument || m.role || '');
-    if (!lbl) return;
-    counts[lbl] = (counts[lbl] || 0) + 1;
-  });
-
-  // ---- Order: vocals first, others alpha, drums last ----
-  const labels = Object.keys(counts);
-  const vocals = labels.filter(l => /vocal/i.test(l));
-  const drums = labels.filter(l => /drums?/i.test(l));
-  const others = labels.filter(l => !/vocal/i.test(l) && !/drums?/i.test(l)).sort((a,b) => a.localeCompare(b));
-  const ordered = [...vocals, ...others, ...drums];
-
-  const formatWithCounts = (arr) => {
-    const parts = arr.map(l => counts[l] > 1 ? `${l} ×${counts[l]}` : l);
-    if (parts.length <= 2) return parts.join(' & ');
-    return parts.slice(0, -1).join(', ') + ' & ' + parts[parts.length - 1];
-  };
-  const instrumentList = formatWithCounts(ordered);
-
-  // ---- Essential additional roles → bracketed note ----
-  const rolesRaw = (Array.isArray(it.bandMembers) ? it.bandMembers : [])
-    .flatMap(m => (m.additionalRoles || []).filter(r => r.isEssential).map(r => r.role))
-    .filter(Boolean);
-  const uniqueRoles = Array.from(new Set(rolesRaw.map(r => String(r).trim())));
-  const formatRoles = (arr) => {
-    if (!arr.length) return '';
-    const pretty = arr.map(r => r.replace(/\b\w/g, c => c.toUpperCase()));
-    if (pretty.length <= 2) return pretty.join(' & ');
-    return pretty.slice(0, -1).join(', ') + ' & ' + pretty[pretty.length - 1];
-  };
-  const rolesList = uniqueRoles.length ? ` (including ${formatRoles(uniqueRoles)} services)` : '';
-
-const description = `${pieceLabel ? pieceLabel + ': ' : ''}${instrumentList}${rolesList}`;%>
+%>
 <div style="margin-top:4px; font-size:14px; color:#111;">
   <%= description %>
 </div>
