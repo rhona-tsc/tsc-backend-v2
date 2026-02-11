@@ -414,12 +414,12 @@ if (userId) {
     if (!actId)
       return res.status(400).json({ success: false, message: "Missing actId" });
 
-    // 🧮 Increment timesShortlisted
+    // 🧮 Increment numberOfShortlistsIn
     const updated = await Act.findByIdAndUpdate(
       actId,
-      { $inc: { timesShortlisted: 1 } },
+      { $inc: { numberOfShortlistsIn: 1 } },
       { new: true }
-    ).select("_id name tscName timesShortlisted");
+    ).select("_id name tscName numberOfShortlistsIn");
 
 
    // 🟢 Trigger WhatsApp availability request (non-blocking)
@@ -470,13 +470,27 @@ router.patch("/act/:id/decrement-shortlist", async (req, res) => {
 
   try {
     const actId = req.params.id;
-    if (!actId) return res.status(400).json({ success: false, message: "Missing actId" });
+    if (!actId)
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing actId" });
 
     const updated = await Act.findByIdAndUpdate(
       actId,
-      { $inc: { timesShortlisted: -1 } },
+      [
+        {
+          $set: {
+            numberOfShortlistsIn: {
+              $max: [
+                0,
+                { $subtract: [{ $ifNull: ["$numberOfShortlistsIn", 0] }, 1] },
+              ],
+            },
+          },
+        },
+      ],
       { new: true }
-    ).select("_id name tscName timesShortlisted");
+    ).select("_id name tscName numberOfShortlistsIn");
 
     res.json({ success: true, act: updated });
   } catch (err) {
