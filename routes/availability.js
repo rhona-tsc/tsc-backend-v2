@@ -463,28 +463,17 @@ const enquiryId = `${actId}_${dateISO}_${address}`.replace(/\s+/g, "_");
 /* 🔵 PATCH /act/:id/decrement-shortlist – decrement shortlist counter        */
 /* -------------------------------------------------------------------------- */
 router.patch("/act/:id/decrement-shortlist", async (req, res) => {
-  console.log(`🔵 (availability.js) /act/:id/decrement-shortlist START`, {
-    id: req.params.id,
-    userId: req.body?.userId,
-  });
-
   try {
     const actId = req.params.id;
-    if (!actId)
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing actId" });
+    if (!actId) return res.status(400).json({ success: false, message: "Missing actId" });
 
-    const updated = await Act.findByIdAndUpdate(
-      actId,
+    const updated = await Act.findOneAndUpdate(
+      { _id: actId },
       [
         {
           $set: {
             numberOfShortlistsIn: {
-              $max: [
-                0,
-                { $subtract: [{ $ifNull: ["$numberOfShortlistsIn", 0] }, 1] },
-              ],
+              $max: [0, { $subtract: ["$numberOfShortlistsIn", 1] }],
             },
           },
         },

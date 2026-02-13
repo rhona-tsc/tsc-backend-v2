@@ -2428,6 +2428,13 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   const body = isExpress ? reqOrArgs.body : reqOrArgs;
   const res = isExpress ? maybeRes : null;
 
+  // Normalize request object (this function is called both as an Express handler and as an internal helper)
+  const reqObj = isExpress ? reqOrArgs : {};
+
+  /* -------------------------------------------------------------- */
+  /* 🔧 Helpers                                                     */
+  /* -------------------------------------------------------------- */
+
   const normalizeAddrStrict = (s = "") =>
     String(s || "")
       .toLowerCase()
@@ -2447,23 +2454,101 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     return crypto.createHash("sha1").update(raw).digest("hex").slice(0, 16);
   };
 
-  // Normalize request object (this function is called both as an Express handler and as an internal helper)
-  const reqObj = isExpress ? reqOrArgs : {};
+  const normalizeAddr = (s = "") =>
+    String(s || "")
+      .toLowerCase()
+      .replace(/\buk\b/g, "")
+      .replace(/\s+/g, " ")
+      .replace(/,\s*/g, ",")
+      .trim();
 
-  // Prefer auth-derived userId when available; fall back to body
-  const authUserIdRaw = reqObj?.user?._id || reqObj?.userId || null;
-  const bodyUserIdRaw =
-    body?.userId ||
-    body?.user?._id ||
-    body?.user?.id ||
-    body?.userIdFromToken ||
-    null;
+  const lastTwoParts = (s = "") =>
+    normalizeAddr(s).split(",").slice(-2).join(",");
 
-  const authUserId = authUserIdRaw ? String(authUserIdRaw) : null;
-  const bodyUserId = bodyUserIdRaw ? String(bodyUserIdRaw) : null;
-  const clientUserId = authUserId || bodyUserId || null;
+  const addressesRoughlyEqual = (a = "", b = "") => {
+    if (!a || !b) return false;
+    const A = normalizeAddr(a);
+    const B = normalizeAddr(b);
+    if (A === B) return true;
+    const A2 = lastTwoParts(a);
+    const B2 = lastTwoParts(b);
+    return A2 && B2 && (A2 === B2 || A2.includes(B2) || B2.includes(A2));
+  };
 
-  const hasAuthHeader = isExpress ? !!reqObj?.headers?.authorization : false;
+  // Title-case helper tuned for UK place names
+  function toTitleCaseCounty(s = "") {
+    const exceptions = new Set(["of", "and", "the", "upon", "on", "by", "in"]);
+    const fixups = {
+      "east riding of yorkshire": "East Riding of Yorkshire",
+      "city of london": "City of London",
+      "isle of wight": "Isle of Wight",
+      "na h-eileanan siar": "Na h-Eileanan Siar",
+    };
+
+    const raw = String(s || "").trim();
+    if (!raw) return "";
+
+    const lower = raw.toLowerCase();
+    if (fixups[lower]) return fixups[lower];
+
+    return (
+      lower
+        .split(/([\s\-’'])/)
+        .map((part, idx) => {
+          if (/^[\s\-’']$/.test(part)) return part; // keep separators
+          if (idx !== 0 && exceptions.has(part)) return part; // small words
+          return part.charAt(0).toUpperCase() + part.slice(1);
+        })
+        .join("")
+        .replace(/\bMc([a-z])/g, (_, c) => "Mc" + c.toUpperCase())
+        .replace(/\bMac([a-z])/g, (_, c) => "Mac" + c.toUpperCase())
+    );
+  }
+
+  const getIdentitySnapshot = () => {
+    const authUserIdRaw = reqObj?.user?._id || reqObj?.userId || null;
+    const bodyUserIdRaw =
+      body?.userId ||
+      body?.user?._id ||
+      body?.user?.id ||
+      body?.userIdFromToken ||
+      null;
+
+    const authUserId = authUserIdRaw ? String(authUserIdRaw) : null;
+    const bodyUserId = bodyUserIdRaw ? String(bodyUserIdRaw) : null;
+    const clientUserId = authUserId || bodyUserId || null;
+
+    const hasAuthHeader = isExpress ? !!reqObj?.headers?.authorization : false;
+
+    return { authUserId, bodyUserId, clientUserId, hasAuthHeader };
+  };
+
+  // “active request” guard for this specific person/slot
+  const findActiveRequest = async ({
+    actId,
+    dateISO,
+    requestKey,
+    slotIndex,
+    phone,
+    musicianId,
+  }) => {
+    const q = {
+      actId,
+      dateISO,
+      v2: true,
+      requestKey,
+      status: { $in: ["sent", "queued"] },
+    };
+    if (typeof slotIndex === "number") q.slotIndex = slotIndex;
+    if (phone) q.phone = phone;
+    if (musicianId) q.musicianId = musicianId;
+
+    return AvailabilityModel.findOne(q)
+      .select(
+        "_id status createdAt updatedAt enquiryId clientUserId slotIndex phone musicianId reply"
+      )
+      .lean();
+  };
 
   try {
     const {
@@ -2489,6 +2574,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       "http://localhost:5174"
     ).replace(/\/$/, "");
 
+    const { authUserId, bodyUserId, clientUserId, hasAuthHeader } =
+      getIdentitySnapshot();
+
     console.log("🧾 [triggerAvailabilityRequest] identity snapshot", {
       isExpress,
       bodyUserId,
@@ -2498,7 +2586,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     });
 
     /* -------------------------------------------------------------- */
-    /* 🔢 Enquiry + slotIndex base                                    */
+    /* 🔢 Enquiry                                                     */
     /* -------------------------------------------------------------- */
     const enquiryId =
       body.enquiryId ||
@@ -2511,25 +2599,16 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       console.warn("⚠️ No enquiryId provided — slotIndex grouping may fail");
     }
 
-    const existingForEnquiry = enquiryId
-      ? await AvailabilityModel.find({ enquiryId }).lean()
-      : [];
-    const slotIndexBase = existingForEnquiry.length; // just FYI
-    const slotIndexFromBody =
-      typeof body.slotIndex === "number" ? body.slotIndex : null;
-
     /* -------------------------------------------------------------- */
     /* 🧭 Enrich clientName/email                                     */
     /* -------------------------------------------------------------- */
     let resolvedClientName = clientName || "";
     let resolvedClientEmail = clientEmail || "";
 
-    const userIdForEnrichment = clientUserId;
-
-    if (!resolvedClientEmail && userIdForEnrichment) {
+    if (!resolvedClientEmail && clientUserId) {
       try {
         const userDoc = await userModel
-          .findById(userIdForEnrichment)
+          .findById(clientUserId)
           .select("firstName surname email")
           .lean();
 
@@ -2539,7 +2618,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           resolvedClientEmail = userDoc.email || "";
           console.log(
             `📧 Enriched client details from userId: ${resolvedClientName} <${resolvedClientEmail}>`,
-            { userIdForEnrichment, source: authUserId ? "auth" : "body" },
+            { userIdForEnrichment: clientUserId, source: authUserId ? "auth" : "body" }
           );
         }
       } catch (err) {
@@ -2557,47 +2636,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const act = await Act.findById(actId).lean();
     if (!act) throw new Error("Act not found");
 
-    // Title-case helper tuned for UK place names
-    function toTitleCaseCounty(s = "") {
-      const exceptions = new Set([
-        "of",
-        "and",
-        "the",
-        "upon",
-        "on",
-        "by",
-        "in",
-      ]);
-      const fixups = {
-        "east riding of yorkshire": "East Riding of Yorkshire",
-        "city of london": "City of London",
-        "isle of wight": "Isle of Wight",
-        "na h-eileanan siar": "Na h-Eileanan Siar",
-      };
-
-      const raw = String(s || "").trim();
-      if (!raw) return "";
-
-      const lower = raw.toLowerCase();
-      if (fixups[lower]) return fixups[lower];
-
-      // keep spaces, hyphens, and apostrophes as separators but preserved
-      return (
-        lower
-          .split(/([\s\-’'])/)
-          .map((part, idx) => {
-            if (/^[\s\-’']$/.test(part)) return part; // keep separator
-            if (idx !== 0 && exceptions.has(part)) return part; // small words
-            return part.charAt(0).toUpperCase() + part.slice(1);
-          })
-          // Mc/Mac prefixes (simple pass)
-          .join("")
-          .replace(/\bMc([a-z])/g, (_, c) => "Mc" + c.toUpperCase())
-          .replace(/\bMac([a-z])/g, (_, c) => "Mac" + c.toUpperCase())
-      );
-    }
-
-    // derive addresses
+    /* -------------------------------------------------------------- */
+    /* 📍 Address resolution + hard block                             */
+    /* -------------------------------------------------------------- */
     const fullFormattedAddress =
       (formattedAddress ||
         address ||
@@ -2612,18 +2653,14 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         {
           actId,
           lineupId,
-          dateISO: dISO || (date ? new Date(date).toISOString().slice(0, 10) : null),
+          dateISO,
           formattedAddress: formattedAddress || null,
           address: address || null,
-        },
+        }
       );
 
       if (res) {
-        return res.json({
-          success: true,
-          sent: 0,
-          skipped: "missing-address",
-        });
+        return res.json({ success: true, sent: 0, skipped: "missing-address" });
       }
       return { success: true, sent: 0, skipped: "missing-address" };
     }
@@ -2636,13 +2673,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const shortAddress =
       [derivedCounty, derivedPostcode].filter(Boolean).join(", ") || "TBC";
 
-    console.log("📍 [triggerAvailabilityRequest] shortAddress for template", {
-      shortAddress,
-      derivedCounty,
-      derivedPostcode,
-      fullFormattedAddress,
-    });
-
     const metaAddress = fullFormattedAddress || shortAddress || "TBC";
 
     const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
@@ -2652,7 +2682,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       year: "numeric",
     });
 
-    // 🔍 Entry summary
     console.log("🟣 [triggerAvailabilityRequest] ENTRY", {
       actId,
       lineupId,
@@ -2661,22 +2690,17 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       clientUserId,
       selectedVocalistName,
       vocalistName,
-      address: address || null,
-      formattedAddress: formattedAddress || null,
       fullFormattedAddress,
       shortAddress,
       metaAddress,
       enquiryId,
-      slotIndexFromBody,
+      slotIndexFromBody: typeof body.slotIndex === "number" ? body.slotIndex : null,
     });
 
     /* -------------------------------------------------------------- */
-    /* Guard to de-dupe availability requests                       */
+    /* 🔑 requestKey                                                  */
     /* -------------------------------------------------------------- */
-
-    // ✅ requestKey scope: enquiryId first (best), else clientUserId, else anon
     const requestScope = enquiryId || clientUserId || "anon";
-
     const requestKey = makeRequestKey({
       scope: requestScope,
       actId,
@@ -2692,64 +2716,6 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       fullFormattedAddress,
     });
 
-    
-      // ✅ EARLY DUPLICATE GUARD (slot-aware; prevents resend when user clicks around)
-if (!skipDuplicateCheck) {
-  const slotGuard =
-    typeof body.slotIndex === "number" ? { slotIndex: body.slotIndex } : {};
-
-  const phoneGuard = (() => {
-    const p = normalizePhone(
-      body?.targetMember?.phone ||
-        body?.targetMember?.phoneNumber ||
-        body?.phone ||
-        ""
-    );
-    return p ? { phone: p } : {};
-  })();
-
-  const musicianGuard = body?.targetMember?.musicianId
-    ? { musicianId: body.targetMember.musicianId }
-    : body?.targetMusicianId
-      ? { musicianId: body.targetMusicianId }
-      : {};
-
-  const existingRequest = await AvailabilityModel.findOne({
-    actId,
-    dateISO,
-    v2: true,
-    requestKey,
-    ...slotGuard,
-    // if we can, guard per musician/phone too
-    ...(Object.keys(musicianGuard).length ? musicianGuard : {}),
-    ...(Object.keys(phoneGuard).length ? phoneGuard : {}),
-    status: { $in: ["sent", "queued"] },
-  })
-    .select("_id status createdAt updatedAt enquiryId clientUserId slotIndex phone musicianId")
-    .lean();
-
-  if (existingRequest) {
-    console.log("🛑 [triggerAvailabilityRequest] already requested — skipping", {
-      requestKey,
-      existingId: String(existingRequest._id),
-      status: existingRequest.status,
-      slotIndex: existingRequest.slotIndex,
-      phone: existingRequest.phone,
-      musicianId: existingRequest.musicianId,
-    });
-
-    if (res) {
-      return res.json({
-        success: true,
-        sent: 0,
-        skipped: "already_requested_for_slot",
-        requestKey,
-      });
-    }
-    return { success: true, sent: 0, skipped: "already_requested_for_slot", requestKey };
-  }
-}
-
     /* -------------------------------------------------------------- */
     /* 🎵 Lineup + members                                            */
     /* -------------------------------------------------------------- */
@@ -2758,43 +2724,17 @@ if (!skipDuplicateCheck) {
       ? lineups.find(
           (l) =>
             String(l._id) === String(lineupId) ||
-            String(l.lineupId) === String(lineupId),
+            String(l.lineupId) === String(lineupId)
         )
       : lineups[0];
 
     if (!lineup) {
       console.warn(
-        "⚠️ No valid lineup found — defaulting to first available or skipping lineup-specific logic.",
+        "⚠️ No valid lineup found — defaulting to first available or skipping lineup-specific logic."
       );
     }
 
-    const members = Array.isArray(lineup?.bandMembers)
-      ? lineup.bandMembers
-      : [];
-
-    /* -------------------------------------------------------------- */
-    /* 🔎 Address compare helpers                                     */
-    /* -------------------------------------------------------------- */
-    const normalizeAddr = (s = "") =>
-      String(s || "")
-        .toLowerCase()
-        .replace(/\buk\b/g, "")
-        .replace(/\s+/g, " ")
-        .replace(/,\s*/g, ",")
-        .trim();
-
-    const lastTwoParts = (s = "") =>
-      normalizeAddr(s).split(",").slice(-2).join(",");
-
-    const addressesRoughlyEqual = (a = "", b = "") => {
-      if (!a || !b) return false;
-      const A = normalizeAddr(a);
-      const B = normalizeAddr(b);
-      if (A === B) return true;
-      const A2 = lastTwoParts(a);
-      const B2 = lastTwoParts(b);
-      return A2 && B2 && (A2 === B2 || A2.includes(B2) || B2.includes(A2));
-    };
+    const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
 
     /* -------------------------------------------------------------- */
     /* 💰 Fee calculation helper                                      */
@@ -2809,8 +2749,9 @@ if (!skipDuplicateCheck) {
         : 0;
 
       const { county: selectedCounty } =
-        countyFromAddress(fullFormattedAddress);
+        countyFromAddress(fullFormattedAddress) || {};
       const selectedDate = dateISO;
+
       let travelFee = 0;
       let travelSource = "none";
 
@@ -2843,7 +2784,7 @@ if (!skipDuplicateCheck) {
     /* 🎤 MULTI-VOCALIST HANDLING (Lead only)                         */
     /* -------------------------------------------------------------- */
     const vocalists = members.filter((m) =>
-      (m.instrument || "").toLowerCase().includes("vocal"),
+      (m.instrument || "").toLowerCase().includes("vocal")
     );
 
     if (!isDeputy && vocalists.length > 1) {
@@ -2856,7 +2797,7 @@ if (!skipDuplicateCheck) {
         const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
         if (!phone) {
           console.warn(
-            `⚠️ Skipping vocalist ${vMember.firstName} — no phone number`,
+            `⚠️ Skipping vocalist ${vMember.firstName} — no phone number`
           );
           continue;
         }
@@ -2885,7 +2826,41 @@ if (!skipDuplicateCheck) {
 
         realMusicianId = musicianDoc?._id || realMusicianId;
 
-        // ✅ NOW safe to use realMusicianId anywhere below
+        // ✅ ACTIVE-REQUEST GUARD (per person/slot) — prevents accidental re-sends
+        if (!skipDuplicateCheck) {
+          const active = await findActiveRequest({
+            actId,
+            dateISO,
+            requestKey,
+            slotIndex: slotIndexForThis,
+            phone,
+            musicianId: realMusicianId,
+          });
+
+          if (active) {
+            console.log(
+              "🛑 [triggerAvailabilityRequest] already sent/queued (multi) — skipping",
+              {
+                requestKey,
+                existingId: String(active._id),
+                status: active.status,
+                slotIndex: active.slotIndex,
+                phone: active.phone,
+                musicianId: String(active.musicianId || ""),
+              }
+            );
+
+            results.push({
+              name: vMember.firstName,
+              slotIndex: slotIndexForThis,
+              phone,
+              reusedExisting: true,
+              existingStatus: active.status,
+            });
+            continue;
+          }
+        }
+
         const dateLevelUnavailable = await findDateLevelUnavailable({
           dateISO,
           canonicalId: realMusicianId,
@@ -2900,7 +2875,7 @@ if (!skipDuplicateCheck) {
               dateISO,
               phone,
               realMusicianId: String(realMusicianId || ""),
-            },
+            }
           );
 
           await notifyDeputies({
@@ -2926,9 +2901,7 @@ if (!skipDuplicateCheck) {
           continue;
         }
 
-        let enriched = musicianDoc
-          ? { ...musicianDoc, ...vMember }
-          : { ...vMember };
+        let enriched = musicianDoc ? { ...musicianDoc, ...vMember } : { ...vMember };
         try {
           if (vMember?.musicianId) {
             const mus = await Musician.findById(vMember.musicianId).lean();
@@ -2937,11 +2910,11 @@ if (!skipDuplicateCheck) {
         } catch (err) {
           console.warn(
             `⚠️ Failed to enrich vocalist ${vMember.firstName}:`,
-            err.message,
+            err.message
           );
         }
 
-        // 🧯 PRIOR-REPLY CHECK (per-slot)
+        // 🧯 PRIOR-REPLY CHECK (per-slot, same location)
         try {
           const prior = await AvailabilityModel.findOne({
             actId,
@@ -2958,7 +2931,7 @@ if (!skipDuplicateCheck) {
             prior &&
             addressesRoughlyEqual(
               prior.formattedAddress || prior.address || "",
-              fullFormattedAddress,
+              fullFormattedAddress
             )
           ) {
             console.log(
@@ -2967,7 +2940,7 @@ if (!skipDuplicateCheck) {
                 slotIndex: slotIndexForThis,
                 reply: prior.reply,
                 phone,
-              },
+              }
             );
 
             if (prior.reply === "unavailable" || prior.reply === "no") {
@@ -3004,7 +2977,7 @@ if (!skipDuplicateCheck) {
               } catch (e) {
                 console.warn(
                   "⚠️ Badge refresh (existing YES) failed:",
-                  e?.message || e,
+                  e?.message || e
                 );
               }
             }
@@ -3032,10 +3005,11 @@ if (!skipDuplicateCheck) {
           slotIndex: slotIndexForThis,
           requestKey,
         };
+
         // 🔗 correlation id
         const requestId = makeShortId();
 
-        // ⛳ INSERT-ONLY META — keep clean
+        // ⛳ INSERT-ONLY META
         const setOnInsert = {
           actId,
           clientUserId: clientUserId || null,
@@ -3079,50 +3053,26 @@ if (!skipDuplicateCheck) {
           profileUrl: realMusicianId
             ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}`
             : "",
-          requestId, // ← set here (no $setOnInsert duplicate)
+          requestId,
         };
 
         console.log("🔎 [triggerAvailabilityRequest/multi] PERSON", {
           role: "LEAD",
-          firstName: (enriched.firstName || vMember.firstName || "").trim(),
-          lastName: (enriched.lastName || vMember.lastName || "").trim(),
           selectedVocalistName: displayNameForLead,
           vocalistName: displayNameForLead,
           address: fullFormattedAddress,
           shortAddress,
-          photoUrl: setAlways.photoUrl || "",
-          profileUrl: setAlways.profileUrl || "",
           musicianId: realMusicianId || null,
           phone,
           slotIndex: slotIndexForThis,
           requestId,
         });
 
-        console.log(
-          "🧾 [triggerAvailabilityRequest/multi] about to upsert availability row",
-          {
-            actId,
-            dateISO,
-            slotIndex: slotIndexForThis,
-            phone,
-            willStoreUserId: clientUserId || null,
-            willStoreClientEmail: resolvedClientEmail || null,
-            willStoreClientName: resolvedClientName || null,
-          },
-        );
-
         const savedLead = await AvailabilityModel.findOneAndUpdate(
           query,
           { $setOnInsert: setOnInsert, $set: setAlways },
-          { new: true, upsert: true },
+          { new: true, upsert: true }
         );
-
-        console.log("✅ Upserted LEAD row", {
-          slot: slotIndexForThis,
-          isDeputy: savedLead?.isDeputy,
-          musicianId: String(savedLead?.musicianId || ""),
-          requestId,
-        });
 
         // Build interactive buttons (carry requestId)
         const buttons = [
@@ -3133,7 +3083,7 @@ if (!skipDuplicateCheck) {
 
         const nameBits = normalizeNameBits(displayNameOf(vMember));
 
-        // Send interactive WA (variables use shortAddress)
+        // Send interactive WA
         const msg = await sendWhatsAppMessage({
           to: phone,
           actData: act,
@@ -3150,8 +3100,8 @@ if (!skipDuplicateCheck) {
             role: vMember.instrument,
             actName: act.tscName || act.name,
           },
-          requestId, // 🔗
-          buttons, // 🔗
+          requestId,
+          buttons,
           smsBody: `Hi ${
             vMember.firstName || "there"
           }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${
@@ -3159,20 +3109,20 @@ if (!skipDuplicateCheck) {
           } duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
         });
 
-        // persist Twilio SID (requestId already set above)
+        // persist Twilio SID
         try {
           await AvailabilityModel.updateOne(
             { _id: savedLead._id },
-            { $set: { messageSidOut: msg?.sid || null } },
+            { $set: { messageSidOut: msg?.sid || null } }
           );
         } catch (e) {
           console.warn(
             "⚠️ Could not persist messageSidOut (multi):",
-            e?.message || e,
+            e?.message || e
           );
         }
 
-        // ⏰ Schedule deputy escalation for THIS lead vocalist (inside loop scope)
+        // ⏰ Schedule deputy escalation for THIS lead vocalist
         await scheduleDeputyEscalation({
           availabilityId: savedLead?._id || null,
           actId,
@@ -3202,20 +3152,19 @@ if (!skipDuplicateCheck) {
           details: results,
         });
       return { success: true, sent: results.length, details: results };
-    } // ✅ CLOSES: if (!isDeputy && vocalists.length > 1)
+    } // ✅ end multi-vocalist block
 
     /* -------------------------------------------------------------- */
     /* 🎤 SINGLE VOCALIST / DEPUTY PATH                               */
     /* -------------------------------------------------------------- */
-   // ✅ Allow caller to explicitly target a vocalist member (for lineup-change ensures)
-const targetedFromBody =
-  body?.targetMember ||
-  body?.targetVocalist ||
-  null;
 
-const targetMember = isDeputy
-  ? deputy
-  : targetedFromBody || findVocalistPhone(act, lineup?._id || lineupId)?.vocalist;
+    // ✅ Allow caller to explicitly target a vocalist member
+    const targetedFromBody = body?.targetMember || body?.targetVocalist || null;
+
+    const targetMember = isDeputy
+      ? deputy
+      : targetedFromBody ||
+        findVocalistPhone(act, lineup?._id || lineupId)?.vocalist;
 
     if (!targetMember) throw new Error("No valid member found");
 
@@ -3226,7 +3175,7 @@ const targetMember = isDeputy
         if (mus) enrichedMember = { ...mus, ...enrichedMember };
       } else {
         const cleanPhone = normalizePhone(
-          targetMember.phone || targetMember.phoneNumber || "",
+          targetMember.phone || targetMember.phoneNumber || ""
         );
         if (cleanPhone) {
           const mus = await Musician.findOne({
@@ -3244,20 +3193,60 @@ const targetMember = isDeputy
     }
 
     targetMember.email = enrichedMember.email || targetMember.email || null;
-    targetMember.musicianId =
-      enrichedMember._id || targetMember.musicianId || null;
+    targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
 
-    const phone = normalizePhone(
-      targetMember.phone || targetMember.phoneNumber,
-    );
+    const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
     if (!phone) throw new Error("Missing phone");
+
+    const singleSlotIndex = typeof body.slotIndex === "number" ? body.slotIndex : 0;
 
     // 🔎 Canonical musician from Musicians collection (by phone)
     const canonical = await findCanonicalMusicianByPhone(phone);
 
-    // ✅ Resolve a real musicianId BEFORE date-level checks (aligns with multi-vocalist path)
+    // ✅ Resolve a real musicianId BEFORE date-level checks
     const realMusicianId =
       canonical?._id || enrichedMember?._id || targetMember?.musicianId || null;
+
+    // ✅ ACTIVE-REQUEST GUARD (single) — prevents resend if already sent/queued
+    if (!skipDuplicateCheck) {
+      const active = await findActiveRequest({
+        actId,
+        dateISO,
+        requestKey,
+        slotIndex: singleSlotIndex,
+        phone,
+        musicianId: realMusicianId,
+      });
+
+      if (active) {
+        console.log(
+          "🛑 [triggerAvailabilityRequest] already sent/queued (single) — skipping",
+          {
+            requestKey,
+            existingId: String(active._id),
+            status: active.status,
+            slotIndex: active.slotIndex,
+            phone: active.phone,
+            musicianId: String(active.musicianId || ""),
+          }
+        );
+
+        if (res) {
+          return res.json({
+            success: true,
+            sent: 0,
+            skipped: "already_requested_for_slot",
+            requestKey,
+          });
+        }
+        return {
+          success: true,
+          sent: 0,
+          skipped: "already_requested_for_slot",
+          requestKey,
+        };
+      }
+    }
 
     const canonicalName = canonical
       ? `${canonical.firstName || ""} ${canonical.lastName || ""}`.trim()
@@ -3272,17 +3261,14 @@ const targetMember = isDeputy
     const selectedName = String(
       selectedVocalistName ||
         canonicalName ||
-        `${targetMember?.firstName || ""} ${targetMember?.lastName || ""}`,
+        `${targetMember?.firstName || ""} ${targetMember?.lastName || ""}`
     ).trim();
 
-    const singleSlotIndex =
-      typeof body.slotIndex === "number" ? body.slotIndex : 0;
-
-    // ✅ Date-level block: if already unavailable for this date, skip lead WhatsApp and go deputies
+    // ✅ Date-level block: if already unavailable for this date, skip lead WA and go deputies
     if (!isDeputy) {
       const dateLevelUnavailable = await findDateLevelUnavailable({
         dateISO,
-        canonicalId: realMusicianId, // ✅ use realMusicianId
+        canonicalId: realMusicianId,
         phone,
       });
 
@@ -3294,7 +3280,7 @@ const targetMember = isDeputy
             phone,
             canonicalId: String(realMusicianId || ""),
             priorId: String(dateLevelUnavailable._id || ""),
-          },
+          }
         );
 
         await notifyDeputies({
@@ -3322,18 +3308,14 @@ const targetMember = isDeputy
     /* -------------------------------------------------------------- */
     /* 🛡️ Prior-reply check (same date + same location)               */
     /* -------------------------------------------------------------- */
-    const priorReplyQuery = {
+    const prior = await AvailabilityModel.findOne({
       actId,
       dateISO,
       phone,
       v2: true,
-      ...(isDeputy && slotIndexFromBody !== null
-        ? { slotIndex: slotIndexFromBody }
-        : {}),
+      slotIndex: singleSlotIndex,
       reply: { $in: ["yes", "no", "unavailable"] },
-    };
-
-    const prior = await AvailabilityModel.findOne(priorReplyQuery)
+    })
       .sort({ updatedAt: -1, createdAt: -1 })
       .lean();
 
@@ -3341,7 +3323,7 @@ const targetMember = isDeputy
       prior &&
       addressesRoughlyEqual(
         prior.formattedAddress || prior.address || "",
-        fullFormattedAddress,
+        fullFormattedAddress
       )
     ) {
       console.log("ℹ️ Using existing reply (single path) — skipping WA send", {
@@ -3368,17 +3350,11 @@ const targetMember = isDeputy
             });
           }
         } catch (e) {
-          console.warn(
-            "⚠️ Badge refresh (existing YES) failed:",
-            e?.message || e,
-          );
+          console.warn("⚠️ Badge refresh (existing YES) failed:", e?.message || e);
         }
       }
 
-      if (
-        !isDeputy &&
-        (prior.reply === "unavailable" || prior.reply === "no")
-      ) {
+      if (!isDeputy && (prior.reply === "unavailable" || prior.reply === "no")) {
         await notifyDeputies({
           actId,
           lineupId: lineup?._id || lineupId || null,
@@ -3386,7 +3362,7 @@ const targetMember = isDeputy
           formattedAddress: fullFormattedAddress,
           clientName: resolvedClientName || "",
           clientEmail: resolvedClientEmail || "",
-          slotIndex: typeof body.slotIndex === "number" ? body.slotIndex : null,
+          slotIndex: singleSlotIndex,
           skipDuplicateCheck: true,
           skipIfUnavailable: false,
         });
@@ -3398,35 +3374,6 @@ const targetMember = isDeputy
     }
 
     /* -------------------------------------------------------------- */
-    /* 🔐 Refined duplicate guard                                     */
-    /* -------------------------------------------------------------- */
-    const strongGuardQuery = {
-      actId,
-      dateISO,
-      phone,
-      v2: true,
-      ...(isDeputy && slotIndexFromBody !== null
-        ? { slotIndex: slotIndexFromBody }
-        : {}),
-    };
-    const existingAny =
-      await AvailabilityModel.findOne(strongGuardQuery).lean();
-
-    if (existingAny && !skipDuplicateCheck) {
-      console.log(
-        "⚠️ Duplicate availability request detected — skipping WhatsApp send",
-        strongGuardQuery,
-      );
-      if (res)
-        return res.json({
-          success: true,
-          sent: 0,
-          skipped: "duplicate-strong",
-        });
-      return { success: true, sent: 0, skipped: "duplicate-strong" };
-    }
-
-    /* -------------------------------------------------------------- */
     /* 🧮 Final Fee Logic (including deputy inheritedFee)             */
     /* -------------------------------------------------------------- */
     let finalFee;
@@ -3435,15 +3382,14 @@ const targetMember = isDeputy
       const parsedBase =
         parseFloat(String(inheritedFee).replace(/[^\d.]/g, "")) || 0;
 
-      const inheritedFeeIncludesTravel =
-        body?.inheritedFeeIncludesTravel === true;
+      const inheritedFeeIncludesTravel = body?.inheritedFeeIncludesTravel === true;
 
       let travelFee = 0;
       let travelSource = "none";
 
       if (!inheritedFeeIncludesTravel) {
         const { county: selectedCounty } =
-          countyFromAddress(fullFormattedAddress);
+          countyFromAddress(fullFormattedAddress) || {};
         const selectedDate = dateISO;
 
         if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
@@ -3458,7 +3404,7 @@ const targetMember = isDeputy
         if (travelSource === "none") {
           const computed = await computeMemberTravelFee({
             act,
-            member: targetMember, // ✅ deputy's own postcode travel
+            member: targetMember, // deputy's postcode travel
             selectedCounty,
             selectedAddress: fullFormattedAddress,
             selectedDate,
@@ -3482,43 +3428,6 @@ const targetMember = isDeputy
     }
 
     /* -------------------------------------------------------------- */
-    /* 🛡️ Skip if already replied unavailable / no                    */
-    /* -------------------------------------------------------------- */
-    const existing = await AvailabilityModel.findOne({
-      actId,
-      dateISO,
-      phone,
-      v2: true,
-    }).lean();
-
-    if (
-      existing &&
-      !skipDuplicateCheck &&
-      ["unavailable", "no"].includes(existing.reply)
-    ) {
-      console.log("🚫 Skipping — musician already unavailable/no", {
-        actId,
-        dateISO,
-        phone: existing.phone,
-        reply: existing.reply,
-      });
-      if (res)
-        return res.json({ success: true, sent: 0, skipped: existing.reply });
-      return { success: true, sent: 0, skipped: existing.reply };
-    }
-
-    if (existing && !skipDuplicateCheck && !isDeputy) {
-      console.log("⚠️ Duplicate availability request detected — skipping", {
-        actId,
-        dateISO,
-        phone: existing.phone,
-      });
-      if (res)
-        return res.json({ success: true, sent: 0, skipped: "duplicate" });
-      return { success: true, sent: 0, skipped: "duplicate" };
-    }
-
-    /* -------------------------------------------------------------- */
     /* ✅ Upsert availability record (single lead / deputy)           */
     /* -------------------------------------------------------------- */
     const now = new Date();
@@ -3529,10 +3438,10 @@ const targetMember = isDeputy
       slotIndex: singleSlotIndex,
       requestKey,
     };
+
     // 🔗 correlation id
     const requestId = makeShortId();
 
-    // ⛳ INSERT-ONLY META — keep clean of duplicates on same op
     const setOnInsert = {
       actId,
       lineupId: lineup?._id || null,
@@ -3548,10 +3457,12 @@ const targetMember = isDeputy
       reply: null,
     };
 
-    // 🔁 ALWAYS-UPDATE FIELDS (requestId ONLY HERE → avoids conflict)
+    const roleStr =
+      body?.inheritedDuties || targetMember.instrument || "Performance";
+
     const setAlways = {
       isDeputy: !!isDeputy,
-      musicianId: realMusicianId, // ✅ use realMusicianId
+      musicianId: realMusicianId,
       musicianName: canonicalName,
       musicianEmail: canonical?.email || targetMember.email || "",
       photoUrl: canonicalPhoto,
@@ -3562,65 +3473,34 @@ const targetMember = isDeputy
       clientEmail: resolvedClientEmail || "",
       clientUserId: clientUserId || null,
       actName: act?.tscName || act?.name || "",
-      duties: body?.inheritedDuties || targetMember.instrument || "Performance",
+      duties: roleStr,
       fee: String(finalFee),
       updatedAt: now,
       profileUrl: realMusicianId
         ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}`
         : "",
       selectedVocalistName: selectedName,
-      selectedVocalistId: realMusicianId || null, // ✅ use realMusicianId
+      selectedVocalistId: realMusicianId || null,
       vocalistName: vocalistName || selectedName || "",
-      requestId, // ← here (not in $setOnInsert)
+      requestId,
     };
-
-    const resolvedFirstName = (
-      canonical?.firstName ||
-      targetMember.firstName ||
-      enrichedMember.firstName ||
-      ""
-    ).trim();
-    const resolvedLastName = (
-      canonical?.lastName ||
-      targetMember.lastName ||
-      enrichedMember.lastName ||
-      ""
-    ).trim();
 
     console.log("🔎 [triggerAvailabilityRequest/single] PERSON", {
       role: isDeputy ? "DEPUTY" : "LEAD",
-      firstName: resolvedFirstName,
-      lastName: resolvedLastName,
       selectedVocalistName: setAlways.selectedVocalistName,
       vocalistName: setAlways.vocalistName,
       address: fullFormattedAddress,
       shortAddress,
-      photoUrl: setAlways.photoUrl || "",
-      profileUrl: setAlways.profileUrl || "",
       musicianId: realMusicianId || null,
       phone,
       slotIndex: singleSlotIndex,
       requestId,
     });
 
-    console.log(
-      "🧾 [triggerAvailabilityRequest/single] about to upsert availability row",
-      {
-        actId,
-        dateISO,
-        slotIndex: singleSlotIndex,
-        phone,
-        willStoreUserId: clientUserId || null,
-        willStoreClientEmail: resolvedClientEmail || null,
-        willStoreClientName: resolvedClientName || null,
-        isDeputy: !!isDeputy,
-      },
-    );
-
     const saved = await AvailabilityModel.findOneAndUpdate(
       query,
       { $setOnInsert: setOnInsert, $set: setAlways },
-      { new: true, upsert: true },
+      { new: true, upsert: true }
     );
 
     console.log(`✅ Upserted ${isDeputy ? "DEPUTY" : "LEAD"} row`, {
@@ -3633,8 +3513,6 @@ const targetMember = isDeputy
     /* -------------------------------------------------------------- */
     /* 💬 Send WhatsApp (interactive buttons with requestId)          */
     /* -------------------------------------------------------------- */
-    const roleStr =
-      body?.inheritedDuties || targetMember.instrument || "Performance";
     const feeStr = finalFee > 0 ? `£${finalFee}` : "TBC";
 
     const person = targetMember || {};
@@ -3648,10 +3526,6 @@ const targetMember = isDeputy
       shortAddress,
       actName: act.tscName || act.name,
       isDeputy,
-      selectedVocalistName: setAlways.selectedVocalistName,
-      vocalistName: setAlways.vocalistName,
-      photoUrl: setAlways.photoUrl,
-      profileUrl: setAlways.profileUrl,
       requestId,
     });
 
@@ -3672,13 +3546,13 @@ const targetMember = isDeputy
       variables: {
         firstName: nameBits.firstName || nameBits.displayName || "Musician",
         date: formattedDate,
-        location: shortAddress, // ✅ COUNTY + POSTCODE
+        location: shortAddress,
         fee: String(finalFee),
         role: roleStr,
         actName: act.tscName || act.name,
       },
-      requestId, // 🔗 correlation
-      buttons, // 🔗 interactive quick replies
+      requestId,
+      buttons,
       smsBody: `Hi ${
         targetMember.firstName || "there"
       }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${roleStr} duties with ${
@@ -3686,16 +3560,16 @@ const targetMember = isDeputy
       }. Please indicate your availability 💫`,
     });
 
-    // Persist Twilio SID (requestId already stored above)
+    // Persist Twilio SID
     try {
       await AvailabilityModel.updateOne(
         { _id: saved._id },
-        { $set: { messageSidOut: msg?.sid || null } },
+        { $set: { messageSidOut: msg?.sid || null } }
       );
     } catch (e) {
       console.warn(
         "⚠️ Could not persist messageSidOut (single):",
-        e?.message || e,
+        e?.message || e
       );
     }
 
