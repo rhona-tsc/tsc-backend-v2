@@ -53,9 +53,9 @@ export const verifyOtp = async (req, res) => {
     await OtpToken.deleteOne({ email });
 
     // ✅ Find or create user
-    let user = await User.findOne({ email });
+    let user = await userModel.findOne({ email });
     if (!user) {
-      user = await User.create({ email, role: "client" }); // you can extend later
+      user = await userModel.create({ email, role: "client" }); // you can extend later
     }
 
     const token = signJwt(user);
