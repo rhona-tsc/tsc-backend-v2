@@ -2523,29 +2523,30 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     return { authUserId, bodyUserId, clientUserId, hasAuthHeader };
   };
 
-  // “active request” guard for this specific person/slot
-  const findActiveRequest = async ({
-    actId,
-    dateISO,
-    requestKey,
-    slotIndex,
-    phone,
-    musicianId,
-  }) => {
-    const q = {
-      actId,
-      dateISO,
-      v2: true,
-      requestKey,
-      status: { $in: ["sent", "queued"] },
-    };
-    if (typeof slotIndex === "number") q.slotIndex = slotIndex;
-    if (phone) q.phone = phone;
-    if (musicianId) q.musicianId = musicianId;
+  // ✅ IMPORTANT: your unique index is:
+  // actId_1_lineupId_1_dateISO_1_phone_1_v2_1_slotIndex_1
+  // so ALL upserts must match on exactly these fields (NOT requestKey).
+  const resolveLineupKey = (lineup, lineupId) => lineup?._id || lineupId || null;
 
-    return AvailabilityModel.findOne(q)
+  const buildUniqueQuery = ({ actId, lineupKey, dateISO, phone, slotIndex }) => ({
+    actId,
+    lineupId: lineupKey,
+    dateISO,
+    phone,
+    v2: true,
+    slotIndex,
+  });
+
+  // “active request” guard for this specific person/slot (matches unique index)
+  const findActiveRequest = async ({ actId, lineupKey, dateISO, phone, slotIndex }) => {
+    const q = buildUniqueQuery({ actId, lineupKey, dateISO, phone, slotIndex });
+
+    return AvailabilityModel.findOne({
+      ...q,
+      status: { $in: ["sent", "queued"] },
+    })
       .select(
-        "_id status createdAt updatedAt enquiryId clientUserId slotIndex phone musicianId reply"
+        "_id status createdAt updatedAt enquiryId clientUserId slotIndex phone musicianId reply requestKey"
       )
       .lean();
   };
@@ -2734,6 +2735,12 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       );
     }
 
+    // ✅ lineupKey must exist for unique index / upserts to be safe
+    const lineupKey = resolveLineupKey(lineup, lineupId);
+    if (!lineupKey) {
+      throw new Error("Missing lineupId — cannot upsert availability safely");
+    }
+
     const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
 
     /* -------------------------------------------------------------- */
@@ -2802,8 +2809,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           continue;
         }
 
-        // ✅ BULLETPROOF TDZ FIX:
-        // Pre-declare realMusicianId so it can never be referenced before init.
+        // ✅ BULLETPROOF TDZ FIX
         let musicianDoc = null;
         let realMusicianId = vMember?.musicianId || vMember?._id || null;
 
@@ -2826,27 +2832,24 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
         realMusicianId = musicianDoc?._id || realMusicianId;
 
-        // ✅ ACTIVE-REQUEST GUARD (per person/slot) — prevents accidental re-sends
+        // ✅ ACTIVE-REQUEST GUARD (per unique slot) — prevents accidental re-sends
         if (!skipDuplicateCheck) {
           const active = await findActiveRequest({
             actId,
+            lineupKey,
             dateISO,
-            requestKey,
-            slotIndex: slotIndexForThis,
             phone,
-            musicianId: realMusicianId,
+            slotIndex: slotIndexForThis,
           });
 
           if (active) {
             console.log(
               "🛑 [triggerAvailabilityRequest] already sent/queued (multi) — skipping",
               {
-                requestKey,
                 existingId: String(active._id),
                 status: active.status,
                 slotIndex: active.slotIndex,
                 phone: active.phone,
-                musicianId: String(active.musicianId || ""),
               }
             );
 
@@ -2880,7 +2883,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
           await notifyDeputies({
             actId,
-            lineupId: lineup?._id || lineupId || null,
+            lineupId: lineupKey,
             dateISO,
             formattedAddress: fullFormattedAddress,
             clientName: resolvedClientName || "",
@@ -2914,10 +2917,11 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           );
         }
 
-        // 🧯 PRIOR-REPLY CHECK (per-slot, same location)
+        // 🧯 PRIOR-REPLY CHECK (per-slot, same location) — include lineupId
         try {
           const prior = await AvailabilityModel.findOne({
             actId,
+            lineupId: lineupKey,
             dateISO,
             phone,
             v2: true,
@@ -2946,7 +2950,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
             if (prior.reply === "unavailable" || prior.reply === "no") {
               await notifyDeputies({
                 actId,
-                lineupId: lineup?._id || lineupId || null,
+                lineupId: lineupKey,
                 dateISO,
                 formattedAddress: fullFormattedAddress,
                 clientName: resolvedClientName || "",
@@ -2998,13 +3002,15 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         const finalFee = await feeForMember(vMember);
 
         const now = new Date();
-        const query = {
+
+        // ✅ Upsert query MUST match unique index (NOT requestKey)
+        const query = buildUniqueQuery({
           actId,
+          lineupKey,
           dateISO,
           phone,
           slotIndex: slotIndexForThis,
-          requestKey,
-        };
+        });
 
         // 🔗 correlation id
         const requestId = makeShortId();
@@ -3012,11 +3018,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         // ⛳ INSERT-ONLY META
         const setOnInsert = {
           actId,
-          clientUserId: clientUserId || null,
-          lineupId: lineup?._id || null,
+          lineupId: lineupKey,
           dateISO,
           phone,
-          requestKey,
           v2: true,
           enquiryId,
           slotIndex: slotIndexForThis,
@@ -3030,7 +3034,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
             enriched.lastName || vMember.lastName || ""
           }`.trim();
 
-        // 🔁 ALWAYS-UPDATE FIELDS (requestId ONLY HERE → avoids $setOnInsert conflict)
+        // 🔁 ALWAYS-UPDATE FIELDS
         const setAlways = {
           isDeputy: false,
           musicianId: realMusicianId,
@@ -3054,6 +3058,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
             ? `${PUBLIC_SITE_BASE}/musician/${realMusicianId}`
             : "",
           requestId,
+          requestKey, // ✅ store for correlation, but don't match on it
         };
 
         console.log("🔎 [triggerAvailabilityRequest/multi] PERSON", {
@@ -3126,7 +3131,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         await scheduleDeputyEscalation({
           availabilityId: savedLead?._id || null,
           actId,
-          lineupId: lineup?._id || lineupId || null,
+          lineupId: lineupKey,
           dateISO,
           phone,
           slotIndex: slotIndexForThis,
@@ -3164,7 +3169,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const targetMember = isDeputy
       ? deputy
       : targetedFromBody ||
-        findVocalistPhone(act, lineup?._id || lineupId)?.vocalist;
+        findVocalistPhone(act, lineupKey)?.vocalist;
 
     if (!targetMember) throw new Error("No valid member found");
 
@@ -3193,12 +3198,14 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     }
 
     targetMember.email = enrichedMember.email || targetMember.email || null;
-    targetMember.musicianId = enrichedMember._id || targetMember.musicianId || null;
+    targetMember.musicianId =
+      enrichedMember._id || targetMember.musicianId || null;
 
     const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
     if (!phone) throw new Error("Missing phone");
 
-    const singleSlotIndex = typeof body.slotIndex === "number" ? body.slotIndex : 0;
+    const singleSlotIndex =
+      typeof body.slotIndex === "number" ? body.slotIndex : 0;
 
     // 🔎 Canonical musician from Musicians collection (by phone)
     const canonical = await findCanonicalMusicianByPhone(phone);
@@ -3211,23 +3218,20 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     if (!skipDuplicateCheck) {
       const active = await findActiveRequest({
         actId,
+        lineupKey,
         dateISO,
-        requestKey,
-        slotIndex: singleSlotIndex,
         phone,
-        musicianId: realMusicianId,
+        slotIndex: singleSlotIndex,
       });
 
       if (active) {
         console.log(
           "🛑 [triggerAvailabilityRequest] already sent/queued (single) — skipping",
           {
-            requestKey,
             existingId: String(active._id),
             status: active.status,
             slotIndex: active.slotIndex,
             phone: active.phone,
-            musicianId: String(active.musicianId || ""),
           }
         );
 
@@ -3285,7 +3289,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
         await notifyDeputies({
           actId,
-          lineupId: lineup?._id || lineupId || null,
+          lineupId: lineupKey,
           dateISO,
           formattedAddress: fullFormattedAddress,
           clientName: resolvedClientName || "",
@@ -3310,6 +3314,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     /* -------------------------------------------------------------- */
     const prior = await AvailabilityModel.findOne({
       actId,
+      lineupId: lineupKey,
       dateISO,
       phone,
       v2: true,
@@ -3357,7 +3362,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       if (!isDeputy && (prior.reply === "unavailable" || prior.reply === "no")) {
         await notifyDeputies({
           actId,
-          lineupId: lineup?._id || lineupId || null,
+          lineupId: lineupKey,
           dateISO,
           formattedAddress: fullFormattedAddress,
           clientName: resolvedClientName || "",
@@ -3382,7 +3387,8 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       const parsedBase =
         parseFloat(String(inheritedFee).replace(/[^\d.]/g, "")) || 0;
 
-      const inheritedFeeIncludesTravel = body?.inheritedFeeIncludesTravel === true;
+      const inheritedFeeIncludesTravel =
+        body?.inheritedFeeIncludesTravel === true;
 
       let travelFee = 0;
       let travelSource = "none";
@@ -3431,24 +3437,25 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     /* ✅ Upsert availability record (single lead / deputy)           */
     /* -------------------------------------------------------------- */
     const now = new Date();
-    const query = {
+
+    // ✅ Upsert query MUST match unique index (NOT requestKey)
+    const query = buildUniqueQuery({
       actId,
+      lineupKey,
       dateISO,
       phone,
       slotIndex: singleSlotIndex,
-      requestKey,
-    };
+    });
 
     // 🔗 correlation id
     const requestId = makeShortId();
 
     const setOnInsert = {
       actId,
-      lineupId: lineup?._id || null,
+      lineupId: lineupKey,
       dateISO,
       clientUserId: clientUserId || null,
       phone,
-      requestKey,
       v2: true,
       enquiryId,
       slotIndex: singleSlotIndex,
@@ -3483,6 +3490,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       selectedVocalistId: realMusicianId || null,
       vocalistName: vocalistName || selectedName || "",
       requestId,
+      requestKey, // ✅ store for correlation, but don't match on it
     };
 
     console.log("🔎 [triggerAvailabilityRequest/single] PERSON", {
@@ -3577,7 +3585,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       await scheduleDeputyEscalation({
         availabilityId: saved?._id || null,
         actId,
-        lineupId: lineup?._id || lineupId || null,
+        lineupId: lineupKey,
         dateISO,
         phone,
         slotIndex: singleSlotIndex,
