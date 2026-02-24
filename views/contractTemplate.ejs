@@ -124,67 +124,89 @@ Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "T
   // - drums last
   // - otherwise preserve existing order
  
-  let description = "Select a Lineup";
+  const norm = (s = "") => String(s || "").trim();
+  const lower = (s = "") => norm(s).toLowerCase();
 
   const members = Array.isArray(it?.bandMembers) ? it.bandMembers : [];
-  const performers = members.filter((m) => {
-    const role = String(m?.instrument || "").trim().toLowerCase();
-    return role && role !== "manager" && role !== "admin" && !role.includes("manager");
+
+  const isManagerLikeInstrument = (instrument = "") => {
+    const v = lower(instrument);
+    return v === "manager" || v === "admin" || v.includes("band manager");
+  };
+
+  const performerMembers = members.filter((m) => {
+    if (!m?.isEssential) return false;
+    const inst = norm(m?.instrument);
+    if (!inst) return false;
+    if (isManagerLikeInstrument(inst)) return false;
+    return true;
   });
 
-  const count = it?.actSize || performers.length;
+  const actSizeLabel = norm(it?.actSize); // if you store it on actsSummary item
+  const countLabel = actSizeLabel ? actSizeLabel : `${performerMembers.length}-Piece`;
 
-  if (count === 0) {
-    description = "Add a Lineup";
-  } else {
-    const instruments = performers
-      .filter((m) => m && m.isEssential)
-      .map((m) => String(m.instrument || "").trim())
-      .filter(Boolean);
+  let instruments = performerMembers
+    .map((m) => norm(m?.instrument))
+    .filter(Boolean);
 
-    // Sort: vocals first, drums last
-    instruments.sort((a, b) => {
-      const aLower = String(a || "").toLowerCase();
-      const bLower = String(b || "").toLowerCase();
-      const isVocal = (str) => str.includes("vocal");
-      const isDrums = (str) => str === "drums";
+  instruments.sort((a, b) => {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    const isVocal = (str) => str.includes("vocal");
+    const isDrums = (str) => str === "drums";
 
-      if (isVocal(aLower) && !isVocal(bLower)) return -1;
-      if (!isVocal(aLower) && isVocal(bLower)) return 1;
-      if (isDrums(aLower)) return 1;
-      if (isDrums(bLower)) return -1;
-      return 0;
+    if (isVocal(aLower) && !isVocal(bLower)) return -1;
+    if (!isVocal(aLower) && isVocal(bLower)) return 1;
+    if (isDrums(aLower)) return 1;
+    if (isDrums(bLower)) return -1;
+    return 0;
+  });
+
+  const withCountsInOrder = (arr) => {
+    const out = [];
+    const counts = new Map();
+    for (const item of arr) {
+      counts.set(item, (counts.get(item) || 0) + 1);
+      if (!out.includes(item)) out.push(item);
+    }
+    return out.map((item) => {
+      const n = counts.get(item) || 1;
+      return n > 1 ? `${item} x ${n}` : item;
     });
+  };
 
-    const formatWithAnd = (arr) => {
-      if (!arr.length) return "";
-      if (arr.length === 1) return arr[0];
-      if (arr.length === 2) return `${arr[0]} & ${arr[1]}`;
-      return `${arr.slice(0, -1).join(", ")} & ${arr[arr.length - 1]}`;
-    };
+  const instrumentsDisplayArr = withCountsInOrder(instruments);
 
-    const roles = performers.flatMap((member) =>
-      (Array.isArray(member?.additionalRoles) ? member.additionalRoles : [])
-        .filter((r) => r && r.isEssential)
-        .map((r) => String(r.role || "Unnamed Service").trim())
-        .filter(Boolean)
-    );
+  const rolesRaw = members.flatMap((member) =>
+    (Array.isArray(member?.additionalRoles) ? member.additionalRoles : [])
+      .filter((r) => r?.isEssential)
+      .map((r) => norm(r?.role || "Unnamed Service"))
+      .filter(Boolean)
+  );
 
-    const hasManagerRow = members.some((m) => {
-      const role = String(m?.instrument || "").trim().toLowerCase();
-      return role === "manager" || role === "admin" || role.includes("manager");
-    });
+  const rolesNormalized = rolesRaw.map((r) =>
+    lower(r).includes("band manager") ? "Band Management" : r
+  );
 
-    if (hasManagerRow) roles.push("Band Management");
+  const rolesDisplayArr = withCountsInOrder(rolesNormalized);
 
-    const instrumentsStr = formatWithAnd(instruments);
-    const rolesStr = roles.length
-      ? ` (including ${formatWithAnd(roles)} services)`
-      : "";
+  const formatWithAnd = (arr) => {
+    const items = Array.isArray(arr) ? arr : [];
+    if (items.length === 0) return "";
+    if (items.length === 1) return items[0];
+    if (items.length === 2) return `${items[0]} & ${items[1]}`;
+    return `${items.slice(0, -1).join(", ")} & ${items[items.length - 1]}`;
+  };
 
-    // If you want "-Piece" always, swap to: `${count}-Piece: ...`
-    description = `${count}-Piece: ${instrumentsStr}${rolesStr}`;
-  }
+  const instrumentsStr = formatWithAnd(instrumentsDisplayArr);
+  const rolesStr = rolesDisplayArr.length
+    ? ` (including ${formatWithAnd(rolesDisplayArr)} services)`
+    : "";
+
+  const description =
+    performerMembers.length === 0
+      ? "Add a Lineup"
+      : `${countLabel}: ${instrumentsStr}${rolesStr}`;
 %>
 
 <div style="margin-top:4px; font-size:14px; color:#111;">
