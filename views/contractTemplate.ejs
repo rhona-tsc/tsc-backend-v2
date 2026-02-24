@@ -123,54 +123,72 @@ Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "T
   // - vocals first
   // - drums last
   // - otherwise preserve existing order
-  if (!it || !Array.isArray(it.bandMembers)) {
-    var description = "Select a Lineup";
-  } else {
-    const count = it.actSize || it.bandMembers.length;
+  const members = Array.isArray(it?.bandMembers) ? it.bandMembers : [];
 
-    const instruments = it.bandMembers
-      .filter((m) => m && m.isEssential)
-      .map((m) => m.instrument)
-      .filter(Boolean);
+  const performers = members.filter((m) => {
+    const role = String(m?.instrument || "").trim().toLowerCase();
+    return role && role !== "manager" && role !== "admin";
+  });
 
-    instruments.sort((a, b) => {
-      const aLower = String(a).toLowerCase();
-      const bLower = String(b).toLowerCase();
-      const isVocal = (str) => str.includes("vocal");
-      const isDrums = (str) => str === "drums";
+  const countLabel =
+    (it?.actSize && String(it.actSize).trim()) ||
+    `${performers.length}-Piece`;
 
-      if (isVocal(aLower) && !isVocal(bLower)) return -1;
-      if (!isVocal(aLower) && isVocal(bLower)) return 1;
-      if (isDrums(aLower)) return 1;
-      if (isDrums(bLower)) return -1;
-      return 0;
+  const instruments = performers
+    .filter((m) => m?.isEssential)
+    .map((m) => String(m?.instrument || "").trim())
+    .filter(Boolean);
+
+  instruments.sort((a, b) => {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    const isVocal = (str) => str.includes("vocal");
+    const isDrums = (str) => str === "drums";
+
+    if (isVocal(aLower) && !isVocal(bLower)) return -1;
+    if (!isVocal(aLower) && isVocal(bLower)) return 1;
+    if (isDrums(aLower)) return 1;
+    if (isDrums(bLower)) return -1;
+    return 0;
+  });
+
+  const roles = performers.flatMap((member) =>
+    (Array.isArray(member?.additionalRoles) ? member.additionalRoles : [])
+      .filter((r) => r?.isEssential)
+      .map((r) => String(r?.role || "Unnamed Service").trim())
+      .filter(Boolean)
+  );
+
+  const formatWithCounts = (arr) => {
+    const counts = new Map();
+    for (const item of arr) counts.set(item, (counts.get(item) || 0) + 1);
+
+    const expanded = [];
+    for (const [name, n] of counts.entries()) {
+      expanded.push(n > 1 ? `${name} x ${n}` : name);
+    }
+
+    // stable order based on first appearance
+    expanded.sort((x, y) => {
+      const baseX = x.replace(/\s+x\s+\d+$/i, "");
+      const baseY = y.replace(/\s+x\s+\d+$/i, "");
+      return arr.findIndex((v) => v === baseX) - arr.findIndex((v) => v === baseY);
     });
 
-    const formatWithAnd = (arr) => {
-      const unique = [...new Set(arr)];
-      if (unique.length === 0) return "";
-      if (unique.length === 1) return unique[0];
-      if (unique.length === 2) return `${unique[0]} & ${unique[1]}`;
-      return `${unique.slice(0, -1).join(", ")} & ${unique[unique.length - 1]}`;
-    };
+    if (expanded.length === 0) return "";
+    if (expanded.length === 1) return expanded[0];
+    if (expanded.length === 2) return `${expanded[0]} & ${expanded[1]}`;
+    return `${expanded.slice(0, -1).join(", ")} & ${expanded[expanded.length - 1]}`;
+  };
 
-    const roles = it.bandMembers.flatMap((member) =>
-      (member.additionalRoles || [])
-        .filter((r) => r.isEssential)
-        .map((r) => r.role || "Unnamed Service")
-    );
-
-    if (count === 0) {
-      var description = "Add a Lineup";
-    } else {
-      const instrumentsStr = formatWithAnd(instruments);
-      const rolesStr = roles.length
-        ? ` (including ${formatWithAnd(roles)} services)`
-        : "";
-      var description = `${count}: ${instrumentsStr}${rolesStr}`;
-    }
+  let description = "Add a Lineup";
+  if (performers.length > 0) {
+    const instrumentsStr = formatWithCounts(instruments);
+    const rolesStr = roles.length ? ` (including ${formatWithCounts(roles)} services)` : "";
+    description = `${countLabel}: ${instrumentsStr}${rolesStr}`;
   }
 %>
+
 <div style="margin-top:4px; font-size:14px; color:#111;">
   <%= description %>
 </div>
@@ -408,6 +426,31 @@ Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "T
       <p><strong>16 | Terms Acceptance</strong></p>
       <p>By signing the contract, you agree to all Terms and Conditions listed above.</p>
     </div>
+    <%
+  const clientFullName =
+    [userAddress?.firstName, userAddress?.lastName].filter(Boolean).join(" ") || "—";
+
+  // You can change this to booking.createdAt if you'd rather:
+const signedDate = (createdAt ? new Date(createdAt) : new Date()).toLocaleDateString("en-GB");%>
+
+<div style="margin-top:18px;">
+  <div style="font-weight:700; margin-bottom:6px;">Client Signature</div>
+
+  <% if (signatureUrl) { %>
+    <div style="border:1px solid #ccc; padding:10px; display:inline-block;">
+      <img src="<%= signatureUrl %>" alt="Client signature" style="width:220px; height:auto; display:block;" />
+    </div>
+  <% } else { %>
+    <div style="border:1px solid #ccc; padding:18px; width:260px; color:#666;">
+      Signature not provided
+    </div>
+  <% } %>
+
+  <div style="margin-top:10px; font-size:13px;">
+    <div><strong>Signed by:</strong> <%= clientFullName %></div>
+    <div><strong>Date:</strong> <%= signedDate %></div>
+  </div>
+</div>
     <footer style="margin-top: 60px; font-size: 12px; color: #666; text-align: center; border-top: 1px solid #ccc; padding-top: 10px;">
   <p>The Supreme Collective Ltd</p>
   <p>Tel: +44 7594 223200 | Email: hello@thesupremecollective.co.uk</p>
