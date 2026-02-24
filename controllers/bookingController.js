@@ -1623,7 +1623,7 @@ export const generateContractPdf = async (req, res) => {
     const booking = await Booking.findById(bookingId).lean();
     if (!booking) return res.status(404).send("Booking not found");
 
-    const viewPath = path.join(process.cwd(), "views", "contract.ejs"); // adjust path
+const viewPath = path.join(__dirname, "../views/contract.ejs");
     const html = await ejs.renderFile(viewPath, {
       ...booking,
       bookingId: booking._id?.toString?.() || bookingId,
