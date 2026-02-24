@@ -5424,6 +5424,96 @@ export async function buildAvailabilityBadgeFromRows({
   return badge;
 }
 
+const generateLineupDescriptionForEmail = (lineup) => {
+  const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+
+  const norm = (s = "") => String(s || "").trim();
+  const lower = (s = "") => norm(s).toLowerCase();
+
+  const isManagerLikeInstrument = (instrument = "") => {
+    const v = lower(instrument);
+    return v === "manager" || v === "admin" || v.includes("band manager");
+  };
+
+  // Count performers (exclude manager/admin/blank instrument rows)
+  const performerMembers = members.filter((m) => {
+    if (!m?.isEssential) return false;
+    const inst = norm(m?.instrument);
+    if (!inst) return false;
+    if (isManagerLikeInstrument(inst)) return false;
+    return true;
+  });
+
+  // Prefix label: prefer actSize ("6-Piece"), else build
+  const actSizeLabel = norm(lineup?.actSize);
+  const countLabel = actSizeLabel ? actSizeLabel : `${performerMembers.length}-Piece`;
+
+  // Essential instruments (no manager/admin/blank), vocals first, drums last
+  let instruments = performerMembers
+    .map((m) => norm(m?.instrument))
+    .filter(Boolean);
+
+  instruments.sort((a, b) => {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    const isVocal = (str) => str.includes("vocal");
+    const isDrums = (str) => str === "drums";
+
+    if (isVocal(aLower) && !isVocal(bLower)) return -1;
+    if (!isVocal(aLower) && isVocal(bLower)) return 1;
+    if (isDrums(aLower)) return 1;
+    if (isDrums(bLower)) return -1;
+    return 0;
+  });
+
+  // Convert duplicates -> "x N" (NOT de-dupe; it counts repeats)
+  const withCountsInOrder = (arr) => {
+    const out = [];
+    const counts = new Map();
+    for (const item of arr) {
+      counts.set(item, (counts.get(item) || 0) + 1);
+      if (!out.includes(item)) out.push(item);
+    }
+    return out.map((item) => {
+      const n = counts.get(item) || 1;
+      return n > 1 ? `${item} x ${n}` : item;
+    });
+  };
+
+  const instrumentsDisplayArr = withCountsInOrder(instruments);
+
+  // Roles: essential additionalRoles, include Band Management if "Band Manager" present
+  const rolesRaw = members.flatMap((member) =>
+    (Array.isArray(member?.additionalRoles) ? member.additionalRoles : [])
+      .filter((r) => r?.isEssential)
+      .map((r) => norm(r?.role || "Unnamed Service"))
+      .filter(Boolean)
+  );
+
+  const rolesNormalized = rolesRaw.map((r) =>
+    lower(r).includes("band manager") ? "Band Management" : r
+  );
+
+  const rolesDisplayArr = withCountsInOrder(rolesNormalized);
+
+  const formatWithAnd = (arr) => {
+    const items = Array.isArray(arr) ? arr : [];
+    if (items.length === 0) return "";
+    if (items.length === 1) return items[0];
+    if (items.length === 2) return `${items[0]} & ${items[1]}`;
+    return `${items.slice(0, -1).join(", ")} & ${items[items.length - 1]}`;
+  };
+
+  if (performerMembers.length === 0) return "Add a Lineup";
+
+  const instrumentsStr = formatWithAnd(instrumentsDisplayArr);
+  const rolesStr = rolesDisplayArr.length
+    ? ` (including ${formatWithAnd(rolesDisplayArr)} services)`
+    : "";
+
+  return `${countLabel}: ${instrumentsStr}${rolesStr}`;
+};
+
 export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
   console.log("🟦 [rebuildAndApplyAvailabilityBadge] START", {
     actId,
@@ -5875,52 +5965,37 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       }
     }
 
-    const lineupQuotes = await Promise.all(
-      (actDoc.lineups || []).map(async (lu) => {
-        try {
-          const name =
-            lu?.actSize ||
-            `${(lu?.bandMembers || []).filter((m) => m?.isEssential).length}-Piece`;
+  const lineupQuotes = await Promise.all(
+  (actDoc.lineups || []).map(async (lu) => {
+    try {
+      const description = generateLineupDescriptionForEmail(lu);
 
-          let travelTotal = "price TBC";
-          try {
-            const { county: selectedCounty } =
-              countyFromAddress(selectedAddress);
-            const { total } = await calculateActPricing(
-              actDoc,
-              selectedCounty,
-              selectedAddress,
-              dateISO,
-              lu,
-            );
-            if (total && !isNaN(total)) {
-              travelTotal = `£${Math.round(Number(total)).toLocaleString("en-GB")}`;
-            }
-          } catch (err) {
-            console.warn(
-              "⚠️ [rebuildAndApplyAvailabilityBadge] Price calc failed:",
-              err.message,
-            );
-          }
-
-          const instruments = (lu?.bandMembers || [])
-            .filter((m) => m?.isEssential)
-            .map((m) => m?.instrument)
-            .filter(Boolean)
-            .join(", ");
-
-          return {
-            html: `<strong>${name}</strong>: ${instruments} — <strong>${travelTotal}</strong>`,
-          };
-        } catch (err) {
-          console.warn(
-            "⚠️ [rebuildAndApplyAvailabilityBadge] Lineup formatting failed:",
-            err.message,
-          );
-          return { html: "<em>Lineup unavailable</em>" };
+      let travelTotal = "price TBC";
+      try {
+        const { county: selectedCounty } = countyFromAddress(selectedAddress);
+        const { total } = await calculateActPricing(
+          actDoc,
+          selectedCounty,
+          selectedAddress,
+          dateISO,
+          lu
+        );
+        if (total && !isNaN(total)) {
+          travelTotal = `£${Math.round(Number(total)).toLocaleString("en-GB")}`;
         }
-      }),
-    );
+      } catch (err) {
+        console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Price calc failed:", err.message);
+      }
+
+      return {
+        html: `${description} — <strong>${travelTotal}</strong>`,
+      };
+    } catch (err) {
+      console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Lineup formatting failed:", err.message);
+      return { html: "<em>Lineup unavailable</em>" };
+    }
+  })
+);
 
     const tailoringExact = (() => {
       const songCount = (() => {
