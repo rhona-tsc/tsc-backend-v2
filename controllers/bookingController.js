@@ -1633,15 +1633,14 @@ export const previewContractHtml = async (req, res) => {
 };
 
 export const generateContractPdf = async (req, res) => {
+  let browser;
   try {
     const bookingMongoId = req.params.id;
 
     const booking = await Booking.findById(bookingMongoId).lean();
     if (!booking) return res.status(404).send("Booking not found");
 
-    // ✅ use the same template file that works in completeBooking
     const viewPath = path.join(__dirname, "../views/contractTemplate.ejs");
-
     const totals = booking.totals || {};
 
     const html = await ejs.renderFile(viewPath, {
@@ -1666,25 +1665,33 @@ export const generateContractPdf = async (req, res) => {
       logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
     });
 
-    const browser = await launchBrowser(); // ✅ you already have chromium setup
+    browser = await launchBrowser();
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "load" });
 
-    const pdfBuffer = await page.pdf({
+    const pdfOut = await page.pdf({
       format: "A4",
       printBackground: true,
       margin: { top: "12mm", right: "12mm", bottom: "12mm", left: "12mm" },
     });
 
-    await browser.close();
+    // ✅ CRITICAL: force Node Buffer (prevents Express JSONifying it)
+    const pdfBuffer = Buffer.isBuffer(pdfOut) ? pdfOut : Buffer.from(pdfOut);
 
+    await browser.close();
+    browser = null;
+
+    const filename = `contract-${booking.bookingId || bookingMongoId}.pdf`;
+
+    res.status(200);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="contract-${booking.bookingId || bookingMongoId}.pdf"`
-    );
-    return res.status(200).send(pdfBuffer);
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.setHeader("Content-Length", String(pdfBuffer.length));
+    res.end(pdfBuffer);
   } catch (err) {
+    if (browser) {
+      try { await browser.close(); } catch {}
+    }
     console.error("generateContractPdf error:", err);
     return res.status(500).json({ message: "Failed to generate contract PDF" });
   }
