@@ -123,69 +123,67 @@ Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "T
   // - vocals first
   // - drums last
   // - otherwise preserve existing order
-  const members = Array.isArray(it?.bandMembers) ? it.bandMembers : [];
+ 
+  let description = "Select a Lineup";
 
+  const members = Array.isArray(it?.bandMembers) ? it.bandMembers : [];
   const performers = members.filter((m) => {
     const role = String(m?.instrument || "").trim().toLowerCase();
-    return role && role !== "manager" && role !== "admin";
+    return role && role !== "manager" && role !== "admin" && !role.includes("manager");
   });
 
-  const countLabel =
-    (it?.actSize && String(it.actSize).trim()) ||
-    `${performers.length}-Piece`;
+  const count = it?.actSize || performers.length;
 
-  const instruments = performers
-    .filter((m) => m?.isEssential)
-    .map((m) => String(m?.instrument || "").trim())
-    .filter(Boolean);
+  if (count === 0) {
+    description = "Add a Lineup";
+  } else {
+    const instruments = performers
+      .filter((m) => m && m.isEssential)
+      .map((m) => String(m.instrument || "").trim())
+      .filter(Boolean);
 
-  instruments.sort((a, b) => {
-    const aLower = a.toLowerCase();
-    const bLower = b.toLowerCase();
-    const isVocal = (str) => str.includes("vocal");
-    const isDrums = (str) => str === "drums";
+    // Sort: vocals first, drums last
+    instruments.sort((a, b) => {
+      const aLower = String(a || "").toLowerCase();
+      const bLower = String(b || "").toLowerCase();
+      const isVocal = (str) => str.includes("vocal");
+      const isDrums = (str) => str === "drums";
 
-    if (isVocal(aLower) && !isVocal(bLower)) return -1;
-    if (!isVocal(aLower) && isVocal(bLower)) return 1;
-    if (isDrums(aLower)) return 1;
-    if (isDrums(bLower)) return -1;
-    return 0;
-  });
-
-  const roles = performers.flatMap((member) =>
-    (Array.isArray(member?.additionalRoles) ? member.additionalRoles : [])
-      .filter((r) => r?.isEssential)
-      .map((r) => String(r?.role || "Unnamed Service").trim())
-      .filter(Boolean)
-  );
-
-  const formatWithCounts = (arr) => {
-    const counts = new Map();
-    for (const item of arr) counts.set(item, (counts.get(item) || 0) + 1);
-
-    const expanded = [];
-    for (const [name, n] of counts.entries()) {
-      expanded.push(n > 1 ? `${name} x ${n}` : name);
-    }
-
-    // stable order based on first appearance
-    expanded.sort((x, y) => {
-      const baseX = x.replace(/\s+x\s+\d+$/i, "");
-      const baseY = y.replace(/\s+x\s+\d+$/i, "");
-      return arr.findIndex((v) => v === baseX) - arr.findIndex((v) => v === baseY);
+      if (isVocal(aLower) && !isVocal(bLower)) return -1;
+      if (!isVocal(aLower) && isVocal(bLower)) return 1;
+      if (isDrums(aLower)) return 1;
+      if (isDrums(bLower)) return -1;
+      return 0;
     });
 
-    if (expanded.length === 0) return "";
-    if (expanded.length === 1) return expanded[0];
-    if (expanded.length === 2) return `${expanded[0]} & ${expanded[1]}`;
-    return `${expanded.slice(0, -1).join(", ")} & ${expanded[expanded.length - 1]}`;
-  };
+    const formatWithAnd = (arr) => {
+      if (!arr.length) return "";
+      if (arr.length === 1) return arr[0];
+      if (arr.length === 2) return `${arr[0]} & ${arr[1]}`;
+      return `${arr.slice(0, -1).join(", ")} & ${arr[arr.length - 1]}`;
+    };
 
-  let description = "Add a Lineup";
-  if (performers.length > 0) {
-    const instrumentsStr = formatWithCounts(instruments);
-    const rolesStr = roles.length ? ` (including ${formatWithCounts(roles)} services)` : "";
-    description = `${countLabel}: ${instrumentsStr}${rolesStr}`;
+    const roles = performers.flatMap((member) =>
+      (Array.isArray(member?.additionalRoles) ? member.additionalRoles : [])
+        .filter((r) => r && r.isEssential)
+        .map((r) => String(r.role || "Unnamed Service").trim())
+        .filter(Boolean)
+    );
+
+    const hasManagerRow = members.some((m) => {
+      const role = String(m?.instrument || "").trim().toLowerCase();
+      return role === "manager" || role === "admin" || role.includes("manager");
+    });
+
+    if (hasManagerRow) roles.push("Band Management");
+
+    const instrumentsStr = formatWithAnd(instruments);
+    const rolesStr = roles.length
+      ? ` (including ${formatWithAnd(roles)} services)`
+      : "";
+
+    // If you want "-Piece" always, swap to: `${count}-Piece: ...`
+    description = `${count}-Piece: ${instrumentsStr}${rolesStr}`;
   }
 %>
 
