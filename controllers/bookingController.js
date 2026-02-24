@@ -1592,20 +1592,36 @@ export const getBookingByRef = async (req, res) => {
 
 export const previewContractHtml = async (req, res) => {
   try {
-    const bookingId = req.params.id;
+    const bookingMongoId = req.params.id;
 
-    const booking = await Booking.findById(bookingId).lean();
+    const booking = await Booking.findById(bookingMongoId).lean();
     if (!booking) return res.status(404).send("Booking not found");
 
-    // IMPORTANT: Ensure your template gets the same variables it expects
-    const viewPath = path.join(process.cwd(), "views", "contract.ejs"); // adjust path
+    // ✅ use the same template file that works in completeBooking
+    const viewPath = path.join(__dirname, "../views/contractTemplate.ejs");
+
+    const totals = booking.totals || {};
+
     const html = await ejs.renderFile(viewPath, {
-      ...booking,
-      bookingId: booking._id?.toString?.() || bookingId,
-      totals: booking.totals || {},
-      deposit: booking.deposit || 0,
-      total: booking.total || booking.totalAmount || 0,
-      // add any other fields your template expects
+      bookingId: booking.bookingId || bookingMongoId,
+      userAddress: booking.userAddress,
+      actsSummary: booking.actsSummary,
+
+      venue: booking.venue || booking.venueAddress || "",
+      venueAddress: booking.venueAddress || booking.venue || "",
+      eventDate: booking.date || booking.eventDateISO || null,
+      eventType: booking.eventType || "",
+
+      performanceTimes: booking.performanceTimes || {},
+      notes: booking.notes || "",
+      createdAt: booking.createdAt,
+
+      totals,
+      total: Number(totals.fullAmount ?? 0),
+      deposit: Number(totals.chargedAmount ?? 0),
+
+      signatureUrl: booking.signatureUrl,
+      logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
     });
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -1618,27 +1634,41 @@ export const previewContractHtml = async (req, res) => {
 
 export const generateContractPdf = async (req, res) => {
   try {
-    const bookingId = req.params.id;
+    const bookingMongoId = req.params.id;
 
-    const booking = await Booking.findById(bookingId).lean();
+    const booking = await Booking.findById(bookingMongoId).lean();
     if (!booking) return res.status(404).send("Booking not found");
 
-const viewPath = path.join(__dirname, "../views/contract.ejs");
+    // ✅ use the same template file that works in completeBooking
+    const viewPath = path.join(__dirname, "../views/contractTemplate.ejs");
+
+    const totals = booking.totals || {};
+
     const html = await ejs.renderFile(viewPath, {
-      ...booking,
-      bookingId: booking._id?.toString?.() || bookingId,
-      totals: booking.totals || {},
-      deposit: booking.deposit || 0,
-      total: booking.total || booking.totalAmount || 0,
+      bookingId: booking.bookingId || bookingMongoId,
+      userAddress: booking.userAddress,
+      actsSummary: booking.actsSummary,
+
+      venue: booking.venue || booking.venueAddress || "",
+      venueAddress: booking.venueAddress || booking.venue || "",
+      eventDate: booking.date || booking.eventDateISO || null,
+      eventType: booking.eventType || "",
+
+      performanceTimes: booking.performanceTimes || {},
+      notes: booking.notes || "",
+      createdAt: booking.createdAt,
+
+      totals,
+      total: Number(totals.fullAmount ?? 0),
+      deposit: Number(totals.chargedAmount ?? 0),
+
+      signatureUrl: booking.signatureUrl,
+      logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
     });
 
-    const browser = await puppeteer.launch({
-      headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
-
+    const browser = await launchBrowser(); // ✅ you already have chromium setup
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0" });
+    await page.setContent(html, { waitUntil: "load" });
 
     const pdfBuffer = await page.pdf({
       format: "A4",
@@ -1649,7 +1679,10 @@ const viewPath = path.join(__dirname, "../views/contract.ejs");
     await browser.close();
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="contract-${bookingId}.pdf"`);
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="contract-${booking.bookingId || bookingMongoId}.pdf"`
+    );
     return res.status(200).send(pdfBuffer);
   } catch (err) {
     console.error("generateContractPdf error:", err);
