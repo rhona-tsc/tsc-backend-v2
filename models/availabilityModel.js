@@ -13,7 +13,7 @@ requestKey: { type: String, index: true },
     actId: { type: mongoose.Schema.Types.ObjectId, ref: "act", index: true },
     lineupId: { type: mongoose.Schema.Types.ObjectId, ref: "Lineup", index: true },
     musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician", index: true },
-
+bandMemberId: { type: mongoose.Schema.Types.ObjectId, index: true },
         isDeputy: { type: Boolean, default: false, index: true },
 
     // 🆕 Track which vocalist slot this record applies to (0, 1, etc.)

@@ -2844,28 +2844,41 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           continue;
         }
 
-        // ✅ BULLETPROOF TDZ FIX
-        let musicianDoc = null;
-        let realMusicianId = vMember?.musicianId || vMember?._id || null;
+       // ✅ Resolve canonical Musician (NEVER fall back to bandMember subdoc _id)
+let musicianDoc = null;
+const bandMemberId = vMember?._id || null; // traceability only
+let realMusicianId = null;
 
-        try {
-          if (vMember.musicianId) {
-            musicianDoc = await Musician.findById(vMember.musicianId).lean();
-          }
-          if (!musicianDoc) {
-            musicianDoc = await Musician.findOne({
-              $or: [
-                { phoneNormalized: phone },
-                { phone: phone },
-                { phoneNumber: phone },
-              ],
-            }).lean();
-          }
-        } catch (err) {
-          console.warn("⚠️ Failed to fetch real musician:", err.message);
-        }
+const vEmail = String(vMember?.email || "").trim().toLowerCase();
 
-        realMusicianId = musicianDoc?._id || realMusicianId;
+try {
+  // 1) Prefer explicit musicianId if present on the act bandMember
+  if (vMember?.musicianId) {
+    musicianDoc = await Musician.findById(vMember.musicianId)
+      .select("_id email phone phoneNumber phoneNormalized profilePhoto profilePicture photoUrl")
+      .lean();
+  }
+
+  // 2) Fallback: phone match (now that phoneNormalized is cleaned)
+  if (!musicianDoc) {
+    musicianDoc = await Musician.findOne({
+      $or: [{ phoneNormalized: phone }, { phone: phone }, { phoneNumber: phone }],
+    })
+      .select("_id email phone phoneNumber phoneNormalized profilePhoto profilePicture photoUrl")
+      .lean();
+  }
+
+  // 3) Fallback: email match (bandMembers usually have email)
+  if (!musicianDoc && vEmail) {
+    musicianDoc = await Musician.findOne({ email: vEmail })
+      .select("_id email phone phoneNumber phoneNormalized profilePhoto profilePicture photoUrl")
+      .lean();
+  }
+} catch (err) {
+  console.warn("⚠️ Failed to fetch real musician:", err?.message || err);
+}
+
+realMusicianId = musicianDoc?._id || null;
 
         // ✅ ACTIVE-REQUEST GUARD (per unique slot) — prevents accidental re-sends
         if (!skipDuplicateCheck) {
@@ -3076,7 +3089,12 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           musicianName: displayNameForLead,
           musicianEmail: enriched.email || "",
           clientUserId: clientUserId || null,
-          photoUrl: enriched.photoUrl || enriched.profilePicture || "",
+          photoUrl:
+  enriched.profilePhoto ||
+  enriched.photoUrl ||
+  enriched.profilePicture ||
+  "",
+bandMemberId: bandMemberId || null,
           address: fullFormattedAddress,
           formattedAddress: fullFormattedAddress,
           formattedDate,
@@ -3206,6 +3224,8 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       : targetedFromBody ||
         findVocalistPhone(act, lineupKey)?.vocalist;
 
+        const bandMemberId = targetMember?._id || null; // traceability only
+
     if (!targetMember) throw new Error("No valid member found");
 
     let enrichedMember = { ...targetMember };
@@ -3232,9 +3252,16 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       targetMember.musicianId = deputy.id;
     }
 
-    targetMember.email = enrichedMember.email || targetMember.email || null;
-    targetMember.musicianId =
-      enrichedMember._id || targetMember.musicianId || null;
+  targetMember.email = enrichedMember.email || targetMember.email || null;
+
+// ✅ Only accept a musicianId if it's NOT the act bandMember _id
+const candidateMusicianId = enrichedMember?._id || targetMember.musicianId || null;
+
+targetMember.musicianId =
+  candidateMusicianId &&
+  (!bandMemberId || String(candidateMusicianId) !== String(bandMemberId))
+    ? candidateMusicianId
+    : null;
 
     const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
     if (!phone) throw new Error("Missing phone");
@@ -3242,12 +3269,20 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const singleSlotIndex =
       typeof body.slotIndex === "number" ? body.slotIndex : 0;
 
-    // 🔎 Canonical musician from Musicians collection (by phone)
-    const canonical = await findCanonicalMusicianByPhone(phone);
+   let canonical = await findCanonicalMusicianByPhone(phone);
 
-    // ✅ Resolve a real musicianId BEFORE date-level checks
-    const realMusicianId =
-      canonical?._id || enrichedMember?._id || targetMember?.musicianId || null;
+// Fallback: email match if phone lookup fails
+if (!canonical) {
+  const email = String(targetMember?.email || "").trim().toLowerCase();
+  if (email) {
+    canonical = await Musician.findOne({ email })
+      .select("_id email phone phoneNumber phoneNormalized profilePhoto profilePicture photoUrl")
+      .lean();
+  }
+}
+
+// ✅ Resolve a real musicianId (never fall back to bandMemberId)
+const realMusicianId = canonical?._id || targetMember?.musicianId || null;
 
     // ✅ ACTIVE-REQUEST GUARD (single) — prevents resend if already sent/queued
     if (!skipDuplicateCheck) {
@@ -3292,10 +3327,11 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       : `${targetMember.firstName || ""} ${targetMember.lastName || ""}`.trim();
 
     const canonicalPhoto =
-      pickPic(canonical) ||
-      enrichedMember?.photoUrl ||
-      enrichedMember?.profilePicture ||
-      "";
+  pickPic(canonical) ||
+  enrichedMember?.profilePhoto ||
+  enrichedMember?.photoUrl ||
+  enrichedMember?.profilePicture ||
+  "";
 
     const selectedName = String(
       selectedVocalistName ||
@@ -3505,6 +3541,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const setAlways = {
       isDeputy: !!isDeputy,
       musicianId: realMusicianId,
+      bandMemberId: bandMemberId || null,
       musicianName: canonicalName,
       musicianEmail: canonical?.email || targetMember.email || "",
       photoUrl: canonicalPhoto,
