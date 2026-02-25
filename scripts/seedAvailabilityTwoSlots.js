@@ -7,20 +7,34 @@
 // - One with slotIndex: 0, one with slotIndex: 1
 // - Sets reply: "yes" (so your badge/email logic can treat them as available)
 
-const { ObjectId } = require("mongodb");
+/* eslint-disable no-undef */
+/* global db, print, printjson */
+// NOTE:
+// - This script is intended to be executed by `mongosh`, where `db`, `print`,
+//   `printjson` and `ObjectId` are available as globals.
+// - VSCode/ESLint will complain about these globals, but that does not affect
+//   execution in mongosh.
+const { ObjectId } = globalThis;
 
 // ---------------------------- CONFIG (edit me) ----------------------------
-const ACT_ID = "6804f31864335e143efb404f";          // e.g. "696fcb4da8c6fc3eba3446b3"
-const LINEUP_ID = "2cd3daec-343e-4e4e-9e76-d9df231114d3";                   // optional: "PUT_LINEUP_ID_HERE" or null
-const MUSICIAN_ID = null;                 // optional: "PUT_MUSICIAN_ID_HERE" or null
+const ACT_ID = "6804f31864335e143efb404f"; // Funk Royale act _id (24-hex ObjectId string)
 
-const DATE_ISO = "2026-01-15";            // past date for testing
-const FORMATTED_ADDRESS = "Test Address, London"; // whatever you want
+// IMPORTANT:
+// Your Availability schema defines `lineupId` as an ObjectId.
+// The value you pasted (e.g. "2cd3daec-343e-4e4e-9e76-d9df231114d3") is a UUID, NOT a Mongo ObjectId.
+// If you don't have the real Mongo ObjectId for the lineup, leave LINEUP_ID as null.
+// (This still works for badge/email testing because your queries don't require lineupId.)
+const LINEUP_ID = null; // e.g. "66f..." (24-hex) or null
+
+const MUSICIAN_ID = null; // optional: 24-hex ObjectId string or null
+
+// Any past date is fine for testing:
+const DATE_ISO = "2025-12-01";
+const FORMATTED_ADDRESS = "Test Address, London";
 const CLIENT_EMAIL = "hello@thesupremecollective.co.uk"; // so it emails you
 const CLIENT_NAME = "Rhona";
 
 // IMPORTANT: requestKey is part of your unique index.
-// Use a stable value for the scenario you’re testing.
 const REQUEST_KEY = "test_email_trigger_two_slots";
 
 // Also in your unique index:
@@ -29,7 +43,7 @@ const V2 = true;
 
 // Optional metadata (nice for debugging)
 const ENQUIRY_ID = `${ACT_ID}_${DATE_ISO}_test`;
-const ACT_NAME = "Funk Royale"; // or "Gotta Be Garage"
+const ACT_NAME = "Funk Royale";
 // -------------------------------------------------------------------------
 
 function oid(v) {
@@ -101,30 +115,34 @@ upsertSlot(1);
 
 print("\n🔎 Current docs:");
 const docs = col
-  .find({
-    actId: oid(ACT_ID),
-    requestKey: REQUEST_KEY,
-    dateISO: DATE_ISO,
-    phone: PHONE,
-    v2: V2,
-    slotIndex: { $in: [0, 1] },
-  })
-  .project({
-    _id: 1,
-    actId: 1,
-    requestKey: 1,
-    lineupId: 1,
-    dateISO: 1,
-    phone: 1,
-    v2: 1,
-    slotIndex: 1,
-    reply: 1,
-    clientEmail: 1,
-    clientName: 1,
-    formattedAddress: 1,
-    createdAt: 1,
-    updatedAt: 1,
-  })
+  .find(
+    {
+      actId: oid(ACT_ID),
+      requestKey: REQUEST_KEY,
+      dateISO: DATE_ISO,
+      phone: PHONE,
+      v2: V2,
+      slotIndex: { $in: [0, 1] },
+    },
+    {
+      projection: {
+        _id: 1,
+        actId: 1,
+        requestKey: 1,
+        lineupId: 1,
+        dateISO: 1,
+        phone: 1,
+        v2: 1,
+        slotIndex: 1,
+        reply: 1,
+        clientEmail: 1,
+        clientName: 1,
+        formattedAddress: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    }
+  )
   .sort({ slotIndex: 1 })
   .toArray();
 

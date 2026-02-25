@@ -135,7 +135,7 @@ router.post("/twilio/inbound", (req, res, next) => {
 }, twilioInbound);
 
 // In your router:
-router.post("/api/twilio/status", twilioStatus);    // handles delivery/read/fail
+router.post("/twilio/status", twilioStatus); // handles delivery/read/fail
 
 /* -------------------------------------------------------------------------- */
 /* 🟦 POST /rebuild-availability-badge                                        */
@@ -151,13 +151,26 @@ router.post("/rebuild-availability-badge", (req, res, next) => {
 /* -------------------------------------------------------------------------- */
 /* 🟧 POST /badges/rebuild                                                    */
 /* -------------------------------------------------------------------------- */
-router.post("/badges/rebuild", (req, res, next) => {
-  console.log(
-    `🟧 (routes/availability.js) /badges/rebuild START at ${new Date().toISOString()}`,
-    { bodyKeys: Object.keys(req.body || {}) }
-  );
-  next();
-}, rebuildAndApplyAvailabilityBadge);
+router.post(
+  "/badges/rebuild",
+  (req, res, next) => {
+    console.log(
+      `🟧 (routes/availability.js) /badges/rebuild START at ${new Date().toISOString()}`,
+      { bodyKeys: Object.keys(req.body || {}) }
+    );
+    next();
+  },
+  async (req, res) => {
+    try {
+      const { actId, dateISO } = req.body || {};
+      const result = await rebuildAndApplyAvailabilityBadge({ actId, dateISO });
+      return res.json(result);
+    } catch (e) {
+      console.error("❌ (availability.js) /badges/rebuild error:", e?.message || e);
+      return res.status(500).json({ success: false, message: e?.message || String(e) });
+    }
+  }
+);
 
 /* -------------------------------------------------------------------------- */
 /* 🟪 GET /resolve-musician                                                   */
