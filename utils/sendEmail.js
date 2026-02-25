@@ -39,10 +39,33 @@ function getTransporter() {
 }
 
 // utils/sendEmail.js
-async function sendEmail({ to, cc, bcc, subject, html, text, from, replyTo, attachments }) {
-  const toArr = [to].flat().filter(Boolean);
-  const ccArr = [cc].flat().filter(Boolean);
-  const bccArr = [bcc].flat().filter(Boolean);
+// Supports dry-run/testing so you can preview emails without sending.
+// - dryRun: returns the computed mail payload + recipients without calling SMTP
+// - testMode: forces delivery to TEST_EMAIL_TO (or DEFAULT_FROM) and tags subject
+async function sendEmail({
+  to,
+  cc,
+  bcc,
+  subject,
+  html,
+  text,
+  from,
+  replyTo,
+  attachments,
+  dryRun = false,
+  testMode = false,
+  forceTo = null,
+  forceCc = null,
+  forceBcc = null,
+  subjectPrefix = null,
+}) {
+  const effectiveTo = forceTo ?? to;
+  const effectiveCc = forceCc ?? cc;
+  const effectiveBcc = forceBcc ?? bcc;
+
+  const toArr = [effectiveTo].flat().filter(Boolean);
+  const ccArr = [effectiveCc].flat().filter(Boolean);
+  const bccArr = [effectiveBcc].flat().filter(Boolean);
 
   const isEmail = (s) => typeof s === "string" && /\S+@\S+\.\S+/.test(s.trim());
 
@@ -56,17 +79,47 @@ async function sendEmail({ to, cc, bcc, subject, html, text, from, replyTo, atta
     return { ok: false, skipped: true, reason: "no_recipients" };
   }
 
+  // If testMode is enabled, force delivery to a safe inbox.
+  // This prevents accidentally emailing musicians while still letting you see the email rendering.
+  if (testMode) {
+    const fallbackTestTo = String(process.env.TEST_EMAIL_TO || "").trim();
+    const safeTo = fallbackTestTo || String(process.env.DEFAULT_FROM || "hello@thesupremecollective.co.uk").trim();
+    // Replace all primary recipients with the safe inbox
+    // and avoid CC/BCC unless explicitly forced.
+    toArr.length = 0;
+    toArr.push(safeTo);
+  }
+
+  const finalSubject = `${subjectPrefix ? String(subjectPrefix) : testMode ? "[TEST]" : ""}${(subjectPrefix || testMode) ? " " : ""}${subject || ""}`.trim();
+
   const mail = {
     from: (from || process.env.DEFAULT_FROM || "hello@thesupremecollective.co.uk").trim(),
     replyTo: replyTo ? String(replyTo).trim() : undefined,
     to: recipients,
     cc: ccArr.length ? [...new Set(ccArr.filter(isEmail))] : undefined,
     bcc: bccRecipients.length ? bccRecipients : undefined,
-    subject,
+    subject: finalSubject,
     text,
     html,
     attachments: Array.isArray(attachments) && attachments.length ? attachments : undefined,
   };
+
+  if (dryRun) {
+    console.log("🧪 [sendEmail] DRY-RUN (no SMTP send)", {
+      to: mail.to,
+      cc: mail.cc,
+      bcc: mail.bcc,
+      subject: mail.subject,
+    });
+
+    return {
+      ok: true,
+      dryRun: true,
+      recipients,
+      bccRecipients,
+      mail,
+    };
+  }
 
   try {
     const transporter = getTransporter();
