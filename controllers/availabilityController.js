@@ -30,6 +30,31 @@ if (AvailabilityModel?.schema?.paths) {
   console.warn("⚠️ AvailabilityModel missing schema.paths — check import");
 }
 
+
+// ───────────────────────────────────────────────────────────────────────────────
+// TEMP TEST GUARD — block accidental sends to real emails
+// ───────────────────────────────────────────────────────────────────────────────
+const HELLO_EMAIL = "hello@thesupremecollective.co.uk";
+
+const BLOCKED_TEST_EMAILS = new Set([
+  "emma_osei_lah@hotmail.com", // TEMP: prevent accidental sends to real Emma while testing
+]);
+
+function guardRecipientEmail(emailLike = "") {
+  const e = String(emailLike || "").trim().toLowerCase();
+  if (!e) return "";
+  if (BLOCKED_TEST_EMAILS.has(e)) {
+    console.warn("🧯 [TEST GUARD] Blocked recipient email — redirecting to hello@", { blocked: e });
+    return HELLO_EMAIL;
+  }
+  return e;
+}
+
+function isBlockedRecipient(emailLike = "") {
+  const e = String(emailLike || "").trim().toLowerCase();
+  return !!e && BLOCKED_TEST_EMAILS.has(e);
+}
+
 // Deffered Availability Request (if lead take longer than 3 hours to reply ping next deputy)
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -662,7 +687,8 @@ export async function sendClientEmail({
 
     // 5) final fallback from env (may still be hello@)
     const envFallback = (process.env.NOTIFY_EMAIL || "").trim().toLowerCase();
-    const finalRecipient = resolvedEmail || envFallback;
+const finalRecipientRaw = resolvedEmail || envFallback;
+const finalRecipient = guardRecipientEmail(finalRecipientRaw);
 
     const isHelloRecipient = finalRecipient === HELLO;
 
@@ -677,15 +703,17 @@ export async function sendClientEmail({
       process.env.ALLOW_HELLO_EMAILS === "true" ||
       process.env.NODE_ENV !== "production";
 
-    console.log("📨 sendClientEmail recipient decision", {
-      requestedTo,
-      userId,
-      actContactEmail: act?.contactEmail,
-      finalRecipient,
-      allowHello,
-      allowHelloEffective,
-      sendEmailsFlag: process.env.SEND_EMAILS,
-    });
+console.log("📨 sendClientEmail recipient decision", {
+  requestedTo,
+  userId,
+  actContactEmail: act?.contactEmail,
+  finalRecipientRaw,
+  finalRecipient,
+  blockedRecipient: isBlockedRecipient(finalRecipientRaw),
+  allowHello,
+  allowHelloEffective,
+  sendEmailsFlag: process.env.SEND_EMAILS,
+});
 
     // Guard: don't send *only* to hello@ unless explicitly allowed
     if (
@@ -710,10 +738,14 @@ export async function sendClientEmail({
 
     const fromAddr = (process.env.DEFAULT_FROM || HELLO).trim();
 
+    const subjectSafe = isBlockedRecipient(finalRecipientRaw)
+  ? `[TEST GUARD: redirected] ${subject}`
+  : subject;
+
     const result = await sendEmail({
       to: [finalRecipient],
       bcc: [HELLO],
-      subject,
+      subject: subjectSafe,
       html,
       // This can be the alias address — SMTP auth should still be rhona@
       from: fromAddr,
@@ -1979,6 +2011,9 @@ async function getDeputyDisplayBits(dep) {
 
   // Step 3: lookup by email if still no photo
   let resolvedEmail = dep?.email || dep?.emailAddress || mus?.email || "";
+
+  // TEMP TEST GUARD: prevent accidental calendar/email sends to real recipients
+resolvedEmail = guardRecipientEmail(resolvedEmail);
 
   if ((!photoUrl || !/^https?:\/\//i.test(photoUrl)) && resolvedEmail) {
     console.log("📧 Step 3: Lookup by email →", resolvedEmail);
