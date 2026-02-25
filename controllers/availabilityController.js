@@ -37,7 +37,6 @@ if (AvailabilityModel?.schema?.paths) {
 const HELLO_EMAIL = "hello@thesupremecollective.co.uk";
 
 const BLOCKED_TEST_EMAILS = new Set([
-  "emma_osei_lah@hotmail.com", // TEMP: prevent accidental sends to real Emma while testing
 ]);
 
 function guardRecipientEmail(emailLike = "") {
