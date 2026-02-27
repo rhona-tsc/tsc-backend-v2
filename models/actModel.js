@@ -199,6 +199,7 @@ slug: { type: String, default: "" },
         instrument: { type: String },
         useMURatesForFees: { type: Boolean },
         fee: { type: Number },
+        
         additionalFee: { type: [Number] },
         sortCode: { type: String },
         accountNumber: { type: String },
@@ -313,6 +314,12 @@ minDisplayPrice: { type: Number, default: null },
             instrument: { type: String },
             useMURatesForFees: { type: Boolean },
             fee: { type: Number },
+            specialDatePricing: {
+  nye: {
+    extraFee: { type: Number, default: 0 },
+    overrideFee: { type: Number, default: null },
+  },
+},
             additionalRoles: [
               {
                 additionalFee: { type: Number },
