@@ -2781,7 +2781,22 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     /* 💰 Fee calculation helper                                      */
     /* -------------------------------------------------------------- */
     const feeForMember = async (member) => {
-      const baseFee = Number(member?.fee ?? 0);
+      const isNYE = String(dateISO).slice(5, 10) === "12-31";
+
+const baseFee = (() => {
+  const base = Number(member?.fee ?? 0);
+  if (!isNYE) return base;
+
+  const nye = member?.specialDatePricing?.nye || {};
+  const override = nye?.overrideFee;
+
+  if (override !== null && override !== undefined && override !== "" && Number.isFinite(Number(override))) {
+    return Number(override);
+  }
+
+  const extra = Number(nye?.extraFee ?? 0);
+  return base + (Number.isFinite(extra) ? extra : 0);
+})();
 
       const essentialExtras = Array.isArray(member?.additionalRoles)
         ? member.additionalRoles
