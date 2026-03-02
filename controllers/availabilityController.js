@@ -993,6 +993,38 @@ export async function notifyDeputies({
     skipDuplicateCheck,
   });
 
+  const isNYE = (iso = "") => {
+  const d = String(iso).slice(0,10);
+  return /-\d{2}-\d{2}$/.test(d) && d.endsWith("-12-31");
+};
+
+const getMemberFeeForDate = (member, iso) => {
+  const base = Number(member?.fee ?? 0);
+  if (!isNYE(iso)) return base;
+
+  // choose your structure:
+  // member.specialDatePricing.nye = { overrideFee, extraFee }
+  const nye = member?.specialDatePricing?.nye || {};
+  const overrideFee = nye.overrideFee;
+  if (overrideFee !== undefined && overrideFee !== null && overrideFee !== "") {
+    const v = Number(overrideFee);
+    if (Number.isFinite(v)) return v;
+  }
+
+  const extra = Number(nye.extraFee ?? 0);
+  return base + (Number.isFinite(extra) ? extra : 0);
+};
+
+const basePlusEssentialExtras = (member, iso) => {
+  const base = getMemberFeeForDate(member, iso);
+  const essentialExtras = Array.isArray(member?.additionalRoles)
+    ? member.additionalRoles
+        .filter(r => r?.isEssential && Number(r?.additionalFee) > 0)
+        .reduce((sum, r) => sum + Number(r.additionalFee), 0)
+    : 0;
+  return base + essentialExtras;
+};
+
   const normalizePhone = (raw = "") => {
     let v = String(raw || "")
       .replace(/\s+/g, "")
@@ -1072,7 +1104,7 @@ export async function notifyDeputies({
   });
 
   // ✅ Inherit context from the lead row for this slot (fee + client identity + enquiryId)
-  let inheritedFee = null;
+let inheritedFee = basePlusEssentialExtras(targetVocalists?.[0], dateISO);
   let inheritedClientName = clientName || "";
   let inheritedClientEmail = clientEmail || "";
   let inheritedEnquiryId = null;
@@ -1081,6 +1113,7 @@ export async function notifyDeputies({
   try {
     const leadRow = await AvailabilityModel.findOne({
       actId,
+      lineupId,
       dateISO,
       isDeputy: { $ne: true },
       ...(slotIndex !== null ? { slotIndex } : {}),
@@ -1186,6 +1219,8 @@ export async function notifyDeputies({
       });
 
       await triggerAvailabilityRequest({
+        inheritedFee,
+inheritedFeeIncludesTravel: false,
         actId,
         lineupId,
         dateISO,
@@ -4538,20 +4573,35 @@ if (!reply) {
             cancelEventId,
           });
 
-          await AvailabilityModel.updateMany(
-            {
-              musicianEmail: (emailForInvite || "").toLowerCase(),
-              dateISO: updated.dateISO,
-            },
-            {
-              $set: {
-                status: "unavailable",
-                reply: "unavailable",
-                repliedAt: new Date(),
-                calendarStatus: "cancelled",
-              },
-            },
-          );
+          // Mark the current thread as unavailable (always)
+await AvailabilityModel.updateOne(
+  { _id: updated._id },
+  {
+    $set: {
+      status: "unavailable",
+      reply: "unavailable",
+      repliedAt: new Date(),
+    },
+  },
+);
+
+// If they previously had an invite (anywhere on that date), cancel invite state across that date
+if (shouldSendCancellationEmail) {
+  await AvailabilityModel.updateMany(
+    {
+      musicianEmail: (emailForInvite || "").toLowerCase(),
+      dateISO: updated.dateISO,
+      $or: [
+        { calendarEventId: { $exists: true, $ne: null } },
+        { calendarInviteSentAt: { $exists: true, $ne: null } },
+        { calendarStatus: { $in: ["needsAction", "accepted", "tentative"] } },
+      ],
+    },
+    {
+      $set: { calendarStatus: "cancelled" },
+    },
+  );
+}
           console.log(
             `🚫 Marked all enquiries for ${emailForInvite} on ${updated.dateISO} as unavailable`,
           );
