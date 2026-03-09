@@ -8,14 +8,41 @@ export const getUserShortlist = async (req, res) => {
 
   try {
     const { userId } = req.params;
-    // Query the Shortlist collection for user's shortlisted acts
-    const shortlist = await Shortlist.find({ userId }).populate("acts.actId", null, "act");
+
+    // Support both shortlist shapes:
+    // 1) one document per shortlist item: { userId, actId }
+    // 2) one document containing acts array: { userId, acts: [{ actId }] }
+    const shortlist = await Shortlist.find({ userId })
+      .populate("actId")
+      .populate("acts.actId");
 
     const acts = (shortlist || [])
-      .map((a) => a.actId)
+      .flatMap((item) => {
+        // Shape 1: direct actId on the shortlist document
+        if (item?.actId) return [item.actId];
+
+        // Shape 2: nested acts array
+        if (Array.isArray(item?.acts)) {
+          return item.acts
+            .map((entry) => entry?.actId)
+            .filter(Boolean);
+        }
+
+        return [];
+      })
       .filter(Boolean);
 
-    res.json({ success: true, acts });
+    const uniqueActs = acts.filter(
+      (act, index, arr) =>
+        arr.findIndex((a) => String(a?._id || a) === String(act?._id || act)) === index
+    );
+
+    console.log("✅ getUserShortlist returning acts:", {
+      count: uniqueActs.length,
+      ids: uniqueActs.map((a) => String(a?._id || a)),
+    });
+
+    res.json({ success: true, acts: uniqueActs });
   } catch (err) {
     console.error("❌ getUserShortlist error:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -50,4 +77,3 @@ export const updateShortlistItem = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
