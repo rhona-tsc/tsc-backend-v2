@@ -21,6 +21,20 @@ import bcrypt from "bcryptjs";
 
 const router = express.Router();
 
+const isObjectIdLike = (value = "") => mongoose.Types.ObjectId.isValid(String(value || ""));
+
+const findMusicianByIdOrSlug = async (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  if (isObjectIdLike(raw)) {
+    const byId = await musicianModel.findById(raw).lean();
+    if (byId) return byId;
+  }
+
+  return musicianModel.findOne({ musicianSlug: raw.toLowerCase() }).lean();
+};
+
 // ⚠️ removed the router.use(...) CORS shim – global CORS in server.js handles it
 
 const uploadFields = upload.fields([
@@ -257,13 +271,20 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/musician/profile/:id
+// GET /api/musician/profile/:idOrSlug
 router.get("/profile/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const doc = await musicianModel.findById(id).lean();
+    const doc = await findMusicianByIdOrSlug(id);
     if (!doc) return res.status(404).json({ message: "Musician not found" });
-    res.json(doc);
+
+    return res.json({
+      ...doc,
+      canonicalPath: doc.musicianSlug ? `/musician/${doc.musicianSlug}` : `/musician/${doc._id}`,
+      requestedKey: id,
+      isCanonicalMatch: Boolean(doc.musicianSlug) ? String(id) === String(doc.musicianSlug) : String(id) === String(doc._id),
+      shouldRedirectToSlug: isObjectIdLike(id) && !!doc.musicianSlug,
+    });
   } catch (err) {
     console.error("❌ Error fetching musician profile:", err);
     res.status(500).json({ message: "Server error" });
@@ -661,12 +682,19 @@ router.get("/dashboard/:id", verifyToken, async (req, res) => {
    Canonical endpoint is: GET /api/musician/profile/:id
 */
 
-const readMusicianById = async (req, res) => {
+const readMusicianByIdOrSlug = async (req, res) => {
   try {
     const { id } = req.params;
-    const doc = await musicianModel.findById(id).lean();
+    const doc = await findMusicianByIdOrSlug(id);
     if (!doc) return res.status(404).json({ message: "Musician not found" });
-    return res.json(doc);
+
+    return res.json({
+      ...doc,
+      canonicalPath: doc.musicianSlug ? `/musician/${doc.musicianSlug}` : `/musician/${doc._id}`,
+      requestedKey: id,
+      isCanonicalMatch: Boolean(doc.musicianSlug) ? String(id) === String(doc.musicianSlug) : String(id) === String(doc._id),
+      shouldRedirectToSlug: isObjectIdLike(id) && !!doc.musicianSlug,
+    });
   } catch (err) {
     console.error("❌ Error fetching musician profile (legacy):", err);
     return res.status(500).json({ message: "Server error" });
@@ -674,7 +702,7 @@ const readMusicianById = async (req, res) => {
 };
 
 // Legacy aliases
-router.get("/get/:id", readMusicianById);
-router.get("/:id", readMusicianById);
+router.get("/get/:id", readMusicianByIdOrSlug);
+router.get("/:id", readMusicianByIdOrSlug);
 
 export default router;

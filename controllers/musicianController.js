@@ -861,8 +861,16 @@ async function getDeputyById(req, res) {
         .json({ success: false, message: "Musician not found" });
     }
 
-    return res.json({ success: true, deputy });
-  } catch (e) {
+    return res.json({
+      success: true,
+      deputy: {
+        ...deputy,
+        canonicalPath: deputy.musicianSlug
+          ? `/musician/${deputy.musicianSlug}`
+          : `/musician/${deputy._id}`,
+      },
+    });
+    } catch (e) {
     console.error(e);
     return res.status(500).json({ success: false, message: "Server error" });
   }
@@ -1448,8 +1456,12 @@ musician.markModified("bank_account");
       success: true,
       message: createdNew ? "Deputy submitted for approval" : "Deputy updated",
       requestId: reqId,
-      musician: {
+            musician: {
         _id: saved._id,
+        musicianSlug: saved.musicianSlug || "",
+        canonicalPath: saved.musicianSlug
+          ? `/musician/${saved.musicianSlug}`
+          : `/musician/${saved._id}`,
         email: saved.email,
         status: saved.status,
         firstName: saved.firstName,
@@ -1539,8 +1551,18 @@ const registerMusician = async (req, res) => {
     });
 
     await newMusician.save();
-    res.status(201).json({ success: true, message: "Musician registered" });
-  } catch (err) {
+    res.status(201).json({
+      success: true,
+      message: "Musician registered",
+      musician: {
+        _id: newMusician._id,
+        musicianSlug: newMusician.musicianSlug || "",
+        canonicalPath: newMusician.musicianSlug
+          ? `/musician/${newMusician.musicianSlug}`
+          : `/musician/${newMusician._id}`,
+      },
+    });
+    } catch (err) {
     console.error("❌ Registration failed:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
@@ -1649,10 +1671,14 @@ const loginMusician = async (req, res) => {
     console.log("✅ Login successful for:", user.email);
 
     // 🔥 7) Send safe response
-    return res.status(200).json({
+      return res.status(200).json({
       success: true,
       token: accessToken,
       userId: user._id,
+      musicianSlug: user.musicianSlug || "",
+      canonicalPath: user.musicianSlug
+        ? `/musician/${user.musicianSlug}`
+        : `/musician/${user._id}`,
       role: user.role,
       email: user.email,
       firstName: user.firstName,
@@ -2801,8 +2827,9 @@ return wanted.map(canon).some((w) => labels.includes(w));
 
     const pool = await musicianModel
       .find(baseFilter, {
-        firstName: 1,
+                firstName: 1,
         lastName: 1,
+        musicianSlug: 1,
         email: 1,
         phone: 1,
         phoneNumber: 1,
@@ -2982,8 +3009,12 @@ return wanted.map(canon).some((w) => labels.includes(w));
       }
 
       const item = {
-        id: String(m._id),
+                id: String(m._id),
         _id: m._id,
+        musicianSlug: m.musicianSlug || "",
+        canonicalPath: m.musicianSlug
+          ? `/musician/${m.musicianSlug}`
+          : `/musician/${m._id}`,
 
         email: m.email,
         firstName: m.firstName,

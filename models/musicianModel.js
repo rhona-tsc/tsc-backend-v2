@@ -10,6 +10,35 @@ const normE164 = (raw = "") => {
   return v;
 };
 
+const slugifySegment = (raw = "") =>
+  String(raw || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-+/g, "-");
+
+const getFirstUsableInstrument = (instrumentation = []) => {
+  if (!Array.isArray(instrumentation)) return "";
+  const first = instrumentation.find((item) => item?.instrument)?.instrument || "";
+  return slugifySegment(first)
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+};
+
+const buildMusicianSlugBase = ({ firstName = "", lastName = "", instrumentation = [] }) => {
+  const first = slugifySegment(firstName);
+  const lastInitial = slugifySegment(lastName).charAt(0);
+  const instrument = getFirstUsableInstrument(instrumentation);
+
+  const base = [first, lastInitial].filter(Boolean).join("-");
+  if (!base) return "";
+
+  return { base, instrument };
+};
+
 const musicianSchema = new mongoose.Schema(
   {
     role: {
@@ -18,6 +47,7 @@ const musicianSchema = new mongoose.Schema(
       default: "musician",
     },
     musicianId: { type: mongoose.Schema.Types.ObjectId, index: true },
+    musicianSlug: { type: String, unique: true, sparse: true, index: true },
 
     tagLine: { type: String, maxlength: 160 },
     tscApprovedBio: { type: String },
@@ -331,53 +361,103 @@ lastLoginAt: { type: Date, default: null, index: true },
   { minimize: false, strict: true }
 );
 
-musicianSchema.pre("validate", function (next) {
-  if (!this.musicianId) this.musicianId = this._id;
+musicianSchema.pre("validate", async function (next) {
+  try {
+    if (!this.musicianId) this.musicianId = this._id;
 
-  if (this.phone) {
-    const n = normE164(this.phone);
-    if (!this.phoneNormalized || this.phoneNormalized !== n) this.phoneNormalized = n;
+    if (this.phone) {
+      const n = normE164(this.phone);
+      if (!this.phoneNormalized || this.phoneNormalized !== n) this.phoneNormalized = n;
+    }
+
+    if (!this.basicInfo) this.basicInfo = {};
+    if (!this.basicInfo.firstName) this.basicInfo.firstName = this.firstName || "";
+    if (!this.basicInfo.lastName) this.basicInfo.lastName = this.lastName || "";
+    if (!this.basicInfo.phone) this.basicInfo.phone = this.phone || "";
+    if (!this.basicInfo.email) this.basicInfo.email = this.email || "";
+
+    const shouldRefreshSlug =
+      !this.musicianSlug ||
+      this.isModified("firstName") ||
+      this.isModified("lastName") ||
+      this.isModified("basicInfo.firstName") ||
+      this.isModified("basicInfo.lastName") ||
+      this.isModified("instrumentation");
+
+    if (shouldRefreshSlug) {
+      const nameSource = {
+        firstName: this.firstName || this.basicInfo?.firstName || "",
+        lastName: this.lastName || this.basicInfo?.lastName || "",
+        instrumentation: this.instrumentation || [],
+      };
+
+      const built = buildMusicianSlugBase(nameSource);
+      if (built?.base) {
+        const candidates = [
+          built.base,
+          built.instrument ? `${built.base}-${built.instrument}` : "",
+          built.instrument
+            ? `${built.base}-${built.instrument}-${String(this._id).slice(-6).toLowerCase()}`
+            : `${built.base}-${String(this._id).slice(-6).toLowerCase()}`,
+        ].filter(Boolean);
+
+        const Musician = this.constructor;
+        let chosenSlug = candidates[candidates.length - 1];
+
+        for (const candidate of candidates) {
+          const existing = await Musician.findOne({
+            musicianSlug: candidate,
+            _id: { $ne: this._id },
+          })
+            .select("_id musicianSlug")
+            .lean();
+
+          if (!existing) {
+            chosenSlug = candidate;
+            break;
+          }
+        }
+
+        this.musicianSlug = chosenSlug;
+      }
+    }
+
+    // ✅ Auto-compute onboarding status (Option B logic)
+    const bioText = String(this.bio || "").trim();
+    const repCount = Array.isArray(this.repertoire) ? this.repertoire.length : 0;
+    const hasPw = this.hasSetPassword === true;
+
+    const onboardingComplete = hasPw && repCount >= 30 && bioText.length > 0;
+
+    if (onboardingComplete) {
+      this.onboardingStatus = "completed";
+      if (!this.onboardingCompletedAt) this.onboardingCompletedAt = new Date();
+    } else {
+      // invited = invitedAt exists AND lastLoginAt is null
+      if (this.onboardingInvitedAt && !this.lastLoginAt) {
+        this.onboardingStatus = "invited";
+      }
+      // in_progress = they've logged in at least once but aren't complete
+      else if (this.lastLoginAt) {
+        this.onboardingStatus = "in_progress";
+      } else {
+        this.onboardingStatus = "not_started";
+      }
+
+      // if requirements no longer met, clear completedAt
+      if (this.onboardingCompletedAt) this.onboardingCompletedAt = null;
+    }
+
+    next();
+  } catch (err) {
+    next(err);
   }
-
-  if (!this.basicInfo) this.basicInfo = {};
-  if (!this.basicInfo.firstName) this.basicInfo.firstName = this.firstName || "";
-  if (!this.basicInfo.lastName) this.basicInfo.lastName = this.lastName || "";
-  if (!this.basicInfo.phone) this.basicInfo.phone = this.phone || "";
-  if (!this.basicInfo.email) this.basicInfo.email = this.email || "";
-
- // ✅ Auto-compute onboarding status (Option B logic)
-const bioText = String(this.bio || "").trim();
-const repCount = Array.isArray(this.repertoire) ? this.repertoire.length : 0;
-const hasPw = this.hasSetPassword === true;
-
-const onboardingComplete = hasPw && repCount >= 30 && bioText.length > 0;
-
-if (onboardingComplete) {
-  this.onboardingStatus = "completed";
-  if (!this.onboardingCompletedAt) this.onboardingCompletedAt = new Date();
-} else {
-  // invited = invitedAt exists AND lastLoginAt is null
-  if (this.onboardingInvitedAt && !this.lastLoginAt) {
-    this.onboardingStatus = "invited";
-  }
-  // in_progress = they've logged in at least once but aren't complete
-  else if (this.lastLoginAt) {
-    this.onboardingStatus = "in_progress";
-  } else {
-    this.onboardingStatus = "not_started";
-  }
-
-  // if requirements no longer met, clear completedAt
-  if (this.onboardingCompletedAt) this.onboardingCompletedAt = null;
-
-  }
-
-  next();
 });
 
 musicianSchema.index({ status: 1 });
 musicianSchema.index({ "instrumentation.instrument": 1 });
 musicianSchema.index({ other_skills: 1 });
+musicianSchema.index({ musicianSlug: 1 }, { unique: true, sparse: true });
 
 const musicianModel =
   mongoose.models.musician || mongoose.model("musician", musicianSchema);
