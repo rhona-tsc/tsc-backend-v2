@@ -35,6 +35,11 @@ const findMusicianByIdOrSlug = async (value) => {
   return musicianModel.findOne({ musicianSlug: raw.toLowerCase() }).lean();
 };
 
+const resolveMusicianObjectId = async (value) => {
+  const doc = await findMusicianByIdOrSlug(value);
+  return doc?._id ? String(doc._id) : null;
+};
+
 // ⚠️ removed the router.use(...) CORS shim – global CORS in server.js handles it
 
 const uploadFields = upload.fields([
@@ -272,18 +277,20 @@ router.get("/", async (req, res) => {
 });
 
 // GET /api/musician/profile/:idOrSlug
-router.get("/profile/:id", async (req, res) => {
+router.get("/profile/:idOrSlug", async (req, res) => {
   try {
-    const { id } = req.params;
-    const doc = await findMusicianByIdOrSlug(id);
+    const { idOrSlug } = req.params;
+    const doc = await findMusicianByIdOrSlug(idOrSlug);
     if (!doc) return res.status(404).json({ message: "Musician not found" });
 
     return res.json({
       ...doc,
       canonicalPath: doc.musicianSlug ? `/musician/${doc.musicianSlug}` : `/musician/${doc._id}`,
-      requestedKey: id,
-      isCanonicalMatch: Boolean(doc.musicianSlug) ? String(id) === String(doc.musicianSlug) : String(id) === String(doc._id),
-      shouldRedirectToSlug: isObjectIdLike(id) && !!doc.musicianSlug,
+      requestedKey: idOrSlug,
+      isCanonicalMatch: Boolean(doc.musicianSlug)
+        ? String(idOrSlug) === String(doc.musicianSlug)
+        : String(idOrSlug) === String(doc._id),
+      shouldRedirectToSlug: isObjectIdLike(idOrSlug) && !!doc.musicianSlug,
     });
   } catch (err) {
     console.error("❌ Error fetching musician profile:", err);
@@ -482,10 +489,13 @@ router.get("/musicians/suggest", async (req, res) => {
 router.post("/moderation/deputy/:id/repertoire/append", appendDeputyRepertoire);
 
 
-// GET /api/musician/stats/:id
-router.get("/stats/:id", verifyToken, async (req, res) => {
+// GET /api/musician/stats/:idOrSlug
+router.get("/stats/:idOrSlug", verifyToken, async (req, res) => {
   try {
-    const musicianId = req.params.id;
+    const musicianId = await resolveMusicianObjectId(req.params.idOrSlug);
+    if (!musicianId) {
+      return res.status(404).json({ success: false, message: "Musician not found" });
+    }
 
     // 12-month window
     const since = new Date();
@@ -550,9 +560,13 @@ router.get("/stats/:id", verifyToken, async (req, res) => {
   }
 });
 
-// GET /api/musician/depping/:id
-router.get("/depping/:id", verifyToken, async (req, res) => {
+// GET /api/musician/depping/:idOrSlug
+router.get("/depping/:idOrSlug", verifyToken, async (req, res) => {
   try {
+    const musicianId = await resolveMusicianObjectId(req.params.idOrSlug);
+    if (!musicianId) {
+      return res.status(404).json({ success: false, message: "Musician not found" });
+    }
     const { email, phoneNormalized } = req.user;
 
     const acts = await actModel.find({
@@ -602,9 +616,12 @@ router.get("/act-v2/my-drafts", verifyToken, async (req, res) => {
 router.post("/act-v2/update-status", updateActStatus);
 
 
-router.get("/dashboard/:id", verifyToken, async (req, res) => {
+router.get("/dashboard/:idOrSlug", verifyToken, async (req, res) => {
   try {
-    const musicianId = req.params.id;
+    const musicianId = await resolveMusicianObjectId(req.params.idOrSlug);
+    if (!musicianId) {
+      return res.status(404).json({ success: false, message: "Musician not found" });
+    }
     const user = req.user;
     const email = user.email;
     const phone = user.phoneNormalized;
@@ -684,16 +701,18 @@ router.get("/dashboard/:id", verifyToken, async (req, res) => {
 
 const readMusicianByIdOrSlug = async (req, res) => {
   try {
-    const { id } = req.params;
-    const doc = await findMusicianByIdOrSlug(id);
+    const { idOrSlug } = req.params;
+    const doc = await findMusicianByIdOrSlug(idOrSlug);
     if (!doc) return res.status(404).json({ message: "Musician not found" });
 
     return res.json({
       ...doc,
       canonicalPath: doc.musicianSlug ? `/musician/${doc.musicianSlug}` : `/musician/${doc._id}`,
-      requestedKey: id,
-      isCanonicalMatch: Boolean(doc.musicianSlug) ? String(id) === String(doc.musicianSlug) : String(id) === String(doc._id),
-      shouldRedirectToSlug: isObjectIdLike(id) && !!doc.musicianSlug,
+      requestedKey: idOrSlug,
+      isCanonicalMatch: Boolean(doc.musicianSlug)
+        ? String(idOrSlug) === String(doc.musicianSlug)
+        : String(idOrSlug) === String(doc._id),
+      shouldRedirectToSlug: isObjectIdLike(idOrSlug) && !!doc.musicianSlug,
     });
   } catch (err) {
     console.error("❌ Error fetching musician profile (legacy):", err);
@@ -702,7 +721,7 @@ const readMusicianByIdOrSlug = async (req, res) => {
 };
 
 // Legacy aliases
-router.get("/get/:id", readMusicianByIdOrSlug);
-router.get("/:id", readMusicianByIdOrSlug);
+router.get("/get/:idOrSlug", readMusicianByIdOrSlug);
+router.get("/:idOrSlug", readMusicianByIdOrSlug);
 
 export default router;
