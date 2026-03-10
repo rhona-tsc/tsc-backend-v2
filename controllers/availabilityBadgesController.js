@@ -1,7 +1,14 @@
 // backend/controllers/availabilityBadgesController.js
 import Act from "../models/actModel.js";
 import AvailabilityModel from "../models/availabilityModel.js";
+import Musician from "../models/musicianModel.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
+
+const PUBLIC_SITE_BASE = (
+  process.env.PUBLIC_SITE_URL ||
+  process.env.FRONTEND_URL ||
+  "http://localhost:5174"
+).replace(/\/$/, "");
 
 /* -------------------------------------------------------------------------- */
 /*                        buildBadgeFromAvailability                          */
@@ -33,20 +40,48 @@ export async function buildBadgeFromAvailability(actId, dateISO) {
     console.log(`🐊 buildBadgeFromAvailability.getMusicianFromReply called`, {
       phone: replyRow.phone || replyRow.availabilityPhone,
       replyId: replyRow._id?.toString?.(),
+      musicianId: replyRow.musicianId || null,
     });
-    const phone = replyRow.phone || replyRow.availabilityPhone;
-    if (!phone) return null;
-    const person = await findPersonByPhone(phone);
+
+    let person = null;
+
+    if (replyRow?.musicianId) {
+      try {
+        person = await Musician.findById(replyRow.musicianId)
+          .select("_id firstName lastName displayName musicianSlug profilePhoto profilePicture images")
+          .lean();
+      } catch (err) {
+        console.warn("⚠️ buildBadgeFromAvailability musicianId lookup failed:", err?.message || err);
+      }
+    }
+
+    if (!person) {
+      const phone = replyRow.phone || replyRow.availabilityPhone;
+      if (!phone) return null;
+      person = await findPersonByPhone(phone);
+    }
+
     if (!person) return null;
 
-    const name = `${person.firstName || ""} ${person.lastName || ""}`.trim() || person.displayName || "(unknown)";
+    const name =
+      `${person.firstName || ""} ${person.lastName || ""}`.trim() ||
+      person.displayName ||
+      "(unknown)";
+
     const photoUrl =
+      person.profilePhoto ||
       person.profilePicture?.url ||
       person.profilePicture ||
       (Array.isArray(person.images) && person.images[0]?.url) ||
       "";
 
-    return { person, name, photoUrl };
+    const profileUrl = person.musicianSlug
+      ? `${PUBLIC_SITE_BASE}/musician/${person.musicianSlug}`
+      : person._id
+        ? `${PUBLIC_SITE_BASE}/musician/${person._id}`
+        : "";
+
+    return { person, name, photoUrl, profileUrl };
   };
 
   const lead = yesReplies[0];
@@ -62,7 +97,7 @@ export async function buildBadgeFromAvailability(actId, dateISO) {
     vocalistName: leadData?.name || "(unknown)",
     musicianId: leadData?.person?._id || null,
     photoUrl: leadData?.photoUrl || "",
-    profileUrl: leadData?.person?._id ? `/musician/${leadData.person._id}` : "",
+    profileUrl: leadData?.profileUrl || "",
     setAt: lead.repliedAt || new Date(),
     isDeputy: false,
     deputies: [],
@@ -75,7 +110,7 @@ export async function buildBadgeFromAvailability(actId, dateISO) {
         musicianId: depData.person?._id || null,
         vocalistName: depData.name,
         photoUrl: depData.photoUrl,
-        profileUrl: depData.person?._id ? `/musician/${depData.person._id}` : "",
+        profileUrl: depData.profileUrl || "",
         setAt: dep.repliedAt || new Date(),
       });
       console.log(`🐊 buildBadgeFromAvailability added deputy`, { name: depData.name });
@@ -107,10 +142,10 @@ export async function getavailabilityBadges(req, res) {
       return res.json({ success: true, updated: false, badge: null });
     }
 
-await Act.updateOne(
-  { _id: actId },
-  { $set: { [`availabilityBadgess.${dateISO}`]: badge } }
-);
+    await Act.updateOne(
+      { _id: actId },
+      { $set: { [`availabilityBadges.${dateISO}`]: badge } }
+    );
     console.log(`🐊 getavailabilityBadges updated`, {
       actId,
       dateISO,

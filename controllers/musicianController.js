@@ -838,23 +838,41 @@ const computeGenreFit = (act, dep) => {
 // Fetch a single deputy by ID
 async function getDeputyById(req, res) {
   try {
-    const { id } = req.params;
+    const identifier = String(
+  req.params.identifier || req.params.slug || req.params.id || ""
+).trim();
 
-    if (!mongoose.isValidObjectId(id)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid musician id" });
-    }
+if (!identifier) {
+  return res
+    .status(400)
+    .json({ success: false, message: "Missing musician identifier" });
+}
+
+const isObjectId = mongoose.isValidObjectId(identifier);
+
+let deputy = null;
+
+if (isObjectId) {
+  deputy = await musicianModel.findById(identifier).lean();
+}
+
+if (!deputy) {
+  deputy = await musicianModel.findOne({ musicianSlug: identifier }).lean();
+}
 
     // Optional: access control — allow self or agents
     const me = req.user; // set by verifyToken
-    const isSelf = me?._id?.toString?.() === id;
+    const meId = me?._id?.toString?.() || "";
+const meSlug = String(me?.musicianSlug || "").trim();
+
+const isSelfById = isObjectId && meId === identifier;
+const isSelfBySlug = !!meSlug && meSlug === identifier;
+const isSelf = isSelfById || isSelfBySlug;
     const isAgent = (me?.role || me?.userRole || "").toLowerCase() === "agent";
     if (!isSelf && !isAgent) {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
-    const deputy = await musicianModel.findById(id).lean();
     if (!deputy) {
       return res
         .status(404)
@@ -1546,8 +1564,7 @@ const registerMusician = async (req, res) => {
 
     const newMusician = new musicianModel({
       ...JSON.parse(req.body), // or parse fields manually
-      profile_picture: profileUrl,
-      // removed coverHeroImage: coverHeroUrl (undefined here)
+profile_picture: profileUrl,      // removed coverHeroImage: coverHeroUrl (undefined here)
     });
 
     await newMusician.save();

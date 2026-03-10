@@ -8,6 +8,23 @@ import {
 } from "./availabilityHelpers.js";
 import { rebuildAndApplyAvailabilityBadge } from "./availabilityController.js";
 
+const PUBLIC_SITE_BASE = (
+  process.env.PUBLIC_SITE_URL ||
+  process.env.FRONTEND_URL ||
+  "http://localhost:5174"
+).replace(/\/$/, "");
+
+const buildMusicianProfileUrl = (musicianLike = {}) => {
+  const slug = String(musicianLike?.musicianSlug || "").trim();
+  const id = String(
+    musicianLike?._id || musicianLike?.musicianId || ""
+  ).trim();
+
+  if (slug) return `${PUBLIC_SITE_BASE}/musician/${slug}`;
+  if (id) return `${PUBLIC_SITE_BASE}/musician/${id}`;
+  return "";
+};
+
 
 // --- tiny debugger for badge state -----------------------------------------
 export async function debugLogBadgeState(actId, label = "badge") {
@@ -136,7 +153,7 @@ if (match) {
             ],
           })
             .select(
-              "_id musicianProfileImageUpload musicianProfileImage profileImage profilePicture.url photoUrl imageUrl firstName lastName"
+              "_id musicianSlug musicianProfileImageUpload musicianProfileImage profileImage profilePicture.url photoUrl imageUrl firstName lastName"
             )
             .lean();
           if (byPhone) docForPhoto = byPhone;
@@ -194,11 +211,10 @@ if (match) {
         docForPhoto?.photoUrl ||
         docForPhoto?.imageUrl ||
         "",
-      profileUrl: resolvedMusicianId
-        ? `${
-            process.env.PUBLIC_SITE_URL || "http://localhost:5174"
-          }/musician/${resolvedMusicianId}`
-        : "",
+      profileUrl: buildMusicianProfileUrl({
+        _id: resolvedMusicianId,
+        musicianSlug: docForPhoto?.musicianSlug || who?.musicianSlug,
+      }),
       setAt: new Date(),
     };
 
@@ -275,7 +291,10 @@ if (match) {
       });
 
       // after updating the availability record
-await rebuildAndApplyAvailabilityBadge(updated.actId, updated.dateISO);
+await rebuildAndApplyAvailabilityBadge({
+  actId: updated.actId,
+  dateISO: updated.dateISO,
+});
 
       await debugLogBadgeState(act._id, "after DEPUTY YES");
     }
@@ -336,7 +355,7 @@ export async function applyFeaturedBadgeOnYesV3({
         ],
       })
         .select(
-          "_id firstName lastName email profilePicture coverHeroImage musicianProfileImageUpload musicianProfileImage images digitalWardrobeBlackTie digitalWardrobeFormal digitalWardrobeSmartCasual"
+          "_id musicianSlug firstName lastName email profilePicture coverHeroImage musicianProfileImageUpload musicianProfileImage images digitalWardrobeBlackTie digitalWardrobeFormal digitalWardrobeSmartCasual"
         )
         .lean());
 
@@ -392,9 +411,10 @@ export async function applyFeaturedBadgeOnYesV3({
             "availabilityBadges.vocalistName": vocalistName,
             "availabilityBadges.musicianId": musicianId,
             "availabilityBadges.photoUrl": photoUrl,
-            "availabilityBadges.profileUrl": `${
-              process.env.PUBLIC_SITE_URL || "http://localhost:5174"
-            }/musician/${musicianId}`,
+            "availabilityBadges.profileUrl": buildMusicianProfileUrl({
+              _id: musicianId,
+              musicianSlug: musician?.musicianSlug,
+            }),
           },
         }
       );
@@ -407,9 +427,10 @@ export async function applyFeaturedBadgeOnYesV3({
         musicianId,
         vocalistName,
         photoUrl,
-        profileUrl: `${
-          process.env.PUBLIC_SITE_URL || "http://localhost:5174"
-        }/musician/${musicianId}`,
+        profileUrl: buildMusicianProfileUrl({
+          _id: musicianId,
+          musicianSlug: musician?.musicianSlug,
+        }),
         setAt: new Date(),
       };
 
@@ -438,7 +459,10 @@ export async function applyFeaturedBadgeOnYesV3({
       );
 
       // 🔁 refresh after deputy added
-      await rebuildAndApplyAvailabilityBadge(updated.actId, updated.dateISO);
+      await rebuildAndApplyAvailabilityBadge({
+        actId: updated.actId,
+        dateISO: updated.dateISO,
+      });
       console.log("➕ Deputy badge updated:", vocalistName);
     }
 
