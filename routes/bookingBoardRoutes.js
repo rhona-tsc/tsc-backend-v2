@@ -25,11 +25,183 @@ const isoDateOnly = (value) => {
   return d.toISOString().slice(0, 10);
 };
 
+
 const calcDepositFromGross = (grossValue) => {
   const gross = Number(grossValue || 0);
   if (!gross) return 0;
   const n = Math.ceil((gross - 50) * 0.2) + 50;
   return n > 0 ? n : 0;
+};
+
+const hasContractLink = (row) => {
+  const url = row?.contractUrl || row?.pdfUrl || row?.contract?.url || row?.contract?.href || "";
+  return Boolean(String(url || "").trim());
+};
+
+const hasEventSheetContent = (row) => {
+  return Boolean(
+    row?.eventSheet?.submitted ||
+    (row?.eventSheet?.answers && Object.keys(row.eventSheet.answers).length) ||
+    (row?.eventSheet?.complete && Object.keys(row.eventSheet.complete).length)
+  );
+};
+
+const getRowClientEmail = (row) => {
+  if (Array.isArray(row?.clientEmails) && row.clientEmails.length) {
+    return String(row.clientEmails.find((e) => e?.email)?.email || "").trim().toLowerCase();
+  }
+  return String(row?.clientEmail || row?.userAddress?.email || row?.userEmail || "").trim().toLowerCase();
+};
+
+const getRowClientName = (row) => {
+  return String(
+    row?.clientFirstNames ||
+    row?.clientName ||
+    row?.bookerName ||
+    [row?.userAddress?.firstName, row?.userAddress?.lastName].filter(Boolean).join(" ") ||
+    ""
+  ).trim().toLowerCase();
+};
+
+const getRowActKey = (row) => {
+  return String(
+    row?.actTscName ||
+    row?.actName ||
+    row?.actsSummary?.[0]?.tscName ||
+    row?.actsSummary?.[0]?.actName ||
+    row?.actsSummary?.[0]?.name ||
+    row?.actId ||
+    row?.act ||
+    ""
+  ).trim().toLowerCase();
+};
+
+const getRowEventDateKey = (row) => {
+  return String(row?.eventDateISO || isoDateOnly(row?.date || row?.eventDate || row?.bookingDate) || "").slice(0, 10);
+};
+
+const getCanonicalBookingKey = (row) => {
+  const sessionId = String(row?.sessionId || "").trim().toLowerCase();
+  if (sessionId) return `session:${sessionId}`;
+
+  const bookingId = String(row?.bookingId || row?.bookingRef || "").trim().toLowerCase();
+  if (bookingId) return `booking:${bookingId}`;
+
+  const email = getRowClientEmail(row);
+  const dateKey = getRowEventDateKey(row);
+  const actKey = getRowActKey(row);
+  const nameKey = getRowClientName(row);
+  return `fallback:${email}|${dateKey}|${actKey}|${nameKey}`;
+};
+
+const scoreRowCompleteness = (row) => {
+  const gross = Number(row?.grossValue || row?.totals?.fullAmount || row?.amount || row?.fee || 0) || 0;
+  const deposit = Number(
+    row?.payments?.depositChargedAmount ??
+    row?.payments?.depositAmount ??
+    row?.totals?.depositAmount ??
+    row?.depositAmount ??
+    0
+  ) || 0;
+
+  return [
+    hasContractLink(row),
+    hasEventSheetContent(row),
+    Boolean(gross),
+    Boolean(deposit),
+    Boolean(getRowClientEmail(row)),
+    Boolean(getRowClientName(row)),
+    Boolean(getRowActKey(row)),
+    Boolean(getRowEventDateKey(row)),
+    Boolean(row?.eventType),
+    Boolean(row?.address || row?.venueAddress || row?.venue),
+    Boolean(row?.lineupSelected || row?.actsSummary?.[0]?.lineupLabel),
+    Boolean(row?.performanceTimes?.startTime || row?.performanceTimes?.arrivalTime || row?.arrivalTime),
+  ].filter(Boolean).length;
+};
+
+const mergeRowData = (preferred, secondary) => {
+  if (!preferred) return secondary;
+  if (!secondary) return preferred;
+
+  return {
+    ...secondary,
+    ...preferred,
+    _id: preferred?._id || secondary?._id,
+    sourceBookingId: preferred?.sourceBookingId || secondary?.sourceBookingId,
+    bookingRef: preferred?.bookingRef || secondary?.bookingRef,
+    bookingId: preferred?.bookingId || secondary?.bookingId,
+    sessionId: preferred?.sessionId || secondary?.sessionId,
+    clientFirstNames: preferred?.clientFirstNames || secondary?.clientFirstNames,
+    clientName: preferred?.clientName || secondary?.clientName,
+    clientEmails: Array.isArray(preferred?.clientEmails) && preferred.clientEmails.length
+      ? preferred.clientEmails
+      : secondary?.clientEmails,
+    clientEmail: preferred?.clientEmail || secondary?.clientEmail,
+    userEmail: preferred?.userEmail || secondary?.userEmail,
+    eventDateISO: preferred?.eventDateISO || secondary?.eventDateISO,
+    enquiryDateISO: preferred?.enquiryDateISO || secondary?.enquiryDateISO,
+    bookingDateISO: preferred?.bookingDateISO || secondary?.bookingDateISO,
+    grossValue: Number(preferred?.grossValue || 0) || Number(secondary?.grossValue || 0) || 0,
+    netCommission: Number(preferred?.netCommission || 0) || Number(secondary?.netCommission || 0) || 0,
+    eventType: preferred?.eventType || secondary?.eventType,
+    actName: preferred?.actName || secondary?.actName,
+    actTscName: preferred?.actTscName || secondary?.actTscName,
+    address: preferred?.address || secondary?.address,
+    county: preferred?.county || secondary?.county,
+    venue: preferred?.venue || secondary?.venue,
+    venueAddress: preferred?.venueAddress || secondary?.venueAddress,
+    lineupSelected: preferred?.lineupSelected || secondary?.lineupSelected,
+    lineupComposition: Array.isArray(preferred?.lineupComposition) && preferred.lineupComposition.length
+      ? preferred.lineupComposition
+      : secondary?.lineupComposition,
+    arrivalTime: preferred?.arrivalTime || secondary?.arrivalTime,
+    finishTime: preferred?.finishTime || secondary?.finishTime,
+    bookingDetails: preferred?.bookingDetails || secondary?.bookingDetails,
+    payments: Array.isArray(preferred?.payments) && preferred.payments.length
+      ? preferred.payments
+      : secondary?.payments,
+    balancePaid: Boolean(preferred?.balancePaid ?? secondary?.balancePaid),
+    bandPaymentsSent: Boolean(preferred?.bandPaymentsSent ?? secondary?.bandPaymentsSent),
+    allocation: preferred?.allocation || secondary?.allocation,
+    review: preferred?.review || secondary?.review,
+    eventSheet: preferred?.eventSheet || secondary?.eventSheet,
+    userAddress: preferred?.userAddress || secondary?.userAddress,
+    actOwnerMusicianId: preferred?.actOwnerMusicianId || secondary?.actOwnerMusicianId,
+    actId: preferred?.actId || secondary?.actId,
+    actsSummary: Array.isArray(preferred?.actsSummary) && preferred.actsSummary.length
+      ? preferred.actsSummary
+      : secondary?.actsSummary,
+    performanceTimes: preferred?.performanceTimes || secondary?.performanceTimes,
+    contractUrl: preferred?.contractUrl || secondary?.contractUrl,
+    pdfUrl: preferred?.pdfUrl || secondary?.pdfUrl,
+    contract: preferred?.contract || secondary?.contract,
+    createdAt: preferred?.createdAt || secondary?.createdAt,
+    updatedAt: preferred?.updatedAt || secondary?.updatedAt,
+  };
+};
+
+const choosePreferredRow = (current, incoming) => {
+  if (!current) return incoming;
+  if (!incoming) return current;
+
+  const currentHasContract = hasContractLink(current);
+  const incomingHasContract = hasContractLink(incoming);
+
+  if (incomingHasContract && !currentHasContract) return mergeRowData(incoming, current);
+  if (currentHasContract && !incomingHasContract) return mergeRowData(current, incoming);
+
+  const currentScore = scoreRowCompleteness(current);
+  const incomingScore = scoreRowCompleteness(incoming);
+
+  if (incomingScore > currentScore) return mergeRowData(incoming, current);
+  if (currentScore > incomingScore) return mergeRowData(current, incoming);
+
+  const currentUpdated = new Date(current?.updatedAt || current?.createdAt || 0).getTime() || 0;
+  const incomingUpdated = new Date(incoming?.updatedAt || incoming?.createdAt || 0).getTime() || 0;
+
+  if (incomingUpdated >= currentUpdated) return mergeRowData(incoming, current);
+  return mergeRowData(current, incoming);
 };
 
 const normalizeBookingToBoardRow = (booking) => {
@@ -110,6 +282,7 @@ const normalizeBookingToBoardRow = (booking) => {
     sourceBookingId: doc?._id,
     bookingRef: doc?.bookingRef || doc?.bookingId || "",
     bookingId: doc?.bookingId || doc?.bookingRef || "",
+    sessionId: doc?.sessionId || "",
     clientFirstNames,
     clientEmails,
     eventDateISO,
@@ -142,6 +315,9 @@ const normalizeBookingToBoardRow = (booking) => {
     actId: actSummary?.actId || doc?.act || "",
     actsSummary: Array.isArray(doc?.actsSummary) ? doc.actsSummary : [],
     performanceTimes: doc?.performanceTimes || actSummary?.performance || {},
+    contractUrl: doc?.contractUrl || "",
+    pdfUrl: doc?.pdfUrl || "",
+    contract: doc?.contract || null,
     createdAt: doc?.createdAt,
     updatedAt: doc?.updatedAt,
   };
@@ -321,46 +497,24 @@ router.get("/", musicianAuth, async (req, res) => {
     const boardRowsRaw = await BookingBoardItem.find(boardQuery, proj).limit(Number(limit));
     const bookingDocs = await Booking.find(bookingQuery).limit(Number(limit));
 
-    const mergedMap = new Map();
+    const dedupeMap = new Map();
 
     for (const row of boardRowsRaw) {
-      const key = String(row?.sourceBookingId || row?._id || row?.bookingRef || row?.bookingId || "");
-      if (!key) continue;
-      mergedMap.set(key, row.toObject ? row.toObject() : row);
+      const plainRow = row?.toObject ? row.toObject() : row;
+      const key = getCanonicalBookingKey(plainRow);
+      const existing = dedupeMap.get(key);
+      dedupeMap.set(key, choosePreferredRow(existing, plainRow));
     }
 
     for (const booking of bookingDocs) {
       const normalized = normalizeBookingToBoardRow(booking);
       if (!normalized) continue;
-      const key = String(normalized?.sourceBookingId || normalized?._id || normalized?.bookingRef || normalized?.bookingId || "");
-      if (!key) continue;
-      const existing = mergedMap.get(key) || {};
-      mergedMap.set(key, {
-        ...normalized,
-        ...existing,
-        clientFirstNames: existing.clientFirstNames || normalized.clientFirstNames,
-        bookingRef: existing.bookingRef || normalized.bookingRef,
-        bookingId: existing.bookingId || normalized.bookingId,
-        eventDateISO: existing.eventDateISO || normalized.eventDateISO,
-        grossValue: Number(existing.grossValue || 0) || normalized.grossValue,
-        clientEmails: Array.isArray(existing.clientEmails) && existing.clientEmails.length ? existing.clientEmails : normalized.clientEmails,
-        eventType: existing.eventType || normalized.eventType,
-        actName: existing.actName || normalized.actName,
-        actTscName: existing.actTscName || normalized.actTscName,
-        address: existing.address || normalized.address,
-        county: existing.county || normalized.county,
-        lineupSelected: existing.lineupSelected || normalized.lineupSelected,
-        arrivalTime: existing.arrivalTime || normalized.arrivalTime,
-        finishTime: existing.finishTime || normalized.finishTime,
-        payments: Array.isArray(existing.payments) ? existing.payments : normalized.payments,
-        balancePaid: Boolean(existing.balancePaid ?? normalized.balancePaid),
-        bandPaymentsSent: Boolean(existing.bandPaymentsSent ?? normalized.bandPaymentsSent),
-        performanceTimes: existing.performanceTimes || normalized.performanceTimes,
-        actsSummary: Array.isArray(existing.actsSummary) && existing.actsSummary.length ? existing.actsSummary : normalized.actsSummary,
-      });
+      const key = getCanonicalBookingKey(normalized);
+      const existing = dedupeMap.get(key);
+      dedupeMap.set(key, choosePreferredRow(existing, normalized));
     }
 
-    const rows = [...mergedMap.values()];
+    const rows = [...dedupeMap.values()];
 
     const dir = String(sortDir).toLowerCase() === "desc" ? -1 : 1;
     rows.sort((a, b) => {
@@ -377,9 +531,11 @@ router.get("/", musicianAuth, async (req, res) => {
       return (aDate - bDate) * dir;
     });
 
+    const totalDeduped = rows.length;
+
     const scopeLabel = isAdmin
-      ? "Showing all bookings across The Supreme Collective"
-      : "Showing bookings visible to your account only";
+      ? `Showing ${totalDeduped} deduplicated booking${totalDeduped === 1 ? "" : "s"} across The Supreme Collective`
+      : `Showing ${totalDeduped} deduplicated booking${totalDeduped === 1 ? "" : "s"} visible to your account only`;
 
     res.json({
       success: true,

@@ -11,6 +11,7 @@ const {
   TWILIO_ACCOUNT_SID,
   TWILIO_AUTH_TOKEN,
   TWILIO_API_KEY,
+  TWILIO_API_SECRET,
   TWILIO_WA_SENDER,
   TWILIO_SMS_FROM,
   TWILIO_MESSAGING_SERVICE_SID,
@@ -187,6 +188,7 @@ export async function sendWhatsAppMessage(opts = {}) {
 
   function pickPic(mus) {
     const url =
+      mus?.profilePhoto ||
       mus?.profilePicture ||
       mus?.musicianProfileImage ||
       mus?.profileImage ||
@@ -201,12 +203,28 @@ export async function sendWhatsAppMessage(opts = {}) {
     process.env.FRONTEND_URL ||
     "http://localhost:5174"
   ).replace(/\/$/, "");
-  const buildProfileUrl = (id) => (id ? `${PUBLIC_SITE_BASE}/musician/${id}` : "");
+  const buildProfileUrl = (musicianLike) => {
+    if (!musicianLike) return "";
+
+    if (typeof musicianLike === "string") {
+      const raw = musicianLike.trim();
+      return raw ? `${PUBLIC_SITE_BASE}/musician/${raw}` : "";
+    }
+
+    const slug = String(musicianLike?.musicianSlug || "").trim();
+    const id = String(
+      musicianLike?._id || musicianLike?.musicianId || ""
+    ).trim();
+
+    if (slug) return `${PUBLIC_SITE_BASE}/musician/${slug}`;
+    if (id) return `${PUBLIC_SITE_BASE}/musician/${id}`;
+    return "";
+  };
 
   const memberNames = firstLast(member || {});
   const memberDisplayName = displayNameOf(member || {});
   const memberPhotoUrl = pickPic(member || {});
-  const memberProfileUrl = buildProfileUrl(member?._id || member?.musicianId);
+  const memberProfileUrl = buildProfileUrl(member);
 
   const isDeputy =
     (member && (member.isDeputy === true || member?.role === "deputy")) ||
