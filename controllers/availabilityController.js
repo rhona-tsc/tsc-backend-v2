@@ -3222,6 +3222,12 @@ bandMemberId: bandMemberId || null,
 
         const nameBits = normalizeNameBits(displayNameOf(vMember));
 
+        const outboundMessage = `Hi ${
+  vMember.firstName || "there"
+}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${
+  vMember.instrument
+} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
+
         // Send interactive WA
         const msg = await sendWhatsAppMessage({
           to: phone,
@@ -3241,18 +3247,19 @@ bandMemberId: bandMemberId || null,
           },
           requestId,
           buttons,
-          smsBody: `Hi ${
-            vMember.firstName || "there"
-          }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${
-            vMember.instrument
-          } duties with ${act.tscName || act.name}. Please indicate your availability 💫`,
+          smsBody: outboundMessage,
         });
 
         // persist Twilio SID
         try {
           await AvailabilityModel.updateOne(
             { _id: savedLead._id },
-            { $set: { messageSidOut: msg?.sid || null } }
+            {  $set: {
+      messageSidOut: msg?.sid || null,
+      outboundMessage,
+      outboundChannel: "whatsapp",
+      outboundSentAt: new Date(),
+    }, }
           );
         } catch (e) {
           console.warn(
@@ -3700,6 +3707,12 @@ const realMusicianId = canonical?._id || targetMember?.musicianId || null;
       { id: `UNAVAILABLE:${requestId}`, title: "Unavailable" },
     ];
 
+    const outboundMessage = `Hi ${
+  targetMember.firstName || "there"
+}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${roleStr} duties with ${
+  act.tscName || act.name
+}. Please indicate your availability 💫`;
+
     const msg = await sendWhatsAppMessage({
       to: phone,
       actData: act,
@@ -3718,19 +3731,22 @@ const realMusicianId = canonical?._id || targetMember?.musicianId || null;
       },
       requestId,
       buttons,
-      smsBody: `Hi ${
-        targetMember.firstName || "there"
-      }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${roleStr} duties with ${
-        act.tscName || act.name
-      }. Please indicate your availability 💫`,
+      smsBody: outboundMessage,
     });
 
     // Persist Twilio SID
     try {
-      await AvailabilityModel.updateOne(
-        { _id: saved._id },
-        { $set: { messageSidOut: msg?.sid || null } }
-      );
+     await AvailabilityModel.updateOne(
+  { _id: saved._id },
+  {
+    $set: {
+      messageSidOut: msg?.sid || null,
+      outboundMessage,
+      outboundChannel: "whatsapp",
+      outboundSentAt: new Date(),
+    },
+  }
+);
     } catch (e) {
       console.warn(
         "⚠️ Could not persist messageSidOut (single):",

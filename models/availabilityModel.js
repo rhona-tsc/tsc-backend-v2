@@ -43,6 +43,7 @@ bandMemberId: { type: mongoose.Schema.Types.ObjectId, index: true },
       default: null,
     },
 
+    outboundMessage: { type: String, default: "" },
     messageSidOut: { type: String, index: true },
     messageSid: { type: String, select: false },
 
@@ -91,7 +92,28 @@ requestId: { type: String, index: true },
     calendarSummary: { type: String },
     calendarDescription: { type: String },
     confirmedBooking: { type: Boolean, default: false },
+    websiteReplies: [
+  {
+    body: { type: String, required: true },
+    senderRole: {
+      type: String,
+      enum: ["agent", "musician"],
+      required: true,
+    },
+    senderName: { type: String, default: "" },
+    senderMusicianId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Musician",
+      default: null,
+    },
+    readByAdmin: { type: Boolean, default: false },
+    readByMusician: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now },
   },
+],
+  },
+
+  
   { timestamps: true }
 );
 

@@ -22,6 +22,10 @@ const musicianAuth = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded || {};
     if (req.user && req.user._id && !req.user.id) req.user.id = req.user._id;
+
+    req.userId = req.user?.id || req.user?._id || "";
+    req.userRole = req.user?.role || "";
+
     console.log(`✅ [${req._rid || 'no-rid'}] musicianAuth ok for user: ${req.user?.id || 'unknown'}`);
     return next();
   } catch (error) {

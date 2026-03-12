@@ -41,7 +41,7 @@ import sitemapRoutes from "./routes/sitemapRoutes.js";
 import enquiryBoardRoutes from "./routes/enquiryBoardRoutes.js";
 import { runOnboardingChase } from "./cron/onboardingChase.js";
 import adminRoutes from "./routes/admin.js";
-
+import messageRoutes from "./routes/messageRoutes.js";
 import {
   watchCalendar,
   handleGoogleWebhook,
@@ -330,7 +330,7 @@ app.use("/api/musician/act-v2", actV2Routes);
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/shortlist", shortlistRoutes);
 app.use("/api/board/enquiries", enquiryBoardRoutes);
-
+app.use("/api/messages", messageRoutes);
 
 // Bookings / payments / invoices
 app.use("/api/cart", cartRouter);
