@@ -1,6 +1,6 @@
 import express from "express";
 import mongoose from "mongoose";
-import Availability from "../models/availability.js";
+import Availability from "../models/availabilityModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 
 const router = express.Router();
