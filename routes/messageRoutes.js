@@ -1,6 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import Availability from "../models/availabilityModel.js";
+import { processAvailabilityReplyFlow } from "../controllers/availabilityController.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 
 const router = express.Router();
@@ -151,30 +152,40 @@ const buildThreadsFromRows = (rows = []) => {
       thread.updatedAt = row.updatedAt;
     }
 
-    if (row.messageSidOut || row.outboundMessage) {
-      thread.messages.push({
-        _id: `out-${row._id}`,
-        senderRole: "agent",
-        senderName: "System",
-        body: row.outboundMessage || buildFallbackOutboundBody(row),
-        channel: row.outboundChannel || "whatsapp",
-        createdAt: row.outboundSentAt || row.createdAt,
-        source: "availability-outbound",
-        sid: row.messageSidOut || null,
-      });
-    }
+   if (row.messageSidOut || row.outboundMessage) {
+  thread.messages.push({
+    _id: `out-${row._id}`,
+    senderRole: "agent",
+    senderName: "System",
+    body: row.outboundMessage || buildFallbackOutboundBody(row),
+    channel: row.outboundChannel || "whatsapp",
+    createdAt: row.outboundSentAt || row.createdAt,
+    source: "availability-outbound",
+    sid: row.messageSidOut || null,
+    rowId: String(row._id),
+    requestId: row.requestId || "",
+    slotIndex: Number(row.slotIndex ?? 0),
+    reply: row.reply || null,
+  });
+}
 
-    if (row.inbound?.body || row.reply) {
-      thread.messages.push({
-        _id: `in-${row._id}`,
-        senderRole: "musician",
-        senderName: row.musicianName || row.contactName || "Musician",
-        body: row.inbound?.body || row.inbound?.buttonText || row.reply || "",
-        channel: "whatsapp",
-        createdAt: row.repliedAt || row.updatedAt || row.createdAt,
-        source: "availability-inbound",
-      });
-    }
+  if (row.inbound?.body || row.reply) {
+  thread.messages.push({
+    _id: `in-${row._id}`,
+    senderRole: "musician",
+    senderName: row.musicianName || row.contactName || "Musician",
+    body: row.inbound?.body || row.inbound?.buttonText || row.reply || "",
+    channel: "whatsapp",
+    createdAt: row.repliedAt || row.updatedAt || row.createdAt,
+    source: "availability-inbound",
+    rowId: String(row._id),
+    requestId: row.requestId || "",
+    slotIndex: Number(row.slotIndex ?? 0),
+    reply: row.reply || null,
+    buttonText: row.inbound?.buttonText || "",
+    buttonPayload: row.inbound?.buttonPayload || "",
+  });
+}
 
     if (Array.isArray(row.websiteReplies)) {
       for (const reply of row.websiteReplies) {
@@ -309,6 +320,103 @@ router.get("/mine", musicianAuth, async (req, res) => {
   }
 });
 
+
+/**
+ * POST /api/messages/message-reply
+ * Website quick reply that mimics a WhatsApp availability response on a single row
+ */
+router.post("/message-reply", musicianAuth, async (req, res) => {
+  try {
+    const { userRole, userId } = getActorFromReq(req);
+    const { rowId, requestId, reply, buttonText, buttonPayload } = req.body || {};
+
+    if (!rowId || !isObjectId(rowId)) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid rowId is required",
+      });
+    }
+
+    if (!["yes", "no", "noloc", "nolocation", "unavailable"].includes(String(reply || "").toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid reply is required",
+      });
+    }
+
+    const existingRow = await Availability.findById(rowId);
+
+    if (!existingRow) {
+      return res.status(404).json({
+        success: false,
+        message: "Message row not found",
+      });
+    }
+
+    const isAgent = userRole === "agent" || userRole === "admin";
+    const isOwnerMusician =
+      isObjectId(userId) && String(existingRow.musicianId || "") === String(userId);
+
+    if (!isAgent && !isOwnerMusician) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorised to reply to this message",
+      });
+    }
+
+    const normalizedReply = String(reply).toLowerCase();
+    const fallbackText =
+      normalizedReply === "yes"
+        ? "I am available"
+        : normalizedReply === "no" || normalizedReply === "noloc" || normalizedReply === "nolocation"
+        ? "Not for this place"
+        : "Unavailable this day";
+
+    const inboundSid = `WEB-${Date.now()}`;
+
+    const updated = await Availability.findByIdAndUpdate(
+      rowId,
+      {
+        $set: {
+          reply: normalizedReply,
+          repliedAt: new Date(),
+          "inbound.sid": inboundSid,
+          "inbound.repliedSid": null,
+          "inbound.body": buttonText || fallbackText,
+          "inbound.buttonText": buttonText || fallbackText,
+          "inbound.buttonPayload": buttonPayload || "",
+          "inbound.source": "website-quick-reply",
+          ...(requestId ? { requestId, "inbound.requestId": requestId } : {}),
+        },
+      },
+      { new: true }
+    );
+
+    await processAvailabilityReplyFlow({
+      updated,
+      reply: normalizedReply,
+      requestId: requestId || updated?.requestId || null,
+      inboundSid,
+      repliedSid: null,
+      bodyText: buttonText || fallbackText,
+      btnText: buttonText || fallbackText,
+      btnId: buttonPayload || "",
+      fromRaw: updated?.phone || "",
+    });
+
+    return res.json({
+      success: true,
+      message: "Quick reply processed",
+    });
+  } catch (err) {
+    console.error("POST /api/messages/message-reply failed:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to process quick reply",
+    });
+  }
+});
+
 /**
  * POST /api/messages/:threadId/reply
  * Save a website reply against all availability rows in the thread
@@ -316,7 +424,7 @@ router.get("/mine", musicianAuth, async (req, res) => {
 router.post("/:threadId/reply", musicianAuth, async (req, res) => {
   try {
     const { userRole, userId, firstName } = getActorFromReq(req);
-    const { body, senderRole, senderName } = req.body || {};
+    const { body, senderName } = req.body || {};
     const threadId = String(req.params.threadId || "");
 
     if (!body || !String(body).trim()) {
@@ -326,35 +434,32 @@ router.post("/:threadId/reply", musicianAuth, async (req, res) => {
       });
     }
 
-    const parts = threadId.split("__");
-    if (parts.length < 4) {
+    const [threadType, threadValue] = threadId.split("__");
+
+    if (!threadType || !threadValue) {
       return res.status(400).json({
         success: false,
         message: "Invalid thread id",
       });
     }
 
-    const [enquiryId, actId, musicianId, slotIndexRaw] = parts;
-    const slotIndex = Number(slotIndexRaw ?? 0);
+    const query = {};
 
-    const query = {
-      slotIndex,
-    };
-
-    if (enquiryId && enquiryId !== "no-enquiry") {
-      query.$or = [
-        { enquiryId },
-        { requestId: enquiryId },
-        { requestKey: enquiryId },
-      ];
-    }
-
-    if (actId && actId !== "no-act" && isObjectId(actId)) {
-      query.actId = actId;
-    }
-
-    if (musicianId && musicianId !== "no-musician" && isObjectId(musicianId)) {
-      query.musicianId = musicianId;
+    if (threadType === "person") {
+      if (!isObjectId(threadValue)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid person thread id",
+        });
+      }
+      query.musicianId = threadValue;
+    } else if (threadType === "phone") {
+      query.phone = threadValue;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Unsupported thread type",
+      });
     }
 
     const matchedRows = await Availability.find(query);
@@ -418,33 +523,32 @@ router.post("/:threadId/mark-read", musicianAuth, async (req, res) => {
     const { userRole, userId } = getActorFromReq(req);
     const threadId = String(req.params.threadId || "");
 
-    const parts = threadId.split("__");
-    if (parts.length < 4) {
+    const [threadType, threadValue] = threadId.split("__");
+
+    if (!threadType || !threadValue) {
       return res.status(400).json({
         success: false,
         message: "Invalid thread id",
       });
     }
 
-    const [enquiryId, actId, musicianId, slotIndexRaw] = parts;
-    const slotIndex = Number(slotIndexRaw ?? 0);
+    const query = {};
 
-    const query = { slotIndex };
-
-    if (enquiryId && enquiryId !== "no-enquiry") {
-      query.$or = [
-        { enquiryId },
-        { requestId: enquiryId },
-        { requestKey: enquiryId },
-      ];
-    }
-
-    if (actId && actId !== "no-act" && isObjectId(actId)) {
-      query.actId = actId;
-    }
-
-    if (musicianId && musicianId !== "no-musician" && isObjectId(musicianId)) {
-      query.musicianId = musicianId;
+    if (threadType === "person") {
+      if (!isObjectId(threadValue)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid person thread id",
+        });
+      }
+      query.musicianId = threadValue;
+    } else if (threadType === "phone") {
+      query.phone = threadValue;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Unsupported thread type",
+      });
     }
 
     const rows = await Availability.find(query);
@@ -470,7 +574,7 @@ router.post("/:threadId/mark-read", musicianAuth, async (req, res) => {
 
     for (const row of rows) {
       row.websiteReplies = (row.websiteReplies || []).map((reply) => ({
-        ...reply.toObject?.() ? reply.toObject() : reply,
+        ...(reply?.toObject ? reply.toObject() : reply),
         readByAdmin: isAgent ? true : reply.readByAdmin,
         readByMusician: !isAgent ? true : reply.readByMusician,
       }));

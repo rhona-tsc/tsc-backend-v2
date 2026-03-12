@@ -3871,6 +3871,532 @@ export async function notifyDeputyOneShot(req, res) {
 // getDeputyDisplayBits, findCanonicalMusicianByPhone, normalizeToE164, normalizeFrom,
 // seenInboundOnce, parsePayload, classifyReply, sendWhatsAppText are available in scope.
 
+
+export const processAvailabilityReplyFlow = async ({
+  updated,
+  reply,
+  requestId = null,
+  inboundSid = null,
+  repliedSid = null,
+  bodyText = "",
+  btnText = "",
+  btnId = "",
+  fromRaw = "",
+}) => {
+  const pickPicLocal = (m = {}) =>
+    m.photoUrl ||
+    m.musicianProfileImageUpload ||
+    m.profileImage ||
+    m.imageUrl ||
+    m.profilePicture ||
+    m.musicianProfileImage ||
+    null;
+
+  const resolveDisplayName = (row, musician) => {
+    const fromRow = (
+      row?.selectedVocalistName ||
+      row?.vocalistName ||
+      row?.musicianName ||
+      ""
+    ).trim();
+    if (fromRow) return fromRow;
+    const fromMus =
+      `${musician?.firstName || ""} ${musician?.lastName || ""}`.trim();
+    return fromMus || "Vocalist";
+  };
+
+  const normE164 = (raw = "") => {
+    let v = String(raw || "")
+      .trim()
+      .replace(/^whatsapp:/i, "")
+      .replace(/\s+/g, "");
+    if (!v) return "";
+    if (v.startsWith("+")) return v;
+    if (/^44\d+$/.test(v)) return `+${v}`;
+    if (/^0\d{10}$/.test(v)) return `+44${v.slice(1)}`;
+    if (/^\d{10,13}$/.test(v))
+      return v.startsWith("44") ? `+${v}` : `+44${v.replace(/^0?/, "")}`;
+    return v;
+  };
+
+  if (!updated) return;
+
+  const byPhone = await findCanonicalMusicianByPhone(updated.phone);
+  let musician =
+    byPhone ||
+    (updated?.musicianId
+      ? await Musician.findById(updated.musicianId).lean()
+      : null);
+
+  if (
+    updated.isDeputy &&
+    musician &&
+    String(updated.musicianId) !== String(musician._id)
+  ) {
+    await AvailabilityModel.updateOne(
+      { _id: updated._id },
+      {
+        $set: {
+          musicianId: musician._id,
+          musicianName:
+            `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+          musicianEmail: musician.email || updated.musicianEmail || "",
+          photoUrl: pickPicLocal(musician),
+          profileUrl: buildMusicianProfileUrl(musician),
+        },
+      }
+    );
+
+    updated.musicianId = musician._id;
+    updated.musicianName =
+      `${musician.firstName || ""} ${musician.lastName || ""}`.trim();
+    updated.musicianEmail = musician.email || updated.musicianEmail;
+    updated.photoUrl = pickPicLocal(musician) || updated.photoUrl;
+    updated.profileUrl = buildMusicianProfileUrl(musician);
+  }
+
+  const displayName = resolveDisplayName(updated, musician);
+
+  if (displayName && updated?.vocalistName !== displayName) {
+    await AvailabilityModel.updateOne(
+      { _id: updated._id },
+      {
+        $set: {
+          vocalistName: displayName,
+          musicianName: updated?.musicianName || displayName,
+        },
+      }
+    );
+    updated.vocalistName = displayName;
+    if (!updated.musicianName) updated.musicianName = displayName;
+  }
+
+  const slotIndex =
+    typeof updated.slotIndex === "number" ? updated.slotIndex : null;
+
+  const isDeputy = Boolean(updated?.isDeputy);
+  if (isDeputy && updated?.isDeputy !== true) {
+    await AvailabilityModel.updateOne(
+      { _id: updated._id },
+      { $set: { isDeputy: true } }
+    );
+    updated.isDeputy = true;
+  }
+
+  if (!musician && updated?.musicianId) {
+    musician = await Musician.findById(updated.musicianId).lean();
+  }
+
+  if (!musician && updated?.musicianName) {
+    const parts = String(updated.musicianName).trim().split(/\s+/);
+    musician = await Musician.findOne({
+      $or: [
+        { name: updated.musicianName },
+        { firstName: new RegExp(parts[0] || "", "i") },
+        { lastName: new RegExp(parts.slice(-1)[0] || "", "i") },
+      ],
+    })
+      .select(
+        "email firstName lastName musicianSlug musicianProfileImageUpload musicianProfileImage profileImage profilePicture profilePhoto photoUrl imageUrl _id"
+      )
+      .lean();
+  }
+
+  const bits = await getDeputyDisplayBits({
+    ...((musician && musician.toObject ? musician.toObject() : musician) || {}),
+    ...((updated && updated.toObject ? updated.toObject() : updated) || {}),
+  });
+
+  const emailForInvite =
+    bits?.resolvedEmail ||
+    musician?.email ||
+    updated?.musicianEmail ||
+    updated?.email ||
+    "hello@thesupremecollective.co.uk";
+
+  const actId = String(updated.actId);
+  const dateISO = updated.dateISO;
+  const toE164 = normE164(updated.phone || fromRaw);
+
+  let act = null;
+  try {
+    const actIdValue = updated?.actId?._id || updated?.actId;
+    if (actIdValue) {
+      act = await Act.findById(actIdValue).lean();
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to resolve act from updated.actId:", err.message);
+  }
+
+  if (reply === "yes") {
+    const { createCalendarInvite, cancelCalendarInvite } =
+      await import("./googleController.js");
+
+    if (emailForInvite && act && dateISO) {
+      const formattedDateString = new Date(dateISO).toLocaleDateString(
+        "en-GB",
+        {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        }
+      );
+
+      const fee =
+        updated?.fee ||
+        act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
+        null;
+
+      try {
+        if (updated?.calendarEventId && emailForInvite) {
+          try {
+            await cancelCalendarInvite({
+              eventId: updated.calendarEventId,
+              actId: act?._id || updated.actId,
+              dateISO: updated.dateISO,
+              email: emailForInvite,
+            });
+          } catch (err) {
+            console.warn(
+              "⚠️ Failed to cancel old calendar event:",
+              err.message
+            );
+          }
+        }
+
+        const event = await createCalendarInvite({
+          enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
+          actId,
+          dateISO,
+          email: emailForInvite,
+          summary: `TSC: ${act.tscName || act.name} enquiry`,
+          description: [
+            `Event Date: ${formattedDateString}`,
+            `Act: ${act.tscName || act.name}`,
+            `Role: ${updated.duties || ""}`,
+            `Address: ${updated.formattedAddress || "TBC"}`,
+            `Fee: £${fee || "TBC"}`,
+          ].join("\n"),
+          startTime: `${dateISO}T17:00:00Z`,
+          endTime: `${dateISO}T23:59:00Z`,
+          fee,
+        });
+
+        await AvailabilityModel.updateOne(
+          { _id: updated._id },
+          {
+            $set: {
+              calendarEventId: event?.id || event?.data?.id || null,
+              calendarInviteEmail: emailForInvite,
+              calendarInviteSentAt: new Date(),
+              calendarStatus: "needsAction",
+            },
+          }
+        );
+      } catch (err) {
+        console.error("❌ Calendar invite failed:", err.message);
+      }
+    }
+
+    await sendWhatsAppText(
+      toE164,
+      "Super — we’ll send a diary invite to log the enquiry for your records."
+    );
+
+    await AvailabilityModel.updateOne(
+      { _id: updated._id },
+      {
+        $set: { status: "read", ...(isDeputy ? { isDeputy: true } : {}) },
+      }
+    );
+
+    await cancelDeputyEscalation({
+      actId,
+      dateISO,
+      phone: updated.phone,
+      slotIndex,
+    });
+
+    let badgeResult = null;
+    try {
+      badgeResult = await rebuildAndApplyAvailabilityBadge({
+        actId,
+        dateISO,
+        __fromYesFlow: true,
+      });
+    } catch (e) {
+      console.warn("⚠️ Badge rebuild failed:", e?.message || e);
+    }
+
+    if (global.availabilityNotify) {
+      const payload = {
+        actId,
+        actName: act?.tscName || act?.name,
+        musicianName: displayName,
+        dateISO,
+        musicianId: musician?._id || updated?.musicianId || null,
+      };
+
+      if (isDeputy && global.availabilityNotify.deputyYes) {
+        global.availabilityNotify.deputyYes(payload);
+      }
+      if (!isDeputy && global.availabilityNotify.leadYes) {
+        global.availabilityNotify.leadYes(payload);
+      }
+      if (badgeResult?.badge && global.availabilityNotify.badgeUpdated) {
+        global.availabilityNotify.badgeUpdated({
+          actId,
+          actName: act?.tscName || act?.name,
+          dateISO,
+          badge: badgeResult.badge,
+        });
+      }
+    }
+
+    return;
+  }
+
+  if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
+    const addressKey = (s = "") =>
+      String(s || "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const thisAddr =
+      addressKey(updated.formattedAddress || "") ||
+      addressKey(act?.formattedAddress || "") ||
+      "tbc";
+
+    const identity = {
+      actId: updated.actId?._id || updated.actId,
+      dateISO: updated.dateISO,
+      v2: true,
+      $or: [
+        ...(updated?.musicianId ? [{ musicianId: updated.musicianId }] : []),
+        ...(toE164 ? [{ phone: toE164 }] : []),
+        ...(emailForInvite
+          ? [{ musicianEmail: String(emailForInvite).toLowerCase() }]
+          : []),
+      ],
+    };
+
+    const previouslyConfirmedRow = await AvailabilityModel.findOne({
+      ...identity,
+      ...(updated.formattedAddress
+        ? { formattedAddress: updated.formattedAddress }
+        : {}),
+      $or: [
+        { reply: "yes" },
+        { calendarEventId: { $exists: true, $ne: null } },
+        { calendarInviteSentAt: { $exists: true, $ne: null } },
+        {
+          calendarStatus: {
+            $in: ["needsAction", "accepted", "tentative"],
+          },
+        },
+      ],
+    })
+      .sort({ repliedAt: -1, updatedAt: -1, createdAt: -1 })
+      .lean();
+
+    let shouldSendCancellationEmail = false;
+    let cancelEventId = null;
+
+    if (previouslyConfirmedRow) {
+      const prevAddr = addressKey(previouslyConfirmedRow.formattedAddress || "");
+      const addrMatches = !prevAddr || prevAddr === thisAddr;
+
+      if (addrMatches) {
+        shouldSendCancellationEmail = true;
+        cancelEventId = previouslyConfirmedRow.calendarEventId || null;
+      }
+    }
+
+    if (!shouldSendCancellationEmail && updated?.calendarEventId) {
+      shouldSendCancellationEmail = true;
+      cancelEventId = updated.calendarEventId;
+    }
+
+    await AvailabilityModel.updateOne(
+      { _id: updated._id },
+      {
+        $set: {
+          status: "unavailable",
+          reply: "unavailable",
+          repliedAt: new Date(),
+        },
+      }
+    );
+
+    if (shouldSendCancellationEmail) {
+      await AvailabilityModel.updateMany(
+        {
+          musicianEmail: (emailForInvite || "").toLowerCase(),
+          dateISO: updated.dateISO,
+          $or: [
+            { calendarEventId: { $exists: true, $ne: null } },
+            { calendarInviteSentAt: { $exists: true, $ne: null } },
+            {
+              calendarStatus: { $in: ["needsAction", "accepted", "tentative"] },
+            },
+          ],
+        },
+        {
+          $set: { calendarStatus: "cancelled" },
+        }
+      );
+    }
+
+    if (shouldSendCancellationEmail && cancelEventId) {
+      try {
+        const { cancelCalendarInvite } = await import("./googleController.js");
+        await cancelCalendarInvite({
+          eventId: cancelEventId,
+          dateISO: updated.dateISO,
+          email: emailForInvite,
+        });
+      } catch (err) {
+        console.error("❌ Failed to cancel shared event:", err.message);
+      }
+    }
+
+    let rebuilt = null;
+    try {
+      rebuilt = await rebuildAndApplyAvailabilityBadge({
+        actId,
+        dateISO,
+        __fromUnavailable: true,
+      });
+    } catch (e) {
+      console.warn("⚠️ Badge rebuild (unavailable) failed:", e?.message || e);
+    }
+
+    try {
+      const unset = {
+        [`availabilityBadges.${dateISO}_tbc`]: "",
+      };
+      await Act.updateOne({ _id: actId }, { $unset: unset });
+    } catch (err) {
+      console.error("❌ Failed to $unset legacy TBC badge key:", err.message);
+    }
+
+    await sendWhatsAppText(
+      toE164,
+      "Thanks for letting us know — we've updated your availability."
+    );
+
+    const shouldTriggerDeputies =
+      !isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply);
+
+    if (act?._id && shouldTriggerDeputies) {
+      await notifyDeputies({
+        actId: act._id,
+        lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+        dateISO,
+        formattedAddress:
+          updated.formattedAddress || act.formattedAddress || "TBC",
+        clientName: updated.clientName || "",
+        clientEmail: updated.clientEmail || "",
+        slotIndex,
+        skipDuplicateCheck: true,
+        skipIfUnavailable: false,
+      });
+    } else if (isDeputy && reply === "unavailable") {
+      await triggerNextDeputy({
+        actId: act._id,
+        lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
+        dateISO,
+        slotIndex,
+        excludePhones: [
+          updated.phone,
+          updated.whatsappNumber,
+          ...(await AvailabilityModel.distinct("phone", {
+            actId,
+            dateISO,
+            slotIndex,
+            reply: { $in: ["unavailable", "yes"] },
+          })),
+        ],
+      });
+    }
+
+    await cancelDeputyEscalation({
+      actId,
+      dateISO,
+      phone: updated.phone,
+      slotIndex,
+    });
+
+    if (shouldSendCancellationEmail) {
+      try {
+        const { sendEmail } = await import("../utils/sendEmail.js");
+
+        const subject = `${act?.tscName || act?.name}: Diary Invite Cancelled for ${new Date(dateISO).toLocaleDateString("en-GB")}`;
+        const html = `
+      <p><strong>${updated?.musicianName || musician?.firstName || "Musician"}</strong>,</p>
+      <p>Thanks for letting us know — we’ve updated your availability.</p>
+      <p>Your diary invite for <b>${act?.tscName || act?.name}</b> on <b>${new Date(dateISO).toLocaleDateString("en-GB")}</b> has been cancelled.</p>
+      <p>If your availability changes, just reply to the WhatsApp message to re-confirm.</p>
+      <br/>
+      <p>– The Supreme Collective Team</p>
+    `;
+
+        const leadEmail = (emailForInvite || "").trim();
+        const recipients = [leadEmail].filter((e) => e && e.includes("@"));
+
+        if (recipients.length) {
+          await sendEmail({
+            to: recipients,
+            bcc: ["hello@thesupremecollective.co.uk"],
+            subject,
+            html,
+          });
+        }
+      } catch (emailErr) {
+        console.error("❌ Failed to send cancellation email:", emailErr.message);
+      }
+    }
+
+    if (!isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply)) {
+      await Act.updateOne(
+        { _id: actId },
+        {
+          $set: {
+            [`availabilityBadgesMeta.${dateISO}.leadReply`]: reply,
+            [`availabilityBadgesMeta.${dateISO}.leadUnavailableAt`]: new Date(),
+          },
+          $unset: {
+            [`availabilityBadgesMeta.${dateISO}.lockedByLeadUnavailable`]: "",
+          },
+        }
+      );
+    }
+
+    if (rebuilt?.badge && global.availabilityNotify?.badgeUpdated) {
+      global.availabilityNotify.badgeUpdated({
+        actId,
+        actName: act?.tscName || act?.name,
+        dateISO,
+        badge: rebuilt.badge,
+      });
+    }
+
+    return;
+  }
+
+  console.log("ℹ️ Reply flow ignored:", reply, {
+    requestId,
+    inboundSid,
+    repliedSid,
+    bodyText,
+    btnText,
+    btnId,
+  });
+};
+
+
 export const twilioInbound = async (req, res) => {
   console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
 
@@ -4239,611 +4765,18 @@ if (!reply) {
           return; // bail early like before
         }
 
-        // 🔎 Resolve canonical Musician by phone (preferred) or by row's musicianId
-        const byPhone = await findCanonicalMusicianByPhone(updated.phone);
-        let musician =
-          byPhone ||
-          (updated?.musicianId
-            ? await Musician.findById(updated.musicianId).lean()
-            : null);
-
-        // If deputy row is carrying ACT collection id, re-point to canonical Musician id
-        if (
-          updated.isDeputy &&
-          musician &&
-          String(updated.musicianId) !== String(musician._id)
-        ) {
-          await AvailabilityModel.updateOne(
-            { _id: updated._id },
-            {
-              $set: {
-                musicianId: musician._id,
-                musicianName:
-                  `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
-                musicianEmail: musician.email || updated.musicianEmail || "",
-                photoUrl: pickPicLocal(musician),
-                profileUrl: buildMusicianProfileUrl(musician),
-              },
-            },
-          );
-
-          // keep in-memory copy in sync for the rest of this handler
-          updated.musicianId = musician._id;
-          updated.musicianName =
-            `${musician.firstName || ""} ${musician.lastName || ""}`.trim();
-          updated.musicianEmail = musician.email || updated.musicianEmail;
-          updated.photoUrl = pickPicLocal(musician) || updated.photoUrl;
-          updated.profileUrl = buildMusicianProfileUrl(musician);
-        }
-
-        const displayName = resolveDisplayName(updated, musician);
-
-        // 📛 Ensure the row carries a stable vocalistName for downstream badge/name use
-        if (displayName && updated?.vocalistName !== displayName) {
-          await AvailabilityModel.updateOne(
-            { _id: updated._id },
-            {
-              $set: {
-                vocalistName: displayName,
-                musicianName: updated?.musicianName || displayName, // keep old field too
-              },
-            },
-          );
-          updated.vocalistName = displayName; // in-memory
-          if (!updated.musicianName) updated.musicianName = displayName;
-        }
-
-        // 🧩 Slot + deputy flags
-        const slotIndex =
-          typeof updated.slotIndex === "number" ? updated.slotIndex : null;
-        console.log("🎯 [twilioInbound] Matched slotIndex:", slotIndex);
-
-        const isDeputy = Boolean(updated?.isDeputy);
-        if (isDeputy && updated?.isDeputy !== true) {
-          await AvailabilityModel.updateOne(
-            { _id: updated._id },
-            { $set: { isDeputy: true } },
-          );
-          updated.isDeputy = true;
-        }
-
-        // 🔍 Ensure we have a musician doc when possible (fallbacks preserved)
-        if (!musician && updated?.musicianId) {
-          musician = await Musician.findById(updated.musicianId).lean();
-        }
-        if (!musician && updated?.musicianName) {
-          const parts = String(updated.musicianName).trim().split(/\s+/);
-          musician = await Musician.findOne({
-            $or: [
-              { name: updated.musicianName },
-              { firstName: new RegExp(parts[0] || "", "i") },
-              { lastName: new RegExp(parts.slice(-1)[0] || "", "i") },
-            ],
-          })
-            .select(
-  "email firstName lastName musicianSlug musicianProfileImageUpload musicianProfileImage profileImage profilePicture profilePhoto photoUrl imageUrl _id",
-            )
-            .lean();
-        }
-
-        // 🔹 Enrich identity bits (email/photo/profile) from either row or musician
-        const bits = await getDeputyDisplayBits({
-          ...((musician && musician.toObject
-            ? musician.toObject()
-            : musician) || {}),
-          ...((updated && updated.toObject ? updated.toObject() : updated) ||
-            {}),
-        });
-
-        const emailForInvite =
-          bits?.resolvedEmail ||
-          musician?.email ||
-          updated?.musicianEmail ||
-          updated?.email ||
-          "hello@thesupremecollective.co.uk";
-
-        console.log("📧 [twilioInbound] Using emailForInvite:", emailForInvite);
-
-        const actId = String(updated.actId);
-        const dateISO = updated.dateISO;
-        const toE164 = normE164(updated.phone || fromRaw);
-
-        // 🧭 Resolve Act reliably
-        let act = null;
-        try {
-          const actIdValue = updated?.actId?._id || updated?.actId;
-          if (actIdValue) {
-            act = await Act.findById(actIdValue).lean();
-            console.log(
-              "📡 Act resolved for notifyDeputies:",
-              act?.tscName || act?.name,
-            );
-          }
-        } catch (err) {
-          console.warn(
-            "⚠️ Failed to resolve act from updated.actId:",
-            err.message,
-          );
-        }
-
-        // ──────────────────────────────────────────────────────────────
-        console.log("──────────────────────────────────────────────");
-        console.log(
-          `📩 Twilio Inbound (${reply?.toUpperCase?.() || "UNKNOWN"}) for ${act?.tscName || "Unknown Act"}`,
-        );
-        console.log(
-          `👤 ${musician?.firstName || updated?.musicianName || "Unknown Musician"}`,
-        );
-        console.log(`📅 ${updated?.dateISO || "Unknown Date"}`);
-        console.log(`📧 ${emailForInvite}`);
-        console.log("──────────────────────────────────────────────");
-
-        /* ---------------------------------------------------------------------- */
-        /* ✅ YES BRANCH (Lead or Deputy)                                         */
-        /* ---------------------------------------------------------------------- */
-        if (reply === "yes") {
-          console.log(
-            `✅ YES reply received via WhatsApp (${isDeputy ? "Deputy" : "Lead"})`,
-          );
-
-          const { createCalendarInvite, cancelCalendarInvite } =
-            await import("./googleController.js");
-
-          // 1️⃣ Create/refresh calendar invite
-          console.log(
-            "📧 [Calendar Debug] emailForInvite=",
-            emailForInvite,
-            "act=",
-            !!act,
-            "dateISO=",
-            dateISO,
-          );
-          if (emailForInvite && act && dateISO) {
-            const formattedDateString = new Date(dateISO).toLocaleDateString(
-              "en-GB",
-              {
-                weekday: "long",
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              },
-            );
-
-            const fee =
-              updated?.fee ||
-              act?.lineups?.[0]?.bandMembers?.find((m) => m.isEssential)?.fee ||
-              null;
-
-            try {
-              // 🧹 Cancel prior event if it exists, then create a fresh one
-              if (updated?.calendarEventId && emailForInvite) {
-                try {
-                  console.log(
-                    "🗓️ Cancelling old calendar event before new YES invite",
-                  );
-                  await cancelCalendarInvite({
-                    eventId: updated.calendarEventId,
-                    actId: act?._id || updated.actId,
-                    dateISO: updated.dateISO,
-                    email: emailForInvite,
-                  });
-                } catch (err) {
-                  console.warn(
-                    "⚠️ Failed to cancel old calendar event:",
-                    err.message,
-                  );
-                }
-              }
-
-              const event = await createCalendarInvite({
-                enquiryId: updated.enquiryId || `ENQ_${Date.now()}`,
-                actId,
-                dateISO,
-                email: emailForInvite,
-                summary: `TSC: ${act.tscName || act.name} enquiry`,
-                description: [
-                  `Event Date: ${formattedDateString}`,
-                  `Act: ${act.tscName || act.name}`,
-                  `Role: ${updated.duties || ""}`,
-                  `Address: ${updated.formattedAddress || "TBC"}`,
-                  `Fee: £${fee || "TBC"}`,
-                ].join("\n"),
-                startTime: `${dateISO}T17:00:00Z`,
-                endTime: `${dateISO}T23:59:00Z`,
-                fee,
-              });
-
-              console.log("📅 Calendar invite sent:", emailForInvite, {
-                eventId: event?.id || event?.data?.id,
-              });
-
-              await AvailabilityModel.updateOne(
-                { _id: updated._id },
-                {
-                  $set: {
-                    calendarEventId: event?.id || event?.data?.id || null,
-                    calendarInviteEmail: emailForInvite,
-                    calendarInviteSentAt: new Date(),
-                    calendarStatus: "needsAction",
-                  },
-                },
-              );
-            } catch (err) {
-              console.error("❌ Calendar invite failed:", err.message);
-            }
-          }
-
-          console.log(
-            "🟦 About to sendWhatsAppMessage using content SID:",
-            process.env.TWILIO_ENQUIRY_SID,
-          );
-          await sendWhatsAppText(
-            toE164,
-            "Super — we’ll send a diary invite to log the enquiry for your records.",
-          );
-
-          // 2️⃣ Mark as read + (if deputy) persist flag
-          await AvailabilityModel.updateOne(
-            { _id: updated._id },
-            {
-              $set: { status: "read", ...(isDeputy ? { isDeputy: true } : {}) },
-            },
-          );
-          // ✅ On YES, cancel any pending escalations for this slot/lead
-          await cancelDeputyEscalation({
-            actId,
-            dateISO,
-            phone: updated.phone,
-            slotIndex,
-          });
-          // 3️⃣ Rebuild badge NOW (prevents flicker/drops)
-          let badgeResult = null;
-          try {
-            badgeResult = await rebuildAndApplyAvailabilityBadge({
-              actId,
-              dateISO,
-              __fromYesFlow: true,
-            });
-          } catch (e) {
-            console.warn("⚠️ Badge rebuild failed:", e?.message || e);
-          }
-
-          // 4️⃣ SSE broadcast (single clean event + badgeUpdated)
-          if (global.availabilityNotify) {
-            const payload = {
-              actId,
-              actName: act?.tscName || act?.name,
-              musicianName: displayName,
-              dateISO,
-              musicianId: musician?._id || updated?.musicianId || null,
-            };
-
-            if (isDeputy && global.availabilityNotify.deputyYes) {
-              global.availabilityNotify.deputyYes(payload);
-            }
-            if (!isDeputy && global.availabilityNotify.leadYes) {
-              global.availabilityNotify.leadYes(payload);
-            }
-            if (badgeResult?.badge && global.availabilityNotify.badgeUpdated) {
-              global.availabilityNotify.badgeUpdated({
-                actId,
-                actName: act?.tscName || act?.name,
-                dateISO,
-                badge: badgeResult.badge,
-              });
-            }
-          }
-
-          console.log("📡 SSE broadcasted: availability_badge_updated");
-          return;
-        } // ← YES branch
-
-        /* ---------------------------------------------------------------------- */
-        /* 🚫 NO / UNAVAILABLE / NOLOC / NOLOCATION BRANCH                         */
-        /* ---------------------------------------------------------------------- */
-        if (["no", "unavailable", "noloc", "nolocation"].includes(reply)) {
-          console.log("🚫 UNAVAILABLE reply received via WhatsApp");
-
-          // 🔎 Only send cancellation email if they previously confirmed YES for THIS enquiry (date + location)
-          const addressKey = (s = "") =>
-            String(s || "")
-              .toLowerCase()
-              .replace(/\s+/g, " ")
-              .trim();
-
-          const thisAddr =
-            addressKey(updated.formattedAddress || "") ||
-            addressKey(act?.formattedAddress || "") ||
-            "tbc";
-
-          // identify the musician consistently
-          const identity = {
-            actId: updated.actId?._id || updated.actId,
-            dateISO: updated.dateISO,
-            v2: true,
-            $or: [
-              ...(updated?.musicianId
-                ? [{ musicianId: updated.musicianId }]
-                : []),
-              ...(sender ? [{ phone: sender }] : []),
-              ...(emailForInvite
-                ? [{ musicianEmail: String(emailForInvite).toLowerCase() }]
-                : []),
-            ],
-          };
-
-          // find a prior "confirmed" row for SAME location
-          const previouslyConfirmedRow = await AvailabilityModel.findOne({
-            ...identity,
-            // same location where possible (exact match on formattedAddress; we also do a key compare below)
-            ...(updated.formattedAddress
-              ? { formattedAddress: updated.formattedAddress }
-              : {}),
-            $or: [
-              { reply: "yes" },
-              { calendarEventId: { $exists: true, $ne: null } },
-              { calendarInviteSentAt: { $exists: true, $ne: null } },
-              {
-                calendarStatus: {
-                  $in: ["needsAction", "accepted", "tentative"],
-                },
-              },
-            ],
-          })
-            .sort({ repliedAt: -1, updatedAt: -1, createdAt: -1 })
-            .lean();
-
-          // if formattedAddress wasn’t present / exact match didn’t hit, do a looser match:
-          let shouldSendCancellationEmail = false;
-          let cancelEventId = null;
-
-          if (previouslyConfirmedRow) {
-            // if we *can* compare address keys, enforce it
-            const prevAddr = addressKey(
-              previouslyConfirmedRow.formattedAddress || "",
-            );
-            const addrMatches = !prevAddr || prevAddr === thisAddr;
-
-            if (addrMatches) {
-              shouldSendCancellationEmail = true;
-              cancelEventId = previouslyConfirmedRow.calendarEventId || null;
-            }
-          }
-
-          // If THIS row itself already has a calendar event id, that's enough to justify cancel+email
-          if (!shouldSendCancellationEmail && updated?.calendarEventId) {
-            shouldSendCancellationEmail = true;
-            cancelEventId = updated.calendarEventId;
-          }
-
-          console.log("📧 [twilioInbound] Cancellation email gate", {
-            shouldSendCancellationEmail,
-            thisAddr,
-            matchedRowId: previouslyConfirmedRow?._id
-              ? String(previouslyConfirmedRow._id)
-              : null,
-            cancelEventId,
-          });
-
-          // Mark the current thread as unavailable (always)
-await AvailabilityModel.updateOne(
-  { _id: updated._id },
-  {
-    $set: {
-      status: "unavailable",
-      reply: "unavailable",
-      repliedAt: new Date(),
-    },
-  },
-);
-
-// If they previously had an invite (anywhere on that date), cancel invite state across that date
-if (shouldSendCancellationEmail) {
-  await AvailabilityModel.updateMany(
-    {
-      musicianEmail: (emailForInvite || "").toLowerCase(),
-      dateISO: updated.dateISO,
-      $or: [
-        { calendarEventId: { $exists: true, $ne: null } },
-        { calendarInviteSentAt: { $exists: true, $ne: null } },
-        { calendarStatus: { $in: ["needsAction", "accepted", "tentative"] } },
-      ],
-    },
-    {
-      $set: { calendarStatus: "cancelled" },
-    },
-  );
-}
-          console.log(
-            `🚫 Marked all enquiries for ${emailForInvite} on ${updated.dateISO} as unavailable`,
-          );
-
-          // 🗓️ Cancel calendar event (ONLY if they previously confirmed / had invite)
-          if (shouldSendCancellationEmail && cancelEventId) {
-            try {
-              const { cancelCalendarInvite } =
-                await import("./googleController.js");
-              await cancelCalendarInvite({
-                eventId: cancelEventId,
-                dateISO: updated.dateISO,
-                email: emailForInvite,
-              });
-              console.log("🗓️ Cancelled calendar invite", {
-                cancelEventId,
-                emailForInvite,
-              });
-            } catch (err) {
-              console.error("❌ Failed to cancel shared event:", err.message);
-            }
-          }
-
-          // 🔔 Rebuild badge immediately
-          let rebuilt = null;
-          try {
-            rebuilt = await rebuildAndApplyAvailabilityBadge({
-              actId,
-              dateISO,
-              __fromUnavailable: true,
-            });
-          } catch (e) {
-            console.warn(
-              "⚠️ Badge rebuild (unavailable) failed:",
-              e?.message || e,
-            );
-          }
-
-          // 🗑️ Clear legacy badge keys in Act (tbc/non-tbc map keys)
-          try {
-            const unset = {
-              [`availabilityBadges.${dateISO}_tbc`]: "",
-            };
-            await Act.updateOne({ _id: actId }, { $unset: unset });
-            console.log("🗑️ Cleared legacy TBC badge key for:", dateISO);
-          } catch (err) {
-            console.error(
-              "❌ Failed to $unset legacy TBC badge key:",
-              err.message,
-            );
-          }
-
-          await sendWhatsAppText(
-            toE164,
-            "Thanks for letting us know — we've updated your availability.",
-          );
-
-          // ✅ Trigger deputies when LEAD replies negative
-          const shouldTriggerDeputies =
-            !isDeputy &&
-            ["unavailable", "no", "noloc", "nolocation"].includes(reply);
-
-          if (act?._id && shouldTriggerDeputies) {
-            console.log(
-              `📢 Triggering deputy notifications for ${act?.tscName || act?.name} — ${dateISO}`,
-            );
-            await notifyDeputies({
-              actId: act._id,
-              lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
-              dateISO,
-              formattedAddress:
-                updated.formattedAddress || act.formattedAddress || "TBC",
-              clientName: updated.clientName || "",
-              clientEmail: updated.clientEmail || "",
-              slotIndex, // keep grouping aligned
-              skipDuplicateCheck: true,
-              skipIfUnavailable: false,
-            });
-            console.log(
-              "📤 notifyDeputies triggered with slotIndex:",
-              slotIndex,
-            );
-          } else if (isDeputy && reply === "unavailable") {
-            console.log("📨 Deputy unavailable — trigger next deputy in queue");
-                       await triggerNextDeputy({
-              actId: act._id,
-              lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
-              dateISO,
-              slotIndex,
-              excludePhones: [
-                updated.phone,
-                updated.whatsappNumber,
-                ...(await AvailabilityModel.distinct("phone", {
-                  actId,
-                  dateISO,
-                  slotIndex,
-                  reply: { $in: ["unavailable", "yes"] },
-                })),
-              ],
-            });
-          }
-
-          await cancelDeputyEscalation({
-            actId,
-            dateISO,
-            phone: updated.phone,
-            slotIndex,
-          });
-
-          // 📨 Courtesy cancellation email (ONLY if they previously confirmed / had invite)
-          if (shouldSendCancellationEmail) {
-            try {
-              const { sendEmail } = await import("../utils/sendEmail.js");
-
-              const subject = `${act?.tscName || act?.name}: Diary Invite Cancelled for ${new Date(dateISO).toLocaleDateString("en-GB")}`;
-              const html = `
-      <p><strong>${updated?.musicianName || musician?.firstName || "Musician"}</strong>,</p>
-      <p>Thanks for letting us know — we’ve updated your availability.</p>
-      <p>Your diary invite for <b>${act?.tscName || act?.name}</b> on <b>${new Date(dateISO).toLocaleDateString("en-GB")}</b> has been cancelled.</p>
-      <p>If your availability changes, just reply to the WhatsApp message to re-confirm.</p>
-      <br/>
-      <p>– The Supreme Collective Team</p>
-    `;
-
-              const leadEmail = (emailForInvite || "").trim();
-              const recipients = [leadEmail].filter(
-                (e) => e && e.includes("@"),
-              );
-
-              if (recipients.length) {
-                await sendEmail({
-                  to: recipients,
-                  bcc: ["hello@thesupremecollective.co.uk"],
-                  subject,
-                  html,
-                });
-                console.log("✅ Cancellation email sent", { to: recipients });
-              } else {
-                console.warn(
-                  "⚠️ Skipping cancellation email — no valid recipient",
-                );
-              }
-            } catch (emailErr) {
-              console.error(
-                "❌ Failed to send cancellation email:",
-                emailErr.message,
-              );
-            }
-          } else {
-            console.log(
-              "📭 Skipping cancellation email (no prior YES/invite for this enquiry).",
-            );
-          }
-
-       // ✅ Record lead unavailable state, but DO NOT lock or clear badge
-if (!isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply)) {
-  await Act.updateOne(
-    { _id: actId },
-    {
-      $set: {
-        [`availabilityBadgesMeta.${dateISO}.leadReply`]: reply, // or "unavailable"
-        [`availabilityBadgesMeta.${dateISO}.leadUnavailableAt`]: new Date(),
-      },
-      $unset: {
-        // if you previously used the lock, remove it so badge can build again
-        [`availabilityBadgesMeta.${dateISO}.lockedByLeadUnavailable`]: "",
-      },
-    },
-  );
-  console.log("🟠 Lead marked unavailable (state saved, no lock):", dateISO);
-}
-
-          // 📡 SSE: push rebuilt badge to clients
-          if (rebuilt?.badge && global.availabilityNotify?.badgeUpdated) {
-            global.availabilityNotify.badgeUpdated({
-              actId,
-              actName: act?.tscName || act?.name,
-              dateISO,
-              badge: rebuilt.badge,
-            });
-          }
-
-          return;
-        } // ← UNAVAILABLE branch
-
-        // If we reach here, reply type wasn’t handled (e.g., "maybe")
-        console.log(
-          "ℹ️ Inbound reply ignored (not YES/NO/UNAVAILABLE/NOL0C):",
-          reply,
-        );
+await processAvailabilityReplyFlow({
+  updated,
+  reply,
+  requestId,
+  inboundSid,
+  repliedSid,
+  bodyText,
+  btnText,
+  btnId,
+  fromRaw,
+});
+return;
       } catch (err) {
         console.error("❌ Error in twilioInbound background task:", err);
       }
