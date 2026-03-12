@@ -25,15 +25,23 @@ const pickRecipientEmail = (row) =>
   row.musicianEmail || row.calendarInviteEmail || "";
 
 const buildFallbackOutboundBody = (row) => {
-  const parts = [
-    "Availability request sent",
-    row.duties ? `for ${row.duties}` : "",
-    row.formattedDate ? `on ${row.formattedDate}` : "",
-    row.formattedAddress ? `at ${row.formattedAddress}` : "",
-    row.fee ? `for £${row.fee}` : "",
-  ].filter(Boolean);
+  const firstName = String(
+    row.recipientName ||
+      row.selectedVocalistName ||
+      row.vocalistName ||
+      row.musicianName ||
+      "there"
+  )
+    .trim()
+    .split(/\s+/)[0] || "there";
 
-  return parts.join(" ");
+  const feeStr = row.fee ? `£${row.fee}` : "TBC";
+  const roleStr = row.duties || "Performance";
+  const actName = row.actName || "the act";
+  const location = row.shortAddress || row.formattedAddress || "TBC";
+  const dateText = row.formattedDate || row.eventDate || row.dateISO || "TBC";
+
+  return `Hi ${firstName}, you've received an enquiry for a gig on ${dateText} in ${location} at a rate of ${feeStr} for ${roleStr} duties with ${actName}. Please indicate your availability 💫`;
 };
 
 const getActorFromReq = (req) => {
@@ -66,11 +74,12 @@ const getActorFromReq = (req) => {
 };
 
 const buildThreadKey = (row) => {
-  const threadRef = row.requestId || row.enquiryId || row.requestKey || "no-enquiry";
-  const actId = row.actId ? String(row.actId) : "no-act";
   const musicianId = row.musicianId ? String(row.musicianId) : "no-musician";
-  const slotIndex = Number(row.slotIndex ?? 0);
-  return `${threadRef}__${actId}__${musicianId}__${slotIndex}`;
+  const phone = String(row.phone || "no-phone").trim();
+
+  return musicianId !== "no-musician"
+    ? `person__${musicianId}`
+    : `phone__${phone}`;
 };
 
 const buildThreadsFromRows = (rows = []) => {
@@ -111,6 +120,7 @@ const buildThreadsFromRows = (rows = []) => {
         outboundSentAt: row.outboundSentAt || row.createdAt || null,
         reply: row.reply || null,
         unreadReplies: 0,
+        messageCount: 0,
         latestMessage: null,
         messages: [],
         rows: [],
@@ -198,6 +208,9 @@ const buildThreadsFromRows = (rows = []) => {
         channel: thread.channel || "whatsapp",
       };
     }
+
+        thread.messageCount = thread.messages.length;
+
 
     return thread;
   });
