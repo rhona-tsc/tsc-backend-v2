@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import EnquiryBoardItem from "../models/enquiryBoardItem.js";
 import Act from "../models/actModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
+import { triggerAvailabilityRequest } from "../controllers/availabilityController.js";
 
 const router = express.Router();
 
@@ -81,6 +82,27 @@ const idToString = (value) => {
   } catch {
     return "";
   }
+};
+
+const getLineupSizeValue = (lineup) => {
+  const raw =
+    lineup?.act_size ??
+    lineup?.actSize ??
+    lineup?.size ??
+    lineup?.lineupSize ??
+    lineup?.name ??
+    "";
+
+  const match = String(raw).match(/(\d+)/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+};
+
+const pickSmallestLineup = (act) => {
+  const lineups = Array.isArray(act?.lineups) ? [...act.lineups] : [];
+  if (!lineups.length) return null;
+
+  lineups.sort((a, b) => getLineupSizeValue(a) - getLineupSizeValue(b));
+  return lineups[0] || null;
 };
 
 const escapeRegex = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -424,7 +446,75 @@ router.post("/", musicianAuth, async (req, res) => {
     }
 
     const row = await EnquiryBoardItem.create(payload);
-    res.json({ success: true, row: mapBoardRow(row.toObject ? row.toObject() : row) });
+    const createdRow = mapBoardRow(row.toObject ? row.toObject() : row);
+
+    let availabilityTriggered = null;
+
+    try {
+      const actObjectId = toObjectIdOrNull(payload.actId);
+      const act = actObjectId ? await Act.findById(actObjectId).lean() : null;
+
+      if (act?._id) {
+        const chosenLineup = payload.lineupId
+          ? (Array.isArray(act.lineups)
+              ? act.lineups.find(
+                  (lineup) => idToString(lineup?._id || lineup?.lineupId) === String(payload.lineupId)
+                )
+              : null)
+          : pickSmallestLineup(act);
+
+        const chosenLineupId = idToString(chosenLineup?._id || chosenLineup?.lineupId) || null;
+
+        const triggerResult = await triggerAvailabilityRequest({
+          actId: idToString(act._id),
+          lineupId: chosenLineupId,
+          dateISO: payload.eventDateISO,
+          formattedAddress: payload.address,
+          address: payload.address,
+          clientName: payload.clientName,
+          clientEmail: payload.clientEmail,
+          enquiryId: createdRow.enquiryRef,
+          requestId: createdRow.enquiryRef,
+          source: "manual_enquiry_board",
+          skipDuplicateCheck: false,
+        });
+
+        availabilityTriggered = {
+          success: !!triggerResult?.success,
+          sent: Number(triggerResult?.sent || 0),
+          skipped: triggerResult?.skipped || null,
+          details: Array.isArray(triggerResult?.details) ? triggerResult.details : [],
+        };
+
+        console.log("✅ Enquiry board manual add triggered availability", {
+          enquiryRef: createdRow.enquiryRef,
+          actId: idToString(act._id),
+          lineupId: chosenLineupId,
+          eventDateISO: payload.eventDateISO,
+          sent: availabilityTriggered.sent,
+          skipped: availabilityTriggered.skipped,
+        });
+      } else {
+        console.warn("⚠️ Manual enquiry created without valid act for availability trigger", {
+          enquiryRef: createdRow.enquiryRef,
+          actId: payload.actId || null,
+        });
+      }
+    } catch (availabilityErr) {
+      console.error("❌ Availability trigger failed after manual enquiry create:", availabilityErr);
+      availabilityTriggered = {
+        success: false,
+        sent: 0,
+        skipped: null,
+        error: availabilityErr?.message || "Availability trigger failed",
+      };
+    }
+
+    res.json({
+      success: true,
+      row: createdRow,
+      availabilityTriggered,
+    });
   } catch (e) {
     console.error("Enquiry board POST error:", e);
     res.status(400).json({ success: false, message: e.message });
