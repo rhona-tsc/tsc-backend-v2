@@ -13,24 +13,36 @@ export const submitActSubmission = async (req, res) => {
 
     // Very light sanitization
     const safe = (s) => String(s || "").toString().trim();
+    const escapeHtml = (s) =>
+      String(s || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
     const fn = safe(firstName);
     const ln = safe(lastName);
-    const em = safe(email);
+    const em = safe(email).toLowerCase();
     const ph = safe(phone);
     const pl = safe(promoLinks);
+    const internalEmail = process.env.INTERNAL_NOTIFICATIONS_EMAIL || "hello@thesupremecollective.co.uk";
 
     const html = `
       <h3>New Act Submission</h3>
-      <p><strong>Name:</strong> ${fn} ${ln}</p>
-      <p><strong>Email:</strong> ${em}</p>
-      <p><strong>Phone:</strong> ${ph || "—"}</p>
+      <p><strong>Name:</strong> ${escapeHtml(fn)} ${escapeHtml(ln)}</p>
+      <p><strong>Email:</strong> ${escapeHtml(em)}</p>
+      <p><strong>Phone:</strong> ${escapeHtml(ph || "—")}</p>
       <p><strong>Promo links:</strong><br/>${(pl || "—")
         .split(/\n+/)
-        .map((line) =>
-          line
-            ? `<div><a href="${line.replace(/"/g, "&quot;")}" target="_blank" rel="noopener noreferrer">${line}</a></div>`
-            : ""
-        )
+        .map((line) => {
+          const trimmed = safe(line);
+          if (!trimmed) return "";
+          const escaped = escapeHtml(trimmed);
+          return /^https?:\/\//i.test(trimmed)
+            ? `<div><a href="${escaped}" target="_blank" rel="noopener noreferrer">${escaped}</a></div>`
+            : `<div>${escaped}</div>`;
+        })
         .join("")}
       </p>
       <hr/>
@@ -39,8 +51,8 @@ export const submitActSubmission = async (req, res) => {
 
     const mail = {
       from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
-      to: 'hello@thesupremecollective.co.uk',
-      bcc: 'hello@thesupremecollective.co.uk',
+      to: internalEmail,
+      replyTo: em,
       subject: `Act Submission – ${fn} ${ln}`,
       html,
     };
@@ -52,6 +64,7 @@ export const submitActSubmission = async (req, res) => {
     await transporter.sendMail({
       from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
       to: em,
+      bcc: internalEmail,
       subject: 'Thanks for your submission',
       html: `
         <p>Hi ${fn},</p>

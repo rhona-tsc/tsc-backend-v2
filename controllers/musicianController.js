@@ -54,6 +54,36 @@ const uploadToCloudinary = (buffer, originalname, resourceType = "image") =>
     uploadStream.end(buffer);
   });
 
+const INTERNAL_SIGNUP_EMAIL = "hello@thesupremecollective.co.uk";
+
+const sendInternalSignupNotification = async ({ subject, html }) => {
+  try {
+    if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
+      console.warn("⚠️ Internal signup notification skipped: missing GMAIL credentials");
+      return;
+    }
+
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"The Supreme Collective" <${process.env.GMAIL_USER}>`,
+      to: INTERNAL_SIGNUP_EMAIL,
+      subject,
+      html,
+    });
+
+    console.log("📧 Internal signup notification sent:", subject);
+  } catch (err) {
+    console.error("❌ Failed to send internal signup notification:", err);
+  }
+};
+
 // Merge helpers
 const mergeObjectIdsUnique = (existingIds = [], incomingIds = []) => {
   const a = existingIds.map(String);
@@ -1454,6 +1484,20 @@ musician.bank_account = bank;
 musician.markModified("bank_account");
     const saved = await musician.save();
 
+    await sendInternalSignupNotification({
+      subject: `New Musician Signup – ${saved.firstName || ""} ${saved.lastName || ""}`.trim(),
+      html: `
+        <h3>New Musician Signup</h3>
+        <p><strong>Name:</strong> ${saved.firstName || ""} ${saved.lastName || ""}</p>
+        <p><strong>Email:</strong> ${saved.email || "—"}</p>
+        <p><strong>Phone:</strong> ${saved.phone || saved.basicInfo?.phone || "—"}</p>
+        <p><strong>Status:</strong> ${saved.status || "pending"}</p>
+        <p><strong>Type:</strong> ${createdNew ? "New musician/deputy registration" : "Existing musician/deputy updated registration"}</p>
+        <hr/>
+        <p>Submitted via musician registration flow.</p>
+      `,
+    });
+
     // END snapshot: read back from DB to confirm persisted shape
     const roundTrip = await musicianModel.findById(saved._id).lean();
     console.groupCollapsed(
@@ -1568,6 +1612,19 @@ profile_picture: profileUrl,      // removed coverHeroImage: coverHeroUrl (undef
     });
 
     await newMusician.save();
+
+    await sendInternalSignupNotification({
+      subject: `New Musician Signup – ${newMusician.firstName || ""} ${newMusician.lastName || ""}`.trim(),
+      html: `
+        <h3>New Musician Signup</h3>
+        <p><strong>Name:</strong> ${newMusician.firstName || ""} ${newMusician.lastName || ""}</p>
+        <p><strong>Email:</strong> ${newMusician.email || "—"}</p>
+        <p><strong>Phone:</strong> ${newMusician.phone || "—"}</p>
+        <p><strong>Status:</strong> ${newMusician.status || "pending"}</p>
+        <hr/>
+        <p>Submitted via musician registration flow.</p>
+      `,
+    });
     res.status(201).json({
       success: true,
       message: "Musician registered",
@@ -1947,6 +2004,20 @@ const addAct = async (req, res) => {
 
     const act = new actModel(actData);
     await act.save();
+
+    await sendInternalSignupNotification({
+      subject: `New Act Signup – ${act.name || act.tscName || "Unnamed Act"}`,
+      html: `
+        <h3>New Act Signup</h3>
+        <p><strong>Act name:</strong> ${act.name || "—"}</p>
+        <p><strong>Original / TSC name:</strong> ${act.tscName || "—"}</p>
+        <p><strong>Created by:</strong> ${act.createdByName || "—"}</p>
+        <p><strong>Email:</strong> ${act.createdByEmail || "—"}</p>
+        <p><strong>Status:</strong> ${act.status || "pending"}</p>
+        <hr/>
+        <p>Submitted via act registration flow.</p>
+      `,
+    });
 
     console.log("✅ Act saved to MongoDB");
     res.json({ success: true, message: "Act Registered" });
