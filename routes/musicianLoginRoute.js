@@ -3,6 +3,7 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
+import mongoose from "mongoose";
 
 import musicianModel from "../models/musicianModel.js";
 import { loginMusician, registerMusician } from "../controllers/musicianLoginController.js";
@@ -419,6 +420,7 @@ musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
       forceResend = false,
       emails = [],
       onlyNew = true,
+      afterId = null,
     } = req.body || {};
 
     const now = new Date();
@@ -437,6 +439,11 @@ musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
       status: { $in: ["approved", "Approved, changes pending"] }, // tweak if you want pending too
       email: { $type: "string", $ne: "" },
     };
+
+    // ✅ Batch cursor: only process users after this _id
+    if (afterId && mongoose.Types.ObjectId.isValid(afterId)) {
+      q._id = { $gt: new mongoose.Types.ObjectId(afterId) };
+    }
 
     // If onlyNew: only email people who still need to set a password
     if (onlyNew) {
@@ -487,6 +494,8 @@ musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
       success: true,
       dryRun: !!dryRun,
       matched: users.length,
+      afterId: afterId && mongoose.Types.ObjectId.isValid(afterId) ? String(afterId) : null,
+      nextAfterId: null,
       emailed: 0,
       invitedSetPassword: 0,
       nudgedLogin: 0,
@@ -500,7 +509,9 @@ musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
       items: [],
     };
 
+    let lastProcessedId = null;
     for (const u of users) {
+      lastProcessedId = String(u?._id || "") || lastProcessedId;
       const email = String(u.email || "").trim().toLowerCase();
       if (!email) {
         report.skippedNoEmail += 1;
@@ -704,6 +715,7 @@ musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
       }
     }
 
+    report.nextAfterId = lastProcessedId || null;
     return res.json(report);
   } catch (err) {
     console.error("[bulk-invite] error:", err);
