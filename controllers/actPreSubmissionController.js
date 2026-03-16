@@ -146,22 +146,42 @@ export const getPendingActPreSubmissions = async (req, res) => {
 
 export const approveActPreSubmission = async (req, res) => {
   try {
+    const rid = req._rid || Math.random().toString(36).slice(2, 8);
+    const t0 = Date.now();
+    console.log(`🟦 [presub.approve][${rid}] start`, { id: req?.params?.id, user: req?.user?._id || req?.user?.id || null });
+
     const { id } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
+      console.warn(`🟨 [presub.approve][${rid}] invalid id`, { id });
       return res.status(400).json({ success: false, message: "Invalid id" });
     }
 
     const sub = await ActPreSubmission.findById(id);
     if (!sub) return res.status(404).json({ success: false, message: "Not found" });
 
+    console.log(`🟦 [presub.approve][${rid}] loaded submission`, {
+      id: String(sub?._id || id),
+      status: sub?.status,
+      hasInviteHash: !!sub?.inviteCodeHash,
+      actName: sub?.actName,
+      musicianId: sub?.musicianId,
+      musicianEmail: sub?.musicianEmail,
+      bandLeaderEmail: sub?.bandLeaderEmail,
+    });
+
     // ✅ If already approved and code exists, don't regenerate (idempotent)
 if (sub.status === "approved" && sub.inviteCodeHash) {
+  console.log(`🟩 [presub.approve][${rid}] already approved (idempotent)`, {
+    id: String(sub?._id || id),
+    status: sub?.status,
+    hasInviteHash: !!sub?.inviteCodeHash,
+  });
   // You *cannot* re-email the code because you don't store plaintext.
   // So either:
   // A) return success and show "code already generated" in UI
   // B) generate a new code and overwrite hash (recommended if you want re-send)
-  return res.json({ success: true, sub });
+  return res.json({ success: true, sub, alreadyApproved: true, emailSent: false });
 }      // still try send email if missing / not sent etc (optional)
      
 
@@ -198,6 +218,12 @@ if (sub.status === "approved" && sub.inviteCodeHash) {
       String(sub.bandLeaderEmail || "").trim() || musicianEmail;
 
     if (!recipientEmail) {
+      console.warn(`🟨 [presub.approve][${rid}] missing recipient email`, {
+        id: String(sub?._id || id),
+        musicianId: sub?.musicianId,
+        musicianEmail,
+        bandLeaderEmail: sub?.bandLeaderEmail,
+      });
       return res.status(400).json({
         success: false,
         message:
@@ -206,6 +232,10 @@ if (sub.status === "approved" && sub.inviteCodeHash) {
     }
 
         const { code, inviteCodeHash } = await generateUniqueInviteCode();
+    console.log(`🟦 [presub.approve][${rid}] generated invite code hash`, {
+      id: String(sub?._id || id),
+      inviteCodeHashPrefix: String(inviteCodeHash || "").slice(0, 10),
+    });
 
     // ✅ Update submission (store hash only)
     sub.status = "approved";
@@ -220,7 +250,18 @@ if (sub.status === "approved" && sub.inviteCodeHash) {
     // sub.inviteCode = undefined;
 
     await sub.save();
+    console.log(`🟩 [presub.approve][${rid}] saved submission`, {
+      id: String(sub?._id || id),
+      status: sub?.status,
+      inviteCodeHashPrefix: String(sub?.inviteCodeHash || "").slice(0, 10),
+      recipientEmail,
+    });
 
+    console.log(`🟦 [presub.approve][${rid}] sending approval email`, {
+      to: recipientEmail,
+      actName: sub.actName,
+      musicianName: musicianName || "there",
+    });
     // ✅ Send email (plaintext code ONLY goes to user)
     await sendActApprovalEmail(
       recipientEmail,
@@ -228,18 +269,12 @@ if (sub.status === "approved" && sub.inviteCodeHash) {
       sub.actName || "your act",
       code
     );
+    console.log(`🟩 [presub.approve][${rid}] email sent`, { to: recipientEmail });
 
-    // ✅ Send email (invite code)
-    await sendActApprovalEmail(
-      recipientEmail,
-      musicianName || "there",
-      sub.actName || "your act",
-      code
-    );
-
-    return res.json({ success: true, sub });
+    console.log(`🟩 [presub.approve][${rid}] done • ${Date.now() - t0}ms`);
+    return res.json({ success: true, sub, emailSent: true, recipientEmail });
   } catch (err) {
-    console.error("approveActPreSubmission:", err);
+    console.error(`🟥 [presub.approve][${req?._rid || "rid"}] error • ${Date.now() - (req?._t0 || Date.now())}ms:`, err?.stack || err?.message || err);
     return res.status(500).json({ success: false, message: err?.message || "Server error" });
   }
 };
