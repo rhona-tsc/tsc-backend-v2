@@ -407,319 +407,463 @@ musicianLoginRouter.post("/reset-password", async (req, res) => {
 //   includeCompleted: false,
 //   onlyVocalists: true,
 //   forceResend: false,
-//   emails: ["a@b.com","c@d.com"]   // if provided, ONLY invite these
+//   emails: ["a@b.com","c@d.com"],
+//   onlyNew: true,
+//   afterId: "<ObjectId>"
 // }
 // ----------------------------------------------------
-musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
-  try {
-    const {
-      limit = 120,
-      dryRun = false,
-      includeCompleted = false,
-      onlyVocalists = false,
-      forceResend = false,
-      emails = [],
-      onlyNew = true,
-      afterId = null,
-    } = req.body || {};
 
-    const now = new Date();
-    const LIMIT = Math.min(Math.max(parseInt(limit, 10) || 120, 1), 500);
+// --- Cron auth: shared secret header (so you can call from Render/Netlify cron)
+function requireCronSecret(req, res, next) {
+  const expected = String(process.env.CRON_SECRET || "").trim();
+  if (!expected) {
+    return res.status(500).json({
+      success: false,
+      message: "CRON_SECRET is not configured on the server.",
+    });
+  }
+  const got = String(req.headers["x-cron-secret"] || "").trim();
+  if (got !== expected) {
+    return res.status(401).json({ success: false, message: "Unauthorized." });
+  }
+  next();
+}
 
-    const vocalistTypes = [
-      "Lead Vocalist",
-      "Backing Vocalist",
-      "Backing Vocalist-Instrumentalist",
-      "Lead Vocalist-Instrumentalist",
+// --- Lightweight cursor store (no model file needed)
+const CURSOR_COLLECTION = "invite_cursors";
+const CURSOR_KEY = "musician_bulk_invite_v1";
+
+async function getInviteCursor() {
+  const col = mongoose.connection.collection(CURSOR_COLLECTION);
+  const doc = await col.findOne({ _id: CURSOR_KEY });
+  return doc || null;
+}
+
+async function setInviteCursor(patch) {
+  const col = mongoose.connection.collection(CURSOR_COLLECTION);
+  const now = new Date();
+  await col.updateOne(
+    { _id: CURSOR_KEY },
+    { $set: { ...patch, updatedAt: now }, $setOnInsert: { createdAt: now } },
+    { upsert: true }
+  );
+}
+
+async function runBulkInvite(opts = {}) {
+  const {
+    limit = 120,
+    dryRun = false,
+    includeCompleted = false,
+    onlyVocalists = false,
+    forceResend = false,
+    emails = [],
+    onlyNew = true,
+    afterId = null,
+    // internal label for logging
+    runLabel = "manual",
+  } = opts;
+
+  const now = new Date();
+  const LIMIT = Math.min(Math.max(parseInt(limit, 10) || 120, 1), 500);
+
+  const vocalistTypes = [
+    "Lead Vocalist",
+    "Backing Vocalist",
+    "Backing Vocalist-Instrumentalist",
+    "Lead Vocalist-Instrumentalist",
+  ];
+
+  // Base query
+  const q = {
+    role: "musician",
+    status: { $in: ["approved", "Approved, changes pending"] },
+    email: { $type: "string", $ne: "" },
+  };
+
+  // ✅ Batch cursor: only process users after this _id
+  if (afterId && mongoose.Types.ObjectId.isValid(afterId)) {
+    q._id = { $gt: new mongoose.Types.ObjectId(afterId) };
+  }
+
+  // If onlyNew: only email people who still need to set a password
+  if (onlyNew) {
+    q.$and = q.$and || [];
+    q.$and.push({
+      $or: [
+        { hasSetPassword: { $ne: true } },
+        { password: { $exists: false } },
+        { password: null },
+        { password: "" },
+      ],
+    });
+  }
+
+  // Optional: only certain emails
+  if (Array.isArray(emails) && emails.length) {
+    q.email = { $in: emails.map((e) => String(e).trim().toLowerCase()) };
+  }
+
+  // Optional: only vocalists
+  if (onlyVocalists) {
+    q["vocals.type"] = { $in: vocalistTypes };
+  }
+
+  // Exclude completed unless explicitly included
+  if (!includeCompleted) {
+    q.onboardingStatus = { $ne: "completed" };
+  }
+
+  // If not forceResend: skip people invited in last 7 days
+  if (!forceResend) {
+    q.$or = [
+      { lastInviteSentAt: null },
+      {
+        lastInviteSentAt: {
+          $lte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        },
+      },
     ];
+  }
 
-    // Base query
-    const q = {
-      role: "musician",
-      status: { $in: ["approved", "Approved, changes pending"] }, // tweak if you want pending too
-      email: { $type: "string", $ne: "" },
-    };
+  console.log(
+    `📨 [bulk-invite][${runLabel}] query`,
+    JSON.stringify(
+      {
+        limit: LIMIT,
+        dryRun: !!dryRun,
+        onlyNew: !!onlyNew,
+        includeCompleted: !!includeCompleted,
+        onlyVocalists: !!onlyVocalists,
+        forceResend: !!forceResend,
+        afterId: afterId && mongoose.Types.ObjectId.isValid(afterId) ? String(afterId) : null,
+      },
+      null,
+      2
+    )
+  );
 
-    // ✅ Batch cursor: only process users after this _id
-    if (afterId && mongoose.Types.ObjectId.isValid(afterId)) {
-      q._id = { $gt: new mongoose.Types.ObjectId(afterId) };
+  const users = await musicianModel
+    .find(q)
+    .select(
+      "_id email firstName lastName hasSetPassword password onboardingInvitedAt onboardingStatus lastLoginAt inviteTokenExpires lastInviteSentAt inviteCount"
+    )
+    .sort({ _id: 1 })
+    .limit(LIMIT)
+    .lean();
+
+  const report = {
+    success: true,
+    dryRun: !!dryRun,
+    matched: users.length,
+    afterId:
+      afterId && mongoose.Types.ObjectId.isValid(afterId)
+        ? String(afterId)
+        : null,
+    nextAfterId: null,
+    emailed: 0,
+    invitedSetPassword: 0,
+    nudgedLogin: 0,
+    skippedNoEmail: 0,
+    skippedCompleted: 0,
+    onlyNew: !!onlyNew,
+    forceResend: !!forceResend,
+    onlyVocalists: !!onlyVocalists,
+    skippedInvitedRecently: 0,
+    skippedAlreadyHasPassword: 0,
+    items: [],
+  };
+
+  let lastProcessedId = null;
+
+  for (const u of users) {
+    lastProcessedId = String(u?._id || "") || lastProcessedId;
+
+    const email = String(u.email || "").trim().toLowerCase();
+    if (!email) {
+      report.skippedNoEmail += 1;
+      continue;
     }
 
-    // If onlyNew: only email people who still need to set a password
-    if (onlyNew) {
-      q.$and = q.$and || [];
-      q.$and.push({
-        $or: [
-          { hasSetPassword: { $ne: true } },
-          { password: { $exists: false } },
-          { password: null },
-          { password: "" },
-        ],
+    if (!includeCompleted && u.onboardingStatus === "completed") {
+      report.skippedCompleted += 1;
+      continue;
+    }
+
+    // Skip if onlyNew and they already have a password / have set password
+    if (
+      onlyNew &&
+      (u.hasSetPassword === true || (u.password && String(u.password).trim()))
+    ) {
+      report.skippedAlreadyHasPassword += 1;
+      report.items.push({
+        email,
+        needsSetPassword: false,
+        skipped: "already_has_password",
+        onboardingStatus: u.onboardingStatus || null,
+        lastLoginAt: u.lastLoginAt || null,
+        lastInviteSentAt: u.lastInviteSentAt || null,
+      });
+      continue;
+    }
+
+    // Skip if not forceResend and they were invited in the last 24 hours
+    if (
+      !forceResend &&
+      u.lastInviteSentAt &&
+      new Date(u.lastInviteSentAt).getTime() >
+        Date.now() - 24 * 60 * 60 * 1000
+    ) {
+      report.skippedInvitedRecently += 1;
+      report.items.push({
+        email,
+        needsSetPassword: false,
+        skipped: "invited_recently",
+        onboardingStatus: u.onboardingStatus || null,
+        lastLoginAt: u.lastLoginAt || null,
+        lastInviteSentAt: u.lastInviteSentAt,
+      });
+      continue;
+    }
+
+    const name =
+      u.firstName || u.lastName
+        ? `${u.firstName || ""} ${u.lastName || ""}`.trim()
+        : "";
+    const greeting = name ? `Hi ${name},` : "Hi there,";
+
+    const needsSetPassword = u.hasSetPassword !== true && !u.password;
+
+    let subject = "";
+    let html = "";
+    const prevLastInviteSentAt = u.lastInviteSentAt || null;
+
+    if (needsSetPassword) {
+      const rawToken = crypto.randomBytes(32).toString("hex");
+      const tokenHash = sha256(rawToken);
+      const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      const link = `${FRONTEND_URL}/set-password?token=${rawToken}&email=${encodeURIComponent(
+        email
+      )}`;
+
+      subject = "Set up your profile on The Supreme Collective";
+      html = `
+        <div style="background:#f6f6f6;padding:28px 12px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+          <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #eee;border-radius:14px;padding:22px;">
+            <p style="margin:0 0 12px 0;color:#111;font-size:15px;line-height:1.6;">${greeting}</p>
+
+            <p style="margin:0 0 12px 0;color:#333;font-size:14.5px;line-height:1.7;">
+              You’ve been invited to set up your <strong>Supreme Collective musician profile</strong>.
+            </p>
+
+            <p style="margin:0 0 12px 0;color:#333;font-size:14.5px;line-height:1.7;">
+              First, please create your password using the button below (this link expires in <strong>24 hours</strong>):
+            </p>
+
+            <div style="text-align:center;margin:18px 0 18px 0;">
+              <a href="${link}" style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:12px;font-weight:800;font-size:15px;">
+                Create your password
+              </a>
+            </div>
+
+            <div style="background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px 14px;margin:0 0 14px 0;">
+              <p style="margin:0 0 8px 0;color:#111;font-size:14.5px;font-weight:700;">Why set up your profile?</p>
+              <ul style="margin:0;padding-left:18px;color:#333;font-size:14.5px;line-height:1.7;">
+                <li><strong>Get matched to deputy roles automatically</strong> when acts register — your instruments, vocals, skills and location help bandleaders find you quickly.</li>
+                <li><strong>Use it as an online CV</strong> you can share for other work — videos, photos, bio, repertoire and equipment all in one place.</li>
+                <li><strong>One‑click apply</strong> for deputy opportunities (launching very soon) — no more long forms.</li>
+                <li><strong>Submit or recommend an act</strong> to join The Supreme Collective — a musician profile is required to do this.</li>
+              </ul>
+            </div>
+
+            <p style="margin:0 0 10px 0;color:#333;font-size:14.5px;line-height:1.7;">
+              Once you’ve set a password, log in and add whatever you can — a short bio, a few videos/photos, and as much repertoire/gear detail as you’re happy to share.
+            </p>
+
+            <p style="margin:0;color:#666;font-size:12.5px;line-height:1.6;">
+              Button not working? Copy and paste this link into your browser:<br/>
+              <a href="${link}" style="color:#ff6667;text-decoration:underline;word-break:break-all;">${link}</a>
+            </p>
+          </div>
+        </div>
+      `;
+
+      if (!dryRun) {
+        await musicianModel.updateOne(
+          { _id: u._id },
+          {
+            $set: {
+              inviteTokenHash: tokenHash,
+              inviteTokenExpires: expires,
+              mustChangePassword: true,
+              onboardingInvitedAt: u.onboardingInvitedAt || now,
+              lastInviteSentAt: now,
+            },
+            $inc: { inviteCount: 1 },
+          }
+        );
+
+        await sendEmail({ to: email, subject, html });
+      }
+
+      report.invitedSetPassword += 1;
+      report.emailed += dryRun ? 0 : 1;
+      report.items.push({
+        email,
+        needsSetPassword,
+        onboardingStatus: u.onboardingStatus || null,
+        lastLoginAt: u.lastLoginAt || null,
+        lastInviteSentAt: prevLastInviteSentAt,
+        subject,
+        action: "invited_set_password",
+      });
+    } else {
+      const link = `${FRONTEND_URL}/login`;
+
+      subject = "Set up your profile on The Supreme Collective";
+      html = `
+        <div style="background:#f6f6f6;padding:28px 12px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+          <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #eee;border-radius:14px;padding:22px;">
+            <p style="margin:0 0 12px 0;color:#111;font-size:15px;line-height:1.6;">${greeting}</p>
+
+            <p style="margin:0 0 12px 0;color:#333;font-size:14.5px;line-height:1.7;">
+              Quick invite to set up your <strong>Supreme Collective musician profile</strong>.
+            </p>
+
+            <div style="text-align:center;margin:18px 0 18px 0;">
+              <a href="${link}" style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:12px;font-weight:800;font-size:15px;">
+                Log in to set up your profile
+              </a>
+            </div>
+
+            <div style="background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px 14px;margin:0 0 14px 0;">
+              <p style="margin:0 0 8px 0;color:#111;font-size:14.5px;font-weight:700;">Why set up your profile?</p>
+              <ul style="margin:0;padding-left:18px;color:#333;font-size:14.5px;line-height:1.7;">
+                <li><strong>Get matched to deputy roles automatically</strong> when acts register — your instruments, vocals, skills and location help bandleaders find you quickly.</li>
+                <li><strong>Use it as an online CV</strong> you can share for other work — videos, photos, bio, repertoire and equipment all in one place.</li>
+                <li><strong>One‑click apply</strong> for deputy opportunities (launching very soon) — no more long forms.</li>
+                <li><strong>Submit or recommend an act</strong> to join The Supreme Collective — a musician profile is required to do this.</li>
+              </ul>
+            </div>
+
+            <p style="margin:0;color:#666;font-size:12.5px;line-height:1.6;">
+              Forgotten password? Use “Forgot password” on the login screen.
+            </p>
+          </div>
+        </div>
+      `;
+
+      if (!dryRun) {
+        await musicianModel.updateOne(
+          { _id: u._id },
+          {
+            $set: {
+              onboardingInvitedAt: u.onboardingInvitedAt || now,
+              lastInviteSentAt: now,
+            },
+            $inc: { inviteCount: 1 },
+          }
+        );
+
+        await sendEmail({ to: email, subject, html });
+      }
+
+      report.nudgedLogin += 1;
+      report.emailed += dryRun ? 0 : 1;
+      report.items.push({
+        email,
+        needsSetPassword,
+        onboardingStatus: u.onboardingStatus || null,
+        lastLoginAt: u.lastLoginAt || null,
+        lastInviteSentAt: prevLastInviteSentAt,
+        subject,
+        action: "nudged_login",
       });
     }
+  }
 
-    // Optional: only certain emails
-    if (Array.isArray(emails) && emails.length) {
-      q.email = { $in: emails.map((e) => String(e).trim().toLowerCase()) };
-    }
+  report.nextAfterId = lastProcessedId || null;
+  console.log(
+    `✅ [bulk-invite][${runLabel}] done`,
+    JSON.stringify(
+      {
+        matched: report.matched,
+        emailed: report.emailed,
+        nextAfterId: report.nextAfterId,
+        invitedSetPassword: report.invitedSetPassword,
+        nudgedLogin: report.nudgedLogin,
+        skippedAlreadyHasPassword: report.skippedAlreadyHasPassword,
+        skippedInvitedRecently: report.skippedInvitedRecently,
+      },
+      null,
+      2
+    )
+  );
 
-    // Optional: only vocalists
-    if (onlyVocalists) {
-      q["vocals.type"] = { $in: vocalistTypes };
-    }
+  return report;
+}
 
-    // Exclude completed unless explicitly included
-    if (!includeCompleted) {
-      q.onboardingStatus = { $ne: "completed" };
-    }
-
-    // If not forceResend: skip people invited in last 7 days
-    if (!forceResend) {
-      q.$or = [
-        { lastInviteSentAt: null },
-        { lastInviteSentAt: { $lte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
-      ];
-    }
-
-    const users = await musicianModel
-      .find(q)
-      .select(
-        "_id email firstName lastName hasSetPassword password onboardingInvitedAt onboardingStatus lastLoginAt inviteTokenExpires lastInviteSentAt inviteCount"
-      )
-      .sort({ _id: 1 })
-      .limit(LIMIT)
-      .lean();
-
-    const report = {
-      success: true,
-      dryRun: !!dryRun,
-      matched: users.length,
-      afterId: afterId && mongoose.Types.ObjectId.isValid(afterId) ? String(afterId) : null,
-      nextAfterId: null,
-      emailed: 0,
-      invitedSetPassword: 0,
-      nudgedLogin: 0,
-      skippedNoEmail: 0,
-      skippedCompleted: 0,
-      onlyNew: !!onlyNew,
-      forceResend: !!forceResend,
-      onlyVocalists: !!onlyVocalists,
-      skippedInvitedRecently: 0,
-      skippedAlreadyHasPassword: 0,
-      items: [],
-    };
-
-    let lastProcessedId = null;
-    for (const u of users) {
-      lastProcessedId = String(u?._id || "") || lastProcessedId;
-      const email = String(u.email || "").trim().toLowerCase();
-      if (!email) {
-        report.skippedNoEmail += 1;
-        continue;
-      }
-
-      if (!includeCompleted && u.onboardingStatus === "completed") {
-        report.skippedCompleted += 1;
-        continue;
-      }
-
-      // Skip if onlyNew and they already have a password / have set password
-      if (onlyNew && (u.hasSetPassword === true || (u.password && String(u.password).trim()))) {
-        report.skippedAlreadyHasPassword += 1;
-        report.items.push({
-          email,
-          needsSetPassword: false,
-          skipped: "already_has_password",
-          onboardingStatus: u.onboardingStatus || null,
-          lastLoginAt: u.lastLoginAt || null,
-          lastInviteSentAt: u.lastInviteSentAt || null,
-        });
-        continue;
-      }
-
-      // Skip if not forceResend and they were invited in the last 24 hours
-      if (
-        !forceResend &&
-        u.lastInviteSentAt &&
-        new Date(u.lastInviteSentAt).getTime() > Date.now() - 24 * 60 * 60 * 1000
-      ) {
-        report.skippedInvitedRecently += 1;
-        report.items.push({
-          email,
-          needsSetPassword: false,
-          skipped: "invited_recently",
-          onboardingStatus: u.onboardingStatus || null,
-          lastLoginAt: u.lastLoginAt || null,
-          lastInviteSentAt: u.lastInviteSentAt,
-        });
-        continue;
-      }
-
-      const name =
-        u.firstName || u.lastName
-          ? `${u.firstName || ""} ${u.lastName || ""}`.trim()
-          : "";
-      const greeting = name ? `Hi ${name},` : "Hi there,";
-
-      const needsSetPassword =
-        u.hasSetPassword !== true && !u.password;
-
-      let subject = "";
-      let html = "";
-      const lastInviteSentAt = u.lastInviteSentAt || null;
-
-      // If they haven't set password yet, generate invite token + link
-      if (needsSetPassword) {
-        const rawToken = crypto.randomBytes(32).toString("hex");
-        const tokenHash = sha256(rawToken);
-        const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-        const link = `${FRONTEND_URL}/set-password?token=${rawToken}&email=${encodeURIComponent(
-          email
-        )}`;
-
-        subject = "Set up your profile on The Supreme Collective";
-        html = `
-          <div style="background:#f6f6f6;padding:28px 12px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-            <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #eee;border-radius:14px;padding:22px;">
-              <p style="margin:0 0 12px 0;color:#111;font-size:15px;line-height:1.6;">${greeting}</p>
-
-              <p style="margin:0 0 12px 0;color:#333;font-size:14.5px;line-height:1.7;">
-                You’ve been invited to set up your <strong>Supreme Collective musician profile</strong>.
-              </p>
-
-              <p style="margin:0 0 12px 0;color:#333;font-size:14.5px;line-height:1.7;">
-                First, please create your password using the button below (this link expires in <strong>24 hours</strong>):
-              </p>
-
-              <div style="text-align:center;margin:18px 0 18px 0;">
-                <a href="${link}" style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:12px;font-weight:800;font-size:15px;">
-                  Create your password
-                </a>
-              </div>
-
-              <div style="background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px 14px;margin:0 0 14px 0;">
-                <p style="margin:0 0 8px 0;color:#111;font-size:14.5px;font-weight:700;">Why set up your profile?</p>
-                <ul style="margin:0;padding-left:18px;color:#333;font-size:14.5px;line-height:1.7;">
-                  <li><strong>Get matched to deputy roles automatically</strong> when acts register — your instruments, vocals, skills and location help bandleaders find you quickly.</li>
-                  <li><strong>Use it as an online CV</strong> you can share for other work — videos, photos, bio, repertoire and equipment all in one place.</li>
-                  <li><strong>One‑click apply</strong> for deputy opportunities (launching very soon) — no more long forms.</li>
-                  <li><strong>Submit or recommend an act</strong> to join The Supreme Collective — a musician profile is required to do this.</li>
-                </ul>
-              </div>
-
-              <p style="margin:0 0 10px 0;color:#333;font-size:14.5px;line-height:1.7;">
-                Once you’ve set a password, log in and add whatever you can — a short bio, a few videos/photos, and as much repertoire/gear detail as you’re happy to share.
-              </p>
-
-              <p style="margin:0;color:#666;font-size:12.5px;line-height:1.6;">
-                Button not working? Copy and paste this link into your browser:<br/>
-                <a href="${link}" style="color:#ff6667;text-decoration:underline;word-break:break-all;">${link}</a>
-              </p>
-            </div>
-          </div>
-        `;
-
-        if (!dryRun) {
-          await musicianModel.updateOne(
-            { _id: u._id },
-            {
-              $set: {
-                inviteTokenHash: tokenHash,
-                inviteTokenExpires: expires,
-                mustChangePassword: true,
-                onboardingInvitedAt: u.onboardingInvitedAt || now,
-                lastInviteSentAt: now,
-              },
-              $inc: { inviteCount: 1 },
-            }
-          );
-
-          await sendEmail({ to: email, subject, html });
-        }
-
-        report.invitedSetPassword += 1;
-        report.emailed += dryRun ? 0 : 1;
-        report.items.push({
-          email,
-          needsSetPassword,
-          onboardingStatus: u.onboardingStatus || null,
-          lastLoginAt: u.lastLoginAt || null,
-          lastInviteSentAt,
-          subject,
-          action: "invited_set_password",
-        });
-      } else {
-        // They have a password already - nudge to login + complete
-        const link = `${FRONTEND_URL}/login`;
-
-        subject = "Set up your profile on The Supreme Collective";
-        html = `
-          <div style="background:#f6f6f6;padding:28px 12px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-            <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #eee;border-radius:14px;padding:22px;">
-              <p style="margin:0 0 12px 0;color:#111;font-size:15px;line-height:1.6;">${greeting}</p>
-
-              <p style="margin:0 0 12px 0;color:#333;font-size:14.5px;line-height:1.7;">
-                Quick invite to set up your <strong>Supreme Collective musician profile</strong>.
-              </p>
-
-              <div style="text-align:center;margin:18px 0 18px 0;">
-                <a href="${link}" style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:12px;font-weight:800;font-size:15px;">
-                  Log in to set up your profile
-                </a>
-              </div>
-
-              <div style="background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px 14px;margin:0 0 14px 0;">
-                <p style="margin:0 0 8px 0;color:#111;font-size:14.5px;font-weight:700;">Why set up your profile?</p>
-                <ul style="margin:0;padding-left:18px;color:#333;font-size:14.5px;line-height:1.7;">
-                  <li><strong>Get matched to deputy roles automatically</strong> when acts register — your instruments, vocals, skills and location help bandleaders find you quickly.</li>
-                  <li><strong>Use it as an online CV</strong> you can share for other work — videos, photos, bio, repertoire and equipment all in one place.</li>
-                  <li><strong>One‑click apply</strong> for deputy opportunities (launching very soon) — no more long forms.</li>
-                  <li><strong>Submit or recommend an act</strong> to join The Supreme Collective — a musician profile is required to do this.</li>
-                </ul>
-              </div>
-
-              <p style="margin:0;color:#666;font-size:12.5px;line-height:1.6;">
-                Forgotten password? Use “Forgot password” on the login screen.
-              </p>
-            </div>
-          </div>
-        `;
-
-        if (!dryRun) {
-          await musicianModel.updateOne(
-            { _id: u._id },
-            {
-              $set: {
-                onboardingInvitedAt: u.onboardingInvitedAt || now,
-                lastInviteSentAt: now,
-              },
-              $inc: { inviteCount: 1 },
-            }
-          );
-
-          await sendEmail({ to: email, subject, html });
-        }
-
-        report.nudgedLogin += 1;
-        report.emailed += dryRun ? 0 : 1;
-        report.items.push({
-          email,
-          needsSetPassword,
-          onboardingStatus: u.onboardingStatus || null,
-          lastLoginAt: u.lastLoginAt || null,
-          lastInviteSentAt,
-          subject,
-          action: "nudged_login",
-        });
-      }
-    }
-
-    report.nextAfterId = lastProcessedId || null;
+// Manual/admin-triggered bulk invite
+musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
+  try {
+    const report = await runBulkInvite({ ...req.body, runLabel: "manual" });
     return res.json(report);
   } catch (err) {
     console.error("[bulk-invite] error:", err);
     return res.status(500).json({ success: false, message: "Bulk invite failed." });
+  }
+});
+
+// Cron-triggered bulk invite with persisted cursor
+// POST /api/musician-login/bulk-invite-cron
+// Headers: x-cron-secret: <CRON_SECRET>
+musicianLoginRouter.post("/bulk-invite-cron", requireCronSecret, async (req, res) => {
+  try {
+    const cursor = await getInviteCursor();
+    const runs = Number(cursor?.runs || 0);
+    const afterId = cursor?.afterId && mongoose.Types.ObjectId.isValid(cursor.afterId)
+      ? String(cursor.afterId)
+      : null;
+
+    // Phase plan: first N runs send small batches, then ramp up.
+    const phase1Runs = Number(process.env.INVITE_CRON_PHASE1_RUNS || 5);
+    const phase1Limit = Number(process.env.INVITE_CRON_PHASE1_LIMIT || 5);
+    const phase2Limit = Number(process.env.INVITE_CRON_PHASE2_LIMIT || 500);
+
+    const limit = runs < phase1Runs ? phase1Limit : phase2Limit;
+
+    console.log(`🕒 [bulk-invite][cron] run #${runs + 1} afterId=${afterId || "(none)"} limit=${limit}`);
+
+    const report = await runBulkInvite({
+      limit,
+      dryRun: false,
+      includeCompleted: false,
+      onlyVocalists: false,
+      forceResend: false,
+      emails: [],
+      onlyNew: true,
+      afterId,
+      runLabel: `cron_${runs + 1}`,
+    });
+
+    await setInviteCursor({
+      runs: runs + 1,
+      afterId: report.nextAfterId || afterId || null,
+      lastReport: {
+        matched: report.matched,
+        emailed: report.emailed,
+        invitedSetPassword: report.invitedSetPassword,
+        nudgedLogin: report.nudgedLogin,
+        nextAfterId: report.nextAfterId,
+        finished: report.matched === 0,
+      },
+      lastRunAt: new Date(),
+    });
+
+    return res.json({ success: true, cursorBefore: cursor || null, report });
+  } catch (err) {
+    console.error("[bulk-invite-cron] error:", err);
+    return res.status(500).json({ success: false, message: "Cron bulk invite failed." });
   }
 });
 
