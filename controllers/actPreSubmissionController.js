@@ -2,6 +2,11 @@ import mongoose from "mongoose";
 import ActPreSubmission from "../models/ActPreSubmissionModel.js";
 import { sendActApprovalEmail } from "../utils/sendActApprovalEmail.js";
 import musicianModel from "../models/musicianModel.js";
+import { generateUniqueInviteCode } from "../utils/generateInviteCode.js"; // adjust path
+import {
+  sendActApprovalEmailResend,
+  buildActSubmissionLink,
+} from "../utils/sendActApprovalEmail.js"; // adjust path
 
 import crypto from "crypto";
 
@@ -275,6 +280,97 @@ if (sub.status === "approved" && sub.inviteCodeHash) {
     return res.json({ success: true, sub, emailSent: true, recipientEmail });
   } catch (err) {
     console.error(`🟥 [presub.approve][${req?._rid || "rid"}] error • ${Date.now() - (req?._t0 || Date.now())}ms:`, err?.stack || err?.message || err);
+    return res.status(500).json({ success: false, message: err?.message || "Server error" });
+  }
+};
+
+export const previewActPreSubmissionApproval = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid id" });
+    }
+
+    const sub = await ActPreSubmission.findById(id).lean();
+    if (!sub) return res.status(404).json({ success: false, message: "Not found" });
+
+    // choose recipient like your approve does
+    const recipientEmail =
+      String(sub.bandLeaderEmail || "").trim() || String(sub.musicianEmail || "").trim();
+
+    if (!recipientEmail) {
+      return res.status(400).json({ success: false, message: "No recipient email on submission." });
+    }
+
+    // generate a code just for preview (NOT saved)
+    const { code } = await generateUniqueInviteCode();
+    const link = buildActSubmissionLink(code);
+
+    return res.json({
+      success: true,
+      id,
+      actName: sub.actName || "",
+      recipientEmail,
+      musicianName: sub.musicianName || "",
+      previewCode: code,
+      previewLink: link,
+      note: "Preview only — code not saved, no email sent.",
+    });
+  } catch (err) {
+    console.error("previewActPreSubmissionApproval:", err);
+    return res.status(500).json({ success: false, message: err?.message || "Server error" });
+  }
+};
+
+// ✅ RESEND (generates NEW code+hash, saves it, sends corrected-link email)
+export const resendActPreSubmissionApproval = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid id" });
+    }
+
+    const sub = await ActPreSubmission.findById(id);
+    if (!sub) return res.status(404).json({ success: false, message: "Not found" });
+
+    const recipientEmail =
+      String(sub.bandLeaderEmail || "").trim() || String(sub.musicianEmail || "").trim();
+
+    if (!recipientEmail) {
+      return res.status(400).json({ success: false, message: "No recipient email on submission." });
+    }
+
+    // ✅ Always mint a NEW code so we can resend (we don't store plaintext)
+    const { code, inviteCodeHash } = await generateUniqueInviteCode();
+
+    sub.status = "approved";              // keep it approved
+    sub.inviteCodeHash = inviteCodeHash;  // overwrite old hash
+    sub.inviteCodeUsed = false;
+
+    // helpful resend tracking (optional fields — add to schema if you like)
+    sub.lastResentAt = new Date();
+    sub.resendCount = (Number(sub.resendCount || 0) + 1);
+
+    await sub.save();
+
+    await sendActApprovalEmailResend(
+      recipientEmail,
+      sub.musicianName || "there",
+      code
+    );
+
+    return res.json({
+      success: true,
+      id,
+      status: sub.status,
+      recipientEmail,
+      resent: true,
+      resendCount: sub.resendCount || 1,
+    });
+  } catch (err) {
+    console.error("resendActPreSubmissionApproval:", err);
     return res.status(500).json({ success: false, message: err?.message || "Server error" });
   }
 };

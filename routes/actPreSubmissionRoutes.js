@@ -9,6 +9,10 @@ import {
   markInviteCodeUsed,
   getActPreSubmissionCount,
   getOnePreSubmission,
+
+  // ✅ add these:
+  previewActPreSubmissionApproval,
+  resendActPreSubmissionApproval,
 } from "../controllers/actPreSubmissionController.js";
 import requireAdminDashboard from "../middleware/requireAdminDashboard.js";
 
@@ -25,6 +29,10 @@ router.get("/:id", requireAdminDashboard, getOnePreSubmission);
 // approval flow (✅ protect)
 router.post("/approve/:id", requireAdminDashboard, approveActPreSubmission);
 router.post("/reject/:id", requireAdminDashboard, rejectActPreSubmission);
+
+// ✅ NEW: preview + resend
+router.post("/approve-preview/:id", requireAdminDashboard, previewActPreSubmissionApproval);
+router.post("/approve-resend/:id", requireAdminDashboard, resendActPreSubmissionApproval);
 
 // validation (musician use — leave open or require auth as you prefer)
 router.post("/validate-code", validateActInviteCode);
