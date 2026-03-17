@@ -174,6 +174,53 @@ async function sendBulkInviteRunSummaryEmail({
   }
 }
 
+// --- Preview musician invite email helper ---
+async function sendBulkInvitePreviewEmail({
+  to,
+  runLabel,
+  isDryRun,
+  targetEmail,
+  subject,
+  html,
+}) {
+  if (!to) return { sent: false, skipped: true, error: "no_to" };
+
+  const previewSubject = `${isDryRun ? "[DRY RUN] " : ""}[PREVIEW] Musician invite (${runLabel}) → ${targetEmail}`;
+
+  const previewHtml = `
+    <div style="background:#f6f6f6;padding:24px 12px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+      <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #eee;border-radius:14px;padding:18px;">
+        <h2 style="margin:0 0 10px 0;font-size:18px;color:#111;">Musician invite preview</h2>
+        <p style="margin:0 0 10px 0;color:#333;font-size:14px;line-height:1.6;">
+          This is a <strong>preview</strong> of the email that would be sent to: <strong>${escapeHtml(
+            String(targetEmail || "")
+          )}</strong>
+        </p>
+        <p style="margin:0 0 14px 0;color:#666;font-size:12.5px;line-height:1.6;">
+          Original subject: <strong>${escapeHtml(String(subject || ""))}</strong>
+        </p>
+
+        <div style="border:1px solid #eee;border-radius:12px;overflow:hidden;">
+          <div style="background:#fafafa;border-bottom:1px solid #eee;padding:10px 12px;color:#555;font-size:12.5px;">
+            Rendered email body
+          </div>
+          <div style="padding:0;">${html || ""}</div>
+        </div>
+
+        <p style="margin:12px 0 0 0;color:#777;font-size:12px;">Sent automatically by The Supreme Collective backend.</p>
+      </div>
+    </div>
+  `;
+
+  try {
+    await sendEmail({ to, subject: previewSubject, html: previewHtml });
+    return { sent: true, skipped: false };
+  } catch (e) {
+    console.warn("[bulk-invite] failed to send preview email:", e?.message || e);
+    return { sent: false, skipped: false, error: String(e?.message || e) };
+  }
+}
+
 // Existing routes
 musicianLoginRouter.post("/register", registerMusician);
 
@@ -555,6 +602,8 @@ async function runBulkInvite(opts = {}) {
     afterId = null,
     // internal label for logging
     runLabel = "manual",
+    notifyEmail = "",
+    sendPreviewToNotify = false,
   } = opts;
 
   const now = new Date();
@@ -668,6 +717,7 @@ async function runBulkInvite(opts = {}) {
   };
 
   let lastProcessedId = null;
+  let previewSent = false;
 
   for (const u of users) {
     lastProcessedId = String(u?._id || "") || lastProcessedId;
@@ -782,6 +832,23 @@ async function runBulkInvite(opts = {}) {
         </div>
       `;
 
+      // Send preview email to notifyEmail if requested and not yet sent
+      if (
+        notifyEmail &&
+        sendPreviewToNotify === true &&
+        previewSent === false
+      ) {
+        await sendBulkInvitePreviewEmail({
+          to: notifyEmail,
+          runLabel,
+          isDryRun: !!dryRun,
+          targetEmail: email,
+          subject,
+          html,
+        });
+        previewSent = true;
+      }
+
       if (!dryRun) {
         await musicianModel.updateOne(
           { _id: u._id },
@@ -847,6 +914,23 @@ async function runBulkInvite(opts = {}) {
         </div>
       `;
 
+      // Send preview email to notifyEmail if requested and not yet sent
+      if (
+        notifyEmail &&
+        sendPreviewToNotify === true &&
+        previewSent === false
+      ) {
+        await sendBulkInvitePreviewEmail({
+          to: notifyEmail,
+          runLabel,
+          isDryRun: !!dryRun,
+          targetEmail: email,
+          subject,
+          html,
+        });
+        previewSent = true;
+      }
+
       if (!dryRun) {
         await musicianModel.updateOne(
           { _id: u._id },
@@ -877,6 +961,10 @@ async function runBulkInvite(opts = {}) {
   }
 
   report.nextAfterId = lastProcessedId || null;
+  report.preview = {
+    requested: !!(notifyEmail && sendPreviewToNotify),
+    sent: previewSent,
+  };
   console.log(
     `✅ [bulk-invite][${runLabel}] done`,
     JSON.stringify(
@@ -900,7 +988,12 @@ async function runBulkInvite(opts = {}) {
 // Manual/admin-triggered bulk invite
 musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
   try {
-    const report = await runBulkInvite({ ...req.body, runLabel: "manual" });
+    const report = await runBulkInvite({
+      ...req.body,
+      runLabel: "manual",
+      notifyEmail: String(req.body?.notifyEmail || "").trim(),
+      sendPreviewToNotify: req.body?.sendPreviewToNotify === true,
+    });
     // Send summary email if requested (even for dry runs)
     const notifyEmail = String(req.body?.notifyEmail || "").trim();
     let notify = null;
@@ -963,6 +1056,8 @@ musicianLoginRouter.post("/bulk-invite-cron", requireCronSecret, async (req, res
       onlyNew: true,
       afterId,
       runLabel: `cron_${runs + 1}`,
+      notifyEmail,
+      sendPreviewToNotify: req.body?.sendPreviewToNotify === true,
     });
 
     if (!isDryRun) {
