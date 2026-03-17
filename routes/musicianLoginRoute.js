@@ -813,7 +813,7 @@ async function runBulkInvite(opts = {}) {
             <div style="background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px 14px;margin:0 0 14px 0;">
               <p style="margin:0 0 8px 0;color:#111;font-size:14.5px;font-weight:700;">Why set up your profile?</p>
               <ul style="margin:0;padding-left:18px;color:#333;font-size:14.5px;line-height:1.7;">
-                <li><strong>Get matched to deputy roles automatically</strong> when acts register — your instruments, vocals, skills and location help bandleaders find you quickly.</li>
+                <li><strong>Get presented to deputy roles automatically</strong> when acts register with us — your instruments, vocal abilities, skills and location put you in front of bandleaders who need you.</li>
                 <li><strong>Use it as an online CV</strong> you can share for other work — videos, photos, bio, repertoire and equipment all in one place.</li>
                 <li><strong>One‑click apply</strong> for deputy opportunities (launching very soon) — no more long forms.</li>
                 <li><strong>Submit or recommend an act</strong> to join The Supreme Collective — a musician profile is required to do this.</li>
@@ -822,6 +822,16 @@ async function runBulkInvite(opts = {}) {
 
             <p style="margin:0 0 10px 0;color:#333;font-size:14.5px;line-height:1.7;">
               Once you’ve set a password, log in and add whatever you can — a short bio, a few videos/photos, and as much repertoire/gear detail as you’re happy to share.
+            </p>
+
+            <p style="margin:0 0 10px 0;color:#333;font-size:14.5px;line-height:1.7;">
+            Looking forward to having you on board! If you have any questions or need a hand getting set up, just reply to this email.
+            </p>
+
+            <p style="margin:0 0 10px 0;color:#333;font-size:14.5px;line-height:1.7;">
+            Best wishes, <br/>
+            The Supreme Collective team<br/>
+            <a href="https://thesupremecollective.co.uk" style="color:#ff6667;text-decoration:underline;">thesupremecollective.co.uk</a>
             </p>
 
             <p style="margin:0;color:#666;font-size:12.5px;line-height:1.6;">
