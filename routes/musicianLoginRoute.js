@@ -605,6 +605,7 @@ async function runBulkInvite(opts = {}) {
     notifyEmail = "",
     sendPreviewToNotify = false,
   } = opts;
+  const MAX_INVITE_COUNT = 6; // cap: stop emailing after 6 sends
 
   const now = new Date();
   const TARGET_SEND = Math.min(Math.max(parseInt(limit, 10) || 120, 1), 500);
@@ -626,6 +627,15 @@ async function runBulkInvite(opts = {}) {
     status: { $in: ["approved", "Approved, changes pending"] },
     email: { $type: "string", $ne: "" },
   };
+  // ✅ Cap: stop emailing after MAX_INVITE_COUNT sends
+  q.$and = q.$and || [];
+  q.$and.push({
+    $or: [
+      { inviteCount: { $exists: false } },
+      { inviteCount: null },
+      { inviteCount: { $lt: MAX_INVITE_COUNT } },
+    ],
+  });
 
   // ✅ Batch cursor: only process users after this _id
   if (afterId && mongoose.Types.ObjectId.isValid(afterId)) {
@@ -706,6 +716,7 @@ async function runBulkInvite(opts = {}) {
     nudgedLogin: 0,
     skippedNoEmail: 0,
     skippedCompleted: 0,
+    skippedInviteCap: 0,
     onlyNew: !!onlyNew,
     forceResend: !!forceResend,
     onlyVocalists: !!onlyVocalists,
@@ -765,6 +776,21 @@ async function runBulkInvite(opts = {}) {
 
       if (!includeCompleted && u.onboardingStatus === "completed") {
         report.skippedCompleted += 1;
+        continue;
+      }
+
+      // ✅ Cap: stop emailing after MAX_INVITE_COUNT sends
+      if (Number(u.inviteCount || 0) >= MAX_INVITE_COUNT) {
+        report.skippedInviteCap += 1;
+        report.items.push({
+          email,
+          needsSetPassword: false,
+          skipped: "invite_cap_reached",
+          onboardingStatus: u.onboardingStatus || null,
+          lastLoginAt: u.lastLoginAt || null,
+          lastInviteSentAt: u.lastInviteSentAt || null,
+          inviteCount: Number(u.inviteCount || 0),
+        });
         continue;
       }
 
