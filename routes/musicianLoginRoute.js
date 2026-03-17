@@ -80,6 +80,98 @@ async function sendEmail({ to, subject, html }) {
   });
 }
 
+// --- Bulk invite summary email helpers ---
+function redactEmail(e = "") {
+  const s = String(e || "");
+  const [u, d] = s.split("@");
+  if (!u || !d) return s;
+  const u2 = u.length <= 2 ? `${u.charAt(0)}*` : `${u.slice(0, 2)}***`;
+  return `${u2}@${d}`;
+}
+
+function escapeHtml(s = "") {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+async function sendBulkInviteRunSummaryEmail({
+  to,
+  runLabel,
+  isDryRun,
+  cursorBefore,
+  report,
+  extraNote,
+}) {
+  if (!to) return;
+
+  const items = Array.isArray(report?.items) ? report.items : [];
+  const sample = items.slice(0, 12);
+
+  const subject = `${isDryRun ? "[DRY RUN] " : ""}TSC Bulk Invite ${runLabel} report — matched ${report?.matched || 0}, emailed ${report?.emailed || 0}`;
+
+  const html = `
+    <div style="background:#f6f6f6;padding:24px 12px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+      <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #eee;border-radius:14px;padding:18px;">
+        <h2 style="margin:0 0 12px 0;font-size:18px;color:#111;">Bulk invite run summary</h2>
+        ${extraNote ? `<p style="margin:0 0 10px 0;color:#333;font-size:14px;">${escapeHtml(extraNote)}</p>` : ""}
+
+        <div style="background:#fafafa;border:1px solid #eee;border-radius:12px;padding:12px;margin:0 0 12px 0;">
+          <p style="margin:0 0 6px 0;color:#111;font-size:14px;"><strong>Run</strong>: ${escapeHtml(runLabel)} ${isDryRun ? "(dry run)" : ""}</p>
+          <p style="margin:0 0 6px 0;color:#111;font-size:14px;"><strong>Matched</strong>: ${report?.matched || 0}</p>
+          <p style="margin:0 0 6px 0;color:#111;font-size:14px;"><strong>Emailed</strong>: ${report?.emailed || 0}</p>
+          <p style="margin:0 0 6px 0;color:#111;font-size:14px;"><strong>Invited (set password)</strong>: ${report?.invitedSetPassword || 0}</p>
+          <p style="margin:0 0 6px 0;color:#111;font-size:14px;"><strong>Nudged (login)</strong>: ${report?.nudgedLogin || 0}</p>
+          <p style="margin:0 0 6px 0;color:#111;font-size:14px;"><strong>Skipped already has password</strong>: ${report?.skippedAlreadyHasPassword || 0}</p>
+          <p style="margin:0 0 0 0;color:#111;font-size:14px;"><strong>Next cursor</strong>: ${escapeHtml(report?.nextAfterId || "(none)")}</p>
+        </div>
+
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#111;">Sample of processed rows (first ${sample.length})</h3>
+        <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:12.5px;">
+          <thead>
+            <tr>
+              <th align="left" style="border-bottom:1px solid #eee;padding:8px 6px;color:#555;">Email</th>
+              <th align="left" style="border-bottom:1px solid #eee;padding:8px 6px;color:#555;">Action</th>
+              <th align="left" style="border-bottom:1px solid #eee;padding:8px 6px;color:#555;">Skipped reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sample
+              .map(
+                (x) => `
+                  <tr>
+                    <td style="border-bottom:1px solid #f2f2f2;padding:7px 6px;color:#111;">${escapeHtml(redactEmail(x.email))}</td>
+                    <td style="border-bottom:1px solid #f2f2f2;padding:7px 6px;color:#111;">${escapeHtml(x.action || "-")}</td>
+                    <td style="border-bottom:1px solid #f2f2f2;padding:7px 6px;color:#111;">${escapeHtml(x.skipped || "-")}</td>
+                  </tr>
+                `
+              )
+              .join("")}
+          </tbody>
+        </table>
+
+        <details style="margin-top:12px;">
+          <summary style="cursor:pointer;color:#ff6667;font-weight:700;">Raw JSON (cursor + report)</summary>
+          <pre style="white-space:pre-wrap;background:#0b1020;color:#e6e6e6;padding:12px;border-radius:10px;overflow:auto;">${escapeHtml(
+            JSON.stringify({ cursorBefore: cursorBefore || null, report }, null, 2)
+          )}</pre>
+        </details>
+
+        <p style="margin:12px 0 0 0;color:#777;font-size:12px;">Sent automatically by The Supreme Collective backend.</p>
+      </div>
+    </div>
+  `;
+
+  try {
+    await sendEmail({ to, subject, html });
+  } catch (e) {
+    console.warn("[bulk-invite] failed to send summary email:", e?.message || e);
+  }
+}
+
 // Existing routes
 musicianLoginRouter.post("/register", registerMusician);
 
@@ -807,6 +899,20 @@ async function runBulkInvite(opts = {}) {
 musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
   try {
     const report = await runBulkInvite({ ...req.body, runLabel: "manual" });
+    // Send summary email if requested (even for dry runs)
+    const notifyEmail = String(req.body?.notifyEmail || "").trim();
+    if (notifyEmail) {
+      await sendBulkInviteRunSummaryEmail({
+        to: notifyEmail,
+        runLabel: "manual",
+        isDryRun: !!req.body?.dryRun,
+        cursorBefore: null,
+        report,
+        extraNote: req.body?.dryRun
+          ? "Manual dry run: no invites were sent."
+          : "Manual run: invites may have been sent.",
+      });
+    }
     return res.json(report);
   } catch (err) {
     console.error("[bulk-invite] error:", err);
@@ -825,6 +931,14 @@ musicianLoginRouter.post("/bulk-invite-cron", requireCronSecret, async (req, res
       ? String(cursor.afterId)
       : null;
 
+    const notifyEmail = String(
+      req.body?.notifyEmail || process.env.INVITE_CRON_NOTIFY_EMAIL || ""
+    ).trim();
+
+    // Allow dryRun for testing: cron secret still required.
+    // IMPORTANT: dryRun does NOT advance the cursor.
+    const isDryRun = req.body?.dryRun === true;
+
     // Phase plan: first N runs send small batches, then ramp up.
     const phase1Runs = Number(process.env.INVITE_CRON_PHASE1_RUNS || 5);
     const phase1Limit = Number(process.env.INVITE_CRON_PHASE1_LIMIT || 5);
@@ -832,11 +946,13 @@ musicianLoginRouter.post("/bulk-invite-cron", requireCronSecret, async (req, res
 
     const limit = runs < phase1Runs ? phase1Limit : phase2Limit;
 
-    console.log(`🕒 [bulk-invite][cron] run #${runs + 1} afterId=${afterId || "(none)"} limit=${limit}`);
+    console.log(
+      `🕒 [bulk-invite][cron] run #${runs + 1} afterId=${afterId || "(none)"} limit=${limit} dryRun=${isDryRun}`
+    );
 
     const report = await runBulkInvite({
       limit,
-      dryRun: false,
+      dryRun: isDryRun,
       includeCompleted: false,
       onlyVocalists: false,
       forceResend: false,
@@ -846,19 +962,35 @@ musicianLoginRouter.post("/bulk-invite-cron", requireCronSecret, async (req, res
       runLabel: `cron_${runs + 1}`,
     });
 
-    await setInviteCursor({
-      runs: runs + 1,
-      afterId: report.nextAfterId || afterId || null,
-      lastReport: {
-        matched: report.matched,
-        emailed: report.emailed,
-        invitedSetPassword: report.invitedSetPassword,
-        nudgedLogin: report.nudgedLogin,
-        nextAfterId: report.nextAfterId,
-        finished: report.matched === 0,
-      },
-      lastRunAt: new Date(),
-    });
+    if (!isDryRun) {
+      await setInviteCursor({
+        runs: runs + 1,
+        afterId: report.nextAfterId || afterId || null,
+        lastReport: {
+          matched: report.matched,
+          emailed: report.emailed,
+          invitedSetPassword: report.invitedSetPassword,
+          nudgedLogin: report.nudgedLogin,
+          nextAfterId: report.nextAfterId,
+          finished: report.matched === 0,
+        },
+        lastRunAt: new Date(),
+      });
+    }
+
+    // ✅ Always send a summary email to you when requested (even during dryRun)
+    if (notifyEmail) {
+      await sendBulkInviteRunSummaryEmail({
+        to: notifyEmail,
+        runLabel: `cron_${runs + 1}`,
+        isDryRun,
+        cursorBefore: cursor || null,
+        report,
+        extraNote: isDryRun
+          ? "Dry run: no invites were sent and the cursor was NOT advanced."
+          : "Live run: invites were sent and the cursor was advanced.",
+      });
+    }
 
     return res.json({ success: true, cursorBefore: cursor || null, report });
   } catch (err) {
