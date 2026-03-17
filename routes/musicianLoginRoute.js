@@ -106,7 +106,7 @@ async function sendBulkInviteRunSummaryEmail({
   report,
   extraNote,
 }) {
-  if (!to) return;
+  if (!to) return { sent: false, skipped: true, error: "no_to" };
 
   const items = Array.isArray(report?.items) ? report.items : [];
   const sample = items.slice(0, 12);
@@ -167,8 +167,10 @@ async function sendBulkInviteRunSummaryEmail({
 
   try {
     await sendEmail({ to, subject, html });
+    return { sent: true, skipped: false };
   } catch (e) {
     console.warn("[bulk-invite] failed to send summary email:", e?.message || e);
+    return { sent: false, skipped: false, error: String(e?.message || e) };
   }
 }
 
@@ -901,8 +903,9 @@ musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
     const report = await runBulkInvite({ ...req.body, runLabel: "manual" });
     // Send summary email if requested (even for dry runs)
     const notifyEmail = String(req.body?.notifyEmail || "").trim();
+    let notify = null;
     if (notifyEmail) {
-      await sendBulkInviteRunSummaryEmail({
+      notify = await sendBulkInviteRunSummaryEmail({
         to: notifyEmail,
         runLabel: "manual",
         isDryRun: !!req.body?.dryRun,
@@ -913,7 +916,7 @@ musicianLoginRouter.post("/bulk-invite", requireAdminAuth, async (req, res) => {
           : "Manual run: invites may have been sent.",
       });
     }
-    return res.json(report);
+    return res.json({ ...report, notifyEmail: notifyEmail || null, notify });
   } catch (err) {
     console.error("[bulk-invite] error:", err);
     return res.status(500).json({ success: false, message: "Bulk invite failed." });
@@ -979,8 +982,9 @@ musicianLoginRouter.post("/bulk-invite-cron", requireCronSecret, async (req, res
     }
 
     // ✅ Always send a summary email to you when requested (even during dryRun)
+    let notify = null;
     if (notifyEmail) {
-      await sendBulkInviteRunSummaryEmail({
+      notify = await sendBulkInviteRunSummaryEmail({
         to: notifyEmail,
         runLabel: `cron_${runs + 1}`,
         isDryRun,
@@ -992,7 +996,7 @@ musicianLoginRouter.post("/bulk-invite-cron", requireCronSecret, async (req, res
       });
     }
 
-    return res.json({ success: true, cursorBefore: cursor || null, report });
+    return res.json({ success: true, cursorBefore: cursor || null, report, notifyEmail: notifyEmail || null, notify });
   } catch (err) {
     console.error("[bulk-invite-cron] error:", err);
     return res.status(500).json({ success: false, message: "Cron bulk invite failed." });
