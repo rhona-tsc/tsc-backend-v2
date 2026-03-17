@@ -22,6 +22,8 @@ const FROM_NAME = String(
 ).trim();
 const FROM_HEADER = FROM_NAME ? `${FROM_NAME} <${FROM_EMAIL}>` : FROM_EMAIL;
 const REPLY_TO = String(process.env.SMTP_REPLY_TO || FROM_EMAIL).trim();
+// Max number of invite/reminder emails we will send to a musician before stopping.
+const MAX_INVITE_COUNT = Number(process.env.INVITE_MAX_COUNT || 6);
 
 function sha256(input) {
   return crypto.createHash("sha256").update(input).digest("hex");
@@ -126,6 +128,7 @@ async function sendBulkInviteRunSummaryEmail({
           <p style="margin:0 0 6px 0;color:#111;font-size:14px;"><strong>Invited (set password)</strong>: ${report?.invitedSetPassword || 0}</p>
           <p style="margin:0 0 6px 0;color:#111;font-size:14px;"><strong>Nudged (login)</strong>: ${report?.nudgedLogin || 0}</p>
           <p style="margin:0 0 6px 0;color:#111;font-size:14px;"><strong>Skipped already has password</strong>: ${report?.skippedAlreadyHasPassword || 0}</p>
+          <p style="margin:0 0 6px 0;color:#111;font-size:14px;"><strong>Skipped invite cap reached</strong>: ${report?.skippedInviteCap || 0}</p>
           <p style="margin:0 0 0 0;color:#111;font-size:14px;"><strong>Next cursor</strong>: ${escapeHtml(report?.nextAfterId || "(none)")}</p>
         </div>
 
@@ -273,6 +276,13 @@ musicianLoginRouter.post("/invite", requireAdminAuth, async (req, res) => {
         .status(404)
         .json({ success: false, message: "User not found" });
 
+    if (Number(user.inviteCount || 0) >= MAX_INVITE_COUNT) {
+      return res.status(409).json({
+        success: false,
+        message: `Invite cap reached (${MAX_INVITE_COUNT}). Not sending further emails.`,
+      });
+    }
+
     const rawToken = crypto.randomBytes(32).toString("hex");
     user.inviteTokenHash = sha256(rawToken);
     user.inviteTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
@@ -281,25 +291,27 @@ musicianLoginRouter.post("/invite", requireAdminAuth, async (req, res) => {
     if (!user.onboardingInvitedAt) user.onboardingInvitedAt = new Date();
 
     user.mustChangePassword = true;
+    user.lastInviteSentAt = new Date();
+    user.inviteCount = Number(user.inviteCount || 0) + 1;
     await user.save();
 
     const link = `${FRONTEND_URL}/set-password?token=${rawToken}&email=${encodeURIComponent(
       user.email
     )}`;
 
-  const LOGO_URL =
-  process.env.PORTAL_EMAIL_LOGO_URL ||
-  "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1770227002/TSC_email_logo_e6o5m5.png"; // <- replace or set env
+    const LOGO_URL =
+      process.env.PORTAL_EMAIL_LOGO_URL ||
+      "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1770227002/TSC_email_logo_e6o5m5.png"; // <- replace or set env
 
-const safeName =
-  (user.firstName || user.lastName)
-    ? `${user.firstName || ""} ${user.lastName || ""}`.trim()
-    : "";
+    const safeName =
+      (user.firstName || user.lastName)
+        ? `${user.firstName || ""} ${user.lastName || ""}`.trim()
+        : "";
 
-await sendEmail({
-  to: user.email,
-  subject: "Your Supreme Collective Portal Access",
-  html: `
+    await sendEmail({
+      to: user.email,
+      subject: "Your Supreme Collective Portal Access",
+      html: `
   <div style="background:#f6f6f6;padding:32px 12px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="width:100%;max-width:640px;">
       <tr>
@@ -309,7 +321,7 @@ await sendEmail({
   alt="The Supreme Collective"
   width="520"
   style="width:100%;max-width:520px;height:auto;display:block;margin:0 auto;"
-/>        </td>
+/></td>
       </tr>
 
       <tr>
@@ -363,7 +375,7 @@ style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:non
     </table>
   </div>
   `,
-});
+    });
 
     res.json({ success: true });
   } catch (err) {
@@ -605,7 +617,6 @@ async function runBulkInvite(opts = {}) {
     notifyEmail = "",
     sendPreviewToNotify = false,
   } = opts;
-  const MAX_INVITE_COUNT = 6; // cap: stop emailing after 6 sends
 
   const now = new Date();
   const TARGET_SEND = Math.min(Math.max(parseInt(limit, 10) || 120, 1), 500);
