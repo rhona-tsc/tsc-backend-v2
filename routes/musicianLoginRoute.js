@@ -842,8 +842,8 @@ async function runBulkInvite(opts = {}) {
       }
 
       const name =
-        u.firstName || u.lastName
-          ? `${u.firstName || ""} ${u.lastName || ""}`.trim()
+        u.firstName 
+          ? `${u.firstName || ""} `.trim()
           : "";
       const greeting = name ? `Hi ${name},` : "Hi there,";
 
@@ -869,7 +869,7 @@ async function runBulkInvite(opts = {}) {
               <p style="margin:0 0 12px 0;color:#111;font-size:15px;line-height:1.6;">${greeting}</p>
 
               <p style="margin:0 0 12px 0;color:#333;font-size:14.5px;line-height:1.7;">
-                You’ve been invited to set up your <strong>Supreme Collective musician profile</strong>.
+                Our Supreme Collective portal is live! And you’ve been invited to set up your <strong>Supreme Collective musician profile</strong>.
               </p>
 
               <p style="margin:0 0 12px 0;color:#333;font-size:14.5px;line-height:1.7;">
