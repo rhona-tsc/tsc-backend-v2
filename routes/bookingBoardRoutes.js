@@ -1,6 +1,7 @@
 import express from "express";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import Booking from "../models/bookingModel.js";
+import actModel from "../models/actModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 
 const router = express.Router();
@@ -355,7 +356,7 @@ const choosePreferredRow = (current, incoming) => {
   return mergeRowData(current, incoming);
 };
 
-const normalizeBookingToBoardRow = (booking) => {
+const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
   const doc = booking?.toObject ? booking.toObject() : booking;
   if (!doc) return null;
 
@@ -382,6 +383,9 @@ const normalizeBookingToBoardRow = (booking) => {
 
   const safeDeposit = depositValue > 0 ? depositValue : calcDepositFromGross(grossValue);
   const actSummary = Array.isArray(doc?.actsSummary) && doc.actsSummary.length ? doc.actsSummary[0] : null;
+  const actId = actSummary?.actId || doc?.act || "";
+  const actLookupKey = String(actId || "");
+  const linkedAct = actLookup.get(actLookupKey) || null;
   const clientFirstNames = [doc?.userAddress?.firstName, doc?.userAddress?.lastName]
     .filter(Boolean)
     .join(" ")
@@ -463,12 +467,22 @@ const normalizeBookingToBoardRow = (booking) => {
     venue: doc?.venue || "",
     venueAddress: doc?.venueAddress || "",
     actOwnerMusicianId: doc?.actOwnerMusicianId || "",
-    actId: actSummary?.actId || doc?.act || "",
+    actId,
     actsSummary: Array.isArray(doc?.actsSummary) ? doc.actsSummary : [],
     performanceTimes: doc?.performanceTimes || actSummary?.performance || {},
     contractUrl: doc?.contractUrl || "",
     pdfUrl: doc?.pdfUrl || "",
     contract: doc?.contract || null,
+    actData: linkedAct
+      ? {
+          _id: linkedAct?._id,
+          name: linkedAct?.name || "",
+          tscName: linkedAct?.tscName || "",
+          extras: linkedAct?.extras || {},
+          paSystem: linkedAct?.paSystem || null,
+          lightingSystem: linkedAct?.lightingSystem || null,
+        }
+      : null,
     createdAt: doc?.createdAt,
     updatedAt: doc?.updatedAt,
   };
@@ -648,6 +662,27 @@ router.get("/", musicianAuth, async (req, res) => {
     const boardRowsRaw = await BookingBoardItem.find(boardQuery, proj).limit(Number(limit));
     const bookingDocs = await Booking.find(bookingQuery).limit(Number(limit));
 
+    const actIdsFromBookings = [...new Set(
+      bookingDocs
+        .map((booking) => {
+          const doc = booking?.toObject ? booking.toObject() : booking;
+          const firstAct = Array.isArray(doc?.actsSummary) && doc.actsSummary.length ? doc.actsSummary[0] : null;
+          return String(firstAct?.actId || doc?.act || "").trim();
+        })
+        .filter(Boolean)
+    )];
+
+    const acts = actIdsFromBookings.length
+      ? await actModel
+          .find({ _id: { $in: actIdsFromBookings } })
+          .select("_id name tscName extras paSystem lightingSystem")
+          .lean()
+      : [];
+
+    const actLookup = new Map(
+      acts.map((act) => [String(act?._id || ""), act])
+    );
+
     const dedupeMap = new Map();
 
     for (const row of boardRowsRaw) {
@@ -658,7 +693,7 @@ router.get("/", musicianAuth, async (req, res) => {
     }
 
     for (const booking of bookingDocs) {
-      const normalized = normalizeBookingToBoardRow(booking);
+      const normalized = normalizeBookingToBoardRow(booking, actLookup);
       if (!normalized) continue;
       const key = getCanonicalBookingKey(normalized);
       const existing = dedupeMap.get(key);
@@ -790,7 +825,21 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       }
 
       const savedBooking = await applyBookingPatch(bookingDoc, body);
-      const normalized = normalizeBookingToBoardRow(savedBooking);
+      const savedBookingDoc = savedBooking?.toObject ? savedBooking.toObject() : savedBooking;
+      const firstAct = Array.isArray(savedBookingDoc?.actsSummary) && savedBookingDoc.actsSummary.length
+        ? savedBookingDoc.actsSummary[0]
+        : null;
+      const savedActId = String(firstAct?.actId || savedBookingDoc?.act || "").trim();
+      const savedAct = savedActId
+        ? await actModel
+            .findById(savedActId)
+            .select("_id name tscName extras paSystem lightingSystem")
+            .lean()
+        : null;
+      const normalized = normalizeBookingToBoardRow(
+        savedBooking,
+        new Map(savedAct ? [[String(savedAct._id), savedAct]] : [])
+      );
 
       const mirrorPatch = {
         updatedAt: new Date(),
