@@ -1,14 +1,66 @@
 // models/bookingModel.js
 import mongoose from "mongoose";
 
+const ExtraPayoutAllocationSchema = new mongoose.Schema(
+  {
+    musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "musician" },
+    name: String,
+    role: String,
+    amount: { type: Number, default: 0 }, // net £ owed to this musician for this extra
+    minutes: { type: Number, default: 0 },
+    isLateStayMember: { type: Boolean, default: false },
+    isPaLateStayMember: { type: Boolean, default: false },
+    isPaHireMember: { type: Boolean, default: false },
+    notes: String,
+  },
+  { _id: false }
+);
+
 const ExtraSchema = new mongoose.Schema(
   {
     key: String,
     name: String,
     quantity: { type: Number, default: 1 },
-    price: { type: Number, default: 0 }, // gross £ you charge
+    price: { type: Number, default: 0 }, // gross £ charged to client
     finishTime: String,
     arrivalTime: String,
+
+    // Optional categorisation for admin / payout logic
+    category: String, // e.g. "pa_hire", "late_stay", "dj", "early_arrival"
+
+    // How this extra was priced
+    pricingMode: {
+      type: String,
+      enum: ["flat", "per_band_member", "per_specific_members", "manual"],
+      default: "flat",
+    },
+
+    // Store underlying calculation inputs for audit / recomputation
+    unitNetPrice: { type: Number, default: 0 },   // e.g. £50 per member per 60 mins
+    unitGrossPrice: { type: Number, default: 0 },
+    unitMinutes: { type: Number, default: 0 },    // e.g. 60
+    appliedMinutes: { type: Number, default: 0 }, // e.g. 90
+    billableMemberCount: { type: Number, default: 0 },
+    marginMultiplier: { type: Number, default: 1 }, // e.g. 1.33
+
+    // Explicit payout mapping for extras
+    payoutAllocations: { type: [ExtraPayoutAllocationSchema], default: [] },
+
+    // Convenience metadata
+    payoutRoleFilter: [String], // e.g. ["Sound Engineering", "PA / Lights"]
+    payoutMemberIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "musician" }],
+    payoutMemberNames: [String],
+
+    // Specific support for PA/lights staying later than the band
+    paLateStay: {
+      enabled: { type: Boolean, default: false },
+      onlySpecificMembers: { type: Boolean, default: false },
+      memberCount: { type: Number, default: 0 },
+      memberIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "musician" }],
+      memberNames: [String],
+      additionalMinutesBeyondBand: { type: Number, default: 0 },
+      basedOnExtraKey: String, // e.g. "late_stay_60min_per_band_member"
+    },
   },
   { _id: false }
 );
@@ -20,13 +72,15 @@ const PerformanceSchema = new mongoose.Schema(
     startTime: String, // "HH:MM"
     finishTime: String, // "HH:MM"
     finishDayOffset: { type: Number, default: 0 },
-// selected performance plan (evening set configuration)
-   planIndex: { type: Number },
-   plan: {
-     sets: { type: Number },
-     length: { type: Number },
-     minInterval: { type: Number },
-   },
+
+    // selected performance plan (evening set configuration)
+    planIndex: { type: Number },
+    plan: {
+      sets: { type: Number },
+      length: { type: Number },
+      minInterval: { type: Number },
+    },
+
     paLightsFinishTime: String,
     paLightsFinishDayOffset: { type: Number, default: 0 },
   },
@@ -115,9 +169,9 @@ const ActSummarySchema = new mongoose.Schema(
       { musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician" } },
     ],
 
-    // ✅ ADD THESE (so contracts can display full lineup)
-    bandMembers: { type: [mongoose.Schema.Types.Mixed], default: [] }, // flat list used by EJS
-    lineup: { type: mongoose.Schema.Types.Mixed, default: null },      // optional snapshot object
+    // full lineup snapshot
+    bandMembers: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    lineup: { type: mongoose.Schema.Types.Mixed, default: null },
 
     quantity: { type: Number, default: 1 },
     prices: {
@@ -150,22 +204,39 @@ const EventSheetSchema = new mongoose.Schema(
     submitted: { type: Boolean, default: false },
     updatedAt: { type: Date, default: Date.now },
     emergencyContact: {
-      number: String, // public proxy DID or IVR number
+      number: String,
       ivrCode: String,
       note: {
         type: String,
         default:
           "Emergency contact active from 5pm the day before and on the event day.",
       },
-      activeWindowSummary: String, // e.g. "Fri 5pm → Sun 2am"
+      activeWindowSummary: String,
     },
+  },
+  { _id: false }
+);
+
+const PaymentExtraBreakdownSchema = new mongoose.Schema(
+  {
+    key: String,
+    name: String,
+    category: String,
+    amount: { type: Number, default: 0 }, // net £ for this musician
+    minutes: { type: Number, default: 0 },
+    pricingMode: String,
+    sourceExtraPrice: { type: Number, default: 0 }, // gross extra price on booking
+    isLateStay: { type: Boolean, default: false },
+    isPaLateStay: { type: Boolean, default: false },
+    isPaHire: { type: Boolean, default: false },
   },
   { _id: false }
 );
 
 const BookingSchema = new mongoose.Schema(
   {
-    bookingId: { type: String, required: true},
+    bookingId: { type: String, required: true },
+
     // User
     userId: { type: String, index: true },
     userEmail: { type: String, index: true },
@@ -173,83 +244,95 @@ const BookingSchema = new mongoose.Schema(
     // Stripe
     sessionId: { type: String },
     amount: { type: Number, default: 0 }, // last Stripe charge (major £)
-    // Success page → contract step stores the PDF here:
     pdfUrl: { type: String },
 
-    // Google Calendar mirror (set when we update/create a calendar event)
+    // Google Calendar mirror
     calendarEventId: { type: String },
 
     // Core details
-    act: { type: String}, // primary act id (string is fine)
-    lineupId: { type: String }, // chosen lineup id
-    bandLineup: [{ type: mongoose.Schema.Types.ObjectId, ref: "musician" }], // confirmed players
-    venue: { type: String }, // short venue name
-    venueAddress: { type: String }, // full address (existing)
+    act: { type: String },
+    lineupId: { type: String },
+    bandLineup: [{ type: mongoose.Schema.Types.ObjectId, ref: "musician" }],
+    venue: { type: String },
+    venueAddress: { type: String },
     eventType: { type: String },
-    date: { type: Date, default: Date.now }, // event date (existing)
-    fee: { type: Number, default: 0 }, // manual/legacy fee
-    agent: { type: String }, // e.g. "TSC Direct", partner name
+    date: { type: Date, default: Date.now },
+    fee: { type: Number, default: 0 },
+    agent: { type: String },
 
-    actsSummary: [ActSummarySchema], // (existing, used by pricing/board)
-performanceTimes: PerformanceSchema, 
+    actsSummary: [ActSummarySchema],
+    performanceTimes: PerformanceSchema,
+
     // Customer
     userAddress: mongoose.Schema.Types.Mixed,
     signatureUrl: { type: String },
 
-    // Totals (Stripe-facing)
+    // Totals
     totals: {
       fullAmount: { type: Number, default: 0 }, // gross £
-      depositAmount: { type: Number, default: 0 }, // suggested deposit £
-      chargedAmount: { type: Number, default: 0 }, // what Stripe actually charged
+      depositAmount: { type: Number, default: 0 },
+      chargedAmount: { type: Number, default: 0 },
       chargeMode: { type: String, enum: ["deposit", "full", ""], default: "" },
       isLessThanFourWeeks: { type: Boolean, default: false },
       currency: { type: String, default: "GBP" },
     },
 
-    // Cart metadata (unchanged)
+    // Cart metadata
     cartMeta: {
       selectedAddress: String,
       selectedDate: String,
       currency: { type: String, default: "GBP" },
     },
 
-    // Payment method/status (unchanged)
+    // Payment method/status
     paymentMethod: { type: String },
     payment: { type: Boolean, default: false },
 
     // Admin/board balance status
-    balanceInvoiceUrl: { type: String }, // Stripe hosted invoice for balance
-    balancePaid: { type: Boolean, default: false }, // for the “Paid” pill on the board
+    balanceInvoiceUrl: { type: String },
+    balancePaid: { type: Boolean, default: false },
     status: { type: String, required: true, default: "pending" },
-    balanceDueAt: { type: Date }, // when the balance is due (14 days pre-event)
-    balanceAmountPence: { type: Number }, // remaining balance (in pence)
+    balanceDueAt: { type: Date },
+    balanceAmountPence: { type: Number },
     balanceStatus: {
       type: String,
       enum: ["scheduled", "sent", "paid", "overdue", "cancelled"],
       default: undefined,
     },
-    stripeInvoiceId: { type: String }, // optional Stripe invoice id for the balance
-    balanceInvoiceId: { type: String }, // internal id if you later add an Invoice collection
+    stripeInvoiceId: { type: String },
+    balanceInvoiceId: { type: String },
 
-    // Per-musician payouts (existing)
+    // Per-musician payouts
     payments: [
       {
         musician: { type: mongoose.Schema.Types.ObjectId, ref: "musician" },
         performanceFee: Number,
         travelFee: Number,
+        extrasFee: { type: Number, default: 0 }, // summed net extras owed to this musician
+        extrasBreakdown: {
+          type: [PaymentExtraBreakdownSchema],
+          default: [],
+        },
         isPaid: { type: Boolean, default: false },
         paidAt: Date,
       },
     ],
+
+    paymentComputation: {
+      extrasLastCalculatedAt: Date,
+      extrasCalculationVersion: String,
+      notes: String,
+    },
+
     bandPaymentsSent: { type: Boolean, default: false },
 
-    // Emergency contact routing for this booking (existing)
+    // Emergency contact routing
     contactRouting: ProxyContactSchema,
 
-    // Event sheet (existing)
+    // Event sheet
     eventSheet: EventSheetSchema,
 
-    // Manual booking helpers (used by manualCreateBooking route)
+    // Manual booking helpers
     lineup: mongoose.Schema.Types.Mixed,
     eventDate: { type: Date },
     clientName: { type: String },
@@ -273,7 +356,6 @@ BookingSchema.index(
 // in bookingModel.js, after schema definition
 BookingSchema.pre("validate", function (next) {
   if (!this.bookingId) {
-    // lazy import to avoid circular dep; or duplicate tiny helper here
     const last = this.clientName || this.userAddress?.lastName || "CLIENT";
     const d = this.date || this.eventDate || new Date();
     const yy = String(d.getFullYear()).slice(-2);
@@ -293,13 +375,13 @@ BookingSchema.index({ "contactRouting.ivrCode": 1 }, { sparse: true });
 // Bookings by musician payouts
 BookingSchema.index({ "payments.musician": 1 });
 
-// Bookings by event date (for month charts)
+// Bookings by event date
 BookingSchema.index({ date: 1 });
 
 // Bookings by status
 BookingSchema.index({ status: 1 });
 
-// Bookings by act (for act-specific metrics)
+// Bookings by act
 BookingSchema.index({ act: 1 });
 
 const Booking =
