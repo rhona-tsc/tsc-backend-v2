@@ -864,19 +864,18 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         contractUrl: savedBooking?.contractUrl || "",
       };
 
-      await BookingBoardItem.updateMany(
-        {
-          $or: [
-            { sourceBookingId: savedBooking._id },
-            { bookingId: savedBooking.bookingId },
-            { bookingRef: savedBooking.bookingId },
-            ...(savedBooking.sessionId
-              ? [{ sessionId: savedBooking.sessionId }]
-              : []),
-          ],
-        },
-        { $set: mirrorPatch }
-      );
+    await BookingBoardItem.updateMany(
+  {
+    $or: [
+      { sourceBookingId: savedBooking._id },
+      { bookingRef: savedBooking.bookingId },
+      ...(savedBooking.sessionId
+        ? [{ sessionId: savedBooking.sessionId }]
+        : []),
+    ],
+  },
+  { $set: mirrorPatch }
+);
 
       return res.json({
         success: true,
