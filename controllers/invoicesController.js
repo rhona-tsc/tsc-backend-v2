@@ -14,8 +14,8 @@ export const getOrCreateBalanceLink = async (req, res) => {
     const charged = Number(booking?.totals?.chargedAmount || 0);
     const explicit = Number(booking?.balanceAmountPence ?? NaN);
 
-    // Always prefer the latest totals-based calculation so extras / manual updates
-    // on the booking board are reflected in the balance link.
+    // Always calculate from the latest booking totals first so booking-board
+    // updates (extras, manual adjustments, etc.) are reflected immediately.
     const totalsBasedRemainingPence = Math.max(
       0,
       Math.round((full - charged) * 100)
@@ -39,10 +39,16 @@ export const getOrCreateBalanceLink = async (req, res) => {
     const existingAmountMatches =
       Number(booking?.balanceAmountPence || 0) === remainingPence;
 
-    // If the booking total has changed since the last link was created,
-    // do not reuse the old hosted URL.
+    // If the amount still matches, we can safely reuse the existing link.
     if (booking.balanceInvoiceUrl && existingAmountMatches) {
       return res.json({ success: true, url: booking.balanceInvoiceUrl });
+    }
+
+    // If the amount has changed, clear the stale hosted checkout reference so
+    // the user is always sent to a checkout for the latest balance amount.
+    if (!existingAmountMatches) {
+      booking.balanceInvoiceUrl = "";
+      booking.balanceInvoiceId = "";
     }
 
     const origin = getOrigin(req);
