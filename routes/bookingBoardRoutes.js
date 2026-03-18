@@ -33,6 +33,157 @@ const calcDepositFromGross = (grossValue) => {
   return n > 0 ? n : 0;
 };
 
+const isPlainObject = (value) => {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+};
+
+const mergeDeep = (target, source) => {
+  if (!isPlainObject(target) || !isPlainObject(source)) {
+    return source;
+  }
+
+  const out = { ...target };
+
+  for (const [key, value] of Object.entries(source)) {
+    if (Array.isArray(value)) {
+      out[key] = value;
+    } else if (isPlainObject(value) && isPlainObject(target[key])) {
+      out[key] = mergeDeep(target[key], value);
+    } else {
+      out[key] = value;
+    }
+  }
+
+  return out;
+};
+
+const sanitizeBookingPatch = (body = {}) => {
+  const patch = { ...body };
+
+  delete patch._id;
+  delete patch.createdAt;
+  delete patch.updatedAt;
+  delete patch.__v;
+  delete patch.sourceBookingId;
+  delete patch.boardRowId;
+  delete patch.bookingRef;
+  delete patch.sessionId;
+
+  if (patch.totals && isPlainObject(patch.totals)) {
+    patch.totals = {
+      ...patch.totals,
+      fullAmount: Number(patch.totals.fullAmount || 0) || 0,
+      depositAmount: Number(patch.totals.depositAmount || 0) || 0,
+      chargedAmount:
+        Number(
+          patch.totals.chargedAmount ??
+            patch.amount ??
+            patch.totals.depositAmount ??
+            0
+        ) || 0,
+    };
+  }
+
+  if (patch.amount != null) {
+    patch.amount = Number(patch.amount || 0) || 0;
+  }
+
+  if (patch.fee != null) {
+    patch.fee = Number(patch.fee || 0) || 0;
+  }
+
+  if (patch.balanceAmountPence != null) {
+    patch.balanceAmountPence = Number(patch.balanceAmountPence || 0) || 0;
+  }
+
+  if (patch.performanceTimes && isPlainObject(patch.performanceTimes)) {
+    patch.performanceTimes = { ...patch.performanceTimes };
+  }
+
+  if (patch.bookingDetails && isPlainObject(patch.bookingDetails)) {
+    patch.bookingDetails = { ...patch.bookingDetails };
+  }
+
+  if (Array.isArray(patch.actsSummary)) {
+    patch.actsSummary = patch.actsSummary.map((act) => ({ ...act }));
+  }
+
+  return patch;
+};
+
+const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
+  const patch = sanitizeBookingPatch(rawPatch);
+
+  if (patch.totals && isPlainObject(patch.totals)) {
+    bookingDoc.totals = mergeDeep(
+      bookingDoc.totals?.toObject ? bookingDoc.totals.toObject() : (bookingDoc.totals || {}),
+      patch.totals
+    );
+  }
+
+  if (patch.performanceTimes && isPlainObject(patch.performanceTimes)) {
+    bookingDoc.performanceTimes = mergeDeep(
+      bookingDoc.performanceTimes?.toObject
+        ? bookingDoc.performanceTimes.toObject()
+        : (bookingDoc.performanceTimes || {}),
+      patch.performanceTimes
+    );
+  }
+
+  if (patch.bookingDetails && isPlainObject(patch.bookingDetails)) {
+    bookingDoc.bookingDetails = mergeDeep(bookingDoc.bookingDetails || {}, patch.bookingDetails);
+  }
+
+  if (Array.isArray(patch.actsSummary)) {
+    bookingDoc.actsSummary = patch.actsSummary;
+  }
+
+  if (patch.notes !== undefined) {
+    bookingDoc.notes = patch.notes;
+  }
+
+  if (patch.amount !== undefined) {
+    bookingDoc.amount = patch.amount;
+  }
+
+  if (patch.fee !== undefined) {
+    bookingDoc.fee = patch.fee;
+  }
+
+  if (patch.balanceAmountPence !== undefined) {
+    bookingDoc.balanceAmountPence = patch.balanceAmountPence;
+  }
+
+  const gross =
+    Number(bookingDoc?.totals?.fullAmount ?? bookingDoc?.amount ?? bookingDoc?.fee ?? 0) || 0;
+
+  const deposit =
+    Number(bookingDoc?.totals?.depositAmount || 0) || 0;
+
+  const charged =
+    Number(bookingDoc?.totals?.chargedAmount ?? bookingDoc?.amount ?? deposit ?? 0) || 0;
+
+  const computedBalance = Math.max(0, gross - charged);
+
+  bookingDoc.totals = {
+    ...(bookingDoc.totals?.toObject ? bookingDoc.totals.toObject() : (bookingDoc.totals || {})),
+    fullAmount: gross,
+    depositAmount: deposit,
+    chargedAmount: charged,
+  };
+
+  bookingDoc.balanceAmountPence = Math.round(computedBalance * 100);
+
+  if (computedBalance > 0) {
+    bookingDoc.balancePaid = false;
+  } else {
+    bookingDoc.balancePaid = true;
+  }
+
+  await bookingDoc.save();
+  return bookingDoc;
+};
+
 const hasContractLink = (row) => {
   const url = row?.contractUrl || row?.pdfUrl || row?.contract?.url || row?.contract?.href || "";
   return Boolean(String(url || "").trim());
@@ -539,7 +690,19 @@ router.get("/", musicianAuth, async (req, res) => {
 
     res.json({
       success: true,
-      rows: rows.slice(0, Number(limit)),
+      rows: rows.slice(0, Number(limit)).map((row) => {
+  const rowId = row?._id?.toString ? row._id.toString() : row?._id;
+  const sourceBookingId = row?.sourceBookingId?.toString
+    ? row.sourceBookingId.toString()
+    : row?.sourceBookingId;
+
+  return {
+    ...row,
+    _id: sourceBookingId || rowId,
+    boardRowId: sourceBookingId ? rowId : null,
+    sourceBookingId: sourceBookingId || null,
+  };
+}),
       scopeLabel,
       debug: {
         isAdmin,
@@ -574,22 +737,123 @@ router.post("/", musicianAuth, async (req, res) => {
   }
 });
 
-// PATCH inline edits
 router.patch("/:id", musicianAuth, async (req, res) => {
   try {
-    const body = { ...req.body, updatedAt: new Date() };
-    if (!isTSCAdmin(req.user)) {
+    const rawBody = { ...req.body };
+    const body = { ...rawBody, updatedAt: new Date() };
+    const isAdmin = isTSCAdmin(req.user);
+
+    // Non-admins can only do lightweight row edits
+    if (!isAdmin) {
       delete body.grossValue;
       delete body.netCommission;
+      delete body.totals;
+      delete body.balanceAmountPence;
+      delete body.amount;
+      delete body.fee;
+      delete body.actsSummary;
+      delete body.performanceTimes;
+      delete body.bookingDetails;
     }
-    if (!isTSCAdmin(req.user)) {
-      const existingRow = await BookingBoardItem.findById(req.params.id).select("actOwnerMusicianId userEmail clientEmails").lean();
-      const reqMusicianId = toObjectIdString(req.user?.musicianId || req.user?._id || req.user?.id);
+
+    // First try: treat :id as a real Booking _id
+    const bookingDoc = await Booking.findById(req.params.id);
+
+    if (bookingDoc) {
+      if (!isAdmin) {
+        const reqMusicianId = toObjectIdString(
+          req.user?.musicianId || req.user?._id || req.user?.id
+        );
+        const reqEmail = String(req.user?.email || "").toLowerCase();
+
+        const bookingEmails = [
+          String(bookingDoc?.userEmail || "").toLowerCase(),
+          String(bookingDoc?.clientEmail || "").toLowerCase(),
+          String(bookingDoc?.userAddress?.email || "").toLowerCase(),
+        ].filter(Boolean);
+
+        const rowOwnerIds = [
+          toObjectIdString(bookingDoc?.actOwnerMusicianId),
+          toObjectIdString(bookingDoc?.userId),
+        ].filter(Boolean);
+
+        const canEditOwnBooking =
+          (reqMusicianId && rowOwnerIds.includes(reqMusicianId)) ||
+          (reqEmail && bookingEmails.includes(reqEmail));
+
+        if (!canEditOwnBooking) {
+          return res.status(403).json({
+            success: false,
+            message: "You can only edit bookings visible to your own account.",
+          });
+        }
+      }
+
+      const savedBooking = await applyBookingPatch(bookingDoc, body);
+      const normalized = normalizeBookingToBoardRow(savedBooking);
+
+      const mirrorPatch = {
+        updatedAt: new Date(),
+        grossValue:
+          Number(
+            savedBooking?.totals?.fullAmount ||
+              savedBooking?.amount ||
+              savedBooking?.fee ||
+              0
+          ) || 0,
+        bookingDetails:
+          normalized?.bookingDetails || savedBooking?.bookingDetails || {},
+        actsSummary: Array.isArray(savedBooking?.actsSummary)
+          ? savedBooking.actsSummary
+          : [],
+        performanceTimes: savedBooking?.performanceTimes || {},
+        balancePaid: Boolean(savedBooking?.balancePaid),
+        bandPaymentsSent: Boolean(savedBooking?.bandPaymentsSent),
+        finishTime: normalized?.finishTime || "",
+        arrivalTime: normalized?.arrivalTime || "",
+        pdfUrl: savedBooking?.pdfUrl || "",
+        contractUrl: savedBooking?.contractUrl || "",
+      };
+
+      await BookingBoardItem.updateMany(
+        {
+          $or: [
+            { sourceBookingId: savedBooking._id },
+            { bookingId: savedBooking.bookingId },
+            { bookingRef: savedBooking.bookingId },
+            ...(savedBooking.sessionId
+              ? [{ sessionId: savedBooking.sessionId }]
+              : []),
+          ],
+        },
+        { $set: mirrorPatch }
+      );
+
+      return res.json({
+        success: true,
+        row: normalized,
+        source: "booking",
+      });
+    }
+
+    // Fallback: plain manual BookingBoardItem row
+    if (!isAdmin) {
+      const existingRow = await BookingBoardItem.findById(req.params.id)
+        .select("actOwnerMusicianId userEmail clientEmails")
+        .lean();
+
+      const reqMusicianId = toObjectIdString(
+        req.user?.musicianId || req.user?._id || req.user?.id
+      );
       const reqEmail = String(req.user?.email || "").toLowerCase();
       const rowOwnerId = toObjectIdString(existingRow?.actOwnerMusicianId);
+
       const rowEmails = [
         String(existingRow?.userEmail || "").toLowerCase(),
-        ...((Array.isArray(existingRow?.clientEmails) ? existingRow.clientEmails : []).map((e) => String(e?.email || "").toLowerCase())),
+        ...((Array.isArray(existingRow?.clientEmails)
+          ? existingRow.clientEmails
+          : []
+        ).map((e) => String(e?.email || "").toLowerCase())),
       ].filter(Boolean);
 
       const canEditOwnRow =
@@ -597,17 +861,36 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         (reqEmail && rowEmails.includes(reqEmail));
 
       if (!canEditOwnRow) {
-        return res.status(403).json({ success: false, message: "You can only edit booking board rows visible to your own account." });
+        return res.status(403).json({
+          success: false,
+          message: "You can only edit booking board rows visible to your own account.",
+        });
       }
     }
+
     const row = await BookingBoardItem.findByIdAndUpdate(
       req.params.id,
       { $set: body },
       { new: true }
     );
-    res.json({ success: true, row });
+
+    if (!row) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking board row not found.",
+      });
+    }
+
+    return res.json({
+      success: true,
+      row,
+      source: "board",
+    });
   } catch (e) {
-    res.status(400).json({ success: false, message: e.message });
+    return res.status(400).json({
+      success: false,
+      message: e.message,
+    });
   }
 });
 
