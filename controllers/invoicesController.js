@@ -1,6 +1,8 @@
 export const getOrCreateBalanceLink = async (req, res) => {
   try {
     const { idOrRef } = req.params;
+    const refreshRequested = String(req.query?.refresh || "") === "1";
+    const expectedAmountPence = Number(req.query?.expectedAmountPence || 0);
 
     const booking = await Booking.findOne(
       looksLikeObjectId(idOrRef) ? { _id: idOrRef } : { bookingId: idOrRef }
@@ -14,39 +16,48 @@ export const getOrCreateBalanceLink = async (req, res) => {
     const charged = Number(booking?.totals?.chargedAmount || 0);
     const explicit = Number(booking?.balanceAmountPence ?? NaN);
 
-    // Always calculate from the latest booking totals first so booking-board
-    // updates (extras, manual adjustments, etc.) are reflected immediately.
+    // Always prefer the latest totals on the booking.
     const totalsBasedRemainingPence = Math.max(
       0,
       Math.round((full - charged) * 100)
     );
 
-    const remainingPence =
+    const calculatedRemainingPence =
       totalsBasedRemainingPence > 0
         ? totalsBasedRemainingPence
         : Number.isFinite(explicit) && explicit > 0
           ? explicit
           : 0;
 
+    // If the frontend knows the current expected amount, trust that when it is
+    // present so the checkout always matches the UI.
+    const remainingPence =
+      expectedAmountPence > 0 ? expectedAmountPence : calculatedRemainingPence;
+
     if (!remainingPence) {
       return res.status(400).json({ success: false, message: "No outstanding balance." });
-    }
-
-    if (booking.balancePaid === true || booking.balanceStatus === "paid") {
-      return res.status(400).json({ success: false, message: "Balance already paid." });
     }
 
     const existingAmountMatches =
       Number(booking?.balanceAmountPence || 0) === remainingPence;
 
-    // If the amount still matches, we can safely reuse the existing link.
-    if (booking.balanceInvoiceUrl && existingAmountMatches) {
+    // If the booking still has money outstanding, stale paid flags should not
+    // block a new invoice from being created.
+    if (remainingPence > 0 && (booking.balancePaid === true || booking.balanceStatus === "paid")) {
+      booking.balancePaid = false;
+      booking.balanceStatus = "sent";
+    }
+
+    // Reuse the existing hosted checkout only when:
+    // 1) the caller did not explicitly request a refresh, and
+    // 2) the amount still matches.
+    if (booking.balanceInvoiceUrl && existingAmountMatches && !refreshRequested) {
       return res.json({ success: true, url: booking.balanceInvoiceUrl });
     }
 
-    // If the amount has changed, clear the stale hosted checkout reference so
-    // the user is always sent to a checkout for the latest balance amount.
-    if (!existingAmountMatches) {
+    // Clear stale checkout references whenever the amount changed or the client
+    // explicitly asked for a refresh.
+    if (!existingAmountMatches || refreshRequested) {
       booking.balanceInvoiceUrl = "";
       booking.balanceInvoiceId = "";
     }

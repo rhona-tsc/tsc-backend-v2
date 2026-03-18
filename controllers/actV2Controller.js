@@ -889,22 +889,65 @@ end();
 export const updateActStatus = async (req, res) => {
   try {
     const { id, status } = req.body;
-    console.log("🔧 Updating act status:", id, status);
+    console.log("🔧 Updating act status:", { id, status, body: req.body });
 
-    const act = await actModel.findById(id);
-    if (!act) {
-      console.log("❌ Act not found:", id);
-      return res.status(404).json({ success: false, message: "Act not found" });
+    if (!id || !status) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing id or status",
+      });
     }
 
-    act.status = status;
-    await act.save();
+    const allowedStatuses = [
+      "pending",
+      "approved",
+      "rejected",
+      "live",
+      "draft",
+      "live_changes_pending",
+      "trashed",
+    ];
 
-    console.log("✅ Act status updated:", act.status);
-    res.status(200).json({ success: true, message: "Status updated", act });
+    if (!allowedStatuses.includes(String(status).trim().toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status: ${status}`,
+      });
+    }
+
+    const updatedAct = await actModel.findByIdAndUpdate(
+      id,
+      { $set: { status } },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedAct) {
+      console.log("❌ Act not found:", id);
+      return res.status(404).json({
+        success: false,
+        message: "Act not found",
+      });
+    }
+
+    console.log("✅ Act status updated:", updatedAct.status);
+
+    return res.status(200).json({
+      success: true,
+      message: "Status updated",
+      act: updatedAct,
+    });
   } catch (error) {
-    console.error("❌ Failed to update act status:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error("❌ Failed to update act status:", {
+      message: error?.message,
+      name: error?.name,
+      errors: error?.errors,
+      stack: error?.stack,
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Server error",
+    });
   }
 };
 
