@@ -2651,6 +2651,59 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       .lean();
   };
 
+  const findConfirmedBookingForMusician = async ({ musicianId, phone, dateISO }) => {
+  try {
+    if (!dateISO || (!musicianId && !phone)) return null;
+
+    const bookingDateStart = new Date(`${dateISO}T00:00:00.000Z`);
+    const bookingDateEnd = new Date(`${dateISO}T23:59:59.999Z`);
+
+    const bookings = await Booking.find({
+      status: "confirmed",
+      $or: [
+        { date: { $gte: bookingDateStart, $lte: bookingDateEnd } },
+        { eventDate: { $gte: bookingDateStart, $lte: bookingDateEnd } },
+      ],
+    })
+      .select("_id bookingId bandLineup actsSummary")
+      .lean();
+
+    for (const booking of bookings) {
+      const actsSummary = Array.isArray(booking?.actsSummary) ? booking.actsSummary : [];
+
+      const chosenMatches = actsSummary.some((summary) => {
+        const chosenList = Array.isArray(summary?.chosenVocalists)
+          ? summary.chosenVocalists
+          : [];
+        const selectedOne = summary?.selectedVocalist ? [summary.selectedVocalist] : [];
+        const combined = [...chosenList, ...selectedOne];
+
+        return combined.some((v) => {
+          const chosenId = String(v?.musicianId || v?._id || "");
+          const chosenPhone = normalizePhone(v?.phone || v?.phoneNumber || "");
+          return (
+            (musicianId && chosenId && String(musicianId) === chosenId) ||
+            (phone && chosenPhone && phone === chosenPhone)
+          );
+        });
+      });
+
+      const bandLineupMatches = Array.isArray(booking?.bandLineup)
+        ? booking.bandLineup.some((id) => musicianId && String(id) === String(musicianId))
+        : false;
+
+      if (chosenMatches || bandLineupMatches) {
+        return booking;
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.warn("⚠️ findConfirmedBookingForMusician failed:", err?.message || err);
+    return null;
+  }
+};
+
   try {
     const {
       actId,
@@ -2959,6 +3012,44 @@ try {
 }
 
 realMusicianId = musicianDoc?._id || null;
+
+const confirmedBooking = await findConfirmedBookingForMusician({
+  musicianId: realMusicianId,
+  phone,
+  dateISO,
+});
+
+if (confirmedBooking) {
+  console.log("🚫 Confirmed booking found (multi) — skip WA, escalate deputies", {
+    slotIndex: slotIndexForThis,
+    dateISO,
+    phone,
+    realMusicianId: String(realMusicianId || ""),
+    bookingId: confirmedBooking?.bookingId || String(confirmedBooking?._id || ""),
+  });
+
+  await notifyDeputies({
+    actId,
+    lineupId: lineupKey,
+    dateISO,
+    formattedAddress: fullFormattedAddress,
+    clientName: resolvedClientName || "",
+    clientEmail: resolvedClientEmail || "",
+    slotIndex: slotIndexForThis,
+    skipDuplicateCheck: true,
+    skipIfUnavailable: false,
+  });
+
+  results.push({
+    name: vMember.firstName,
+    slotIndex: slotIndexForThis,
+    phone,
+    reusedExisting: true,
+    existingReply: "booked (booking db)",
+  });
+
+  continue;
+}
 
         // ✅ ACTIVE-REQUEST GUARD (per unique slot) — prevents accidental re-sends
         if (!skipDuplicateCheck) {
@@ -3371,6 +3462,50 @@ if (!canonical) {
 
 // ✅ Resolve a real musicianId (never fall back to bandMemberId)
 const realMusicianId = canonical?._id || targetMember?.musicianId || null;
+
+const confirmedBooking = !isDeputy
+  ? await findConfirmedBookingForMusician({
+      musicianId: realMusicianId,
+      phone,
+      dateISO,
+    })
+  : null;
+
+if (confirmedBooking) {
+  console.log(
+    "🚫 Confirmed booking found — skipping lead WhatsApp, escalating to deputies",
+    {
+      dateISO,
+      phone,
+      canonicalId: String(realMusicianId || ""),
+      bookingId: confirmedBooking?.bookingId || String(confirmedBooking?._id || ""),
+    }
+  );
+
+  await notifyDeputies({
+    actId,
+    lineupId: lineupKey,
+    dateISO,
+    formattedAddress: fullFormattedAddress,
+    clientName: resolvedClientName || "",
+    clientEmail: resolvedClientEmail || "",
+    slotIndex: singleSlotIndex,
+    skipDuplicateCheck: true,
+    skipIfUnavailable: false,
+  });
+
+  if (res)
+    return res.json({
+      success: true,
+      sent: 0,
+      skipped: "already-booked-confirmed-booking",
+    });
+  return {
+    success: true,
+    sent: 0,
+    skipped: "already-booked-confirmed-booking",
+  };
+}
 
     // ✅ ACTIVE-REQUEST GUARD (single) — prevents resend if already sent/queued
     if (!skipDuplicateCheck) {

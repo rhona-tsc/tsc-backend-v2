@@ -483,30 +483,7 @@ function buildEmergencyMirror(contactRouting) {
   };
 }
 
-function daysUntil(dateStr) {
-  console.log(`🐣 (controllers/bookingController.js) daysUntil called at`, new Date().toISOString(), { dateStr });
-  if (!dateStr) return null;
-  const now = new Date();
-  const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const ev = new Date(dateStr);
-  const d1 = new Date(ev.getFullYear(), ev.getMonth(), ev.getDate());
-  return Math.ceil((d1 - d0) / (1000 * 60 * 60 * 24));
-}
 
-function calcDeposit(totalGross) {
-  console.log(
-    `🐣 (controllers/bookingController.js) calcDeposit called at`,
-    new Date().toISOString(),
-    { totalGross }
-  );
-  const gross = Number(totalGross || 0);
-  if (!gross || gross <= 0) return 0;
-
-  // Deposit is 33% of the (already-rounded) gross total, rounded to pennies
-  const depositRate = Number(process.env.TSC_DEPOSIT_RATE ?? 0.33);
-  const deposit = Math.round(gross * depositRate * 100) / 100;
-  return deposit;
-}
 
 const makeBookingId = (dateStr = new Date().toISOString(), lastName = 'TSC') => {
   console.log(`🐣 (controllers/bookingController.js) makeBookingId called at`, new Date().toISOString(), { dateStr, lastName });
@@ -1270,11 +1247,12 @@ const completeBooking = async (req, res) => {
     }
 
     // --- Messaging: confirm to client and ping lineup for allocation
-    try {
-      const confirmedActName = (order?.actsSummary?.[0]?.actTscName || order?.actsSummary?.[0]?.actName);
-      await sendClientBookingConfirmation({ booking: order, actName: confirmedActName });
-      console.log("[completeBooking] ✓ sendClientBookingConfirmation queued", { confirmedActName });
-    } catch (e) { console.warn("⚠️ client confirm (completeBooking) failed:", e?.message || e); }
+  try {
+  await confirmLeadVocalistForBooking(order);
+  console.log("[completeBooking] ✓ confirmLeadVocalistForBooking done");
+} catch (e) {
+  console.warn("⚠️ confirmLeadVocalistForBooking failed in completeBooking:", e?.message || e);
+}
 
     // ---- NEW: compute per-member fee and notify confirmed performers ----
     try {
@@ -2382,26 +2360,37 @@ async function confirmLeadVocalistForBooking(booking) {
     ? booking.actsSummary[0]
     : null;
 
-  const chosen = actSummary?.chosenVocalists?.[0];
-  if (!chosen?.musicianId) {
+  const chosen =
+    actSummary?.chosenVocalists?.[0] ||
+    actSummary?.selectedVocalist ||
+    null;
+
+  const chosenMusicianId =
+    chosen?.musicianId ||
+    chosen?._id ||
+    null;
+
+  if (!chosenMusicianId) {
     console.warn("🎤 No chosen lead vocalist on booking", { bookingId: booking.bookingId });
     return;
   }
 
-  const musician = await Musician.findById(chosen.musicianId).lean();
+  const musician = await Musician.findById(chosenMusicianId).lean();
   if (!musician) {
-    console.warn("🎤 Lead vocalist musician not found", { musicianId: chosen.musicianId });
+    console.warn("🎤 Lead vocalist musician not found", { musicianId: chosenMusicianId });
     return;
   }
 
   const phone = normalize(musician.phone || musician.phoneNumber);
   if (!phone) {
-    console.warn("🎤 Lead vocalist has no valid phone", { musicianId: chosen.musicianId });
+    console.warn("🎤 Lead vocalist has no valid phone", { musicianId: chosenMusicianId });
   }
 
   const actName =
     actSummary?.actName ||
+    actSummary?.actTscName ||
     booking.actName ||
+    booking?.actsSummary?.[0]?.actName ||
     "Your Act";
 
   const venueAddress =
@@ -2409,20 +2398,19 @@ async function confirmLeadVocalistForBooking(booking) {
     booking.venue ||
     "Venue";
 
-  const eventDateISO = toDateISO(booking.date);
-  const formattedDate = new Date(booking.date).toLocaleDateString("en-GB", {
+  const eventDateISO = toDateISO(booking.date || booking.eventDate || booking.eventDateISO);
+  const formattedDate = new Date(booking.date || booking.eventDate || booking.eventDateISO).toLocaleDateString("en-GB", {
     weekday: "long",
     day: "numeric",
     month: "short",
     year: "numeric",
   });
 
-  // 2️⃣ WhatsApp to lead vocalist (confirmed booking)
   if (phone) {
     try {
       const contentSid =
         process.env.TWILIO_VOCALIST_BOOKING_CONFIRMATION_SID ||
-        process.env.TWILIO_BOOKING_CONFIRMATION_SID; // fallback
+        process.env.TWILIO_BOOKING_CONFIRMATION_SID;
 
       await sendWhatsAppMessage({
         to: phone,
@@ -2445,25 +2433,94 @@ async function confirmLeadVocalistForBooking(booking) {
     }
   }
 
-  // 3️⃣ Mark vocalist unavailable for that date in AvailabilityModel
   try {
-    await AvailabilityModel.updateMany(
+    const lineupId =
+      booking.lineupId ||
+      actSummary?.lineupId ||
+      actSummary?.lineup?._id ||
+      null;
+
+    const bookingRef = booking.bookingId || booking.bookingRef || String(booking._id || "");
+
+    const updateResult = await AvailabilityModel.updateMany(
       {
-        musicianId: musician._id,
-        dateISO: eventDateISO,
+        $or: [
+          { musicianId: musician._id, dateISO: eventDateISO },
+          { phone, dateISO: eventDateISO },
+        ],
       },
       {
         $set: {
           reply: "yes",
+          status: "booked",
           updatedAt: new Date(),
+          bookingId: bookingRef,
+          bookedOnDate: eventDateISO,
+          isBooked: true,
         },
       }
     );
+
+    console.log("✅ Lead vocalist availability rows marked booked/yes", {
+      vocalistId: musician._id,
+      eventDateISO,
+      matchedCount: updateResult?.matchedCount,
+      modifiedCount: updateResult?.modifiedCount,
+      bookingId: bookingRef,
+      lineupId,
+    });
   } catch (err) {
     console.warn("⚠️ Failed to mark vocalist unavailable in AvailabilityModel:", err.message);
   }
 
-  // 3️⃣ Clear availability badges for this vocalist on this date across all acts
+  try {
+    const existingDateLevel = await AvailabilityModel.findOne({
+      dateISO: eventDateISO,
+      $or: [{ musicianId: musician._id }, { phone }],
+    })
+      .select("_id")
+      .lean();
+
+    if (!existingDateLevel) {
+      const actId = booking.act || actSummary?.actId || null;
+      const lineupId =
+        booking.lineupId ||
+        actSummary?.lineupId ||
+        actSummary?.lineup?._id ||
+        null;
+
+      await AvailabilityModel.create({
+        actId,
+        lineupId,
+        dateISO: eventDateISO,
+        phone,
+        v2: true,
+        slotIndex: 0,
+        musicianId: musician._id,
+        musicianName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+        musicianEmail: musician.email || "",
+        reply: "yes",
+        status: "booked",
+        isBooked: true,
+        bookingId: booking.bookingId || booking.bookingRef || String(booking._id || ""),
+        bookedOnDate: eventDateISO,
+        isDeputy: false,
+        actName,
+        formattedDate,
+        address: venueAddress,
+        formattedAddress: venueAddress,
+        duties: "Lead Vocalist",
+      });
+
+      console.log("🧱 Created date-level booking blocker row for lead vocalist", {
+        vocalistId: musician._id,
+        eventDateISO,
+      });
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to create date-level booking blocker row:", err.message);
+  }
+
   try {
     await Act.updateMany(
       {
