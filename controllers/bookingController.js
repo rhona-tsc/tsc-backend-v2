@@ -25,16 +25,15 @@ import { updateCalendarEvent, createCalendarInvite } from '../controllers/google
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import axios from "axios";
 import { differenceInCalendarDays, startOfDay, subDays } from "date-fns";
-import { postcodes } from "../utils/postcodes.js";
 import { logStart } from "../utils/logger.js";
 import { setSharedIVR } from "../utils/proxySetup.js";
-import { sendSMSMessage, sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
+import { sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
 import userModel from '../models/userModel.js';
-import { sendBookingConfirmationToLeadVocalist, sendBookingRequestsToLineup } from './booking/helpers.js';
 import { updateOrCreateBookingEvent } from '../utils/updateOrCreateBookingEvent.js';
 import { normalize } from "../utils/phoneUtils.js";
 import chromium from "@sparticuz/chromium";
 import { sendContractEmail } from "./helpers/sendContractEmail.js";
+import { triggerBookingRequests } from "./allocationController.js";
 
 /**
  * Lookup a musician’s full name by ID.
@@ -287,110 +286,34 @@ async function sendClientBookingConfirmation({ booking, actName }) {
   }
 }
 
-async function pingLineupForAllocation({ actId, lineupId, dateISO, venueShort, dutiesOverride, perMemberFee }) {
-  console.log(`🐣 (controllers/bookingController.js) pingLineupForAllocation called at`, new Date().toISOString(), { actId, lineupId, dateISO, venueShort });
-  try {
-    const act = await Act.findById(actId).lean();
-    if (!act) { console.warn("[pingLineupForAllocation] no act", { actId }); return; }
+async function triggerBookingRequestsInternal({ actId, lineupId, dateISO, address, perMemberFee, bookingId, dryRun = false }) {
+  const fakeRes = {
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+      return payload;
+    },
+  };
 
-    const allLineups = Array.isArray(act?.lineups) ? act.lineups : [];
-    const lineup = allLineups.find(l => String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId)) || allLineups[0];
-    if (!lineup) { console.warn("[pingLineupForAllocation] no lineup", { actId, lineupId }); return; }
-
-    const membersRaw = Array.isArray(lineup.bandMembers) ? lineup.bandMembers : [];
-    const formattedDate = formatWithOrdinal(dateISO);
-    const shortAddress = String(venueShort || "");
-
-    const normalize = (raw = "") => {
-      let v = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
-      if (!v) return "";
-      if (v.startsWith("+")) return v;
-      if (v.startsWith("07")) return v.replace(/^0/, "+44");
-      if (v.startsWith("44")) return `+${v}`;
-      return v;
-    };
-
-    let sentCount = 0;
-    for (const m of membersRaw) {
-      // Skip non-performers (e.g., Manager/Admin rows) so we don't message agents or blanks
-      const roleLower = String(m?.instrument || "").trim().toLowerCase();
-      if (!roleLower || roleLower === "manager" || roleLower === "admin") {
-        continue;
-      }
-      // prefer phone on lineup member; else look up the Musician doc
-      let phone = normalize(m?.phoneNumber || m?.phone || "");
-      if (!phone && (m?.musicianId || m?._id)) {
-        try {
-          const mus = await Musician.findById(m.musicianId || m._id).select("phone phoneNumber firstName lastName email").lean();
-          phone = normalize(mus?.phone || mus?.phoneNumber || "");
-        } catch {}
-      }
-      if (!phone) {
-        console.warn("[pingLineupForAllocation] skip: no phone for member", { name: `${m?.firstName || ""} ${m?.lastName || ""}`.trim(), instrument: m?.instrument || dutiesOverride || "" });
-        continue;
-      }
-
-      const duties = m.instrument || dutiesOverride || "performance";
-
-      // Create/update availability row (tracking + idempotency)
-      try {
-        const enquiryId = `${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-        await AvailabilityModel.findOneAndUpdate(
-          { actId, dateISO, phone },
-          {
-            $setOnInsert: {
-              enquiryId,
-              actId,
-              lineupId: lineup?._id || lineup?.lineupId || null,
-              musicianId: m?._id || m?.musicianId || null,
-              phone,
-              duties,
-              formattedDate,
-              formattedAddress: shortAddress,
-              fee: "",
-              reply: null,
-              dateISO,
-              createdAt: new Date(),
-            },
-            $set: { updatedAt: new Date() },
-          },
-          { new: true, upsert: true }
-        );
-      } catch (e) {
-        console.warn("[pingLineupForAllocation] availability upsert failed", e?.message || e);
-      }
-
-      try {
-        // WhatsApp ONLY here to avoid dual WA+SMS; SMS fallback handled elsewhere if needed
-       const smsBody =
-   `Hi ${m?.firstName}, you have a booking request for ${formattedDate} in ${shortAddress} ` +
-   `with ${act.tscName || act.name || "the band"} for ${duties} at a rate of ` +
-   `${perMemberFee ? `£${Number(perMemberFee).toFixed(0)}` : "TBC"}. ` +
-   `Please reply YES or NO. 🤍 TSC`;
- await sendWhatsAppMessage({
-   to: `whatsapp:${phone}`,
-   templateParams: {
-     FirstName: (m?.firstName),
-     FormattedDate: formattedDate,
-     FormattedAddress: shortAddress,
-     Fee: perMemberFee ? `£${Number(perMemberFee).toFixed(0)}` : "TBC",
-     Duties: duties,
-     ActName: act.tscName || act.name || "the band",
-   },
-   smsBody,
- });
-        sentCount++;
-        console.log("[pingLineupForAllocation] ✓ WA sent", { to: phone, name: `${m?.firstName || ""} ${m?.lastName || ""}`.trim(), duties });
-      } catch (e) {
-        console.warn("[pingLineupForAllocation] send failed", { to: phone, err: e?.message || e });
-      }
-    }
-
-    console.log("[pingLineupForAllocation] done", { actId, lineupId, members: membersRaw.length, sent: sentCount });
-  } catch (e) {
-    console.warn("⚠️ pingLineupForAllocation failed:", e?.message || e);
-  }
+  return triggerBookingRequests(
+    {
+      body: {
+        actId,
+        lineupId,
+        dateISO,
+        address,
+        perMemberFee,
+        bookingId,
+        dryRun,
+      },
+    },
+    fakeRes
+  );
 }
+
 
 const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY_V2);
 
@@ -1298,21 +1221,31 @@ const completeBooking = async (req, res) => {
       // 2) Compute per-member fee (availability-logic)
       const perMemberFee = perMemberFeeComputed;
 
-      // --- PATCHED LOGIC for safe logging ---
-      try {
-        const actId = actIdForCalc;
-        const lineupId = lineupIdForCalc;
-        await upsertCalendarForConfirmedBooking({
-          booking: order,
-          actId: actId,
-          lineupId: lineupId || null,
-          bandLineup: [], // unknown here
-          venue: order?.venue || order?.venueAddress || ''
-        });
-        console.log("[completeBooking] ✓ calendar upsert for confirmed booking");
-      } catch (e) {
-        console.warn("[completeBooking] ⚠️ calendar upsert failed:", e?.message || e);
-      }
+   try {
+  const actId = actIdForCalc;
+  const resolvedLineupId = lineupIdForCalc;
+
+  await upsertCalendarForConfirmedBooking({
+    booking: order,
+    actId,
+    lineupId: resolvedLineupId || null,
+    bandLineup: [],
+    venue: order?.venue || order?.venueAddress || "",
+  });
+  console.log("[completeBooking] ✓ calendar upsert for confirmed booking");
+
+  await triggerBookingRequestsInternal({
+    actId,
+    lineupId: resolvedLineupId,
+    dateISO: dateISOForCalc,
+    address: shortAddrForCalc,
+    perMemberFee,
+    bookingId: order.bookingId,
+  });
+  console.log("[completeBooking] ✓ lineup allocation requests triggered");
+} catch (e) {
+  console.warn("[completeBooking] ⚠️ calendar/allocation step failed:", e?.message || e);
+}
     } catch (e) { console.warn("⚠️ lineup allocation ping (completeBooking) failed:", e?.message || e); }
 
     // ---------------- Render contract HTML ----------------
@@ -2016,13 +1949,36 @@ chosenVocalists: [],
       await sendClientBookingConfirmation({ booking: newBooking, actName: undefined });
     } catch (e) { console.warn("⚠️ client confirm (createBooking) failed:", e?.message || e); }
 
-    try {
-      const actId   = newBooking?.actId;
-      const lineupId= lineupId || newBooking?.lineupId;
-      const dateISO = new Date(newBooking?.date).toISOString().slice(0,10);
-      const shortAddress = (newBooking?.venue || "").split(',').slice(-2).join(',').replace(/,\s*UK$/i, '').trim();
-      await pingLineupForAllocation({ actId, lineupId, dateISO, venueShort: shortAddress });
-    } catch (e) { console.warn("⚠️ lineup allocation ping (createBooking) failed:", e?.message || e); }
+try {
+  const actId = newBooking?.act;
+  const resolvedLineupId = lineupId || newBooking?.lineupId || newBooking?.actsSummary?.[0]?.lineupId || null;
+  const dateISO = new Date(newBooking?.date).toISOString().slice(0, 10);
+  const shortAddress = (newBooking?.venueAddress || newBooking?.venue || "")
+    .split(",")
+    .slice(-2)
+    .join(",")
+    .replace(/,\s*UK$/i, "")
+    .trim();
+
+  const actDoc = await Act.findById(actId).lean();
+  const lineupDoc =
+    actDoc?.lineups?.find(
+      (l) => String(l._id) === String(resolvedLineupId) || String(l.lineupId) === String(resolvedLineupId)
+    ) || actDoc?.lineups?.[0];
+
+  const perMemberFee = computePerMemberFee({ lineup: lineupDoc, booking: newBooking }, "createBooking");
+
+  await triggerBookingRequestsInternal({
+    actId,
+    lineupId: resolvedLineupId,
+    dateISO,
+    address: shortAddress,
+    perMemberFee,
+    bookingId: newBooking.bookingId,
+  });
+} catch (e) {
+  console.warn("⚠️ lineup allocation ping (createBooking) failed:", e?.message || e);
+}
 
     // Ensures Google event exists and adds all lineup emails as attendees (calendar invites to band)
     try {
@@ -2042,7 +1998,7 @@ chosenVocalists: [],
       try {
         // Prefer your internal route so everything is standardized in one place:
         await axios.post(
-          `${backendUrl || process.env.BACKEND_URL || ""}/api/invoices/schedule-balance`,
+`${process.env.BACKEND_URL || ""}/api/invoices/schedule-balance`,
           {
             bookingId: newBooking.bookingId || String(newBooking._id),
             actId: act,
@@ -2087,7 +2043,7 @@ const markMusicianAsPaid = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing bookingId or musicianId" });
     }
 
-   const booking = await Booking.findOne({ bookingId }).lean();
+const booking = await Booking.findOne({ bookingId });
     if (!booking) {
       return res.status(404).json({ success: false, message: "Booking not found" });
     }
@@ -2562,16 +2518,32 @@ async function sendBookingRequestsToLineupFromBooking(booking) {
   }
 
   const dateISO = toDateISO(booking.date);
-  const address = booking.venueAddress || booking.venue || "";
-  const calendarBooking = {
-  ...(typeof booking.toObject === "function" ? booking.toObject() : booking),
-  act: booking.act,
-  lineupId: booking.lineupId,
-  date: booking.date,
-  eventDateISO: booking.eventDateISO,
-};
+  const address = (booking.venueAddress || booking.venue || "")
+    .split(",")
+    .slice(-2)
+    .join(",")
+    .replace(/,\s*UK$/i, "")
+    .trim();
 
- await sendBookingRequestsToLineup(calendarBooking);
+  const actDoc = await Act.findById(booking.act).lean();
+  const lineupDoc =
+    actDoc?.lineups?.find(
+      (l) => String(l._id) === String(booking.lineupId) || String(l.lineupId) === String(booking.lineupId)
+    ) || actDoc?.lineups?.[0];
+
+  const perMemberFee = computePerMemberFee(
+    { lineup: lineupDoc, booking },
+    "sendBookingRequestsToLineupFromBooking"
+  );
+
+  await triggerBookingRequestsInternal({
+    actId: booking.act,
+    lineupId: booking.lineupId,
+    dateISO,
+    address,
+    perMemberFee,
+    bookingId: booking.bookingId,
+  });
 
   console.log("📣 Booking requests triggered to lineup", {
     actId: booking.act,
@@ -2638,22 +2610,34 @@ export const completeBookingV2 = async (req, res) => {
 
     console.log("Resolved actId/lineupId:", { actId, lineupId });
 
+    try {
+  await upsertBoardRowFromBooking(booking);
+  console.log("[completeBookingV2] ✓ upsertBoardRowFromBooking done");
+} catch (e) {
+  console.warn("⚠️ upsertBoardRowFromBooking failed in completeBookingV2:", e?.message || e);
+}
     // 3️⃣ Idempotency
     if (booking.checkoutCompleted) {
       return res.json({ success: true, bookingRef });
     }
 
     // 4️⃣ Mark paid
-    await Booking.updateOne(
-      { bookingId: bookingRef },
-      {
-        $set: {
-          checkoutCompleted: true,
-          payment: true,
-          sessionId: session_id,
-        },
-      }
-    );
+   await Booking.updateOne(
+  { bookingId: bookingRef },
+  {
+    $set: {
+      checkoutCompleted: true,
+      payment: true,
+      sessionId: session_id,
+      status: "confirmed",
+    },
+  }
+);
+
+booking.status = "confirmed";
+booking.checkoutCompleted = true;
+booking.payment = true;
+booking.sessionId = session_id;
 
     const calendarBooking = {
       ...(typeof booking.toObject === "function" ? booking.toObject() : booking),
@@ -2671,6 +2655,19 @@ export const completeBookingV2 = async (req, res) => {
       console.warn("⚠️ Calendar event failed:", e?.message);
     }
 
+    try {
+  await upsertCalendarForConfirmedBooking({
+    booking,
+    actId,
+    lineupId: lineupId || null,
+    bandLineup: booking?.bandLineup || [],
+    venue: booking?.venue || booking?.venueAddress || "",
+  });
+  console.log("[completeBookingV2] ✓ calendar attendee sync done");
+} catch (e) {
+  console.warn("⚠️ upsertCalendarForConfirmedBooking failed in completeBookingV2:", e?.message || e);
+}
+
     // 6️⃣ Lead vocalist confirmation
     try {
       await confirmLeadVocalistForBooking(booking);
@@ -2678,12 +2675,34 @@ export const completeBookingV2 = async (req, res) => {
       console.warn("⚠️ confirmLeadVocalistForBooking failed:", e?.message);
     }
 
-    // 7️⃣ Send lineup requests
-    try {
-      await sendBookingRequestsToLineupFromBooking(calendarBooking);
-    } catch (e) {
-      console.warn("⚠️ sendBookingRequestsToLineupFromBooking failed:", e?.message);
-    }
+  // 7️⃣ Send lineup requests
+try {
+  const actDoc = actId ? await Act.findById(actId).lean() : null;
+  const lineupDoc =
+    actDoc?.lineups?.find(
+      (l) => String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId)
+    ) || actDoc?.lineups?.[0];
+
+  const perMemberFee = computePerMemberFee({ lineup: lineupDoc, booking }, "completeBookingV2");
+  const shortAddress = (booking?.venueAddress || booking?.venue || "")
+    .split(",")
+    .slice(-2)
+    .join(",")
+    .replace(/,\s*UK$/i, "")
+    .trim();
+
+  await triggerBookingRequestsInternal({
+    actId,
+    lineupId,
+    dateISO: booking.eventDateISO,
+    address: shortAddress,
+    perMemberFee,
+    bookingId: booking.bookingId,
+  });
+  console.log("[completeBookingV2] ✓ lineup allocation requests triggered");
+} catch (e) {
+  console.warn("⚠️ triggerBookingRequestsInternal failed in completeBookingV2:", e?.message || e);
+}
 
     // ------------------------------------------------
     // 8️⃣ CONTRACT GENERATION – EJS

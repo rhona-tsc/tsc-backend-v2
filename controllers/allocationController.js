@@ -8,6 +8,7 @@ import {
   appendLineToEventDescription,
   addAttendeeToEvent,
 } from "./googleController.js";
+import { normalize } from "../utils/phoneUtils.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import bookingBoardItem from "../models/bookingBoardItem.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
@@ -53,6 +54,71 @@ const normalizeFrom = (from) => {
   return Array.from(new Set([plus, uk07, ukNoPlus]));
 };
 
+const formatWithOrdinal = (dateLike) => {
+  const d = new Date(dateLike);
+  if (isNaN(d)) return String(dateLike || "");
+  const day = d.getDate();
+  const j = day % 10, k = day % 100;
+  const suffix = j === 1 && k !== 11 ? "st" : j === 2 && k !== 12 ? "nd" : j === 3 && k !== 13 ? "rd" : "th";
+  const weekday = d.toLocaleDateString("en-GB", { weekday: "long" });
+  const month = d.toLocaleDateString("en-GB", { month: "short" });
+  const year = d.getFullYear();
+  return `${weekday}, ${day}${suffix} ${month} ${year}`;
+};
+
+const normalizePhone = (raw = "") => {
+  let v = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+  if (!v) return "";
+  if (v.startsWith("+")) return v;
+  if (v.startsWith("07")) return v.replace(/^0/, "+44");
+  if (v.startsWith("44")) return `+${v}`;
+  return v;
+};
+
+const buildBookingSMS = ({ firstName, formattedDate, formattedAddress, fee, duties, actName, requestId }) => {
+  return `Hi ${firstName || "there"}, booking request for ${formattedDate} at ${formattedAddress} with ${actName}. Role: ${duties || "performance"}. Fee: £${sanitizeFee(fee) || "TBC"}. Reply YES (YESBOOK_${requestId}) or NO (NOBOOK_${requestId}). 🤍 TSC`;
+};
+
+const findRealMusicianForMember = async (member = {}) => {
+  try {
+    if (member?.musicianId) {
+      const byId = await Musician.findById(member.musicianId)
+        .select("_id firstName lastName email phone phoneNumber phoneNormalized")
+        .lean();
+      if (byId) return byId;
+    }
+
+    const phone = normalizePhone(member?.phoneNumber || member?.phone || "");
+    if (phone) {
+      const byPhone = await Musician.findOne({
+        $or: [{ phoneNormalized: phone }, { phone: phone }, { phoneNumber: phone }],
+      })
+        .select("_id firstName lastName email phone phoneNumber phoneNormalized")
+        .lean();
+      if (byPhone) return byPhone;
+    }
+
+    const email = String(member?.email || member?.emailAddress || "").trim().toLowerCase();
+    if (email) {
+      const byEmail = await Musician.findOne({ email })
+        .select("_id firstName lastName email phone phoneNumber phoneNormalized")
+        .lean();
+      if (byEmail) return byEmail;
+    }
+  } catch (err) {
+    console.warn("⚠️ findRealMusicianForMember failed:", err?.message || err);
+  }
+  return null;
+};
+
+const buildMemberFee = ({ perMemberFee, member }) => {
+  if (Number.isFinite(Number(perMemberFee)) && Number(perMemberFee) > 0) {
+    return Math.ceil(Number(perMemberFee));
+  }
+  const memberFee = Number(member?.fee || 0);
+  return Number.isFinite(memberFee) && memberFee > 0 ? Math.ceil(memberFee) : 0;
+};
+
 /* -------------------------------------------------------------------------- */
 /*                        triggerBookingRequests (main)                       */
 /* -------------------------------------------------------------------------- */
@@ -61,7 +127,7 @@ export const triggerBookingRequests = async (req, res) => {
     bodyKeys: Object.keys(req.body || {}),
   });
   try {
-    const { actId, lineupId, dateISO, address, perMemberFee } = req.body;
+    const { actId, lineupId, dateISO, address, perMemberFee, bookingId, bookingRef } = req.body;
     if (!actId || !dateISO || !address) {
       return res.status(400).json({ success: false, message: "Missing actId/dateISO/address" });
     }
@@ -107,17 +173,39 @@ export const triggerBookingRequests = async (req, res) => {
     const ts = Date.now();
     const sent = [];
 
+    const booking = bookingId || bookingRef
+      ? await Booking.findOne({
+          $or: [{ bookingId: bookingId || bookingRef }, { bookingRef: bookingId || bookingRef }],
+        }).lean()
+      : await Booking.findOne({
+          act: actId,
+          status: "confirmed",
+          $or: [
+            { date: { $gte: new Date(`${dateISO}T00:00:00.000Z`), $lte: new Date(`${dateISO}T23:59:59.999Z`) } },
+            { eventDate: { $gte: new Date(`${dateISO}T00:00:00.000Z`), $lte: new Date(`${dateISO}T23:59:59.999Z`) } },
+          ],
+        })
+          .sort({ updatedAt: -1, createdAt: -1 })
+          .lean();
+
+    const resolvedBookingRef = booking?.bookingId || booking?.bookingRef || bookingId || bookingRef || null;
+
     for (const m of members) {
-      let raw = String(m.phoneNumber || m.phone || "").replace(/\s+/g, "");
-      if (!raw && (m.musicianId || m._id)) {
-        try {
-          const mus = await Musician.findById(m.musicianId || m._id)
-            .select("phone phoneNumber firstName lastName email")
-            .lean();
-          raw = String(mus?.phone || mus?.phoneNumber || "").replace(/\s+/g, "");
-        } catch {}
+      const roleLower = String(m?.instrument || "").trim().toLowerCase();
+      if (!roleLower || roleLower === "manager" || roleLower === "admin") {
+        continue;
       }
-      if (!raw) {
+
+      const realMusician = await findRealMusicianForMember(m);
+      const rawPhone =
+        realMusician?.phone ||
+        realMusician?.phoneNumber ||
+        m?.phoneNumber ||
+        m?.phone ||
+        "";
+
+      const phone = normalizePhone(rawPhone);
+      if (!phone) {
         console.warn("🦚 triggerBookingRequests skip: no phone for member", {
           name: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
           instrument: m.instrument || "",
@@ -125,24 +213,32 @@ export const triggerBookingRequests = async (req, res) => {
         continue;
       }
 
-      const phone =
-        raw.startsWith("+") ? raw :
-        raw.startsWith("0") ? raw.replace(/^0/, "+44") :
-        raw.startsWith("44") ? `+${raw}` : raw;
+      const memberFee = buildMemberFee({ perMemberFee, member: m });
+      const requestId = `${ts}_${Math.random().toString(36).slice(2, 7)}`;
+      const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
+        weekday: "long", day: "numeric", month: "short", year: "numeric"
+      });
 
-      const bookingId = `${ts}_${Math.random().toString(36).slice(2,7)}`;
+      const smsBody = buildBookingSMS({
+        firstName: firstNameOf(realMusician || m),
+        formattedDate,
+        formattedAddress: address,
+        fee: memberFee,
+        duties: m.instrument || "performance",
+        actName: act.tscName || act.name || "the band",
+        requestId,
+      });
 
-      // Persist message
       await EnquiryMessage.create({
         actId,
         lineupId: lineup._id || lineup.lineupId || null,
-        enquiryId: bookingId,
+        musicianId: realMusician?._id || m?.musicianId || m?._id || null,
+        enquiryId: requestId,
+        bookingRef: resolvedBookingRef,
         phone,
         duties: m.instrument || "",
-        fee: perMemberFee ? String(perMemberFee) : undefined,
-        formattedDate: new Date(dateISO).toLocaleDateString("en-GB", {
-          weekday: "long", day: "numeric", month: "short", year: "numeric"
-        }),
+        fee: memberFee ? String(memberFee) : undefined,
+        formattedDate,
         formattedAddress: address,
         meta: {
           actName: act.tscName || act.name,
@@ -151,42 +247,101 @@ export const triggerBookingRequests = async (req, res) => {
           MetaAddress: address,
           kind: "booking",
           lineupId: String(lineup._id || lineup.lineupId || ""),
+          bookingRef: resolvedBookingRef || "",
         },
-        calendar: { eventId: event.id, calendarStatus: "needsAction" },
+        calendar: {
+          eventId: event.id,
+          calendarStatus: "needsAction",
+          attendeeEmail: realMusician?.email || m?.email || m?.emailAddress || "",
+        },
+        deliveryStatus: "queued",
+        status: "queued",
       });
 
-      await sendWAOrSMS({
+      await AvailabilityModel.findOneAndUpdate(
+        {
+          actId,
+          lineupId: lineup._id || lineup.lineupId || null,
+          dateISO,
+          phone,
+        },
+        {
+          $setOnInsert: {
+            actId,
+            lineupId: lineup._id || lineup.lineupId || null,
+            dateISO,
+            phone,
+            musicianId: realMusician?._id || m?.musicianId || m?._id || null,
+            musicianName: `${realMusician?.firstName || m?.firstName || ""} ${realMusician?.lastName || m?.lastName || ""}`.trim(),
+            musicianEmail: realMusician?.email || m?.email || m?.emailAddress || "",
+            duties: m.instrument || "performance",
+            fee: memberFee ? String(memberFee) : "",
+            formattedDate,
+            formattedAddress: address,
+            reply: null,
+            createdAt: new Date(),
+          },
+          $set: {
+            updatedAt: new Date(),
+            status: "sent",
+            bookingId: resolvedBookingRef,
+          },
+        },
+        { new: true, upsert: true }
+      );
+
+      const wa = await sendWAOrSMS({
         to: phone,
         templateParams: {
-          FirstName: firstNameOf(m),
-          FormattedDate: new Date(dateISO).toLocaleDateString("en-GB", {
-            weekday: "long", day: "numeric", month: "short", year: "numeric"
-          }),
+          FirstName: firstNameOf(realMusician || m),
+          FormattedDate: formattedDate,
           FormattedAddress: address,
-          Fee: sanitizeFee(perMemberFee),
+          Fee: sanitizeFee(memberFee),
           Duties: m.instrument || "performance",
           ActName: act.tscName || act.name || "the band",
         },
-        smsBody:
-          `Hi ${firstNameOf(m)}, booking request for ` +
-          `${new Date(dateISO).toLocaleDateString("en-GB", {
-            weekday:"long", day:"numeric", month:"short", year:"numeric"
-          })} ` +
-          `at ${address} with ${act.tscName || act.name}. Role: ${m.instrument || "performance"}. ` +
-          `Fee: £${String(perMemberFee ?? "").replace(/[^\d.]/g,"") || "TBC"}. ` +
-          `Reply YES (YESBOOK_${bookingId}) or NO (NOBOOK_${bookingId}).`,
+        smsBody,
       });
+
+      await EnquiryMessage.updateOne(
+        { enquiryId: requestId },
+        {
+          $set: {
+            deliveryStatus: "sent",
+            status: "sent",
+            messageSid: wa?.sid || null,
+          },
+        }
+      );
+
+      await AvailabilityModel.updateOne(
+        { actId, lineupId: lineup._id || lineup.lineupId || null, dateISO, phone },
+        {
+          $set: {
+            messageSidOut: wa?.sid || null,
+            outboundChannel: "whatsapp",
+            outboundSentAt: new Date(),
+            outboundMessage: smsBody,
+            status: "sent",
+          },
+        }
+      );
 
       console.log(`🦚 triggerBookingRequests sent`, {
-        name: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
+        name: `${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""}`.trim(),
         phone,
         duties: m.instrument || "",
+        bookingRef: resolvedBookingRef,
       });
 
-      const line = `Booking invite sent to ${m.firstName || ""} ${m.lastName || ""} (${m.instrument || ""})`;
+      const line = `Booking invite sent to ${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""} (${m.instrument || ""})`;
       await appendLineToEventDescription({ eventId: event.id, line });
 
-      sent.push({ name: `${m.firstName || ""} ${m.lastName || ""}`.trim(), phone, instrument: m.instrument || "" });
+      sent.push({
+        name: `${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""}`.trim(),
+        phone,
+        instrument: m.instrument || "",
+      });
     }
 
     return res.json({ success: true, eventId: event.id, sent });
@@ -263,14 +418,16 @@ export const twilioInboundBooking = async (req, res) => {
     // ---------------------------------------------------------
     // 2️⃣ Extract bookingId from YESBOOK_xxx or NOBOOK_xxx
     // ---------------------------------------------------------
-    let bookingId = null;
+    let requestId = null;
 
     const bookingMatch =
       bodyText.match(/YESBOOK_(\S+)/i) ||
-      bodyText.match(/NOBOOK_(\S+)/i);
+      bodyText.match(/NOBOOK_(\S+)/i) ||
+      buttonPayload.match(/YESBOOK_(\S+)/i) ||
+      buttonPayload.match(/NOBOOK_(\S+)/i);
 
     if (bookingMatch) {
-      bookingId = bookingMatch[1];
+      requestId = bookingMatch[1];
     }
 
     // ---------------------------------------------------------
@@ -278,9 +435,9 @@ export const twilioInboundBooking = async (req, res) => {
     // ---------------------------------------------------------
     let msg = null;
 
-    if (bookingId) {
+    if (requestId) {
       msg = await EnquiryMessage.findOneAndUpdate(
-        { enquiryId: bookingId },
+        { enquiryId: requestId },
         {
           $set: {
             reply: replyType,
@@ -329,10 +486,15 @@ export const twilioInboundBooking = async (req, res) => {
   console.log("🟢 YES — musician accepts the gig");
 
   // 👍 Ensure shared event exists
-  const booking = await Booking.findOne({ bookingRef: msg.enquiryId }).lean();
+const booking = msg?.bookingRef
+  ? await Booking.findOne({
+      $or: [{ bookingId: msg.bookingRef }, { bookingRef: msg.bookingRef }]
+    }).lean()
+  : null;
   const eventId =
+    msg?.calendar?.eventId ||
     booking?.calendarEventId ||
-    (await updateOrCreateBookingEvent({ booking }));
+    (booking ? await updateOrCreateBookingEvent({ booking }) : null);
 
   // ✔ determine their email
   const phoneVariants = normalizeFrom(fromRaw);
@@ -369,10 +531,34 @@ export const twilioInboundBooking = async (req, res) => {
   }
 
   // Mark musician YES
-  await AvailabilityModel.updateOne(
-    { phone: msg.phone, actId: msg.actId, dateISO: msg.meta?.MetaISODate },
-    { $set: { reply: "yes", updatedAt: new Date() } }
+  await AvailabilityModel.findOneAndUpdate(
+    {
+      phone: msg.phone,
+      actId: msg.actId,
+      dateISO: msg.meta?.MetaISODate,
+    },
+    {
+      $set: {
+        reply: "yes",
+        status: "accepted",
+        updatedAt: new Date(),
+        calendarEventId: eventId || null,
+        bookingId: msg.bookingRef || null,
+      },
+      $setOnInsert: {
+        lineupId: msg.lineupId || null,
+        musicianId: msg.musicianId || null,
+        duties: msg.duties || "performance",
+        fee: msg.fee || "",
+        formattedDate: msg.formattedDate || "",
+        formattedAddress: msg.formattedAddress || "",
+        createdAt: new Date(),
+      },
+    },
+    { upsert: true, new: true }
   );
+
+  await refreshAllocationForActDate(msg.actId, msg.meta?.MetaISODate);
 
   return res.status(200).send("<Response/>");
 }
@@ -386,16 +572,23 @@ export const twilioInboundBooking = async (req, res) => {
       // Mark unavailable for ALL acts on this date
       await AvailabilityModel.updateMany(
         {
-          musicianId: msg.musicianId,
+          $or: [
+            { musicianId: msg.musicianId },
+            { phone: msg.phone },
+          ],
           dateISO: msg.meta?.MetaISODate,
         },
         {
           $set: {
             reply: "unavailable",
+            status: "unavailable",
             updatedAt: new Date(),
+            bookingId: msg.bookingRef || null,
           },
         }
       );
+
+      await refreshAllocationForActDate(msg.actId, msg.meta?.MetaISODate);
 
       // Escalate to deputy
       await escalateToNextDeputy(msg);
@@ -413,6 +606,25 @@ export const twilioInboundBooking = async (req, res) => {
         { _id: msg._id },
         { $set: { reply: "no", updatedAt: new Date() } }
       );
+
+      await AvailabilityModel.findOneAndUpdate(
+        {
+          phone: msg.phone,
+          actId: msg.actId,
+          dateISO: msg.meta?.MetaISODate,
+        },
+        {
+          $set: {
+            reply: "no",
+            status: "declined",
+            updatedAt: new Date(),
+            bookingId: msg.bookingRef || null,
+          },
+        },
+        { upsert: true, new: true }
+      );
+
+      await refreshAllocationForActDate(msg.actId, msg.meta?.MetaISODate);
 
       // Escalate to next deputy
       await escalateToNextDeputy(msg);
@@ -522,6 +734,7 @@ export async function escalateToNextDeputy(msg) {
       lineupId: msg.lineupId,
       musicianId: nextDep.musicianId || nextDep._id || null,
       enquiryId: newBookingId,
+      bookingRef: msg.bookingRef || null,
       phone,
       duties: msg.duties,
       fee: msg.fee,
@@ -533,6 +746,7 @@ export async function escalateToNextDeputy(msg) {
         MetaISODate: msg.meta?.MetaISODate,
         MetaAddress: msg.meta?.MetaAddress,
         kind: "booking",
+        bookingRef: msg.bookingRef || "",
       },
       calendar: {
         eventId: msg.calendar?.eventId,
@@ -541,6 +755,35 @@ export async function escalateToNextDeputy(msg) {
       deliveryStatus: "queued",
       status: "queued",
     });
+
+    await AvailabilityModel.findOneAndUpdate(
+      {
+        actId: msg.actId,
+        lineupId: msg.lineupId,
+        dateISO: msg.meta?.MetaISODate,
+        phone,
+      },
+      {
+        $setOnInsert: {
+          actId: msg.actId,
+          lineupId: msg.lineupId,
+          dateISO: msg.meta?.MetaISODate,
+          phone,
+          musicianId: nextDep.musicianId || nextDep._id || null,
+          duties: msg.duties || "performance",
+          fee: msg.fee || "",
+          formattedDate: msg.formattedDate || "",
+          formattedAddress: msg.formattedAddress || "",
+          createdAt: new Date(),
+        },
+        $set: {
+          updatedAt: new Date(),
+          status: "sent",
+          bookingId: msg.bookingRef || null,
+        },
+      },
+      { upsert: true, new: true }
+    );
 
     console.log("🟢 Created new deputy EnquiryMessage", {
       messageId: created._id,
@@ -574,6 +817,24 @@ export async function escalateToNextDeputy(msg) {
       { $set: { messageSid: wa?.sid || null, deliveryStatus: "sent" } }
     );
 
+    await AvailabilityModel.updateOne(
+      {
+        actId: msg.actId,
+        lineupId: msg.lineupId,
+        dateISO: msg.meta?.MetaISODate,
+        phone,
+      },
+      {
+        $set: {
+          messageSidOut: wa?.sid || null,
+          outboundChannel: "whatsapp",
+          outboundSentAt: new Date(),
+          outboundMessage: smsBody,
+          status: "sent",
+        },
+      }
+    );
+
     // ---------------------------------------------------
     // 6. Mark previous message auto-escalated
     // ---------------------------------------------------
@@ -581,6 +842,8 @@ export async function escalateToNextDeputy(msg) {
       { _id: msg._id },
       { $set: { autoEscalatedAt: new Date() } }
     );
+
+    await refreshAllocationForActDate(msg.actId, msg.meta?.MetaISODate);
 
     console.log("🟢 Escalation complete → new deputy contacted");
     return true;
