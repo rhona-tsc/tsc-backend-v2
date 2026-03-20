@@ -147,7 +147,9 @@ export const triggerBookingRequests = async (req, res) => {
    console.log("🟡 Skipping badge clear in triggerBookingRequests; badge structure is date-keyed or embedded");
 
     // 2) Ensure booking event exists
-    const { event } = await ensureBookingEvent({ actId, dateISO, address });
+    const event = dryRun
+      ? { id: `dryrun_${actId}_${dateISO}` }
+      : (await ensureBookingEvent({ actId, dateISO, address })).event;
 
     // 3) Resolve lineup + members
     const allLineups = Array.isArray(act.lineups) ? act.lineups : [];
@@ -228,103 +230,109 @@ export const triggerBookingRequests = async (req, res) => {
         requestId,
       });
 
-      await EnquiryMessage.create({
-        actId,
-        lineupId: lineup._id || lineup.lineupId || null,
-        musicianId: realMusician?._id || m?.musicianId || m?._id || null,
-        enquiryId: requestId,
-        bookingRef: resolvedBookingRef,
-        phone,
-        duties: m.instrument || "",
-        fee: memberFee ? String(memberFee) : undefined,
-        formattedDate,
-        formattedAddress: address,
-        meta: {
-          actName: act.tscName || act.name,
-          MetaActId: String(actId),
-          MetaISODate: dateISO,
-          MetaAddress: address,
-          kind: "booking",
-          lineupId: String(lineup._id || lineup.lineupId || ""),
-          bookingRef: resolvedBookingRef || "",
-        },
-        calendar: {
-          eventId: event.id,
-          calendarStatus: "needsAction",
-          attendeeEmail: realMusician?.email || m?.email || m?.emailAddress || "",
-        },
-        deliveryStatus: "queued",
-        status: "queued",
-      });
-
-      await AvailabilityModel.findOneAndUpdate(
-        {
+      if (!dryRun) {
+        await EnquiryMessage.create({
           actId,
           lineupId: lineup._id || lineup.lineupId || null,
-          dateISO,
+          musicianId: realMusician?._id || m?.musicianId || m?._id || null,
+          enquiryId: requestId,
+          bookingRef: resolvedBookingRef,
           phone,
-        },
-        {
-          $setOnInsert: {
+          duties: m.instrument || "",
+          fee: memberFee ? String(memberFee) : undefined,
+          formattedDate,
+          formattedAddress: address,
+          meta: {
+            actName: act.tscName || act.name,
+            MetaActId: String(actId),
+            MetaISODate: dateISO,
+            MetaAddress: address,
+            kind: "booking",
+            lineupId: String(lineup._id || lineup.lineupId || ""),
+            bookingRef: resolvedBookingRef || "",
+          },
+          calendar: {
+            eventId: event.id,
+            calendarStatus: "needsAction",
+            attendeeEmail: realMusician?.email || m?.email || m?.emailAddress || "",
+          },
+          deliveryStatus: "queued",
+          status: "queued",
+        });
+
+        await AvailabilityModel.findOneAndUpdate(
+          {
             actId,
             lineupId: lineup._id || lineup.lineupId || null,
             dateISO,
             phone,
-            musicianId: realMusician?._id || m?.musicianId || m?._id || null,
-            musicianName: `${realMusician?.firstName || m?.firstName || ""} ${realMusician?.lastName || m?.lastName || ""}`.trim(),
-            musicianEmail: realMusician?.email || m?.email || m?.emailAddress || "",
-            duties: m.instrument || "performance",
-            fee: memberFee ? String(memberFee) : "",
-            formattedDate,
-            formattedAddress: address,
-            reply: null,
-            createdAt: new Date(),
           },
-          $set: {
-            updatedAt: new Date(),
-            status: "sent",
-            bookingId: resolvedBookingRef,
+          {
+            $setOnInsert: {
+              actId,
+              lineupId: lineup._id || lineup.lineupId || null,
+              dateISO,
+              phone,
+              musicianId: realMusician?._id || m?.musicianId || m?._id || null,
+              musicianName: `${realMusician?.firstName || m?.firstName || ""} ${realMusician?.lastName || m?.lastName || ""}`.trim(),
+              musicianEmail: realMusician?.email || m?.email || m?.emailAddress || "",
+              duties: m.instrument || "performance",
+              fee: memberFee ? String(memberFee) : "",
+              formattedDate,
+              formattedAddress: address,
+              reply: null,
+              createdAt: new Date(),
+            },
+            $set: {
+              updatedAt: new Date(),
+              status: "sent",
+              bookingId: resolvedBookingRef,
+            },
           },
-        },
-        { new: true, upsert: true }
-      );
+          { new: true, upsert: true }
+        );
+      }
 
-      const wa = await sendWAOrSMS({
-        to: phone,
-        templateParams: {
-          FirstName: firstNameOf(realMusician || m),
-          FormattedDate: formattedDate,
-          FormattedAddress: address,
-          Fee: sanitizeFee(memberFee),
-          Duties: m.instrument || "performance",
-          ActName: act.tscName || act.name || "the band",
-        },
-        smsBody,
-      });
+      const wa = dryRun
+        ? { sid: `dryrun_${requestId}` }
+        : await sendWAOrSMS({
+            to: phone,
+            templateParams: {
+              FirstName: firstNameOf(realMusician || m),
+              FormattedDate: formattedDate,
+              FormattedAddress: address,
+              Fee: sanitizeFee(memberFee),
+              Duties: m.instrument || "performance",
+              ActName: act.tscName || act.name || "the band",
+            },
+            smsBody,
+          });
 
-      await EnquiryMessage.updateOne(
-        { enquiryId: requestId },
-        {
-          $set: {
-            deliveryStatus: "sent",
-            status: "sent",
-            messageSid: wa?.sid || null,
-          },
-        }
-      );
+      if (!dryRun) {
+        await EnquiryMessage.updateOne(
+          { enquiryId: requestId },
+          {
+            $set: {
+              deliveryStatus: "sent",
+              status: "sent",
+              messageSid: wa?.sid || null,
+            },
+          }
+        );
 
-      await AvailabilityModel.updateOne(
-        { actId, lineupId: lineup._id || lineup.lineupId || null, dateISO, phone },
-        {
-          $set: {
-            messageSidOut: wa?.sid || null,
-            outboundChannel: "whatsapp",
-            outboundSentAt: new Date(),
-            outboundMessage: smsBody,
-            status: "sent",
-          },
-        }
-      );
+        await AvailabilityModel.updateOne(
+          { actId, lineupId: lineup._id || lineup.lineupId || null, dateISO, phone },
+          {
+            $set: {
+              messageSidOut: wa?.sid || null,
+              outboundChannel: "whatsapp",
+              outboundSentAt: new Date(),
+              outboundMessage: smsBody,
+              status: "sent",
+            },
+          }
+        );
+      }
 
       console.log(`🦚 triggerBookingRequests sent`, {
         name: `${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""}`.trim(),
@@ -334,16 +342,22 @@ export const triggerBookingRequests = async (req, res) => {
       });
 
       const line = `Booking invite sent to ${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""} (${m.instrument || ""})`;
-      await appendLineToEventDescription({ eventId: event.id, line });
+      if (!dryRun) {
+        await appendLineToEventDescription({ eventId: event.id, line });
+      }
 
       sent.push({
         name: `${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""}`.trim(),
         phone,
         instrument: m.instrument || "",
+        fee: memberFee,
+        requestId,
+        attendeeEmail: realMusician?.email || m?.email || m?.emailAddress || "",
+        dryRun,
       });
     }
 
-    return res.json({ success: true, eventId: event.id, sent });
+    return res.json({ success: true, eventId: event.id, sent, dryRun });
   } catch (err) {
     console.error(`🦚 triggerBookingRequests error`, err);
     return res.status(500).json({ success: false, message: err?.message || "Server error" });
