@@ -136,16 +136,7 @@ export const triggerBookingRequests = async (req, res) => {
     if (!act) return res.status(404).json({ success: false, message: "Act not found" });
 
     // 1) Clear the availability badge immediately
-    await Act.findByIdAndUpdate(actId, {
-      $set: { "availabilityBadges.active": false },
-      $unset: {
-        "availabilityBadges.vocalistName": "",
-        "availabilityBadges.inPromo": "",
-        "availabilityBadges.dateISO": "",
-        "availabilityBadges.address": "",
-        "availabilityBadges.setAt": "",
-      },
-    });
+   console.log("🟡 Skipping badge clear in triggerBookingRequests; badge structure is date-keyed or embedded");
 
     // 2) Ensure booking event exists
     const { event } = await ensureBookingEvent({ actId, dateISO, address });
