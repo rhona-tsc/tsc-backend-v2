@@ -127,7 +127,15 @@ export const triggerBookingRequests = async (req, res) => {
     bodyKeys: Object.keys(req.body || {}),
   });
   try {
-    const { actId, lineupId, dateISO, address, perMemberFee, bookingId, bookingRef } = req.body;
+    const { actId, lineupId, dateISO, address, perMemberFee, bookingId, bookingRef, dryRun = false } = req.body;
+    console.log("🧪 triggerBookingRequests mode", {
+  dryRun,
+  actId,
+  lineupId,
+  dateISO,
+  bookingId,
+  bookingRef,
+});
     if (!actId || !dateISO || !address) {
       return res.status(400).json({ success: false, message: "Missing actId/dateISO/address" });
     }

@@ -323,7 +323,7 @@ app.use("/api/musician", musicianRouter);
 // Acts (v2) – choose ONE canonical base. I’d recommend /api/act
 app.use("/api/act", actV2Routes);           // ← put act routes here
 
-// If you truly need a musician-scoped subset, keep this too:
+// If you truly need a musicaian-scoped subset, keep this too:
 app.use("/api/musician/act-v2", actV2Routes);
 
 // Availability / shortlist / enquiries
