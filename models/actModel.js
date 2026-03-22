@@ -330,11 +330,11 @@ minDisplayPrice: { type: Number, default: null },
             useMURatesForFees: { type: Boolean },
             fee: { type: Number },
             specialDatePricing: {
-  nye: {
-    extraFee: { type: Number, default: 0 },
-    overrideFee: { type: Number, default: null },
-  },
-},
+              nye: {
+                extraFee: { type: Number, default: 0 },
+                overrideFee: { type: Number, default: null },
+              },
+            },
             additionalRoles: [
               {
                 additionalFee: { type: Number },
@@ -347,9 +347,9 @@ minDisplayPrice: { type: Number, default: null },
             accountName: { type: String },
             dietaryRequirements: { type: String },
             postCode: { type: String },
-             carRegistration: { type: String },
-    carRegistrationValue: { type: String },
-musicianProfileImageUpload: { type: String },
+            carRegistration: { type: String },
+            carRegistrationValue: { type: String },
+            musicianProfileImageUpload: { type: String },
             canDJ: booleanField(),
             haveMixingConsoleOrDecks: booleanField(),
             hasDjTable: booleanField(),
@@ -362,18 +362,18 @@ musicianProfileImageUpload: { type: String },
             maxDJHoursPerDay: { type: Number },
             deputies: [
               {
-                 id: { type: String },          // you use id/_id interchangeably in UI
-    _id: { type: String },         // keep if you're passing it
-    musicianId: { type: String },  // optional
+                id: { type: String },          // you use id/_id interchangeably in UI
+                _id: { type: String },         // keep if you're passing it
+                musicianId: { type: String },  // optional
 
-    // manual deputies
-    clientKey: { type: String },   // used for stable keys in your UI
-    // firstName: { type: String },
-                  firstName: { type: String, default: "" },
-    lastName: { type: String, default: "" },
-    email: { type: String, default: "" },
-    phoneNumber: { type: String, default: "" },
-    image: { type: String, default: "" },
+                // manual deputies
+                clientKey: { type: String },   // used for stable keys in your UI
+                // firstName: { type: String },
+                firstName: { type: String, default: "" },
+                lastName: { type: String, default: "" },
+                email: { type: String, default: "" },
+                phoneNumber: { type: String, default: "" },
+                image: { type: String, default: "" },
               },
             ],
           },
@@ -391,6 +391,24 @@ musicianProfileImageUpload: { type: String },
         ],
       },
     ],
+    availabilityByDate: { type: [ActAvailabilitySchema], default: [] },
+
+    // ✅ stores idempotency + email send history etc (not the badge itself)
+    availabilityBadgesMeta: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+      select: false,
+    },
+
+    availabilityBadges: {
+      type: Map,
+      of: availabilityBadgesSchema,
+      default: {},
+    },
+  },
+  { timestamps: true }
+);
+
 // Normalize boolean fields in nested arrays before validation
 actSchema.pre("validate", function normalizeNestedBooleanFields(next) {
   if (Array.isArray(this.lineups)) {
@@ -437,23 +455,6 @@ actSchema.pre("validate", function normalizeNestedBooleanFields(next) {
 
   next();
 });
-  availabilityByDate: { type: [ActAvailabilitySchema], default: [] },
-
-// ✅ stores idempotency + email send history etc (not the badge itself)
-availabilityBadgesMeta: {
-  type: mongoose.Schema.Types.Mixed,
-  default: {},
-  select: false,
-},
-
-availabilityBadges: {
-  type: Map,
-  of: availabilityBadgesSchema,
-  default: {},
-},
-  },
-  { timestamps: true }
-);
 
 
 function slugifyName(raw = "") {
