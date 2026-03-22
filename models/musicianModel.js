@@ -208,7 +208,7 @@ lastLoginAt: { type: Date, default: null, index: true },
     ],
 
     vocals: {
-      type: {
+
         type: {
   type: [
     {
@@ -367,15 +367,27 @@ lastLoginAt: { type: Date, default: null, index: true },
     ],
 
     deputy_contract_signed: { type: String, default: null, set: (v) => (v === "" ? null : v) },
-    bank_account: {
-      sort_code: { type: String, default: "", set: (v) => (v ?? "").toString().replace(/\D/g, "") },
-      account_number: { type: String, default: "", set: (v) => (v ?? "").toString().replace(/\D/g, "") },
+   bank_account: {
+      sort_code: {
+        type: String,
+        default: "",
+        set: (v) => (v ?? "").toString().replace(/\D/g, ""),
+      },
+      account_number: {
+        type: String,
+        default: "",
+        set: (v) => (v ?? "").toString().replace(/\D/g, ""),
+      },
       account_name: { type: String, default: "" },
-      account_type: { type: String, enum: ["Personal", "Business", ""], default: "" },
+      account_type: {
+        type: String,
+        enum: ["Personal", "Business", ""],
+        default: "",
+      },
     },
+
     dateRegistered: { type: Date, default: Date.now },
   },
-
   { minimize: false, strict: true }
 );
 
