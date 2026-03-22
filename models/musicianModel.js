@@ -209,18 +209,27 @@ lastLoginAt: { type: Date, default: null, index: true },
 
     vocals: {
       type: {
-        type: [String],
-        enum: [
-          "Lead Vocalist",
-          "Backing Vocalist",
-          "I don't sing",
-          "Backing Vocalist-Instrumentalist",
-          "Lead Vocalist-Instrumentalist",
-        ],
-        default: [],
-        required: false,
-        set: (v) => (v === "" ? [] : v),
-      },
+        type: {
+  type: [
+    {
+      type: String,
+      enum: [
+        "Lead Vocalist",
+        "Backing Vocalist",
+        "I don't sing",
+        "Backing Vocalist-Instrumentalist",
+        "Lead Vocalist-Instrumentalist",
+      ],
+    },
+  ],
+  default: [],
+  required: false,
+  set: (v) => {
+    if (v === "" || v == null) return [];
+    const arr = Array.isArray(v) ? v : [v];
+    return arr.map((item) => String(item || "").trim()).filter(Boolean);
+  },
+},
 
       gender: {
         type: String,
@@ -228,10 +237,19 @@ lastLoginAt: { type: Date, default: null, index: true },
         default: "",
       },
       range: {
-        type: String,
-        enum: ["Soprano", "Alto", "Tenor", "Mezzo-Soprano", ""],
-        default: "",
-      },
+  type: String,
+  enum: [
+    "Soprano",
+    "Mezzo-Soprano",
+    "Alto",
+    "Tenor",
+    "Baritone",
+    "Bass",
+    "Not sure",
+    "",
+  ],
+  default: "",
+},
 
       rap: {
         type: String,

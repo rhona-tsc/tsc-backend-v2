@@ -58,8 +58,56 @@ const buildSetDoc = (obj, prefix = "", out = {}) => {
   return out;
 };
 
+
 // Helper to validate ObjectIds
 const isValidObjectId = (v) => mongoose.isValidObjectId(String(v || ""));
+
+const coerceBool = (v) => {
+  if (Array.isArray(v)) return Boolean(v[0]);
+  if (v === "true") return true;
+  if (v === "false") return false;
+  if (v === null || v === undefined || v === "") return v;
+  return Boolean(v);
+};
+
+const normalizeLineupBooleans = (lineups = []) => {
+  if (!Array.isArray(lineups)) return lineups;
+
+  return lineups.map((lineup) => ({
+    ...lineup,
+    hasDrums: coerceBool(lineup?.hasDrums),
+    iems: coerceBool(lineup?.iems),
+    ampless: coerceBool(lineup?.ampless),
+    withoutDrums: coerceBool(lineup?.withoutDrums),
+    acoustic: coerceBool(lineup?.acoustic),
+    anotherVocalist: coerceBool(lineup?.anotherVocalist),
+    eDrums: coerceBool(lineup?.eDrums),
+    roamingPercussion: coerceBool(lineup?.roamingPercussion),
+    coverOverhead: coerceBool(lineup?.coverOverhead),
+    dryAndLevel: coerceBool(lineup?.dryAndLevel),
+    changingRoom: coerceBool(lineup?.changingRoom),
+    bandMembers: Array.isArray(lineup?.bandMembers)
+      ? lineup.bandMembers.map((member) => ({
+          ...member,
+          canDJ: coerceBool(member?.canDJ),
+          haveMixingConsoleOrDecks: coerceBool(member?.haveMixingConsoleOrDecks),
+          hasDjTable: coerceBool(member?.hasDjTable),
+          haveBooth: coerceBool(member?.haveBooth),
+          wireless: coerceBool(member?.wireless),
+          inPromo: coerceBool(member?.inPromo),
+          haveSoloPa: coerceBool(member?.haveSoloPa),
+          haveDuoPa: coerceBool(member?.haveDuoPa),
+          isEssential: coerceBool(member?.isEssential),
+          additionalRoles: Array.isArray(member?.additionalRoles)
+            ? member.additionalRoles.map((role) => ({
+                ...role,
+                isEssential: coerceBool(role?.isEssential),
+              }))
+            : member?.additionalRoles,
+        }))
+      : lineup?.bandMembers,
+  }));
+};
 
 export const updateActV2 = async (req, res) => {
   try {
@@ -74,6 +122,11 @@ export const updateActV2 = async (req, res) => {
     }
 
     const incoming = req.body || {};
+
+    if (Array.isArray(incoming.lineups)) {
+      incoming.lineups = normalizeLineupBooleans(incoming.lineups);
+      req.body.lineups = incoming.lineups;
+    }
 
     console.log("🧪 updateActV2 incoming has lineups?", Array.isArray(incoming.lineups));
 console.log("🧪 updateActV2 incoming has deputies anywhere?", hasDeputiesAnywhere(incoming));
@@ -152,6 +205,9 @@ export const createActV2 = async (req, res) => {
 
     // Never trust client-sent ownership fields
     const cleaned = { ...data };
+    if (Array.isArray(cleaned.lineups)) {
+      cleaned.lineups = normalizeLineupBooleans(cleaned.lineups);
+    }
     delete cleaned.createdBy;
     delete cleaned.createdByRole;
     delete cleaned.createdByEmail;
@@ -324,6 +380,10 @@ export const getActByIdV2 = async (req, res) => {
 export const saveActDraftV2 = async (req, res) => {
   try {
     const data = req.body || {};
+    if (Array.isArray(data.lineups)) {
+      data.lineups = normalizeLineupBooleans(data.lineups);
+      req.body.lineups = data.lineups;
+    }
     const status = "draft"; // force draft on autosave
 
     if (data._id) {

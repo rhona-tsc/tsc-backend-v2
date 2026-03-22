@@ -69,6 +69,21 @@ const ActAvailabilitySchema = new mongoose.Schema(
   { _id: false }
 );
 
+function coerceBoolean(value) {
+  if (Array.isArray(value)) return Boolean(value[0]);
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (value === null || value === undefined || value === "") return value;
+  return Boolean(value);
+}
+
+function booleanField() {
+  return {
+    type: Boolean,
+    set: coerceBoolean,
+  };
+}
+
 const actSchema = new mongoose.Schema(
   {
     name: { type: String },
@@ -270,8 +285,8 @@ minDisplayPrice: { type: Number, default: null },
         lineupId: { type: String, default: () => uuidv4(), index: true },
         actSize: { type: String },
         spaceRequired: { type: String },
-        coverOverhead: { type: Boolean },
-        dryAndLevel: { type: Boolean },
+        coverOverhead: booleanField(),
+        dryAndLevel: booleanField(),
         setupTime: { type: Number },
         soundcheckTime: { type: Number },
         totalSetupAndSoundcheckTime: { type: Number },
@@ -280,16 +295,16 @@ minDisplayPrice: { type: Number, default: null },
         electricityRequirements: { type: String },
         hotMeal: { type: Number },
         parking: { type: Number },
-        changingRoom: { type: Boolean },
+        changingRoom: booleanField(),
         rider: { type: [String] },
-        hasDrums: { type: Boolean },
-        iems: { type: Boolean },
-        ampless: { type: Boolean },
-        withoutDrums: { type: Boolean },
-        acoustic: { type: Boolean },
-        anotherVocalist: { type: Boolean },
-        eDrums: { type: Boolean },
-        roamingPercussion: { type: Boolean },
+        hasDrums: booleanField(),
+        iems: booleanField(),
+        ampless: booleanField(),
+        withoutDrums: booleanField(),
+        acoustic: booleanField(),
+        anotherVocalist: booleanField(),
+        eDrums: booleanField(),
+        roamingPercussion: booleanField(),
         ceremonySets: {
           type: Map,
           of: new mongoose.Schema(
@@ -324,7 +339,7 @@ minDisplayPrice: { type: Number, default: null },
               {
                 additionalFee: { type: Number },
                 role: { type: String },
-                isEssential: { type: Boolean, default: false },
+                isEssential: { ...booleanField(), default: false },
               },
             ],
             sortCode: { type: String },
@@ -335,15 +350,15 @@ minDisplayPrice: { type: Number, default: null },
              carRegistration: { type: String },
     carRegistrationValue: { type: String },
 musicianProfileImageUpload: { type: String },
-            canDJ: { type: Boolean },
-            haveMixingConsoleOrDecks: { type: Boolean },
-            hasDjTable: { type: Boolean },
-            haveBooth: { type: Boolean },
-            wireless: { type: Boolean },
-            inPromo: { type: Boolean },
-            haveSoloPa: { type: Boolean },
-            haveDuoPa: { type: Boolean },
-            isEssential: { type: Boolean, default: false },
+            canDJ: booleanField(),
+            haveMixingConsoleOrDecks: booleanField(),
+            hasDjTable: booleanField(),
+            haveBooth: booleanField(),
+            wireless: booleanField(),
+            inPromo: booleanField(),
+            haveSoloPa: booleanField(),
+            haveDuoPa: booleanField(),
+            isEssential: { ...booleanField(), default: false },
             maxDJHoursPerDay: { type: Number },
             deputies: [
               {
@@ -376,6 +391,52 @@ musicianProfileImageUpload: { type: String },
         ],
       },
     ],
+// Normalize boolean fields in nested arrays before validation
+actSchema.pre("validate", function normalizeNestedBooleanFields(next) {
+  if (Array.isArray(this.lineups)) {
+    this.lineups = this.lineups.map((lineup) => {
+      const normalizedLineup = {
+        ...lineup,
+        coverOverhead: coerceBoolean(lineup?.coverOverhead),
+        dryAndLevel: coerceBoolean(lineup?.dryAndLevel),
+        changingRoom: coerceBoolean(lineup?.changingRoom),
+        hasDrums: coerceBoolean(lineup?.hasDrums),
+        iems: coerceBoolean(lineup?.iems),
+        ampless: coerceBoolean(lineup?.ampless),
+        withoutDrums: coerceBoolean(lineup?.withoutDrums),
+        acoustic: coerceBoolean(lineup?.acoustic),
+        anotherVocalist: coerceBoolean(lineup?.anotherVocalist),
+        eDrums: coerceBoolean(lineup?.eDrums),
+        roamingPercussion: coerceBoolean(lineup?.roamingPercussion),
+      };
+
+      if (Array.isArray(normalizedLineup.bandMembers)) {
+        normalizedLineup.bandMembers = normalizedLineup.bandMembers.map((member) => ({
+          ...member,
+          canDJ: coerceBoolean(member?.canDJ),
+          haveMixingConsoleOrDecks: coerceBoolean(member?.haveMixingConsoleOrDecks),
+          hasDjTable: coerceBoolean(member?.hasDjTable),
+          haveBooth: coerceBoolean(member?.haveBooth),
+          wireless: coerceBoolean(member?.wireless),
+          inPromo: coerceBoolean(member?.inPromo),
+          haveSoloPa: coerceBoolean(member?.haveSoloPa),
+          haveDuoPa: coerceBoolean(member?.haveDuoPa),
+          isEssential: coerceBoolean(member?.isEssential),
+          additionalRoles: Array.isArray(member?.additionalRoles)
+            ? member.additionalRoles.map((role) => ({
+                ...role,
+                isEssential: coerceBoolean(role?.isEssential),
+              }))
+            : member?.additionalRoles,
+        }));
+      }
+
+      return normalizedLineup;
+    });
+  }
+
+  next();
+});
   availabilityByDate: { type: [ActAvailabilitySchema], default: [] },
 
 // ✅ stores idempotency + email send history etc (not the badge itself)
