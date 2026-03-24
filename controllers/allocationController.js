@@ -78,12 +78,9 @@ const buildBookingSMS = ({ firstName, formattedDate, formattedAddress, fee, duti
   return `Hi ${firstName || "there"}, booking request for ${formattedDate} at ${formattedAddress} with ${actName}. Role: ${duties || "performance"}. Fee: £${sanitizeFee(fee) || "TBC"}. Reply YES (YESBOOK_${requestId}) or NO (NOBOOK_${requestId}). 🤍 TSC`;
 };
 
+
 const findRealMusicianForMember = async (member = {}) => {
   try {
-    // ACT bandMember should be the source of truth for outbound contact details.
-    // Only resolve a real musician record if one is explicitly linked, or if the
-    // ACT member is missing its own contact details.
-
     if (member?.musicianId) {
       const byId = await Musician.findById(member.musicianId)
         .select("_id firstName lastName email phone phoneNumber phoneNormalized")
@@ -92,35 +89,19 @@ const findRealMusicianForMember = async (member = {}) => {
     }
 
     const hasOwnPhone = !!normalizePhone(member?.phoneNumber || member?.phone || "");
-    const hasOwnEmail = !!String(member?.email || member?.emailAddress || "").trim().toLowerCase();
+    const hasOwnEmail = !!String(member?.email || member?.emailAddress || "").trim();
 
-    // If ACT member already has contact details, don't resolve by phone/email,
-    // because that can accidentally swap in a real musician doc.
+    // If ACT member already has its own contact data, do not try to match by phone/email.
+    // That avoids cross-linking to the wrong real musician in test acts.
     if (hasOwnPhone || hasOwnEmail) {
       return null;
     }
 
-    const phone = normalizePhone(member?.phoneNumber || member?.phone || "");
-    if (phone) {
-      const byPhone = await Musician.findOne({
-        $or: [{ phoneNormalized: phone }, { phone }, { phoneNumber: phone }],
-      })
-        .select("_id firstName lastName email phone phoneNumber phoneNormalized")
-        .lean();
-      if (byPhone) return byPhone;
-    }
-
-    const email = String(member?.email || member?.emailAddress || "").trim().toLowerCase();
-    if (email) {
-      const byEmail = await Musician.findOne({ email })
-        .select("_id firstName lastName email phone phoneNumber phoneNormalized")
-        .lean();
-      if (byEmail) return byEmail;
-    }
+    return null;
   } catch (err) {
     console.warn("⚠️ findRealMusicianForMember failed:", err?.message || err);
+    return null;
   }
-  return null;
 };
 
 const buildMemberFee = ({ perMemberFee, member }) => {
@@ -135,38 +116,66 @@ const buildMemberFee = ({ perMemberFee, member }) => {
 /*                        triggerBookingRequests (main)                       */
 /* -------------------------------------------------------------------------- */
 export const triggerBookingRequests = async (req, res) => {
-  console.log(`🦚 (controllers/allocationController.js) triggerBookingRequests called at`, new Date().toISOString(), {
-    bodyKeys: Object.keys(req.body || {}),
-  });
+  console.log(
+    `🦚 (controllers/allocationController.js) triggerBookingRequests called at`,
+    new Date().toISOString(),
+    {
+      bodyKeys: Object.keys(req.body || {}),
+    }
+  );
+
   try {
-    const { actId, lineupId, dateISO, address, perMemberFee, bookingId, bookingRef, dryRun = false } = req.body;
+    const {
+      actId,
+      lineupId,
+      dateISO,
+      address,
+      perMemberFee,
+      bookingId,
+      bookingRef,
+      dryRun = false,
+    } = req.body;
+
     console.log("🧪 triggerBookingRequests mode", {
-  dryRun,
-  actId,
-  lineupId,
-  dateISO,
-  bookingId,
-  bookingRef,
-});
+      dryRun,
+      actId,
+      lineupId,
+      dateISO,
+      bookingId,
+      bookingRef,
+    });
+
     if (!actId || !dateISO || !address) {
-      return res.status(400).json({ success: false, message: "Missing actId/dateISO/address" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing actId/dateISO/address" });
     }
 
     const act = await Act.findById(actId).lean();
-    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
+    if (!act) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Act not found" });
+    }
 
-    // 1) Clear the availability badge immediately
-   console.log("🟡 Skipping badge clear in triggerBookingRequests; badge structure is date-keyed or embedded");
+    // Keep badge logic untouched for now
+    console.log(
+      "🟡 Skipping badge clear in triggerBookingRequests; badge structure is date-keyed or embedded"
+    );
 
-    // 2) Ensure booking event exists
+    // Ensure booking event exists unless dry run
     const event = dryRun
       ? { id: `dryrun_${actId}_${dateISO}` }
       : (await ensureBookingEvent({ actId, dateISO, address })).event;
 
-    // 3) Resolve lineup + members
+    // Resolve lineup
     const allLineups = Array.isArray(act.lineups) ? act.lineups : [];
     const lineup = lineupId
-      ? allLineups.find(l => (l._id?.toString?.() === String(lineupId)) || (String(l.lineupId) === String(lineupId)))
+      ? allLineups.find(
+          (l) =>
+            String(l._id) === String(lineupId) ||
+            String(l.lineupId) === String(lineupId)
+        )
       : allLineups[0];
 
     if (!lineup) {
@@ -175,72 +184,104 @@ export const triggerBookingRequests = async (req, res) => {
 
     const members = Array.isArray(lineup.bandMembers) ? lineup.bandMembers : [];
     if (!members.length) {
-      return res.json({ success: false, message: "No bandMembers in lineup" });
+      return res.json({
+        success: false,
+        message: "No bandMembers in lineup",
+      });
     }
 
-    console.log(`🦚 triggerBookingRequests: sending to ${members.length} members`, {
-      actName: act.tscName || act.name,
-      lineupId: lineup._id || lineup.lineupId,
-    });
+    console.log(
+      `🦚 triggerBookingRequests: sending to ${members.length} members`,
+      {
+        actName: act.tscName || act.name,
+        lineupId: lineup._id || lineup.lineupId,
+      }
+    );
 
     const ts = Date.now();
     const sent = [];
 
-    const booking = bookingId || bookingRef
-      ? await Booking.findOne({
-          $or: [{ bookingId: bookingId || bookingRef }, { bookingRef: bookingId || bookingRef }],
-        }).lean()
-      : await Booking.findOne({
-          act: actId,
-          status: "confirmed",
-          $or: [
-            { date: { $gte: new Date(`${dateISO}T00:00:00.000Z`), $lte: new Date(`${dateISO}T23:59:59.999Z`) } },
-            { eventDate: { $gte: new Date(`${dateISO}T00:00:00.000Z`), $lte: new Date(`${dateISO}T23:59:59.999Z`) } },
-          ],
-        })
-          .sort({ updatedAt: -1, createdAt: -1 })
-          .lean();
+    const booking =
+      bookingId || bookingRef
+        ? await Booking.findOne({
+            $or: [
+              { bookingId: bookingId || bookingRef },
+              { bookingRef: bookingId || bookingRef },
+            ],
+          }).lean()
+        : await Booking.findOne({
+            act: actId,
+            status: "confirmed",
+            $or: [
+              {
+                date: {
+                  $gte: new Date(`${dateISO}T00:00:00.000Z`),
+                  $lte: new Date(`${dateISO}T23:59:59.999Z`),
+                },
+              },
+              {
+                eventDate: {
+                  $gte: new Date(`${dateISO}T00:00:00.000Z`),
+                  $lte: new Date(`${dateISO}T23:59:59.999Z`),
+                },
+              },
+            ],
+          })
+            .sort({ updatedAt: -1, createdAt: -1 })
+            .lean();
 
-    const resolvedBookingRef = booking?.bookingId || booking?.bookingRef || bookingId || bookingRef || null;
+    const resolvedBookingRef =
+      booking?.bookingId ||
+      booking?.bookingRef ||
+      bookingId ||
+      bookingRef ||
+      null;
 
     for (const m of members) {
-      const roleLower = String(m?.instrument || "").trim().toLowerCase();
+      const roleLower = String(m?.instrument || "")
+        .trim()
+        .toLowerCase();
+
       if (!roleLower || roleLower === "manager" || roleLower === "admin") {
         continue;
       }
 
-    const realMusician = await findRealMusicianForMember(m);
+      const realMusician = await findRealMusicianForMember(m);
 
-// ACT member data is the source of truth for outbound contact details.
-// Only fall back to Musician collection if ACT member is missing them.
-const memberPhone = normalizePhone(m?.phoneNumber || m?.phone || "");
-const musicianPhone = normalizePhone(realMusician?.phone || realMusician?.phoneNumber || "");
-const phone = memberPhone || musicianPhone;
+      // ACT member is source of truth for contact details
+      const memberPhone = normalizePhone(m?.phoneNumber || m?.phone || "");
+      const musicianPhone = normalizePhone(
+        realMusician?.phone || realMusician?.phoneNumber || ""
+      );
+      const phone = memberPhone || musicianPhone;
 
-if (!phone) {
+      if (!phone) {
         console.warn("🦚 triggerBookingRequests skip: no phone for member", {
           name: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
           instrument: m.instrument || "",
         });
         continue;
       }
+
       const attendeeEmail = String(
-  m?.email ||
-  m?.emailAddress ||
-  realMusician?.email ||
-  ""
-).trim();
+        m?.email || m?.emailAddress || realMusician?.email || ""
+      ).trim();
 
-const displayFirstName = m?.firstName || realMusician?.firstName || "";
-const displayLastName = m?.lastName || realMusician?.lastName || "";
-const displayName = `${displayFirstName} ${displayLastName}`.trim();
+      const displayFirstName = m?.firstName || realMusician?.firstName || "";
+      const displayLastName = m?.lastName || realMusician?.lastName || "";
+      const displayName = `${displayFirstName} ${displayLastName}`.trim();
 
-const resolvedMusicianId = realMusician?._id || m?.musicianId || null;
+      const resolvedMusicianId = realMusician?._id || m?.musicianId || null;
 
       const memberFee = buildMemberFee({ perMemberFee, member: m });
+
       const requestId = `${ts}_${Math.random().toString(36).slice(2, 7)}`;
+
       const formattedDate = new Date(dateISO).toLocaleDateString("en-GB", {
-        weekday: "long", day: "numeric", month: "short", year: "numeric"
+        weekday: "long",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
       });
 
       const smsBody = buildBookingSMS({
@@ -254,10 +295,25 @@ const resolvedMusicianId = realMusician?._id || m?.musicianId || null;
       });
 
       if (!dryRun) {
+        if (!resolvedMusicianId) {
+          console.warn(
+            "🦚 triggerBookingRequests skip: no real musicianId resolved",
+            {
+              memberName: displayName,
+              instrument: m.instrument || "",
+              phone,
+              attendeeEmail,
+              hasActMusicianId: !!m?.musicianId,
+            }
+          );
+          continue;
+        }
+
         await EnquiryMessage.create({
           actId,
           lineupId: lineup._id || lineup.lineupId || null,
-musicianId: resolvedMusicianId,          enquiryId: requestId,
+          musicianId: resolvedMusicianId,
+          enquiryId: requestId,
           bookingRef: resolvedBookingRef,
           phone,
           duties: m.instrument || "",
@@ -276,7 +332,8 @@ musicianId: resolvedMusicianId,          enquiryId: requestId,
           calendar: {
             eventId: event.id,
             calendarStatus: "needsAction",
-attendeeEmail,          },
+            attendeeEmail,
+          },
           deliveryStatus: "queued",
           status: "queued",
         });
@@ -294,9 +351,9 @@ attendeeEmail,          },
               lineupId: lineup._id || lineup.lineupId || null,
               dateISO,
               phone,
-musicianId: resolvedMusicianId,              
-musicianName: displayName,
-musicianEmail: attendeeEmail,
+              musicianId: resolvedMusicianId,
+              musicianName: displayName,
+              musicianEmail: attendeeEmail,
               duties: m.instrument || "performance",
               fee: memberFee ? String(memberFee) : "",
               formattedDate,
@@ -314,20 +371,22 @@ musicianEmail: attendeeEmail,
         );
       }
 
-     const wa = dryRun
-  ? { sid: `dryrun_${requestId}` }
-  : await sendWhatsAppMessage({
-      to: `whatsapp:${phone}`,
-      contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
-      variables: {
-"1": firstNameOf(m) || firstNameOf(realMusician),        "2": formattedDate,
-        "3": address,
-        "4": sanitizeFee(memberFee),
-        "5": m.instrument || "performance",
-        "6": act.tscName || act.name || "the band",
-      },
-      smsBody,
-    });
+      const wa = dryRun
+        ? { sid: `dryrun_${requestId}` }
+        : await sendWhatsAppMessage({
+            to: `whatsapp:${phone}`,
+            contentSid:
+              process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+            variables: {
+              "1": firstNameOf(realMusician || m),
+              "2": formattedDate,
+              "3": address,
+              "4": sanitizeFee(memberFee),
+              "5": m.instrument || "performance",
+              "6": act.tscName || act.name || "the band",
+            },
+            smsBody,
+          });
 
       if (!dryRun) {
         await EnquiryMessage.updateOne(
@@ -342,7 +401,12 @@ musicianEmail: attendeeEmail,
         );
 
         await AvailabilityModel.updateOne(
-          { actId, lineupId: lineup._id || lineup.lineupId || null, dateISO, phone },
+          {
+            actId,
+            lineupId: lineup._id || lineup.lineupId || null,
+            dateISO,
+            phone,
+          },
           {
             $set: {
               messageSidOut: wa?.sid || null,
@@ -355,31 +419,48 @@ musicianEmail: attendeeEmail,
         );
       }
 
-  console.log(`🦚 triggerBookingRequests sent`, {
-name: displayName,  phone,
-  duties: m.instrument || "",
-  bookingRef: resolvedBookingRef,
-  channel: "whatsapp",
-});
+      console.log("🦚 triggerBookingRequests sent", {
+        name: displayName,
+        phone,
+        duties: m.instrument || "",
+        bookingRef: resolvedBookingRef,
+        channel: "whatsapp",
+      });
 
-const line = `Booking invite sent to ${displayName} (${m.instrument || ""})`;
+      const line = `Booking invite sent to ${displayName} (${
+        m.instrument || ""
+      })`;
+
       if (!dryRun) {
-        await appendLineToEventDescription({ eventId: event.id, line });
+        await appendLineToEventDescription({
+          eventId: event.id,
+          line,
+        });
       }
 
       sent.push({
-name: displayName,        phone,
+        name: displayName,
+        phone,
         instrument: m.instrument || "",
         fee: memberFee,
         requestId,
-attendeeEmail,        dryRun,
+        attendeeEmail,
+        dryRun,
       });
     }
 
-    return res.json({ success: true, eventId: event.id, sent, dryRun });
+    return res.json({
+      success: true,
+      eventId: event.id,
+      sent,
+      dryRun,
+    });
   } catch (err) {
-    console.error(`🦚 triggerBookingRequests error`, err);
-    return res.status(500).json({ success: false, message: err?.message || "Server error" });
+    console.error("🦚 triggerBookingRequests error", err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || "Server error",
+    });
   }
 };
 
