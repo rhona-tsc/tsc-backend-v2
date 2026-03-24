@@ -5693,17 +5693,31 @@ const generateLineupDescriptionForEmail = (lineup) => {
   const norm = (s = "") => String(s || "").trim();
   const lower = (s = "") => norm(s).toLowerCase();
 
-  const isManagerLikeInstrument = (instrument = "") => {
+  const isNonPerformerLikeInstrument = (instrument = "") => {
     const v = lower(instrument);
-    return v === "manager" || v === "admin" || v.includes("band manager");
+    return (
+      v === "manager" ||
+      v === "admin" ||
+      v.includes("band manager") ||
+      v.includes("management") ||
+      v.includes("sound engineer") ||
+      v.includes("sound tech") ||
+      v.includes("sound technician") ||
+      v.includes("audio engineer") ||
+      v.includes("audio tech") ||
+      v.includes("audio technician") ||
+      v.includes("foh") ||
+      v.includes("front of house")
+    );
   };
 
-  // Count performers (exclude manager/admin/blank instrument rows)
+  // Count performers (exclude manager/admin/sound tech/non-performer/blank instrument rows)
   const performerMembers = members.filter((m) => {
     if (!m?.isEssential) return false;
     const inst = norm(m?.instrument);
     if (!inst) return false;
-    if (isManagerLikeInstrument(inst)) return false;
+    if (m?.isManager === true || m?.isNonPerformer === true) return false;
+    if (isNonPerformerLikeInstrument(inst)) return false;
     return true;
   });
 
@@ -5711,7 +5725,7 @@ const generateLineupDescriptionForEmail = (lineup) => {
   const actSizeLabel = norm(lineup?.actSize);
   const countLabel = actSizeLabel ? actSizeLabel : `${performerMembers.length}-Piece`;
 
-  // Essential instruments (no manager/admin/blank), vocals first, drums last
+  // Essential instruments (no manager/admin/sound tech/blank), vocals first, drums last
   let instruments = performerMembers
     .map((m) => norm(m?.instrument))
     .filter(Boolean);
@@ -5729,7 +5743,7 @@ const generateLineupDescriptionForEmail = (lineup) => {
     return 0;
   });
 
-  // Convert duplicates -> "x N" (NOT de-dupe; it counts repeats)
+  // Convert duplicates -> "x N"
   const withCountsInOrder = (arr) => {
     const out = [];
     const counts = new Map();
@@ -5745,7 +5759,7 @@ const generateLineupDescriptionForEmail = (lineup) => {
 
   const instrumentsDisplayArr = withCountsInOrder(instruments);
 
-  // Roles: essential additionalRoles, include Band Management if "Band Manager" present
+  // Roles: essential additionalRoles
   const rolesRaw = members.flatMap((member) =>
     (Array.isArray(member?.additionalRoles) ? member.additionalRoles : [])
       .filter((r) => r?.isEssential)
@@ -5753,9 +5767,25 @@ const generateLineupDescriptionForEmail = (lineup) => {
       .filter(Boolean)
   );
 
-  const rolesNormalized = rolesRaw.map((r) =>
-    lower(r).includes("band manager") ? "Band Management" : r
-  );
+  const rolesNormalized = rolesRaw.map((r) => {
+    const rLower = lower(r);
+
+    if (rLower.includes("band manager")) return "Band Management";
+    if (
+      rLower.includes("sound engineer") ||
+      rLower.includes("sound tech") ||
+      rLower.includes("sound technician") ||
+      rLower.includes("audio engineer") ||
+      rLower.includes("audio tech") ||
+      rLower.includes("audio technician") ||
+      rLower.includes("foh") ||
+      rLower.includes("front of house")
+    ) {
+      return "Sound Engineering";
+    }
+
+    return r;
+  });
 
   const rolesDisplayArr = withCountsInOrder(rolesNormalized);
 

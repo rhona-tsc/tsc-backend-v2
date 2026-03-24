@@ -61,14 +61,14 @@
 </head>
 <body>
   <img src="https://res.cloudinary.com/dvcgr3fyd/image/upload/v1762950219/4_tt3cay.png" alt="The Supreme Collective Logo" class="header-logo" />
-  <div class="title">THE <span style="color:#ff6667">CONTRACT</span></div>
+<div class="title">THE <span style="color:#ff6667">CONTRACT</span></div>
 <%
   const t = totals || {};
   const fullAmount = Number(t.fullAmount ?? total ?? 0);
   const chargedAmount = Number(t.chargedAmount ?? deposit ?? 0);
 
-  const bookingTotalDisplay = fullAmount;               // “Booking total” should be the full contract value
-  const depositDisplay = `£${chargedAmount.toFixed(2)}`; // Always show what was paid
+  const bookingTotalDisplay = fullAmount;
+  const depositDisplay = `£${chargedAmount.toFixed(2)}`;
   const outstanding = Math.max(0, fullAmount - chargedAmount);
 %>
     <div class="contract-section" aria-label="Booking contract terms">
@@ -119,30 +119,39 @@ Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "T
         <div>
 <strong><%= it.tscName || it.actName || it.name || "—" %></strong>
 <%
-  // Lineup description to match generateDescription() ordering:
-  // - vocals first
-  // - drums last
-  // - otherwise preserve existing order
- 
   const norm = (s = "") => String(s || "").trim();
   const lower = (s = "") => norm(s).toLowerCase();
 
   const members = Array.isArray(it?.bandMembers) ? it.bandMembers : [];
 
-  const isManagerLikeInstrument = (instrument = "") => {
+  const isNonPerformerLikeInstrument = (instrument = "") => {
     const v = lower(instrument);
-    return v === "manager" || v === "admin" || v.includes("band manager");
+    return (
+      v === "manager" ||
+      v === "admin" ||
+      v.includes("band manager") ||
+      v.includes("management") ||
+      v.includes("sound engineer") ||
+      v.includes("sound tech") ||
+      v.includes("sound technician") ||
+      v.includes("audio engineer") ||
+      v.includes("audio tech") ||
+      v.includes("audio technician") ||
+      v.includes("foh") ||
+      v.includes("front of house")
+    );
   };
 
   const performerMembers = members.filter((m) => {
     if (!m?.isEssential) return false;
     const inst = norm(m?.instrument);
     if (!inst) return false;
-    if (isManagerLikeInstrument(inst)) return false;
+    if (m?.isManager === true || m?.isNonPerformer === true) return false;
+    if (isNonPerformerLikeInstrument(inst)) return false;
     return true;
   });
 
-  const actSizeLabel = norm(it?.actSize); // if you store it on actsSummary item
+  const actSizeLabel = norm(it?.actSize);
   const countLabel = actSizeLabel ? actSizeLabel : `${performerMembers.length}-Piece`;
 
   let instruments = performerMembers
@@ -184,9 +193,25 @@ Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "T
       .filter(Boolean)
   );
 
-  const rolesNormalized = rolesRaw.map((r) =>
-    lower(r).includes("band manager") ? "Band Management" : r
-  );
+  const rolesNormalized = rolesRaw.map((r) => {
+    const rLower = lower(r);
+
+    if (rLower.includes("band manager")) return "Band Management";
+    if (
+      rLower.includes("sound engineer") ||
+      rLower.includes("sound tech") ||
+      rLower.includes("sound technician") ||
+      rLower.includes("audio engineer") ||
+      rLower.includes("audio tech") ||
+      rLower.includes("audio technician") ||
+      rLower.includes("foh") ||
+      rLower.includes("front of house")
+    ) {
+      return "Sound Engineering";
+    }
+
+    return r;
+  });
 
   const rolesDisplayArr = withCountsInOrder(rolesNormalized);
 
@@ -214,12 +239,10 @@ Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "T
 </div>
 
         <% 
-          // Determine if lineup has any vocalists
           const hasVocalists =
             Array.isArray(it.bandMembers) &&
             it.bandMembers.some(m => (m.instrument || "").toLowerCase().includes("vocal"));
 
-          // Determine if a chosen vocalist exists (from PlaceBooking selectedVocalist snapshot)
           const sv = it.selectedVocalist;
         %>
 

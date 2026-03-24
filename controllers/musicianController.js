@@ -800,68 +800,9 @@ const COUNTY_NEIGHBORS = {
 const _norm = (s = "") => String(s).trim().toLowerCase().replace(/\s+/g, " ");
 
 // lightweight aliasing for role “families”
-const roleAliases = {
-  dj: [
-    "dj with decks",
-    "dj with mixing console",
-    "dj with console",
-    "curate setlist",
-  ],
-  "band leader": ["musical director", "md", "band management", "band manager"],
-  "sound engineering": [
-    "sound engineer",
-    "live audio recording",
-    "pa & lights provision",
-  ],
-  "client liaison": ["client liason", "client liaison"], // typos
-};
 
-// UK postcode area = leading letters (one or two letters at start)
-const postcodeArea = (postcode = "") => {
-  const m = String(postcode)
-    .toUpperCase()
-    .trim()
-    .match(/^([A-Z]{1,2})/);
-  return m ? m[1] : "";
-};
 
-// 0..1 proximity score from origin to deputy
-const computeProximity = (origin = {}, deputy = {}) => {
-  const oCounty = _norm(origin?.county || "");
-  const oArea = postcodeArea(origin?.postcode || "");
-  const dCounty = _norm(deputy?.address?.county || "");
-  const dArea = postcodeArea(deputy?.address?.postcode || "");
 
-  if (!oCounty && !oArea) return 0; // nothing to compare
-
-  // simple tiers
-  if (oCounty && dCounty && oCounty === dCounty) return 1.0;
-  if (oArea && dArea && oArea === dArea) return 0.75;
-
-  // partial letter match on area (e.g., E vs EC) gives a small bump
-  if (oArea && dArea && oArea[0] === dArea[0]) return 0.5;
-
-  return 0.0;
-};
-
-// 0..1 genre match (intersection / actGenres count)
-// Replace your computeGenreFit with this:
-const computeGenreFit = (act, dep) => {
-  const A = new Set((act || []).map(_norm).filter(Boolean));
-  const D = new Set((dep || []).map(_norm).filter(Boolean));
-  if (!A.size) return 0;
-
-  // 1.0 if deputy covers every act genre
-  let inter = 0;
-  for (const g of A) if (D.has(g)) inter++;
-  const coverage = inter / A.size;
-
-  // Optional: keep a touch of Jaccard so we don't over-reward "everything" profiles
-  const jacc = A.size && D.size ? inter / (A.size + D.size - inter) : 0;
-
-  // Heavier weight on coverage (feel free to tweak 0.8/0.2)
-  return 0.8 * coverage + 0.2 * jacc;
-};
 
 // ----------------------- Controllers -----------------------
 
