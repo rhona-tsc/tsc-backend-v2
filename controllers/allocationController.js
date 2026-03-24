@@ -80,6 +80,10 @@ const buildBookingSMS = ({ firstName, formattedDate, formattedAddress, fee, duti
 
 const findRealMusicianForMember = async (member = {}) => {
   try {
+    // ACT bandMember should be the source of truth for outbound contact details.
+    // Only resolve a real musician record if one is explicitly linked, or if the
+    // ACT member is missing its own contact details.
+
     if (member?.musicianId) {
       const byId = await Musician.findById(member.musicianId)
         .select("_id firstName lastName email phone phoneNumber phoneNormalized")
@@ -87,10 +91,19 @@ const findRealMusicianForMember = async (member = {}) => {
       if (byId) return byId;
     }
 
+    const hasOwnPhone = !!normalizePhone(member?.phoneNumber || member?.phone || "");
+    const hasOwnEmail = !!String(member?.email || member?.emailAddress || "").trim().toLowerCase();
+
+    // If ACT member already has contact details, don't resolve by phone/email,
+    // because that can accidentally swap in a real musician doc.
+    if (hasOwnPhone || hasOwnEmail) {
+      return null;
+    }
+
     const phone = normalizePhone(member?.phoneNumber || member?.phone || "");
     if (phone) {
       const byPhone = await Musician.findOne({
-        $or: [{ phoneNormalized: phone }, { phone: phone }, { phoneNumber: phone }],
+        $or: [{ phoneNormalized: phone }, { phone }, { phoneNumber: phone }],
       })
         .select("_id firstName lastName email phone phoneNumber phoneNormalized")
         .lean();
@@ -196,22 +209,33 @@ export const triggerBookingRequests = async (req, res) => {
         continue;
       }
 
-      const realMusician = await findRealMusicianForMember(m);
-      const rawPhone =
-        realMusician?.phone ||
-        realMusician?.phoneNumber ||
-        m?.phoneNumber ||
-        m?.phone ||
-        "";
+    const realMusician = await findRealMusicianForMember(m);
 
-      const phone = normalizePhone(rawPhone);
-      if (!phone) {
+// ACT member data is the source of truth for outbound contact details.
+// Only fall back to Musician collection if ACT member is missing them.
+const memberPhone = normalizePhone(m?.phoneNumber || m?.phone || "");
+const musicianPhone = normalizePhone(realMusician?.phone || realMusician?.phoneNumber || "");
+const phone = memberPhone || musicianPhone;
+
+if (!phone) {
         console.warn("🦚 triggerBookingRequests skip: no phone for member", {
           name: `${m.firstName || ""} ${m.lastName || ""}`.trim(),
           instrument: m.instrument || "",
         });
         continue;
       }
+      const attendeeEmail = String(
+  m?.email ||
+  m?.emailAddress ||
+  realMusician?.email ||
+  ""
+).trim();
+
+const displayFirstName = m?.firstName || realMusician?.firstName || "";
+const displayLastName = m?.lastName || realMusician?.lastName || "";
+const displayName = `${displayFirstName} ${displayLastName}`.trim();
+
+const resolvedMusicianId = realMusician?._id || m?.musicianId || null;
 
       const memberFee = buildMemberFee({ perMemberFee, member: m });
       const requestId = `${ts}_${Math.random().toString(36).slice(2, 7)}`;
@@ -233,8 +257,7 @@ export const triggerBookingRequests = async (req, res) => {
         await EnquiryMessage.create({
           actId,
           lineupId: lineup._id || lineup.lineupId || null,
-          musicianId: realMusician?._id || m?.musicianId || m?._id || null,
-          enquiryId: requestId,
+musicianId: resolvedMusicianId,          enquiryId: requestId,
           bookingRef: resolvedBookingRef,
           phone,
           duties: m.instrument || "",
@@ -253,8 +276,7 @@ export const triggerBookingRequests = async (req, res) => {
           calendar: {
             eventId: event.id,
             calendarStatus: "needsAction",
-            attendeeEmail: realMusician?.email || m?.email || m?.emailAddress || "",
-          },
+attendeeEmail,          },
           deliveryStatus: "queued",
           status: "queued",
         });
@@ -272,9 +294,9 @@ export const triggerBookingRequests = async (req, res) => {
               lineupId: lineup._id || lineup.lineupId || null,
               dateISO,
               phone,
-              musicianId: realMusician?._id || m?.musicianId || m?._id || null,
-              musicianName: `${realMusician?.firstName || m?.firstName || ""} ${realMusician?.lastName || m?.lastName || ""}`.trim(),
-              musicianEmail: realMusician?.email || m?.email || m?.emailAddress || "",
+musicianId: resolvedMusicianId,              
+musicianName: displayName,
+musicianEmail: attendeeEmail,
               duties: m.instrument || "performance",
               fee: memberFee ? String(memberFee) : "",
               formattedDate,
@@ -298,8 +320,7 @@ export const triggerBookingRequests = async (req, res) => {
       to: `whatsapp:${phone}`,
       contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
       variables: {
-        "1": firstNameOf(realMusician || m),
-        "2": formattedDate,
+"1": firstNameOf(m) || firstNameOf(realMusician),        "2": formattedDate,
         "3": address,
         "4": sanitizeFee(memberFee),
         "5": m.instrument || "performance",
@@ -335,26 +356,23 @@ export const triggerBookingRequests = async (req, res) => {
       }
 
   console.log(`🦚 triggerBookingRequests sent`, {
-  name: `${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""}`.trim(),
-  phone,
+name: displayName,  phone,
   duties: m.instrument || "",
   bookingRef: resolvedBookingRef,
   channel: "whatsapp",
 });
 
-      const line = `Booking invite sent to ${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""} (${m.instrument || ""})`;
+const line = `Booking invite sent to ${displayName} (${m.instrument || ""})`;
       if (!dryRun) {
         await appendLineToEventDescription({ eventId: event.id, line });
       }
 
       sent.push({
-        name: `${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""}`.trim(),
-        phone,
+name: displayName,        phone,
         instrument: m.instrument || "",
         fee: memberFee,
         requestId,
-        attendeeEmail: realMusician?.email || m?.email || m?.emailAddress || "",
-        dryRun,
+attendeeEmail,        dryRun,
       });
     }
 
