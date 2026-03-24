@@ -1783,21 +1783,7 @@ export const clearavailabilityBadges = async (req, res) => {
 
 // -------------------- Utilities --------------------
 
-const mapTwilioToEnquiryStatus = (s) => {
-  console.log(
-    `🟢  (availabilityController.js) mapTwilioToEnquiryStatus START at ${new Date().toISOString()}`,
-    {},
-  );
-  const v = String(s || "").toLowerCase();
-  if (v === "accepted" || v === "queued" || v === "scheduled") return "queued";
-  if (v === "sending") return "sent";
-  if (v === "sent") return "sent";
-  if (v === "delivered") return "delivered";
-  if (v === "read") return "read";
-  if (v === "undelivered") return "undelivered";
-  if (v === "failed") return "failed";
-  return "queued";
-};
+
 
 const BASE_URL = (
   process.env.BACKEND_PUBLIC_URL ||
@@ -6195,6 +6181,8 @@ const generateLineupDescriptionForEmail = (lineup) => {
     );
   };
 
+  
+
   // Count performers (exclude manager/admin/sound tech/non-performer/blank instrument rows)
   const performerMembers = members.filter((m) => {
     if (!m?.isEssential) return false;
@@ -6332,6 +6320,73 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
   });
 
   /* ------------------------------- helpers ------------------------------- */
+
+  const formatCurrencyGBP = (value) => {
+  const n = Number(value || 0);
+  return `£${n.toFixed(2)}`;
+};
+
+const titleCaseWords = (value = "") =>
+  String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+const getActExtrasForEmail = (actDoc = {}) => {
+  const raw = actDoc?.extras;
+  if (!raw) return [];
+
+  const entries =
+    raw instanceof Map
+      ? Array.from(raw.entries())
+      : typeof raw?.entries === "function"
+        ? Array.from(raw.entries())
+        : Object.entries(raw || {});
+
+  return entries
+    .map(([key, value]) => {
+      const price = Number(value?.price ?? 0);
+      const complimentary = value?.complimentary === true;
+
+      return {
+        key,
+        label: titleCaseWords(key),
+        price,
+        complimentary,
+      };
+    })
+    .filter((item) => item.label && (item.complimentary || item.price > 0))
+    .sort((a, b) => a.label.localeCompare(b.label));
+};
+
+const renderActExtrasHtml = (actDoc = {}) => {
+  const extras = getActExtrasForEmail(actDoc);
+  if (!extras.length) return "";
+
+  const itemsHtml = extras
+    .map((extra) => {
+      const priceText = extra.complimentary
+        ? "Complimentary"
+        : formatCurrencyGBP(extra.price);
+
+      return `
+        <li style="margin: 0 0 6px;">
+          <strong>${extra.label}</strong>: ${priceText}
+        </li>
+      `;
+    })
+    .join("");
+
+  return `
+    <div style="margin-top:16px;">
+      <div style="font-weight:700; margin-bottom:8px;">Available band extras:</div>
+      <ul style="margin:0; padding-left:18px;">
+        ${itemsHtml}
+      </ul>
+    </div>
+  `;
+};
 
   const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -6753,6 +6808,10 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       }
     }
 
+    
+    
+
+
     const lineupQuotes = await Promise.all(
       (actDoc.lineups || []).map(async (lu) => {
         try {
@@ -7037,6 +7096,9 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
                 to: clientEmail,
               });
 
+              
+              const actExtrasHtml = renderActExtrasHtml(actDoc);
+
               await sendClientEmail({
                 actId: String(actId),
                 userId: clientUserId,
@@ -7120,6 +7182,8 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
                     ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
                     <li>Travel to ${selectedAddress || "TBC"}</li>
                   </ul>
+
+                  ${actExtrasHtml}
 
                   <div style="margin-top:30px;">
                     <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
@@ -7271,6 +7335,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
                   : "The band's regular vocalist isn’t available for your date, but we’re delighted to confirm that";
 
                   const actExtrasHtml = renderActExtrasHtml(actDoc);
+
 
               await sendClientEmail({
                 actId: String(actId),
