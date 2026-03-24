@@ -371,37 +371,7 @@ export const sendSMSMessage = async (to, body) => {
   return client.messages.create(payload);
 };
 
-/**
- * Try WA first; if creation fails, fallback to SMS (requires smsBody).
- */
-export async function sendWAOrSMS(opts = {}) {
-  console.log(
-    `🩵 (utils/twilioClient.js) sendWAOrSMS START at ${new Date().toISOString()}`,
-    {}
-  );
 
-  const { to, templateParams, variables, contentSid, smsBody = "" } = opts;
-
-  try {
-    const wa = await sendWhatsAppMessage({
-      to,
-      templateParams,
-      variables,
-      contentSid,
-      smsBody,
-    });
-    return wa;
-  } catch (err) {
-    console.warn(
-      "⚠️ WA creation failed, falling back to SMS:",
-      err?.message || err
-    );
-    if (!smsBody)
-      throw new Error("SMS fallback requested but no smsBody provided");
-    const sms = await sendSMSMessage(to, smsBody);
-    return { sid: sms.sid, status: sms.status, channel: "sms", to: toE164(to) };
-  }
-}
 
 /**
  * Send a plain WhatsApp text (no template/content).
@@ -427,7 +397,6 @@ export async function sendWhatsAppText(to, body) {
 export default {
   sendWhatsAppMessage,
   sendSMSMessage,
-  sendWAOrSMS,
   sendWhatsAppText,
   toE164,
 };

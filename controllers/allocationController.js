@@ -2,13 +2,12 @@
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
 import EnquiryMessage from "../models/EnquiryMessage.js";
-import { sendWhatsAppMessage, sendWAOrSMS, sendSMSMessage } from "../utils/twilioClient.js";
+import { sendWhatsAppMessage, sendSMSMessage } from "../utils/twilioClient.js";
 import {
   ensureBookingEvent,
   appendLineToEventDescription,
   addAttendeeToEvent,
 } from "./googleController.js";
-import { normalize } from "../utils/phoneUtils.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import bookingBoardItem from "../models/bookingBoardItem.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
@@ -293,20 +292,21 @@ export const triggerBookingRequests = async (req, res) => {
         );
       }
 
-      const wa = dryRun
-        ? { sid: `dryrun_${requestId}` }
-        : await sendWAOrSMS({
-            to: phone,
-            templateParams: {
-              FirstName: firstNameOf(realMusician || m),
-              FormattedDate: formattedDate,
-              FormattedAddress: address,
-              Fee: sanitizeFee(memberFee),
-              Duties: m.instrument || "performance",
-              ActName: act.tscName || act.name || "the band",
-            },
-            smsBody,
-          });
+     const wa = dryRun
+  ? { sid: `dryrun_${requestId}` }
+  : await sendWhatsAppMessage({
+      to: `whatsapp:${phone}`,
+      contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+      variables: {
+        "1": firstNameOf(realMusician || m),
+        "2": formattedDate,
+        "3": address,
+        "4": sanitizeFee(memberFee),
+        "5": m.instrument || "performance",
+        "6": act.tscName || act.name || "the band",
+      },
+      smsBody,
+    });
 
       if (!dryRun) {
         await EnquiryMessage.updateOne(
@@ -334,12 +334,13 @@ export const triggerBookingRequests = async (req, res) => {
         );
       }
 
-      console.log(`🦚 triggerBookingRequests sent`, {
-        name: `${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""}`.trim(),
-        phone,
-        duties: m.instrument || "",
-        bookingRef: resolvedBookingRef,
-      });
+  console.log(`🦚 triggerBookingRequests sent`, {
+  name: `${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""}`.trim(),
+  phone,
+  duties: m.instrument || "",
+  bookingRef: resolvedBookingRef,
+  channel: "whatsapp",
+});
 
       const line = `Booking invite sent to ${realMusician?.firstName || m.firstName || ""} ${realMusician?.lastName || m.lastName || ""} (${m.instrument || ""})`;
       if (!dryRun) {

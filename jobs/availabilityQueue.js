@@ -1,7 +1,6 @@
 // backend/jobs/availabilityQueue.js
 import Availability from "../models/availabilityModel.js";
 import DeferredAvailability from "../models/deferredAvailabilityModel.js";
-import { sendWAOrSMS } from "../utils/twilioClient.js";
 import { pingDeputiesFor } from "../controllers/availabilityController.js"; // export it if not already
 
 const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
@@ -96,7 +95,7 @@ export async function processAvailabilityQueue() {
             actName: p.actName,
           });
 
-          await sendWAOrSMS({
+          await sendWhatsAppMessage({
             to: p.phone,
             templateParams: {
               FirstName: safeFirst(p.contactName || firstNameOfLoose(p) || p.musicianName),
@@ -162,7 +161,7 @@ export async function processAvailabilityQueue() {
                 date: hydrated.FormattedDate,
               });
 
-              await sendWAOrSMS(payload);
+              await sendWhatsAppMessage(payload);
               await DeferredAvailability.deleteOne({ _id: next._id });
               console.log(`🟪 (jobs/availabilityQueue.js) Deferred availability sent + deleted`);
             }

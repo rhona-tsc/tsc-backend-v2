@@ -2,7 +2,6 @@
 // utils/bookingNotifications.js
 import musicianModel from "../models/musicianModel.js";
 import sendEmail from "../utils/sendEmail.js";
-import { sendWAOrSMS } from "../utils/twilioClient.js";
 
 
 const fmtDate = (dLike) => {
@@ -131,7 +130,7 @@ const BookingNotifications = async (booking, act, lineup) => {
       // --- Send WA→SMS (fallback) ---
       if (toPhone) {
         try {
-const res = await sendWAOrSMS({ to: toPhone, smsBody: smsBody });          messagesSent.push({ to: toPhone, channel: res?.channel || "unknown", sid: res?.sid });
+const res = await sendWhatsAppMessage({ to: toPhone, smsBody: smsBody });          messagesSent.push({ to: toPhone, channel: res?.channel || "unknown", sid: res?.sid });
         } catch (e) {
           console.warn("⚠️ WA/SMS send failed for", toPhone, e?.message || e);
         }
