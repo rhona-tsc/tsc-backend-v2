@@ -271,7 +271,7 @@ export const triggerBookingRequests = async (req, res) => {
       const displayLastName = m?.lastName || realMusician?.lastName || "";
       const displayName = `${displayFirstName} ${displayLastName}`.trim();
 
-      const resolvedMusicianId = realMusician?._id || m?.musicianId || null;
+      const resolvedMusicianId = realMusician?._id || m?.musicianId || m?._id || null;
 
       const memberFee = buildMemberFee({ perMemberFee, member: m });
 
@@ -297,13 +297,14 @@ export const triggerBookingRequests = async (req, res) => {
       if (!dryRun) {
         if (!resolvedMusicianId) {
           console.warn(
-            "🦚 triggerBookingRequests skip: no real musicianId resolved",
+            "🦚 triggerBookingRequests skip: no musicianId resolved",
             {
               memberName: displayName,
               instrument: m.instrument || "",
               phone,
               attendeeEmail,
               hasActMusicianId: !!m?.musicianId,
+              hasBandMemberSubdocId: !!m?._id,
             }
           );
           continue;

@@ -820,6 +820,289 @@ export async function sendClientEmail({
   }
 }
 
+export const sendExampleGoodNewsEmail = async (req, res) => {
+  try {
+    const {
+      actId,
+      lineupId = null,
+      to = "hello@thesupremecollective.co.uk",
+      eventDate = null,
+      dateISO = null,
+      formattedAddress = "Example Venue, London",
+      deputyName = "Emma",
+      clientName = "Rhona",
+    } = req.body || {};
+
+    if (!actId) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing actId",
+      });
+    }
+
+    const actDoc = await Act.findById(actId).lean();
+    if (!actDoc) {
+      return res.status(404).json({
+        success: false,
+        message: "Act not found",
+      });
+    }
+
+    const lineup = lineupId
+      ? (Array.isArray(actDoc.lineups)
+          ? actDoc.lineups.find(
+              (l) =>
+                String(l?._id) === String(lineupId) ||
+                String(l?.lineupId) === String(lineupId),
+            )
+          : null)
+      : Array.isArray(actDoc.lineups)
+        ? actDoc.lineups[0]
+        : null;
+
+    const eventDatePretty = formatNiceDate(
+      dateISO || eventDate || new Date().toISOString().slice(0, 10),
+    );
+
+    const formatCurrencyGBP = (value) => {
+      const n = Number(value || 0);
+      return `£${n.toFixed(2)}`;
+    };
+
+    const titleCaseWords = (value = "") =>
+      String(value || "")
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+
+    const getActExtrasForEmail = (actLike = {}) => {
+      const raw = actLike?.extras;
+      if (!raw) return [];
+
+      const entries =
+        raw instanceof Map
+          ? Array.from(raw.entries())
+          : typeof raw?.entries === "function"
+            ? Array.from(raw.entries())
+            : Object.entries(raw || {});
+
+      return entries
+        .map(([key, value]) => {
+          const price = Number(value?.price ?? 0);
+          const complimentary = value?.complimentary === true;
+
+          return {
+            key,
+            label: titleCaseWords(key),
+            price,
+            complimentary,
+          };
+        })
+        .filter((item) => item.label && (item.complimentary || item.price > 0))
+        .sort((a, b) => a.label.localeCompare(b.label));
+    };
+
+    const renderActExtrasHtml = (actLike = {}) => {
+      const extras = getActExtrasForEmail(actLike);
+      if (!extras.length) return "";
+
+      const itemsHtml = extras
+        .map((extra) => {
+          const priceText = extra.complimentary
+            ? "Complimentary"
+            : formatCurrencyGBP(extra.price);
+
+          return `
+            <li style="margin: 0 0 6px;">
+              <strong>${extra.label}</strong>: ${priceText}
+            </li>
+          `;
+        })
+        .join("");
+
+      return `
+        <div style="margin-top:16px;">
+          <div style="font-weight:700; margin-bottom:8px;">Available band extras:</div>
+          <ul style="margin:0; padding-left:18px;">
+            ${itemsHtml}
+          </ul>
+        </div>
+      `;
+    };
+
+    const generateLineupDescriptionForEmail = (lineupLike) => {
+      const members = Array.isArray(lineupLike?.bandMembers)
+        ? lineupLike.bandMembers
+        : [];
+
+      const norm = (s = "") => String(s || "").trim();
+      const lower = (s = "") => norm(s).toLowerCase();
+
+      const isNonPerformerLikeInstrument = (instrument = "") => {
+        const v = lower(instrument);
+        return (
+          v === "manager" ||
+          v === "admin" ||
+          v.includes("band manager") ||
+          v.includes("management") ||
+          v.includes("sound engineer") ||
+          v.includes("sound tech") ||
+          v.includes("sound technician") ||
+          v.includes("audio engineer") ||
+          v.includes("audio tech") ||
+          v.includes("audio technician") ||
+          v.includes("foh") ||
+          v.includes("front of house")
+        );
+      };
+
+      const performerMembers = members.filter((m) => {
+        if (!m?.isEssential) return false;
+        const inst = norm(m?.instrument);
+        if (!inst) return false;
+        if (m?.isManager === true || m?.isNonPerformer === true) return false;
+        if (isNonPerformerLikeInstrument(inst)) return false;
+        return true;
+      });
+
+      const actSizeLabel = norm(lineupLike?.actSize);
+      const countLabel = actSizeLabel
+        ? actSizeLabel
+        : `${performerMembers.length}-Piece`;
+
+      let instruments = performerMembers
+        .map((m) => norm(m?.instrument))
+        .filter(Boolean);
+
+      instruments.sort((a, b) => {
+        const aLower = a.toLowerCase();
+        const bLower = b.toLowerCase();
+        const isVocal = (str) => str.includes("vocal");
+        const isDrums = (str) => str === "drums";
+
+        if (isVocal(aLower) && !isVocal(bLower)) return -1;
+        if (!isVocal(aLower) && isVocal(bLower)) return 1;
+        if (isDrums(aLower)) return 1;
+        if (isDrums(bLower)) return -1;
+        return 0;
+      });
+
+      const withCountsInOrder = (arr) => {
+        const out = [];
+        const counts = new Map();
+        for (const item of arr) {
+          counts.set(item, (counts.get(item) || 0) + 1);
+          if (!out.includes(item)) out.push(item);
+        }
+        return out.map((item) => {
+          const n = counts.get(item) || 1;
+          return n > 1 ? `${item} x ${n}` : item;
+        });
+      };
+
+      const instrumentsDisplayArr = withCountsInOrder(instruments);
+
+      const rolesRaw = members.flatMap((member) =>
+        (Array.isArray(member?.additionalRoles) ? member.additionalRoles : [])
+          .filter((r) => r?.isEssential)
+          .map((r) => norm(r?.role || "Unnamed Service"))
+          .filter(Boolean),
+      );
+
+      const rolesNormalized = rolesRaw.map((r) => {
+        const rLower = lower(r);
+
+        if (rLower.includes("band manager")) return "Band Management";
+        if (
+          rLower.includes("sound engineer") ||
+          rLower.includes("sound tech") ||
+          rLower.includes("sound technician") ||
+          rLower.includes("audio engineer") ||
+          rLower.includes("audio tech") ||
+          rLower.includes("audio technician") ||
+          rLower.includes("foh") ||
+          rLower.includes("front of house")
+        ) {
+          return "Sound Engineering";
+        }
+
+        return r;
+      });
+
+      const rolesDisplayArr = withCountsInOrder(rolesNormalized);
+
+      const formatWithAnd = (arr) => {
+        const items = Array.isArray(arr) ? arr : [];
+        if (items.length === 0) return "";
+        if (items.length === 1) return items[0];
+        if (items.length === 2) return `${items[0]} & ${items[1]}`;
+        return `${items.slice(0, -1).join(", ")} & ${items[items.length - 1]}`;
+      };
+
+      if (performerMembers.length === 0) return "Add a Lineup";
+
+      const instrumentsStr = formatWithAnd(instrumentsDisplayArr);
+      const rolesStr = rolesDisplayArr.length
+        ? ` (including ${formatWithAnd(rolesDisplayArr)} services)`
+        : "";
+
+      return `${countLabel}: ${instrumentsStr}${rolesStr}`;
+    };
+
+    const lineupDescription = lineup
+      ? generateLineupDescriptionForEmail(lineup)
+      : "Lineup TBC";
+
+    const actExtrasHtml = renderActExtrasHtml(actDoc);
+    const actName = actDoc.tscName || actDoc.name || "this act";
+    const deputyShort = String(deputyName || "A vocalist").trim();
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #111; line-height: 1.6; max-width: 680px; margin: 0 auto;">
+        <h2 style="margin-bottom: 8px;">Good news</h2>
+        <p>
+          ${deputyShort} is available to perform for you with <strong>${actName}</strong> on <strong>${eventDatePretty}</strong>.
+        </p>
+        <p>
+          <strong>Client:</strong> ${clientName || "Test Client"}<br/>
+          <strong>Venue:</strong> ${formattedAddress || "TBC"}<br/>
+          <strong>Date:</strong> ${eventDatePretty}<br/>
+          <strong>Lineup:</strong> ${lineupDescription}
+        </p>
+        ${actExtrasHtml}
+        <p style="margin-top: 18px;">
+          Please let us know if you'd like to go ahead or if you'd like us to talk you through any of the options.
+        </p>
+      </div>
+    `;
+
+    const sendResult = await sendClientEmail({
+      actId,
+      to,
+      name: clientName || "Test Client",
+      subject: `${deputyShort} is available to perform for you with ${actName} on ${eventDatePretty}`,
+      html,
+      allowHello: true,
+    });
+
+    return res.json({
+      success: !!sendResult?.success,
+      previewSentTo: to,
+      subject: `${deputyShort} is available to perform for you with ${actName} on ${eventDatePretty}`,
+      lineupDescription,
+      extrasCount: getActExtrasForEmail(actDoc).length,
+      sendResult,
+    });
+  } catch (error) {
+    console.error("❌ sendExampleGoodNewsEmail failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to send example email",
+    });
+  }
+};
+
 function parsePayload(payload = "") {
   console.log(
     `🟢 (availabilityController.js) parsePayload START at ${new Date().toISOString()}`,
