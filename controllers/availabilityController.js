@@ -1,20 +1,16 @@
 import AvailabilityModel from "../models/availabilityModel.js";
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
-import { cancelCalendarInvite } from "../controllers/googleController.js";
 import { sendWhatsAppText } from "../utils/twilioClient.js";
 import DeferredAvailability from "../models/deferredAvailabilityModel.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js";
-import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is correct in backend
-import { sendEmail } from "../utils/sendEmail.js";
 import mongoose from "mongoose";
 import calculateActPricing from "../utils/calculateActPricing.js";
-import { createCalendarInvite } from "./googleController.js";
 import userModel from "../models/userModel.js";
-import { computeMemberMessageFee } from "./helpersForCorrectFee.js";
 import { makeShortId } from "../utils/makeShortId.js";
 import crypto from "crypto"; // at top of file if not already
+import EnquiryMessage from "../models/EnquiryMessage.js";
 
 const isValid24 = (v) =>
   typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
@@ -391,37 +387,29 @@ const normCountyKey = (s) =>
     .toLowerCase()
     .replace(/\s+/g, "_");
 
-function classifyReply(text) {
-  console.log(
-    `🟢 (availabilityController.js) classifyReply START at ${new Date().toISOString()}`,
-    { text },
-  );
-  const v = String(text || "")
+const classifyBookingReply = (s = "") => {
+  const t = String(s || "")
     .trim()
     .toLowerCase();
-
-  if (!v) return null;
-
-  // YES variants
-  if (
-    /^(yes|y|yeah|yep|sure|ok|okay)$/i.test(v) ||
-    /\bi am available\b/i.test(v) ||
-    /\bi'm available\b/i.test(v) ||
-    /\bavailable\b/i.test(v)
-  )
-    return "yes";
-
-  // NO variants
-  if (
-    /^(no|n|nope|nah)$/i.test(v) ||
-    /\bi am not available\b/i.test(v) ||
-    /\bi'm not available\b/i.test(v) ||
-    /\bunavailable\b/i.test(v)
-  )
-    return "no";
-
+  if (!t) return null;
+  if (t === "yes" || t.includes("book me in")) return "YES";
+  if (t === "no" || t.includes("already booked")) return "NO_BOOKED";
+  if (t === "noloc" || t.includes("no thanks")) return "NO_LOC";
   return null;
-}
+};
+
+const buildNoopRes = () => ({
+  status() {
+    return this;
+  },
+  send() {
+    return this;
+  },
+  json() {
+    return this;
+  },
+});
+
 const toE164 = (raw = "") => {
   let s = String(raw || "")
     .replace(/^whatsapp:/i, "")
@@ -849,13 +837,13 @@ export const sendExampleGoodNewsEmail = async (req, res) => {
     }
 
     const lineup = lineupId
-      ? (Array.isArray(actDoc.lineups)
-          ? actDoc.lineups.find(
-              (l) =>
-                String(l?._id) === String(lineupId) ||
-                String(l?.lineupId) === String(lineupId),
-            )
-          : null)
+      ? Array.isArray(actDoc.lineups)
+        ? actDoc.lineups.find(
+            (l) =>
+              String(l?._id) === String(lineupId) ||
+              String(l?.lineupId) === String(lineupId),
+          )
+        : null
       : Array.isArray(actDoc.lineups)
         ? actDoc.lineups[0]
         : null;
@@ -1783,8 +1771,6 @@ export const clearavailabilityBadges = async (req, res) => {
 
 // -------------------- Utilities --------------------
 
-
-
 const BASE_URL = (
   process.env.BACKEND_PUBLIC_URL ||
   process.env.BACKEND_URL ||
@@ -2618,20 +2604,20 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
             ? Array.from(raw.entries())
             : Object.entries(raw || {});
 
-       return entries
-    .map(([key, value]) => {
-      const price = Number(value?.price ?? 0);
-      const complimentary = value?.complimentary === true;
+      return entries
+        .map(([key, value]) => {
+          const price = Number(value?.price ?? 0);
+          const complimentary = value?.complimentary === true;
 
-      return {
-        key,
-        label: titleCaseWords(key),
-        price,
-        complimentary,
-      };
-    })
-    .filter((item) => item.label && (item.complimentary || item.price > 0))
-    .sort((a, b) => a.label.localeCompare(b.label));
+          return {
+            key,
+            label: titleCaseWords(key),
+            price,
+            complimentary,
+          };
+        })
+        .filter((item) => item.label && (item.complimentary || item.price > 0))
+        .sort((a, b) => a.label.localeCompare(b.label));
     };
 
     const renderActExtrasHtml = (actDoc = {}) => {
@@ -5259,6 +5245,85 @@ export const twilioInbound = async (req, res) => {
         });
 
         /* ---------------------------------------------------------------------- */
+        /* 🎟️ Booking reply handoff                                               */
+        /* ---------------------------------------------------------------------- */
+        const bookingReply =
+          classifyBookingReply(btnText) ||
+          classifyBookingReply(btnId) ||
+          classifyBookingReply(bodyText) ||
+          null;
+
+        let bookingMsg = null;
+
+        if (requestId) {
+          bookingMsg = await EnquiryMessage.findOne({
+            enquiryId: requestId,
+            "meta.kind": "booking",
+          })
+            .select("_id enquiryId phone messageSid")
+            .lean();
+        }
+
+        if (!bookingMsg && repliedSid) {
+          bookingMsg = await EnquiryMessage.findOne({
+            messageSid: repliedSid,
+            "meta.kind": "booking",
+          })
+            .select("_id enquiryId phone messageSid")
+            .lean();
+        }
+
+        if (!bookingMsg && sender) {
+          bookingMsg = await EnquiryMessage.findOne({
+            phone: sender,
+            "meta.kind": "booking",
+            $or: [{ reply: null }, { reply: { $exists: false } }],
+          })
+            .sort({ createdAt: -1 })
+            .select("_id enquiryId phone messageSid")
+            .lean();
+        }
+
+        if (bookingReply || bookingMsg) {
+          console.log(
+            "🎟️ [twilioInbound] routing inbound reply to booking flow",
+            {
+              sender,
+              bookingReply,
+              bookingEnquiryId: bookingMsg?.enquiryId || null,
+              repliedSid,
+            },
+          );
+
+          const { twilioInboundBooking } =
+            await import("./allocationController.js");
+
+          const bookingPayload =
+            bookingReply === "YES"
+              ? `YESBOOK_${bookingMsg?.enquiryId || requestId || ""}`
+              : bookingReply === "NO_BOOKED"
+                ? `NOBOOK_${bookingMsg?.enquiryId || requestId || ""}`
+                : bookingReply === "NO_LOC"
+                  ? "NOLOC"
+                  : bodyText || btnText || btnId || "";
+
+          await twilioInboundBooking(
+            {
+              body: {
+                ...bodyObj,
+                Body: bookingPayload,
+                ButtonText: bookingReply || bodyObj?.ButtonText || "",
+                ButtonPayload: bookingPayload,
+                From: bodyObj?.From || bodyObj?.WaId || "",
+                WaId: bodyObj?.WaId || bodyObj?.From || "",
+              },
+            },
+            buildNoopRes(),
+          );
+
+          return;
+        }
+        /* ---------------------------------------------------------------------- */
         /* 🎯 Locate the Availability row to update                               */
         /*   1) Strict: requestId                                                 */
         /*   2) Deterministic: repliedSid → outboundSid                           */
@@ -6181,8 +6246,6 @@ const generateLineupDescriptionForEmail = (lineup) => {
     );
   };
 
-  
-
   // Count performers (exclude manager/admin/sound tech/non-performer/blank instrument rows)
   const performerMembers = members.filter((m) => {
     if (!m?.isEssential) return false;
@@ -6322,63 +6385,63 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
   /* ------------------------------- helpers ------------------------------- */
 
   const formatCurrencyGBP = (value) => {
-  const n = Number(value || 0);
-  return `£${n.toFixed(2)}`;
-};
+    const n = Number(value || 0);
+    return `£${n.toFixed(2)}`;
+  };
 
-const titleCaseWords = (value = "") =>
-  String(value || "")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  const titleCaseWords = (value = "") =>
+    String(value || "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
 
-const getActExtrasForEmail = (actDoc = {}) => {
-  const raw = actDoc?.extras;
-  if (!raw) return [];
+  const getActExtrasForEmail = (actDoc = {}) => {
+    const raw = actDoc?.extras;
+    if (!raw) return [];
 
-  const entries =
-    raw instanceof Map
-      ? Array.from(raw.entries())
-      : typeof raw?.entries === "function"
+    const entries =
+      raw instanceof Map
         ? Array.from(raw.entries())
-        : Object.entries(raw || {});
+        : typeof raw?.entries === "function"
+          ? Array.from(raw.entries())
+          : Object.entries(raw || {});
 
-  return entries
-    .map(([key, value]) => {
-      const price = Number(value?.price ?? 0);
-      const complimentary = value?.complimentary === true;
+    return entries
+      .map(([key, value]) => {
+        const price = Number(value?.price ?? 0);
+        const complimentary = value?.complimentary === true;
 
-      return {
-        key,
-        label: titleCaseWords(key),
-        price,
-        complimentary,
-      };
-    })
-    .filter((item) => item.label && (item.complimentary || item.price > 0))
-    .sort((a, b) => a.label.localeCompare(b.label));
-};
+        return {
+          key,
+          label: titleCaseWords(key),
+          price,
+          complimentary,
+        };
+      })
+      .filter((item) => item.label && (item.complimentary || item.price > 0))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  };
 
-const renderActExtrasHtml = (actDoc = {}) => {
-  const extras = getActExtrasForEmail(actDoc);
-  if (!extras.length) return "";
+  const renderActExtrasHtml = (actDoc = {}) => {
+    const extras = getActExtrasForEmail(actDoc);
+    if (!extras.length) return "";
 
-  const itemsHtml = extras
-    .map((extra) => {
-      const priceText = extra.complimentary
-        ? "Complimentary"
-        : formatCurrencyGBP(extra.price);
+    const itemsHtml = extras
+      .map((extra) => {
+        const priceText = extra.complimentary
+          ? "Complimentary"
+          : formatCurrencyGBP(extra.price);
 
-      return `
+        return `
         <li style="margin: 0 0 6px;">
           <strong>${extra.label}</strong>: ${priceText}
         </li>
       `;
-    })
-    .join("");
+      })
+      .join("");
 
-  return `
+    return `
     <div style="margin-top:16px;">
       <div style="font-weight:700; margin-bottom:8px;">Available band extras:</div>
       <ul style="margin:0; padding-left:18px;">
@@ -6386,7 +6449,7 @@ const renderActExtrasHtml = (actDoc = {}) => {
       </ul>
     </div>
   `;
-};
+  };
 
   const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -6808,10 +6871,6 @@ const renderActExtrasHtml = (actDoc = {}) => {
       }
     }
 
-    
-    
-
-
     const lineupQuotes = await Promise.all(
       (actDoc.lineups || []).map(async (lu) => {
         try {
@@ -7096,7 +7155,6 @@ const renderActExtrasHtml = (actDoc = {}) => {
                 to: clientEmail,
               });
 
-              
               const actExtrasHtml = renderActExtrasHtml(actDoc);
 
               await sendClientEmail({
@@ -7334,8 +7392,7 @@ const renderActExtrasHtml = (actDoc = {}) => {
                   ? "One of the band's regular vocalists isn’t available for your date, but we’re delighted to confirm that"
                   : "The band's regular vocalist isn’t available for your date, but we’re delighted to confirm that";
 
-                  const actExtrasHtml = renderActExtrasHtml(actDoc);
-
+              const actExtrasHtml = renderActExtrasHtml(actDoc);
 
               await sendClientEmail({
                 actId: String(actId),
