@@ -221,7 +221,8 @@ export async function sendWhatsAppMessage(opts = {}) {
     return "";
   };
 
-  const memberNames = firstLast(member || {});
+const memberDisplayName = displayNameOf(member || {}, false);
+const memberNames = firstLast(memberDisplayName);
   const memberDisplayName = displayNameOf(member || {});
   const memberPhotoUrl = pickPic(member || {});
   const memberProfileUrl = buildProfileUrl(member);

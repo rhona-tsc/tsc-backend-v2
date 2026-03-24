@@ -5244,6 +5244,37 @@ export const twilioInbound = async (req, res) => {
           repliedSid,
         });
 
+        const bookingReply = classifyBookingReply(btnText || btnId || bodyText);
+
+const bookingLooksLikePayload =
+  /^YESBOOK_/i.test(String(btnId || "")) ||
+  /^NOBOOK_/i.test(String(btnId || "")) ||
+  /^YESBOOK_/i.test(String(bodyText || "")) ||
+  /^NOBOOK_/i.test(String(bodyText || ""));
+
+if (bookingReply || bookingLooksLikePayload) {
+  const syntheticBookingBody = {
+    ...bodyObj,
+    Body:
+      requestId && bookingReply
+        ? `${bookingReply === "YES" ? "YESBOOK" : "NOBOOK"}_${requestId}`
+        : String(bodyObj?.Body || bodyText || ""),
+    ButtonText:
+      String(bodyObj?.ButtonText || btnText || "").toUpperCase(),
+    ButtonPayload:
+      requestId && bookingReply
+        ? `${bookingReply === "YES" ? "YESBOOK" : "NOBOOK"}_${requestId}`
+        : String(bodyObj?.ButtonPayload || btnId || ""),
+    OriginalRepliedMessageSid:
+      repliedSid || bodyObj?.OriginalRepliedMessageSid || "",
+    WaId: bodyObj?.WaId,
+    From: bodyObj?.From,
+  };
+
+  await twilioInboundBooking({ body: syntheticBookingBody }, buildNoopRes());
+  return;
+}
+
         /* ---------------------------------------------------------------------- */
         /* 🎟️ Booking reply handoff                                               */
         /* ---------------------------------------------------------------------- */

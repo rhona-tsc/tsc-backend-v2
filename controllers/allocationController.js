@@ -53,6 +53,8 @@ const normalizeFrom = (from) => {
   return Array.from(new Set([plus, uk07, ukNoPlus]));
 };
 
+
+
 const formatWithOrdinal = (dateLike) => {
   const d = new Date(dateLike);
   if (isNaN(d)) return String(dateLike || "");
@@ -373,21 +375,30 @@ export const triggerBookingRequests = async (req, res) => {
       }
 
       const wa = dryRun
-        ? { sid: `dryrun_${requestId}` }
-        : await sendWhatsAppMessage({
-            to: `whatsapp:${phone}`,
-            contentSid:
-              process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
-            variables: {
-              "1": firstNameOf(realMusician || m),
-              "2": formattedDate,
-              "3": address,
-              "4": sanitizeFee(memberFee),
-              "5": m.instrument || "performance",
-              "6": act.tscName || act.name || "the band",
-            },
-            smsBody,
-          });
+  ? { sid: `dryrun_${requestId}` }
+  : await sendWhatsAppMessage({
+      to: `whatsapp:${phone}`,
+      contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+      requestId,
+      variables: {
+        "1": firstNameOf(realMusician || m),
+        "2": formattedDate,
+        "3": address,
+        "4": sanitizeFee(memberFee),
+        "5": m.instrument || "performance",
+        "6": act.tscName || act.name || "the band",
+        "7": requestId,
+        firstName: firstNameOf(realMusician || m),
+        date: formattedDate,
+        location: address,
+        fee: sanitizeFee(memberFee),
+        role: m.instrument || "performance",
+        actName: act.tscName || act.name || "the band",
+        requestId,
+        requestCode: `#${requestId}`,
+      },
+      smsBody,
+    });
 
       if (!dryRun) {
         await EnquiryMessage.updateOne(
@@ -490,15 +501,35 @@ export const twilioInboundBooking = async (req, res) => {
   // ---------------------------------------------------------
   // Helper: interpret YES / NO / NOLOC
   // ---------------------------------------------------------
-  function interpretReply(raw) {
-    if (!raw) return null;
-    const low = raw.toLowerCase().trim();
+ function interpretReply(raw) {
+  if (!raw) return null;
+  const low = String(raw).toLowerCase().trim();
 
-    if (low === "yes") return "YES";            // Yes, book me in
-    if (low === "no") return "NO_BOOKED";       // I'm already booked
-    if (low === "noloc" || low === "no loc") return "NO_LOC"; // No thanks (location)
-    return null;
+  if (
+    low === "yes" ||
+    low.includes("book me in") ||
+    low.startsWith("yesbook")
+  ) {
+    return "YES";
   }
+
+  if (
+    low === "no" ||
+    low.includes("already booked") ||
+    low.startsWith("nobook")
+  ) {
+    return "NO_BOOKED";
+  }
+
+  if (
+    low === "noloc" ||
+    low.includes("no thanks")
+  ) {
+    return "NO_LOC";
+  }
+
+  return null;
+}
 
   try {
     // ---------------------------------------------------------
@@ -547,23 +578,62 @@ export const twilioInboundBooking = async (req, res) => {
     // ---------------------------------------------------------
     // 3️⃣ Fetch the pending EnquiryMessage row
     // ---------------------------------------------------------
-    let msg = null;
+    const repliedSid = String(req.body?.OriginalRepliedMessageSid || "");
+let msg = null;
 
-    if (requestId) {
-      msg = await EnquiryMessage.findOneAndUpdate(
-        { enquiryId: requestId },
-        {
-          $set: {
-            reply: replyType,
-            repliedAt: new Date(),
-            deliveryStatus: "read",
-            status: "read",
-            "calendar.calendarStatus": "needsAction",
-          },
-        },
-        { new: true }
-      );
-    } else {
+if (requestId) {
+  msg = await EnquiryMessage.findOneAndUpdate(
+    { enquiryId: requestId },
+    {
+      $set: {
+        reply: replyType,
+        repliedAt: new Date(),
+        deliveryStatus: "read",
+        status: "read",
+        "calendar.calendarStatus": "needsAction",
+      },
+    },
+    { new: true }
+  );
+}
+
+if (!msg && repliedSid) {
+  msg = await EnquiryMessage.findOneAndUpdate(
+    { messageSid: repliedSid },
+    {
+      $set: {
+        reply: replyType,
+        repliedAt: new Date(),
+        deliveryStatus: "read",
+        status: "read",
+        "calendar.calendarStatus": "needsAction",
+      },
+    },
+    { new: true }
+  );
+}
+
+if (!msg) {
+  const variants = normalizeFrom(fromRaw);
+
+  msg = await EnquiryMessage.findOneAndUpdate(
+    {
+      phone: { $in: variants },
+      "meta.kind": "booking",
+      $or: [{ reply: null }, { reply: { $exists: false } }],
+    },
+    {
+      $set: {
+        reply: replyType,
+        repliedAt: new Date(),
+        deliveryStatus: "read",
+        status: "read",
+        "calendar.calendarStatus": "needsAction",
+      },
+    },
+    { new: true, sort: { createdAt: -1 } }
+  );
+} else {
       // Fallback matching by phone (last unanswered request)
       const variants = normalizeFrom(fromRaw);
 
