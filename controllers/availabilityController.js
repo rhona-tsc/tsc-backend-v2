@@ -34,9 +34,7 @@ const buildMusicianProfileUrl = (musicianLike) => {
   }
 
   const slug = String(musicianLike.musicianSlug || "").trim();
-  const id = String(
-    musicianLike._id || musicianLike.musicianId || ""
-  ).trim();
+  const id = String(musicianLike._id || musicianLike.musicianId || "").trim();
 
   if (slug) return `${PUBLIC_SITE_BASE}/musician/${slug}`;
   if (id) return `${PUBLIC_SITE_BASE}/musician/${id}`;
@@ -54,27 +52,32 @@ if (AvailabilityModel?.schema?.paths) {
   console.warn("⚠️ AvailabilityModel missing schema.paths — check import");
 }
 
-
 // ───────────────────────────────────────────────────────────────────────────────
 // TEMP TEST GUARD — block accidental sends to real emails
 // ───────────────────────────────────────────────────────────────────────────────
 const HELLO_EMAIL = "hello@thesupremecollective.co.uk";
 
-const BLOCKED_TEST_EMAILS = new Set([
-]);
+const BLOCKED_TEST_EMAILS = new Set([]);
 
 function guardRecipientEmail(emailLike = "") {
-  const e = String(emailLike || "").trim().toLowerCase();
+  const e = String(emailLike || "")
+    .trim()
+    .toLowerCase();
   if (!e) return "";
   if (BLOCKED_TEST_EMAILS.has(e)) {
-    console.warn("🧯 [TEST GUARD] Blocked recipient email — redirecting to hello@", { blocked: e });
+    console.warn(
+      "🧯 [TEST GUARD] Blocked recipient email — redirecting to hello@",
+      { blocked: e },
+    );
     return HELLO_EMAIL;
   }
   return e;
 }
 
 function isBlockedRecipient(emailLike = "") {
-  const e = String(emailLike || "").trim().toLowerCase();
+  const e = String(emailLike || "")
+    .trim()
+    .toLowerCase();
   return !!e && BLOCKED_TEST_EMAILS.has(e);
 }
 
@@ -390,9 +393,9 @@ const normCountyKey = (s) =>
 
 function classifyReply(text) {
   console.log(
-  `🟢 (availabilityController.js) classifyReply START at ${new Date().toISOString()}`,
-  { text },
-);
+    `🟢 (availabilityController.js) classifyReply START at ${new Date().toISOString()}`,
+    { text },
+  );
   const v = String(text || "")
     .trim()
     .toLowerCase();
@@ -435,8 +438,6 @@ const normalize44 = (raw = "") =>
     .replace(/\s+/g, "")
     .replace(/^(\+44|44|0)/, "+44");
 
-
-
 /* ========================================================================== */
 /* 👤 findCanonicalMusicianByPhone                                            */
 /* ========================================================================== */
@@ -458,8 +459,9 @@ export async function findCanonicalMusicianByPhone(phoneLike) {
       { whatsappNumber: p },
     ],
   })
-  .select(
-"_id firstName lastName email musicianSlug profilePhoto profilePicture musicianProfileImage profileImage photoUrl imageUrl phoneNormalized"    )
+    .select(
+      "_id firstName lastName email musicianSlug profilePhoto profilePicture musicianProfileImage profileImage photoUrl imageUrl phoneNormalized",
+    )
     .lean();
 
   if (!mus) {
@@ -480,7 +482,7 @@ export async function findCanonicalMusicianByPhone(phoneLike) {
   };
 
   const displayName = displayNameOf(mus);
-const profileUrl = buildProfileUrl(mus);
+  const profileUrl = buildProfileUrl(mus);
   const photoUrl = pickPic(mus);
 
   console.log("✅ [findCanonicalMusicianByPhone] Canonical found", {
@@ -700,8 +702,8 @@ export async function sendClientEmail({
 
     // 5) final fallback from env (may still be hello@)
     const envFallback = (process.env.NOTIFY_EMAIL || "").trim().toLowerCase();
-const finalRecipientRaw = resolvedEmail || envFallback;
-const finalRecipient = guardRecipientEmail(finalRecipientRaw);
+    const finalRecipientRaw = resolvedEmail || envFallback;
+    const finalRecipient = guardRecipientEmail(finalRecipientRaw);
 
     const isHelloRecipient = finalRecipient === HELLO;
 
@@ -716,17 +718,17 @@ const finalRecipient = guardRecipientEmail(finalRecipientRaw);
       process.env.ALLOW_HELLO_EMAILS === "true" ||
       process.env.NODE_ENV !== "production";
 
-console.log("📨 sendClientEmail recipient decision", {
-  requestedTo,
-  userId,
-  actContactEmail: act?.contactEmail,
-  finalRecipientRaw,
-  finalRecipient,
-  blockedRecipient: isBlockedRecipient(finalRecipientRaw),
-  allowHello,
-  allowHelloEffective,
-  sendEmailsFlag: process.env.SEND_EMAILS,
-});
+    console.log("📨 sendClientEmail recipient decision", {
+      requestedTo,
+      userId,
+      actContactEmail: act?.contactEmail,
+      finalRecipientRaw,
+      finalRecipient,
+      blockedRecipient: isBlockedRecipient(finalRecipientRaw),
+      allowHello,
+      allowHelloEffective,
+      sendEmailsFlag: process.env.SEND_EMAILS,
+    });
 
     // Guard: don't send *only* to hello@ unless explicitly allowed
     if (
@@ -752,8 +754,8 @@ console.log("📨 sendClientEmail recipient decision", {
     const fromAddr = (process.env.DEFAULT_FROM || HELLO).trim();
 
     const subjectSafe = isBlockedRecipient(finalRecipientRaw)
-  ? `[TEST GUARD: redirected] ${subject}`
-  : subject;
+      ? `[TEST GUARD: redirected] ${subject}`
+      : subject;
 
     const result = await sendEmail({
       to: [finalRecipient],
@@ -1009,36 +1011,40 @@ export async function notifyDeputies({
   });
 
   const isNYE = (iso = "") => {
-  const d = String(iso).slice(0,10);
-  return /-\d{2}-\d{2}$/.test(d) && d.endsWith("-12-31");
-};
+    const d = String(iso).slice(0, 10);
+    return /-\d{2}-\d{2}$/.test(d) && d.endsWith("-12-31");
+  };
 
-const getMemberFeeForDate = (member, iso) => {
-  const base = Number(member?.fee ?? 0);
-  if (!isNYE(iso)) return base;
+  const getMemberFeeForDate = (member, iso) => {
+    const base = Number(member?.fee ?? 0);
+    if (!isNYE(iso)) return base;
 
-  // choose your structure:
-  // member.specialDatePricing.nye = { overrideFee, extraFee }
-  const nye = member?.specialDatePricing?.nye || {};
-  const overrideFee = nye.overrideFee;
-  if (overrideFee !== undefined && overrideFee !== null && overrideFee !== "") {
-    const v = Number(overrideFee);
-    if (Number.isFinite(v)) return v;
-  }
+    // choose your structure:
+    // member.specialDatePricing.nye = { overrideFee, extraFee }
+    const nye = member?.specialDatePricing?.nye || {};
+    const overrideFee = nye.overrideFee;
+    if (
+      overrideFee !== undefined &&
+      overrideFee !== null &&
+      overrideFee !== ""
+    ) {
+      const v = Number(overrideFee);
+      if (Number.isFinite(v)) return v;
+    }
 
-  const extra = Number(nye.extraFee ?? 0);
-  return base + (Number.isFinite(extra) ? extra : 0);
-};
+    const extra = Number(nye.extraFee ?? 0);
+    return base + (Number.isFinite(extra) ? extra : 0);
+  };
 
-const basePlusEssentialExtras = (member, iso) => {
-  const base = getMemberFeeForDate(member, iso);
-  const essentialExtras = Array.isArray(member?.additionalRoles)
-    ? member.additionalRoles
-        .filter(r => r?.isEssential && Number(r?.additionalFee) > 0)
-        .reduce((sum, r) => sum + Number(r.additionalFee), 0)
-    : 0;
-  return base + essentialExtras;
-};
+  const basePlusEssentialExtras = (member, iso) => {
+    const base = getMemberFeeForDate(member, iso);
+    const essentialExtras = Array.isArray(member?.additionalRoles)
+      ? member.additionalRoles
+          .filter((r) => r?.isEssential && Number(r?.additionalFee) > 0)
+          .reduce((sum, r) => sum + Number(r.additionalFee), 0)
+      : 0;
+    return base + essentialExtras;
+  };
 
   const normalizePhone = (raw = "") => {
     let v = String(raw || "")
@@ -1113,7 +1119,7 @@ const basePlusEssentialExtras = (member, iso) => {
   });
 
   // ✅ Inherit context from the lead row for this slot (fee + client identity + enquiryId)
-let inheritedFee = basePlusEssentialExtras(targetVocalists?.[0], dateISO);
+  let inheritedFee = basePlusEssentialExtras(targetVocalists?.[0], dateISO);
   let inheritedClientName = clientName || "";
   let inheritedClientEmail = clientEmail || "";
   let inheritedEnquiryId = null;
@@ -1191,14 +1197,14 @@ let inheritedFee = basePlusEssentialExtras(targetVocalists?.[0], dateISO);
   let totalSent = 0;
 
   for (const vocalist of targetVocalists) {
-  const vocalistNames = firstLast(vocalist);
-  const vocalistDisplayName = displayNameOf(vocalist);
-  const deputiesToContact =
-    Array.isArray(customDeputyList) && customDeputyList.length
-      ? customDeputyList
-      : (vocalist.deputies || []);
+    const vocalistNames = firstLast(vocalist);
+    const vocalistDisplayName = displayNameOf(vocalist);
+    const deputiesToContact =
+      Array.isArray(customDeputyList) && customDeputyList.length
+        ? customDeputyList
+        : vocalist.deputies || [];
 
-  for (const deputy of deputiesToContact) {
+    for (const deputy of deputiesToContact) {
       const cleanPhone = normalizePhone(
         deputy.phoneNumber || deputy.phone || "",
       );
@@ -1213,10 +1219,10 @@ let inheritedFee = basePlusEssentialExtras(targetVocalists?.[0], dateISO);
         deputy: {
           ...deputyNames,
           displayName: deputyDisplayName,
-profileUrl: buildProfileUrl({
-  _id: deputy?.musicianId || deputy?._id,
-  musicianSlug: deputy?.musicianSlug,
-}),
+          profileUrl: buildProfileUrl({
+            _id: deputy?.musicianId || deputy?._id,
+            musicianSlug: deputy?.musicianSlug,
+          }),
           photoUrl: pickPic(deputy),
           phone: cleanPhone,
           email: deputy?.email || "",
@@ -1224,11 +1230,11 @@ profileUrl: buildProfileUrl({
         vocalist: {
           ...vocalistNames,
           vocalistDisplayName,
-profileUrl: buildProfileUrl({
-  _id: vocalist?.musicianId || vocalist?._id,
-  musicianSlug: vocalist?.musicianSlug,
-}),
-            photoUrl: pickPic(vocalist),
+          profileUrl: buildProfileUrl({
+            _id: vocalist?.musicianId || vocalist?._id,
+            musicianSlug: vocalist?.musicianSlug,
+          }),
+          photoUrl: pickPic(vocalist),
         },
         address: null,
         formattedAddress: formattedAddress || null,
@@ -1239,7 +1245,7 @@ profileUrl: buildProfileUrl({
 
       await triggerAvailabilityRequest({
         inheritedFee,
-inheritedFeeIncludesTravel: false,
+        inheritedFeeIncludesTravel: false,
         actId,
         lineupId,
         dateISO,
@@ -1384,7 +1390,7 @@ async function _finalFeeForMember({
   const membersCount = Math.max(1, Array.isArray(members) ? members.length : 1);
   const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
   let base = Number(member?.fee ?? 0) > 0 ? Number(member.fee) : perHead;
-    // 🧩 If deputy fee missing, inherit from matching essential member (e.g. same instrument)
+  // 🧩 If deputy fee missing, inherit from matching essential member (e.g. same instrument)
   if (
     (!member?.fee || Number(member.fee) === 0) &&
     Array.isArray(lineup.bandMembers)
@@ -1764,9 +1770,7 @@ const computeMemberTravelFee = async ({
   }
 };
 
-const buildProfileUrl = (musicianLike) =>
-  buildMusicianProfileUrl(musicianLike);
-
+const buildProfileUrl = (musicianLike) => buildMusicianProfileUrl(musicianLike);
 
 const displayNameOf = (p = {}) => {
   const fn = (p.firstName || p.name || "").trim();
@@ -1902,10 +1906,10 @@ export function findVocalistPhone(actData, lineupId) {
     // These are unknown in this function; include as nulls for consistency
     address: null,
     formattedAddress: null,
-profileUrl: buildProfileUrl({
-  _id: vocalist?.musicianId || vocalist?._id,
-  musicianSlug: vocalist?.musicianSlug,
-}),
+    profileUrl: buildProfileUrl({
+      _id: vocalist?.musicianId || vocalist?._id,
+      musicianSlug: vocalist?.musicianSlug,
+    }),
     photoUrl: pickPic(vocalist),
     isDeputy: false,
     phone,
@@ -1965,13 +1969,13 @@ async function getDeputyDisplayBits(dep) {
     mus = await Musician.findById(initialMusicianId)
       .select(
         [
-           "firstName",
-    "lastName",
-    "displayName",
-    "preferredName",
-    "name",
-    "musicianSlug",
-    "email",
+          "firstName",
+          "lastName",
+          "displayName",
+          "preferredName",
+          "name",
+          "musicianSlug",
+          "email",
           "phone",
           "phoneNormalized",
           "phoneNumber",
@@ -2066,7 +2070,7 @@ async function getDeputyDisplayBits(dep) {
   let resolvedEmail = dep?.email || dep?.emailAddress || mus?.email || "";
 
   // TEMP TEST GUARD: prevent accidental calendar/email sends to real recipients
-resolvedEmail = guardRecipientEmail(resolvedEmail);
+  resolvedEmail = guardRecipientEmail(resolvedEmail);
 
   if ((!photoUrl || !/^https?:\/\//i.test(photoUrl)) && resolvedEmail) {
     console.log("📧 Step 3: Lookup by email →", resolvedEmail);
@@ -2109,11 +2113,10 @@ resolvedEmail = guardRecipientEmail(resolvedEmail);
   const finalMusicianId = String(
     resolvedMusicianId || dep?.musicianId || initialMusicianId || "",
   );
-const profileUrl = buildMusicianProfileUrl({
-  _id: finalMusicianId,
-  musicianSlug: mus?.musicianSlug || dep?.musicianSlug,
-});
-
+  const profileUrl = buildMusicianProfileUrl({
+    _id: finalMusicianId,
+    musicianSlug: mus?.musicianSlug || dep?.musicianSlug,
+  });
 
   if (!photoUrl || !/^https?:\/\//i.test(photoUrl)) {
     console.log("🪄 No valid photo found — using fallback");
@@ -2177,8 +2180,6 @@ async function findDateLevelUnavailable({ dateISO, canonicalId, phone }) {
     .lean();
 }
 
-
-
 export const ensureVocalistAvailabilityForLineup = async (req, res) => {
   try {
     const {
@@ -2216,18 +2217,21 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
         reused: 0,
         triggered: 0,
         skipped: "missing-address",
-        message: "No formattedAddress/address provided; availability requests not sent.",
+        message:
+          "No formattedAddress/address provided; availability requests not sent.",
         details: [],
       });
     }
 
     // Prefer auth user when available
     const authUserId = req?.user?._id ? String(req.user._id) : null;
-    const clientUserId = authUserId || (clientUserIdBody ? String(clientUserIdBody) : null);
+    const clientUserId =
+      authUserId || (clientUserIdBody ? String(clientUserIdBody) : null);
 
     // Pull act + lineup
     const act = await Act.findById(actId).lean();
-    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
+    if (!act)
+      return res.status(404).json({ success: false, message: "Act not found" });
 
     const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
     const lineup =
@@ -2240,10 +2244,14 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
         : null) || lineups[0];
 
     if (!lineup) {
-      return res.status(400).json({ success: false, message: "Lineup not found" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Lineup not found" });
     }
 
-    const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+    const members = Array.isArray(lineup?.bandMembers)
+      ? lineup.bandMembers
+      : [];
 
     // ✅ include MC/Rapper as a "vocal contact"
     const isVocalContact = (m) => {
@@ -2260,7 +2268,13 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
     const contacts = members.filter(isVocalContact);
 
     if (!contacts.length) {
-      return res.json({ success: true, ensured: 0, reused: 0, triggered: 0, details: [] });
+      return res.json({
+        success: true,
+        ensured: 0,
+        reused: 0,
+        triggered: 0,
+        details: [],
+      });
     }
 
     // ---- helpers (local) ----
@@ -2272,7 +2286,8 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
         .replace(/,\s*/g, ",")
         .trim();
 
-    const lastTwoParts = (s = "") => normalizeAddr(s).split(",").slice(-2).join(",");
+    const lastTwoParts = (s = "") =>
+      normalizeAddr(s).split(",").slice(-2).join(",");
 
     const addressesRoughlyEqual = (a = "", b = "") => {
       if (!a || !b) return false;
@@ -2311,17 +2326,88 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
       address: fullAddress,
     });
 
+    const formatCurrencyGBP = (value) => {
+      const n = Number(value || 0);
+      return `£${n.toFixed(2)}`;
+    };
+
+    const titleCaseWords = (value = "") =>
+      String(value || "")
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+
+    const getActExtrasForEmail = (actDoc = {}) => {
+      const raw = actDoc?.extras;
+      if (!raw) return [];
+
+      const entries =
+        raw instanceof Map
+          ? Array.from(raw.entries())
+          : typeof raw?.entries === "function"
+            ? Array.from(raw.entries())
+            : Object.entries(raw || {});
+
+       return entries
+    .map(([key, value]) => {
+      const price = Number(value?.price ?? 0);
+      const complimentary = value?.complimentary === true;
+
+      return {
+        key,
+        label: titleCaseWords(key),
+        price,
+        complimentary,
+      };
+    })
+    .filter((item) => item.label && (item.complimentary || item.price > 0))
+    .sort((a, b) => a.label.localeCompare(b.label));
+    };
+
+    const renderActExtrasHtml = (actDoc = {}) => {
+      const extras = getActExtrasForEmail(actDoc);
+      if (!extras.length) return "";
+
+      const itemsHtml = extras
+        .map((extra) => {
+          const priceText = extra.complimentary
+            ? "Complimentary"
+            : formatCurrencyGBP(extra.price);
+
+          return `
+        <li style="margin: 0 0 6px;">
+          <strong>${extra.label}</strong>: ${priceText}
+        </li>
+      `;
+        })
+        .join("");
+
+      return `
+    <div style="margin-top:16px;">
+      <div style="font-weight:700; margin-bottom:8px;">Available band extras:</div>
+      <ul style="margin:0; padding-left:18px;">
+        ${itemsHtml}
+      </ul>
+    </div>
+  `;
+    };
+
     // ✅ Resolve canonical musician by email/phone (NEVER use bandMember _id)
     const findCanonicalMusician = async ({ email, phone }) => {
-      const e = String(email || "").trim().toLowerCase();
+      const e = String(email || "")
+        .trim()
+        .toLowerCase();
       const p = normalizePhone(phone || "");
 
       if (e) {
-        const byEmail = await Musician.findOne({ email: e }).select("_id email phoneNumber phone musicianSlug").lean();
+        const byEmail = await Musician.findOne({ email: e })
+          .select("_id email phoneNumber phone musicianSlug")
+          .lean();
         if (byEmail?._id) return byEmail;
       }
 
-            if (p) {
+      if (p) {
         const byPhone = await Musician.findOne({
           $or: [{ phoneNormalized: p }, { phoneNumber: p }, { phone: p }],
         })
@@ -2363,7 +2449,9 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
       const v = sortedContacts[i];
       const slotIndex = i;
 
-      const email = String(v.email || "").trim().toLowerCase();
+      const email = String(v.email || "")
+        .trim()
+        .toLowerCase();
       const phone = normalizePhone(v.phoneNumber || v.phone || "");
 
       const canonical = await findCanonicalMusician({ email, phone });
@@ -2376,12 +2464,17 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
 
         // Prefer canonicalId match if we have it
         if (canonicalId && r.musicianId) {
-          return sameSlot && sameReq && String(r.musicianId) === String(canonicalId);
+          return (
+            sameSlot && sameReq && String(r.musicianId) === String(canonicalId)
+          );
         }
 
         // Otherwise fallback to phone/email match
         const samePhone = phone && r.phone && normalizePhone(r.phone) === phone;
-        const sameEmail = email && r.musicianEmail && String(r.musicianEmail).toLowerCase() === email;
+        const sameEmail =
+          email &&
+          r.musicianEmail &&
+          String(r.musicianEmail).toLowerCase() === email;
         return sameSlot && sameReq && (samePhone || sameEmail);
       });
 
@@ -2400,23 +2493,36 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
 
       const candidates = existingRows
         .filter((r) => {
-          const decisive = r.reply && ["yes", "no", "unavailable", "noloc", "nolocation"].includes(r.reply);
+          const decisive =
+            r.reply &&
+            ["yes", "no", "unavailable", "noloc", "nolocation"].includes(
+              r.reply,
+            );
           if (!decisive) return false;
 
-          if (canonicalId && r.musicianId) return String(r.musicianId) === String(canonicalId);
+          if (canonicalId && r.musicianId)
+            return String(r.musicianId) === String(canonicalId);
 
-          const samePhone = phone && r.phone && normalizePhone(r.phone) === phone;
-          const sameEmail = email && r.musicianEmail && String(r.musicianEmail).toLowerCase() === email;
+          const samePhone =
+            phone && r.phone && normalizePhone(r.phone) === phone;
+          const sameEmail =
+            email &&
+            r.musicianEmail &&
+            String(r.musicianEmail).toLowerCase() === email;
           return samePhone || sameEmail;
         })
-        .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+        .sort(
+          (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0),
+        );
 
-      reusable = candidates.find((r) => addressesRoughlyEqual(r.formattedAddress || "", fullAddress));
+      reusable = candidates.find((r) =>
+        addressesRoughlyEqual(r.formattedAddress || "", fullAddress),
+      );
 
       if (reusable) {
         const now = new Date();
 
-               await AvailabilityModel.findOneAndUpdate(
+        await AvailabilityModel.findOneAndUpdate(
           {
             actId,
             lineupId: lineup?._id || null,
@@ -2451,8 +2557,11 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
               address: fullAddress,
               photoUrl: reusable.photoUrl || "",
               profileUrl: reusable.profileUrl || "",
-              musicianName: reusable.musicianName || `${v.firstName || ""} ${v.lastName || ""}`.trim(),
-              vocalistName: reusable.vocalistName || reusable.selectedVocalistName || "",
+              musicianName:
+                reusable.musicianName ||
+                `${v.firstName || ""} ${v.lastName || ""}`.trim(),
+              vocalistName:
+                reusable.vocalistName || reusable.selectedVocalistName || "",
               selectedVocalistName: reusable.selectedVocalistName || "",
               duties: reusable.duties || v.instrument || "Vocalist",
               fee: reusable.fee || "",
@@ -2507,7 +2616,9 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
     }
 
     const reusedCount = results.filter((r) => r.action === "reused").length;
-    const triggeredCount = results.filter((r) => r.action === "triggered").length;
+    const triggeredCount = results.filter(
+      (r) => r.action === "triggered",
+    ).length;
 
     return res.json({
       success: true,
@@ -2591,18 +2702,16 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const lower = raw.toLowerCase();
     if (fixups[lower]) return fixups[lower];
 
-    return (
-      lower
-        .split(/([\s\-’'])/)
-        .map((part, idx) => {
-          if (/^[\s\-’']$/.test(part)) return part; // keep separators
-          if (idx !== 0 && exceptions.has(part)) return part; // small words
-          return part.charAt(0).toUpperCase() + part.slice(1);
-        })
-        .join("")
-        .replace(/\bMc([a-z])/g, (_, c) => "Mc" + c.toUpperCase())
-        .replace(/\bMac([a-z])/g, (_, c) => "Mac" + c.toUpperCase())
-    );
+    return lower
+      .split(/([\s\-’'])/)
+      .map((part, idx) => {
+        if (/^[\s\-’']$/.test(part)) return part; // keep separators
+        if (idx !== 0 && exceptions.has(part)) return part; // small words
+        return part.charAt(0).toUpperCase() + part.slice(1);
+      })
+      .join("")
+      .replace(/\bMc([a-z])/g, (_, c) => "Mc" + c.toUpperCase())
+      .replace(/\bMac([a-z])/g, (_, c) => "Mac" + c.toUpperCase());
   }
 
   const getIdentitySnapshot = () => {
@@ -2626,9 +2735,16 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   // ✅ IMPORTANT: your unique index is:
   // actId_1_lineupId_1_dateISO_1_phone_1_v2_1_slotIndex_1
   // so ALL upserts must match on exactly these fields (NOT requestKey).
-  const resolveLineupKey = (lineup, lineupId) => lineup?._id || lineupId || null;
+  const resolveLineupKey = (lineup, lineupId) =>
+    lineup?._id || lineupId || null;
 
-  const buildUniqueQuery = ({ actId, lineupKey, dateISO, phone, slotIndex }) => ({
+  const buildUniqueQuery = ({
+    actId,
+    lineupKey,
+    dateISO,
+    phone,
+    slotIndex,
+  }) => ({
     actId,
     lineupId: lineupKey,
     dateISO,
@@ -2638,7 +2754,13 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   });
 
   // “active request” guard for this specific person/slot (matches unique index)
-  const findActiveRequest = async ({ actId, lineupKey, dateISO, phone, slotIndex }) => {
+  const findActiveRequest = async ({
+    actId,
+    lineupKey,
+    dateISO,
+    phone,
+    slotIndex,
+  }) => {
     const q = buildUniqueQuery({ actId, lineupKey, dateISO, phone, slotIndex });
 
     return AvailabilityModel.findOne({
@@ -2646,63 +2768,78 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       status: { $in: ["sent", "queued"] },
     })
       .select(
-        "_id status createdAt updatedAt enquiryId clientUserId slotIndex phone musicianId reply requestKey"
+        "_id status createdAt updatedAt enquiryId clientUserId slotIndex phone musicianId reply requestKey",
       )
       .lean();
   };
 
-  const findConfirmedBookingForMusician = async ({ musicianId, phone, dateISO }) => {
-  try {
-    if (!dateISO || (!musicianId && !phone)) return null;
+  const findConfirmedBookingForMusician = async ({
+    musicianId,
+    phone,
+    dateISO,
+  }) => {
+    try {
+      if (!dateISO || (!musicianId && !phone)) return null;
 
-    const bookingDateStart = new Date(`${dateISO}T00:00:00.000Z`);
-    const bookingDateEnd = new Date(`${dateISO}T23:59:59.999Z`);
+      const bookingDateStart = new Date(`${dateISO}T00:00:00.000Z`);
+      const bookingDateEnd = new Date(`${dateISO}T23:59:59.999Z`);
 
-    const bookings = await Booking.find({
-      status: "confirmed",
-      $or: [
-        { date: { $gte: bookingDateStart, $lte: bookingDateEnd } },
-        { eventDate: { $gte: bookingDateStart, $lte: bookingDateEnd } },
-      ],
-    })
-      .select("_id bookingId bandLineup actsSummary")
-      .lean();
+      const bookings = await Booking.find({
+        status: "confirmed",
+        $or: [
+          { date: { $gte: bookingDateStart, $lte: bookingDateEnd } },
+          { eventDate: { $gte: bookingDateStart, $lte: bookingDateEnd } },
+        ],
+      })
+        .select("_id bookingId bandLineup actsSummary")
+        .lean();
 
-    for (const booking of bookings) {
-      const actsSummary = Array.isArray(booking?.actsSummary) ? booking.actsSummary : [];
-
-      const chosenMatches = actsSummary.some((summary) => {
-        const chosenList = Array.isArray(summary?.chosenVocalists)
-          ? summary.chosenVocalists
+      for (const booking of bookings) {
+        const actsSummary = Array.isArray(booking?.actsSummary)
+          ? booking.actsSummary
           : [];
-        const selectedOne = summary?.selectedVocalist ? [summary.selectedVocalist] : [];
-        const combined = [...chosenList, ...selectedOne];
 
-        return combined.some((v) => {
-          const chosenId = String(v?.musicianId || v?._id || "");
-          const chosenPhone = normalizePhone(v?.phone || v?.phoneNumber || "");
-          return (
-            (musicianId && chosenId && String(musicianId) === chosenId) ||
-            (phone && chosenPhone && phone === chosenPhone)
-          );
+        const chosenMatches = actsSummary.some((summary) => {
+          const chosenList = Array.isArray(summary?.chosenVocalists)
+            ? summary.chosenVocalists
+            : [];
+          const selectedOne = summary?.selectedVocalist
+            ? [summary.selectedVocalist]
+            : [];
+          const combined = [...chosenList, ...selectedOne];
+
+          return combined.some((v) => {
+            const chosenId = String(v?.musicianId || v?._id || "");
+            const chosenPhone = normalizePhone(
+              v?.phone || v?.phoneNumber || "",
+            );
+            return (
+              (musicianId && chosenId && String(musicianId) === chosenId) ||
+              (phone && chosenPhone && phone === chosenPhone)
+            );
+          });
         });
-      });
 
-      const bandLineupMatches = Array.isArray(booking?.bandLineup)
-        ? booking.bandLineup.some((id) => musicianId && String(id) === String(musicianId))
-        : false;
+        const bandLineupMatches = Array.isArray(booking?.bandLineup)
+          ? booking.bandLineup.some(
+              (id) => musicianId && String(id) === String(musicianId),
+            )
+          : false;
 
-      if (chosenMatches || bandLineupMatches) {
-        return booking;
+        if (chosenMatches || bandLineupMatches) {
+          return booking;
+        }
       }
-    }
 
-    return null;
-  } catch (err) {
-    console.warn("⚠️ findConfirmedBookingForMusician failed:", err?.message || err);
-    return null;
-  }
-};
+      return null;
+    } catch (err) {
+      console.warn(
+        "⚠️ findConfirmedBookingForMusician failed:",
+        err?.message || err,
+      );
+      return null;
+    }
+  };
 
   try {
     const {
@@ -2772,7 +2909,10 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           resolvedClientEmail = userDoc.email || "";
           console.log(
             `📧 Enriched client details from userId: ${resolvedClientName} <${resolvedClientEmail}>`,
-            { userIdForEnrichment: clientUserId, source: authUserId ? "auth" : "body" }
+            {
+              userIdForEnrichment: clientUserId,
+              source: authUserId ? "auth" : "body",
+            },
           );
         }
       } catch (err) {
@@ -2793,12 +2933,13 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     /* -------------------------------------------------------------- */
     /* 📍 Address resolution + hard block                             */
     /* -------------------------------------------------------------- */
-    const fullFormattedAddress =
-      (formattedAddress ||
-        address ||
-        act?.formattedAddress ||
-        act?.venueAddress ||
-        "").trim();
+    const fullFormattedAddress = (
+      formattedAddress ||
+      address ||
+      act?.formattedAddress ||
+      act?.venueAddress ||
+      ""
+    ).trim();
 
     // Hard block: do not message musicians if we don't have a real location
     if (!fullFormattedAddress || /^tbc$/i.test(fullFormattedAddress)) {
@@ -2810,7 +2951,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           dateISO,
           formattedAddress: formattedAddress || null,
           address: address || null,
-        }
+        },
       );
 
       if (res) {
@@ -2848,7 +2989,8 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       shortAddress,
       metaAddress,
       enquiryId,
-      slotIndexFromBody: typeof body.slotIndex === "number" ? body.slotIndex : null,
+      slotIndexFromBody:
+        typeof body.slotIndex === "number" ? body.slotIndex : null,
     });
 
     /* -------------------------------------------------------------- */
@@ -2878,13 +3020,13 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       ? lineups.find(
           (l) =>
             String(l._id) === String(lineupId) ||
-            String(l.lineupId) === String(lineupId)
+            String(l.lineupId) === String(lineupId),
         )
       : lineups[0];
 
     if (!lineup) {
       console.warn(
-        "⚠️ No valid lineup found — defaulting to first available or skipping lineup-specific logic."
+        "⚠️ No valid lineup found — defaulting to first available or skipping lineup-specific logic.",
       );
     }
 
@@ -2894,7 +3036,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       throw new Error("Missing lineupId — cannot upsert availability safely");
     }
 
-    const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+    const members = Array.isArray(lineup?.bandMembers)
+      ? lineup.bandMembers
+      : [];
 
     /* -------------------------------------------------------------- */
     /* 💰 Fee calculation helper                                      */
@@ -2902,20 +3046,25 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const feeForMember = async (member) => {
       const isNYE = String(dateISO).slice(5, 10) === "12-31";
 
-const baseFee = (() => {
-  const base = Number(member?.fee ?? 0);
-  if (!isNYE) return base;
+      const baseFee = (() => {
+        const base = Number(member?.fee ?? 0);
+        if (!isNYE) return base;
 
-  const nye = member?.specialDatePricing?.nye || {};
-  const override = nye?.overrideFee;
+        const nye = member?.specialDatePricing?.nye || {};
+        const override = nye?.overrideFee;
 
-  if (override !== null && override !== undefined && override !== "" && Number.isFinite(Number(override))) {
-    return Number(override);
-  }
+        if (
+          override !== null &&
+          override !== undefined &&
+          override !== "" &&
+          Number.isFinite(Number(override))
+        ) {
+          return Number(override);
+        }
 
-  const extra = Number(nye?.extraFee ?? 0);
-  return base + (Number.isFinite(extra) ? extra : 0);
-})();
+        const extra = Number(nye?.extraFee ?? 0);
+        return base + (Number.isFinite(extra) ? extra : 0);
+      })();
 
       const essentialExtras = Array.isArray(member?.additionalRoles)
         ? member.additionalRoles
@@ -2959,7 +3108,7 @@ const baseFee = (() => {
     /* 🎤 MULTI-VOCALIST HANDLING (Lead only)                         */
     /* -------------------------------------------------------------- */
     const vocalists = members.filter((m) =>
-      (m.instrument || "").toLowerCase().includes("vocal")
+      (m.instrument || "").toLowerCase().includes("vocal"),
     );
 
     if (!isDeputy && vocalists.length > 1) {
@@ -2972,84 +3121,104 @@ const baseFee = (() => {
         const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
         if (!phone) {
           console.warn(
-            `⚠️ Skipping vocalist ${vMember.firstName} — no phone number`
+            `⚠️ Skipping vocalist ${vMember.firstName} — no phone number`,
           );
           continue;
         }
 
-       // ✅ Resolve canonical Musician (NEVER fall back to bandMember subdoc _id)
-let musicianDoc = null;
-const bandMemberId = vMember?._id || null; // traceability only
-let realMusicianId = null;
+        // ✅ Resolve canonical Musician (NEVER fall back to bandMember subdoc _id)
+        let musicianDoc = null;
+        const bandMemberId = vMember?._id || null; // traceability only
+        let realMusicianId = null;
 
-const vEmail = String(vMember?.email || "").trim().toLowerCase();
+        const vEmail = String(vMember?.email || "")
+          .trim()
+          .toLowerCase();
 
-try {
-  // 1) Prefer explicit musicianId if present on the act bandMember
-  if (vMember?.musicianId) {
-    musicianDoc = await Musician.findById(vMember.musicianId)
-      .select("_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl")
-      .lean();
-  }
+        try {
+          // 1) Prefer explicit musicianId if present on the act bandMember
+          if (vMember?.musicianId) {
+            musicianDoc = await Musician.findById(vMember.musicianId)
+              .select(
+                "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl",
+              )
+              .lean();
+          }
 
-  // 2) Fallback: phone match (now that phoneNormalized is cleaned)
-  if (!musicianDoc) {
-    musicianDoc = await Musician.findOne({
-      $or: [{ phoneNormalized: phone }, { phone: phone }, { phoneNumber: phone }],
-    })
-      .select("_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl")
-      .lean();
-  }
+          // 2) Fallback: phone match (now that phoneNormalized is cleaned)
+          if (!musicianDoc) {
+            musicianDoc = await Musician.findOne({
+              $or: [
+                { phoneNormalized: phone },
+                { phone: phone },
+                { phoneNumber: phone },
+              ],
+            })
+              .select(
+                "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl",
+              )
+              .lean();
+          }
 
-  // 3) Fallback: email match (bandMembers usually have email)
-  if (!musicianDoc && vEmail) {
-    musicianDoc = await Musician.findOne({ email: vEmail })
-      .select("_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl")
-      .lean();
-  }
-} catch (err) {
-  console.warn("⚠️ Failed to fetch real musician:", err?.message || err);
-}
+          // 3) Fallback: email match (bandMembers usually have email)
+          if (!musicianDoc && vEmail) {
+            musicianDoc = await Musician.findOne({ email: vEmail })
+              .select(
+                "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl",
+              )
+              .lean();
+          }
+        } catch (err) {
+          console.warn(
+            "⚠️ Failed to fetch real musician:",
+            err?.message || err,
+          );
+        }
 
-realMusicianId = musicianDoc?._id || null;
+        realMusicianId = musicianDoc?._id || null;
 
-const confirmedBooking = await findConfirmedBookingForMusician({
-  musicianId: realMusicianId,
-  phone,
-  dateISO,
-});
+        const confirmedBooking = await findConfirmedBookingForMusician({
+          musicianId: realMusicianId,
+          phone,
+          dateISO,
+        });
 
-if (confirmedBooking) {
-  console.log("🚫 Confirmed booking found (multi) — skip WA, escalate deputies", {
-    slotIndex: slotIndexForThis,
-    dateISO,
-    phone,
-    realMusicianId: String(realMusicianId || ""),
-    bookingId: confirmedBooking?.bookingId || String(confirmedBooking?._id || ""),
-  });
+        if (confirmedBooking) {
+          console.log(
+            "🚫 Confirmed booking found (multi) — skip WA, escalate deputies",
+            {
+              slotIndex: slotIndexForThis,
+              dateISO,
+              phone,
+              realMusicianId: String(realMusicianId || ""),
+              bookingId:
+                confirmedBooking?.bookingId ||
+                String(confirmedBooking?._id || ""),
+            },
+          );
 
-  await notifyDeputies({
-    actId,
-    lineupId: lineupKey,
-    dateISO,
-    formattedAddress: fullFormattedAddress,
-    clientName: resolvedClientName || "",
-    clientEmail: resolvedClientEmail || "",
-    slotIndex: slotIndexForThis,
-    skipDuplicateCheck: true,
-    skipIfUnavailable: false,
-  });
+          await notifyDeputies({
+            actId,
+            lineupId: lineupKey,
+            dateISO,
+            formattedAddress: fullFormattedAddress,
+            clientName: resolvedClientName || "",
+            clientEmail: resolvedClientEmail || "",
+            slotIndex: slotIndexForThis,
+            skipDuplicateCheck: true,
+            skipIfUnavailable: false,
+          });
 
-  results.push({
-    name: vMember.firstName,
-    slotIndex: slotIndexForThis,
-    phone,
-    reusedExisting: true,
-    existingReply: "booked (booking db)",
-  });
+          results.push({
+            name: vMember.firstName,
+            slotIndex: slotIndexForThis,
+            phone,
+            reusedExisting: true,
+            existingReply: "booked (booking db)",
+          });
 
-  continue;
-}
+          continue;
+        }
 
         // ✅ ACTIVE-REQUEST GUARD (per unique slot) — prevents accidental re-sends
         if (!skipDuplicateCheck) {
@@ -3069,7 +3238,7 @@ if (confirmedBooking) {
                 status: active.status,
                 slotIndex: active.slotIndex,
                 phone: active.phone,
-              }
+              },
             );
 
             results.push({
@@ -3097,7 +3266,7 @@ if (confirmedBooking) {
               dateISO,
               phone,
               realMusicianId: String(realMusicianId || ""),
-            }
+            },
           );
 
           await notifyDeputies({
@@ -3123,7 +3292,9 @@ if (confirmedBooking) {
           continue;
         }
 
-        let enriched = musicianDoc ? { ...musicianDoc, ...vMember } : { ...vMember };
+        let enriched = musicianDoc
+          ? { ...musicianDoc, ...vMember }
+          : { ...vMember };
         try {
           if (vMember?.musicianId) {
             const mus = await Musician.findById(vMember.musicianId).lean();
@@ -3132,7 +3303,7 @@ if (confirmedBooking) {
         } catch (err) {
           console.warn(
             `⚠️ Failed to enrich vocalist ${vMember.firstName}:`,
-            err.message
+            err.message,
           );
         }
 
@@ -3154,7 +3325,7 @@ if (confirmedBooking) {
             prior &&
             addressesRoughlyEqual(
               prior.formattedAddress || prior.address || "",
-              fullFormattedAddress
+              fullFormattedAddress,
             )
           ) {
             console.log(
@@ -3163,7 +3334,7 @@ if (confirmedBooking) {
                 slotIndex: slotIndexForThis,
                 reply: prior.reply,
                 phone,
-              }
+              },
             );
 
             if (prior.reply === "unavailable" || prior.reply === "no") {
@@ -3200,7 +3371,7 @@ if (confirmedBooking) {
               } catch (e) {
                 console.warn(
                   "⚠️ Badge refresh (existing YES) failed:",
-                  e?.message || e
+                  e?.message || e,
                 );
               }
             }
@@ -3261,11 +3432,11 @@ if (confirmedBooking) {
           musicianEmail: enriched.email || "",
           clientUserId: clientUserId || null,
           photoUrl:
-  enriched.profilePhoto ||
-  enriched.photoUrl ||
-  enriched.profilePicture ||
-  "",
-bandMemberId: bandMemberId || null,
+            enriched.profilePhoto ||
+            enriched.photoUrl ||
+            enriched.profilePicture ||
+            "",
+          bandMemberId: bandMemberId || null,
           address: fullFormattedAddress,
           formattedAddress: fullFormattedAddress,
           formattedDate,
@@ -3279,9 +3450,9 @@ bandMemberId: bandMemberId || null,
           selectedVocalistId: realMusicianId || null,
           vocalistName: displayNameForLead,
           profileUrl: buildMusicianProfileUrl({
-  _id: realMusicianId,
-  musicianSlug: musicianDoc?.musicianSlug || enriched?.musicianSlug,
-}),
+            _id: realMusicianId,
+            musicianSlug: musicianDoc?.musicianSlug || enriched?.musicianSlug,
+          }),
           requestId,
           requestKey, // ✅ store for correlation, but don't match on it
         };
@@ -3301,7 +3472,7 @@ bandMemberId: bandMemberId || null,
         const savedLead = await AvailabilityModel.findOneAndUpdate(
           query,
           { $setOnInsert: setOnInsert, $set: setAlways },
-          { new: true, upsert: true }
+          { new: true, upsert: true },
         );
 
         // Build interactive buttons (carry requestId)
@@ -3314,10 +3485,10 @@ bandMemberId: bandMemberId || null,
         const nameBits = normalizeNameBits(displayNameOf(vMember));
 
         const outboundMessage = `Hi ${
-  vMember.firstName || "there"
-}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${
-  vMember.instrument
-} duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
+          vMember.firstName || "there"
+        }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${
+          vMember.instrument
+        } duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
 
         // Send interactive WA
         const msg = await sendWhatsAppMessage({
@@ -3345,17 +3516,19 @@ bandMemberId: bandMemberId || null,
         try {
           await AvailabilityModel.updateOne(
             { _id: savedLead._id },
-            {  $set: {
-      messageSidOut: msg?.sid || null,
-      outboundMessage,
-      outboundChannel: "whatsapp",
-      outboundSentAt: new Date(),
-    }, }
+            {
+              $set: {
+                messageSidOut: msg?.sid || null,
+                outboundMessage,
+                outboundChannel: "whatsapp",
+                outboundSentAt: new Date(),
+              },
+            },
           );
         } catch (e) {
           console.warn(
             "⚠️ Could not persist messageSidOut (multi):",
-            e?.message || e
+            e?.message || e,
           );
         }
 
@@ -3400,10 +3573,9 @@ bandMemberId: bandMemberId || null,
 
     const targetMember = isDeputy
       ? deputy
-      : targetedFromBody ||
-        findVocalistPhone(act, lineupKey)?.vocalist;
+      : targetedFromBody || findVocalistPhone(act, lineupKey)?.vocalist;
 
-        const bandMemberId = targetMember?._id || null; // traceability only
+    const bandMemberId = targetMember?._id || null; // traceability only
 
     if (!targetMember) throw new Error("No valid member found");
 
@@ -3414,7 +3586,7 @@ bandMemberId: bandMemberId || null,
         if (mus) enrichedMember = { ...mus, ...enrichedMember };
       } else {
         const cleanPhone = normalizePhone(
-          targetMember.phone || targetMember.phoneNumber || ""
+          targetMember.phone || targetMember.phoneNumber || "",
         );
         if (cleanPhone) {
           const mus = await Musician.findOne({
@@ -3431,81 +3603,89 @@ bandMemberId: bandMemberId || null,
       targetMember.musicianId = deputy.id;
     }
 
-  targetMember.email = enrichedMember.email || targetMember.email || null;
+    targetMember.email = enrichedMember.email || targetMember.email || null;
 
-// ✅ Only accept a musicianId if it's NOT the act bandMember _id
-const candidateMusicianId = enrichedMember?._id || targetMember.musicianId || null;
+    // ✅ Only accept a musicianId if it's NOT the act bandMember _id
+    const candidateMusicianId =
+      enrichedMember?._id || targetMember.musicianId || null;
 
-targetMember.musicianId =
-  candidateMusicianId &&
-  (!bandMemberId || String(candidateMusicianId) !== String(bandMemberId))
-    ? candidateMusicianId
-    : null;
+    targetMember.musicianId =
+      candidateMusicianId &&
+      (!bandMemberId || String(candidateMusicianId) !== String(bandMemberId))
+        ? candidateMusicianId
+        : null;
 
-    const phone = normalizePhone(targetMember.phone || targetMember.phoneNumber);
+    const phone = normalizePhone(
+      targetMember.phone || targetMember.phoneNumber,
+    );
     if (!phone) throw new Error("Missing phone");
 
     const singleSlotIndex =
       typeof body.slotIndex === "number" ? body.slotIndex : 0;
 
-   let canonical = await findCanonicalMusicianByPhone(phone);
+    let canonical = await findCanonicalMusicianByPhone(phone);
 
-// Fallback: email match if phone lookup fails
-if (!canonical) {
-  const email = String(targetMember?.email || "").trim().toLowerCase();
-  if (email) {
-    canonical = await Musician.findOne({ email })
-      .select("_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl")
-      .lean();
-  }
-}
-
-// ✅ Resolve a real musicianId (never fall back to bandMemberId)
-const realMusicianId = canonical?._id || targetMember?.musicianId || null;
-
-const confirmedBooking = !isDeputy
-  ? await findConfirmedBookingForMusician({
-      musicianId: realMusicianId,
-      phone,
-      dateISO,
-    })
-  : null;
-
-if (confirmedBooking) {
-  console.log(
-    "🚫 Confirmed booking found — skipping lead WhatsApp, escalating to deputies",
-    {
-      dateISO,
-      phone,
-      canonicalId: String(realMusicianId || ""),
-      bookingId: confirmedBooking?.bookingId || String(confirmedBooking?._id || ""),
+    // Fallback: email match if phone lookup fails
+    if (!canonical) {
+      const email = String(targetMember?.email || "")
+        .trim()
+        .toLowerCase();
+      if (email) {
+        canonical = await Musician.findOne({ email })
+          .select(
+            "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl",
+          )
+          .lean();
+      }
     }
-  );
 
-  await notifyDeputies({
-    actId,
-    lineupId: lineupKey,
-    dateISO,
-    formattedAddress: fullFormattedAddress,
-    clientName: resolvedClientName || "",
-    clientEmail: resolvedClientEmail || "",
-    slotIndex: singleSlotIndex,
-    skipDuplicateCheck: true,
-    skipIfUnavailable: false,
-  });
+    // ✅ Resolve a real musicianId (never fall back to bandMemberId)
+    const realMusicianId = canonical?._id || targetMember?.musicianId || null;
 
-  if (res)
-    return res.json({
-      success: true,
-      sent: 0,
-      skipped: "already-booked-confirmed-booking",
-    });
-  return {
-    success: true,
-    sent: 0,
-    skipped: "already-booked-confirmed-booking",
-  };
-}
+    const confirmedBooking = !isDeputy
+      ? await findConfirmedBookingForMusician({
+          musicianId: realMusicianId,
+          phone,
+          dateISO,
+        })
+      : null;
+
+    if (confirmedBooking) {
+      console.log(
+        "🚫 Confirmed booking found — skipping lead WhatsApp, escalating to deputies",
+        {
+          dateISO,
+          phone,
+          canonicalId: String(realMusicianId || ""),
+          bookingId:
+            confirmedBooking?.bookingId || String(confirmedBooking?._id || ""),
+        },
+      );
+
+      await notifyDeputies({
+        actId,
+        lineupId: lineupKey,
+        dateISO,
+        formattedAddress: fullFormattedAddress,
+        clientName: resolvedClientName || "",
+        clientEmail: resolvedClientEmail || "",
+        slotIndex: singleSlotIndex,
+        skipDuplicateCheck: true,
+        skipIfUnavailable: false,
+      });
+
+      if (res)
+        return res.json({
+          success: true,
+          sent: 0,
+          skipped: "already-booked-confirmed-booking",
+        });
+      return {
+        success: true,
+        sent: 0,
+        skipped: "already-booked-confirmed-booking",
+      };
+    }
 
     // ✅ ACTIVE-REQUEST GUARD (single) — prevents resend if already sent/queued
     if (!skipDuplicateCheck) {
@@ -3525,7 +3705,7 @@ if (confirmedBooking) {
             status: active.status,
             slotIndex: active.slotIndex,
             phone: active.phone,
-          }
+          },
         );
 
         if (res) {
@@ -3550,16 +3730,16 @@ if (confirmedBooking) {
       : `${targetMember.firstName || ""} ${targetMember.lastName || ""}`.trim();
 
     const canonicalPhoto =
-  pickPic(canonical) ||
-  enrichedMember?.profilePhoto ||
-  enrichedMember?.photoUrl ||
-  enrichedMember?.profilePicture ||
-  "";
+      pickPic(canonical) ||
+      enrichedMember?.profilePhoto ||
+      enrichedMember?.photoUrl ||
+      enrichedMember?.profilePicture ||
+      "";
 
     const selectedName = String(
       selectedVocalistName ||
         canonicalName ||
-        `${targetMember?.firstName || ""} ${targetMember?.lastName || ""}`
+        `${targetMember?.firstName || ""} ${targetMember?.lastName || ""}`,
     ).trim();
 
     // ✅ Date-level block: if already unavailable for this date, skip lead WA and go deputies
@@ -3578,7 +3758,7 @@ if (confirmedBooking) {
             phone,
             canonicalId: String(realMusicianId || ""),
             priorId: String(dateLevelUnavailable._id || ""),
-          }
+          },
         );
 
         await notifyDeputies({
@@ -3622,7 +3802,7 @@ if (confirmedBooking) {
       prior &&
       addressesRoughlyEqual(
         prior.formattedAddress || prior.address || "",
-        fullFormattedAddress
+        fullFormattedAddress,
       )
     ) {
       console.log("ℹ️ Using existing reply (single path) — skipping WA send", {
@@ -3649,11 +3829,17 @@ if (confirmedBooking) {
             });
           }
         } catch (e) {
-          console.warn("⚠️ Badge refresh (existing YES) failed:", e?.message || e);
+          console.warn(
+            "⚠️ Badge refresh (existing YES) failed:",
+            e?.message || e,
+          );
         }
       }
 
-      if (!isDeputy && (prior.reply === "unavailable" || prior.reply === "no")) {
+      if (
+        !isDeputy &&
+        (prior.reply === "unavailable" || prior.reply === "no")
+      ) {
         await notifyDeputies({
           actId,
           lineupId: lineupKey,
@@ -3779,12 +3965,12 @@ if (confirmedBooking) {
       fee: String(finalFee),
       updatedAt: now,
       profileUrl: buildMusicianProfileUrl({
-  _id: realMusicianId,
-  musicianSlug:
-    canonical?.musicianSlug ||
-    enrichedMember?.musicianSlug ||
-    targetMember?.musicianSlug,
-}),
+        _id: realMusicianId,
+        musicianSlug:
+          canonical?.musicianSlug ||
+          enrichedMember?.musicianSlug ||
+          targetMember?.musicianSlug,
+      }),
       selectedVocalistName: selectedName,
       selectedVocalistId: realMusicianId || null,
       vocalistName: vocalistName || selectedName || "",
@@ -3807,7 +3993,7 @@ if (confirmedBooking) {
     const saved = await AvailabilityModel.findOneAndUpdate(
       query,
       { $setOnInsert: setOnInsert, $set: setAlways },
-      { new: true, upsert: true }
+      { new: true, upsert: true },
     );
 
     console.log(`✅ Upserted ${isDeputy ? "DEPUTY" : "LEAD"} row`, {
@@ -3843,10 +4029,10 @@ if (confirmedBooking) {
     ];
 
     const outboundMessage = `Hi ${
-  targetMember.firstName || "there"
-}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${roleStr} duties with ${
-  act.tscName || act.name
-}. Please indicate your availability 💫`;
+      targetMember.firstName || "there"
+    }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of ${feeStr} for ${roleStr} duties with ${
+      act.tscName || act.name
+    }. Please indicate your availability 💫`;
 
     const msg = await sendWhatsAppMessage({
       to: phone,
@@ -3871,21 +4057,21 @@ if (confirmedBooking) {
 
     // Persist Twilio SID
     try {
-     await AvailabilityModel.updateOne(
-  { _id: saved._id },
-  {
-    $set: {
-      messageSidOut: msg?.sid || null,
-      outboundMessage,
-      outboundChannel: "whatsapp",
-      outboundSentAt: new Date(),
-    },
-  }
-);
+      await AvailabilityModel.updateOne(
+        { _id: saved._id },
+        {
+          $set: {
+            messageSidOut: msg?.sid || null,
+            outboundMessage,
+            outboundChannel: "whatsapp",
+            outboundSentAt: new Date(),
+          },
+        },
+      );
     } catch (e) {
       console.warn(
         "⚠️ Could not persist messageSidOut (single):",
-        e?.message || e
+        e?.message || e,
       );
     }
 
@@ -4006,7 +4192,6 @@ export async function notifyDeputyOneShot(req, res) {
 // getDeputyDisplayBits, findCanonicalMusicianByPhone, normalizeToE164, normalizeFrom,
 // seenInboundOnce, parsePayload, classifyReply, sendWhatsAppText are available in scope.
 
-
 export const processAvailabilityReplyFlow = async ({
   updated,
   reply,
@@ -4079,7 +4264,7 @@ export const processAvailabilityReplyFlow = async ({
           photoUrl: pickPicLocal(musician),
           profileUrl: buildMusicianProfileUrl(musician),
         },
-      }
+      },
     );
 
     updated.musicianId = musician._id;
@@ -4100,7 +4285,7 @@ export const processAvailabilityReplyFlow = async ({
           vocalistName: displayName,
           musicianName: updated?.musicianName || displayName,
         },
-      }
+      },
     );
     updated.vocalistName = displayName;
     if (!updated.musicianName) updated.musicianName = displayName;
@@ -4113,7 +4298,7 @@ export const processAvailabilityReplyFlow = async ({
   if (isDeputy && updated?.isDeputy !== true) {
     await AvailabilityModel.updateOne(
       { _id: updated._id },
-      { $set: { isDeputy: true } }
+      { $set: { isDeputy: true } },
     );
     updated.isDeputy = true;
   }
@@ -4132,7 +4317,7 @@ export const processAvailabilityReplyFlow = async ({
       ],
     })
       .select(
-        "email firstName lastName musicianSlug musicianProfileImageUpload musicianProfileImage profileImage profilePicture profilePhoto photoUrl imageUrl _id"
+        "email firstName lastName musicianSlug musicianProfileImageUpload musicianProfileImage profileImage profilePicture profilePhoto photoUrl imageUrl _id",
       )
       .lean();
   }
@@ -4175,7 +4360,7 @@ export const processAvailabilityReplyFlow = async ({
           day: "numeric",
           month: "long",
           year: "numeric",
-        }
+        },
       );
 
       const fee =
@@ -4195,7 +4380,7 @@ export const processAvailabilityReplyFlow = async ({
           } catch (err) {
             console.warn(
               "⚠️ Failed to cancel old calendar event:",
-              err.message
+              err.message,
             );
           }
         }
@@ -4227,7 +4412,7 @@ export const processAvailabilityReplyFlow = async ({
               calendarInviteSentAt: new Date(),
               calendarStatus: "needsAction",
             },
-          }
+          },
         );
       } catch (err) {
         console.error("❌ Calendar invite failed:", err.message);
@@ -4236,14 +4421,14 @@ export const processAvailabilityReplyFlow = async ({
 
     await sendWhatsAppText(
       toE164,
-      "Super — we’ll send a diary invite to log the enquiry for your records."
+      "Super — we’ll send a diary invite to log the enquiry for your records.",
     );
 
     await AvailabilityModel.updateOne(
       { _id: updated._id },
       {
         $set: { status: "read", ...(isDeputy ? { isDeputy: true } : {}) },
-      }
+      },
     );
 
     await cancelDeputyEscalation({
@@ -4340,7 +4525,9 @@ export const processAvailabilityReplyFlow = async ({
     let cancelEventId = null;
 
     if (previouslyConfirmedRow) {
-      const prevAddr = addressKey(previouslyConfirmedRow.formattedAddress || "");
+      const prevAddr = addressKey(
+        previouslyConfirmedRow.formattedAddress || "",
+      );
       const addrMatches = !prevAddr || prevAddr === thisAddr;
 
       if (addrMatches) {
@@ -4362,7 +4549,7 @@ export const processAvailabilityReplyFlow = async ({
           reply: "unavailable",
           repliedAt: new Date(),
         },
-      }
+      },
     );
 
     if (shouldSendCancellationEmail) {
@@ -4380,7 +4567,7 @@ export const processAvailabilityReplyFlow = async ({
         },
         {
           $set: { calendarStatus: "cancelled" },
-        }
+        },
       );
     }
 
@@ -4419,7 +4606,7 @@ export const processAvailabilityReplyFlow = async ({
 
     await sendWhatsAppText(
       toE164,
-      "Thanks for letting us know — we've updated your availability."
+      "Thanks for letting us know — we've updated your availability.",
     );
 
     const shouldTriggerDeputies =
@@ -4490,11 +4677,17 @@ export const processAvailabilityReplyFlow = async ({
           });
         }
       } catch (emailErr) {
-        console.error("❌ Failed to send cancellation email:", emailErr.message);
+        console.error(
+          "❌ Failed to send cancellation email:",
+          emailErr.message,
+        );
       }
     }
 
-    if (!isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply)) {
+    if (
+      !isDeputy &&
+      ["unavailable", "no", "noloc", "nolocation"].includes(reply)
+    ) {
       await Act.updateOne(
         { _id: actId },
         {
@@ -4505,7 +4698,7 @@ export const processAvailabilityReplyFlow = async ({
           $unset: {
             [`availabilityBadgesMeta.${dateISO}.lockedByLeadUnavailable`]: "",
           },
-        }
+        },
       );
     }
 
@@ -4530,7 +4723,6 @@ export const processAvailabilityReplyFlow = async ({
     btnId,
   });
 };
-
 
 export const twilioInbound = async (req, res) => {
   console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
@@ -4769,10 +4961,14 @@ export const twilioInbound = async (req, res) => {
         } catch {}
 
         if (requestId) requestId = requestId.toUpperCase();
-if (!reply) {
-  console.log("ℹ️ Unclassified inbound message — ignoring", { bodyText, btnText, btnId });
-  return;
-}
+        if (!reply) {
+          console.log("ℹ️ Unclassified inbound message — ignoring", {
+            bodyText,
+            btnText,
+            btnId,
+          });
+          return;
+        }
         const sender = normE164(fromRaw);
 
         console.log("📥 [twilioInbound] RAW SNAPSHOT", {
@@ -4829,7 +5025,7 @@ if (!reply) {
 
         if (!updated && repliedSid) {
           updated = await AvailabilityModel.findOneAndUpdate(
-             { messageSidOut: repliedSid },
+            { messageSidOut: repliedSid },
             {
               $set: {
                 reply,
@@ -4900,18 +5096,18 @@ if (!reply) {
           return; // bail early like before
         }
 
-await processAvailabilityReplyFlow({
-  updated,
-  reply,
-  requestId,
-  inboundSid,
-  repliedSid,
-  bodyText,
-  btnText,
-  btnId,
-  fromRaw,
-});
-return;
+        await processAvailabilityReplyFlow({
+          updated,
+          reply,
+          requestId,
+          inboundSid,
+          repliedSid,
+          bodyText,
+          btnText,
+          btnId,
+          fromRaw,
+        });
+        return;
       } catch (err) {
         console.error("❌ Error in twilioInbound background task:", err);
       }
@@ -5309,8 +5505,6 @@ export const makeAvailabilityBroadcaster = (broadcastFn) => {
   };
 };
 
-
-
 export async function buildAvailabilityBadgeFromRows({
   actId,
   dateISO,
@@ -5413,10 +5607,7 @@ export async function buildAvailabilityBadgeFromRows({
   // Prefer whatever “human label” exists on the row if musician lookup fails
   const fallbackRowName = (r) =>
     String(
-      r?.selectedVocalistName ||
-        r?.vocalistName ||
-        r?.musicianName ||
-        "",
+      r?.selectedVocalistName || r?.vocalistName || r?.musicianName || "",
     ).trim();
   // ---------- end helpers ----------
 
@@ -5431,7 +5622,9 @@ export async function buildAvailabilityBadgeFromRows({
 
   const musDocs = ids.length
     ? await Musician.find({ _id: { $in: ids } })
-        .select("firstName lastName displayName preferredName name musicianSlug")
+        .select(
+          "firstName lastName displayName preferredName name musicianSlug",
+        )
         .lean()
     : [];
 
@@ -5444,7 +5637,10 @@ export async function buildAvailabilityBadgeFromRows({
     return acc;
   }, {});
 
-  console.log("📦 buildBadge: rows grouped by slot:", Object.keys(groupedBySlot));
+  console.log(
+    "📦 buildBadge: rows grouped by slot:",
+    Object.keys(groupedBySlot),
+  );
 
   const slots = [];
   const orderedKeys = Object.keys(groupedBySlot).sort(
@@ -5464,8 +5660,9 @@ export async function buildAvailabilityBadgeFromRows({
         .filter((r) =>
           ["yes", "no", "unavailable", "noloc", "nolocation"].includes(r.reply),
         )
-        .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))[0] ||
-      null;
+        .sort(
+          (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0),
+        )[0] || null;
 
     // Resolve lead display bits (photo/profile) if possible
     let leadDisplayBits = null;
@@ -5548,7 +5745,7 @@ export async function buildAvailabilityBadgeFromRows({
 
     // --- slot status ---
     const leadState = leadReply?.reply || "pending";
-        const effectiveLeadState =
+    const effectiveLeadState =
       leadState === "pending" && leadUnavailable ? "unavailable" : leadState;
     const anyYesDeputy = deputies.some((d) => d.available);
     const anyDeputy = deputies.length > 0;
@@ -5560,34 +5757,36 @@ export async function buildAvailabilityBadgeFromRows({
 
     // --- covering state ---
     let covering = "none";
-       if (effectiveLeadState === "yes") covering = "lead";
+    if (effectiveLeadState === "yes") covering = "lead";
     else if (anyYesDeputy) covering = "deputy";
-    else if (effectiveLeadState !== "pending" && anyDeputy) covering = "pending_deputies";
+    else if (effectiveLeadState !== "pending" && anyDeputy)
+      covering = "pending_deputies";
 
     // --- escalation ---
-     const escalationActive =
+    const escalationActive =
       effectiveLeadState !== "yes" &&
       effectiveLeadState !== "pending" &&
       anyDeputy &&
       !anyYesDeputy;
 
-       const escalationReason =
+    const escalationReason =
       effectiveLeadState === "unavailable"
         ? "lead_unavailable"
         : effectiveLeadState === "no"
           ? "lead_no"
-          : effectiveLeadState === "noloc" || effectiveLeadState === "nolocation"
+          : effectiveLeadState === "noloc" ||
+              effectiveLeadState === "nolocation"
             ? "lead_no_location"
             : "none";
 
     // --- primary visual ---
     let primary = null;
     if (effectiveLeadState === "yes" && isHttp(leadBits?.photoUrl)) {
-            primary = leadBits;
+      primary = leadBits;
     } else if (anyYesDeputy) {
       primary = coveringYesDeputy || deputies.find((d) => d.available) || null;
     } else if (effectiveLeadState !== "yes" && anyDeputy) {
-            primary = firstDeputyWithPhoto || deputies[0] || null;
+      primary = firstDeputyWithPhoto || deputies[0] || null;
     } else if (isHttp(leadBits?.photoUrl)) {
       primary = leadBits;
     }
@@ -5610,7 +5809,9 @@ export async function buildAvailabilityBadgeFromRows({
 
     // --- legacy fields to mirror primary ---
     const legacyIsDeputy = Boolean(primary?.isDeputy);
-    const legacyVocalistName = String(primary?.vocalistName || chosenName || "").trim();
+    const legacyVocalistName = String(
+      primary?.vocalistName || chosenName || "",
+    ).trim();
     const legacyMusicianId =
       (primary?.musicianId && String(primary.musicianId)) ||
       leadBits?.musicianId ||
@@ -5632,7 +5833,7 @@ export async function buildAvailabilityBadgeFromRows({
       deputies,
       setAt: leadReply?.updatedAt || null,
       state: effectiveLeadState,
-            escalation: {
+      escalation: {
         active: escalationActive,
         reason: escalationReason,
       },
@@ -5723,7 +5924,9 @@ const generateLineupDescriptionForEmail = (lineup) => {
 
   // Prefix label: prefer actSize ("6-Piece"), else build
   const actSizeLabel = norm(lineup?.actSize);
-  const countLabel = actSizeLabel ? actSizeLabel : `${performerMembers.length}-Piece`;
+  const countLabel = actSizeLabel
+    ? actSizeLabel
+    : `${performerMembers.length}-Piece`;
 
   // Essential instruments (no manager/admin/sound tech/blank), vocals first, drums last
   let instruments = performerMembers
@@ -5764,7 +5967,7 @@ const generateLineupDescriptionForEmail = (lineup) => {
     (Array.isArray(member?.additionalRoles) ? member.additionalRoles : [])
       .filter((r) => r?.isEssential)
       .map((r) => norm(r?.role || "Unnamed Service"))
-      .filter(Boolean)
+      .filter(Boolean),
   );
 
   const rolesNormalized = rolesRaw.map((r) => {
@@ -5992,7 +6195,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       const m = await Musician.findById(musicianId)
         .select(
           "firstName lastName displayName preferredName name musicianSlug " +
-  "profilePhoto profilePicture photoUrl tscProfileUrl " +
+            "profilePhoto profilePicture photoUrl tscProfileUrl " +
             "tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks",
         )
         .lean();
@@ -6004,13 +6207,13 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
           name;
 
         if (!photoUrl)
-  photoUrl = normaliseUrl(
-    m.profilePhoto || m.profilePicture || m.photoUrl || ""
-  );
+          photoUrl = normaliseUrl(
+            m.profilePhoto || m.profilePicture || m.photoUrl || "",
+          );
         if (!profileUrl) {
           profileUrl = m.musicianSlug
             ? `${SITE}musician/${m.musicianSlug}`
-            : (m.tscProfileUrl || `${SITE}musician/${m._id}`);
+            : m.tscProfileUrl || `${SITE}musician/${m._id}`;
         }
 
         videos = buildApprovedVideos(m);
@@ -6208,13 +6411,17 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
         .replace(/^-+|-+$/g, "");
 
     const actSlug =
-      (typeof actDoc?.slug === "string" && actDoc.slug.trim() ? actDoc.slug.trim() : "") ||
+      (typeof actDoc?.slug === "string" && actDoc.slug.trim()
+        ? actDoc.slug.trim()
+        : "") ||
       (typeof actDoc?.tscSlug === "string" && actDoc.tscSlug.trim()
         ? actDoc.tscSlug.trim()
         : "") ||
       slugify(actDoc?.tscName || actDoc?.name || "");
 
-    const actPath = actSlug ? `${SITE}act/${actSlug}` : `${SITE}act/${actDoc._id}`;
+    const actPath = actSlug
+      ? `${SITE}act/${actSlug}`
+      : `${SITE}act/${actDoc._id}`;
 
     const profileUrl = actPath;
     const cartUrl = `${actPath}?date=${encodeURIComponent(dateISO)}&address=${encodeURIComponent(
@@ -6263,37 +6470,44 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       }
     }
 
-  const lineupQuotes = await Promise.all(
-  (actDoc.lineups || []).map(async (lu) => {
-    try {
-      const description = generateLineupDescriptionForEmail(lu);
+    const lineupQuotes = await Promise.all(
+      (actDoc.lineups || []).map(async (lu) => {
+        try {
+          const description = generateLineupDescriptionForEmail(lu);
 
-      let travelTotal = "price TBC";
-      try {
-        const { county: selectedCounty } = countyFromAddress(selectedAddress);
-        const { total } = await calculateActPricing(
-          actDoc,
-          selectedCounty,
-          selectedAddress,
-          dateISO,
-          lu
-        );
-        if (total && !isNaN(total)) {
-          travelTotal = `£${Math.round(Number(total)).toLocaleString("en-GB")}`;
+          let travelTotal = "price TBC";
+          try {
+            const { county: selectedCounty } =
+              countyFromAddress(selectedAddress);
+            const { total } = await calculateActPricing(
+              actDoc,
+              selectedCounty,
+              selectedAddress,
+              dateISO,
+              lu,
+            );
+            if (total && !isNaN(total)) {
+              travelTotal = `£${Math.round(Number(total)).toLocaleString("en-GB")}`;
+            }
+          } catch (err) {
+            console.warn(
+              "⚠️ [rebuildAndApplyAvailabilityBadge] Price calc failed:",
+              err.message,
+            );
+          }
+
+          return {
+            html: `${description} — <strong>${travelTotal}</strong>`,
+          };
+        } catch (err) {
+          console.warn(
+            "⚠️ [rebuildAndApplyAvailabilityBadge] Lineup formatting failed:",
+            err.message,
+          );
+          return { html: "<em>Lineup unavailable</em>" };
         }
-      } catch (err) {
-        console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Price calc failed:", err.message);
-      }
-
-      return {
-        html: `${description} — <strong>${travelTotal}</strong>`,
-      };
-    } catch (err) {
-      console.warn("⚠️ [rebuildAndApplyAvailabilityBadge] Lineup formatting failed:", err.message);
-      return { html: "<em>Lineup unavailable</em>" };
-    }
-  })
-);
+      }),
+    );
 
     const tailoringExact = (() => {
       const songCount = (() => {
@@ -6515,10 +6729,9 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
 
           if (!canSend) {
             console.log(
-           
-  "✉️ [rebuild] Skipping LEAD email (sent within 7 days)",
-  { slotIdx },
-);
+              "✉️ [rebuild] Skipping LEAD email (sent within 7 days)",
+              { slotIdx },
+            );
           } else {
             try {
               const vocalistCard = await buildMusicianProfileCard({
@@ -6774,6 +6987,8 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
                   ? "One of the band's regular vocalists isn’t available for your date, but we’re delighted to confirm that"
                   : "The band's regular vocalist isn’t available for your date, but we’re delighted to confirm that";
 
+                  const actExtrasHtml = renderActExtrasHtml(actDoc);
+
               await sendClientEmail({
                 actId: String(actId),
                 userId: clientUserId,
@@ -6860,6 +7075,8 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
                     <li>Travel to ${selectedAddress || "TBC"}</li>
                   </ul>
 
+                  ${actExtrasHtml}
+
                   <div style="margin-top:30px;">
                     <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
                   </div>
@@ -6924,19 +7141,18 @@ export async function getAvailabilityBadge(req, res) {
       return res.status(404).json({ error: "Act not found" });
     }
 
-   const leadUnavailable =
-  !!actDoc?.availabilityBadgesMeta?.[dateISO]?.lockedByLeadUnavailable;
+    const leadUnavailable =
+      !!actDoc?.availabilityBadgesMeta?.[dateISO]?.lockedByLeadUnavailable;
 
-// ✅ don’t skip building — pass the signal down so UI can show “lead unavailable” state
-const badge = await buildAvailabilityBadgeFromRows({
-  actId,
-  dateISO,
-  hasLineups: actDoc?.hasLineups ?? true,
-  leadUnavailable,
-});
+    // ✅ don’t skip building — pass the signal down so UI can show “lead unavailable” state
+    const badge = await buildAvailabilityBadgeFromRows({
+      actId,
+      dateISO,
+      hasLineups: actDoc?.hasLineups ?? true,
+      leadUnavailable,
+    });
 
-return res.json({ badge: badge || null, leadUnavailable });
-
+    return res.json({ badge: badge || null, leadUnavailable });
   } catch (err) {
     console.error("❌ [getAvailabilityBadge] Error:", err);
     return res.status(500).json({ error: err.message });
