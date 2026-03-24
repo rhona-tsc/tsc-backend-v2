@@ -2,9 +2,8 @@
 import Musician from "../models/musicianModel.js";
 import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import AvailabilityModel from "../models/availabilityModel.js";
-import { sendWAOrSMS } from "../utils/twilioClient.js";
 import EnquiryMessage from "../models/EnquiryMessage.js";
-
+import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 /* -------------------------- phone normalisation -------------------------- */
 
 const firstNameOf = (p) => {
@@ -245,7 +244,7 @@ export const notifyDeputyOneShot = async ({
       `Hi ${firstNameOf(deputy)}, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress}. ` +
       `Rate £${finalFee} for ${duties} duties with ${act?.tscName || act?.name || "the band"}. Reply YES / NO.`;
 
-    const sendRes = await sendWAOrSMS({
+    const sendRes = await sendWhatsAppMessage({
       to: phoneE164,
       templateParams: { FirstName: firstNameOf(deputy), FormattedDate: formattedDate },
       smsBody,
