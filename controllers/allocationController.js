@@ -615,8 +615,6 @@ if (!msg && repliedSid) {
   );
 }
 
-    const repliedSid = String(req.body?.OriginalRepliedMessageSid || "");
-    let msg = null;
 
     if (requestId) {
       msg = await EnquiryMessage.findOneAndUpdate(
