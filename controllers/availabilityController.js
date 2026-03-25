@@ -5048,6 +5048,46 @@ export const twilioInbound = async (req, res) => {
     return null;
   };
 
+    const classifyBookingReply = (s = "") => {
+    const t = String(s || "").trim().toLowerCase();
+    if (!t) return null;
+
+    if (
+      t === "yes" ||
+      t === "yes, book me in!" ||
+      t.includes("book me in") ||
+      t === "yesbook" ||
+      t.startsWith("yesbook_") ||
+      t === "yesbook_"
+    ) return "YES";
+
+    if (
+      t === "no" ||
+      t === "i'm already booked!" ||
+      t === "im already booked!" ||
+      t.includes("already booked") ||
+      t === "nobook" ||
+      t.startsWith("nobook_") ||
+      t === "nobook_"
+    ) return "NO_BOOKED";
+
+    if (
+      t === "noloc" ||
+      t === "no thanks" ||
+      t === "no thanks!" ||
+      t.includes("can't do this location") ||
+      t.includes("cant do this location")
+    ) return "NO_LOC";
+
+    return null;
+  };
+
+  const buildNoopRes = () => ({
+    status() { return this; },
+    send() { return this; },
+    json() { return this; },
+  });
+
   // Covers Content API & non-Content interactive payloads (legacy)
   function parseInteractive(body) {
     const id =
@@ -5244,36 +5284,7 @@ export const twilioInbound = async (req, res) => {
           repliedSid,
         });
 
-        const bookingReply = classifyBookingReply(btnText || btnId || bodyText);
 
-const bookingLooksLikePayload =
-  /^YESBOOK_/i.test(String(btnId || "")) ||
-  /^NOBOOK_/i.test(String(btnId || "")) ||
-  /^YESBOOK_/i.test(String(bodyText || "")) ||
-  /^NOBOOK_/i.test(String(bodyText || ""));
-
-if (bookingReply || bookingLooksLikePayload) {
-  const syntheticBookingBody = {
-    ...bodyObj,
-    Body:
-      requestId && bookingReply
-        ? `${bookingReply === "YES" ? "YESBOOK" : "NOBOOK"}_${requestId}`
-        : String(bodyObj?.Body || bodyText || ""),
-    ButtonText:
-      String(bodyObj?.ButtonText || btnText || "").toUpperCase(),
-    ButtonPayload:
-      requestId && bookingReply
-        ? `${bookingReply === "YES" ? "YESBOOK" : "NOBOOK"}_${requestId}`
-        : String(bodyObj?.ButtonPayload || btnId || ""),
-    OriginalRepliedMessageSid:
-      repliedSid || bodyObj?.OriginalRepliedMessageSid || "",
-    WaId: bodyObj?.WaId,
-    From: bodyObj?.From,
-  };
-
-  await twilioInboundBooking({ body: syntheticBookingBody }, buildNoopRes());
-  return;
-}
 
         /* ---------------------------------------------------------------------- */
         /* 🎟️ Booking reply handoff                                               */
@@ -5283,6 +5294,15 @@ if (bookingReply || bookingLooksLikePayload) {
           classifyBookingReply(btnId) ||
           classifyBookingReply(bodyText) ||
           null;
+
+        const bookingLooksLikePayload =
+          /^YESBOOK_/i.test(String(btnId || "")) ||
+          /^NOBOOK_/i.test(String(btnId || "")) ||
+          /^YESBOOK_/i.test(String(bodyText || "")) ||
+          /^NOBOOK_/i.test(String(bodyText || "")) ||
+          String(btnId || "").toLowerCase() === "yes" ||
+          String(btnId || "").toLowerCase() === "no" ||
+          String(btnId || "").toLowerCase() === "noloc";
 
         let bookingMsg = null;
 
@@ -5315,7 +5335,7 @@ if (bookingReply || bookingLooksLikePayload) {
             .lean();
         }
 
-        if (bookingReply || bookingMsg) {
+        if (bookingReply || bookingLooksLikePayload || bookingMsg) {
           console.log(
             "🎟️ [twilioInbound] routing inbound reply to booking flow",
             {
@@ -5323,37 +5343,49 @@ if (bookingReply || bookingLooksLikePayload) {
               bookingReply,
               bookingEnquiryId: bookingMsg?.enquiryId || null,
               repliedSid,
-            },
+            }
           );
 
           const { twilioInboundBooking } =
             await import("./allocationController.js");
 
-          const bookingPayload =
+          const fallbackPayload =
             bookingReply === "YES"
-              ? `YESBOOK_${bookingMsg?.enquiryId || requestId || ""}`
+              ? "YESBOOK"
               : bookingReply === "NO_BOOKED"
-                ? `NOBOOK_${bookingMsg?.enquiryId || requestId || ""}`
+                ? "NOBOOK"
                 : bookingReply === "NO_LOC"
                   ? "NOLOC"
-                  : bodyText || btnText || btnId || "";
+                  : String(bodyObj?.ButtonPayload || btnId || bodyObj?.Body || bodyText || "");
+
+          const syntheticBookingBody = {
+            ...bodyObj,
+            Body:
+              bookingMsg?.enquiryId && bookingReply === "YES"
+                ? `YESBOOK_${bookingMsg.enquiryId}`
+                : bookingMsg?.enquiryId && bookingReply === "NO_BOOKED"
+                  ? `NOBOOK_${bookingMsg.enquiryId}`
+                  : String(bodyObj?.Body || bodyText || fallbackPayload || ""),
+            ButtonText: String(bodyObj?.ButtonText || btnText || ""),
+            ButtonPayload:
+              bookingMsg?.enquiryId && bookingReply === "YES"
+                ? `YESBOOK_${bookingMsg.enquiryId}`
+                : bookingMsg?.enquiryId && bookingReply === "NO_BOOKED"
+                  ? `NOBOOK_${bookingMsg.enquiryId}`
+                  : String(bodyObj?.ButtonPayload || btnId || fallbackPayload || ""),
+            OriginalRepliedMessageSid:
+              repliedSid || bodyObj?.OriginalRepliedMessageSid || "",
+            WaId: bodyObj?.WaId,
+            From: bodyObj?.From,
+          };
 
           await twilioInboundBooking(
-            {
-              body: {
-                ...bodyObj,
-                Body: bookingPayload,
-                ButtonText: bookingReply || bodyObj?.ButtonText || "",
-                ButtonPayload: bookingPayload,
-                From: bodyObj?.From || bodyObj?.WaId || "",
-                WaId: bodyObj?.WaId || bodyObj?.From || "",
-              },
-            },
-            buildNoopRes(),
+            { body: syntheticBookingBody },
+            buildNoopRes()
           );
-
           return;
         }
+        
         /* ---------------------------------------------------------------------- */
         /* 🎯 Locate the Availability row to update                               */
         /*   1) Strict: requestId                                                 */

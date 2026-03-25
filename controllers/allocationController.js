@@ -523,7 +523,9 @@ export const twilioInboundBooking = async (req, res) => {
 
   if (
     low === "noloc" ||
-    low.includes("no thanks")
+    low.includes("no thanks") ||
+    low.includes("can't do this location") ||
+    low.includes("cant do this location")
   ) {
     return "NO_LOC";
   }
@@ -613,28 +615,42 @@ if (!msg && repliedSid) {
   );
 }
 
-if (!msg) {
-  const variants = normalizeFrom(fromRaw);
+    const repliedSid = String(req.body?.OriginalRepliedMessageSid || "");
+    let msg = null;
 
-  msg = await EnquiryMessage.findOneAndUpdate(
-    {
-      phone: { $in: variants },
-      "meta.kind": "booking",
-      $or: [{ reply: null }, { reply: { $exists: false } }],
-    },
-    {
-      $set: {
-        reply: replyType,
-        repliedAt: new Date(),
-        deliveryStatus: "read",
-        status: "read",
-        "calendar.calendarStatus": "needsAction",
-      },
-    },
-    { new: true, sort: { createdAt: -1 } }
-  );
-} else {
-      // Fallback matching by phone (last unanswered request)
+    if (requestId) {
+      msg = await EnquiryMessage.findOneAndUpdate(
+        { enquiryId: requestId },
+        {
+          $set: {
+            reply: replyType,
+            repliedAt: new Date(),
+            deliveryStatus: "read",
+            status: "read",
+            "calendar.calendarStatus": "needsAction",
+          },
+        },
+        { new: true }
+      );
+    }
+
+    if (!msg && repliedSid) {
+      msg = await EnquiryMessage.findOneAndUpdate(
+        { messageSid: repliedSid },
+        {
+          $set: {
+            reply: replyType,
+            repliedAt: new Date(),
+            deliveryStatus: "read",
+            status: "read",
+            "calendar.calendarStatus": "needsAction",
+          },
+        },
+        { new: true }
+      );
+    }
+
+    if (!msg) {
       const variants = normalizeFrom(fromRaw);
 
       msg = await EnquiryMessage.findOneAndUpdate(
@@ -652,7 +668,7 @@ if (!msg) {
             "calendar.calendarStatus": "needsAction",
           },
         },
-        { new: true }
+        { new: true, sort: { createdAt: -1 } }
       );
     }
 
