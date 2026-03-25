@@ -350,36 +350,7 @@ const normalizeNameBits = (nameLike) => {
   };
 };
 
-/** Build a complete "primary" record for the badge slot */
-function presentBadgePrimary({ row = {}, musicianDoc = {}, leadBits = {} }) {
-  const id = String(row.musicianId || musicianDoc?._id || "");
-  const nameBits = normalizeNameBits({
-    firstName: musicianDoc.firstName ?? leadBits.firstName ?? row.firstName,
-    lastName: musicianDoc.lastName ?? leadBits.lastName ?? row.lastName,
-    displayName: musicianDoc.displayName ?? leadBits.displayName,
-    vocalistDisplayName:
-      leadBits.vocalistDisplayName ??
-      row.vocalistName ??
-      musicianDoc.vocalistDisplayName,
-  });
 
-  const photoUrl =
-    leadBits.photoUrl || musicianDoc.photoUrl || row.photoUrl || null;
-  const profileUrl =
-    leadBits.profileUrl || musicianDoc.profileUrl || row.profileUrl || "";
-
-  return {
-    musicianId: id || null,
-    ...nameBits,
-    photoUrl,
-    profileUrl,
-    isDeputy: !!row.isDeputy,
-    phone: row.phone || musicianDoc.phone || null,
-    setAt: row.updatedAt || new Date().toISOString(),
-    available: row.reply === "yes",
-    slotIndex: typeof row.slotIndex === "number" ? row.slotIndex : null,
-  };
-}
 
 const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
 const normCountyKey = (s) =>
@@ -387,28 +358,7 @@ const normCountyKey = (s) =>
     .toLowerCase()
     .replace(/\s+/g, "_");
 
-const classifyBookingReply = (s = "") => {
-  const t = String(s || "")
-    .trim()
-    .toLowerCase();
-  if (!t) return null;
-  if (t === "yes" || t.includes("book me in")) return "YES";
-  if (t === "no" || t.includes("already booked")) return "NO_BOOKED";
-  if (t === "noloc" || t.includes("no thanks")) return "NO_LOC";
-  return null;
-};
 
-const buildNoopRes = () => ({
-  status() {
-    return this;
-  },
-  send() {
-    return this;
-  },
-  json() {
-    return this;
-  },
-});
 
 const toE164 = (raw = "") => {
   let s = String(raw || "")
@@ -808,6 +758,301 @@ export async function sendClientEmail({
   }
 }
 
+const EMAIL_MARKUP_MULTIPLIER = 1.33;
+
+const formatCurrencyGBP = (value) => {
+  const n = Number(value || 0);
+  return `£${Math.round(n).toLocaleString("en-GB")}`;
+};
+
+const titleCaseWords = (value = "") =>
+  String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+const getEssentialPerformerCountForExtras = (lineup = {}) => {
+  const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+
+  return members.filter((m) => {
+    if (!m || m.isEssential === false) return false;
+
+    const instrument = String(m.instrument || "").trim().toLowerCase();
+    if (!instrument) return false;
+    if (m?.isManager === true || m?.isNonPerformer === true) return false;
+
+    return !(
+      instrument === "manager" ||
+      instrument === "admin" ||
+      instrument.includes("band manager") ||
+      instrument.includes("management") ||
+      instrument.includes("sound engineer") ||
+      instrument.includes("sound tech") ||
+      instrument.includes("sound technician") ||
+      instrument.includes("audio engineer") ||
+      instrument.includes("audio tech") ||
+      instrument.includes("audio technician") ||
+      instrument.includes("foh") ||
+      instrument.includes("front of house")
+    );
+  }).length;
+};
+
+const getLineupSizeLabelForExtras = (lineup = {}) => {
+  const actSize = String(lineup?.actSize || "").trim();
+  if (actSize) return actSize;
+
+  const count = getEssentialPerformerCountForExtras(lineup);
+  return count > 0 ? `${count}-Piece` : "Lineup";
+};
+
+const getUniqueLineupSizeMetaForExtras = (actLike = {}) => {
+  const metas = (Array.isArray(actLike?.lineups) ? actLike.lineups : [])
+    .map((lineup) => ({
+      label: getLineupSizeLabelForExtras(lineup),
+      count: getEssentialPerformerCountForExtras(lineup),
+      hasSax: (Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : []).some(
+        (member) =>
+          member &&
+          member.isEssential !== false &&
+          /sax/i.test(String(member.instrument || "")),
+      ),
+    }))
+    .filter((meta) => meta.label && meta.count > 0);
+
+  const deduped = [];
+  for (const meta of metas) {
+    if (!deduped.some((x) => x.label === meta.label)) deduped.push(meta);
+  }
+
+  return deduped.sort(
+    (a, b) => a.count - b.count || a.label.localeCompare(b.label),
+  );
+};
+
+const getActExtrasForEmail = (actLike = {}) => {
+  const raw = actLike?.extras;
+  if (!raw) return [];
+
+  const entries =
+    raw instanceof Map
+      ? Array.from(raw.entries())
+      : typeof raw?.entries === "function"
+        ? Array.from(raw.entries())
+        : Object.entries(raw || {});
+
+  return entries
+    .map(([key, value]) => {
+      const price = Number(value?.price ?? 0);
+      const complimentary = value?.complimentary === true;
+
+      return {
+        key,
+        keyNorm: String(key || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_"),
+        label: titleCaseWords(key),
+        price,
+        complimentary,
+      };
+    })
+    .filter((item) => item.label && !item.complimentary && item.price > 0)
+    .sort((a, b) => a.label.localeCompare(b.label));
+};
+
+const getExtraByKeyNorm = (extras = [], wanted = "") => {
+  const normWanted = String(wanted || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_");
+
+  return extras.find((extra) => extra.keyNorm === normWanted) || null;
+};
+
+const buildMarkedUpPrice = (price = 0) =>
+  Number(price || 0) * EMAIL_MARKUP_MULTIPLIER;
+
+const buildPerLineupPriceSummary = (pricePerBandMember = 0, actLike = {}) => {
+  const lineupMetas = getUniqueLineupSizeMetaForExtras(actLike);
+
+  if (!lineupMetas.length) {
+    return formatCurrencyGBP(buildMarkedUpPrice(pricePerBandMember));
+  }
+
+  return lineupMetas
+    .map(
+      (meta) =>
+        `${meta.label} ${formatCurrencyGBP(
+          buildMarkedUpPrice(pricePerBandMember) * meta.count,
+        )}`,
+    )
+    .join(" / ");
+};
+
+const buildDjLiveSaxSummary = (basePrice = 0, actLike = {}) => {
+  const lineupMetas = getUniqueLineupSizeMetaForExtras(actLike);
+  const baseText = formatCurrencyGBP(buildMarkedUpPrice(basePrice));
+
+  if (!lineupMetas.length) return `${baseText} + travel`;
+
+  const allHaveSax = lineupMetas.every((meta) => meta.hasSax);
+  const noneHaveSax = lineupMetas.every((meta) => !meta.hasSax);
+
+  if (allHaveSax) return baseText;
+  if (noneHaveSax) return `${baseText} + travel`;
+  return `${baseText} to ${baseText} + travel`;
+};
+
+const renderActExtrasHtml = (actLike = {}) => {
+  const extras = getActExtrasForEmail(actLike);
+  if (!extras.length) return "";
+
+  const rows = [];
+  const pushRow = (label, value) => {
+    if (!value) return;
+    rows.push(`
+      <li style="margin:0 0 10px; color:#555;">
+        <strong style="color:#111;">${label}:</strong> ${value}
+      </li>
+    `);
+  };
+
+  pushRow(
+    "Extra 30-minute live set",
+    buildPerLineupPriceSummary(
+      getExtraByKeyNorm(extras, "extra_30min_performance_per_band_member")?.price,
+      actLike,
+    ),
+  );
+  pushRow(
+    "Extra 40-minute live set",
+    buildPerLineupPriceSummary(
+      getExtraByKeyNorm(extras, "extra_40min_performance_per_band_member")?.price,
+      actLike,
+    ),
+  );
+  pushRow(
+    "Extra 60-minute live set",
+    buildPerLineupPriceSummary(
+      getExtraByKeyNorm(extras, "extra_60min_performance_per_band_member")?.price,
+      actLike,
+    ),
+  );
+
+  pushRow(
+    "Up to 3 hours manned playlist",
+    formatCurrencyGBP(
+      buildMarkedUpPrice(
+        getExtraByKeyNorm(extras, "up_to_3_hours_manned_playlist")?.price,
+      ),
+    ),
+  );
+  pushRow(
+    "Up to 3 hours band member DJ",
+    formatCurrencyGBP(
+      buildMarkedUpPrice(
+        getExtraByKeyNorm(extras, "up_to_3_hours_band_member_dj")?.price,
+      ),
+    ),
+  );
+  pushRow(
+    "Extra DJing per 30 mins",
+    formatCurrencyGBP(
+      buildMarkedUpPrice(
+        getExtraByKeyNorm(extras, "extra_djing_per_30_mins")?.price,
+      ),
+    ),
+  );
+  pushRow(
+    "DJ Live Sax 3x30mins",
+    buildDjLiveSaxSummary(
+      getExtraByKeyNorm(extras, "dj_live_sax_3x30mins")?.price,
+      actLike,
+    ),
+  );
+
+  pushRow(
+    "Extra song request",
+    buildPerLineupPriceSummary(
+      getExtraByKeyNorm(extras, "extra_song_request_per_band_member")?.price,
+      actLike,
+    ),
+  );
+  pushRow(
+    "Israeli dancing 20 mins",
+    buildPerLineupPriceSummary(
+      getExtraByKeyNorm(extras, "israeli_dancing_20mins_per_band_member")?.price,
+      actLike,
+    ),
+  );
+  pushRow(
+    "Late stay 60 mins",
+    buildPerLineupPriceSummary(
+      getExtraByKeyNorm(extras, "late_stay_60min_per_band_member")?.price,
+      actLike,
+    ),
+  );
+  pushRow(
+    "Early arrival 60 mins",
+    buildPerLineupPriceSummary(
+      getExtraByKeyNorm(extras, "early_arrival_60min_per_band_member")?.price,
+      actLike,
+    ),
+  );
+
+  pushRow(
+    "PA & Sound Engineering Provision For An External Act",
+    formatCurrencyGBP(
+      buildMarkedUpPrice(
+        getExtraByKeyNorm(
+          extras,
+          "sound_engineering_for_another_act_with_your_acts_pa",
+        )?.price,
+      ),
+    ),
+  );
+
+  pushRow(
+    "Speedy Setup & Soundcheck (60mins)",
+    (() => {
+      const extra = getExtraByKeyNorm(
+        extras,
+        "speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member",
+      );
+      if (!extra?.price) return "";
+      return `${formatCurrencyGBP(buildMarkedUpPrice(extra.price))} + travel`;
+    })(),
+  );
+
+  pushRow(
+    "Wired mic for speeches",
+    formatCurrencyGBP(
+      buildMarkedUpPrice(
+        getExtraByKeyNorm(extras, "wired_mic_for_speeches")?.price,
+      ),
+    ),
+  );
+  pushRow(
+    "Wireless mic for speeches",
+    formatCurrencyGBP(
+      buildMarkedUpPrice(
+        getExtraByKeyNorm(extras, "wireless_mic_for_speeches")?.price,
+      ),
+    ),
+  );
+
+  if (!rows.length) return "";
+
+  return `
+    <div style="margin-top:24px;">
+      <h4 style="margin:0 0 10px; color:#111;">Popular extras</h4>
+      <ul style="margin:0; padding-left:18px; line-height:1.6;">
+        ${rows.join("")}
+      </ul>
+    </div>
+  `;
+};
+
 export const sendExampleGoodNewsEmail = async (req, res) => {
   try {
     const {
@@ -852,72 +1097,7 @@ export const sendExampleGoodNewsEmail = async (req, res) => {
       dateISO || eventDate || new Date().toISOString().slice(0, 10),
     );
 
-    const formatCurrencyGBP = (value) => {
-      const n = Number(value || 0);
-      return `£${n.toFixed(2)}`;
-    };
 
-    const titleCaseWords = (value = "") =>
-      String(value || "")
-        .replace(/[_-]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .replace(/\b\w/g, (c) => c.toUpperCase());
-
-    const getActExtrasForEmail = (actLike = {}) => {
-      const raw = actLike?.extras;
-      if (!raw) return [];
-
-      const entries =
-        raw instanceof Map
-          ? Array.from(raw.entries())
-          : typeof raw?.entries === "function"
-            ? Array.from(raw.entries())
-            : Object.entries(raw || {});
-
-      return entries
-        .map(([key, value]) => {
-          const price = Number(value?.price ?? 0);
-          const complimentary = value?.complimentary === true;
-
-          return {
-            key,
-            label: titleCaseWords(key),
-            price,
-            complimentary,
-          };
-        })
-        .filter((item) => item.label && (item.complimentary || item.price > 0))
-        .sort((a, b) => a.label.localeCompare(b.label));
-    };
-
-    const renderActExtrasHtml = (actLike = {}) => {
-      const extras = getActExtrasForEmail(actLike);
-      if (!extras.length) return "";
-
-      const itemsHtml = extras
-        .map((extra) => {
-          const priceText = extra.complimentary
-            ? "Complimentary"
-            : formatCurrencyGBP(extra.price);
-
-          return `
-            <li style="margin: 0 0 6px;">
-              <strong>${extra.label}</strong>: ${priceText}
-            </li>
-          `;
-        })
-        .join("");
-
-      return `
-        <div style="margin-top:16px;">
-          <div style="font-weight:700; margin-bottom:8px;">Available band extras:</div>
-          <ul style="margin:0; padding-left:18px;">
-            ${itemsHtml}
-          </ul>
-        </div>
-      `;
-    };
 
     const generateLineupDescriptionForEmail = (lineupLike) => {
       const members = Array.isArray(lineupLike?.bandMembers)
@@ -1042,7 +1222,7 @@ export const sendExampleGoodNewsEmail = async (req, res) => {
       ? generateLineupDescriptionForEmail(lineup)
       : "Lineup TBC";
 
-    const actExtrasHtml = renderActExtrasHtml(actDoc);
+   const actExtrasHtml = await renderActExtrasHtml(actDoc);
     const actName = actDoc.tscName || actDoc.name || "this act";
     const deputyShort = String(deputyName || "A vocalist").trim();
 
@@ -1106,32 +1286,7 @@ function parsePayload(payload = "") {
     enquiryId: match[2] || null,
   };
 }
-const normalizeFrom = (from) => {
-  console.log(
-    `🟢 (availabilityController.js) normalizeFrom START at ${new Date().toISOString()}`,
-    {},
-  );
-  const v = String(from || "")
-    .replace(/^whatsapp:/i, "")
-    .trim();
-  if (!v) return [];
-  const plus = v.startsWith("+") ? v : v.startsWith("44") ? `+${v}` : v;
-  const uk07 = plus.replace(/^\+44/, "0");
-  const ukNoPlus = plus.replace(/^\+/, "");
-  return Array.from(new Set([plus, uk07, ukNoPlus]));
-};
-// Module-scope E.164 normalizer (also strips "whatsapp:" prefix)
-const normalizeToE164 = (raw = "") => {
-  let s = String(raw || "")
-    .trim()
-    .replace(/^whatsapp:/i, "")
-    .replace(/\s+/g, "");
-  if (!s) return "";
-  if (s.startsWith("+")) return s;
-  if (s.startsWith("07")) return s.replace(/^0/, "+44");
-  if (s.startsWith("44")) return `+${s}`;
-  return s;
-};
+
 /* ========================================================================== */
 /* 💷 getCountyFeeValue                                                        */
 /* ========================================================================== */
@@ -1176,13 +1331,7 @@ export function getCountyFeeValue(countyFees, countyName) {
 const _waFallbackSent = new Set(); // remember WA SIDs we've already fallen back for
 
 // Normalise first-name display so we never fall back to "there" when we actually have a name
-const safeFirst = (s) => {
-  console.log(
-    `🟢 (availabilityController.js) safeFirst START at ${new Date().toISOString()}`,
-  );
-  const v = String(s || "").trim();
-  return v ? v.split(/\s+/)[0] : "there";
-};
+
 
 function extractOutcode(address = "") {
   console.log(
@@ -1549,7 +1698,7 @@ export async function notifyDeputies({
           displayName: deputyDisplayName || "",
         },
 
-        inheritedFee,
+        
         inheritedDuties: vocalist.instrument || "Vocalist",
         skipDuplicateCheck,
       });
@@ -1645,98 +1794,7 @@ export async function triggerNextDeputy({
 // Compute a per-member final fee exactly like the enquiry flow:
 // - explicit member.fee if set, else per-head from lineup.base_fee
 // - plus county travel fee (if enabled) OR distance-based travel
-async function _finalFeeForMember({
-  act,
-  lineup,
-  members,
-  member,
-  address,
-  dateISO,
-}) {
-  console.log(
-    `🟢 (availabilityController.js) _finalFeeForMember START at ${new Date().toISOString()}`,
-    {},
-  );
-  const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
-  const membersCount = Math.max(1, Array.isArray(members) ? members.length : 1);
-  const perHead = lineupTotal > 0 ? Math.ceil(lineupTotal / membersCount) : 0;
-  let base = Number(member?.fee ?? 0) > 0 ? Number(member.fee) : perHead;
-  // 🧩 If deputy fee missing, inherit from matching essential member (e.g. same instrument)
-  if (
-    (!member?.fee || Number(member.fee) === 0) &&
-    Array.isArray(lineup.bandMembers)
-  ) {
-    const matching = lineup.bandMembers.find(
-      (m) =>
-        m.isEssential &&
-        m.instrument &&
-        member?.instrument &&
-        m.instrument.toLowerCase() === member.instrument.toLowerCase(),
-    );
-    if (matching?.fee) {
-      console.log(
-        `🎯 Inheriting fee £${matching.fee} from ${matching.instrument}`,
-      );
-      base = Number(matching.fee);
-    }
-  }
-  const { county: selectedCounty } = countyFromAddress(address);
 
-  // County-rate (if enabled) wins; otherwise distance-based
-  let travelFee = 0;
-  let usedCounty = false;
-
-  if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
-    const raw = getCountyFeeValue(act.countyFees, selectedCounty);
-    const val = Number(raw);
-    if (Number.isFinite(val) && val > 0) {
-      usedCounty = true;
-      travelFee = Math.ceil(val);
-    }
-  }
-
-  if (!usedCounty) {
-    travelFee = await computeMemberTravelFee({
-      act,
-      member,
-      selectedCounty,
-      selectedAddress: address,
-      selectedDate: dateISO,
-    });
-    travelFee = Math.max(0, Math.ceil(Number(travelFee || 0)));
-  }
-
-  return Math.max(0, Math.ceil(Number(base || 0) + Number(travelFee || 0)));
-}
-
-const isVocalRoleGlobal = (role = "") => {
-  const r = String(role || "").toLowerCase();
-  return [
-    "lead male vocal",
-    "lead female vocal",
-    "lead vocal",
-    "vocalist-guitarist",
-    "vocalist-bassist",
-    "mc/rapper",
-    "lead male vocal/rapper",
-    "lead female vocal/rapper",
-    "lead male vocal/rapper & guitarist",
-    "lead female vocal/rapper & guitarist",
-  ].includes(r);
-};
-
-// --- New helpers for badge rebuilding ---
-
-const normalizePhoneE164 = (raw = "") => {
-  let v = String(raw || "")
-    .replace(/^whatsapp:/i, "")
-    .replace(/\s+/g, "");
-  if (!v) return "";
-  if (v.startsWith("+")) return v;
-  if (v.startsWith("07")) return v.replace(/^0/, "+44");
-  if (v.startsWith("44")) return `+${v}`;
-  return v;
-};
 
 export const clearavailabilityBadges = async (req, res) => {
   console.log(
@@ -2581,72 +2639,9 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
       address: fullAddress,
     });
 
-    const formatCurrencyGBP = (value) => {
-      const n = Number(value || 0);
-      return `£${n.toFixed(2)}`;
-    };
+  
 
-    const titleCaseWords = (value = "") =>
-      String(value || "")
-        .replace(/[_-]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .replace(/\b\w/g, (c) => c.toUpperCase());
-
-    const getActExtrasForEmail = (actDoc = {}) => {
-      const raw = actDoc?.extras;
-      if (!raw) return [];
-
-      const entries =
-        raw instanceof Map
-          ? Array.from(raw.entries())
-          : typeof raw?.entries === "function"
-            ? Array.from(raw.entries())
-            : Object.entries(raw || {});
-
-      return entries
-        .map(([key, value]) => {
-          const price = Number(value?.price ?? 0);
-          const complimentary = value?.complimentary === true;
-
-          return {
-            key,
-            label: titleCaseWords(key),
-            price,
-            complimentary,
-          };
-        })
-        .filter((item) => item.label && (item.complimentary || item.price > 0))
-        .sort((a, b) => a.label.localeCompare(b.label));
-    };
-
-    const renderActExtrasHtml = (actDoc = {}) => {
-      const extras = getActExtrasForEmail(actDoc);
-      if (!extras.length) return "";
-
-      const itemsHtml = extras
-        .map((extra) => {
-          const priceText = extra.complimentary
-            ? "Complimentary"
-            : formatCurrencyGBP(extra.price);
-
-          return `
-        <li style="margin: 0 0 6px;">
-          <strong>${extra.label}</strong>: ${priceText}
-        </li>
-      `;
-        })
-        .join("");
-
-      return `
-    <div style="margin-top:16px;">
-      <div style="font-weight:700; margin-bottom:8px;">Available band extras:</div>
-      <ul style="margin:0; padding-left:18px;">
-        ${itemsHtml}
-      </ul>
-    </div>
-  `;
-    };
+ 
 
     // ✅ Resolve canonical musician by email/phone (NEVER use bandMember _id)
     const findCanonicalMusician = async ({ email, phone }) => {
@@ -4991,27 +4986,7 @@ export const twilioInbound = async (req, res) => {
     process.env.PUBLIC_SITE_BASE ||
     "https://meek-biscotti-8d5020.netlify.app";
 
-  const pickPicLocal = (m = {}) =>
-    m.photoUrl ||
-    m.musicianProfileImageUpload ||
-    m.profileImage ||
-    m.imageUrl ||
-    m.profilePicture ||
-    m.musicianProfileImage ||
-    null;
 
-  const resolveDisplayName = (row, musician) => {
-    const fromRow = (
-      row?.selectedVocalistName ||
-      row?.vocalistName ||
-      row?.musicianName ||
-      ""
-    ).trim();
-    if (fromRow) return fromRow;
-    const fromMus =
-      `${musician?.firstName || ""} ${musician?.lastName || ""}`.trim();
-    return fromMus || "Vocalist";
-  };
 
   // tiny safe getter for odd webhook keys (with bracket names)
   const pick = (obj, ...keys) => {
@@ -5385,7 +5360,7 @@ export const twilioInbound = async (req, res) => {
           );
           return;
         }
-        
+
         /* ---------------------------------------------------------------------- */
         /* 🎯 Locate the Availability row to update                               */
         /*   1) Strict: requestId                                                 */
@@ -5530,66 +5505,7 @@ function seenInboundOnce(sid) {
   return false;
 }
 
-// Format date like "Saturday, 5th Oct 2025"
-const formatWithOrdinal = (dateLike) => {
-  console.log(
-    `🟢 (availabilityController.js) formatWithOrdinal START at ${new Date().toISOString()}`,
-    {},
-  );
-  const d = new Date(dateLike);
-  if (isNaN(d)) return String(dateLike);
-  const day = d.getDate();
-  const j = day % 10,
-    k = day % 100;
-  const suffix =
-    j === 1 && k !== 11
-      ? "st"
-      : j === 2 && k !== 12
-        ? "nd"
-        : j === 3 && k !== 13
-          ? "rd"
-          : "th";
-  const weekday = d.toLocaleDateString("en-GB", { weekday: "long" });
-  const month = d.toLocaleDateString("en-GB", { month: "short" }); // Oct
-  const year = d.getFullYear();
-  return `${weekday}, ${day}${suffix} ${month} ${year}`;
-};
 
-const firstNameOf = (p) => {
-  console.log(
-    `🟢 (availabilityController.js) firstNameOf START at ${new Date().toISOString()}`,
-    {},
-  );
-  if (!p) return "there";
-
-  // If it's a string like "Miça Townsend"
-  if (typeof p === "string") {
-    const parts = p.trim().split(/\s+/);
-    return parts[0] || "there";
-  }
-
-  // Common first-name keys
-  const direct =
-    p.firstName ||
-    p.FirstName ||
-    p.first_name ||
-    p.firstname ||
-    p.givenName ||
-    p.given_name ||
-    "";
-
-  if (direct && String(direct).trim()) {
-    return String(direct).trim().split(/\s+/)[0];
-  }
-
-  // Fall back to splitting a full name
-  const full = p.name || p.fullName || p.displayName || "";
-  if (full && String(full).trim()) {
-    return String(full).trim().split(/\s+/)[0];
-  }
-
-  return "there";
-};
 // -------------------- Outbound Trigger --------------------
 
 // ✅ Unified version ensuring correct photoUrl vs profileUrl distinction
@@ -6445,74 +6361,98 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     hasLineups: Array.isArray(actDoc?.lineups),
   });
 
+
   /* ------------------------------- helpers ------------------------------- */
 
-  const formatCurrencyGBP = (value) => {
-    const n = Number(value || 0);
-    return `£${n.toFixed(2)}`;
-  };
+const formatCurrencyGBP = (value) => {
+  const n = Number(value || 0);
+  return `£${n.toFixed(2)}`;
+};
 
-  const titleCaseWords = (value = "") =>
-    String(value || "")
-      .replace(/[_-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/\b\w/g, (c) => c.toUpperCase());
+const titleCaseWords = (value = "") =>
+  String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 
-  const getActExtrasForEmail = (actDoc = {}) => {
-    const raw = actDoc?.extras;
-    if (!raw) return [];
+const getActExtrasForEmail = (actLike = {}) => {
+  const raw = actLike?.extras;
+  if (!raw) return [];
 
-    const entries =
-      raw instanceof Map
+  const entries =
+    raw instanceof Map
+      ? Array.from(raw.entries())
+      : typeof raw?.entries === "function"
         ? Array.from(raw.entries())
-        : typeof raw?.entries === "function"
-          ? Array.from(raw.entries())
-          : Object.entries(raw || {});
+        : Object.entries(raw || {});
 
-    return entries
-      .map(([key, value]) => {
-        const price = Number(value?.price ?? 0);
-        const complimentary = value?.complimentary === true;
+  return entries
+    .map(([key, value]) => ({
+      key,
+      label: titleCaseWords(key),
+      price: Number(value?.price ?? 0),
+      complimentary: value?.complimentary === true,
+    }))
+    .filter((item) => item.label && !item.complimentary && item.price > 0)
+    .sort((a, b) => a.label.localeCompare(b.label));
+};
 
-        return {
-          key,
-          label: titleCaseWords(key),
-          price,
-          complimentary,
-        };
-      })
-      .filter((item) => item.label && (item.complimentary || item.price > 0))
-      .sort((a, b) => a.label.localeCompare(b.label));
+const getTravelBreakdownForMember = async (member, selectedAddress = "") => {
+  if (!member) return { fee: 0, source: "none" };
+
+  const { county: selectedCounty } =
+    countyFromAddress(selectedAddress || "") || {};
+
+  if (actDoc?.useCountyTravelFee && actDoc?.countyFees && selectedCounty) {
+    const raw = getCountyFeeValue(actDoc.countyFees, selectedCounty);
+    const val = Number(raw);
+    if (Number.isFinite(val) && val > 0) {
+      return { fee: Math.ceil(val), source: "county" };
+    }
+  }
+
+  const computed = await computeMemberTravelFee({
+    act: actDoc,
+    member,
+    selectedCounty,
+    selectedAddress,
+    selectedDate: dateISO,
+  });
+
+  return {
+    fee: Math.max(0, Math.ceil(Number(computed || 0))),
+    source: "computed",
   };
+};
 
-  const renderActExtrasHtml = (actDoc = {}) => {
-    const extras = getActExtrasForEmail(actDoc);
-    if (!extras.length) return "";
+const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
+  const extras = getActExtrasForEmail(actLike);
+  if (!extras.length) return "";
 
-    const itemsHtml = extras
-      .map((extra) => {
-        const priceText = extra.complimentary
-          ? "Complimentary"
-          : formatCurrencyGBP(extra.price);
-
-        return `
-        <li style="margin: 0 0 6px;">
-          <strong>${extra.label}</strong>: ${priceText}
+  const itemsHtml = extras
+    .map((extra) => {
+      const markedUp = Math.round(extra.price * 1.33);
+      return `
+        <li style="margin:0 0 8px; color:#555;">
+          <strong style="color:#111;">${extra.label}</strong>
+          <span style="color:#555;"> — ${formatCurrencyGBP(markedUp)}</span>
         </li>
       `;
-      })
-      .join("");
+    })
+    .join("");
 
-    return `
-    <div style="margin-top:16px;">
-      <div style="font-weight:700; margin-bottom:8px;">Available band extras:</div>
-      <ul style="margin:0; padding-left:18px;">
+  return `
+    <div style="margin-top:22px; padding-top:18px; border-top:1px solid #eee;">
+      <h4 style="margin:0 0 10px; color:#111;">Popular extras</h4>
+      <ul style="margin:0; padding-left:18px; line-height:1.7;">
         ${itemsHtml}
       </ul>
     </div>
   `;
-  };
+};
+
+
 
   const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -7218,8 +7158,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
                 to: clientEmail,
               });
 
-              const actExtrasHtml = renderActExtrasHtml(actDoc);
-
+const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
               await sendClientEmail({
                 actId: String(actId),
                 userId: clientUserId,
@@ -7455,7 +7394,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
                   ? "One of the band's regular vocalists isn’t available for your date, but we’re delighted to confirm that"
                   : "The band's regular vocalist isn’t available for your date, but we’re delighted to confirm that";
 
-              const actExtrasHtml = renderActExtrasHtml(actDoc);
+const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
 
               await sendClientEmail({
                 actId: String(actId),
