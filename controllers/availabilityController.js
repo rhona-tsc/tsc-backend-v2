@@ -6361,98 +6361,21 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     hasLineups: Array.isArray(actDoc?.lineups),
   });
 
-
   /* ------------------------------- helpers ------------------------------- */
 
-const formatCurrencyGBP = (value) => {
-  const n = Number(value || 0);
-  return `£${n.toFixed(2)}`;
-};
-
-const titleCaseWords = (value = "") =>
-  String(value || "")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-
-const getActExtrasForEmail = (actLike = {}) => {
-  const raw = actLike?.extras;
-  if (!raw) return [];
-
-  const entries =
-    raw instanceof Map
-      ? Array.from(raw.entries())
-      : typeof raw?.entries === "function"
-        ? Array.from(raw.entries())
-        : Object.entries(raw || {});
-
-  return entries
-    .map(([key, value]) => ({
-      key,
-      label: titleCaseWords(key),
-      price: Number(value?.price ?? 0),
-      complimentary: value?.complimentary === true,
-    }))
-    .filter((item) => item.label && !item.complimentary && item.price > 0)
-    .sort((a, b) => a.label.localeCompare(b.label));
-};
-
-const getTravelBreakdownForMember = async (member, selectedAddress = "") => {
-  if (!member) return { fee: 0, source: "none" };
-
-  const { county: selectedCounty } =
-    countyFromAddress(selectedAddress || "") || {};
-
-  if (actDoc?.useCountyTravelFee && actDoc?.countyFees && selectedCounty) {
-    const raw = getCountyFeeValue(actDoc.countyFees, selectedCounty);
-    const val = Number(raw);
-    if (Number.isFinite(val) && val > 0) {
-      return { fee: Math.ceil(val), source: "county" };
-    }
-  }
-
-  const computed = await computeMemberTravelFee({
-    act: actDoc,
-    member,
-    selectedCounty,
-    selectedAddress,
-    selectedDate: dateISO,
-  });
-
-  return {
-    fee: Math.max(0, Math.ceil(Number(computed || 0))),
-    source: "computed",
+  const formatCurrencyGBP = (value) => {
+    const n = Number(value || 0);
+    return `£${n.toFixed(2)}`;
   };
-};
 
-const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
-  const extras = getActExtrasForEmail(actLike);
-  if (!extras.length) return "";
+  const markupPrice = (value) => Math.round(Number(value || 0) * 1.33);
 
-  const itemsHtml = extras
-    .map((extra) => {
-      const markedUp = Math.round(extra.price * 1.33);
-      return `
-        <li style="margin:0 0 8px; color:#555;">
-          <strong style="color:#111;">${extra.label}</strong>
-          <span style="color:#555;"> — ${formatCurrencyGBP(markedUp)}</span>
-        </li>
-      `;
-    })
-    .join("");
-
-  return `
-    <div style="margin-top:22px; padding-top:18px; border-top:1px solid #eee;">
-      <h4 style="margin:0 0 10px; color:#111;">Popular extras</h4>
-      <ul style="margin:0; padding-left:18px; line-height:1.7;">
-        ${itemsHtml}
-      </ul>
-    </div>
-  `;
-};
-
-
+  const titleCaseWords = (value = "") =>
+    String(value || "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
 
   const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -6460,19 +6383,18 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
     const path = `availabilityBadgesMeta.${dateISO}.clientEmailsSent.${slotIdx}.${kind}`;
     const cutoff = new Date(Date.now() - COOLDOWN_MS);
 
-    // Reserve if not sent, or last sent is older than cutoff
     const updated = await Act.findOneAndUpdate(
       {
         _id: actId,
         $or: [{ [path]: { $exists: false } }, { [path]: { $lt: cutoff } }],
       },
       { $set: { [path]: new Date() } },
-      { new: false }, // we just need to know if we got the lock
+      { new: false },
     )
       .select("_id")
       .lean();
 
-    return !!updated; // true = you own the send
+    return !!updated;
   };
 
   const rollbackClientEmailReservation = async ({
@@ -6508,7 +6430,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
 
   const isHttpUrl = (u) => /^https?:\/\//i.test(normaliseUrl(u));
 
-  /** Normalise a good display name from a musician doc */
   const pickDisplayName = (m) => {
     if (!m) return "";
     const s =
@@ -6610,10 +6531,11 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
           `${String(m.firstName || "").trim()} ${String(m.lastName || "").trim()}`.trim() ||
           name;
 
-        if (!photoUrl)
+        if (!photoUrl) {
           photoUrl = normaliseUrl(
             m.profilePhoto || m.profilePicture || m.photoUrl || "",
           );
+        }
         if (!profileUrl) {
           profileUrl = m.musicianSlug
             ? `${SITE}musician/${m.musicianSlug}`
@@ -6628,8 +6550,302 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       name,
       photoUrl: isHttpUrl(photoUrl) ? photoUrl : "",
       profileUrl,
-      videos, // [{title,url}]
+      videos,
     };
+  };
+
+  const getLineupMembers = (lineup) =>
+    Array.isArray(lineup?.bandMembers)
+      ? lineup.bandMembers.filter((m) => m && m.isEssential !== false)
+      : [];
+
+  const getLineupLabel = (lineup) => {
+    const explicit = String(lineup?.actSize || "").trim();
+    if (explicit) return explicit;
+    const count = getLineupMembers(lineup).length;
+    return count ? `${count}-Piece` : "Lineup";
+  };
+
+  const getActExtrasForEmail = (actLike = {}) => {
+    const raw = actLike?.extras;
+    if (!raw) return [];
+
+    const entries =
+      raw instanceof Map
+        ? Array.from(raw.entries())
+        : typeof raw?.entries === "function"
+          ? Array.from(raw.entries())
+          : Object.entries(raw || {});
+
+    return entries
+      .map(([key, value]) => ({
+        key,
+        label: titleCaseWords(key),
+        price: Number(value?.price ?? 0),
+        complimentary: value?.complimentary === true,
+      }))
+      .filter((item) => item.label && !item.complimentary && item.price > 0);
+  };
+
+  const getTravelBreakdownForMember = async (member, selectedAddress = "") => {
+    if (!member) return { fee: 0, source: "none" };
+
+    const { county: selectedCounty } =
+      countyFromAddress(selectedAddress || "") || {};
+
+    if (actDoc?.useCountyTravelFee && actDoc?.countyFees && selectedCounty) {
+      const raw = getCountyFeeValue(actDoc.countyFees, selectedCounty);
+      const val = Number(raw);
+      if (Number.isFinite(val) && val > 0) {
+        return { fee: Math.ceil(val), source: "county" };
+      }
+    }
+
+    const computed = await computeMemberTravelFee({
+      act: actDoc,
+      member,
+      selectedCounty,
+      selectedAddress,
+      selectedDate: dateISO,
+    });
+
+    return {
+      fee: Math.max(0, Math.ceil(Number(computed || 0))),
+      source: "computed",
+    };
+  };
+
+  const findExtra = (extrasMap, ...possibleKeys) => {
+    for (const key of possibleKeys) {
+      const hit = extrasMap[key];
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  const findMemberAcrossLineups = (predicate) => {
+    for (const lineup of actDoc.lineups || []) {
+      for (const member of getLineupMembers(lineup)) {
+        if (predicate(member, lineup)) return member;
+      }
+    }
+    return null;
+  };
+
+  const formatPerLineupExtraRow = async ({
+    label,
+    perMemberBasePrice,
+    selectedAddress = "",
+  }) => {
+    const parts = [];
+
+    for (const lineup of actDoc.lineups || []) {
+      const members = getLineupMembers(lineup);
+      if (!members.length) continue;
+      const total = markupPrice(Number(perMemberBasePrice || 0) * members.length);
+      parts.push(`${getLineupLabel(lineup)} ${formatCurrencyGBP(total)}`);
+    }
+
+    if (!parts.length) return "";
+    return `
+      <li style="margin:0 0 8px; color:#555;">
+        <strong style="color:#111;">${label}</strong>
+        <span style="color:#555;"> — ${parts.join(" / ")}</span>
+      </li>
+    `;
+  };
+
+  const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
+    const extras = getActExtrasForEmail(actLike);
+    if (!extras.length) return "";
+
+    const extrasMap = Object.fromEntries(extras.map((e) => [e.key, e]));
+    const rows = [];
+
+    const pushSimple = (extra, labelOverride = null, extraAmount = 0) => {
+      if (!extra) return;
+      rows.push(`
+        <li style="margin:0 0 8px; color:#555;">
+          <strong style="color:#111;">${labelOverride || extra.label}</strong>
+          <span style="color:#555;"> — ${formatCurrencyGBP(markupPrice(extra.price) + Number(extraAmount || 0))}</span>
+        </li>
+      `);
+    };
+
+    const pushPerMember = async (extra, labelOverride = null) => {
+      if (!extra) return;
+      const row = await formatPerLineupExtraRow({
+        label: labelOverride || extra.label,
+        perMemberBasePrice: extra.price,
+        selectedAddress,
+      });
+      if (row) rows.push(row);
+    };
+
+    const extra30 = findExtra(
+      extrasMap,
+      "extra_30min_performance_per_band_member",
+      "extra_30_minutes_performance_per_band_member",
+    );
+    const extra40 = findExtra(
+      extrasMap,
+      "extra_40min_performance_per_band_member",
+      "extra_40_minutes_performance_per_band_member",
+    );
+    const extra60 = findExtra(
+      extrasMap,
+      "extra_60min_performance_per_band_member",
+      "extra_60_minutes_performance_per_band_member",
+    );
+
+    await pushPerMember(extra30, "Extra 30 Minute Set");
+    await pushPerMember(extra40, "Extra 40 Minute Set");
+    await pushPerMember(extra60, "Extra 60 Minute Set");
+
+    const mannedPlaylist = findExtra(
+      extrasMap,
+      "up_to_3_hours_manned_playlist",
+      "upto_3_hours_manned_playlist",
+    );
+    const bandMemberDj = findExtra(
+      extrasMap,
+      "up_to_3_hours_band_member_dj",
+      "upto_3_hours_band_member_dj",
+    );
+    const extraDj30 = findExtra(
+      extrasMap,
+      "extra_djing_per_30_mins",
+      "extra_dj_per_30_mins",
+      "extra_djing_per_30_minutes",
+    );
+    const djLiveSax = findExtra(
+      extrasMap,
+      "dj_live_sax_3x30mins",
+      "dj_live_sax_3x30_mins",
+    );
+
+    pushSimple(mannedPlaylist, "Up To 3 Hours Manned Playlist");
+    pushSimple(bandMemberDj, "Up To 3 Hours Band Member DJ");
+    pushSimple(extraDj30, "Extra DJing Per 30 Minutes");
+
+    if (djLiveSax) {
+      const saxTravelMember = findMemberAcrossLineups((member) =>
+        String(member?.instrument || "").toLowerCase().includes("sax"),
+      );
+
+      let saxTravel = 0;
+      if (saxTravelMember) {
+        const travel = await getTravelBreakdownForMember(
+          saxTravelMember,
+          selectedAddress,
+        );
+        saxTravel = travel.fee;
+      }
+
+      const lineups = actDoc.lineups || [];
+      const hasSaxInSomeLineups = lineups.some((lineup) =>
+        getLineupMembers(lineup).some((member) =>
+          String(member?.instrument || "").toLowerCase().includes("sax"),
+        ),
+      );
+      const missingSaxInSomeLineups = lineups.some(
+        (lineup) =>
+          !getLineupMembers(lineup).some((member) =>
+            String(member?.instrument || "").toLowerCase().includes("sax"),
+          ),
+      );
+
+      const base = markupPrice(djLiveSax.price);
+      let priceText = formatCurrencyGBP(base);
+
+      if (saxTravel > 0 && missingSaxInSomeLineups && hasSaxInSomeLineups) {
+        priceText = `${formatCurrencyGBP(base)} to ${formatCurrencyGBP(base + saxTravel)}`;
+      } else if (saxTravel > 0 && missingSaxInSomeLineups) {
+        priceText = formatCurrencyGBP(base + saxTravel);
+      }
+
+      rows.push(`
+        <li style="margin:0 0 8px; color:#555;">
+          <strong style="color:#111;">DJ Live Sax 3x30mins</strong>
+          <span style="color:#555;"> — ${priceText}</span>
+        </li>
+      `);
+    }
+
+    const extraSongRequest = findExtra(
+      extrasMap,
+      "extra_song_request_per_band_member",
+    );
+    const israeliDancing = findExtra(
+      extrasMap,
+      "israeli_dancing_20mins_per_band_member",
+      "israeli_dancing_20_minutes_per_band_member",
+    );
+    const lateStay = findExtra(
+      extrasMap,
+      "late_stay_60min_per_band_member",
+      "late_stay_60_minutes_per_band_member",
+    );
+
+    await pushPerMember(extraSongRequest, "Extra Song Request");
+    await pushPerMember(israeliDancing, "Israeli Dancing 20 Minutes");
+    await pushPerMember(lateStay, "Late Stay 60 Minutes");
+
+    const paAndEngineer = findExtra(
+      extrasMap,
+      "sound_engineering_for_another_act_with_your_acts_pa",
+      "sound_engineering_for_another_act",
+    );
+    pushSimple(
+      paAndEngineer,
+      "PA & Sound Engineering Provision For An External Act",
+    );
+
+    const speedySetup = findExtra(
+      extrasMap,
+      "speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member",
+      "speedy_setup_60mins",
+      "speedy_setup",
+    );
+
+    if (speedySetup) {
+      const engineerCandidate = findMemberAcrossLineups((member) => {
+        const instrument = String(member?.instrument || "").toLowerCase();
+        const roles = Array.isArray(member?.additionalRoles)
+          ? member.additionalRoles
+              .map((r) => String(r?.role || "").toLowerCase())
+              .join(" ")
+          : "";
+        const haystack = `${instrument} ${roles}`;
+        return haystack.includes("engineer") || haystack.includes("sound");
+      });
+
+      let speedyTravel = 0;
+      if (engineerCandidate) {
+        const travel = await getTravelBreakdownForMember(
+          engineerCandidate,
+          selectedAddress,
+        );
+        speedyTravel = travel.fee;
+      }
+
+      pushSimple(
+        speedySetup,
+        "Speedy Setup & Soundcheck (60 Minutes)",
+        speedyTravel,
+      );
+    }
+
+    if (!rows.length) return "";
+
+    return `
+      <div style="margin-top:22px; padding-top:18px; border-top:1px solid #eee;">
+        <h4 style="margin:0 0 10px; color:#111;">Popular extras</h4>
+        <ul style="margin:0; padding-left:18px; line-height:1.7;">
+          ${rows.join("")}
+        </ul>
+      </div>
+    `;
   };
 
   /* ---------------------- backfill missing vocalistName ---------------------- */
@@ -6678,7 +6894,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
     slotsCount: badge?.slots?.length || 0,
   });
 
-  // Pull rows for optional email + safe summaries
   const availRows = await AvailabilityModel.find({ actId, dateISO }).lean();
   console.log(
     "📥 Availability rows FULL identity snapshot:",
@@ -6694,8 +6909,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
     })),
   );
 
-  /* --------------------------- handle badge clear --------------------------- */
-
   if (!badge) {
     console.log("🟠 No badge returned — attempting CLEAR operation");
 
@@ -6709,7 +6922,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       return { success: true, skipped: true };
     }
 
-    // legacy clear (older key shape)
     await Act.updateOne(
       { _id: actId },
       { $unset: { [`availabilityBadges.${dateISO}`]: "" } },
@@ -6718,8 +6930,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
 
     return { success: true, cleared: true };
   }
-
-  /* ------------------------------ persist badge ----------------------------- */
 
   const addressForKey =
     badge.address || actDoc?.formattedAddress || actDoc?.venueAddress || "TBC";
@@ -6731,7 +6941,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
 
   const key = `${dateISO}_${shortAddress}`;
 
-  // (Optional) safe primary summary
   const idxPrimarySlot = (badge.slots || []).findIndex((s) => !!s?.primary);
   const primaryRef =
     idxPrimarySlot >= 0 ? badge.slots[idxPrimarySlot].primary : null;
@@ -6766,7 +6975,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
   );
   console.log(`✅ Applied badge for ${actDoc.tscName || actDoc.name}`, { key });
 
-  // SSE broadcast
   if (global.availabilityNotify?.badgeUpdated) {
     console.log("📡 SSE badgeUpdated fired", {
       actId,
@@ -6792,7 +7000,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
         (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0),
       )[0];
 
-    // Prefer any real client email/name on any row; fallback to hello@
     let clientEmail =
       allRows.find((r) => r.clientEmail && String(r.clientEmail).includes("@"))
         ?.clientEmail || "hello@thesupremecollective.co.uk";
@@ -6805,7 +7012,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       actDoc?.venueAddress ||
       "TBC";
 
-    // Prefer slug URLs for nicer links (fallback to _id)
     const slugify = (v = "") =>
       String(v || "")
         .trim()
@@ -6859,20 +7065,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
             lensA[1] || lensA[0]
           }-minute live sets`
         : `Up to 3×40-minute or 2×60-minute live sets`;
-
-    const complimentaryExtras = [];
-    if (actDoc?.extras && typeof actDoc.extras === "object") {
-      for (const [k, v] of Object.entries(actDoc.extras)) {
-        if (v && v.complimentary) {
-          complimentaryExtras.push(
-            k
-              .replace(/_/g, " ")
-              .replace(/\s+/g, " ")
-              .replace(/^\w/, (c) => c.toUpperCase()),
-          );
-        }
-      }
-    }
 
     const lineupQuotes = await Promise.all(
       (actDoc.lineups || []).map(async (lu) => {
@@ -6968,7 +7160,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       offRepertoireRequests: actDoc?.offRepertoireRequests,
     });
 
-    // Compute event date once for both branches
     const eventDatePretty = (() => {
       const d = new Date(dateISO);
       if (isNaN(d)) return String(dateISO || "");
@@ -6988,7 +7179,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       return `${day}${suffix} ${month} ${year}`;
     })();
 
-    // Try to discover the client user id
     const clientUserId =
       availabilityRecord?.userId ||
       availabilityRecord?.clientUserId ||
@@ -7005,9 +7195,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       resolvedClientName: clientName || null,
     });
 
-    /* ===================== per-slot sending + idempotency ===================== */
-
-    // Determine lead/deputy availability per slot (no longer requires photoUrl)
     const slotIsLeadAvailable = (s) => {
       const leadSaysYes = s?.state === "yes" && s?.covering !== "deputy";
       const primaryIsLead =
@@ -7031,10 +7218,8 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
     };
 
     const slotsArr = Array.isArray(badge?.slots) ? badge.slots : [];
-    // If any lead is available anywhere on this badge, suppress deputy client emails
     const anyLeadAvailable = slotsArr.some(slotIsLeadAvailable);
 
-    // Pick a "primary" person for the email from a slot (lead or deputy)
     const presentBadgePrimary = (slot = null) => {
       if (!slot || typeof slot !== "object") return null;
 
@@ -7042,7 +7227,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       let isDeputy = false;
 
       if (slot.covering === "deputy") {
-        // Prefer a YES deputy (even if photo missing; we can fetch later)
         if (Array.isArray(slot.deputies)) {
           const yesDep = slot.deputies.find(
             (d) => d?.state === "yes" || d?.available === true,
@@ -7052,29 +7236,22 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
             isDeputy = true;
           }
         }
-        // Fallback to primary deputy
         if (!candidate && slot?.primary?.isDeputy) {
           candidate = slot.primary;
           isDeputy = true;
         }
-        // Any deputy as last resort
-        if (
-          !candidate &&
-          Array.isArray(slot.deputies) &&
-          slot.deputies.length
-        ) {
+        if (!candidate && Array.isArray(slot.deputies) && slot.deputies.length) {
           candidate = slot.deputies[0];
           isDeputy = true;
         }
       }
 
-      // Lead case
       if (!candidate) {
         if (slot?.primary && slot.primary.isDeputy === false) {
           candidate = slot.primary;
           isDeputy = false;
         } else {
-          candidate = slot; // last fallback
+          candidate = slot;
           isDeputy = false;
         }
       }
@@ -7119,7 +7296,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
         typeof slot?.slotIndex === "number" ? slot.slotIndex : null;
       if (slotIdx === null) continue;
 
-      /* --------------------------- LEAD AVAILABLE --------------------------- */
       if (slotIsLeadAvailable(slot)) {
         const leadInfo = presentBadgePrimary(slot);
 
@@ -7158,7 +7334,11 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
                 to: clientEmail,
               });
 
-const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
+              const actExtrasHtml = await renderActExtrasHtml(
+                actDoc,
+                selectedAddress,
+              );
+
               await sendClientEmail({
                 actId: String(actId),
                 userId: clientUserId,
@@ -7181,27 +7361,27 @@ const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
                       ? `
                         <div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
                           <h3 style="color:#111; margin-bottom:10px;">Meet ${vocalistShort}</h3>
-                         ${
-                           vocalistCard.photoUrl
-                             ? vocalistCard.profileUrl
-                               ? `
-        <a href="${vocalistCard.profileUrl}" style="text-decoration:none;">
-          <img
-            src="${vocalistCard.photoUrl}"
-            alt="${vocalistCard.name}"
-            style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
-          />
-        </a>
-      `
-                               : `
-        <img
-          src="${vocalistCard.photoUrl}"
-          alt="${vocalistCard.name}"
-          style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
-        />
-      `
-                             : ""
-                         }
+                          ${
+                            vocalistCard.photoUrl
+                              ? vocalistCard.profileUrl
+                                ? `
+                                  <a href="${vocalistCard.profileUrl}" style="text-decoration:none;">
+                                    <img
+                                      src="${vocalistCard.photoUrl}"
+                                      alt="${vocalistCard.name}"
+                                      style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
+                                    />
+                                  </a>
+                                `
+                                : `
+                                  <img
+                                    src="${vocalistCard.photoUrl}"
+                                    alt="${vocalistCard.name}"
+                                    style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
+                                  />
+                                `
+                              : ""
+                          }
                           ${
                             vocalistCard.profileUrl
                               ? `<p style="margin:6px 0 0;"><a href="${vocalistCard.profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View ${vocalistShort}'s profile →</a></p>`
@@ -7239,7 +7419,6 @@ const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
                     <li>Or up to 7 hours on site if earlier arrival is needed</li>
                     ${offRepLine ? `<li>${offRepLine}</li>` : ""}
                     ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
-                    ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
                     <li>Travel to ${selectedAddress || "TBC"}</li>
                   </ul>
 
@@ -7255,6 +7434,7 @@ const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
                 </div>
               `,
               });
+
               console.log("✅ Client email sent (lead available, per slot).", {
                 slotIdx,
               });
@@ -7273,11 +7453,9 @@ const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
           }
         }
 
-        continue; // slot handled
+        continue;
       }
 
-      /* -------------------------- DEPUTY AVAILABLE -------------------------- */
-      // Only email deputy if NO lead is available anywhere (badges still show deputy coverage per slot)
       if (!anyLeadAvailable && slotIsDeputyCovering(slot)) {
         const depInfo = presentBadgePrimary(slot);
 
@@ -7316,44 +7494,6 @@ const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
 
               const deputyShort =
                 shortDisplayName(deputyNameFull) || deputyNameFull;
-
-              // 🔎 DEBUG: why is deputyShort not shortened?
-              {
-                const raw = String(deputyNameFull || "");
-                const cleaned = raw.trim().replace(/\s+/g, " ");
-                const parts = cleaned ? cleaned.split(" ") : [];
-                console.log("🧩 [DEPUTY NAME DEBUG]", {
-                  slotIdx,
-                  deputyNameFull_raw: raw,
-                  deputyNameFull_cleaned: cleaned,
-                  parts,
-                  partsCount: parts.length,
-                  firstToken: parts[0] || "",
-                  lastToken: parts[parts.length - 1] || "",
-                  shortDisplayName_result: shortDisplayName(deputyNameFull),
-                  deputyShort_final: deputyShort,
-                  sourcePicked: deputyCard.name
-                    ? "deputyCard.name"
-                    : depInfo.vocalistDisplayName
-                      ? "depInfo.vocalistDisplayName"
-                      : depInfo.displayName
-                        ? "depInfo.displayName"
-                        : depInfo.firstName
-                          ? "depInfo.firstName"
-                          : "fallback",
-                  deputyCard: {
-                    name: deputyCard?.name || "",
-                    profileUrl: deputyCard?.profileUrl || "",
-                    hasPhoto: !!deputyCard?.photoUrl,
-                  },
-                  depInfo: {
-                    vocalistDisplayName: depInfo?.vocalistDisplayName || "",
-                    displayName: depInfo?.displayName || "",
-                    firstName: depInfo?.firstName || "",
-                    lastName: depInfo?.lastName || "",
-                  },
-                });
-              }
 
               console.log("📧 Sending DEPUTY-available email (per slot)", {
                 slotIdx,
@@ -7394,7 +7534,10 @@ const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
                   ? "One of the band's regular vocalists isn’t available for your date, but we’re delighted to confirm that"
                   : "The band's regular vocalist isn’t available for your date, but we’re delighted to confirm that";
 
-const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
+              const actExtrasHtml = await renderActExtrasHtml(
+                actDoc,
+                selectedAddress,
+              );
 
               await sendClientEmail({
                 actId: String(actId),
@@ -7416,27 +7559,27 @@ const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
                       ? `
                         <div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
                           <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyShort}</h3>
-                         ${
-                           deputyCard.photoUrl
-                             ? deputyCard.profileUrl
-                               ? `
-        <a href="${deputyCard.profileUrl}" style="text-decoration:none;">
-          <img
-            src="${deputyCard.photoUrl}"
-            alt="${deputyCard.name}"
-            style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
-          />
-        </a>
-      `
-                               : `
-        <img
-          src="${deputyCard.photoUrl}"
-          alt="${deputyCard.name}"
-          style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
-        />
-      `
-                             : ""
-                         }
+                          ${
+                            deputyCard.photoUrl
+                              ? deputyCard.profileUrl
+                                ? `
+                                  <a href="${deputyCard.profileUrl}" style="text-decoration:none;">
+                                    <img
+                                      src="${deputyCard.photoUrl}"
+                                      alt="${deputyCard.name}"
+                                      style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
+                                    />
+                                  </a>
+                                `
+                                : `
+                                  <img
+                                    src="${deputyCard.photoUrl}"
+                                    alt="${deputyCard.name}"
+                                    style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
+                                  />
+                                `
+                              : ""
+                          }
                           ${
                             deputyCard.profileUrl
                               ? `<p style="margin:6px 0 0;"><a href="${deputyCard.profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View ${deputyShort}'s profile →</a></p>`
@@ -7478,7 +7621,6 @@ const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
                     <li>Or up to 7 hours on site if earlier arrival is needed</li>
                     ${offRepLine ? `<li>${offRepLine}</li>` : ""}
                     ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
-                    ${complimentaryExtras.map((x) => `<li>${x}</li>`).join("")}
                     <li>Travel to ${selectedAddress || "TBC"}</li>
                   </ul>
 
@@ -7513,7 +7655,7 @@ const actExtrasHtml = await renderActExtrasHtml(actDoc, selectedAddress);
           }
         }
 
-        continue; // slot handled
+        continue;
       }
     }
   } catch (e) {
