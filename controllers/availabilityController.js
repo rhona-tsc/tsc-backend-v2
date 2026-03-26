@@ -843,22 +843,14 @@ const getActExtrasForEmail = (actLike = {}) => {
         : Object.entries(raw || {});
 
   return entries
-    .map(([key, value]) => {
-      const price = Number(value?.price ?? 0);
-      const complimentary = value?.complimentary === true;
-
-      return {
-        key,
-        keyNorm: String(key || "")
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "_"),
-        label: titleCaseWords(key),
-        price,
-        complimentary,
-      };
-    })
-    .filter((item) => item.label && !item.complimentary && item.price > 0)
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .map(([key, value]) => ({
+      key,
+      normalizedKey: normaliseExtraKey(key),
+      label: titleCaseWords(key),
+      price: Number(value?.price ?? 0),
+      complimentary: value?.complimentary === true,
+    }))
+    .filter((item) => item.key);
 };
 
 const getExtraByKeyNorm = (extras = [], wanted = "") => {
@@ -6445,19 +6437,40 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
 
   /* ------------------------------- helpers ------------------------------- */
 
-  const formatCurrencyGBP = (value) => {
-    const n = Number(value || 0);
-    return `£${n.toFixed(2)}`;
-  };
+ const formatCurrencyGBP = (value) => {
+  const n = Number(value || 0);
+  return `£${n.toFixed(2)}`;
+};
 
-  const markupPrice = (value) => Math.round(Number(value || 0) * 1.33);
+const markupPrice = (value) => Math.round(Number(value || 0) * 1.33);
 
-  const titleCaseWords = (value = "") =>
-    String(value || "")
-      .replace(/[_-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/\b\w/g, (c) => c.toUpperCase());
+const titleCaseWords = (value = "") =>
+  String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+const normaliseExtraKey = (value = "") =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[()]/g, "")
+    .replace(/\+/g, "plus")
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+
+
+
+const findExtra = (extrasMap, ...aliases) => {
+  for (const alias of aliases) {
+    const hit = extrasMap[normaliseExtraKey(alias)];
+    if (hit) return hit;
+  }
+  return null;
+};
 
   const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -6697,13 +6710,6 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     };
   };
 
-  const findExtra = (extrasMap, ...possibleKeys) => {
-    for (const key of possibleKeys) {
-      const hit = extrasMap[key];
-      if (hit) return hit;
-    }
-    return null;
-  };
 
   const findMemberAcrossLineups = (predicate) => {
     for (const lineup of actDoc.lineups || []) {
@@ -6738,119 +6744,135 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
   };
 
 const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
-  const extras = getActExtrasForEmail(actLike);
+  const extras = getActExtrasForEmail(actLike).filter(
+    (e) => !e.complimentary && e.price > 0
+  );
   if (!extras.length) return "";
 
-  const extrasMap = Object.fromEntries(extras.map((e) => [e.key, e]));
+  const extrasMap = Object.fromEntries(
+    extras.map((e) => [e.normalizedKey, e])
+  );
+
+  const getLineupMembers = (lineup) =>
+    Array.isArray(lineup?.bandMembers)
+      ? lineup.bandMembers.filter((m) => m && m.isEssential !== false)
+      : [];
+
+  const findMemberAcrossLineups = (predicate) => {
+    for (const lineup of actDoc?.lineups || []) {
+      for (const member of getLineupMembers(lineup)) {
+        if (predicate(member)) return member;
+      }
+    }
+    return null;
+  };
+
+  const formatPerLineupExtraRow = async ({
+    label,
+    perMemberBasePrice,
+  }) => {
+    const lineups = Array.isArray(actDoc?.lineups) ? actDoc.lineups : [];
+    if (!lineups.length) return "";
+
+    const parts = lineups
+      .map((lineup) => {
+        const members = getLineupMembers(lineup).filter((m) => {
+          const instrument = String(m?.instrument || "").trim().toLowerCase();
+          const additionalRoles = Array.isArray(m?.additionalRoles)
+            ? m.additionalRoles
+            : [];
+
+          const hasBandManagerRole = additionalRoles.some((r) =>
+            String(r?.role || "").toLowerCase().includes("band manager")
+          );
+
+          if (!instrument && hasBandManagerRole) return false;
+          if (instrument.includes("manager")) return false;
+          return true;
+        });
+
+        const count = members.length;
+        if (!count) return null;
+
+        const total = markupPrice(Number(perMemberBasePrice || 0) * count);
+        const actSize = String(lineup?.actSize || `${count}-Piece`).trim();
+
+        return `${actSize} ${formatCurrencyGBP(total)}`;
+      })
+      .filter(Boolean);
+
+    if (!parts.length) return "";
+
+    return `
+      <li style="margin:0 0 8px; color:#555;">
+        <strong style="color:#111;">${label}</strong>
+        <span style="color:#555;"> — ${parts.join(" / ")}</span>
+      </li>
+    `;
+  };
+
   const rows = [];
 
-  const pushSimple = (extra, labelOverride = null, extraAmount = 0) => {
-    if (!extra) return;
+  const pushHeading = (title) => {
     rows.push(`
-      <li style="margin:0 0 8px; color:#555;">
-        <strong style="color:#111;">${labelOverride || extra.label}</strong>
-        <span style="color:#555;"> — ${formatCurrencyGBP(markupPrice(extra.price) + Number(extraAmount || 0))}</span>
-      </li>
-    `);
-  };
-
-  const pushPerMember = async (extra, labelOverride = null) => {
-    if (!extra) return;
-    const row = await formatPerLineupExtraRow({
-      label: labelOverride || extra.label,
-      perMemberBasePrice: extra.price,
-      selectedAddress,
-    });
-    if (row) rows.push(row);
-  };
-
-  const pushSectionHeading = (title) => {
-    rows.push(`
-      <li style="margin:14px 0 8px; padding:0; list-style:none; font-weight:700; color:#111;">
+      <li style="list-style:none; margin:14px 0 8px; padding:0; font-weight:700; color:#111;">
         ${title}
       </li>
     `);
   };
 
-  // PERFORMANCE
-  const extra30 = findExtra(
-    extrasMap,
-    "extra_30min_performance_per_band_member",
-    "extra_30_minutes_performance_per_band_member"
-  );
-  const extra40 = findExtra(
-    extrasMap,
-    "extra_40min_performance_per_band_member",
-    "extra_40_minutes_performance_per_band_member"
-  );
-  const extra60 = findExtra(
-    extrasMap,
-    "extra_60min_performance_per_band_member",
-    "extra_60_minutes_performance_per_band_member"
-  );
-  const extraSongRequest = findExtra(
-    extrasMap,
-    "extra_song_request_per_band_member"
-  );
-  const israeliDancing = findExtra(
-    extrasMap,
-    "israeli_dancing_20mins_per_band_member",
-    "israeli_dancing_20_minutes_per_band_member"
-  );
-  const lateStay = findExtra(
-    extrasMap,
-    "late_stay_60min_per_band_member",
-    "late_stay_60_minutes_per_band_member"
-  );
-  const earlyArrival = findExtra(
-    extrasMap,
-    "early_arrival_60min_per_band_member",
-    "early_arrival_60_minutes_per_band_member"
-  );
+  const pushSimple = (extra, labelOverride, extraAmount = 0) => {
+    if (!extra) return;
+    const total = markupPrice(extra.price) + Math.round(Number(extraAmount || 0));
+    rows.push(`
+      <li style="margin:0 0 8px; color:#555;">
+        <strong style="color:#111;">${labelOverride}</strong>
+        <span style="color:#555;"> — ${formatCurrencyGBP(total)}</span>
+      </li>
+    `);
+  };
 
-  if (
-    extra30 || extra40 || extra60 || extraSongRequest ||
-    israeliDancing || lateStay || earlyArrival
-  ) {
-    pushSectionHeading("Performance extras");
+  const pushPerMember = async (extra, labelOverride) => {
+    if (!extra) return;
+    const row = await formatPerLineupExtraRow({
+      label: labelOverride,
+      perMemberBasePrice: extra.price,
+    });
+    if (row) rows.push(row);
+  };
+
+  // PERFORMANCE
+  const extra30 = findExtra(extrasMap, "extra_30min_performance_per_band_member");
+  const extra40 = findExtra(extrasMap, "extra_40min_performance_per_band_member");
+  const extra60 = findExtra(extrasMap, "extra_60min_performance_per_band_member");
+  const extraSong = findExtra(extrasMap, "extra_song_request_per_band_member");
+  const israeli = findExtra(extrasMap, "israeli_dancing_20mins_per_band_member");
+  const lateStay = findExtra(extrasMap, "late_stay_60min_per_band_member");
+  const earlyArrival = findExtra(extrasMap, "early_arrival_60min_per_band_member");
+
+  if (extra30 || extra40 || extra60 || extraSong || israeli || lateStay || earlyArrival) {
+    pushHeading("Performance extras");
     await pushPerMember(extra30, "Extra 30 Minute Set");
     await pushPerMember(extra40, "Extra 40 Minute Set");
     await pushPerMember(extra60, "Extra 60 Minute Set");
-    await pushPerMember(extraSongRequest, "Extra Song Request");
-    await pushPerMember(israeliDancing, "Israeli Dancing 20 Minutes");
+    await pushPerMember(extraSong, "Extra Song Request");
+    await pushPerMember(israeli, "Israeli Dancing 20 Minutes");
     await pushPerMember(lateStay, "Late Stay 60 Minutes");
     await pushPerMember(earlyArrival, "Early Arrival 60 Minutes");
   }
 
-  // DJ EXTRAS
-  const mannedPlaylist = findExtra(
-    extrasMap,
-    "up_to_3_hours_manned_playlist",
-    "upto_3_hours_manned_playlist"
-  );
-  const bandMemberDj = findExtra(
-    extrasMap,
-    "up_to_3_hours_band_member_dj",
-    "upto_3_hours_band_member_dj"
-  );
-  const extraDj30 = findExtra(
-    extrasMap,
-    "extra_djing_per_30_mins",
-    "extra_dj_per_30_mins",
-    "extra_djing_per_30_minutes"
-  );
-  const djLiveSax = findExtra(
-    extrasMap,
-    "dj_live_sax_3x30mins",
-    "dj_live_sax_3x30_mins"
-  );
+  // DJ
+  const mannedPlaylist = findExtra(extrasMap, "up_to_3_hours_manned_playlist");
+  const bandMemberDJ = findExtra(extrasMap, "up_to_3_hours_band_member_dj");
+  const extraDJ30 = findExtra(extrasMap, "extra_djing_per_30_mins", "extra_djing_per_30_min");
+  const djLiveSax = findExtra(extrasMap, "dj_live_sax_3x30mins");
 
-  if (mannedPlaylist || bandMemberDj || extraDj30 || djLiveSax) {
-    pushSectionHeading("DJ extras");
+  if (mannedPlaylist || bandMemberDJ || extraDJ30 || djLiveSax) {
+    pushHeading("DJ extras");
 
     pushSimple(mannedPlaylist, "Up To 3 Hours Manned Playlist");
-    pushSimple(bandMemberDj, "Up To 3 Hours Band Member DJ");
-    pushSimple(extraDj30, "Extra DJing Per 30 Minutes");
+    pushSimple(bandMemberDJ, "Up To 3 Hours Band Member DJ");
+    pushSimple(extraDJ30, "Extra DJing Per 30 Minutes");
 
     if (djLiveSax) {
       const saxTravelMember = findMemberAcrossLineups((member) =>
@@ -6863,16 +6885,16 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
           saxTravelMember,
           selectedAddress
         );
-        saxTravel = travel.fee;
+        saxTravel = travel.fee || 0;
       }
 
-      const lineups = actDoc.lineups || [];
+      const lineups = Array.isArray(actDoc?.lineups) ? actDoc.lineups : [];
       const hasSaxInSomeLineups = lineups.some((lineup) =>
         getLineupMembers(lineup).some((member) =>
           String(member?.instrument || "").toLowerCase().includes("sax")
         )
       );
-      const missingSaxInSomeLineups = lineups.some(
+      const lacksSaxInSomeLineups = lineups.some(
         (lineup) =>
           !getLineupMembers(lineup).some((member) =>
             String(member?.instrument || "").toLowerCase().includes("sax")
@@ -6882,9 +6904,9 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       const base = markupPrice(djLiveSax.price);
       let priceText = formatCurrencyGBP(base);
 
-      if (saxTravel > 0 && missingSaxInSomeLineups && hasSaxInSomeLineups) {
+      if (saxTravel > 0 && hasSaxInSomeLineups && lacksSaxInSomeLineups) {
         priceText = `${formatCurrencyGBP(base)} to ${formatCurrencyGBP(base + saxTravel)}`;
-      } else if (saxTravel > 0 && missingSaxInSomeLineups) {
+      } else if (saxTravel > 0 && lacksSaxInSomeLineups) {
         priceText = formatCurrencyGBP(base + saxTravel);
       }
 
@@ -6897,52 +6919,51 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
     }
   }
 
-  // PA / ENGINEERING
-  const paAndEngineer = findExtra(
+  // PRODUCTION
+  const soundEngineering = findExtra(
     extrasMap,
-    "sound_engineering_for_another_act_with_your_acts_pa",
-    "sound_engineering_for_another_act"
+    "sound_engineering_for_another_act_with_your_acts_pa"
   );
+
   const speedySetup = findExtra(
     extrasMap,
-    "speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member",
-    "speedy_setup_60mins",
-    "speedy_setup"
+    "speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member"
   );
 
-  if (paAndEngineer || speedySetup) {
-    pushSectionHeading("Production extras");
+  if (soundEngineering || speedySetup) {
+    pushHeading("Production extras");
 
     pushSimple(
-      paAndEngineer,
+      soundEngineering,
       "PA & Sound Engineering Provision For An External Act"
     );
 
     if (speedySetup) {
-      const engineerCandidate = findMemberAcrossLineups((member) => {
+      const engineerMember = findMemberAcrossLineups((member) => {
         const instrument = String(member?.instrument || "").toLowerCase();
         const roles = Array.isArray(member?.additionalRoles)
-          ? member.additionalRoles
-              .map((r) => String(r?.role || "").toLowerCase())
-              .join(" ")
-          : "";
-        const haystack = `${instrument} ${roles}`;
-        return haystack.includes("engineer") || haystack.includes("sound");
+          ? member.additionalRoles.map((r) => String(r?.role || "").toLowerCase())
+          : [];
+
+        return (
+          instrument.includes("engineer") ||
+          roles.some((role) => role.includes("engineer") || role.includes("sound"))
+        );
       });
 
-      let speedyTravel = 0;
-      if (engineerCandidate) {
+      let engineerTravel = 0;
+      if (engineerMember) {
         const travel = await getTravelBreakdownForMember(
-          engineerCandidate,
+          engineerMember,
           selectedAddress
         );
-        speedyTravel = travel.fee;
+        engineerTravel = travel.fee || 0;
       }
 
       pushSimple(
         speedySetup,
         "Speedy Setup & Soundcheck (60 Minutes)",
-        speedyTravel
+        engineerTravel
       );
     }
   }
@@ -6952,7 +6973,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
   const wirelessMic = findExtra(extrasMap, "wireless_mic_for_speeches");
 
   if (wiredMic || wirelessMic) {
-    pushSectionHeading("Speech microphones");
+    pushHeading("Speech microphones");
     pushSimple(wiredMic, "Wired Mic For Speeches");
     pushSimple(wirelessMic, "Wireless Mic For Speeches");
   }
