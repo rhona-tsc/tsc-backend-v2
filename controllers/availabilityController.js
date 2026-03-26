@@ -6673,12 +6673,15 @@ const findExtra = (extrasMap, ...aliases) => {
           : Object.entries(raw || {});
 
     return entries
-      .map(([key, value]) => ({
-        key,
-        label: titleCaseWords(key),
-        price: Number(value?.price ?? 0),
-        complimentary: value?.complimentary === true,
-      }))
+      .map(([key, value]) =>
+        ({
+          key,
+          normalizedKey: normaliseExtraKey(key),
+          label: titleCaseWords(key),
+          price: Number(value?.price ?? 0),
+          complimentary: value?.complimentary === true,
+        })
+      )
       .filter((item) => item.label && !item.complimentary && item.price > 0);
   };
 
