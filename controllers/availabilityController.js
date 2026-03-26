@@ -903,150 +903,232 @@ const buildDjLiveSaxSummary = (basePrice = 0, actLike = {}) => {
   return `${baseText} to ${baseText} + travel`;
 };
 
-const renderActExtrasHtml = (actLike = {}) => {
+const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
   const extras = getActExtrasForEmail(actLike);
   if (!extras.length) return "";
 
+  const extrasMap = Object.fromEntries(extras.map((e) => [e.key, e]));
   const rows = [];
-  const pushRow = (label, value) => {
-    if (!value) return;
+
+  const pushSimple = (extra, labelOverride = null, extraAmount = 0) => {
+    if (!extra) return;
     rows.push(`
-      <li style="margin:0 0 10px; color:#555;">
-        <strong style="color:#111;">${label}:</strong> ${value}
+      <li style="margin:0 0 8px; color:#555;">
+        <strong style="color:#111;">${labelOverride || extra.label}</strong>
+        <span style="color:#555;"> — ${formatCurrencyGBP(markupPrice(extra.price) + Number(extraAmount || 0))}</span>
       </li>
     `);
   };
 
-  pushRow(
-    "Extra 30-minute live set",
-    buildPerLineupPriceSummary(
-      getExtraByKeyNorm(extras, "extra_30min_performance_per_band_member")?.price,
-      actLike,
-    ),
+  const pushPerMember = async (extra, labelOverride = null) => {
+    if (!extra) return;
+    const row = await formatPerLineupExtraRow({
+      label: labelOverride || extra.label,
+      perMemberBasePrice: extra.price,
+      selectedAddress,
+    });
+    if (row) rows.push(row);
+  };
+
+  const pushSectionHeading = (title) => {
+    rows.push(`
+      <li style="margin:14px 0 8px; padding:0; list-style:none; font-weight:700; color:#111;">
+        ${title}
+      </li>
+    `);
+  };
+
+  // PERFORMANCE
+  const extra30 = findExtra(
+    extrasMap,
+    "extra_30min_performance_per_band_member",
+    "extra_30_minutes_performance_per_band_member"
   );
-  pushRow(
-    "Extra 40-minute live set",
-    buildPerLineupPriceSummary(
-      getExtraByKeyNorm(extras, "extra_40min_performance_per_band_member")?.price,
-      actLike,
-    ),
+  const extra40 = findExtra(
+    extrasMap,
+    "extra_40min_performance_per_band_member",
+    "extra_40_minutes_performance_per_band_member"
   );
-  pushRow(
-    "Extra 60-minute live set",
-    buildPerLineupPriceSummary(
-      getExtraByKeyNorm(extras, "extra_60min_performance_per_band_member")?.price,
-      actLike,
-    ),
+  const extra60 = findExtra(
+    extrasMap,
+    "extra_60min_performance_per_band_member",
+    "extra_60_minutes_performance_per_band_member"
+  );
+  const extraSongRequest = findExtra(
+    extrasMap,
+    "extra_song_request_per_band_member"
+  );
+  const israeliDancing = findExtra(
+    extrasMap,
+    "israeli_dancing_20mins_per_band_member",
+    "israeli_dancing_20_minutes_per_band_member"
+  );
+  const lateStay = findExtra(
+    extrasMap,
+    "late_stay_60min_per_band_member",
+    "late_stay_60_minutes_per_band_member"
+  );
+  const earlyArrival = findExtra(
+    extrasMap,
+    "early_arrival_60min_per_band_member",
+    "early_arrival_60_minutes_per_band_member"
   );
 
-  pushRow(
-    "Up to 3 hours manned playlist",
-    formatCurrencyGBP(
-      buildMarkedUpPrice(
-        getExtraByKeyNorm(extras, "up_to_3_hours_manned_playlist")?.price,
-      ),
-    ),
+  if (
+    extra30 || extra40 || extra60 || extraSongRequest ||
+    israeliDancing || lateStay || earlyArrival
+  ) {
+    pushSectionHeading("Performance extras");
+    await pushPerMember(extra30, "Extra 30 Minute Set");
+    await pushPerMember(extra40, "Extra 40 Minute Set");
+    await pushPerMember(extra60, "Extra 60 Minute Set");
+    await pushPerMember(extraSongRequest, "Extra Song Request");
+    await pushPerMember(israeliDancing, "Israeli Dancing 20 Minutes");
+    await pushPerMember(lateStay, "Late Stay 60 Minutes");
+    await pushPerMember(earlyArrival, "Early Arrival 60 Minutes");
+  }
+
+  // DJ EXTRAS
+  const mannedPlaylist = findExtra(
+    extrasMap,
+    "up_to_3_hours_manned_playlist",
+    "upto_3_hours_manned_playlist"
   );
-  pushRow(
-    "Up to 3 hours band member DJ",
-    formatCurrencyGBP(
-      buildMarkedUpPrice(
-        getExtraByKeyNorm(extras, "up_to_3_hours_band_member_dj")?.price,
-      ),
-    ),
+  const bandMemberDj = findExtra(
+    extrasMap,
+    "up_to_3_hours_band_member_dj",
+    "upto_3_hours_band_member_dj"
   );
-  pushRow(
-    "Extra DJing per 30 mins",
-    formatCurrencyGBP(
-      buildMarkedUpPrice(
-        getExtraByKeyNorm(extras, "extra_djing_per_30_mins")?.price,
-      ),
-    ),
+  const extraDj30 = findExtra(
+    extrasMap,
+    "extra_djing_per_30_mins",
+    "extra_dj_per_30_mins",
+    "extra_djing_per_30_minutes"
   );
-  pushRow(
-    "DJ Live Sax 3x30mins",
-    buildDjLiveSaxSummary(
-      getExtraByKeyNorm(extras, "dj_live_sax_3x30mins")?.price,
-      actLike,
-    ),
+  const djLiveSax = findExtra(
+    extrasMap,
+    "dj_live_sax_3x30mins",
+    "dj_live_sax_3x30_mins"
   );
 
-  pushRow(
-    "Extra song request",
-    buildPerLineupPriceSummary(
-      getExtraByKeyNorm(extras, "extra_song_request_per_band_member")?.price,
-      actLike,
-    ),
-  );
-  pushRow(
-    "Israeli dancing 20 mins",
-    buildPerLineupPriceSummary(
-      getExtraByKeyNorm(extras, "israeli_dancing_20mins_per_band_member")?.price,
-      actLike,
-    ),
-  );
-  pushRow(
-    "Late stay 60 mins",
-    buildPerLineupPriceSummary(
-      getExtraByKeyNorm(extras, "late_stay_60min_per_band_member")?.price,
-      actLike,
-    ),
-  );
-  pushRow(
-    "Early arrival 60 mins",
-    buildPerLineupPriceSummary(
-      getExtraByKeyNorm(extras, "early_arrival_60min_per_band_member")?.price,
-      actLike,
-    ),
-  );
+  if (mannedPlaylist || bandMemberDj || extraDj30 || djLiveSax) {
+    pushSectionHeading("DJ extras");
 
-  pushRow(
-    "PA & Sound Engineering Provision For An External Act",
-    formatCurrencyGBP(
-      buildMarkedUpPrice(
-        getExtraByKeyNorm(
-          extras,
-          "sound_engineering_for_another_act_with_your_acts_pa",
-        )?.price,
-      ),
-    ),
-  );
+    pushSimple(mannedPlaylist, "Up To 3 Hours Manned Playlist");
+    pushSimple(bandMemberDj, "Up To 3 Hours Band Member DJ");
+    pushSimple(extraDj30, "Extra DJing Per 30 Minutes");
 
-  pushRow(
-    "Speedy Setup & Soundcheck (60mins)",
-    (() => {
-      const extra = getExtraByKeyNorm(
-        extras,
-        "speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member",
+    if (djLiveSax) {
+      const saxTravelMember = findMemberAcrossLineups((member) =>
+        String(member?.instrument || "").toLowerCase().includes("sax")
       );
-      if (!extra?.price) return "";
-      return `${formatCurrencyGBP(buildMarkedUpPrice(extra.price))} + travel`;
-    })(),
+
+      let saxTravel = 0;
+      if (saxTravelMember) {
+        const travel = await getTravelBreakdownForMember(
+          saxTravelMember,
+          selectedAddress
+        );
+        saxTravel = travel.fee;
+      }
+
+      const lineups = actDoc.lineups || [];
+      const hasSaxInSomeLineups = lineups.some((lineup) =>
+        getLineupMembers(lineup).some((member) =>
+          String(member?.instrument || "").toLowerCase().includes("sax")
+        )
+      );
+      const missingSaxInSomeLineups = lineups.some(
+        (lineup) =>
+          !getLineupMembers(lineup).some((member) =>
+            String(member?.instrument || "").toLowerCase().includes("sax")
+          )
+      );
+
+      const base = markupPrice(djLiveSax.price);
+      let priceText = formatCurrencyGBP(base);
+
+      if (saxTravel > 0 && missingSaxInSomeLineups && hasSaxInSomeLineups) {
+        priceText = `${formatCurrencyGBP(base)} to ${formatCurrencyGBP(base + saxTravel)}`;
+      } else if (saxTravel > 0 && missingSaxInSomeLineups) {
+        priceText = formatCurrencyGBP(base + saxTravel);
+      }
+
+      rows.push(`
+        <li style="margin:0 0 8px; color:#555;">
+          <strong style="color:#111;">DJ Live Sax 3x30mins</strong>
+          <span style="color:#555;"> — ${priceText}</span>
+        </li>
+      `);
+    }
+  }
+
+  // PA / ENGINEERING
+  const paAndEngineer = findExtra(
+    extrasMap,
+    "sound_engineering_for_another_act_with_your_acts_pa",
+    "sound_engineering_for_another_act"
+  );
+  const speedySetup = findExtra(
+    extrasMap,
+    "speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member",
+    "speedy_setup_60mins",
+    "speedy_setup"
   );
 
-  pushRow(
-    "Wired mic for speeches",
-    formatCurrencyGBP(
-      buildMarkedUpPrice(
-        getExtraByKeyNorm(extras, "wired_mic_for_speeches")?.price,
-      ),
-    ),
-  );
-  pushRow(
-    "Wireless mic for speeches",
-    formatCurrencyGBP(
-      buildMarkedUpPrice(
-        getExtraByKeyNorm(extras, "wireless_mic_for_speeches")?.price,
-      ),
-    ),
-  );
+  if (paAndEngineer || speedySetup) {
+    pushSectionHeading("Production extras");
+
+    pushSimple(
+      paAndEngineer,
+      "PA & Sound Engineering Provision For An External Act"
+    );
+
+    if (speedySetup) {
+      const engineerCandidate = findMemberAcrossLineups((member) => {
+        const instrument = String(member?.instrument || "").toLowerCase();
+        const roles = Array.isArray(member?.additionalRoles)
+          ? member.additionalRoles
+              .map((r) => String(r?.role || "").toLowerCase())
+              .join(" ")
+          : "";
+        const haystack = `${instrument} ${roles}`;
+        return haystack.includes("engineer") || haystack.includes("sound");
+      });
+
+      let speedyTravel = 0;
+      if (engineerCandidate) {
+        const travel = await getTravelBreakdownForMember(
+          engineerCandidate,
+          selectedAddress
+        );
+        speedyTravel = travel.fee;
+      }
+
+      pushSimple(
+        speedySetup,
+        "Speedy Setup & Soundcheck (60 Minutes)",
+        speedyTravel
+      );
+    }
+  }
+
+  // SPEECH MICS
+  const wiredMic = findExtra(extrasMap, "wired_mic_for_speeches");
+  const wirelessMic = findExtra(extrasMap, "wireless_mic_for_speeches");
+
+  if (wiredMic || wirelessMic) {
+    pushSectionHeading("Speech microphones");
+    pushSimple(wiredMic, "Wired Mic For Speeches");
+    pushSimple(wirelessMic, "Wireless Mic For Speeches");
+  }
 
   if (!rows.length) return "";
 
   return `
-    <div style="margin-top:24px;">
+    <div style="margin-top:22px; padding-top:18px; border-top:1px solid #eee;">
       <h4 style="margin:0 0 10px; color:#111;">Popular extras</h4>
-      <ul style="margin:0; padding-left:18px; line-height:1.6;">
+      <ul style="margin:0; padding-left:18px; line-height:1.7;">
         ${rows.join("")}
       </ul>
     </div>
@@ -6655,74 +6737,116 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
     `;
   };
 
-  const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
-    const extras = getActExtrasForEmail(actLike);
-    if (!extras.length) return "";
+const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
+  const extras = getActExtrasForEmail(actLike);
+  if (!extras.length) return "";
 
-    const extrasMap = Object.fromEntries(extras.map((e) => [e.key, e]));
-    const rows = [];
+  const extrasMap = Object.fromEntries(extras.map((e) => [e.key, e]));
+  const rows = [];
 
-    const pushSimple = (extra, labelOverride = null, extraAmount = 0) => {
-      if (!extra) return;
-      rows.push(`
-        <li style="margin:0 0 8px; color:#555;">
-          <strong style="color:#111;">${labelOverride || extra.label}</strong>
-          <span style="color:#555;"> — ${formatCurrencyGBP(markupPrice(extra.price) + Number(extraAmount || 0))}</span>
-        </li>
-      `);
-    };
+  const pushSimple = (extra, labelOverride = null, extraAmount = 0) => {
+    if (!extra) return;
+    rows.push(`
+      <li style="margin:0 0 8px; color:#555;">
+        <strong style="color:#111;">${labelOverride || extra.label}</strong>
+        <span style="color:#555;"> — ${formatCurrencyGBP(markupPrice(extra.price) + Number(extraAmount || 0))}</span>
+      </li>
+    `);
+  };
 
-    const pushPerMember = async (extra, labelOverride = null) => {
-      if (!extra) return;
-      const row = await formatPerLineupExtraRow({
-        label: labelOverride || extra.label,
-        perMemberBasePrice: extra.price,
-        selectedAddress,
-      });
-      if (row) rows.push(row);
-    };
+  const pushPerMember = async (extra, labelOverride = null) => {
+    if (!extra) return;
+    const row = await formatPerLineupExtraRow({
+      label: labelOverride || extra.label,
+      perMemberBasePrice: extra.price,
+      selectedAddress,
+    });
+    if (row) rows.push(row);
+  };
 
-    const extra30 = findExtra(
-      extrasMap,
-      "extra_30min_performance_per_band_member",
-      "extra_30_minutes_performance_per_band_member",
-    );
-    const extra40 = findExtra(
-      extrasMap,
-      "extra_40min_performance_per_band_member",
-      "extra_40_minutes_performance_per_band_member",
-    );
-    const extra60 = findExtra(
-      extrasMap,
-      "extra_60min_performance_per_band_member",
-      "extra_60_minutes_performance_per_band_member",
-    );
+  const pushSectionHeading = (title) => {
+    rows.push(`
+      <li style="margin:14px 0 8px; padding:0; list-style:none; font-weight:700; color:#111;">
+        ${title}
+      </li>
+    `);
+  };
 
+  // PERFORMANCE
+  const extra30 = findExtra(
+    extrasMap,
+    "extra_30min_performance_per_band_member",
+    "extra_30_minutes_performance_per_band_member"
+  );
+  const extra40 = findExtra(
+    extrasMap,
+    "extra_40min_performance_per_band_member",
+    "extra_40_minutes_performance_per_band_member"
+  );
+  const extra60 = findExtra(
+    extrasMap,
+    "extra_60min_performance_per_band_member",
+    "extra_60_minutes_performance_per_band_member"
+  );
+  const extraSongRequest = findExtra(
+    extrasMap,
+    "extra_song_request_per_band_member"
+  );
+  const israeliDancing = findExtra(
+    extrasMap,
+    "israeli_dancing_20mins_per_band_member",
+    "israeli_dancing_20_minutes_per_band_member"
+  );
+  const lateStay = findExtra(
+    extrasMap,
+    "late_stay_60min_per_band_member",
+    "late_stay_60_minutes_per_band_member"
+  );
+  const earlyArrival = findExtra(
+    extrasMap,
+    "early_arrival_60min_per_band_member",
+    "early_arrival_60_minutes_per_band_member"
+  );
+
+  if (
+    extra30 || extra40 || extra60 || extraSongRequest ||
+    israeliDancing || lateStay || earlyArrival
+  ) {
+    pushSectionHeading("Performance extras");
     await pushPerMember(extra30, "Extra 30 Minute Set");
     await pushPerMember(extra40, "Extra 40 Minute Set");
     await pushPerMember(extra60, "Extra 60 Minute Set");
+    await pushPerMember(extraSongRequest, "Extra Song Request");
+    await pushPerMember(israeliDancing, "Israeli Dancing 20 Minutes");
+    await pushPerMember(lateStay, "Late Stay 60 Minutes");
+    await pushPerMember(earlyArrival, "Early Arrival 60 Minutes");
+  }
 
-    const mannedPlaylist = findExtra(
-      extrasMap,
-      "up_to_3_hours_manned_playlist",
-      "upto_3_hours_manned_playlist",
-    );
-    const bandMemberDj = findExtra(
-      extrasMap,
-      "up_to_3_hours_band_member_dj",
-      "upto_3_hours_band_member_dj",
-    );
-    const extraDj30 = findExtra(
-      extrasMap,
-      "extra_djing_per_30_mins",
-      "extra_dj_per_30_mins",
-      "extra_djing_per_30_minutes",
-    );
-    const djLiveSax = findExtra(
-      extrasMap,
-      "dj_live_sax_3x30mins",
-      "dj_live_sax_3x30_mins",
-    );
+  // DJ EXTRAS
+  const mannedPlaylist = findExtra(
+    extrasMap,
+    "up_to_3_hours_manned_playlist",
+    "upto_3_hours_manned_playlist"
+  );
+  const bandMemberDj = findExtra(
+    extrasMap,
+    "up_to_3_hours_band_member_dj",
+    "upto_3_hours_band_member_dj"
+  );
+  const extraDj30 = findExtra(
+    extrasMap,
+    "extra_djing_per_30_mins",
+    "extra_dj_per_30_mins",
+    "extra_djing_per_30_minutes"
+  );
+  const djLiveSax = findExtra(
+    extrasMap,
+    "dj_live_sax_3x30mins",
+    "dj_live_sax_3x30_mins"
+  );
+
+  if (mannedPlaylist || bandMemberDj || extraDj30 || djLiveSax) {
+    pushSectionHeading("DJ extras");
 
     pushSimple(mannedPlaylist, "Up To 3 Hours Manned Playlist");
     pushSimple(bandMemberDj, "Up To 3 Hours Band Member DJ");
@@ -6730,14 +6854,14 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
 
     if (djLiveSax) {
       const saxTravelMember = findMemberAcrossLineups((member) =>
-        String(member?.instrument || "").toLowerCase().includes("sax"),
+        String(member?.instrument || "").toLowerCase().includes("sax")
       );
 
       let saxTravel = 0;
       if (saxTravelMember) {
         const travel = await getTravelBreakdownForMember(
           saxTravelMember,
-          selectedAddress,
+          selectedAddress
         );
         saxTravel = travel.fee;
       }
@@ -6745,14 +6869,14 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       const lineups = actDoc.lineups || [];
       const hasSaxInSomeLineups = lineups.some((lineup) =>
         getLineupMembers(lineup).some((member) =>
-          String(member?.instrument || "").toLowerCase().includes("sax"),
-        ),
+          String(member?.instrument || "").toLowerCase().includes("sax")
+        )
       );
       const missingSaxInSomeLineups = lineups.some(
         (lineup) =>
           !getLineupMembers(lineup).some((member) =>
-            String(member?.instrument || "").toLowerCase().includes("sax"),
-          ),
+            String(member?.instrument || "").toLowerCase().includes("sax")
+          )
       );
 
       const base = markupPrice(djLiveSax.price);
@@ -6771,41 +6895,27 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
         </li>
       `);
     }
+  }
 
-    const extraSongRequest = findExtra(
-      extrasMap,
-      "extra_song_request_per_band_member",
-    );
-    const israeliDancing = findExtra(
-      extrasMap,
-      "israeli_dancing_20mins_per_band_member",
-      "israeli_dancing_20_minutes_per_band_member",
-    );
-    const lateStay = findExtra(
-      extrasMap,
-      "late_stay_60min_per_band_member",
-      "late_stay_60_minutes_per_band_member",
-    );
+  // PA / ENGINEERING
+  const paAndEngineer = findExtra(
+    extrasMap,
+    "sound_engineering_for_another_act_with_your_acts_pa",
+    "sound_engineering_for_another_act"
+  );
+  const speedySetup = findExtra(
+    extrasMap,
+    "speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member",
+    "speedy_setup_60mins",
+    "speedy_setup"
+  );
 
-    await pushPerMember(extraSongRequest, "Extra Song Request");
-    await pushPerMember(israeliDancing, "Israeli Dancing 20 Minutes");
-    await pushPerMember(lateStay, "Late Stay 60 Minutes");
+  if (paAndEngineer || speedySetup) {
+    pushSectionHeading("Production extras");
 
-    const paAndEngineer = findExtra(
-      extrasMap,
-      "sound_engineering_for_another_act_with_your_acts_pa",
-      "sound_engineering_for_another_act",
-    );
     pushSimple(
       paAndEngineer,
-      "PA & Sound Engineering Provision For An External Act",
-    );
-
-    const speedySetup = findExtra(
-      extrasMap,
-      "speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member",
-      "speedy_setup_60mins",
-      "speedy_setup",
+      "PA & Sound Engineering Provision For An External Act"
     );
 
     if (speedySetup) {
@@ -6824,7 +6934,7 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       if (engineerCandidate) {
         const travel = await getTravelBreakdownForMember(
           engineerCandidate,
-          selectedAddress,
+          selectedAddress
         );
         speedyTravel = travel.fee;
       }
@@ -6832,21 +6942,32 @@ export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
       pushSimple(
         speedySetup,
         "Speedy Setup & Soundcheck (60 Minutes)",
-        speedyTravel,
+        speedyTravel
       );
     }
+  }
 
-    if (!rows.length) return "";
+  // SPEECH MICS
+  const wiredMic = findExtra(extrasMap, "wired_mic_for_speeches");
+  const wirelessMic = findExtra(extrasMap, "wireless_mic_for_speeches");
 
-    return `
-      <div style="margin-top:22px; padding-top:18px; border-top:1px solid #eee;">
-        <h4 style="margin:0 0 10px; color:#111;">Popular extras</h4>
-        <ul style="margin:0; padding-left:18px; line-height:1.7;">
-          ${rows.join("")}
-        </ul>
-      </div>
-    `;
-  };
+  if (wiredMic || wirelessMic) {
+    pushSectionHeading("Speech microphones");
+    pushSimple(wiredMic, "Wired Mic For Speeches");
+    pushSimple(wirelessMic, "Wireless Mic For Speeches");
+  }
+
+  if (!rows.length) return "";
+
+  return `
+    <div style="margin-top:22px; padding-top:18px; border-top:1px solid #eee;">
+      <h4 style="margin:0 0 10px; color:#111;">Popular extras</h4>
+      <ul style="margin:0; padding-left:18px; line-height:1.7;">
+        ${rows.join("")}
+      </ul>
+    </div>
+  `;
+};
 
   /* ---------------------- backfill missing vocalistName ---------------------- */
 
