@@ -2009,15 +2009,27 @@ const singleAct = async (req, res) => {
 
 // Update act status
 const updateActStatus = async (req, res) => {
-  const { id, status, approvedName, approvedBio, approvedVideos } = req.body;
+  const {
+    id,
+    status,
+    approvedName,
+    approvedBio,
+    approvedVideos,
+    tscName,
+    tscApprovedBio,
+    tscVideos,
+  } = req.body;
   try {
     const act = await actModel.findByIdAndUpdate(
       id,
       {
         status,
-        approvedName,
-        approvedBio,
-        approvedVideos,
+        ...(approvedName !== undefined ? { approvedName } : {}),
+        ...(approvedBio !== undefined ? { approvedBio } : {}),
+        ...(approvedVideos !== undefined ? { approvedVideos } : {}),
+        ...(tscName !== undefined ? { tscName } : {}),
+        ...(tscApprovedBio !== undefined ? { tscApprovedBio } : {}),
+        ...(tscVideos !== undefined ? { tscVideos } : {}),
       },
       { new: true }
     );
@@ -2141,6 +2153,9 @@ const updateAct = async (req, res) => {
       pliExpiry,
       patExpiry,
       discountToClient,
+      tscApprovedBio,
+      tscDescription,
+      tscVideos,
     } = req.body;
 
     const images = req.files?.images || [];
@@ -2188,6 +2203,9 @@ const updateAct = async (req, res) => {
     act.tscName = tscName || act.tscName;
     act.description = description || act.description;
     act.bio = bio || act.bio;
+    if (tscApprovedBio !== undefined) act.tscApprovedBio = tscApprovedBio;
+    if (tscDescription !== undefined) act.tscDescription = tscDescription;
+    if (tscVideos !== undefined) act.tscVideos = safeJSONParse(tscVideos, act.tscVideos || []);
     act.status = status || act.status;
     act.pliAmount = Number(pliAmount) || act.pliAmount;
     act.pliExpiry = pliExpiry ? new Date(pliExpiry) : act.pliExpiry;
