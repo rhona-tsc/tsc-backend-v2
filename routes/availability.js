@@ -435,31 +435,8 @@ if (userId) {
     ).select("_id name tscName numberOfShortlistsIn");
 
 
-   // 🟢 Trigger WhatsApp availability request (non-blocking)
-try {
- const { selectedDate, selectedAddress } = req.body || {};
-  const actId = req.params.id;
-  const dateISO = selectedDate || new Date().toISOString().slice(0, 10);
-  const address = selectedAddress || "TBC";
-const enquiryId = `${actId}_${dateISO}_${address}`.replace(/\s+/g, "_");
-
-
-
- await triggerAvailabilityRequest({
-  actId,
-  enquiryId,
-    dateISO,       
-  address,
-  formattedAddress: address,
-  clientEmail: email,
- clientName: name,
- userId,
-});
-
-  console.log("✅ Availability request triggered successfully");
-} catch (whErr) {
-  console.warn("⚠️ WhatsApp availability request failed:", whErr.message);
-}
+    // Intentionally do NOT trigger availability from shortlist count changes.
+    // Availability requests should only happen from explicit enquiry/cart flows.
 
     // 🩵 Respond to client
     res.json({ success: true, act: updated });
