@@ -6807,7 +6807,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
     if (!parts.length) return "";
 
     return `
-      <li style="margin:0 0 6px; color:#555; line-height:1.7;">
+      <li style="margin:0 0 4px 14px; color:#555; line-height:1.5;">
         ${label} — ${parts.join(" / ")}
       </li>
     `;
@@ -6817,7 +6817,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
 
   const pushSectionHeading = (title) => {
     rows.push(`
-      <li style="list-style:none; margin:10px 0 4px; padding:0; font-weight:600; color:#111;">
+      <li style="list-style:none; margin:8px 0 2px; padding:0; font-weight:700; color:#111; line-height:1.4;">
         ${title}
       </li>
     `);
@@ -6827,7 +6827,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
     if (!extra) return;
     const total = markupPrice(extra.price) + Math.round(Number(extraAmount || 0));
     rows.push(`
-      <li style="margin:0 0 6px; color:#555; line-height:1.7;">
+      <li style="margin:0 0 4px 14px; color:#555; line-height:1.5;">
         ${labelOverride} — ${formatCurrencyGBP(total)}
       </li>
     `);
@@ -6924,7 +6924,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       }
 
       rows.push(`
-        <li style="margin:0 0 6px; color:#555; line-height:1.7;">
+        <li style="margin:0 0 4px 14px; color:#555; line-height:1.5;">
           DJ Live Sax 3x30mins — ${priceText}
         </li>
       `);
@@ -6989,8 +6989,8 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
   if (!rows.length) return "";
 
   return `
-    <h4 style="margin-top:25px;">Extra add ons:</h4>
-    <ul style="margin:0; padding-left:18px; line-height:1.7;">
+    <h4 style="margin-top:25px; margin-bottom:8px;">Extra add ons:</h4>
+    <ul style="margin:0 0 0 6px; padding-left:28px; line-height:1.5;">
       ${rows.join("")}
     </ul>
   `;
