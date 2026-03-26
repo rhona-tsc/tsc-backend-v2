@@ -6748,12 +6748,12 @@ const findExtra = (extrasMap, ...aliases) => {
 
 const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
   const extras = getActExtrasForEmail(actLike).filter(
-    (e) => !e.complimentary && e.price > 0
+    (e) => !e.complimentary && e.price > 0,
   );
   if (!extras.length) return "";
 
   const extrasMap = Object.fromEntries(
-    extras.map((e) => [e.normalizedKey, e])
+    extras.map((e) => [e.normalizedKey, e]),
   );
 
   const getLineupMembers = (lineup) =>
@@ -6786,7 +6786,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
             : [];
 
           const hasBandManagerRole = additionalRoles.some((r) =>
-            String(r?.role || "").toLowerCase().includes("band manager")
+            String(r?.role || "").toLowerCase().includes("band manager"),
           );
 
           if (!instrument && hasBandManagerRole) return false;
@@ -6807,18 +6807,17 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
     if (!parts.length) return "";
 
     return `
-      <li style="margin:0 0 8px; color:#555;">
-        <strong style="color:#111;">${label}</strong>
-        <span style="color:#555;"> — ${parts.join(" / ")}</span>
+      <li style="margin:0 0 6px; color:#555; line-height:1.7;">
+        ${label} — ${parts.join(" / ")}
       </li>
     `;
   };
 
   const rows = [];
 
-  const pushHeading = (title) => {
+  const pushSectionHeading = (title) => {
     rows.push(`
-      <li style="list-style:none; margin:14px 0 8px; padding:0; font-weight:700; color:#111;">
+      <li style="list-style:none; margin:10px 0 4px; padding:0; font-weight:600; color:#111;">
         ${title}
       </li>
     `);
@@ -6828,9 +6827,8 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
     if (!extra) return;
     const total = markupPrice(extra.price) + Math.round(Number(extraAmount || 0));
     rows.push(`
-      <li style="margin:0 0 8px; color:#555;">
-        <strong style="color:#111;">${labelOverride}</strong>
-        <span style="color:#555;"> — ${formatCurrencyGBP(total)}</span>
+      <li style="margin:0 0 6px; color:#555; line-height:1.7;">
+        ${labelOverride} — ${formatCurrencyGBP(total)}
       </li>
     `);
   };
@@ -6853,8 +6851,16 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
   const lateStay = findExtra(extrasMap, "late_stay_60min_per_band_member");
   const earlyArrival = findExtra(extrasMap, "early_arrival_60min_per_band_member");
 
-  if (extra30 || extra40 || extra60 || extraSong || israeli || lateStay || earlyArrival) {
-    pushHeading("Performance extras");
+  if (
+    extra30 ||
+    extra40 ||
+    extra60 ||
+    extraSong ||
+    israeli ||
+    lateStay ||
+    earlyArrival
+  ) {
+    pushSectionHeading("Performance extras");
     await pushPerMember(extra30, "Extra 30 Minute Set");
     await pushPerMember(extra40, "Extra 40 Minute Set");
     await pushPerMember(extra60, "Extra 60 Minute Set");
@@ -6867,11 +6873,15 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
   // DJ
   const mannedPlaylist = findExtra(extrasMap, "up_to_3_hours_manned_playlist");
   const bandMemberDJ = findExtra(extrasMap, "up_to_3_hours_band_member_dj");
-  const extraDJ30 = findExtra(extrasMap, "extra_djing_per_30_mins", "extra_djing_per_30_min");
+  const extraDJ30 = findExtra(
+    extrasMap,
+    "extra_djing_per_30_mins",
+    "extra_djing_per_30_min",
+  );
   const djLiveSax = findExtra(extrasMap, "dj_live_sax_3x30mins");
 
   if (mannedPlaylist || bandMemberDJ || extraDJ30 || djLiveSax) {
-    pushHeading("DJ extras");
+    pushSectionHeading("DJ extras");
 
     pushSimple(mannedPlaylist, "Up To 3 Hours Manned Playlist");
     pushSimple(bandMemberDJ, "Up To 3 Hours Band Member DJ");
@@ -6879,14 +6889,14 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
 
     if (djLiveSax) {
       const saxTravelMember = findMemberAcrossLineups((member) =>
-        String(member?.instrument || "").toLowerCase().includes("sax")
+        String(member?.instrument || "").toLowerCase().includes("sax"),
       );
 
       let saxTravel = 0;
       if (saxTravelMember) {
         const travel = await getTravelBreakdownForMember(
           saxTravelMember,
-          selectedAddress
+          selectedAddress,
         );
         saxTravel = travel.fee || 0;
       }
@@ -6894,14 +6904,14 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       const lineups = Array.isArray(actDoc?.lineups) ? actDoc.lineups : [];
       const hasSaxInSomeLineups = lineups.some((lineup) =>
         getLineupMembers(lineup).some((member) =>
-          String(member?.instrument || "").toLowerCase().includes("sax")
-        )
+          String(member?.instrument || "").toLowerCase().includes("sax"),
+        ),
       );
       const lacksSaxInSomeLineups = lineups.some(
         (lineup) =>
           !getLineupMembers(lineup).some((member) =>
-            String(member?.instrument || "").toLowerCase().includes("sax")
-          )
+            String(member?.instrument || "").toLowerCase().includes("sax"),
+          ),
       );
 
       const base = markupPrice(djLiveSax.price);
@@ -6914,31 +6924,33 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       }
 
       rows.push(`
-        <li style="margin:0 0 8px; color:#555;">
-          <strong style="color:#111;">DJ Live Sax 3x30mins</strong>
-          <span style="color:#555;"> — ${priceText}</span>
+        <li style="margin:0 0 6px; color:#555; line-height:1.7;">
+          DJ Live Sax 3x30mins — ${priceText}
         </li>
       `);
     }
   }
 
-  // PRODUCTION
+  // PRODUCTION + MICS
   const soundEngineering = findExtra(
     extrasMap,
-    "sound_engineering_for_another_act_with_your_acts_pa"
+    "sound_engineering_for_another_act_with_your_acts_pa",
   );
 
   const speedySetup = findExtra(
     extrasMap,
-    "speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member"
+    "speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member",
   );
 
-  if (soundEngineering || speedySetup) {
-    pushHeading("Production extras");
+  const wiredMic = findExtra(extrasMap, "wired_mic_for_speeches");
+  const wirelessMic = findExtra(extrasMap, "wireless_mic_for_speeches");
+
+  if (soundEngineering || speedySetup || wiredMic || wirelessMic) {
+    pushSectionHeading("Production extras");
 
     pushSimple(
       soundEngineering,
-      "PA & Sound Engineering Provision For An External Act"
+      "PA & Sound Engineering Provision For An External Act",
     );
 
     if (speedySetup) {
@@ -6958,7 +6970,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       if (engineerMember) {
         const travel = await getTravelBreakdownForMember(
           engineerMember,
-          selectedAddress
+          selectedAddress,
         );
         engineerTravel = travel.fee || 0;
       }
@@ -6966,17 +6978,10 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       pushSimple(
         speedySetup,
         "Speedy Setup & Soundcheck (60 Minutes)",
-        engineerTravel
+        engineerTravel,
       );
     }
-  }
 
-  // SPEECH MICS
-  const wiredMic = findExtra(extrasMap, "wired_mic_for_speeches");
-  const wirelessMic = findExtra(extrasMap, "wireless_mic_for_speeches");
-
-  if (wiredMic || wirelessMic) {
-    pushHeading("Speech microphones");
     pushSimple(wiredMic, "Wired Mic For Speeches");
     pushSimple(wirelessMic, "Wireless Mic For Speeches");
   }
@@ -6984,12 +6989,10 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
   if (!rows.length) return "";
 
   return `
-    <div style="margin-top:22px; padding-top:18px; border-top:1px solid #eee;">
-      <h4 style="margin:0 0 10px; color:#111;">Popular extras</h4>
-      <ul style="margin:0; padding-left:18px; line-height:1.7;">
-        ${rows.join("")}
-      </ul>
-    </div>
+    <h4 style="margin-top:25px;">Extra add ons:</h4>
+    <ul style="margin:0; padding-left:18px; line-height:1.7;">
+      ${rows.join("")}
+    </ul>
   `;
 };
 
