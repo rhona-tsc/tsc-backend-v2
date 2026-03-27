@@ -27,6 +27,32 @@ const safeJSONParse = (data, fallback = undefined) => {
   }
 };
 
+const normalizeAdditionalPerformanceFees = (fees) => {
+  if (!Array.isArray(fees)) return [];
+
+  return fees
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+
+      const duration =
+        item.duration === null || item.duration === undefined
+          ? ""
+          : String(item.duration).trim();
+
+      const fee =
+        item.fee === null || item.fee === undefined || String(item.fee).trim() === ""
+          ? ""
+          : Number(item.fee);
+
+      return {
+        duration,
+        fee: Number.isFinite(fee) ? fee : "",
+        isCustom: Boolean(item.isCustom),
+      };
+    })
+    .filter(Boolean);
+};
+
 const sanitizeFileName = (name) =>
   name
     .replace(/[^\w.-]/g, "_")
@@ -1869,22 +1895,36 @@ const addAct = async (req, res) => {
     });
 
     // Normalize additional roles into role/additionalFee arrays
-    lineups.forEach((lineup) => {
-      lineup.bandMembers.forEach((member) => {
-        if (member.additionalRoles && Array.isArray(member.additionalRoles)) {
-          const customRoles = [];
-          const additionalFees = [];
+   lineups.forEach((lineup) => {
+  lineup.bandMembers = (lineup.bandMembers || []).map((member) => {
+    const normalizedAdditionalRoles = (member.additionalRoles || [])
+      .filter((role) => role && typeof role === "object" && role.role)
+      .map((role) => ({
+        ...role,
+        isEssential: !!role.isEssential,
+        role: role.role,
+        additionalFee: parseFloat(role.additionalFee || role.fee || 0),
+      }));
 
-          member.additionalRoles.forEach((r) => {
-            if (r.role) customRoles.push(r.role);
-            additionalFees.push(parseFloat(r.fee) || 0);
-          });
+    const customRoles = [];
+    const additionalFees = [];
 
-          member.role = customRoles.filter((role) => !!role?.trim());
-          member.additionalFee = additionalFees.filter((fee) => !isNaN(fee));
-        }
-      });
+    normalizedAdditionalRoles.forEach((r) => {
+      if (r.role) customRoles.push(r.role);
+      additionalFees.push(parseFloat(r.additionalFee || 0));
     });
+
+    return {
+      ...member,
+      additionalPerformanceFees: normalizeAdditionalPerformanceFees(
+        member.additionalPerformanceFees
+      ),
+      additionalRoles: normalizedAdditionalRoles,
+      role: customRoles.filter((role) => !!role?.trim()),
+      additionalFee: additionalFees.filter((fee) => !isNaN(fee)),
+    };
+  });
+});
 
     const actData = {
       name,
@@ -2214,8 +2254,17 @@ const updateAct = async (req, res) => {
     act.costPerMile = Number(costPerMile) || act.costPerMile;
 
     act.genre = safeJSONParse(req.body.genre, act.genre);
-    act.lineups = safeJSONParse(req.body.lineups, act.lineups);
-    act.extras = safeJSONParse(req.body.extras, act.extras);
+const parsedLineups = safeJSONParse(req.body.lineups, act.lineups);
+
+act.lineups = (parsedLineups || []).map((lineup) => ({
+  ...lineup,
+  bandMembers: (lineup.bandMembers || []).map((member) => ({
+    ...member,
+    additionalPerformanceFees: normalizeAdditionalPerformanceFees(
+      member.additionalPerformanceFees
+    ),
+  })),
+}));    act.extras = safeJSONParse(req.body.extras, act.extras);
     act.selectedSongs = safeJSONParse(
       req.body.selectedSongs,
       act.selectedSongs

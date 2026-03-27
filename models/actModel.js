@@ -329,6 +329,13 @@ minDisplayPrice: { type: Number, default: null },
             instrument: { type: String },
             useMURatesForFees: { type: Boolean },
             fee: { type: Number },
+            additionalPerformanceRates: [
+              {
+                minutes: { type: Number, default: null },
+                label: { type: String, default: "" },
+                fee: { type: Number, default: null },
+              },
+            ],
             specialDatePricing: {
               nye: {
                 extraFee: { type: Number, default: 0 },

@@ -298,6 +298,36 @@ router.get("/profile/:idOrSlug", async (req, res) => {
   }
 });
 
+const readProtectedMusicianByIdOrSlug = async (req, res) => {
+  try {
+    const { idOrSlug } = req.params;
+    const doc = await findMusicianByIdOrSlug(idOrSlug);
+    if (!doc) {
+      return res.status(404).json({ success: false, message: "Musician not found" });
+    }
+
+    return res.json({
+      success: true,
+      musician: doc,
+      canonicalPath: doc.musicianSlug ? `/musician/${doc.musicianSlug}` : `/musician/${doc._id}`,
+      requestedKey: idOrSlug,
+      isCanonicalMatch: Boolean(doc.musicianSlug)
+        ? String(idOrSlug) === String(doc.musicianSlug)
+        : String(idOrSlug) === String(doc._id),
+      shouldRedirectToSlug: isObjectIdLike(idOrSlug) && !!doc.musicianSlug,
+    });
+  } catch (err) {
+    console.error("❌ Error fetching protected musician profile:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// GET /api/musician/admin/profile/:idOrSlug
+router.get("/admin/profile/:idOrSlug", verifyToken, readProtectedMusicianByIdOrSlug);
+
+// GET /api/musician/moderation/profile/:idOrSlug
+router.get("/moderation/profile/:idOrSlug", verifyToken, readProtectedMusicianByIdOrSlug);
+
 // GET /api/musician/moderation/acts/:id  (alias for fetching act by id)
 router.get("/moderation/acts/:id", verifyToken, async (req, res) => {
   try {

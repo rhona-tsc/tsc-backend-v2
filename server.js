@@ -42,6 +42,7 @@ import enquiryBoardRoutes from "./routes/enquiryBoardRoutes.js";
 import { runOnboardingChase } from "./cron/onboardingChase.js";
 import adminRoutes from "./routes/admin.js";
 import messageRoutes from "./routes/messageRoutes.js";
+import deputyOpportunityRoutes from "./routes/deputyOpportunityRoutes.js";
 import {
   watchCalendar,
   handleGoogleWebhook,
@@ -331,6 +332,7 @@ app.use("/api/availability", availabilityRoutes);
 app.use("/api/shortlist", shortlistRoutes);
 app.use("/api/board/enquiries", enquiryBoardRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/deputy-opportunities", deputyOpportunityRoutes);
 
 // Bookings / payments / invoices
 app.use("/api/cart", cartRouter);
