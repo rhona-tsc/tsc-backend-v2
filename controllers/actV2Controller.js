@@ -24,7 +24,7 @@ const hasDeputiesAnywhere = (obj) => {
     if (!Array.isArray(lineups)) return false;
     return lineups.some((l) =>
       Array.isArray(l?.bandMembers) &&
-      l.bandMembers.some((m) => Array.isArray(m?.deputies) && m.deputies.length >= 0)
+      l.bandMembers.some((m) => Array.isArray(m?.deputies) && m.deputies.length > 0)
     );
   } catch {
     return false;
@@ -114,8 +114,7 @@ const normalizeCountyFees = (countyFees = {}) => {
           value.available ??
           value.enabled ??
           value.allowed ??
-          isFree ||
-          fee !== null
+          (isFree || fee !== null)
       );
 
       acc[county] = {
