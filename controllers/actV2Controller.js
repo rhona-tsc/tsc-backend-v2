@@ -70,6 +70,65 @@ const coerceBool = (v) => {
   return Boolean(v);
 };
 
+const coerceNumberOrNull = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+const normalizeCountyFees = (countyFees = {}) => {
+  if (!countyFees || typeof countyFees !== "object" || Array.isArray(countyFees)) {
+    return {};
+  }
+
+  return Object.entries(countyFees).reduce((acc, [county, value]) => {
+    if (!county) return acc;
+
+    // Legacy shape: { Essex: 25 } or { Essex: "25" }
+    if (
+      typeof value === "number" ||
+      typeof value === "string" ||
+      value === null ||
+      value === ""
+    ) {
+      const fee = coerceNumberOrNull(value);
+      acc[county] = {
+        fee,
+        isFree: fee === null ? false : false,
+        travelsToCounty: fee !== null,
+      };
+      return acc;
+    }
+
+    if (typeof value === "object") {
+      const fee = coerceNumberOrNull(
+        value.fee ?? value.price ?? value.amount ?? value.countyFee
+      );
+
+      const isFree = Boolean(
+        value.isFree ?? value.free ?? value.complimentary ?? false
+      );
+
+      const travelsToCounty = Boolean(
+        value.travelsToCounty ??
+          value.available ??
+          value.enabled ??
+          value.allowed ??
+          isFree ||
+          fee !== null
+      );
+
+      acc[county] = {
+        fee,
+        isFree,
+        travelsToCounty,
+      };
+    }
+
+    return acc;
+  }, {});
+};
+
 const normalizeLineupBooleans = (lineups = []) => {
   if (!Array.isArray(lineups)) return lineups;
 
@@ -126,6 +185,10 @@ export const updateActV2 = async (req, res) => {
     if (Array.isArray(incoming.lineups)) {
       incoming.lineups = normalizeLineupBooleans(incoming.lineups);
       req.body.lineups = incoming.lineups;
+    }
+    if (incoming.countyFees && typeof incoming.countyFees === "object") {
+      incoming.countyFees = normalizeCountyFees(incoming.countyFees);
+      req.body.countyFees = incoming.countyFees;
     }
 
     console.log("🧪 updateActV2 incoming has lineups?", Array.isArray(incoming.lineups));
@@ -207,6 +270,9 @@ export const createActV2 = async (req, res) => {
     const cleaned = { ...data };
     if (Array.isArray(cleaned.lineups)) {
       cleaned.lineups = normalizeLineupBooleans(cleaned.lineups);
+    }
+    if (cleaned.countyFees && typeof cleaned.countyFees === "object") {
+      cleaned.countyFees = normalizeCountyFees(cleaned.countyFees);
     }
     delete cleaned.createdBy;
     delete cleaned.createdByRole;
@@ -383,6 +449,10 @@ export const saveActDraftV2 = async (req, res) => {
     if (Array.isArray(data.lineups)) {
       data.lineups = normalizeLineupBooleans(data.lineups);
       req.body.lineups = data.lineups;
+    }
+    if (data.countyFees && typeof data.countyFees === "object") {
+      data.countyFees = normalizeCountyFees(data.countyFees);
+      req.body.countyFees = data.countyFees;
     }
     const status = "draft"; // force draft on autosave
 

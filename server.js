@@ -57,6 +57,9 @@ import { getAvailableActIds } from "./controllers/actAvailabilityController.js";
 import { startRemindersPoller } from "./services/remindersQueue.js";
 import { runChaseAndEscalation } from "./cron/chaseAndEscalate.js";
 import actModel from "./models/actModel.js";
+import deputyJobRouter from "./routes/deputyJobRoute.js";
+
+import { runDeputyPayoutRelease } from "./services/deputyPayoutService.js";
 
 
 // Simple env debug
@@ -333,6 +336,7 @@ app.use("/api/shortlist", shortlistRoutes);
 app.use("/api/board/enquiries", enquiryBoardRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/deputy-opportunities", deputyOpportunityRoutes);
+app.use("/api/deputy-jobs", deputyJobRouter);
 
 // Bookings / payments / invoices
 app.use("/api/cart", cartRouter);
@@ -461,6 +465,26 @@ cron.schedule("0 * * * *", async () => {
   await runChaseAndEscalation();
 });
 
+// Release deputy payouts daily at 06:00 London time
+cron.schedule(
+  "0 6 * * *",
+  async () => {
+    console.log("💸 [CRON] Running deputy payout release...");
+    try {
+      const result = await runDeputyPayoutRelease({ asOfDate: new Date() });
+      console.log("✅ [CRON] Deputy payout release complete:", {
+        checkedCount: result.checkedCount,
+        releasedCount: result.releasedCount,
+        totalReleased: result.totalReleased,
+        financeEmailSent: Boolean(result.financeEmailResult?.success),
+      });
+    } catch (err) {
+      console.error("❌ [CRON] Deputy payout release failed:", err?.message || err);
+    }
+  },
+  { timezone: "Europe/London" }
+);
+
 // Refresh availability badges every 30 minutes
 cron.schedule("*/30 * * * *", async () => {
   console.log("🔁 [CRON] Refreshing availability badges...");
@@ -526,6 +550,7 @@ cron.schedule("0 3 * * *", async () => {
 console.log(
   "🕒 Cron job scheduled: Google Calendar webhook will refresh daily at 03:00 UTC"
 );
+console.log("🕒 Cron job scheduled: Deputy payouts will release daily at 06:00 Europe/London");
 
 /* -------------------------------------------------------------------------- */
 /*                                   Server                                   */

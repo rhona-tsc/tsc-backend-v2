@@ -253,6 +253,11 @@ slug: { type: String, default: "" },
       type: Map,
       of: Number, // Store only counties with values
     },
+    countyTravelAvailability: {
+      type: Map,
+      of: Boolean,
+      default: {},
+    },
 
     costPerMile: { type: Number },
 minDisplayPrice: { type: Number, default: null },
@@ -458,6 +463,24 @@ actSchema.pre("validate", function normalizeNestedBooleanFields(next) {
 
       return normalizedLineup;
     });
+  }
+
+  if (this.countyTravelAvailability instanceof Map) {
+    const normalized = new Map();
+    for (const [county, value] of this.countyTravelAvailability.entries()) {
+      normalized.set(county, coerceBoolean(value) === true);
+    }
+    this.countyTravelAvailability = normalized;
+  } else if (
+    this.countyTravelAvailability &&
+    typeof this.countyTravelAvailability === "object" &&
+    !Array.isArray(this.countyTravelAvailability)
+  ) {
+    const normalized = {};
+    for (const [county, value] of Object.entries(this.countyTravelAvailability)) {
+      normalized[county] = coerceBoolean(value) === true;
+    }
+    this.countyTravelAvailability = normalized;
   }
 
   next();
