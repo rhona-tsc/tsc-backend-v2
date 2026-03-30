@@ -42,6 +42,38 @@ const stripe = stripeSecretKey
 
 const normaliseEmail = (value) => normaliseString(value).toLowerCase();
 
+const normaliseBoolean = (value) => {
+  if (value === true || value === "true" || value === 1 || value === "1") return true;
+  if (value === false || value === "false" || value === 0 || value === "0") return false;
+  return Boolean(value);
+};
+
+const normaliseStringArray = (value) =>
+  normaliseArray(value).map((item) => normaliseString(item)).filter(Boolean);
+
+const withDeputyJobAliases = (job) => {
+  if (!job) return job;
+
+  const source = typeof job.toObject === "function" ? job.toObject() : { ...job };
+
+  return {
+    ...source,
+    date: source.date || source.eventDate || "",
+    callTime: source.callTime || source.startTime || "",
+    finishTime: source.finishTime || source.endTime || "",
+    venue: source.venue || source.locationName || source.location || "",
+    locationName: source.locationName || source.venue || source.location || "",
+    location: source.location || source.locationName || source.venue || "",
+    setLengths: Array.isArray(source.setLengths) ? source.setLengths : [],
+    whatsIncluded: Array.isArray(source.whatsIncluded) ? source.whatsIncluded : [],
+    whatsIncludedOther: source.whatsIncludedOther || "",
+    claimableExpenses: Array.isArray(source.claimableExpenses)
+      ? source.claimableExpenses
+      : [],
+    claimableExpensesOther: source.claimableExpensesOther || "",
+  };
+};
+
 const toPence = (value) => {
   const amount = Number(value || 0);
   if (!Number.isFinite(amount) || amount <= 0) return 0;
@@ -432,6 +464,11 @@ const buildJobPayloadFromRequest = (req) => {
     requiredSkills = [],
     desiredRoles = [],
     secondaryInstruments = [],
+    setLengths = [],
+    whatsIncluded = [],
+    whatsIncludedOther = "",
+    claimableExpenses = [],
+    claimableExpensesOther = "",
     fee = 0,
     currency = "GBP",
     notes = "",
@@ -442,6 +479,7 @@ const buildJobPayloadFromRequest = (req) => {
     commissionAmount = 0,
     deputyNetAmount = 0,
     releaseOn = null,
+    saveClientCard = true,
     mode = "preview",
   } = req.body || {};
 
@@ -452,6 +490,9 @@ const buildJobPayloadFromRequest = (req) => {
   const resolvedSecondaryInstruments = normaliseArray(secondaryInstruments);
   const resolvedGenres = normaliseArray(genres);
   const resolvedTags = normaliseArray(tags);
+  const resolvedSetLengths = normaliseStringArray(setLengths);
+  const resolvedWhatsIncluded = normaliseStringArray(whatsIncluded);
+  const resolvedClaimableExpenses = normaliseStringArray(claimableExpenses);
 
   const primaryInstrument =
     normaliseString(instrument) ||
@@ -471,7 +512,7 @@ const buildJobPayloadFromRequest = (req) => {
   const resolvedStartTime = normaliseString(startTime || callTime);
   const resolvedEndTime = normaliseString(endTime || finishTime);
   const resolvedLocationName = normaliseString(locationName || venue);
-  const resolvedLocation = normaliseString(location);
+  const resolvedLocation = normaliseString(location || locationName || venue);
 
   const inferredCounty =
     normaliseString(county) ||
@@ -503,6 +544,11 @@ const buildJobPayloadFromRequest = (req) => {
     resolvedSecondaryInstruments,
     resolvedGenres,
     resolvedTags,
+    resolvedSetLengths,
+    resolvedWhatsIncluded,
+    resolvedClaimableExpenses,
+    whatsIncludedOther: normaliseString(whatsIncludedOther),
+    claimableExpensesOther: normaliseString(claimableExpensesOther),
     resolvedEventDate,
     resolvedStartTime,
     resolvedEndTime,
@@ -516,6 +562,7 @@ const buildJobPayloadFromRequest = (req) => {
     clientName: normaliseString(clientName),
     clientEmail: normaliseEmail(clientEmail),
     clientPhone: normaliseString(clientPhone),
+    saveClientCard: normaliseBoolean(saveClientCard),
     ...buildLedgerAmounts({
       fee,
       grossAmount,
@@ -624,8 +671,11 @@ export const createDeputyJob = async (req, res) => {
       instrument: built.primaryInstrument,
       requiredInstruments: built.resolvedInstruments,
       isVocalSlot: built.effectiveIsVocalSlot,
+      date: built.resolvedEventDate,
       eventDate: built.resolvedEventDate,
+      callTime: built.resolvedStartTime,
       startTime: built.resolvedStartTime,
+      finishTime: built.resolvedEndTime,
       endTime: built.resolvedEndTime,
       venue: built.resolvedLocationName,
       locationName: built.resolvedLocationName,
@@ -638,6 +688,11 @@ export const createDeputyJob = async (req, res) => {
       requiredSkills: built.resolvedRequiredSkills,
       desiredRoles: built.matcherDesiredRoles,
       secondaryInstruments: built.resolvedSecondaryInstruments,
+      setLengths: built.resolvedSetLengths,
+      whatsIncluded: built.resolvedWhatsIncluded,
+      whatsIncludedOther: built.whatsIncludedOther,
+      claimableExpenses: built.resolvedClaimableExpenses,
+      claimableExpensesOther: built.claimableExpensesOther,
       fee: built.fee,
       currency: built.currency,
       notes: built.notes,
@@ -648,7 +703,7 @@ export const createDeputyJob = async (req, res) => {
       commissionAmount: built.commissionAmount,
       deputyNetAmount: built.deputyNetAmount,
       releaseOn: built.releaseOn || buildDefaultReleaseOn(built.resolvedEventDate),
-      paymentStatus: built.clientEmail ? "setup_required" : "not_started",
+      paymentStatus: built.saveClientCard && built.clientEmail ? "setup_required" : "not_started",
       payoutStatus: "not_ready",
       createdBy,
       createdByName,
@@ -696,7 +751,9 @@ export const createDeputyJob = async (req, res) => {
       job.matchedMusicians = job.matchedMusicians.map((m) => ({
         ...m,
         notified: sentIds.some((id) => asObjectIdString(id) === asObjectIdString(m.musicianId)),
-        notifiedAt: sentIds.some((id) => asObjectIdString(id) === asObjectIdString(m.musicianId)) ? new Date() : null,
+        notifiedAt: sentIds.some((id) => asObjectIdString(id) === asObjectIdString(m.musicianId))
+          ? new Date()
+          : null,
       }));
     } else {
       job.notifiedMusicianIds = [];
@@ -720,6 +777,8 @@ export const createDeputyJob = async (req, res) => {
 
     await job.save();
 
+    const formattedJob = withDeputyJobAliases(job);
+
     return res.status(201).json({
       success: true,
       message:
@@ -727,7 +786,7 @@ export const createDeputyJob = async (req, res) => {
           ? "Deputy job created and notifications sent"
           : "Deputy job created in preview mode",
       mode: built.mode,
-      job,
+      job: formattedJob,
       matchedCount: job.matchedCount,
       notifiedCount: job.notifiedCount,
       previewNotification: matcherResult.previewNotification,
@@ -753,7 +812,9 @@ export const listDeputyJobs = async (req, res) => {
       .populate("bookedMusicianId", "firstName lastName email musicianSlug profilePhoto profilePicture")
       .lean();
 
-    res.json({ success: true, jobs });
+    const formattedJobs = jobs.map((job) => withDeputyJobAliases(job));
+
+    res.json({ success: true, jobs: formattedJobs });
   } catch (error) {
     console.error("❌ listDeputyJobs error:", error);
     res.status(500).json({ success: false, message: "Failed to fetch deputy jobs" });
@@ -773,7 +834,7 @@ export const getDeputyJobById = async (req, res) => {
       return res.status(404).json({ success: false, message: "Deputy job not found" });
     }
 
-    return res.json({ success: true, job });
+    return res.json({ success: true, job: withDeputyJobAliases(job) });
   } catch (error) {
     console.error("❌ getDeputyJobById error:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch deputy job" });
@@ -882,15 +943,19 @@ export const sendDeputyJobNotifications = async (req, res) => {
     job.matchedMusicians = (job.matchedMusicians || []).map((m) => ({
       ...m,
       notified: sentIds.some((id) => asObjectIdString(id) === asObjectIdString(m.musicianId)),
-      notifiedAt: sentIds.some((id) => asObjectIdString(id) === asObjectIdString(m.musicianId)) ? new Date() : null,
+      notifiedAt: sentIds.some((id) => asObjectIdString(id) === asObjectIdString(m.musicianId))
+        ? new Date()
+        : null,
     }));
 
     await job.save();
 
+    const formattedJob = withDeputyJobAliases(job);
+
     return res.json({
       success: true,
       message: "Notifications sent",
-      job,
+      job: formattedJob,
       notifiedCount: job.notifiedCount,
     });
   } catch (error) {
@@ -976,6 +1041,8 @@ export const createDeputyJobSetupIntent = async (req, res) => {
 
     await job.save();
 
+    const formattedJob = withDeputyJobAliases(job);
+
     return res.json({
       success: true,
       message: "SetupIntent created",
@@ -983,7 +1050,7 @@ export const createDeputyJobSetupIntent = async (req, res) => {
       setupIntentId: setupIntent.id,
       stripeCustomerId,
       paymentStatus: job.paymentStatus,
-      job,
+      job: formattedJob,
     });
   } catch (error) {
     console.error("❌ createDeputyJobSetupIntent error:", error);
@@ -999,7 +1066,14 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
   try {
     if (!ensureStripeReady(res)) return;
 
-    const { setupIntentId = "", paymentMethodId = "", clientName = "", clientEmail = "", clientPhone = "" } = req.body || {};
+    const {
+      setupIntentId = "",
+      paymentMethodId = "",
+      clientName = "",
+      clientEmail = "",
+      clientPhone = "",
+    } = req.body || {};
+
     const job = await deputyJobModel.findById(req.params.id);
 
     if (!job) {
@@ -1083,10 +1157,12 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
 
     await job.save();
 
+    const formattedJob = withDeputyJobAliases(job);
+
     return res.json({
       success: true,
       message: "Payment method saved",
-      job,
+      job: formattedJob,
       defaultPaymentMethodId: resolvedPaymentMethodId,
       paymentStatus: job.paymentStatus,
     });
@@ -1120,14 +1196,16 @@ export const chargeDeputyJob = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: chargeResult.message || "Failed to charge deputy job",
-        job,
+        job: withDeputyJobAliases(job),
       });
     }
+
+    const formattedJob = withDeputyJobAliases(job);
 
     return res.json({
       success: true,
       message: "Deputy job charged successfully",
-      job,
+      job: formattedJob,
       paymentIntent: chargeResult.paymentIntent,
     });
   } catch (error) {
@@ -1230,7 +1308,9 @@ export const confirmDeputyAllocation = async (req, res) => {
     }
 
     job.applications = (job.applications || []).map((application) => {
-      const sameMusician = asObjectIdString(application.musicianId) === asObjectIdString(musician._id);
+      const sameMusician =
+        asObjectIdString(application.musicianId) === asObjectIdString(musician._id);
+
       return {
         ...application,
         status: sameMusician ? "allocated" : application.status,
@@ -1268,12 +1348,14 @@ export const confirmDeputyAllocation = async (req, res) => {
 
     await job.save();
 
+    const formattedJob = withDeputyJobAliases(job);
+
     return res.json({
       success: true,
       message: chargeResult?.success
         ? "Deputy allocated and client charged"
         : "Deputy allocated",
-      job,
+      job: formattedJob,
       allocatedMusician: musician,
       preview,
       chargeResult,
@@ -1350,7 +1432,9 @@ export const sendDeputyBookingEmail = async (req, res) => {
     job.bookingConfirmedAt = new Date();
 
     job.applications = (job.applications || []).map((application) => {
-      const sameMusician = asObjectIdString(application.musicianId) === asObjectIdString(musician._id);
+      const sameMusician =
+        asObjectIdString(application.musicianId) === asObjectIdString(musician._id);
+
       return {
         ...application,
         status: sameMusician ? "booked" : application.status,
@@ -1378,10 +1462,12 @@ export const sendDeputyBookingEmail = async (req, res) => {
 
     await job.save();
 
+    const formattedJob = withDeputyJobAliases(job);
+
     return res.json({
       success: true,
       message: "Booking confirmation sent",
-      job,
+      job: formattedJob,
       confirmedMusician: musician,
       preview,
     });
@@ -1400,7 +1486,15 @@ export const updateDeputyJobApplicationStatus = async (req, res) => {
     const { status, notes = "" } = req.body || {};
     const { id, musicianId } = req.params;
 
-    const allowedStatuses = ["applied", "shortlisted", "allocated", "booked", "declined", "withdrawn"];
+    const allowedStatuses = [
+      "applied",
+      "shortlisted",
+      "allocated",
+      "booked",
+      "declined",
+      "withdrawn",
+    ];
+
     if (!allowedStatuses.includes(normaliseString(status))) {
       return res.status(400).json({ success: false, message: "Invalid application status" });
     }
@@ -1431,10 +1525,12 @@ export const updateDeputyJobApplicationStatus = async (req, res) => {
 
     await job.save();
 
+    const formattedJob = withDeputyJobAliases(job);
+
     return res.json({
       success: true,
       message: "Application status updated",
-      job,
+      job: formattedJob,
       application: job.applications[applicationIndex],
     });
   } catch (error) {

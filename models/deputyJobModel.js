@@ -27,7 +27,6 @@ const deputyJobApplicationSchema = new mongoose.Schema(
     },
     notes: { type: String, default: "", trim: true },
 
-    // snapshot of why they matched / what was shown at the time
     deputyMatchScore: { type: Number, default: 0 },
     matchSummary: {
       instrument: { type: String, default: "" },
@@ -161,14 +160,19 @@ const deputyJobSchema = new mongoose.Schema(
   {
     title: { type: String, default: "", trim: true },
 
-    // Core matcher input
     instrument: { type: String, required: true, trim: true, index: true },
     requiredInstruments: { type: [String], default: [] },
     isVocalSlot: { type: Boolean, default: false },
 
-    eventDate: { type: String, default: "", index: true }, // YYYY-MM-DD
+    // canonical + aliases for frontend convenience
+    eventDate: { type: String, default: "", index: true },
+    date: { type: String, default: "", index: true },
+
     startTime: { type: String, default: "" },
+    callTime: { type: String, default: "" },
+
     endTime: { type: String, default: "" },
+    finishTime: { type: String, default: "" },
 
     venue: { type: String, default: "", trim: true },
     location: { type: String, default: "", trim: true },
@@ -183,9 +187,17 @@ const deputyJobSchema = new mongoose.Schema(
     desiredRoles: { type: [String], default: [] },
     secondaryInstruments: { type: [String], default: [] },
 
+    setLengths: { type: [String], default: [] },
+
+    whatsIncluded: { type: [String], default: [] },
+    whatsIncludedOther: { type: String, default: "", trim: true },
+
+    claimableExpenses: { type: [String], default: [] },
+    claimableExpensesOther: { type: String, default: "", trim: true },
+
     fee: { type: Number, default: 0 },
     currency: { type: String, default: "GBP", trim: true, uppercase: true },
-    notes: { type: String, default: "" },
+    notes: { type: String, default: "", trim: true },
 
     clientName: { type: String, default: "", trim: true },
     clientEmail: { type: String, default: "", trim: true, lowercase: true },
@@ -267,13 +279,11 @@ const deputyJobSchema = new mongoose.Schema(
 
     applications: { type: [deputyJobApplicationSchema], default: [] },
 
-    // Store everyone the matcher found
     matchedMusicianIds: [
       { type: mongoose.Schema.Types.ObjectId, ref: "musician" },
     ],
     matchedMusicians: { type: [deputyJobMatchSnapshotSchema], default: [] },
 
-    // Store everyone successfully notified
     notifiedMusicianIds: [
       { type: mongoose.Schema.Types.ObjectId, ref: "musician" },
     ],
