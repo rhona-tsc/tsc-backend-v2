@@ -867,8 +867,18 @@ export const applyToDeputyJob = async (req, res) => {
       return res.status(404).json({ success: false, message: "Deputy job not found" });
     }
 
+    const authenticatedMusicianId =
+      req.user?._id || req.user?.id || req.user?.userId || req.user?.musicianId || null;
+
+    if (!authenticatedMusicianId) {
+      return res.status(401).json({
+        success: false,
+        message: "You must be logged in as a musician to apply for this opportunity",
+      });
+    }
+
     const alreadyApplied = job.applications.some(
-      (a) => asObjectIdString(a.musicianId) === asObjectIdString(req.user?._id)
+      (a) => asObjectIdString(a.musicianId) === asObjectIdString(authenticatedMusicianId)
     );
 
     if (alreadyApplied) {
@@ -878,18 +888,50 @@ export const applyToDeputyJob = async (req, res) => {
       });
     }
 
+    const musician = await musicianModel.findById(authenticatedMusicianId).lean();
+
     const matchedSnapshot = Array.isArray(job.matchedMusicians)
       ? job.matchedMusicians.find(
-          (m) => asObjectIdString(m.musicianId) === asObjectIdString(req.user?._id)
+          (m) => asObjectIdString(m.musicianId) === asObjectIdString(authenticatedMusicianId)
         )
       : null;
 
     job.applications.push({
-      musicianId: req.user?._id,
-      firstName: req.user?.firstName || "",
-      lastName: req.user?.lastName || "",
-      email: req.user?.email || "",
-      phone: req.user?.phone || "",
+      musicianId: authenticatedMusicianId,
+      firstName:
+        musician?.firstName ||
+        musician?.firstname ||
+        musician?.basicInfo?.firstName ||
+        req.user?.firstName ||
+        "",
+      lastName:
+        musician?.lastName ||
+        musician?.lastname ||
+        musician?.basicInfo?.lastName ||
+        req.user?.lastName ||
+        "",
+      email:
+        musician?.email ||
+        musician?.basicInfo?.email ||
+        req.user?.email ||
+        "",
+      phone:
+        musician?.phone ||
+        musician?.basicInfo?.phone ||
+        req.user?.phone ||
+        "",
+      musicianSlug: musician?.musicianSlug || "",
+      profileImage:
+        musician?.profilePhoto ||
+        musician?.profilePicture ||
+        musician?.profileImage ||
+        musician?.profilePic ||
+        musician?.profile_picture ||
+        "",
+      postcode:
+        musician?.address?.postcode ||
+        musician?.postcode ||
+        "",
       status: "applied",
       appliedAt: new Date(),
       deputyMatchScore: Number(matchedSnapshot?.deputyMatchScore || 0),
@@ -909,7 +951,11 @@ export const applyToDeputyJob = async (req, res) => {
 
     await job.save();
 
-    return res.json({ success: true, message: "Application submitted", job });
+    return res.json({
+      success: true,
+      message: "Application submitted",
+      job: withDeputyJobAliases(job),
+    });
   } catch (error) {
     console.error("❌ applyToDeputyJob error:", error);
     return res.status(500).json({ success: false, message: "Failed to apply" });
