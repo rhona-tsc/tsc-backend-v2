@@ -629,12 +629,58 @@ const getMatchedMusiciansForJob = async (job) => {
   ).lean();
 };
 
+const findApplicationFromJob = (job, musicianId) => {
+  const targetId = asObjectIdString(musicianId);
+  if (!targetId) return null;
+
+  return (
+    (Array.isArray(job?.applications) ? job.applications : []).find(
+      (application) => asObjectIdString(application?.musicianId) === targetId
+    ) || null
+  );
+};
+
+const hydrateMusicianFromApplication = async (application = {}) => {
+  const applicationMusicianId = asObjectIdString(application?.musicianId);
+
+  if (applicationMusicianId) {
+    const musicianDoc = await musicianModel.findById(applicationMusicianId).lean();
+    if (musicianDoc) return musicianDoc;
+  }
+
+  return {
+    _id: application?.musicianId || null,
+    firstName: application?.firstName || "",
+    lastName: application?.lastName || "",
+    email: application?.email || "",
+    phone: application?.phone || "",
+    phoneNumber: application?.phone || "",
+    musicianSlug: application?.musicianSlug || "",
+    profilePhoto: application?.profileImage || "",
+    profilePicture: application?.profileImage || "",
+    profileImage: application?.profileImage || "",
+    profilePic: application?.profileImage || "",
+    profile_picture: application?.profileImage || "",
+  };
+};
+
 const findMatchedMusicianFromJob = async (job, musicianId) => {
   const targetId = asObjectIdString(musicianId);
   if (!targetId) return null;
 
+  const application = findApplicationFromJob(job, targetId);
+  if (application) {
+    return hydrateMusicianFromApplication(application);
+  }
+
   const matchedMusicians = await getMatchedMusiciansForJob(job);
-  return matchedMusicians.find((m) => asObjectIdString(m?._id) === targetId) || null;
+  const matchedMusician = matchedMusicians.find(
+    (m) => asObjectIdString(m?._id) === targetId
+  );
+
+  if (matchedMusician) return matchedMusician;
+
+  return musicianModel.findById(targetId).lean();
 };
 
 export const previewDeputyJob = async (req, res) => {
@@ -1334,6 +1380,7 @@ export const confirmDeputyAllocation = async (req, res) => {
       return res.status(400).json({ success: false, message: "musicianId is required" });
     }
 
+    const application = findApplicationFromJob(job, musicianId);
     const musician = await findMatchedMusicianFromJob(job, musicianId);
     if (!musician) {
       return res.status(404).json({ success: false, message: "Matched musician not found" });
@@ -1353,14 +1400,29 @@ export const confirmDeputyAllocation = async (req, res) => {
       job.deputyNetAmount = ledger.deputyNetAmount;
     }
 
-    job.applications = (job.applications || []).map((application) => {
+    job.applications = (job.applications || []).map((existingApplication) => {
       const sameMusician =
-        asObjectIdString(application.musicianId) === asObjectIdString(musician._id);
+        asObjectIdString(existingApplication.musicianId) === asObjectIdString(musician._id);
 
       return {
-        ...application,
-        status: sameMusician ? "allocated" : application.status,
-        allocatedAt: sameMusician ? new Date() : application.allocatedAt || null,
+        ...existingApplication,
+        status: sameMusician ? "allocated" : existingApplication.status,
+        allocatedAt: sameMusician ? new Date() : existingApplication.allocatedAt || null,
+        musicianSlug:
+          sameMusician && !existingApplication.musicianSlug
+            ? musician?.musicianSlug || ""
+            : existingApplication.musicianSlug || "",
+        profileImage:
+          sameMusician && !existingApplication.profileImage
+            ? (
+                musician?.profilePhoto ||
+                musician?.profilePicture ||
+                musician?.profileImage ||
+                musician?.profilePic ||
+                musician?.profile_picture ||
+                ""
+              )
+            : existingApplication.profileImage || "",
       };
     });
 
@@ -1380,8 +1442,8 @@ export const confirmDeputyAllocation = async (req, res) => {
       ...(job.notifications || []),
       {
         musicianId: musician._id,
-        email: musician.email || "",
-        phone: musician.phone || musician.phoneNumber || "",
+        email: musician.email || application?.email || "",
+        phone: musician.phone || musician.phoneNumber || application?.phone || "",
         channel: "email",
         type: "allocation_preview",
         subject: preview.subject,

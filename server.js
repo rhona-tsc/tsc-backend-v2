@@ -316,21 +316,20 @@ startRemindersPoller({ intervalMs: 30000 });
 
 /* -------------------------- Main API mounts (clean) ------------------------- */
 
-// Users / auth
+app.use("/api/musician-login", musicianLoginRouter);
+app.use("/api/sitemap", sitemapRoutes);
+app.use("/api/v2", v2Routes);
+app.use("/api/agent-dashboard", agentDashboardRoutes);
+
 app.use("/api/user", userRouter);
 app.use("/api/auth", authRoutes);
 app.use("/api/account", accountRouter);
 
-// Musicians
 app.use("/api/musician", musicianRouter);
 
-// Acts (v2) – choose ONE canonical base. I’d recommend /api/act
-app.use("/api/act", actV2Routes);           // ← put act routes here
-
-// If you truly need a musicaian-scoped subset, keep this too:
+app.use("/api/act", actV2Routes);
 app.use("/api/musician/act-v2", actV2Routes);
 
-// Availability / shortlist / enquiries
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/shortlist", shortlistRoutes);
 app.use("/api/board/enquiries", enquiryBoardRoutes);
@@ -338,32 +337,27 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/deputy-opportunities", deputyOpportunityRoutes);
 app.use("/api/deputy-jobs", deputyJobRouter);
 
-// Bookings / payments / invoices
 app.use("/api/cart", cartRouter);
 app.use("/api/booking", bookingRoutes);
 app.use("/api/payments", paymentsRouter);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/board/bookings", bookingBoardRoutes);
 
-// Newsletters / notices / feedback
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/noticeboard", noticeRoutes);
 app.use("/api/feedback", feedbackRoutes);
 
-// Uploads
 app.use("/api/upload", uploadRoutes);
 
-// Google integrations
 app.use("/api/google", googleRoutes);
 app.use("/api/calendar", calendarWebhook);
 
-// Pre-submission & moderation
 app.use("/api/act-pre-submissions", actPreSubmissionRoutes);
 app.use("/api/moderation", moderationRoutes);
-app.use("/api/agent-dashboard", agentDashboardRoutes);
 
-// Debug (scoped)
 app.use("/api/debug", debugRoutes);
+app.use("/api/allocations", allocationRoutes);
+app.use("/api", adminRoutes);
 
 // Availability direct mount
 app.get("/api/availability/acts-available", async (req, res) => {
