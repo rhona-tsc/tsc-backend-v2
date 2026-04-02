@@ -17,11 +17,24 @@ import {
   saveDeputyJobPaymentMethod,
   chargeDeputyJob,
   runDeputyPayoutCron,
+  twilioInboundDeputyJob,
+  twilioInboundDeputyAllocation,
 } from "../controllers/deputyJobController.js";
 import authUser from "../middleware/auth.js";
 
 const deputyJobRouter = express.Router();
 
+deputyJobRouter.post(
+  "/twilio/inbound",
+  express.urlencoded({ extended: false }),
+  twilioInboundDeputyJob
+);
+
+deputyJobRouter.post(
+  "/twilio/inbound-allocation",
+  express.urlencoded({ extended: false }),
+  twilioInboundDeputyAllocation
+);
 /**
  * Create / list
  * POST /api/deputy-jobs/preview

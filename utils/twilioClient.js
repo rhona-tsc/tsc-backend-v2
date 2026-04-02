@@ -337,6 +337,75 @@ const memberNames = firstLast(memberDisplayName);
 /**
  * Send a plain SMS (used for fallback or reminders).
  */
+export const sendDeputyAllocationWhatsApp = async ({
+  to,
+  job,
+  musician,
+  acceptCode,
+  declineCode,
+}) => {
+  const formattedDate = job?.eventDate
+    ? formatNiceDate(job.eventDate)
+    : "TBC";
+
+  const location =
+    job?.venue ||
+    job?.locationName ||
+    job?.location ||
+    "Location TBC";
+
+  const fee = String(Number(job?.fee || 0) || "");
+  const firstName =
+    musician?.firstName ||
+    musician?.name ||
+    "there";
+
+  const actName =
+    job?.title ||
+    job?.instrument ||
+    "Deputy opportunity";
+
+  const smsBody = [
+    `Hi ${firstName},`,
+    `You have been allocated for ${actName}.`,
+    `Date: ${formattedDate}`,
+    `Location: ${location}`,
+    fee ? `Fee: £${fee}` : "Fee: TBC",
+    `Reply ACCEPT_DEPUTY_${job?._id}_${musician?._id || musician?.musicianId} to accept.`,
+    `Reply DECLINE_DEPUTY_${job?._id}_${musician?._id || musician?.musicianId} to decline.`,
+  ].join("\n");
+
+  return sendWhatsAppMessage({
+    to,
+    member: musician,
+    dateISO: job?.eventDate || "",
+    address: location,
+    role: job?.instrument || job?.title || "Deputy",
+    finalFee: Number(job?.fee || 0),
+    skipFeeCompute: true,
+    smsBody,
+    variables: {
+      firstName,
+      date: formattedDate,
+      location,
+      fee,
+      role: job?.instrument || job?.title || "Deputy",
+      actName,
+      requestId: acceptCode,
+      requestCode: acceptCode,
+      "1": firstName,
+      "2": formattedDate,
+      "3": location,
+      "4": fee,
+      "5": job?.instrument || job?.title || "Deputy",
+      "6": actName,
+      "7": acceptCode,
+      acceptCode,
+      declineCode,
+    },
+  });
+};
+
 export const sendSMSMessage = async (to, body) => {
   console.log(
     `🩵 (utils/twilioClient.js) sendSMSMessage START at ${new Date().toISOString()}`,
@@ -396,6 +465,7 @@ export async function sendWhatsAppText(to, body) {
 
 export default {
   sendWhatsAppMessage,
+  sendDeputyAllocationWhatsApp,
   sendSMSMessage,
   sendWhatsAppText,
   toE164,

@@ -5,6 +5,7 @@ import musicianModel from "../models/musicianModel.js";
 import { findMatchingMusiciansForDeputyJob } from "../services/deputyJobMatcher.js";
 import { notifyMusiciansAboutDeputyJob } from "../services/deputyJobNotifier.js";
 import { runDeputyPayoutRelease } from "../services/deputyPayoutService.js";
+import { sendDeputyAllocationWhatsApp, toE164 } from "../utils/twilioClient.js";
 
 const normaliseArray = (value) => {
   if (Array.isArray(value)) {
@@ -50,6 +51,82 @@ const normaliseBoolean = (value) => {
 
 const normaliseStringArray = (value) =>
   normaliseArray(value).map((item) => normaliseString(item)).filter(Boolean);
+
+const normalisePhoneValue = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  return raw
+    .replace(/^whatsapp:/i, "")
+    .replace(/[^\d+]/g, "")
+    .replace(/^00/, "+");
+};
+
+const buildPhoneVariants = (value = "") => {
+  const normalised = normalisePhoneValue(value);
+  if (!normalised) return [];
+
+  const digitsOnly = normalised.replace(/^\+/, "");
+  const variants = new Set([
+    normalised,
+    digitsOnly,
+    `+${digitsOnly}`,
+    `whatsapp:${normalised}`,
+    `whatsapp:+${digitsOnly}`,
+  ]);
+
+  if (digitsOnly.startsWith("44")) {
+    const local = `0${digitsOnly.slice(2)}`;
+    variants.add(local);
+    variants.add(`whatsapp:${local}`);
+  }
+
+  return Array.from(variants).filter(Boolean);
+};
+
+const phonesMatch = (left, right) => {
+  const leftVariants = buildPhoneVariants(left);
+  const rightSet = new Set(buildPhoneVariants(right));
+  return leftVariants.some((value) => rightSet.has(value));
+};
+
+const interpretDeputyReply = (raw = "") => {
+  const low = String(raw || "").toLowerCase().trim();
+  if (!low) return null;
+
+  if (
+    low === "yes" ||
+    low === "accept" ||
+    low.includes("accept") ||
+    low.includes("book me in") ||
+    low.startsWith("djyes_") ||
+    low.startsWith("deputyyes_")
+  ) {
+    return "accepted";
+  }
+
+  if (
+    low === "no" ||
+    low === "decline" ||
+    low.includes("decline") ||
+    low.includes("no thanks") ||
+    low.includes("cant do") ||
+    low.includes("can't do") ||
+    low.startsWith("djno_") ||
+    low.startsWith("deputyno_")
+  ) {
+    return "declined";
+  }
+
+  return null;
+};
+
+const extractDeputyJobIdFromReply = (raw = "") => {
+  const match = String(raw || "").match(
+    /(?:djyes|djno|deputyyes|deputyno)_([a-f\d]{24})/i
+  );
+  return match ? match[1] : "";
+};
 
 const withDeputyJobAliases = (job) => {
   if (!job) return job;
@@ -681,6 +758,124 @@ const findMatchedMusicianFromJob = async (job, musicianId) => {
   if (matchedMusician) return matchedMusician;
 
   return musicianModel.findById(targetId).lean();
+};
+
+const buildDeputyReplyCode = (jobId, musicianId, action) => {
+  const safeJobId = normaliseString(jobId);
+  const safeMusicianId = normaliseString(musicianId);
+  const safeAction = normaliseString(action).toUpperCase();
+  return `${safeAction}_DEPUTY_${safeJobId}_${safeMusicianId}`;
+};
+
+const parseDeputyReplyCode = (raw = "") => {
+  const value = normaliseString(raw);
+  const match = value.match(/^(ACCEPT|DECLINE)_DEPUTY_([^_]+)_(.+)$/i);
+
+  if (!match) {
+    return {
+      action: "",
+      jobId: "",
+      musicianId: "",
+    };
+  }
+
+  return {
+    action: normaliseString(match[1]).toLowerCase(),
+    jobId: normaliseString(match[2]),
+    musicianId: normaliseString(match[3]),
+  };
+};
+
+const findApplicationByAnyIdentity = (job, { musicianId = "", phone = "", email = "" } = {}) => {
+  const safeMusicianId = asObjectIdString(musicianId);
+  const safePhone = toE164(phone);
+  const safeEmail = normaliseEmail(email);
+
+  return (
+    (Array.isArray(job?.applications) ? job.applications : []).find((application) => {
+      const applicationMusicianId = asObjectIdString(application?.musicianId);
+      const applicationPhone = toE164(application?.phone || application?.phoneNormalized || "");
+      const applicationEmail = normaliseEmail(application?.email || "");
+
+      if (safeMusicianId && applicationMusicianId === safeMusicianId) return true;
+      if (safePhone && applicationPhone === safePhone) return true;
+      if (safeEmail && applicationEmail && applicationEmail === safeEmail) return true;
+      return false;
+    }) || null
+  );
+};
+
+const applyBookedStateToJob = (job, musician) => {
+  const now = new Date();
+  const safeMusicianId = asObjectIdString(musician?._id || musician?.musicianId);
+  const fullName = [musician?.firstName, musician?.lastName].filter(Boolean).join(" ").trim();
+
+  job.status = "filled";
+  job.workflowStage = "booking_confirmed";
+  job.bookedMusicianId = musician?._id || musician?.musicianId || null;
+  job.bookedMusicianName = fullName;
+  job.bookingConfirmedAt = now;
+
+  job.applications = (job.applications || []).map((application) => {
+    const sameMusician = asObjectIdString(application?.musicianId) === safeMusicianId;
+
+    return {
+      ...application,
+      status: sameMusician ? "booked" : application.status,
+      bookedAt: sameMusician ? now : application.bookedAt || null,
+    };
+  });
+
+  return now;
+};
+
+const findDeputyApplicationByPhone = (job, phone = "") => {
+  const applications = Array.isArray(job?.applications) ? job.applications : [];
+  return (
+    applications.find((application) => phonesMatch(application?.phone, phone)) || null
+  );
+};
+
+const findDeputyJobFromInboundReply = async ({
+  jobId = "",
+  repliedSid = "",
+  fromRaw = "",
+}) => {
+  if (jobId) {
+    const byId = await deputyJobModel.findById(jobId);
+    if (byId) return byId;
+  }
+
+  if (repliedSid) {
+    const bySid = await deputyJobModel.findOne({
+      "notifications.providerMessageId": repliedSid,
+    });
+    if (bySid) return bySid;
+  }
+
+  if (fromRaw) {
+    const recentAllocatedJobs = await deputyJobModel
+      .find({
+        status: { $in: ["allocated", "open"] },
+        allocatedAt: { $ne: null },
+      })
+      .sort({ allocatedAt: -1, updatedAt: -1 })
+      .limit(50);
+
+    const matchedJob = recentAllocatedJobs.find((candidateJob) => {
+      const allocatedApplication = findDeputyApplicationByPhone(candidateJob, fromRaw);
+      if (allocatedApplication) return true;
+
+      return (Array.isArray(candidateJob.notifications) ? candidateJob.notifications : []).some(
+        (notification) =>
+          notification?.channel === "whatsapp" && phonesMatch(notification?.phone, fromRaw)
+      );
+    });
+
+    if (matchedJob) return matchedJob;
+  }
+
+  return null;
 };
 
 export const previewDeputyJob = async (req, res) => {
@@ -1386,9 +1581,13 @@ export const confirmDeputyAllocation = async (req, res) => {
       return res.status(404).json({ success: false, message: "Matched musician not found" });
     }
 
+    const now = new Date();
+    const acceptCode = buildDeputyReplyCode(job._id, musician._id || musicianId, "accept");
+    const declineCode = buildDeputyReplyCode(job._id, musician._id || musicianId, "decline");
+
     job.allocatedMusicianId = musician._id;
     job.allocatedMusicianName = [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim();
-    job.allocatedAt = new Date();
+    job.allocatedAt = now;
     job.status = "allocated";
     job.workflowStage = "allocated";
     job.releaseOn = job.releaseOn || buildDefaultReleaseOn(job.eventDate);
@@ -1407,7 +1606,7 @@ export const confirmDeputyAllocation = async (req, res) => {
       return {
         ...existingApplication,
         status: sameMusician ? "allocated" : existingApplication.status,
-        allocatedAt: sameMusician ? new Date() : existingApplication.allocatedAt || null,
+        allocatedAt: sameMusician ? now : existingApplication.allocatedAt || null,
         musicianSlug:
           sameMusician && !existingApplication.musicianSlug
             ? musician?.musicianSlug || ""
@@ -1423,6 +1622,15 @@ export const confirmDeputyAllocation = async (req, res) => {
                 ""
               )
             : existingApplication.profileImage || "",
+        phoneNormalized:
+          sameMusician && !existingApplication.phoneNormalized
+            ? toE164(
+                musician?.phone ||
+                  musician?.phoneNumber ||
+                  existingApplication.phone ||
+                  ""
+              )
+            : existingApplication.phoneNormalized || toE164(existingApplication.phone || ""),
       };
     });
 
@@ -1438,19 +1646,44 @@ export const confirmDeputyAllocation = async (req, res) => {
       job.paymentStatus = "setup_required";
     }
 
+    let whatsappResult = null;
+    const targetPhone = toE164(
+      musician?.phone ||
+        musician?.phoneNumber ||
+        application?.phone ||
+        application?.phoneNormalized ||
+        ""
+    );
+
+    if (targetPhone) {
+      try {
+        whatsappResult = await sendDeputyAllocationWhatsApp({
+          to: targetPhone,
+          job,
+          musician,
+          acceptCode,
+          declineCode,
+        });
+      } catch (whatsappError) {
+        console.error("❌ sendDeputyAllocationWhatsApp error:", whatsappError);
+      }
+    }
+
     job.notifications = [
       ...(job.notifications || []),
       {
         musicianId: musician._id,
         email: musician.email || application?.email || "",
-        phone: musician.phone || musician.phoneNumber || application?.phone || "",
-        channel: "email",
-        type: "allocation_preview",
+        phone: targetPhone,
+        channel: targetPhone ? "whatsapp" : "email",
+        type: "allocation",
         subject: preview.subject,
         previewHtml: preview.html,
         previewText: preview.text,
-        status: "preview",
+        providerMessageId: whatsappResult?.sid || "",
+        status: whatsappResult?.sid ? "sent" : "preview",
         sentAt: new Date(),
+        error: whatsappResult?.sid ? "" : targetPhone ? "WhatsApp allocation send failed" : "No phone number available for allocation message",
       },
     ];
 
@@ -1461,12 +1694,17 @@ export const confirmDeputyAllocation = async (req, res) => {
     return res.json({
       success: true,
       message: chargeResult?.success
-        ? "Deputy allocated and client charged"
+        ? "Deputy allocated, WhatsApp sent and client charged"
+        : whatsappResult?.sid
+        ? "Deputy allocated and WhatsApp sent"
         : "Deputy allocated",
       job: formattedJob,
       allocatedMusician: musician,
       preview,
       chargeResult,
+      whatsappResult: whatsappResult
+        ? { sid: whatsappResult.sid || "", status: whatsappResult.status || "" }
+        : null,
     });
   } catch (error) {
     console.error("❌ confirmDeputyAllocation error:", error);
@@ -1477,7 +1715,6 @@ export const confirmDeputyAllocation = async (req, res) => {
     });
   }
 };
-
 export const previewDeputyBookingEmail = async (req, res) => {
   try {
     const { musicianId = "" } = req.body || {};
@@ -1586,6 +1823,281 @@ export const sendDeputyBookingEmail = async (req, res) => {
       message: "Failed to send booking confirmation",
       error: error.message,
     });
+  }
+};
+
+export const twilioInboundDeputyAllocation = async (req, res) => {
+  try {
+    const bodyText = normaliseString(req.body?.Body || "");
+    const buttonText = normaliseString(req.body?.ButtonText || "");
+    const buttonPayload = normaliseString(req.body?.ButtonPayload || "");
+    const fromRaw = normaliseString(req.body?.From || req.body?.WaId || "");
+    const fromPhone = toE164(fromRaw);
+
+    const rawReply = buttonPayload || buttonText || bodyText;
+    const parsed = parseDeputyReplyCode(rawReply);
+
+    if (!parsed.action || !parsed.jobId) {
+      return res.status(200).send("<Response/>");
+    }
+
+    const job = await deputyJobModel.findById(parsed.jobId);
+    if (!job) {
+      return res.status(200).send("<Response/>");
+    }
+
+    const matchedApplication = findApplicationByAnyIdentity(job, {
+      musicianId: parsed.musicianId,
+      phone: fromPhone,
+      email: "",
+    });
+
+    const musician = await findMatchedMusicianFromJob(
+      job,
+      matchedApplication?.musicianId || parsed.musicianId || job.allocatedMusicianId
+    );
+
+    if (!musician) {
+      return res.status(200).send("<Response/>");
+    }
+
+    if (parsed.action === "accept") {
+      applyBookedStateToJob(job, musician);
+
+      job.notifications = [
+        ...(job.notifications || []),
+        {
+          musicianId: musician._id,
+          email: musician.email || matchedApplication?.email || "",
+          phone: fromPhone || musician.phone || musician.phoneNumber || matchedApplication?.phone || "",
+          channel: "whatsapp",
+          type: "booking_confirmation",
+          subject: `Deputy accepted: ${normaliseString(job.title || job.instrument || "Deputy opportunity")}`,
+          previewHtml: "",
+          previewText: `Accepted via WhatsApp by ${[musician.firstName, musician.lastName].filter(Boolean).join(" ").trim()}`,
+          status: "sent",
+          sentAt: new Date(),
+        },
+      ];
+
+      await job.save();
+      return res.status(200).send("<Response/>");
+    }
+
+    if (parsed.action === "decline") {
+      const now = new Date();
+      const safeMusicianId = asObjectIdString(musician._id || musician.musicianId);
+
+      job.status = "open";
+      job.workflowStage = "sent_to_matches";
+      job.allocatedMusicianId = null;
+      job.allocatedMusicianName = "";
+      job.allocatedAt = null;
+      job.bookedMusicianId = null;
+      job.bookedMusicianName = "";
+      job.bookingConfirmedAt = null;
+
+      job.applications = (job.applications || []).map((application) => {
+        const sameMusician = asObjectIdString(application?.musicianId) === safeMusicianId;
+
+        return {
+          ...application,
+          status: sameMusician ? "declined" : application.status,
+          declinedAt: sameMusician ? now : application.declinedAt || null,
+        };
+      });
+
+      job.notifications = [
+        ...(job.notifications || []),
+        {
+          musicianId: musician._id,
+          email: musician.email || matchedApplication?.email || "",
+          phone: fromPhone || musician.phone || musician.phoneNumber || matchedApplication?.phone || "",
+          channel: "whatsapp",
+          type: "manual",
+          subject: `Deputy declined: ${normaliseString(job.title || job.instrument || "Deputy opportunity")}`,
+          previewHtml: "",
+          previewText: `Declined via WhatsApp by ${[musician.firstName, musician.lastName].filter(Boolean).join(" ").trim()}`,
+          status: "sent",
+          sentAt: new Date(),
+        },
+      ];
+
+      await job.save();
+      return res.status(200).send("<Response/>");
+    }
+
+    return res.status(200).send("<Response/>");
+  } catch (error) {
+    console.error("❌ twilioInboundDeputyAllocation error:", error);
+    return res.status(200).send("<Response/>");
+  }
+};
+
+export const twilioInboundDeputyJob = async (req, res) => {
+  try {
+    const bodyText = String(req.body?.Body || "");
+    const buttonText = String(req.body?.ButtonText || "");
+    const buttonPayload = String(req.body?.ButtonPayload || "");
+    const fromRaw = String(req.body?.From || req.body?.WaId || "");
+    const repliedSid = String(req.body?.OriginalRepliedMessageSid || "");
+
+    const rawReply = buttonPayload || buttonText || bodyText || "";
+    const replyType = interpretDeputyReply(rawReply);
+
+    console.log("🟣 twilioInboundDeputyJob", {
+      fromRaw,
+      bodyText,
+      buttonText,
+      buttonPayload,
+      repliedSid,
+      replyType,
+    });
+
+    if (!replyType) {
+      console.warn("⚠️ Could not interpret deputy WhatsApp reply");
+      return res.status(200).send("<Response/>");
+    }
+
+    const jobId = extractDeputyJobIdFromReply(rawReply);
+
+    const job = await findDeputyJobFromInboundReply({
+      jobId,
+      repliedSid,
+      fromRaw,
+    });
+
+    if (!job) {
+      console.warn("⚠️ No deputy job matched inbound WhatsApp reply", {
+        fromRaw,
+        repliedSid,
+        rawReply,
+      });
+      return res.status(200).send("<Response/>");
+    }
+
+    const application =
+      findDeputyApplicationByPhone(job, fromRaw) ||
+      findApplicationFromJob(job, job.allocatedMusicianId);
+
+    const musicianId =
+      asObjectIdString(application?.musicianId) ||
+      asObjectIdString(job.allocatedMusicianId);
+
+    const musician = musicianId
+      ? await findMatchedMusicianFromJob(job, musicianId)
+      : null;
+
+    if (!musician) {
+      console.warn("⚠️ No musician matched inbound deputy reply", {
+        jobId: String(job._id),
+        fromRaw,
+      });
+      return res.status(200).send("<Response/>");
+    }
+
+    const now = new Date();
+
+    if (replyType === "accepted") {
+      job.status = "filled";
+      job.workflowStage = "booking_confirmed";
+      job.bookedMusicianId = musician._id;
+      job.bookedMusicianName = [musician.firstName, musician.lastName]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+      job.bookingConfirmedAt = now;
+
+      job.applications = (job.applications || []).map((existingApplication) => {
+        const sameMusician =
+          asObjectIdString(existingApplication.musicianId) === asObjectIdString(musician._id);
+
+        return {
+          ...existingApplication,
+          status: sameMusician ? "booked" : existingApplication.status,
+          bookedAt: sameMusician ? now : existingApplication.bookedAt || null,
+        };
+      });
+
+      job.notifications = [
+        ...(job.notifications || []),
+        {
+          musicianId: musician._id,
+          email: musician.email || application?.email || "",
+          phone: musician.phone || musician.phoneNumber || application?.phone || "",
+          channel: "whatsapp",
+          type: "booking_confirmation",
+          subject: `Accepted via WhatsApp: ${job.title || job.instrument || "Deputy job"}`,
+          previewText: `Accepted by ${
+            [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim() ||
+            "allocated deputy"
+          }`,
+          providerMessageId: repliedSid,
+          status: "sent",
+          sentAt: now,
+        },
+      ];
+
+      await job.save();
+
+      console.log("✅ Deputy job accepted via WhatsApp", {
+        jobId: String(job._id),
+        musicianId: String(musician._id),
+      });
+
+      return res.status(200).send("<Response/>");
+    }
+
+    job.status = "open";
+    job.workflowStage = job.notifiedCount > 0 ? "sent_to_matches" : "applications_open";
+    job.bookedMusicianId = null;
+    job.bookedMusicianName = "";
+    job.bookingConfirmedAt = null;
+    job.allocatedMusicianId = null;
+    job.allocatedMusicianName = "";
+    job.allocatedAt = null;
+
+    job.applications = (job.applications || []).map((existingApplication) => {
+      const sameMusician =
+        asObjectIdString(existingApplication.musicianId) === asObjectIdString(musician._id);
+
+      return {
+        ...existingApplication,
+        status: sameMusician ? "declined" : existingApplication.status,
+        declinedAt: sameMusician ? now : existingApplication.declinedAt || null,
+      };
+    });
+
+    job.notifications = [
+      ...(job.notifications || []),
+      {
+        musicianId: musician._id,
+        email: musician.email || application?.email || "",
+        phone: musician.phone || musician.phoneNumber || application?.phone || "",
+        channel: "whatsapp",
+        type: "manual",
+        subject: `Declined via WhatsApp: ${job.title || job.instrument || "Deputy job"}`,
+        previewText: `Declined by ${
+          [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim() ||
+          "allocated deputy"
+        }`,
+        providerMessageId: repliedSid,
+        status: "sent",
+        sentAt: now,
+      },
+    ];
+
+    await job.save();
+
+    console.log("↩️ Deputy job declined via WhatsApp and reopened", {
+      jobId: String(job._id),
+      musicianId: String(musician._id),
+    });
+
+    return res.status(200).send("<Response/>");
+  } catch (error) {
+    console.error("❌ twilioInboundDeputyJob error:", error);
+    return res.status(200).send("<Response/>");
   }
 };
 
