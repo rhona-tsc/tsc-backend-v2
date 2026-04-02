@@ -6,6 +6,8 @@ import { findMatchingMusiciansForDeputyJob } from "../services/deputyJobMatcher.
 import { notifyMusiciansAboutDeputyJob } from "../services/deputyJobNotifier.js";
 import { runDeputyPayoutRelease } from "../services/deputyPayoutService.js";
 import { sendDeputyAllocationWhatsApp, toE164 } from "../utils/twilioClient.js";
+import { sendWhatsAppText } from "../utils/twilioClient.js";
+import { sendEmail } from "../utils/sendEmail.js";
 
 const normaliseArray = (value) => {
   if (Array.isArray(value)) {
@@ -1843,6 +1845,7 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
     const buttonText = normaliseString(req.body?.ButtonText || "");
     const buttonPayload = normaliseString(req.body?.ButtonPayload || "");
     const repliedSid = normaliseString(req.body?.OriginalRepliedMessageSid || "");
+    const inboundMessageSid = normaliseString(req.body?.MessageSid || "");
     const fromRaw = normaliseString(req.body?.From || req.body?.WaId || "");
     const fromPhone = toE164(fromRaw);
 
@@ -1909,6 +1912,27 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       return res.status(200).send("<Response/>");
     }
 
+    const musicianName = [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim();
+    const jobTitle = normaliseString(job.title || job.instrument || "Deputy opportunity");
+    const location =
+      normaliseString(job.venue || job.locationName || job.location || "Location TBC");
+    const dateText = normaliseString(job.eventDate || "TBC");
+    const feeText = Number(job?.fee || 0) ? `£${Number(job.fee).toLocaleString("en-GB")}` : "TBC";
+
+    const musicianEmail =
+      normaliseString(musician.email || matchedApplication?.email || "").toLowerCase();
+    const musicianPhone =
+      fromPhone ||
+      toE164(
+        musician.phone ||
+          musician.phoneNumber ||
+          matchedApplication?.phone ||
+          ""
+      ) ||
+      "";
+
+    const posterEmail = normaliseString(job.createdByEmail || job.clientEmail || "").toLowerCase();
+
     if (action === "accept") {
       applyBookedStateToJob(job, musician);
 
@@ -1916,30 +1940,73 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
         ...(job.notifications || []),
         {
           musicianId: musician._id,
-          email: musician.email || matchedApplication?.email || "",
-          phone:
-            fromPhone ||
-            musician.phone ||
-            musician.phoneNumber ||
-            matchedApplication?.phone ||
-            "",
+          email: musicianEmail,
+          phone: musicianPhone,
           channel: "whatsapp",
           type: "booking_confirmation",
-          subject: `Deputy accepted: ${normaliseString(
-            job.title || job.instrument || "Deputy opportunity"
-          )}`,
+          subject: `Deputy accepted: ${jobTitle}`,
           previewHtml: "",
-          previewText: `Accepted via WhatsApp by ${[musician.firstName, musician.lastName]
-            .filter(Boolean)
-            .join(" ")
-            .trim()}`,
-          providerMessageId: normaliseString(req.body?.MessageSid || ""),
+          previewText: `Accepted via WhatsApp by ${musicianName}`,
+          providerMessageId: inboundMessageSid,
           status: "sent",
           sentAt: new Date(),
         },
       ];
 
       await job.save();
+
+      if (musicianPhone) {
+        try {
+          await sendWhatsAppText(
+            musicianPhone,
+            "Wonderful! Please consider yourself booked. We’ll let the band know, and you should hear from them shortly."
+          );
+        } catch (whatsAppError) {
+          console.error("❌ Failed to send deputy acceptance WhatsApp confirmation:", whatsAppError);
+        }
+      }
+
+      if (musicianEmail) {
+        try {
+          await sendEmail({
+            to: musicianEmail,
+            subject: `Confirmed: ${jobTitle}`,
+            html: `
+              <p>Hi ${normaliseString(musician.firstName || "there")},</p>
+              <p>Wonderful — please consider yourself booked for <strong>${jobTitle}</strong>.</p>
+              <p><strong>Date:</strong> ${dateText}</p>
+              <p><strong>Location:</strong> ${location}</p>
+              <p><strong>Fee:</strong> ${feeText}</p>
+              <p>We’ll let the band know, and you should hear from them shortly with any further details.</p>
+              <p>Best,<br/>The Supreme Collective</p>
+            `,
+          });
+        } catch (musicianEmailError) {
+          console.error("❌ Failed to send musician deputy acceptance email:", musicianEmailError);
+        }
+      }
+
+      if (posterEmail) {
+        try {
+          await sendEmail({
+            to: posterEmail,
+            subject: `Deputy accepted: ${jobTitle}`,
+            html: `
+              <p>Hi,</p>
+              <p><strong>${musicianName || "Your selected deputy"}</strong> has accepted the deputy job for <strong>${jobTitle}</strong>.</p>
+              <p><strong>Date:</strong> ${dateText}</p>
+              <p><strong>Location:</strong> ${location}</p>
+              <p><strong>Phone:</strong> ${musicianPhone || "Not provided"}</p>
+              <p><strong>Email:</strong> ${musicianEmail || "Not provided"}</p>
+              <p>Please get in touch directly to provide the setlist and any further details of the gig to ensure a successful performance.</p>
+              <p>Best,<br/>The Supreme Collective</p>
+            `,
+          });
+        } catch (posterEmailError) {
+          console.error("❌ Failed to send poster deputy acceptance email:", posterEmailError);
+        }
+      }
+
       return res.status(200).send("<Response/>");
     }
 
@@ -1970,30 +2037,51 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
         ...(job.notifications || []),
         {
           musicianId: musician._id,
-          email: musician.email || matchedApplication?.email || "",
-          phone:
-            fromPhone ||
-            musician.phone ||
-            musician.phoneNumber ||
-            matchedApplication?.phone ||
-            "",
+          email: musicianEmail,
+          phone: musicianPhone,
           channel: "whatsapp",
           type: "manual",
-          subject: `Deputy declined: ${normaliseString(
-            job.title || job.instrument || "Deputy opportunity"
-          )}`,
+          subject: `Deputy declined: ${jobTitle}`,
           previewHtml: "",
-          previewText: `Declined via WhatsApp by ${[musician.firstName, musician.lastName]
-            .filter(Boolean)
-            .join(" ")
-            .trim()}`,
-          providerMessageId: normaliseString(req.body?.MessageSid || ""),
+          previewText: `Declined via WhatsApp by ${musicianName}`,
+          providerMessageId: inboundMessageSid,
           status: "sent",
           sentAt: new Date(),
         },
       ];
 
       await job.save();
+
+      if (musicianPhone) {
+        try {
+          await sendWhatsAppText(
+            musicianPhone,
+            "Thanks for letting us know. We’ve updated the job and will look for another deputy."
+          );
+        } catch (whatsAppError) {
+          console.error("❌ Failed to send deputy decline WhatsApp confirmation:", whatsAppError);
+        }
+      }
+
+      if (posterEmail) {
+        try {
+          await sendEmail({
+            to: posterEmail,
+            subject: `Deputy declined: ${jobTitle}`,
+            html: `
+              <p>Hi,</p>
+              <p><strong>${musicianName || "The allocated deputy"}</strong> has declined the deputy job for <strong>${jobTitle}</strong>.</p>
+              <p><strong>Date:</strong> ${dateText}</p>
+              <p><strong>Location:</strong> ${location}</p>
+              <p>The job has been reopened so you can allocate another deputy.</p>
+              <p>Best,<br/>The Supreme Collective</p>
+            `,
+          });
+        } catch (posterEmailError) {
+          console.error("❌ Failed to send poster deputy decline email:", posterEmailError);
+        }
+      }
+
       return res.status(200).send("<Response/>");
     }
 
