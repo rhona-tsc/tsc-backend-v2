@@ -4428,13 +4428,14 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 // module-scope guard so we don't double-fallback on Twilio retries
 export const twilioStatus = async (req, res) => {
   console.log(
-    `🟢 (availabilityController.js) twilioStatus START ${new Date().toISOString()}`,
+    `🟢 (availabilityController.js) twilioStatus START ${new Date().toISOString()}`
   );
+
   try {
     const {
       MessageSid,
-      MessageStatus, // delivered, failed, undelivered, read, sent, queued...
-      SmsStatus, // sometimes used
+      MessageStatus,
+      SmsStatus,
       To,
       From,
       ErrorCode,
@@ -4442,10 +4443,7 @@ export const twilioStatus = async (req, res) => {
     } = req.body || {};
 
     const status = String(
-      req.body?.MessageStatus ??
-        req.body?.SmsStatus ??
-        req.body?.message_status ??
-        "",
+      MessageStatus ?? SmsStatus ?? req.body?.message_status ?? ""
     ).toLowerCase();
 
     console.log("📡 Twilio status:", {
@@ -4457,7 +4455,6 @@ export const twilioStatus = async (req, res) => {
       errMsg: ErrorMessage || null,
     });
 
-    // 🔗 Optional: reflect outbound status on the availability row
     if (MessageSid) {
       const update = {
         $set: {
@@ -4465,19 +4462,23 @@ export const twilioStatus = async (req, res) => {
           "outbound.lastEventAt": new Date(),
         },
       };
-      if (status === "read") update.$set["outbound.readAt"] = new Date();
+
+      if (status === "read") {
+        update.$set["outbound.readAt"] = new Date();
+      }
+
       if (ErrorCode) {
-        update.$set["outbound.errorCode"] = ErrorCode;
-        update.$set["outbound.errorMessage"] = ErrorMessage || "";
+        update.$set["outbound.errorCode"] = String(ErrorCode);
+        update.$set["outbound.errorMessage"] = String(ErrorMessage || "");
       }
 
       await AvailabilityModel.updateOne({ messageSidOut: MessageSid }, update);
     }
 
-    return res.status(200).send("OK"); // Twilio needs 2xx
+    return res.sendStatus(200);
   } catch (e) {
     console.error("❌ twilioStatus error:", e);
-    return res.status(200).send("OK"); // still 200 to stop retries
+    return res.sendStatus(200);
   }
 };
 
@@ -5052,7 +5053,10 @@ export const twilioInbound = async (req, res) => {
   console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
 
   // ✅ Immediately acknowledge Twilio to prevent retries
-  res.status(200).send("OK");
+res
+  .status(200)
+  .type("text/xml")
+  .send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 
   // --- local helpers (self-contained, no external deps required) ---
   const FRONTEND_BASE =
