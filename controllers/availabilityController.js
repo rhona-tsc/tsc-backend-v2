@@ -5060,8 +5060,6 @@ export const twilioInbound = async (req, res) => {
     process.env.PUBLIC_SITE_BASE ||
     "https://meek-biscotti-8d5020.netlify.app";
 
-
-
   // tiny safe getter for odd webhook keys (with bracket names)
   const pick = (obj, ...keys) => {
     for (const k of keys) {
@@ -5081,8 +5079,9 @@ export const twilioInbound = async (req, res) => {
     if (v.startsWith("+")) return v;
     if (/^44\d+$/.test(v)) return `+${v}`;
     if (/^0\d{10}$/.test(v)) return `+44${v.slice(1)}`;
-    if (/^\d{10,13}$/.test(v))
+    if (/^\d{10,13}$/.test(v)) {
       return v.startsWith("44") ? `+${v}` : `+44${v.replace(/^0?/, "")}`;
+    }
     return v;
   };
 
@@ -5097,7 +5096,7 @@ export const twilioInbound = async (req, res) => {
     return null;
   };
 
-    const classifyBookingReply = (s = "") => {
+  const classifyBookingReply = (s = "") => {
     const t = String(s || "").trim().toLowerCase();
     if (!t) return null;
 
@@ -5127,6 +5126,35 @@ export const twilioInbound = async (req, res) => {
       t.includes("can't do this location") ||
       t.includes("cant do this location")
     ) return "NO_LOC";
+
+    return null;
+  };
+
+  const classifyDeputyAllocationReply = (s = "") => {
+    const t = String(s || "").trim().toLowerCase();
+    if (!t) return null;
+
+    if (
+      t === "yes" ||
+      t === "yes, book me in!" ||
+      t.includes("book me in") ||
+      t === "accept" ||
+      t.startsWith("accept_deputy_")
+    ) {
+      return "accept";
+    }
+
+    if (
+      t === "no" ||
+      t === "not available now" ||
+      t === "changed my mind" ||
+      t.includes("not available") ||
+      t.includes("changed my mind") ||
+      t === "decline" ||
+      t.startsWith("decline_deputy_")
+    ) {
+      return "decline";
+    }
 
     return null;
   };
@@ -5215,10 +5243,11 @@ export const twilioInbound = async (req, res) => {
           bodyObj?.MessageSid || bodyObj?.SmsMessageSid || "",
         );
         const fromRaw = String(bodyObj?.WaId || bodyObj?.From || "");
-        if (noContent)
+        if (noContent) {
           return console.log("🪵 Ignoring empty inbound message", {
             From: fromRaw,
           });
+        }
 
         if (
           typeof seenInboundOnce === "function" &&
@@ -5305,14 +5334,6 @@ export const twilioInbound = async (req, res) => {
         } catch {}
 
         if (requestId) requestId = requestId.toUpperCase();
-        if (!reply) {
-          console.log("ℹ️ Unclassified inbound message — ignoring", {
-            bodyText,
-            btnText,
-            btnId,
-          });
-          return;
-        }
         const sender = normE164(fromRaw);
 
         console.log("📥 [twilioInbound] RAW SNAPSHOT", {
@@ -5333,7 +5354,47 @@ export const twilioInbound = async (req, res) => {
           repliedSid,
         });
 
+        /* ---------------------------------------------------------------------- */
+        /* 🎯 Deputy-job allocation reply handoff                                 */
+        /* ---------------------------------------------------------------------- */
+        const deputyAllocationReply =
+          classifyDeputyAllocationReply(btnText) ||
+          classifyDeputyAllocationReply(btnId) ||
+          classifyDeputyAllocationReply(bodyText) ||
+          null;
 
+        let deputyAllocationJob = null;
+
+        if (repliedSid) {
+          const { default: DeputyJob } = await import("../models/deputyJobModel.js");
+          deputyAllocationJob = await DeputyJob.findOne({
+            "notifications.providerMessageId": repliedSid,
+            "notifications.type": "allocation",
+          })
+            .select("_id")
+            .lean();
+        }
+
+        if (deputyAllocationReply && deputyAllocationJob) {
+          console.log(
+            "🎯 [twilioInbound] routing inbound reply to deputy allocation flow",
+            {
+              sender,
+              deputyAllocationReply,
+              deputyJobId: deputyAllocationJob?._id || null,
+              repliedSid,
+            }
+          );
+
+          const { twilioInboundDeputyAllocation } =
+            await import("./deputyJobController.js");
+
+          await twilioInboundDeputyAllocation(
+            { body: bodyObj },
+            buildNoopRes()
+          );
+          return;
+        }
 
         /* ---------------------------------------------------------------------- */
         /* 🎟️ Booking reply handoff                                               */
@@ -5432,6 +5493,15 @@ export const twilioInbound = async (req, res) => {
             { body: syntheticBookingBody },
             buildNoopRes()
           );
+          return;
+        }
+
+        if (!reply) {
+          console.log("ℹ️ Unclassified inbound message — ignoring", {
+            bodyText,
+            btnText,
+            btnId,
+          });
           return;
         }
 
@@ -5539,7 +5609,7 @@ export const twilioInbound = async (req, res) => {
               hint: "With Content quick replies, some payloads lack RID. We now try requestId, then OriginalRepliedMessageSid→outboundSid, then latest 'awaiting reply' by phone.",
             },
           );
-          return; // bail early like before
+          return;
         }
 
         await processAvailabilityReplyFlow({
@@ -5557,8 +5627,8 @@ export const twilioInbound = async (req, res) => {
       } catch (err) {
         console.error("❌ Error in twilioInbound background task:", err);
       }
-    })(); // async IIFE
-  }); // setImmediate
+    })();
+  });
 };
 
 const INBOUND_SEEN = new Map();

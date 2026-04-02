@@ -1842,33 +1842,32 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
     const bodyText = normaliseString(req.body?.Body || "");
     const buttonText = normaliseString(req.body?.ButtonText || "");
     const buttonPayload = normaliseString(req.body?.ButtonPayload || "");
+    const repliedSid = normaliseString(req.body?.OriginalRepliedMessageSid || "");
     const fromRaw = normaliseString(req.body?.From || req.body?.WaId || "");
     const fromPhone = toE164(fromRaw);
-    const repliedSid = normaliseString(req.body?.OriginalRepliedMessageSid || "");
 
-    const rawReply = buttonPayload || buttonText || bodyText;
-    const normalisedReply = String(rawReply || "").trim().toLowerCase();
+    const rawReply = (buttonPayload || buttonText || bodyText).trim().toLowerCase();
 
-    let action = "";
-
-    if (normalisedReply === "yes") {
-      action = "accept";
-    } else if (normalisedReply === "notavailable" || normalisedReply === "changedmind") {
+    let action = null;
+    if (["yes", "yes, book me in!"].includes(rawReply)) action = "accept";
+    if (
+      ["notavailable", "not available now", "changedmind", "changed my mind"].includes(
+        rawReply
+      )
+    ) {
       action = "decline";
-    } else {
-      return res.status(200).send("<Response/>");
     }
 
-    if (!repliedSid) {
-      console.warn("⚠️ twilioInboundDeputyAllocation: missing OriginalRepliedMessageSid");
+    if (!action || !repliedSid) {
       return res.status(200).send("<Response/>");
     }
 
     const job = await deputyJobModel.findOne({
       notifications: {
         $elemMatch: {
-          channel: "whatsapp",
           providerMessageId: repliedSid,
+          channel: "whatsapp",
+          type: "allocation",
         },
       },
     });
@@ -1876,29 +1875,28 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
     if (!job) {
       console.warn("⚠️ twilioInboundDeputyAllocation: no deputy job found for replied SID", {
         repliedSid,
+        fromPhone,
       });
       return res.status(200).send("<Response/>");
     }
 
-    const matchedNotification = (job.notifications || []).find(
-      (notification) =>
-        String(notification?.channel || "").toLowerCase() === "whatsapp" &&
-        String(notification?.providerMessageId || "") === repliedSid
+    const allocationNotification = (job.notifications || []).find(
+      (item) =>
+        String(item?.providerMessageId || "") === repliedSid &&
+        String(item?.channel || "") === "whatsapp" &&
+        String(item?.type || "") === "allocation"
     );
 
     const matchedApplication = findApplicationByAnyIdentity(job, {
-      musicianId: matchedNotification?.musicianId || "",
-      phone:
-        fromPhone ||
-        matchedNotification?.phone ||
-        "",
-      email: matchedNotification?.email || "",
+      musicianId: allocationNotification?.musicianId || job.allocatedMusicianId,
+      phone: fromPhone,
+      email: allocationNotification?.email || "",
     });
 
     const musician = await findMatchedMusicianFromJob(
       job,
-      matchedApplication?.musicianId ||
-        matchedNotification?.musicianId ||
+      allocationNotification?.musicianId ||
+        matchedApplication?.musicianId ||
         job.allocatedMusicianId
     );
 
@@ -1906,6 +1904,7 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       console.warn("⚠️ twilioInboundDeputyAllocation: musician not found", {
         jobId: String(job._id),
         repliedSid,
+        fromPhone,
       });
       return res.status(200).send("<Response/>");
     }
@@ -1934,7 +1933,7 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
             .filter(Boolean)
             .join(" ")
             .trim()}`,
-          providerMessageId: repliedSid,
+          providerMessageId: normaliseString(req.body?.MessageSid || ""),
           status: "sent",
           sentAt: new Date(),
         },
@@ -1958,8 +1957,7 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       job.bookingConfirmedAt = null;
 
       job.applications = (job.applications || []).map((application) => {
-        const sameMusician =
-          asObjectIdString(application?.musicianId) === safeMusicianId;
+        const sameMusician = asObjectIdString(application?.musicianId) === safeMusicianId;
 
         return {
           ...application,
@@ -1989,7 +1987,7 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
             .filter(Boolean)
             .join(" ")
             .trim()}`,
-          providerMessageId: repliedSid,
+          providerMessageId: normaliseString(req.body?.MessageSid || ""),
           status: "sent",
           sentAt: new Date(),
         },
