@@ -5052,11 +5052,11 @@ export const processAvailabilityReplyFlow = async ({
 export const twilioInbound = async (req, res) => {
   console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
 
-  // ✅ Immediately acknowledge Twilio to prevent retries
-  res
-    .status(200)
-    .type("text/xml")
-    .send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      // ✅ Immediately acknowledge Twilio to prevent retries
+      res
+        .status(200)
+        .type("text/xml")
+        .send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 
   // --- local helpers (self-contained, no external deps required) ---
   const FRONTEND_BASE =
@@ -5133,6 +5133,8 @@ export const twilioInbound = async (req, res) => {
 
     return null;
   };
+
+  
 
   const classifyDeputyAllocationReply = (s = "") => {
     const t = String(s || "").trim().toLowerCase();
@@ -5360,7 +5362,7 @@ export const twilioInbound = async (req, res) => {
           repliedSid,
         });
 
-        /* ---------------------------------------------------------------------- */
+             /* ---------------------------------------------------------------------- */
         /* 🎯 Deputy-job allocation reply handoff                                 */
         /* ---------------------------------------------------------------------- */
         const deputyAllocationReply =
@@ -5373,6 +5375,7 @@ export const twilioInbound = async (req, res) => {
 
         if (repliedSid) {
           const { default: DeputyJob } = await import("../models/deputyJobModel.js");
+
           deputyAllocationJob = await DeputyJob.findOne({
             notifications: {
               $elemMatch: {
@@ -5404,10 +5407,11 @@ export const twilioInbound = async (req, res) => {
             { body: bodyObj },
             buildNoopRes()
           );
+
           return;
         }
 
-        /* ---------------------------------------------------------------------- */
+              /* ---------------------------------------------------------------------- */
         /* 🎟️ Booking reply handoff                                               */
         /* ---------------------------------------------------------------------- */
         const rawBtnId = String(btnId || "");
@@ -5493,16 +5497,10 @@ export const twilioInbound = async (req, res) => {
             bookingReply === "YES"
               ? "YESBOOK"
               : bookingReply === "NO_BOOKED"
-                ? "NOBOOK"
-                : bookingReply === "NO_LOC"
-                  ? "NOLOC"
-                  : String(
-                      bodyObj?.ButtonPayload ||
-                        btnId ||
-                        bodyObj?.Body ||
-                        bodyText ||
-                        ""
-                    );
+              ? "NOBOOK"
+              : bookingReply === "NO_LOC"
+              ? "NOLOC"
+              : String(bodyObj?.ButtonPayload || btnId || bodyObj?.Body || bodyText || "");
 
           const syntheticBookingBody = {
             ...bodyObj,
@@ -5510,15 +5508,15 @@ export const twilioInbound = async (req, res) => {
               bookingMsg?.enquiryId && bookingReply === "YES"
                 ? `YESBOOK_${bookingMsg.enquiryId}`
                 : bookingMsg?.enquiryId && bookingReply === "NO_BOOKED"
-                  ? `NOBOOK_${bookingMsg.enquiryId}`
-                  : String(bodyObj?.Body || bodyText || fallbackPayload || ""),
+                ? `NOBOOK_${bookingMsg.enquiryId}`
+                : String(bodyObj?.Body || bodyText || fallbackPayload || ""),
             ButtonText: String(bodyObj?.ButtonText || btnText || ""),
             ButtonPayload:
               bookingMsg?.enquiryId && bookingReply === "YES"
                 ? `YESBOOK_${bookingMsg.enquiryId}`
                 : bookingMsg?.enquiryId && bookingReply === "NO_BOOKED"
-                  ? `NOBOOK_${bookingMsg.enquiryId}`
-                  : String(bodyObj?.ButtonPayload || btnId || fallbackPayload || ""),
+                ? `NOBOOK_${bookingMsg.enquiryId}`
+                : String(bodyObj?.ButtonPayload || btnId || fallbackPayload || ""),
             OriginalRepliedMessageSid:
               repliedSid || bodyObj?.OriginalRepliedMessageSid || "",
             WaId: bodyObj?.WaId,
