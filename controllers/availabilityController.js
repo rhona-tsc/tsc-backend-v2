@@ -5403,53 +5403,72 @@ res
         /* ---------------------------------------------------------------------- */
         /* 🎟️ Booking reply handoff                                               */
         /* ---------------------------------------------------------------------- */
-        const bookingReply =
-          classifyBookingReply(btnText) ||
-          classifyBookingReply(btnId) ||
-          classifyBookingReply(bodyText) ||
-          null;
+      const rawBtnId = String(btnId || "");
+const rawBodyText = String(bodyText || "");
+const rawBtnText = String(btnText || "");
 
-        const bookingLooksLikePayload =
-          /^YESBOOK_/i.test(String(btnId || "")) ||
-          /^NOBOOK_/i.test(String(btnId || "")) ||
-          /^YESBOOK_/i.test(String(bodyText || "")) ||
-          /^NOBOOK_/i.test(String(bodyText || "")) ||
-          String(btnId || "").toLowerCase() === "yes" ||
-          String(btnId || "").toLowerCase() === "no" ||
-          String(btnId || "").toLowerCase() === "noloc";
+const bookingPayloadMatch =
+  rawBtnId.match(/^YESBOOK_(\S+)$/i) ||
+  rawBtnId.match(/^NOBOOK_(\S+)$/i) ||
+  rawBodyText.match(/^YESBOOK_(\S+)$/i) ||
+  rawBodyText.match(/^NOBOOK_(\S+)$/i);
 
-        let bookingMsg = null;
+const bookingLooksExplicit =
+  /^YESBOOK_/i.test(rawBtnId) ||
+  /^NOBOOK_/i.test(rawBtnId) ||
+  /^YESBOOK_/i.test(rawBodyText) ||
+  /^NOBOOK_/i.test(rawBodyText);
 
-        if (requestId) {
-          bookingMsg = await EnquiryMessage.findOne({
-            enquiryId: requestId,
-            "meta.kind": "booking",
-          })
-            .select("_id enquiryId phone messageSid")
-            .lean();
-        }
+const bookingReply = bookingLooksExplicit
+  ? (
+      classifyBookingReply(rawBtnText) ||
+      classifyBookingReply(rawBtnId) ||
+      classifyBookingReply(rawBodyText) ||
+      null
+    )
+  : null;
 
-        if (!bookingMsg && repliedSid) {
-          bookingMsg = await EnquiryMessage.findOne({
-            messageSid: repliedSid,
-            "meta.kind": "booking",
-          })
-            .select("_id enquiryId phone messageSid")
-            .lean();
-        }
+let bookingMsg = null;
 
-        if (!bookingMsg && sender) {
-          bookingMsg = await EnquiryMessage.findOne({
-            phone: sender,
-            "meta.kind": "booking",
-            $or: [{ reply: null }, { reply: { $exists: false } }],
-          })
-            .sort({ createdAt: -1 })
-            .select("_id enquiryId phone messageSid")
-            .lean();
-        }
+if (requestId) {
+  bookingMsg = await EnquiryMessage.findOne({
+    enquiryId: requestId,
+    "meta.kind": "booking",
+  })
+    .select("_id enquiryId phone messageSid")
+    .lean();
+}
 
-        if (bookingReply || bookingLooksLikePayload || bookingMsg) {
+if (!bookingMsg && repliedSid) {
+  bookingMsg = await EnquiryMessage.findOne({
+    messageSid: repliedSid,
+    "meta.kind": "booking",
+  })
+    .select("_id enquiryId phone messageSid")
+    .lean();
+}
+
+if (!bookingMsg && bookingPayloadMatch?.[1]) {
+  bookingMsg = await EnquiryMessage.findOne({
+    enquiryId: bookingPayloadMatch[1],
+    "meta.kind": "booking",
+  })
+    .select("_id enquiryId phone messageSid")
+    .lean();
+}
+
+if (!bookingMsg && sender && bookingLooksExplicit) {
+  bookingMsg = await EnquiryMessage.findOne({
+    phone: sender,
+    "meta.kind": "booking",
+    $or: [{ reply: null }, { reply: { $exists: false } }],
+  })
+    .sort({ createdAt: -1 })
+    .select("_id enquiryId phone messageSid")
+    .lean();
+}
+
+if (bookingMsg || bookingLooksExplicit) {
           console.log(
             "🎟️ [twilioInbound] routing inbound reply to booking flow",
             {
