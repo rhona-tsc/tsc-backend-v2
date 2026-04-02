@@ -372,11 +372,17 @@ export const sendDeputyAllocationWhatsApp = async ({
     ? formatNiceDate(job.eventDate)
     : "TBC";
 
-  const location =
-    job?.venue ||
-    job?.locationName ||
-    job?.location ||
-    "Location TBC";
+  const locationParts = [
+    job?.venue || job?.locationName || "",
+    job?.county || "",
+    job?.postcode || "",
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+
+  const location = locationParts.length
+    ? Array.from(new Set(locationParts)).join(", ")
+    : job?.location || "Location TBC";
 
   const fee = String(Number(job?.fee || 0) || "");
   const firstName =
@@ -397,8 +403,9 @@ export const sendDeputyAllocationWhatsApp = async ({
 
   const smsBody = [
     `Hi ${firstName},`,
-    `You've been selected for a booking on ${formattedDate} in ${location} as ${roleLabel} with ${actName} at a fee of £${fee || "TBC"}.`,
-    "Please confirm whether you'd like to accept the booking.",
+    `You've been selected for a booking on ${formattedDate} in ${location} for the role of ${roleLabel} for the job titled \"${actName}\", at a fee of £${fee || "TBC"}.`,
+    "As you applied for this gig, please confirm whether you'd like to accept the booking.",
+    "🤍 TSC",
   ].join("\n");
 
   return sendWhatsAppMessage({
@@ -418,6 +425,12 @@ export const sendDeputyAllocationWhatsApp = async ({
       "4": roleLabel,
       "5": actName,
       "6": fee || "TBC",
+      firstName: String(firstName || "there").trim() || "there",
+      date: formattedDate,
+      location,
+      role: roleLabel,
+      actName,
+      fee: fee || "TBC",
     },
   });
 };
