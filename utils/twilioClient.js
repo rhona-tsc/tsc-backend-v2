@@ -137,6 +137,25 @@ export async function sendWhatsAppMessage(opts = {}) {
     return { first, last, firstName: first, lastName: last, displayName: s };
   };
 
+  const getFirstName = (person = {}) =>
+    String(
+      person?.firstName ||
+      person?.firstname ||
+      person?.basicInfo?.firstName ||
+      person?.name ||
+      ""
+    )
+      .trim()
+      .split(/\s+/)[0] || "there";
+
+  const getLastName = (person = {}) =>
+    String(
+      person?.lastName ||
+      person?.lastname ||
+      person?.basicInfo?.lastName ||
+      ""
+    ).trim();
+
   const logIdentity = (label, obj = {}) => {
     const firstName =
       obj.firstName ||
@@ -179,9 +198,9 @@ export async function sendWhatsAppMessage(opts = {}) {
   };
 
   const displayNameOf = (p = {}, log = true, label = "displayNameOf") => {
-    const fn = (p.firstName || p.name || "").trim();
-    const ln = (p.lastName || "").trim();
-    const dn = fn && ln ? `${fn} ${ln}` : fn || ln || "";
+    const fn = getFirstName(p);
+    const ln = getLastName(p);
+    const dn = [fn === "there" ? "" : fn, ln].filter(Boolean).join(" ") || String(p?.name || "").trim();
     if (log) logIdentity(label, { ...p, displayName: dn });
     return dn;
   };
@@ -239,9 +258,10 @@ const memberNames = firstLast(memberDisplayName);
     addressRaw: address,
   });
 
-  // enrich variables for ContentSid templates
+  const resolvedFirstName = getFirstName(member);
+
   let enrichedVars = {
-    firstName: member?.firstName || member?.name || "Musician",
+    firstName: resolvedFirstName,
     date: formattedDate,
     location: effectiveLocation,
     fee: String(formattedFee).replace(/[^0-9.]/g, ""),
@@ -249,6 +269,7 @@ const memberNames = firstLast(memberDisplayName);
     actName: actData?.tscName || actData?.name || "TSC Act",
     ...(variables || {}),
   };
+  enrichedVars.firstName = String(enrichedVars.firstName || resolvedFirstName || "there").trim() || "there";
   enrichedVars.fee = String(enrichedVars.fee ?? "").replace(/[^0-9.]/g, "");
 
   // add correlation variables so templates can show them
@@ -260,7 +281,9 @@ const memberNames = firstLast(memberDisplayName);
   };
 
   // REQUIRED for Quick Reply button IDs (YES{{7}} etc.)
-  enrichedVars["7"] = requestId || "";
+  if (requestId) {
+    enrichedVars["7"] = requestId;
+  }
 
   console.log("📨 [sendWhatsAppMessage] PRE-SEND", {
     to: toE,
@@ -285,7 +308,10 @@ const memberNames = firstLast(memberDisplayName);
   /* ────────────────────────────────────────────────────────────────────────────
    * ⬇️ SEND VIA TWILIO, THEN PERSIST outboundSid FOR INBOUND MATCHING
    * ──────────────────────────────────────────────────────────────────────────── */
-  const useContent = !!(contentSid || process.env.TWILIO_ENQUIRY_SID);
+  const useContent = !!(
+    (contentSid || process.env.TWILIO_ENQUIRY_SID) &&
+    (!buttons || buttons.length === 0 || requestId)
+  );
   let result = null;
 
   try {
@@ -355,8 +381,11 @@ export const sendDeputyAllocationWhatsApp = async ({
     "Location TBC";
 
   const fee = String(Number(job?.fee || 0) || "");
+  const musicianId = musician?._id || musician?.musicianId || "";
   const firstName =
     musician?.firstName ||
+    musician?.firstname ||
+    musician?.basicInfo?.firstName ||
     musician?.name ||
     "there";
 
@@ -371,8 +400,8 @@ export const sendDeputyAllocationWhatsApp = async ({
     `Date: ${formattedDate}`,
     `Location: ${location}`,
     fee ? `Fee: £${fee}` : "Fee: TBC",
-    `Reply ACCEPT_DEPUTY_${job?._id}_${musician?._id || musician?.musicianId} to accept.`,
-    `Reply DECLINE_DEPUTY_${job?._id}_${musician?._id || musician?.musicianId} to decline.`,
+    "Reply ACCEPT to accept this deputy booking.",
+    "Reply DECLINE to decline this deputy booking.",
   ].join("\n");
 
   return sendWhatsAppMessage({
@@ -384,26 +413,70 @@ export const sendDeputyAllocationWhatsApp = async ({
     finalFee: Number(job?.fee || 0),
     skipFeeCompute: true,
     smsBody,
+    requestId: acceptCode,
+    contentSid: process.env.TWILIO_DEPUTY_ALLOCATION_SID || undefined,
     variables: {
+      "1": String(firstName || "there").trim() || "there",
+      "2": formattedDate,
+      "3": location,
+      "4": fee,
+      "5": job?.instrument || job?.title || "Deputy",
+      "6": actName,
+      "7": acceptCode || "",
       firstName,
       date: formattedDate,
       location,
       fee,
       role: job?.instrument || job?.title || "Deputy",
       actName,
-      requestId: acceptCode,
-      requestCode: acceptCode,
-      "1": firstName,
-      "2": formattedDate,
-      "3": location,
-      "4": fee,
-      "5": job?.instrument || job?.title || "Deputy",
-      "6": actName,
-      "7": acceptCode,
-      acceptCode,
-      declineCode,
+      requestId: acceptCode || "",
+      requestCode: acceptCode || "",
+      acceptCode: acceptCode || "",
+      declineCode: declineCode || "",
+      musicianId: musicianId ? String(musicianId) : "",
+      deputyJobId: job?._id ? String(job._id) : "",
     },
   });
+};
+
+export const sendDeputyAllocationDeclinedWhatsApp = async ({
+  to,
+  job,
+  musician,
+}) => {
+  const formattedDate = job?.eventDate
+    ? formatNiceDate(job.eventDate)
+    : "TBC";
+
+  const location =
+    job?.venue ||
+    job?.locationName ||
+    job?.location ||
+    "Location TBC";
+
+  const fee = String(Number(job?.fee || 0) || "");
+  const firstName =
+    musician?.firstName ||
+    musician?.firstname ||
+    musician?.basicInfo?.firstName ||
+    musician?.name ||
+    "there";
+
+  const actName =
+    job?.title ||
+    job?.instrument ||
+    "Deputy opportunity";
+
+  const body = [
+    `Hi ${firstName},`,
+    `Thanks for letting us know. We have marked you as declined for ${actName}.`,
+    `Date: ${formattedDate}`,
+    `Location: ${location}`,
+    fee ? `Fee: £${fee}` : "Fee: TBC",
+    "No problem at all — we’ll move on to the next available deputy.",
+  ].join("\n");
+
+  return sendWhatsAppText(to, body);
 };
 
 export const sendSMSMessage = async (to, body) => {
@@ -466,6 +539,7 @@ export async function sendWhatsAppText(to, body) {
 export default {
   sendWhatsAppMessage,
   sendDeputyAllocationWhatsApp,
+  sendDeputyAllocationDeclinedWhatsApp,
   sendSMSMessage,
   sendWhatsAppText,
   toE164,
