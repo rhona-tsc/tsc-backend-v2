@@ -5053,10 +5053,10 @@ export const twilioInbound = async (req, res) => {
   console.log(`🟢 [twilioInbound] START at ${new Date().toISOString()}`);
 
   // ✅ Immediately acknowledge Twilio to prevent retries
-res
-  .status(200)
-  .type("text/xml")
-  .send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  res
+    .status(200)
+    .type("text/xml")
+    .send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
 
   // --- local helpers (self-contained, no external deps required) ---
   const FRONTEND_BASE =
@@ -5164,9 +5164,15 @@ res
   };
 
   const buildNoopRes = () => ({
-    status() { return this; },
-    send() { return this; },
-    json() { return this; },
+    status() {
+      return this;
+    },
+    send() {
+      return this;
+    },
+    json() {
+      return this;
+    },
   });
 
   // Covers Content API & non-Content interactive payloads (legacy)
@@ -5177,7 +5183,7 @@ res
         "ButtonResponse[Id]",
         "ButtonPayload",
         "ListResponse[Id]",
-        "ListId",
+        "ListId"
       ) || null;
     const title =
       pick(
@@ -5185,14 +5191,16 @@ res
         "ButtonResponse[Text]",
         "ButtonText",
         "ListResponse[Title]",
-        "ListTitle",
+        "ListTitle"
       ) || null;
 
-    if (!id) return { requestId: null, reply: null, source: null, title: null };
+    if (!id) {
+      return { requestId: null, reply: null, source: null, title: null };
+    }
 
     // Expect "YES:RID" / "NO:RID" / "UNAVAILABLE:RID" on non-Content
     const [raw, rid] = String(id).split(":");
-    const reply = raw?.toLowerCase().startsWith("yes")
+    const parsedReply = raw?.toLowerCase().startsWith("yes")
       ? "yes"
       : raw?.toLowerCase().startsWith("un")
         ? "unavailable"
@@ -5202,7 +5210,7 @@ res
 
     return {
       requestId: (rid || "").toUpperCase() || null,
-      reply,
+      reply: parsedReply,
       source: "button",
       title,
     };
@@ -5214,10 +5222,10 @@ res
 
     // allow inline "#ABC123" anywhere in text
     const m = text.match(/#([A-Z0-9]{5,12})/i);
-    const requestId = m ? m[1].toUpperCase() : null;
+    const parsedRequestId = m ? m[1].toUpperCase() : null;
 
     const t = text.replace(/#\w+/g, "").trim().toLowerCase();
-    const reply = t.startsWith("y")
+    const parsedReply = t.startsWith("y")
       ? "yes"
       : t.startsWith("un")
         ? "unavailable"
@@ -5225,7 +5233,7 @@ res
           ? "no"
           : null;
 
-    return { requestId, reply, source: "text" };
+    return { requestId: parsedRequestId, reply: parsedReply, source: "text" };
   }
   // --- end helpers ---
 
@@ -5244,7 +5252,7 @@ res
           !bodyObj["ListResponse[Id]"] &&
           !bodyObj["ListResponse[Title]"];
         const inboundSid = String(
-          bodyObj?.MessageSid || bodyObj?.SmsMessageSid || "",
+          bodyObj?.MessageSid || bodyObj?.SmsMessageSid || ""
         );
         const fromRaw = String(bodyObj?.WaId || bodyObj?.From || "");
         if (noContent) {
@@ -5270,15 +5278,15 @@ res
             bodyObj,
             "ButtonText",
             "ButtonResponse[Text]",
-            "Interactive[ButtonReply][Title]",
+            "Interactive[ButtonReply][Title]"
           ) || "";
         const btnId =
           pick(
             bodyObj,
-            "ButtonPayload", // Content quick reply → ID (static, from template)
-            "ButtonResponse[Id]", // non-Content interactive
-            "ListResponse[Id]", // list id
-            "Interactive[ButtonReply][Id]", // alternative shape
+            "ButtonPayload",
+            "ButtonResponse[Id]",
+            "ListResponse[Id]",
+            "Interactive[ButtonReply][Id]"
           ) || "";
 
         // Deterministic join to the exact outbound message we sent
@@ -5287,7 +5295,7 @@ res
             bodyObj,
             "OriginalRepliedMessageSid",
             "InReplyToSid",
-            "QuotedMessageSid",
+            "QuotedMessageSid"
           ) || null;
 
         // First-pass reply classification
@@ -5297,32 +5305,27 @@ res
           classifyReply(bodyText) ||
           null;
 
-        // Accept: "YES:RID", "YES RID", "YES-RID", "YESRID" (no delimiter), or just "RID"
         const tryExtractRid = (s) => {
           if (!s) return null;
           const t = String(s).trim();
 
-          // 1) YES/NO/UNAVAILABLE with optional delimiter + RID
           const m1 = t.match(
-            /^(?:YES|NO|UNAVAILABLE)[:\s-]?([A-Z0-9]{5,12})$/i,
+            /^(?:YES|NO|UNAVAILABLE)[:\s-]?([A-Z0-9]{5,12})$/i
           );
           if (m1) return m1[1].toUpperCase();
 
-          // 2) plain RID alone
           const m2 = t.match(/^([A-Z0-9]{5,12})$/i);
           if (m2) return m2[1].toUpperCase();
 
           return null;
         };
 
-        // RID extraction from multiple carriers
         let requestId =
           tryExtractRid(btnId) ||
           tryExtractRid(btnText) ||
           (String(bodyText || "").match(/#([A-Z0-9]{5,12})/i) || [])[1] ||
           null;
 
-        // Legacy parsers as soft fallback (do NOT shadow vars)
         const iParse = parseInteractive(bodyObj);
         if (!requestId && iParse.requestId) requestId = iParse.requestId;
         if (!reply && iParse.reply) reply = iParse.reply;
@@ -5331,7 +5334,6 @@ res
         if (!requestId && tParse.requestId) requestId = tParse.requestId;
         if (!reply && tParse.reply) reply = tParse.reply;
 
-        // Legacy payload JSON (safe try)
         try {
           const parsedPayload = parsePayload ? parsePayload(btnId) : null;
           if (!reply && parsedPayload?.reply) reply = parsedPayload.reply;
@@ -5372,8 +5374,13 @@ res
         if (repliedSid) {
           const { default: DeputyJob } = await import("../models/deputyJobModel.js");
           deputyAllocationJob = await DeputyJob.findOne({
-            "notifications.providerMessageId": repliedSid,
-            "notifications.type": "allocation",
+            notifications: {
+              $elemMatch: {
+                providerMessageId: repliedSid,
+                channel: "whatsapp",
+                type: "allocation",
+              },
+            },
           })
             .select("_id")
             .lean();
@@ -5403,72 +5410,72 @@ res
         /* ---------------------------------------------------------------------- */
         /* 🎟️ Booking reply handoff                                               */
         /* ---------------------------------------------------------------------- */
-      const rawBtnId = String(btnId || "");
-const rawBodyText = String(bodyText || "");
-const rawBtnText = String(btnText || "");
+        const rawBtnId = String(btnId || "");
+        const rawBodyText = String(bodyText || "");
+        const rawBtnText = String(btnText || "");
 
-const bookingPayloadMatch =
-  rawBtnId.match(/^YESBOOK_(\S+)$/i) ||
-  rawBtnId.match(/^NOBOOK_(\S+)$/i) ||
-  rawBodyText.match(/^YESBOOK_(\S+)$/i) ||
-  rawBodyText.match(/^NOBOOK_(\S+)$/i);
+        const bookingPayloadMatch =
+          rawBtnId.match(/^YESBOOK_(\S+)$/i) ||
+          rawBtnId.match(/^NOBOOK_(\S+)$/i) ||
+          rawBodyText.match(/^YESBOOK_(\S+)$/i) ||
+          rawBodyText.match(/^NOBOOK_(\S+)$/i);
 
-const bookingLooksExplicit =
-  /^YESBOOK_/i.test(rawBtnId) ||
-  /^NOBOOK_/i.test(rawBtnId) ||
-  /^YESBOOK_/i.test(rawBodyText) ||
-  /^NOBOOK_/i.test(rawBodyText);
+        const bookingLooksExplicit =
+          /^YESBOOK_/i.test(rawBtnId) ||
+          /^NOBOOK_/i.test(rawBtnId) ||
+          /^YESBOOK_/i.test(rawBodyText) ||
+          /^NOBOOK_/i.test(rawBodyText);
 
-const bookingReply = bookingLooksExplicit
-  ? (
-      classifyBookingReply(rawBtnText) ||
-      classifyBookingReply(rawBtnId) ||
-      classifyBookingReply(rawBodyText) ||
-      null
-    )
-  : null;
+        const bookingReply = bookingLooksExplicit
+          ? (
+              classifyBookingReply(rawBtnText) ||
+              classifyBookingReply(rawBtnId) ||
+              classifyBookingReply(rawBodyText) ||
+              null
+            )
+          : null;
 
-let bookingMsg = null;
+        let bookingMsg = null;
 
-if (requestId) {
-  bookingMsg = await EnquiryMessage.findOne({
-    enquiryId: requestId,
-    "meta.kind": "booking",
-  })
-    .select("_id enquiryId phone messageSid")
-    .lean();
-}
+        if (requestId) {
+          bookingMsg = await EnquiryMessage.findOne({
+            enquiryId: requestId,
+            "meta.kind": "booking",
+          })
+            .select("_id enquiryId phone messageSid")
+            .lean();
+        }
 
-if (!bookingMsg && repliedSid) {
-  bookingMsg = await EnquiryMessage.findOne({
-    messageSid: repliedSid,
-    "meta.kind": "booking",
-  })
-    .select("_id enquiryId phone messageSid")
-    .lean();
-}
+        if (!bookingMsg && repliedSid) {
+          bookingMsg = await EnquiryMessage.findOne({
+            messageSid: repliedSid,
+            "meta.kind": "booking",
+          })
+            .select("_id enquiryId phone messageSid")
+            .lean();
+        }
 
-if (!bookingMsg && bookingPayloadMatch?.[1]) {
-  bookingMsg = await EnquiryMessage.findOne({
-    enquiryId: bookingPayloadMatch[1],
-    "meta.kind": "booking",
-  })
-    .select("_id enquiryId phone messageSid")
-    .lean();
-}
+        if (!bookingMsg && bookingPayloadMatch?.[1]) {
+          bookingMsg = await EnquiryMessage.findOne({
+            enquiryId: bookingPayloadMatch[1],
+            "meta.kind": "booking",
+          })
+            .select("_id enquiryId phone messageSid")
+            .lean();
+        }
 
-if (!bookingMsg && sender && bookingLooksExplicit) {
-  bookingMsg = await EnquiryMessage.findOne({
-    phone: sender,
-    "meta.kind": "booking",
-    $or: [{ reply: null }, { reply: { $exists: false } }],
-  })
-    .sort({ createdAt: -1 })
-    .select("_id enquiryId phone messageSid")
-    .lean();
-}
+        if (!bookingMsg && sender && bookingLooksExplicit) {
+          bookingMsg = await EnquiryMessage.findOne({
+            phone: sender,
+            "meta.kind": "booking",
+            $or: [{ reply: null }, { reply: { $exists: false } }],
+          })
+            .sort({ createdAt: -1 })
+            .select("_id enquiryId phone messageSid")
+            .lean();
+        }
 
-if (bookingMsg || bookingLooksExplicit) {
+        if (bookingMsg || bookingLooksExplicit) {
           console.log(
             "🎟️ [twilioInbound] routing inbound reply to booking flow",
             {
@@ -5489,7 +5496,13 @@ if (bookingMsg || bookingLooksExplicit) {
                 ? "NOBOOK"
                 : bookingReply === "NO_LOC"
                   ? "NOLOC"
-                  : String(bodyObj?.ButtonPayload || btnId || bodyObj?.Body || bodyText || "");
+                  : String(
+                      bodyObj?.ButtonPayload ||
+                        btnId ||
+                        bodyObj?.Body ||
+                        bodyText ||
+                        ""
+                    );
 
           const syntheticBookingBody = {
             ...bodyObj,
@@ -5552,12 +5565,12 @@ if (bookingMsg || bookingLooksExplicit) {
                 "inbound.requestId": requestId,
               },
             },
-            { new: true },
+            { new: true }
           );
           if (!updated) {
             console.log(
               "⚠️ requestId not found, will try repliedSid/phone fallbacks",
-              { requestId },
+              { requestId }
             );
           }
         }
@@ -5580,7 +5593,7 @@ if (bookingMsg || bookingLooksExplicit) {
                   : {}),
               },
             },
-            { new: true },
+            { new: true }
           );
           if (!updated) {
             console.log("⚠️ repliedSid did not match any row by outboundSid", {
@@ -5615,7 +5628,7 @@ if (bookingMsg || bookingLooksExplicit) {
                   : {}),
               },
             },
-            { new: true, sort: { createdAt: -1 } },
+            { new: true, sort: { createdAt: -1 } }
           );
         }
 
@@ -5630,7 +5643,7 @@ if (bookingMsg || bookingLooksExplicit) {
               sender,
               candidateCount,
               hint: "With Content quick replies, some payloads lack RID. We now try requestId, then OriginalRepliedMessageSid→outboundSid, then latest 'awaiting reply' by phone.",
-            },
+            }
           );
           return;
         }
