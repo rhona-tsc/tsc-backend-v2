@@ -367,8 +367,6 @@ export const sendDeputyAllocationWhatsApp = async ({
   to,
   job,
   musician,
-  acceptCode,
-  declineCode,
 }) => {
   const formattedDate = job?.eventDate
     ? formatNiceDate(job.eventDate)
@@ -381,13 +379,16 @@ export const sendDeputyAllocationWhatsApp = async ({
     "Location TBC";
 
   const fee = String(Number(job?.fee || 0) || "");
-  const musicianId = musician?._id || musician?.musicianId || "";
   const firstName =
     musician?.firstName ||
     musician?.firstname ||
     musician?.basicInfo?.firstName ||
     musician?.name ||
     "there";
+
+  const roleLabel =
+    job?.instrument ||
+    "Deputy";
 
   const actName =
     job?.title ||
@@ -396,12 +397,8 @@ export const sendDeputyAllocationWhatsApp = async ({
 
   const smsBody = [
     `Hi ${firstName},`,
-    `You have been allocated for ${actName}.`,
-    `Date: ${formattedDate}`,
-    `Location: ${location}`,
-    fee ? `Fee: £${fee}` : "Fee: TBC",
-    "Reply ACCEPT to accept this deputy booking.",
-    "Reply DECLINE to decline this deputy booking.",
+    `You've been selected for a booking on ${formattedDate} in ${location} as ${roleLabel} with ${actName} at a fee of £${fee || "TBC"}.`,
+    "Please confirm whether you'd like to accept the booking.",
   ].join("\n");
 
   return sendWhatsAppMessage({
@@ -409,32 +406,18 @@ export const sendDeputyAllocationWhatsApp = async ({
     member: musician,
     dateISO: job?.eventDate || "",
     address: location,
-    role: job?.instrument || job?.title || "Deputy",
+    role: roleLabel,
     finalFee: Number(job?.fee || 0),
     skipFeeCompute: true,
     smsBody,
-    requestId: acceptCode,
-    contentSid: process.env.TWILIO_DEPUTY_ALLOCATION_SID || undefined,
+    contentSid: process.env.TWILIO_JOB_ALLOCATION_REQUEST_SID,
     variables: {
       "1": String(firstName || "there").trim() || "there",
       "2": formattedDate,
       "3": location,
-      "4": fee,
-      "5": job?.instrument || job?.title || "Deputy",
-      "6": actName,
-      "7": acceptCode || "",
-      firstName,
-      date: formattedDate,
-      location,
-      fee,
-      role: job?.instrument || job?.title || "Deputy",
-      actName,
-      requestId: acceptCode || "",
-      requestCode: acceptCode || "",
-      acceptCode: acceptCode || "",
-      declineCode: declineCode || "",
-      musicianId: musicianId ? String(musicianId) : "",
-      deputyJobId: job?._id ? String(job._id) : "",
+      "4": roleLabel,
+      "5": actName,
+      "6": fee || "TBC",
     },
   });
 };
