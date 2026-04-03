@@ -313,6 +313,7 @@ const ensureStripeReady = (res) => {
   return false;
 };
 
+
 const ensureCronSecret = (req, res) => {
   const expectedSecret = normaliseString(process.env.CRON_SECRET || process.env.DEPUTY_PAYOUT_CRON_SECRET || "");
 
@@ -337,6 +338,97 @@ const ensureCronSecret = (req, res) => {
   }
 
   return true;
+};
+
+const createOrRefreshDeputyJobSetupIntentInternal = async ({
+  job,
+  clientName = "",
+  clientEmail = "",
+  clientPhone = "",
+  createdBy = null,
+}) => {
+  if (!stripe) {
+    return {
+      success: false,
+      message: "Stripe is not configured on the server",
+      clientSecret: "",
+      setupIntentId: "",
+      stripeCustomerId: "",
+    };
+  }
+
+  const safeClientName = normaliseString(clientName || job?.clientName || "");
+  const safeClientEmail = normaliseEmail(clientEmail || job?.clientEmail || "");
+  const safeClientPhone = normaliseString(clientPhone || job?.clientPhone || "");
+
+  if (!safeClientEmail) {
+    return {
+      success: false,
+      message: "clientEmail is required before saving a card",
+      clientSecret: "",
+      setupIntentId: "",
+      stripeCustomerId: normaliseString(job?.stripeCustomerId || ""),
+    };
+  }
+
+  let stripeCustomerId = normaliseString(job?.stripeCustomerId || "");
+
+  if (!stripeCustomerId) {
+    const customer = await stripe.customers.create({
+      name: safeClientName || undefined,
+      email: safeClientEmail,
+      phone: safeClientPhone || undefined,
+      metadata: {
+        deputyJobId: String(job._id),
+      },
+    });
+    stripeCustomerId = customer.id;
+  } else {
+    await stripe.customers.update(stripeCustomerId, {
+      name: safeClientName || undefined,
+      email: safeClientEmail,
+      phone: safeClientPhone || undefined,
+      metadata: {
+        deputyJobId: String(job._id),
+      },
+    });
+  }
+
+  const setupIntent = await stripe.setupIntents.create({
+    customer: stripeCustomerId,
+    payment_method_types: ["card"],
+    usage: "off_session",
+    metadata: {
+      deputyJobId: String(job._id),
+    },
+  });
+
+  job.clientName = safeClientName;
+  job.clientEmail = safeClientEmail;
+  job.clientPhone = safeClientPhone;
+  job.stripeCustomerId = stripeCustomerId;
+  job.setupIntentId = setupIntent.id || "";
+  job.setupIntentStatus = setupIntent.status || "";
+  job.paymentStatus = "setup_pending";
+
+  pushPaymentEvent(job, {
+    type: "setup_intent_created",
+    status: setupIntent.status || "",
+    amount: Number(job.grossAmount || job.fee || 0),
+    currency: job.currency,
+    stripeCustomerId,
+    setupIntentId: setupIntent.id,
+    createdBy,
+    note: "SetupIntent created during deputy job creation",
+  });
+
+  return {
+    success: true,
+    clientSecret: setupIntent.client_secret || "",
+    setupIntentId: setupIntent.id || "",
+    stripeCustomerId,
+    paymentStatus: job.paymentStatus,
+  };
 };
 
 const attemptDeputyJobCharge = async ({ job, createdBy = null }) => {
@@ -1144,7 +1236,7 @@ export const createDeputyJob = async (req, res) => {
     const createdBy = req.user?._id || null;
     const createdByName = `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim();
     const createdByEmail = req.user?.email || "";
-const createdByPhone = req.user?.phone || req.user?.phoneNumber || "";
+    const createdByPhone = req.user?.phone || req.user?.phoneNumber || "";
 
     const job = await deputyJobModel.create({
       title: built.title,
@@ -1193,6 +1285,23 @@ const createdByPhone = req.user?.phone || req.user?.phoneNumber || "";
       previewMode: built.mode !== "send",
       workflowStage: built.mode === "send" ? "sent_to_matches" : "preview_ready",
     });
+
+    let setupIntentResult = null;
+
+    if (built.saveClientCard && built.clientEmail && stripe) {
+      try {
+        setupIntentResult = await createOrRefreshDeputyJobSetupIntentInternal({
+          job,
+          clientName: built.clientName,
+          clientEmail: built.clientEmail,
+          clientPhone: built.clientPhone,
+          createdBy,
+        });
+      } catch (setupIntentError) {
+        console.error("❌ createDeputyJob setup intent error:", setupIntentError);
+        job.paymentStatus = "setup_required";
+      }
+    }
 
     const matcherResult = await runMatcherForJob({
       job,
@@ -1272,6 +1381,14 @@ const createdByPhone = req.user?.phone || req.user?.phoneNumber || "";
       notifiedCount: job.notifiedCount,
       previewNotification: matcherResult.previewNotification,
       matchedMusicians: matcherResult.matches,
+      payment: setupIntentResult
+        ? {
+            clientSecret: setupIntentResult.clientSecret,
+            setupIntentId: setupIntentResult.setupIntentId,
+            stripeCustomerId: setupIntentResult.stripeCustomerId,
+            paymentStatus: setupIntentResult.paymentStatus,
+          }
+        : null,
     });
   } catch (error) {
     console.error("❌ createDeputyJob error:", error);
@@ -1504,67 +1621,20 @@ export const createDeputyJobSetupIntent = async (req, res) => {
       return res.status(404).json({ success: false, message: "Deputy job not found" });
     }
 
-    const clientName = normaliseString(req.body?.clientName || job.clientName || "");
-    const clientEmail = normaliseEmail(req.body?.clientEmail || job.clientEmail || "");
-    const clientPhone = normaliseString(req.body?.clientPhone || job.clientPhone || "");
+    const result = await createOrRefreshDeputyJobSetupIntentInternal({
+      job,
+      clientName: req.body?.clientName || job.clientName || "",
+      clientEmail: req.body?.clientEmail || job.clientEmail || "",
+      clientPhone: req.body?.clientPhone || job.clientPhone || "",
+      createdBy: req.user?._id || null,
+    });
 
-    if (!clientEmail) {
+    if (!result.success) {
       return res.status(400).json({
         success: false,
-        message: "clientEmail is required before saving a card",
+        message: result.message || "Failed to create SetupIntent",
       });
     }
-
-    let stripeCustomerId = normaliseString(job.stripeCustomerId || "");
-
-    if (!stripeCustomerId) {
-      const customer = await stripe.customers.create({
-        name: clientName || undefined,
-        email: clientEmail,
-        phone: clientPhone || undefined,
-        metadata: {
-          deputyJobId: String(job._id),
-        },
-      });
-      stripeCustomerId = customer.id;
-    } else {
-      await stripe.customers.update(stripeCustomerId, {
-        name: clientName || undefined,
-        email: clientEmail,
-        phone: clientPhone || undefined,
-        metadata: {
-          deputyJobId: String(job._id),
-        },
-      });
-    }
-
-    const setupIntent = await stripe.setupIntents.create({
-      customer: stripeCustomerId,
-      payment_method_types: ["card"],
-      usage: "off_session",
-      metadata: {
-        deputyJobId: String(job._id),
-      },
-    });
-
-    job.clientName = clientName;
-    job.clientEmail = clientEmail;
-    job.clientPhone = clientPhone;
-    job.stripeCustomerId = stripeCustomerId;
-    job.setupIntentId = setupIntent.id || "";
-    job.setupIntentStatus = setupIntent.status || "";
-    job.paymentStatus = "setup_pending";
-
-    pushPaymentEvent(job, {
-      type: "setup_intent_created",
-      status: setupIntent.status || "",
-      amount: Number(job.grossAmount || job.fee || 0),
-      currency: job.currency,
-      stripeCustomerId,
-      setupIntentId: setupIntent.id,
-      createdBy: req.user?._id || null,
-      note: "SetupIntent created for deputy job card capture",
-    });
 
     await job.save();
 
@@ -1573,10 +1643,10 @@ export const createDeputyJobSetupIntent = async (req, res) => {
     return res.json({
       success: true,
       message: "SetupIntent created",
-      clientSecret: setupIntent.client_secret,
-      setupIntentId: setupIntent.id,
-      stripeCustomerId,
-      paymentStatus: job.paymentStatus,
+      clientSecret: result.clientSecret,
+      setupIntentId: result.setupIntentId,
+      stripeCustomerId: result.stripeCustomerId,
+      paymentStatus: result.paymentStatus,
       job: formattedJob,
     });
   } catch (error) {
@@ -2169,6 +2239,15 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
     }
 
     const musicianName = [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim();
+    const musicianDisplayName = [
+      normaliseString(musician?.firstName || ""),
+      normaliseString(musician?.lastName || "").charAt(0)
+        ? `${normaliseString(musician?.lastName || "").charAt(0)}.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
     const jobTitle = normaliseString(job.title || job.instrument || "Deputy opportunity");
     const location =
       normaliseString(job.venue || job.locationName || job.location || "Location TBC");
@@ -2404,24 +2483,90 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
         }
       }
 
-      if (posterEmail) {
+   if (posterEmail) {
         try {
-          await sendEmail({
-            to: posterEmail,
-            subject: `Deputy declined: ${jobTitle}`,
-            html: `
-              <p>Hi,</p>
-              <p><strong>${musicianName || "The allocated deputy"}</strong> has declined the deputy job for <strong>${jobTitle}</strong>.</p>
-              <p><strong>Date:</strong> ${dateText}</p>
-              <p><strong>Location:</strong> ${location}</p>
-              <p>The job has been reopened so you can allocate another deputy.</p>
-              <p>Best,<br/>The Supreme Collective</p>
-            `,
-          });
-        } catch (posterEmailError) {
-          console.error("❌ Failed to send poster deputy decline email:", posterEmailError);
-        }
+          const requiredInstruments = normaliseList(job?.requiredInstruments);
+          const essentialSkills = normaliseList(job?.essentialRoles);
+          const requiredSkills = normaliseList(job?.requiredSkills);
+          const preferredExtraSkills = normaliseList(job?.desiredRoles);
+          const secondaryInstruments = normaliseList(job?.secondaryInstruments);
+          const genres = normaliseList(job?.genres);
+          const tags = normaliseList(job?.tags);
+          const setLengths = normaliseList(job?.setLengths);
+          const whatsIncluded = normaliseList(job?.whatsIncluded);
+          const claimableExpenses = normaliseList(job?.claimableExpenses);
+          const callTime = normaliseString(job?.callTime || job?.startTime || "");
+          const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
+          const notes = normaliseString(job?.notes || "");
+
+        await sendEmail({
+          to: posterEmail,
+          subject: `Deputy declined: ${jobTitle}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
+              <p>Hi ${escapeHtml(normaliseString(job?.createdByName || "there"))},</p>
+
+              <p>
+                We wanted to let you know that <strong>${escapeHtml(
+                  musicianDisplayName || "the allocated deputy"
+                )}</strong> is no longer available for <strong>${escapeHtml(jobTitle)}</strong>.
+              </p>
+
+              <p>
+                The deputy job has now been <strong>reopened</strong>, so you can return to the job board and allocate another deputy when ready.
+              </p>
+
+              <p>
+                To help make reallocation as quick and straightforward as possible, we’ve included the full job details below for reference.
+              </p>
+
+              <h3 style="margin: 24px 0 10px;">Declined deputy</h3>
+              <ul style="padding-left: 20px; margin: 0 0 18px;">
+                <li><strong>Name:</strong> ${escapeHtml(musicianDisplayName || "Not provided")}</li>
+                <li><strong>Email:</strong> ${escapeHtml(musicianEmail || "Not provided")}</li>
+                <li><strong>Phone:</strong> ${escapeHtml(musicianPhone || "Not provided")}</li>
+              </ul>
+
+              <h3 style="margin: 24px 0 10px;">Job details</h3>
+              <ul style="padding-left: 20px; margin: 0 0 18px;">
+                ${renderDetailRow("Job", jobTitle)}
+                ${renderDetailRow("Date", dateText)}
+                ${renderDetailRow("Call time", callTime)}
+                ${renderDetailRow("Finish time", finishTime)}
+                ${renderDetailRow("Location", location)}
+                ${renderDetailRow("Fee", feeText)}
+                ${renderDetailListRow("Required instruments", requiredInstruments)}
+                ${renderDetailListRow("Essential skills", essentialSkills)}
+                ${renderDetailListRow("Required skills", requiredSkills)}
+                ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
+                ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
+                ${renderDetailListRow("Genres", genres)}
+                ${renderDetailListRow("Tags", tags)}
+                ${renderDetailListRow("Set lengths", setLengths)}
+                ${renderDetailListRow("What's included", whatsIncluded)}
+                ${renderDetailListRow("Claimable expenses", claimableExpenses)}
+                ${renderDetailRow("Notes", notes)}
+              </ul>
+
+              <p>
+                Thank you for using <strong>The Supreme Collective</strong> to source your deputy. If you’d like, you can now allocate another suitable applicant or return to the job board to review your options.
+              </p>
+
+              <p>
+                If you need any help choosing a replacement or if anything about the job has changed, just reply to this email and we’ll be happy to help.
+              </p>
+
+              <p>
+                Best wishes,<br/>
+                <strong>The Supreme Collective</strong>
+              </p>
+            </div>
+          `,
+        });
+      } catch (posterEmailError) {
+        console.error("❌ Failed to send poster deputy decline email:", posterEmailError);
       }
+    }
 
       return res.status(200).send("<Response/>");
     }
