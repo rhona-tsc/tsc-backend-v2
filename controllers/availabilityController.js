@@ -5365,51 +5365,51 @@ export const twilioInbound = async (req, res) => {
              /* ---------------------------------------------------------------------- */
         /* 🎯 Deputy-job allocation reply handoff                                 */
         /* ---------------------------------------------------------------------- */
-        const deputyAllocationReply =
-          classifyDeputyAllocationReply(btnText) ||
-          classifyDeputyAllocationReply(btnId) ||
-          classifyDeputyAllocationReply(bodyText) ||
-          null;
+     const deputyAllocationReply =
+  classifyDeputyAllocationReply(btnText) ||
+  classifyDeputyAllocationReply(btnId) ||
+  classifyDeputyAllocationReply(bodyText) ||
+  null;
 
-        let deputyAllocationJob = null;
+let deputyAllocationJob = null;
 
-        if (repliedSid) {
-          const { default: DeputyJob } = await import("../models/deputyJobModel.js");
+if (repliedSid) {
+  const { default: DeputyJob } = await import("../models/deputyJobModel.js");
 
-          deputyAllocationJob = await DeputyJob.findOne({
-            notifications: {
-              $elemMatch: {
-                providerMessageId: repliedSid,
-                channel: "whatsapp",
-                type: "allocation",
-              },
-            },
-          })
-            .select("_id")
-            .lean();
-        }
+  deputyAllocationJob = await DeputyJob.findOne({
+    notifications: {
+      $elemMatch: {
+        providerMessageId: repliedSid,
+        channel: "whatsapp",
+        type: { $in: ["allocation_request", "allocation"] },
+      },
+    },
+  })
+    .select("_id notifications allocatedMusicianId applications")
+    .lean();
+}
 
-        if (deputyAllocationReply && deputyAllocationJob) {
-          console.log(
-            "🎯 [twilioInbound] routing inbound reply to deputy allocation flow",
-            {
-              sender,
-              deputyAllocationReply,
-              deputyJobId: deputyAllocationJob?._id || null,
-              repliedSid,
-            }
-          );
+if (deputyAllocationReply && deputyAllocationJob) {
+  console.log(
+    "🎯 [twilioInbound] routing inbound reply to deputy allocation flow",
+    {
+      sender,
+      deputyAllocationReply,
+      deputyJobId: deputyAllocationJob?._id || null,
+      repliedSid,
+    }
+  );
 
-          const { twilioInboundDeputyAllocation } =
-            await import("./deputyJobController.js");
+  const { twilioInboundDeputyAllocation } =
+    await import("./deputyJobController.js");
 
-          await twilioInboundDeputyAllocation(
-            { body: bodyObj },
-            buildNoopRes()
-          );
+  await twilioInboundDeputyAllocation(
+    { body: bodyObj },
+    buildNoopRes()
+  );
 
-          return;
-        }
+  return;
+}
 
               /* ---------------------------------------------------------------------- */
         /* 🎟️ Booking reply handoff                                               */

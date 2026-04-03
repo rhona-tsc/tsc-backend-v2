@@ -1865,15 +1865,15 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       return res.status(200).send("<Response/>");
     }
 
-    const job = await deputyJobModel.findOne({
-      notifications: {
-        $elemMatch: {
-          providerMessageId: repliedSid,
-          channel: "whatsapp",
-          type: "allocation",
-        },
-      },
-    });
+  const job = await deputyJobModel.findOne({
+  notifications: {
+    $elemMatch: {
+      providerMessageId: repliedSid,
+      channel: "whatsapp",
+      type: { $in: ["allocation_request", "allocation"] },
+    },
+  },
+});
 
     if (!job) {
       console.warn("⚠️ twilioInboundDeputyAllocation: no deputy job found for replied SID", {
@@ -1883,12 +1883,12 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       return res.status(200).send("<Response/>");
     }
 
-    const allocationNotification = (job.notifications || []).find(
-      (item) =>
-        String(item?.providerMessageId || "") === repliedSid &&
-        String(item?.channel || "") === "whatsapp" &&
-        String(item?.type || "") === "allocation"
-    );
+   const allocationNotification = (job.notifications || []).find(
+  (item) =>
+    String(item?.providerMessageId || "") === repliedSid &&
+    String(item?.channel || "") === "whatsapp" &&
+    ["allocation_request", "allocation"].includes(String(item?.type || ""))
+);
 
     const matchedApplication = findApplicationByAnyIdentity(job, {
       musicianId: allocationNotification?.musicianId || job.allocatedMusicianId,
