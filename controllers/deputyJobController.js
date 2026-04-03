@@ -719,10 +719,19 @@ const buildJobNotificationPreview = ({
             </div>
           </div>
 
-          <p style="margin:0; font-size:14px; line-height:1.7; color:#555;">
+          <p style="margin:0 0 14px; font-size:14px; line-height:1.7; color:#555;">
             Sent via <strong>The Supreme Collective</strong> deputy system.
             You can make any changes in the job board before sending the live notification to matched musicians.
           </p>
+
+          <div style="margin-top:18px; padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+            <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+              P.S.
+            </p>
+            <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+              Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -768,6 +777,9 @@ const buildJobNotificationPreview = ({
     `Matched musicians: ${musicians.length}`,
     `View deputy job: ${jobUrl}`,
     `Open job board: ${jobBoardUrl}`,
+    "",
+    "P.S. Did you know you can also post your own deputy jobs through The Supreme Collective? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.",
+    "",
   ]
     .filter(Boolean)
     .join("\n");
