@@ -64,6 +64,87 @@ const normalisePhoneValue = (value = "") => {
     .replace(/^00/, "+");
 };
 
+const escapeHtml = (value = "") =>
+  String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+const normaliseList = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
+
+
+const renderDetailRow = (label, value) => {
+  const safeValue = String(value || "").trim();
+  if (!safeValue) return "";
+  return `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(safeValue)}</li>`;
+};
+
+const renderDetailListRow = (label, values = []) => {
+  const safeValues = normaliseList(values);
+  if (!safeValues.length) return "";
+  return `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(safeValues.join(", "))}</li>`;
+};
+
+
+
+const getMusicianProfileUrl = (musician = {}) => {
+  const siteBase = (
+    process.env.PUBLIC_SITE_URL ||
+    process.env.FRONTEND_URL ||
+    "https://thesupremecollective.co.uk"
+  ).replace(/\/$/, "");
+
+  const slug = String(musician?.musicianSlug || "").trim();
+  const id = String(musician?._id || musician?.musicianId || "").trim();
+
+  if (slug) return `${siteBase}/musician/${slug}`;
+  if (id) return `${siteBase}/musician/${id}`;
+  return `${siteBase}/my-account`;
+};
+
+const getMusicianPayoutSummary = (musician = {}) => {
+  const sortCode = String(musician?.bank_account?.sort_code || "").replace(/\D/g, "");
+  const accountNumber = String(musician?.bank_account?.account_number || "").replace(/\D/g, "");
+  const accountName = String(musician?.bank_account?.account_name || "").trim();
+  const accountType = String(musician?.bank_account?.account_type || "").trim();
+
+  const hasSortCode = sortCode.length === 6;
+  const hasAccountNumber = accountNumber.length >= 6;
+  const hasAccountName = Boolean(accountName);
+  const hasAccountType = Boolean(accountType);
+
+  const hasPayoutDetails =
+    hasSortCode && hasAccountNumber && hasAccountName && hasAccountType;
+
+  return {
+    hasPayoutDetails,
+    hasSortCode,
+    hasAccountNumber,
+    hasAccountName,
+    hasAccountType,
+    sortCode,
+    accountNumber,
+    accountName,
+    accountType,
+    ending: hasAccountNumber ? accountNumber.slice(-3) : "",
+  };
+};
+
+
+
 const buildPhoneVariants = (value = "") => {
   const normalised = normalisePhoneValue(value);
   if (!normalised) return [];
@@ -489,35 +570,190 @@ const buildAllocationEmailPreview = ({ job, musician }) => {
 };
 
 const buildBookingConfirmationPreview = ({ job, musician }) => {
-  const name = [musician?.firstName, musician?.lastName].filter(Boolean).join(" ").trim() || "Deputy";
-  const title = normaliseString(job?.title || job?.instrument || "Deputy opportunity");
-  const safeCurrency = normaliseCurrency(job?.currency);
-  const subject = `Booking confirmed: ${title}`;
+  const firstName = normaliseString(musician?.firstName || "there");
+  const fullName =
+    [musician?.firstName, musician?.lastName].filter(Boolean).join(" ").trim() || "Deputy";
+  const jobTitle = normaliseString(job?.title || job?.instrument || "Deputy opportunity");
+
+  const dateText = normaliseString(job?.eventDate || job?.date || "TBC");
+  const callTime = normaliseString(job?.callTime || job?.startTime || "");
+  const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
+  const location = normaliseString(
+    job?.location || job?.venue || job?.locationName || "Location TBC"
+  );
+  const feeText = job?.fee
+    ? `${normaliseCurrency(job?.currency || "GBP")} ${Number(job.fee)}`
+    : "TBC";
+
+  const requiredInstruments = normaliseList(job?.requiredInstruments);
+  const essentialSkills = normaliseList(job?.essentialRoles);
+  const preferredExtraSkills = normaliseList(job?.desiredRoles);
+  const requiredSkills = normaliseList(job?.requiredSkills);
+  const secondaryInstruments = normaliseList(job?.secondaryInstruments);
+  const genres = normaliseList(job?.genres);
+  const tags = normaliseList(job?.tags);
+  const setLengths = normaliseList(job?.setLengths);
+  const whatsIncluded = normaliseList(job?.whatsIncluded);
+  const claimableExpenses = normaliseList(job?.claimableExpenses);
+  const notes = normaliseString(job?.notes || "");
+  const paymentDate =
+    job?.releaseOn instanceof Date
+      ? job.releaseOn.toLocaleDateString("en-GB")
+      : normaliseString(job?.releaseOn || "");
+
+  const bandContactName = normaliseString(job?.createdByName || "The Supreme Collective");
+  const bandContactEmail = normaliseString(
+    job?.createdByEmail || "hello@thesupremecollective.co.uk"
+  );
+  const bandContactPhone = normaliseString(job?.createdByPhone || "");
+
+  const payout = getMusicianPayoutSummary(musician);
+const profileUrl = getMusicianProfileUrl(musician);
+
+const payoutHtml = payout.hasPayoutDetails
+  ? `
+    <p>
+      <strong>Payment</strong><br/>
+      Your payment is due to be processed automatically on
+      <strong>${escapeHtml(paymentDate || "TBC")}</strong>
+      into the ${escapeHtml(payout.accountType.toLowerCase())} account ending
+      <strong>***${escapeHtml(payout.ending)}</strong>.
+    </p>
+  `
+  : `
+    <p>
+      <strong>Payment</strong><br/>
+      We do not currently have complete payout details on file for you.
+      Please update your profile now to ensure payment can be processed for this gig.
+    </p>
+    <p style="margin: 16px 0 20px;">
+      <a
+        href="${escapeHtml(profileUrl)}"
+        style="
+          display:inline-block;
+          background:#111;
+          color:#fff;
+          text-decoration:none;
+          padding:12px 18px;
+          border-radius:8px;
+          font-weight:600;
+        "
+      >
+        Update payment details
+      </a>
+    </p>
+  `;
+
   const html = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
-      <h2 style="margin-bottom: 12px;">Booking confirmation preview</h2>
-      <p>Hi ${name},</p>
-      <p>Your booking for <strong>${title}</strong> is now confirmed.</p>
-      ${job?.eventDate ? `<p><strong>Date:</strong> ${job.eventDate}</p>` : ""}
-      ${(job?.venue || job?.locationName || job?.location) ? `<p><strong>Location:</strong> ${job.venue || job.locationName || job.location}</p>` : ""}
-      ${job?.fee ? `<p><strong>Fee:</strong> ${safeCurrency} ${job.fee}</p>` : ""}
-      <p>This is a preview of the confirmation email.</p>
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111; max-width: 700px;">
+      <h2 style="margin-bottom: 12px;">Booking confirmed</h2>
+
+      <p>Hi ${escapeHtml(firstName)},</p>
+
+      <p>
+        Thank you for confirming your availability for <strong>${escapeHtml(jobTitle)}</strong> —
+        please consider yourself booked.
+      </p>
+
+      <p>
+        We’ve let the band know that you’ve accepted the booking. Their contact details are below,
+        so you can get in touch directly regarding final timings, setlist details, logistics,
+        arrival information, and anything else needed to ensure a smooth and successful performance.
+      </p>
+
+      <h3 style="margin: 24px 0 10px;">Gig details</h3>
+      <ul style="padding-left: 20px; margin: 0 0 18px;">
+        ${renderDetailRow("Date", dateText)}
+        ${renderDetailRow("Call time", callTime)}
+        ${renderDetailRow("Finish time", finishTime)}
+        ${renderDetailRow("Location", location)}
+        ${renderDetailRow("Fee", feeText)}
+        ${renderDetailListRow("Required instruments", requiredInstruments)}
+        ${renderDetailListRow("Essential skills", essentialSkills)}
+        ${renderDetailListRow("Required skills", requiredSkills)}
+        ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
+        ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
+        ${renderDetailListRow("Genres", genres)}
+        ${renderDetailListRow("Tags", tags)}
+        ${renderDetailListRow("Set lengths", setLengths)}
+        ${renderDetailListRow("What's included", whatsIncluded)}
+        ${renderDetailListRow("Claimable expenses", claimableExpenses)}
+        ${renderDetailRow("Notes", notes)}
+      </ul>
+
+      ${payoutHtml}
+
+      <h3 style="margin: 24px 0 10px;">Band contact details</h3>
+      <ul style="padding-left: 20px; margin: 0 0 18px;">
+        ${renderDetailRow("Name", bandContactName)}
+        ${renderDetailRow("Email", bandContactEmail)}
+        ${renderDetailRow("Phone", bandContactPhone)}
+      </ul>
+
+      <p>
+        If you have any problems getting hold of the band, or anything changes, just reply to this
+        email and we’ll be happy to help.
+      </p>
+
+      <p>
+        Best,<br/>
+        The Supreme Collective
+      </p>
     </div>
   `;
+
   const text = [
-    `Hi ${name},`,
-    `Your booking for ${title} is now confirmed.`,
-    job?.eventDate ? `Date: ${job.eventDate}` : "",
-    (job?.venue || job?.locationName || job?.location)
-      ? `Location: ${job.venue || job.locationName || job.location}`
+    `Hi ${firstName},`,
+    ``,
+    `Thank you for confirming your availability for ${jobTitle} — please consider yourself booked.`,
+    ``,
+    `Gig details:`,
+    `Date: ${dateText || "TBC"}`,
+    callTime ? `Call time: ${callTime}` : "",
+    finishTime ? `Finish time: ${finishTime}` : "",
+    `Location: ${location || "TBC"}`,
+    `Fee: ${feeText}`,
+    requiredInstruments.length
+      ? `Required instruments: ${requiredInstruments.join(", ")}`
       : "",
-    job?.fee ? `Fee: ${safeCurrency} ${job.fee}` : "",
-    "This is a preview of the confirmation email.",
+    essentialSkills.length ? `Essential skills: ${essentialSkills.join(", ")}` : "",
+    requiredSkills.length ? `Required skills: ${requiredSkills.join(", ")}` : "",
+    preferredExtraSkills.length
+      ? `Preferred extra skills: ${preferredExtraSkills.join(", ")}`
+      : "",
+    secondaryInstruments.length
+      ? `Secondary instruments: ${secondaryInstruments.join(", ")}`
+      : "",
+    genres.length ? `Genres: ${genres.join(", ")}` : "",
+    tags.length ? `Tags: ${tags.join(", ")}` : "",
+    setLengths.length ? `Set lengths: ${setLengths.join(", ")}` : "",
+    whatsIncluded.length ? `What's included: ${whatsIncluded.join(", ")}` : "",
+    claimableExpenses.length
+      ? `Claimable expenses: ${claimableExpenses.join(", ")}`
+      : "",
+    notes ? `Notes: ${notes}` : "",
+    ``,
+    payout.hasPayoutDetails
+      ? `Your payment is due to be processed on ${paymentDate || "TBC"} into the account ending ***${payout.ending}.`
+      : `Your payment is due to be processed on ${paymentDate || "TBC"}. Please update your profile now to ensure payment can be processed: ${profileUrl}`,
+    ``,
+    `Band contact details:`,
+    `Name: ${bandContactName}`,
+    `Email: ${bandContactEmail}`,
+    bandContactPhone ? `Phone: ${bandContactPhone}` : "",
+    ``,
+    `Best,`,
+    `The Supreme Collective`,
   ]
     .filter(Boolean)
     .join("\n");
 
-  return { subject, html, text };
+  return {
+    subject: `Booking confirmed: ${jobTitle}`,
+    html,
+    text,
+    musicianName: fullName,
+  };
 };
 
 const buildJobPayloadFromRequest = (req) => {
@@ -908,6 +1144,7 @@ export const createDeputyJob = async (req, res) => {
     const createdBy = req.user?._id || null;
     const createdByName = `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim();
     const createdByEmail = req.user?.email || "";
+const createdByPhone = req.user?.phone || req.user?.phoneNumber || "";
 
     const job = await deputyJobModel.create({
       title: built.title,
@@ -951,6 +1188,7 @@ export const createDeputyJob = async (req, res) => {
       createdBy,
       createdByName,
       createdByEmail,
+      createdByPhone,
       status: built.mode === "send" ? "open" : "preview",
       previewMode: built.mode !== "send",
       workflowStage: built.mode === "send" ? "sent_to_matches" : "preview_ready",
@@ -1734,24 +1972,42 @@ export const previewDeputyBookingEmail = async (req, res) => {
     const job = await deputyJobModel.findById(req.params.id);
 
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
     }
 
     const targetMusicianId = musicianId || job.allocatedMusicianId;
     if (!targetMusicianId) {
-      return res.status(400).json({ success: false, message: "No allocated musician to preview" });
+      return res.status(400).json({
+        success: false,
+        message: "No allocated musician to preview",
+      });
     }
 
     const musician = await findMatchedMusicianFromJob(job, targetMusicianId);
     if (!musician) {
-      return res.status(404).json({ success: false, message: "Allocated musician not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Allocated musician not found",
+      });
     }
 
+    const payout = getMusicianPayoutSummary(musician);
     const preview = buildBookingConfirmationPreview({ job, musician });
 
     return res.json({
       success: true,
       musician,
+      payout: {
+        hasPayoutDetails: payout.hasPayoutDetails,
+        hasSortCode: payout.hasSortCode,
+        hasAccountNumber: payout.hasAccountNumber,
+        hasAccountName: payout.hasAccountName,
+        hasAccountType: payout.hasAccountType,
+        accountEnding: payout.ending ? `***${payout.ending}` : "",
+      },
       preview,
     });
   } catch (error) {
@@ -1973,12 +2229,17 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
             subject: `Confirmed: ${jobTitle}`,
             html: `
               <p>Hi ${normaliseString(musician.firstName || "there")},</p>
-              <p>Wonderful — please consider yourself booked for <strong>${jobTitle}</strong>.</p>
-              <p><strong>Date:</strong> ${dateText}</p>
-              <p><strong>Location:</strong> ${location}</p>
-              <p><strong>Fee:</strong> ${feeText}</p>
-              <p>We’ll let the band know, and you should hear from them shortly with any further details.</p>
+              <p>Thank you for confiming your availability for <strong>${jobTitle}</strong> — please consider yourself booked.</p>
+              <p><strong>Gig Details</strong> ${dateText}</p>
+              <p><ul>
+              <li>Date: ${dateText}</li>
+              <li>Location: ${location}</li>
+              <li>Fee: ${feeText}</li>
+              </ul>
+              </p>
+              <p>The band knows you have confirmed the booking, and they have your contact details. Please kindly find their contact details below for you to reach out to them directly for further details.</p>
               <p>Best,<br/>The Supreme Collective</p>
+
             `,
           });
         } catch (musicianEmailError) {
@@ -1988,18 +2249,98 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
 
       if (posterEmail) {
         try {
+          const requiredInstruments = normaliseList(job?.requiredInstruments);
+          const essentialSkills = normaliseList(job?.essentialRoles);
+          const requiredSkills = normaliseList(job?.requiredSkills);
+          const preferredExtraSkills = normaliseList(job?.desiredRoles);
+          const secondaryInstruments = normaliseList(job?.secondaryInstruments);
+          const genres = normaliseList(job?.genres);
+          const tags = normaliseList(job?.tags);
+          const setLengths = normaliseList(job?.setLengths);
+          const whatsIncluded = normaliseList(job?.whatsIncluded);
+          const claimableExpenses = normaliseList(job?.claimableExpenses);
+          const callTime = normaliseString(job?.callTime || job?.startTime || "");
+          const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
+          const notes = normaliseString(job?.notes || "");
+          const paymentDate = job?.releaseOn
+            ? new Date(job.releaseOn).toLocaleDateString("en-GB", {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              })
+            : "TBC";
+
           await sendEmail({
             to: posterEmail,
             subject: `Deputy accepted: ${jobTitle}`,
             html: `
-              <p>Hi,</p>
-              <p><strong>${musicianName || "Your selected deputy"}</strong> has accepted the deputy job for <strong>${jobTitle}</strong>.</p>
-              <p><strong>Date:</strong> ${dateText}</p>
-              <p><strong>Location:</strong> ${location}</p>
-              <p><strong>Phone:</strong> ${musicianPhone || "Not provided"}</p>
-              <p><strong>Email:</strong> ${musicianEmail || "Not provided"}</p>
-              <p>Please get in touch directly to provide the setlist and any further details of the gig to ensure a successful performance.</p>
-              <p>Best,<br/>The Supreme Collective</p>
+              <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
+                <p>Hi ${escapeHtml(normaliseString(job?.createdByName || "there"))},</p>
+
+                <p>
+                  Great news — <strong>${escapeHtml(
+                    musicianName || "your selected deputy"
+                  )}</strong> has accepted the deputy booking for <strong>${escapeHtml(jobTitle)}</strong>.
+                </p>
+
+                <p>
+                  Thank you for using <strong>The Supreme Collective</strong> to find your deputy.
+                  Please now get in touch with them directly to share the setlist, timings,
+                  dress code, logistics, arrival details, parking instructions, and any other
+                  information needed to help ensure a smooth and successful performance.
+                </p>
+
+                <h3 style="margin: 24px 0 10px;">Deputy contact details</h3>
+                <ul style="padding-left: 20px; margin: 0 0 18px;">
+                  <li><strong>Name:</strong> ${escapeHtml(
+                    musicianName || "Not provided"
+                  )}</li>
+                  <li><strong>Email:</strong> ${escapeHtml(
+                    musicianEmail || "Not provided"
+                  )}</li>
+                  <li><strong>Phone:</strong> ${escapeHtml(
+                    musicianPhone || "Not provided"
+                  )}</li>
+                </ul>
+
+                <h3 style="margin: 24px 0 10px;">Confirmed job details</h3>
+                <ul style="padding-left: 20px; margin: 0 0 18px;">
+                  ${renderDetailRow("Job", jobTitle)}
+                  ${renderDetailRow("Date", dateText)}
+                  ${renderDetailRow("Call time", callTime)}
+                  ${renderDetailRow("Finish time", finishTime)}
+                  ${renderDetailRow("Location", location)}
+                  ${renderDetailRow("Fee", feeText)}
+                  ${renderDetailListRow("Required instruments", requiredInstruments)}
+                  ${renderDetailListRow("Essential skills", essentialSkills)}
+                  ${renderDetailListRow("Required skills", requiredSkills)}
+                  ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
+                  ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
+                  ${renderDetailListRow("Genres", genres)}
+                  ${renderDetailListRow("Tags", tags)}
+                  ${renderDetailListRow("Set lengths", setLengths)}
+                  ${renderDetailListRow("What's included", whatsIncluded)}
+                  ${renderDetailListRow("Claimable expenses", claimableExpenses)}
+                  ${renderDetailRow("Notes", notes)}
+                </ul>
+
+                <p>
+                  <strong>Payment processing:</strong><br/>
+                  Unless otherwise agreed, payment is due to be processed on
+                  <strong>${escapeHtml(paymentDate)}</strong>.
+                </p>
+
+                <p>
+                  If anything changes or you need any support before the event,
+                  just reply to this email and we’ll be happy to help.
+                </p>
+
+                <p>
+                  Best wishes,<br/>
+                  <strong>The Supreme Collective</strong>
+                </p>
+              </div>
             `,
           });
         } catch (posterEmailError) {

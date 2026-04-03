@@ -277,7 +277,7 @@ const deputyJobSchema = new mongoose.Schema(
     },
     createdByName: { type: String, default: "" },
     createdByEmail: { type: String, default: "", trim: true, lowercase: true },
-
+createdByPhone: { type: String, default: "", trim: true },
     applications: { type: [deputyJobApplicationSchema], default: [] },
 
     matchedMusicianIds: [
