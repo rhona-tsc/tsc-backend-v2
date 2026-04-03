@@ -588,34 +588,186 @@ const buildMatchSnapshot = (musician = {}) => ({
   notifiedAt: null,
 });
 
-const buildJobNotificationPreview = ({ job, musicians = [] }) => {
-  const safeTitle = normaliseString(job?.title || job?.instrument || "Deputy opportunity");
-  const safeDate = normaliseString(job?.eventDate);
-  const safeVenue = normaliseString(job?.venue || job?.locationName || job?.location);
+const buildJobNotificationPreview = ({
+  job,
+  musicians = [],
+  previewRecipientEmail = "",
+}) => {
+  const safeTitle = normaliseString(
+    job?.title || job?.instrument || "Deputy opportunity"
+  );
+  const safeDate = normaliseString(job?.eventDate || job?.date || "");
+  const safeVenue = normaliseString(
+    job?.venue || job?.locationName || job?.location || ""
+  );
   const safeFee = Number(job?.fee || 0);
   const safeCurrency = normaliseCurrency(job?.currency);
+  const safeNotes = normaliseString(job?.notes || "");
+  const safePreviewRecipientEmail = normaliseEmail(previewRecipientEmail || "");
+
+  const requiredInstruments = normaliseList(job?.requiredInstruments);
+  const essentialSkills = normaliseList(job?.essentialRoles);
+  const requiredSkills = normaliseList(job?.requiredSkills);
+  const preferredExtraSkills = normaliseList(job?.desiredRoles);
+  const secondaryInstruments = normaliseList(job?.secondaryInstruments);
+  const genres = normaliseList(job?.genres);
+  const tags = normaliseList(job?.tags);
+  const setLengths = normaliseList(job?.setLengths);
+  const whatsIncluded = normaliseList(job?.whatsIncluded);
+  const claimableExpenses = normaliseList(job?.claimableExpenses);
+  const callTime = normaliseString(job?.callTime || job?.startTime || "");
+  const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
+
+  const siteBase = (
+    process.env.PUBLIC_SITE_URL ||
+    process.env.FRONTEND_URL ||
+    "https://thesupremecollective.co.uk"
+  ).replace(/\/$/, "");
+
+  const jobBoardUrl = `${siteBase}/deputy-jobs`;
+  const jobUrl = job?._id ? `${siteBase}/deputy-jobs/${job._id}` : jobBoardUrl;
 
   const subject = `${safeTitle}${safeDate ? ` – ${safeDate}` : ""}`;
 
+  const detailRowsHtml = [
+    renderDetailRow("Date", safeDate),
+    renderDetailRow("Call time", callTime),
+    renderDetailRow("Finish time", finishTime),
+    renderDetailRow("Location", safeVenue),
+    safeFee
+      ? renderDetailRow("Fee", `${safeCurrency} ${safeFee}`)
+      : "",
+    renderDetailListRow("Required instruments", requiredInstruments),
+    renderDetailListRow("Essential skills", essentialSkills),
+    renderDetailListRow("Required skills", requiredSkills),
+    renderDetailListRow("Preferred extra skills", preferredExtraSkills),
+    renderDetailListRow("Secondary instruments", secondaryInstruments),
+    renderDetailListRow("Genres", genres),
+    renderDetailListRow("Tags", tags),
+    renderDetailListRow("Set lengths", setLengths),
+    renderDetailListRow("What's included", whatsIncluded),
+    renderDetailListRow("Claimable expenses", claimableExpenses),
+    renderDetailRow("Notes", safeNotes),
+  ]
+    .filter(Boolean)
+    .join("");
+
   const html = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
-      <h2 style="margin-bottom: 12px;">Deputy opportunity</h2>
-      <p><strong>${safeTitle}</strong></p>
-      ${safeDate ? `<p><strong>Date:</strong> ${safeDate}</p>` : ""}
-      ${safeVenue ? `<p><strong>Location:</strong> ${safeVenue}</p>` : ""}
-      ${safeFee ? `<p><strong>Fee:</strong> ${safeCurrency} ${safeFee}</p>` : ""}
-      ${job?.notes ? `<p><strong>Notes:</strong><br/>${job.notes}</p>` : ""}
-      <p>This is a preview of the deputy job notification email.</p>
+    <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
+      <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
+        <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
+          <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700;">
+            The Supreme Collective
+          </p>
+          <h1 style="margin:12px 0 0; font-size:28px; line-height:1.2; color:#fff;">
+            Deputy Opportunity
+          </h1>
+          <p style="margin:12px 0 0; font-size:15px; line-height:1.6; color:#f3f3f3;">
+            A new opportunity has been created and this email shows exactly how the notification will appear to musicians.
+          </p>
+        </div>
+
+        <div style="background:#ffffff; border:1px solid #e8e8e8; border-top:0; border-radius:0 0 20px 20px; padding:32px;">
+          <div style="margin-bottom:24px; padding:20px; border:1px solid #f1d0d1; background:#fff7f7; border-radius:16px;">
+            <p style="margin:0 0 8px; font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+              Preview mode
+            </p>
+            <p style="margin:0; font-size:14px; line-height:1.7; color:#333;">
+              This is a preview of the deputy job notification email before it is sent out.
+              ${safePreviewRecipientEmail ? `It has been sent to <strong>${escapeHtml(safePreviewRecipientEmail)}</strong> for review.` : ""}
+            </p>
+          </div>
+
+          <h2 style="margin:0 0 8px; font-size:24px; line-height:1.3; color:#111;">
+            ${escapeHtml(safeTitle)}
+          </h2>
+
+          <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#444;">
+            Please review the details below and use the button to open the deputy job directly in the job board.
+          </p>
+
+          <div style="margin:0 0 24px;">
+            <a
+              href="${escapeHtml(jobUrl)}"
+              style="display:inline-block; background:#ff6667; color:#fff; text-decoration:none; padding:14px 22px; border-radius:999px; font-size:14px; font-weight:700;"
+            >
+              View deputy job
+            </a>
+            <a
+              href="${escapeHtml(jobBoardUrl)}"
+              style="display:inline-block; margin-left:10px; background:#111; color:#fff; text-decoration:none; padding:14px 22px; border-radius:999px; font-size:14px; font-weight:700;"
+            >
+              Open job board
+            </a>
+          </div>
+
+          <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
+            <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Job details</h3>
+            <ul style="margin:0; padding-left:20px; font-size:14px; line-height:1.8; color:#333;">
+              ${detailRowsHtml}
+            </ul>
+          </div>
+
+          <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; margin-bottom:24px;">
+            <div style="padding:18px; border:1px solid #ececec; border-radius:16px; background:#fff;">
+              <p style="margin:0 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#777; font-weight:700;">Matched musicians</p>
+              <p style="margin:0; font-size:24px; font-weight:700; color:#111;">${musicians.length}</p>
+            </div>
+            <div style="padding:18px; border:1px solid #ececec; border-radius:16px; background:#fff;">
+              <p style="margin:0 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:1px; color:#777; font-weight:700;">Notification type</p>
+              <p style="margin:0; font-size:24px; font-weight:700; color:#111;">Preview</p>
+            </div>
+          </div>
+
+          <p style="margin:0; font-size:14px; line-height:1.7; color:#555;">
+            Sent via <strong>The Supreme Collective</strong> deputy system.
+            You can make any changes in the job board before sending the live notification to matched musicians.
+          </p>
+        </div>
+      </div>
     </div>
   `;
 
   const text = [
-    "Deputy opportunity",
+    "The Supreme Collective",
+    "Deputy Opportunity Preview",
+    "",
+    "This is a preview of the deputy job notification email before it is sent out.",
+    safePreviewRecipientEmail
+      ? `Preview recipient: ${safePreviewRecipientEmail}`
+      : "",
+    "",
     safeTitle,
     safeDate ? `Date: ${safeDate}` : "",
+    callTime ? `Call time: ${callTime}` : "",
+    finishTime ? `Finish time: ${finishTime}` : "",
     safeVenue ? `Location: ${safeVenue}` : "",
     safeFee ? `Fee: ${safeCurrency} ${safeFee}` : "",
-    job?.notes ? `Notes: ${job.notes}` : "",
+    requiredInstruments.length
+      ? `Required instruments: ${requiredInstruments.join(", ")}`
+      : "",
+    essentialSkills.length
+      ? `Essential skills: ${essentialSkills.join(", ")}`
+      : "",
+    requiredSkills.length ? `Required skills: ${requiredSkills.join(", ")}` : "",
+    preferredExtraSkills.length
+      ? `Preferred extra skills: ${preferredExtraSkills.join(", ")}`
+      : "",
+    secondaryInstruments.length
+      ? `Secondary instruments: ${secondaryInstruments.join(", ")}`
+      : "",
+    genres.length ? `Genres: ${genres.join(", ")}` : "",
+    tags.length ? `Tags: ${tags.join(", ")}` : "",
+    setLengths.length ? `Set lengths: ${setLengths.join(", ")}` : "",
+    whatsIncluded.length ? `What's included: ${whatsIncluded.join(", ")}` : "",
+    claimableExpenses.length
+      ? `Claimable expenses: ${claimableExpenses.join(", ")}`
+      : "",
+    safeNotes ? `Notes: ${safeNotes}` : "",
+    "",
+    `Matched musicians: ${musicians.length}`,
+    `View deputy job: ${jobUrl}`,
+    `Open job board: ${jobBoardUrl}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -983,6 +1135,7 @@ const buildJobPayloadFromRequest = (req) => {
 
 const runMatcherForJob = async ({
   job,
+  previewRecipientEmail,
   createdBy,
   primaryInstrument,
   effectiveIsVocalSlot,
@@ -1016,6 +1169,7 @@ const runMatcherForJob = async ({
   const previewNotification = buildJobNotificationPreview({
     job,
     musicians: matches,
+    previewRecipientEmail,
   });
 
   return {
@@ -1303,19 +1457,20 @@ export const createDeputyJob = async (req, res) => {
       }
     }
 
-    const matcherResult = await runMatcherForJob({
-      job,
-      createdBy,
-      primaryInstrument: built.primaryInstrument,
-      effectiveIsVocalSlot: built.effectiveIsVocalSlot,
-      resolvedEssentialRoles: built.resolvedEssentialRoles,
-      matcherDesiredRoles: built.matcherDesiredRoles,
-      resolvedSecondaryInstruments: built.resolvedSecondaryInstruments,
-      resolvedGenres: built.resolvedGenres,
-      resolvedTags: built.resolvedTags,
-      inferredCounty: built.inferredCounty,
-      inferredPostcode: built.inferredPostcode,
-    });
+  const matcherResult = await runMatcherForJob({
+  job,
+  previewRecipientEmail: built.clientEmail || createdByEmail,
+  createdBy,
+  primaryInstrument: built.primaryInstrument,
+  effectiveIsVocalSlot: built.effectiveIsVocalSlot,
+  resolvedEssentialRoles: built.resolvedEssentialRoles,
+  matcherDesiredRoles: built.matcherDesiredRoles,
+  resolvedSecondaryInstruments: built.resolvedSecondaryInstruments,
+  resolvedGenres: built.resolvedGenres,
+  resolvedTags: built.resolvedTags,
+  inferredCounty: built.inferredCounty,
+  inferredPostcode: built.inferredPostcode,
+});
 
     job.matchedMusicianIds = matcherResult.matchedMusicianIds;
     job.matchedMusicians = matcherResult.matchedMusicians;
@@ -1345,25 +1500,55 @@ export const createDeputyJob = async (req, res) => {
           ? new Date()
           : null,
       }));
-    } else {
-      job.notifiedMusicianIds = [];
-      job.notifiedCount = 0;
-      job.status = "preview";
-      job.previewMode = true;
-      job.workflowStage = "preview_ready";
-      job.notifications = matcherResult.previewNotification.recipients.map((recipient) => ({
-        musicianId: recipient.musicianId,
-        email: recipient.email,
-        phone: recipient.phone || "",
-        channel: "email",
-        type: "job_created_preview",
-        subject: matcherResult.previewNotification.subject,
-        previewHtml: matcherResult.previewNotification.html,
-        previewText: matcherResult.previewNotification.text,
-        status: "preview",
-        sentAt: new Date(),
-      }));
+  } else {
+  job.notifiedMusicianIds = [];
+  job.notifiedCount = 0;
+  job.status = "preview";
+  job.previewMode = true;
+  job.workflowStage = "preview_ready";
+
+  job.notifications = matcherResult.previewNotification.recipients.map((recipient) => ({
+    musicianId: recipient.musicianId,
+    email: recipient.email,
+    phone: recipient.phone || "",
+    channel: "email",
+    type: "job_created_preview",
+    subject: matcherResult.previewNotification.subject,
+    previewHtml: matcherResult.previewNotification.html,
+    previewText: matcherResult.previewNotification.text,
+    status: "preview",
+    sentAt: new Date(),
+  }));
+
+  const previewRecipientEmail = normaliseEmail(built.clientEmail || createdByEmail || "");
+
+  if (previewRecipientEmail) {
+    job.notifications.unshift({
+      musicianId: null,
+      email: previewRecipientEmail,
+      phone: "",
+      channel: "email",
+      type: "job_created_preview",
+      subject: `[Preview] ${matcherResult.previewNotification.subject}`,
+      previewHtml: matcherResult.previewNotification.html,
+      previewText: matcherResult.previewNotification.text,
+      status: "sent",
+      sentAt: new Date(),
+      error: "",
+    });
+
+    try {
+      await sendEmail({
+        to: previewRecipientEmail,
+        subject: `[Preview] ${matcherResult.previewNotification.subject}`,
+        html: matcherResult.previewNotification.html,
+        text: matcherResult.previewNotification.text,
+      });
+    } catch (previewEmailError) {
+      console.error("❌ Failed to send deputy job preview email:", previewEmailError);
     }
+  }
+}
 
     await job.save();
 
