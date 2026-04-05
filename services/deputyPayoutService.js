@@ -1,9 +1,17 @@
 
+import Stripe from "stripe";
 import nodemailer from "nodemailer";
 import deputyJobModel from "../models/deputyJobModel.js";
 import musicianModel from "../models/musicianModel.js";
 
 const PAYOUT_READY_STATUSES = ["scheduled", "pending"];
+
+const stripeSecretKey =
+  process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY || "";
+
+const stripe = stripeSecretKey
+  ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
+  : null;
 
 const normaliseString = (value) => String(value || "").trim();
 const normaliseEmail = (value) => normaliseString(value).toLowerCase();
@@ -40,6 +48,8 @@ const formatDateTime = (value) => {
   });
 };
 
+
+
 const formatDate = (value) => {
   if (!value) return "TBC";
   const parsed = parseDateOrNull(value);
@@ -52,6 +62,20 @@ const formatDate = (value) => {
     });
   }
   return normaliseString(value) || "TBC";
+};
+
+const toPence = (value = 0) => {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  return Math.round(amount * 100);
+};
+
+const hasTransferCapability = (musician = {}) => {
+  const accountId = normaliseString(musician?.stripeConnect?.accountId || "");
+  const payoutsEnabled = musician?.stripeConnect?.payoutsEnabled === true;
+  const detailsSubmitted = musician?.stripeConnect?.detailsSubmitted === true;
+
+  return Boolean(accountId && payoutsEnabled && detailsSubmitted);
 };
 
 const buildMailer = () => {
@@ -109,20 +133,23 @@ const buildDeputyRemittanceEmail = ({ job, musician }) => {
   const grossAmount = formatMoney(job?.grossAmount || job?.fee || 0, job?.currency || "GBP");
   const commissionAmount = formatMoney(job?.commissionAmount || 0, job?.currency || "GBP");
   const deputyNetAmount = formatMoney(job?.deputyNetAmount || 0, job?.currency || "GBP");
-  const payoutPaidAt = formatDateTime(job?.payoutPaidAt || new Date());
-  const location = normaliseString(job?.venue || job?.locationName || job?.location || "TBC");
-
+ const payoutPaidAt = formatDateTime(job?.payoutPaidAt || new Date());
+const transferId = normaliseString(job?.latestTransferId || "");
+const location = normaliseString(job?.venue || job?.locationName || job?.location || "TBC");
   const html = `
     <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
       <h2 style="margin-bottom: 12px;">Remittance advice</h2>
       <p>Hi ${musicianName},</p>
       <p>Your deputy payment has been released for <strong>${jobTitle}</strong>.</p>
+
       <p><strong>Event date:</strong> ${formatDate(job?.eventDate)}</p>
       <p><strong>Location:</strong> ${location}</p>
       <p><strong>Gross booking amount:</strong> ${grossAmount}</p>
       <p><strong>Commission amount:</strong> ${commissionAmount}</p>
       <p><strong>Your net amount:</strong> ${deputyNetAmount}</p>
       <p><strong>Payout released:</strong> ${payoutPaidAt}</p>
+      <p><strong>Payout released:</strong> ${payoutPaidAt}</p>
+${transferId ? `<p><strong>Stripe transfer reference:</strong> ${transferId}</p>` : ""}
       <p>If anything looks incorrect, please reply to this email.</p>
     </div>
   `;
@@ -136,6 +163,8 @@ const buildDeputyRemittanceEmail = ({ job, musician }) => {
     `Commission amount: ${commissionAmount}`,
     `Your net amount: ${deputyNetAmount}`,
     `Payout released: ${payoutPaidAt}`,
+    `Payout released: ${payoutPaidAt}`,
+transferId ? `Stripe transfer reference: ${transferId}` : "",
     "If anything looks incorrect, please reply to this email.",
   ].join("\n");
 
@@ -181,20 +210,21 @@ const buildFinanceSummaryEmail = ({ runAt, checkedCount, releasedCount, totalRel
   const subject = `Deputy payout summary – ${formatDate(runAt)}`;
   const totalReleasedFormatted = formatMoney(totalReleased, currency);
 
-  const releasedRowsHtml = releasedJobs.length
-    ? releasedJobs
-        .map(
-          (item) => `
-            <tr>
-              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.jobTitle}</td>
-              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.musicianName}</td>
-              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.eventDate}</td>
-              <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.amount}</td>
-            </tr>
-          `
-        )
-        .join("")
-    : `<tr><td colspan="4" style="padding: 8px;">No payouts released.</td></tr>`;
+ const releasedRowsHtml = releasedJobs.length
+  ? releasedJobs
+      .map(
+        (item) => `
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.jobTitle}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.musicianName}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.eventDate}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.amount}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.transferId || "—"}</td>
+          </tr>
+        `
+      )
+      .join("")
+  : `<tr><td colspan="5" style="padding: 8px;">No payouts released.</td></tr>`;
 
   const failuresHtml = failures.length
     ? `<ul>${failures.map((item) => `<li>${item.jobTitle}: ${item.reason}</li>`).join("")}</ul>`
@@ -211,12 +241,13 @@ const buildFinanceSummaryEmail = ({ runAt, checkedCount, releasedCount, totalRel
       <h3 style="margin-top: 24px;">Released payouts</h3>
       <table style="border-collapse: collapse; width: 100%;">
         <thead>
-          <tr>
-            <th style="text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb;">Job</th>
-            <th style="text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb;">Deputy</th>
-            <th style="text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb;">Event date</th>
-            <th style="text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb;">Amount</th>
-          </tr>
+         <tr>
+  <th style="text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb;">Job</th>
+  <th style="text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb;">Deputy</th>
+  <th style="text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb;">Event date</th>
+  <th style="text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb;">Amount</th>
+  <th style="text-align: left; padding: 8px; border-bottom: 1px solid #e5e7eb;">Transfer</th>
+</tr>
         </thead>
         <tbody>
           ${releasedRowsHtml}
@@ -238,8 +269,7 @@ const buildFinanceSummaryEmail = ({ runAt, checkedCount, releasedCount, totalRel
     "Released payouts:",
     ...(releasedJobs.length
       ? releasedJobs.map(
-          (item) => `${item.jobTitle} | ${item.musicianName} | ${item.eventDate} | ${item.amount}`
-        )
+(item) => `${item.jobTitle} | ${item.musicianName} | ${item.eventDate} | ${item.amount} | ${item.transferId || "—"}`        )
       : ["No payouts released."]),
     "",
     "Failures:",
@@ -316,6 +346,25 @@ const releaseDeputyPayout = async ({ job, transporter }) => {
     };
   }
 
+  if (!stripe) {
+    lockedJob.payoutStatus = "held";
+    pushPaymentEvent(lockedJob, {
+      type: "manual_adjustment",
+      status: "held",
+      amount: Number(lockedJob.deputyNetAmount || 0),
+      currency: lockedJob.currency,
+      note: "Payout held because Stripe is not configured on the server",
+      metadata: { reason: "missing_stripe_configuration" },
+    });
+    await lockedJob.save();
+
+    return {
+      success: false,
+      reason: "missing_stripe_configuration",
+      job: lockedJob,
+    };
+  }
+
   const musician = await musicianModel.findById(lockedJob.bookedMusicianId).lean();
   if (!musician) {
     lockedJob.payoutStatus = "held";
@@ -336,17 +385,104 @@ const releaseDeputyPayout = async ({ job, transporter }) => {
     };
   }
 
+  if (!hasTransferCapability(musician)) {
+    lockedJob.payoutStatus = "held";
+    pushPaymentEvent(lockedJob, {
+      type: "manual_adjustment",
+      status: "held",
+      amount: Number(lockedJob.deputyNetAmount || 0),
+      currency: lockedJob.currency,
+      note: "Payout held because the booked musician does not have an active Stripe Connect account",
+      metadata: {
+        reason: "missing_stripe_connect_account",
+        musicianId: String(musician._id),
+        accountId: normaliseString(musician?.stripeConnect?.accountId || ""),
+      },
+    });
+    await lockedJob.save();
+
+    return {
+      success: false,
+      reason: "missing_stripe_connect_account",
+      job: lockedJob,
+      musician,
+    };
+  }
+
+  const transferAmountPence = toPence(lockedJob.deputyNetAmount || 0);
+  if (!transferAmountPence) {
+    lockedJob.payoutStatus = "held";
+    pushPaymentEvent(lockedJob, {
+      type: "manual_adjustment",
+      status: "held",
+      amount: Number(lockedJob.deputyNetAmount || 0),
+      currency: lockedJob.currency,
+      note: "Payout held because the deputy net amount was not greater than zero",
+      metadata: { reason: "invalid_deputy_net_amount" },
+    });
+    await lockedJob.save();
+
+    return {
+      success: false,
+      reason: "invalid_deputy_net_amount",
+      job: lockedJob,
+      musician,
+    };
+  }
+
+  let transfer;
+  try {
+    transfer = await stripe.transfers.create({
+      amount: transferAmountPence,
+      currency: normaliseString(lockedJob.currency || "GBP").toLowerCase() || "gbp",
+      destination: normaliseString(musician?.stripeConnect?.accountId || ""),
+      metadata: {
+        deputyJobId: String(lockedJob._id),
+        musicianId: String(musician._id),
+        eventDate: normaliseString(lockedJob.eventDate || ""),
+        grossAmount: String(Number(lockedJob.grossAmount || lockedJob.fee || 0)),
+        commissionAmount: String(Number(lockedJob.commissionAmount || 0)),
+        deputyNetAmount: String(Number(lockedJob.deputyNetAmount || 0)),
+      },
+    });
+  } catch (error) {
+    lockedJob.payoutStatus = "held";
+    pushPaymentEvent(lockedJob, {
+      type: "payout_transfer_failed",
+      status: normaliseString(error?.code || "failed"),
+      amount: Number(lockedJob.deputyNetAmount || 0),
+      currency: lockedJob.currency,
+      note: error?.message || "Stripe transfer failed",
+      metadata: {
+        reason: "stripe_transfer_failed",
+        musicianId: String(musician._id),
+        accountId: normaliseString(musician?.stripeConnect?.accountId || ""),
+      },
+    });
+    await lockedJob.save();
+
+    return {
+      success: false,
+      reason: error?.message || "stripe_transfer_failed",
+      job: lockedJob,
+      musician,
+    };
+  }
+
   lockedJob.payoutStatus = "paid";
   lockedJob.payoutPaidAt = new Date();
+  lockedJob.latestTransferId = normaliseString(transfer?.id || "");
   pushPaymentEvent(lockedJob, {
-    type: "payout_marked_paid",
-    status: "paid",
+    type: "payout_transfer_succeeded",
+    status: normaliseString(transfer?.status || "paid"),
     amount: Number(lockedJob.deputyNetAmount || 0),
     currency: lockedJob.currency,
-    note: "Deputy payout released by daily payout cron",
+    note: "Deputy payout transferred by daily payout cron",
     metadata: {
       musicianId: String(musician._id),
       musicianEmail: normaliseEmail(musician.email || ""),
+      transferId: normaliseString(transfer?.id || ""),
+      destinationAccountId: normaliseString(musician?.stripeConnect?.accountId || ""),
     },
   });
   await lockedJob.save();
@@ -362,6 +498,7 @@ const releaseDeputyPayout = async ({ job, transporter }) => {
     job: lockedJob,
     musician,
     remittanceResult,
+    transferId: normaliseString(transfer?.id || ""),
   };
 };
 
@@ -388,19 +525,19 @@ export const runDeputyPayoutRelease = async ({ asOfDate = new Date() } = {}) => 
       });
     }
   }
-
-  const releasedJobs = results
-    .filter((item) => item?.success && item?.job)
-    .map((item) => ({
-      jobTitle: normaliseString(item.job.title || item.job.instrument || "Deputy booking"),
-      musicianName:
-        [item?.musician?.firstName, item?.musician?.lastName]
-          .filter(Boolean)
-          .join(" ")
-          .trim() || "Unknown musician",
-      eventDate: formatDate(item?.job?.eventDate),
-      amount: formatMoney(item?.job?.deputyNetAmount || 0, item?.job?.currency || "GBP"),
-    }));
+const releasedJobs = results
+  .filter((item) => item?.success && item?.job)
+  .map((item) => ({
+    jobTitle: normaliseString(item.job.title || item.job.instrument || "Deputy booking"),
+    musicianName:
+      [item?.musician?.firstName, item?.musician?.lastName]
+        .filter(Boolean)
+        .join(" ")
+        .trim() || "Unknown musician",
+    eventDate: formatDate(item?.job?.eventDate),
+    amount: formatMoney(item?.job?.deputyNetAmount || 0, item?.job?.currency || "GBP"),
+    transferId: normaliseString(item?.transferId || item?.job?.latestTransferId || ""),
+  }));
 
   const failures = results
     .filter((item) => !item?.success && !item?.skipped)

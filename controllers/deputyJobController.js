@@ -274,7 +274,7 @@ const buildDefaultReleaseOn = (eventDate) => {
   const parsed = parseDateOrNull(eventDate);
   if (!parsed) return null;
   const releaseOn = new Date(parsed);
-  releaseOn.setDate(releaseOn.getDate() + 7);
+  releaseOn.setDate(releaseOn.getDate() + 5);
   return releaseOn;
 };
 
@@ -2538,22 +2538,93 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
 
       if (musicianEmail) {
         try {
+          const callTime = normaliseString(job?.callTime || job?.startTime || "");
+          const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
+          const notes = normaliseString(job?.notes || "");
+          const requiredInstruments = normaliseList(job?.requiredInstruments);
+          const essentialSkills = normaliseList(job?.essentialRoles);
+          const requiredSkills = normaliseList(job?.requiredSkills);
+          const preferredExtraSkills = normaliseList(job?.desiredRoles);
+          const secondaryInstruments = normaliseList(job?.secondaryInstruments);
+          const genres = normaliseList(job?.genres);
+          const tags = normaliseList(job?.tags);
+          const setLengths = normaliseList(job?.setLengths);
+          const whatsIncluded = normaliseList(job?.whatsIncluded);
+          const claimableExpenses = normaliseList(job?.claimableExpenses);
+          const paymentDate = job?.releaseOn
+            ? new Date(job.releaseOn).toLocaleDateString("en-GB", {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              })
+            : "TBC";
+          const bandContactName = normaliseString(job?.createdByName || "The Supreme Collective");
+          const bandContactEmail = normaliseString(
+            job?.createdByEmail || "hello@thesupremecollective.co.uk"
+          );
+          const bandContactPhone = normaliseString(job?.createdByPhone || "");
+
           await sendEmail({
             to: musicianEmail,
             subject: `Confirmed: ${jobTitle}`,
             html: `
-              <p>Hi ${normaliseString(musician.firstName || "there")},</p>
-              <p>Thank you for confiming your availability for <strong>${jobTitle}</strong> — please consider yourself booked.</p>
-              <p><strong>Gig Details</strong> ${dateText}</p>
-              <p><ul>
-              <li>Date: ${dateText}</li>
-              <li>Location: ${location}</li>
-              <li>Fee: ${feeText}</li>
-              </ul>
-              </p>
-              <p>The band knows you have confirmed the booking, and they have your contact details. Please kindly find their contact details below for you to reach out to them directly for further details.</p>
-              <p>Best,<br/>The Supreme Collective</p>
+              <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
+                <p>Hi ${escapeHtml(normaliseString(musician.firstName || "there"))},</p>
 
+                <p>
+                  Thank you for confirming your availability for <strong>${escapeHtml(jobTitle)}</strong> —
+                  please consider yourself booked.
+                </p>
+
+                <p>
+                  The band knows you have confirmed the booking, and they have your contact details.
+                  Please find the full job details and band contact information below so you can get in touch directly about timings,
+                  setlist details, logistics, arrival information, parking, dress code, and anything else needed to ensure a smooth performance.
+                </p>
+
+                <h3 style="margin: 24px 0 10px;">Gig details</h3>
+                <ul style="padding-left: 20px; margin: 0 0 18px;">
+                  ${renderDetailRow("Job", jobTitle)}
+                  ${renderDetailRow("Date", dateText)}
+                  ${renderDetailRow("Call time", callTime)}
+                  ${renderDetailRow("Finish time", finishTime)}
+                  ${renderDetailRow("Location", location)}
+                  ${renderDetailRow("Fee", feeText)}
+                  ${renderDetailListRow("Required instruments", requiredInstruments)}
+                  ${renderDetailListRow("Essential skills", essentialSkills)}
+                  ${renderDetailListRow("Required skills", requiredSkills)}
+                  ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
+                  ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
+                  ${renderDetailListRow("Genres", genres)}
+                  ${renderDetailListRow("Tags", tags)}
+                  ${renderDetailListRow("Set lengths", setLengths)}
+                  ${renderDetailListRow("What's included", whatsIncluded)}
+                  ${renderDetailListRow("Claimable expenses", claimableExpenses)}
+                  ${renderDetailRow("Notes", notes)}
+                </ul>
+
+                <p>
+                  <strong>Payment processing:</strong><br/>
+                  Unless otherwise agreed, payment is due to be processed on <strong>${escapeHtml(paymentDate)}</strong>.
+                </p>
+
+                <h3 style="margin: 24px 0 10px;">Band contact details</h3>
+                <ul style="padding-left: 20px; margin: 0 0 18px;">
+                  ${renderDetailRow("Name", bandContactName)}
+                  ${renderDetailRow("Email", bandContactEmail)}
+                  ${renderDetailRow("Phone", bandContactPhone)}
+                </ul>
+
+                <p>
+                  If anything changes or you have any trouble getting hold of the band, just reply to this email and we’ll be happy to help.
+                </p>
+
+                <p>
+                  Best wishes,<br/>
+                  <strong>The Supreme Collective</strong>
+                </p>
+              </div>
             `,
           });
         } catch (musicianEmailError) {
@@ -2585,78 +2656,124 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
               })
             : "TBC";
 
-          await sendEmail({
-            to: posterEmail,
-            subject: `Deputy accepted: ${jobTitle}`,
-            html: `
-              <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
-                <p>Hi ${escapeHtml(normaliseString(job?.createdByName || "there"))},</p>
+      await sendEmail({
+        to: posterEmail,
+        subject: `Deputy accepted: ${jobTitle}`,
+        html: `
+          <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
+            <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
+              <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
+                <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700;">
+                  The Supreme Collective
+                </p>
+                <h1 style="margin:12px 0 0; font-size:28px; line-height:1.2; color:#fff;">
+                  Deputy Accepted
+                </h1>
+                <p style="margin:12px 0 0; font-size:15px; line-height:1.6; color:#f3f3f3;">
+                  Your selected deputy has confirmed their availability and is now booked for this job.
+                </p>
+              </div>
 
-                <p>
+              <div style="background:#ffffff; border:1px solid #e8e8e8; border-top:0; border-radius:0 0 20px 20px; padding:32px;">
+                <p style="margin:0 0 18px; font-size:16px; line-height:1.7; color:#333;">
+                  Hi ${escapeHtml(normaliseString(job?.createdByName || "there"))},
+                </p>
+
+                <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
                   Great news — <strong>${escapeHtml(
                     musicianName || "your selected deputy"
                   )}</strong> has accepted the deputy booking for <strong>${escapeHtml(jobTitle)}</strong>.
                 </p>
 
-                <p>
+                <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#444;">
                   Thank you for using <strong>The Supreme Collective</strong> to find your deputy.
                   Please now get in touch with them directly to share the setlist, timings,
                   dress code, logistics, arrival details, parking instructions, and any other
                   information needed to help ensure a smooth and successful performance.
                 </p>
 
-                <h3 style="margin: 24px 0 10px;">Deputy contact details</h3>
-                <ul style="padding-left: 20px; margin: 0 0 18px;">
-                  <li><strong>Name:</strong> ${escapeHtml(
-                    musicianName || "Not provided"
-                  )}</li>
-                  <li><strong>Email:</strong> ${escapeHtml(
-                    musicianEmail || "Not provided"
-                  )}</li>
-                  <li><strong>Phone:</strong> ${escapeHtml(
-                    musicianPhone || "Not provided"
-                  )}</li>
-                </ul>
+                <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
+                  <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Deputy contact details</h3>
+                  <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
+                    <li><strong>Name:</strong> ${escapeHtml(
+                      musicianName || "Not provided"
+                    )}</li>
+                    <li><strong>Email:</strong> ${escapeHtml(
+                      musicianEmail || "Not provided"
+                    )}</li>
+                    <li><strong>Phone:</strong> ${escapeHtml(
+                      musicianPhone || "Not provided"
+                    )}</li>
+                  </ul>
+                </div>
 
-                <h3 style="margin: 24px 0 10px;">Confirmed job details</h3>
-                <ul style="padding-left: 20px; margin: 0 0 18px;">
-                  ${renderDetailRow("Job", jobTitle)}
-                  ${renderDetailRow("Date", dateText)}
-                  ${renderDetailRow("Call time", callTime)}
-                  ${renderDetailRow("Finish time", finishTime)}
-                  ${renderDetailRow("Location", location)}
-                  ${renderDetailRow("Fee", feeText)}
-                  ${renderDetailListRow("Required instruments", requiredInstruments)}
-                  ${renderDetailListRow("Essential skills", essentialSkills)}
-                  ${renderDetailListRow("Required skills", requiredSkills)}
-                  ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
-                  ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
-                  ${renderDetailListRow("Genres", genres)}
-                  ${renderDetailListRow("Tags", tags)}
-                  ${renderDetailListRow("Set lengths", setLengths)}
-                  ${renderDetailListRow("What's included", whatsIncluded)}
-                  ${renderDetailListRow("Claimable expenses", claimableExpenses)}
-                  ${renderDetailRow("Notes", notes)}
-                </ul>
+                <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
+                  <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Confirmed job details</h3>
+                  <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
+                    ${renderDetailRow("Job", jobTitle)}
+                    ${renderDetailRow("Date", dateText)}
+                    ${renderDetailRow("Call time", callTime)}
+                    ${renderDetailRow("Finish time", finishTime)}
+                    ${renderDetailRow("Location", location)}
+                    ${renderDetailRow("Fee", feeText)}
+                    ${renderDetailListRow("Required instruments", requiredInstruments)}
+                    ${renderDetailListRow("Essential skills", essentialSkills)}
+                    ${renderDetailListRow("Required skills", requiredSkills)}
+                    ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
+                    ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
+                    ${renderDetailListRow("Genres", genres)}
+                    ${renderDetailListRow("Tags", tags)}
+                    ${renderDetailListRow("Set lengths", setLengths)}
+                    ${renderDetailListRow("What's included", whatsIncluded)}
+                    ${renderDetailListRow("Claimable expenses", claimableExpenses)}
+                    ${renderDetailRow("Notes", notes)}
+                  </ul>
+                </div>
 
-                <p>
-                  <strong>Payment processing:</strong><br/>
-                  Unless otherwise agreed, payment is due to be processed on
-                  <strong>${escapeHtml(paymentDate)}</strong>.
-                </p>
+                <div style="margin-bottom:24px; padding:20px; border:1px solid #f1d0d1; background:#fff7f7; border-radius:16px;">
+                  <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+                    Payment processing
+                  </p>
+                  <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+                    Unless otherwise agreed, payment is due to be processed on
+                    <strong>${escapeHtml(paymentDate)}</strong>.
+                  </p>
+                </div>
 
-                <p>
+                <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
                   If anything changes or you need any support before the event,
                   just reply to this email and we’ll be happy to help.
                 </p>
 
-                <p>
+                <div style="margin-top:18px; display:grid; gap:12px;">
+                  <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+                    <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+                      P.S.
+                    </p>
+                    <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+                      Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
+                    </p>
+                  </div>
+
+                  <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+                    <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+                      Also...
+                    </p>
+                    <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+                      Think your act could be a great fit for <strong>The Supreme Collective</strong>? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.
+                    </p>
+                  </div>
+                </div>
+
+                <p style="margin:24px 0 0; font-size:15px; line-height:1.7; color:#444;">
                   Best wishes,<br/>
                   <strong>The Supreme Collective</strong>
                 </p>
               </div>
-            `,
-          });
+            </div>
+          </div>
+        `,
+      });
         } catch (posterEmailError) {
           console.error("❌ Failed to send poster deputy acceptance email:", posterEmailError);
         }
@@ -2738,63 +2855,102 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
           to: posterEmail,
           subject: `Deputy declined: ${jobTitle}`,
           html: `
-            <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
-              <p>Hi ${escapeHtml(normaliseString(job?.createdByName || "there"))},</p>
+            <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
+              <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
+                <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
+                  <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700;">
+                    The Supreme Collective
+                  </p>
+                  <h1 style="margin:12px 0 0; font-size:28px; line-height:1.2; color:#fff;">
+                    Deputy Declined
+                  </h1>
+                  <p style="margin:12px 0 0; font-size:15px; line-height:1.6; color:#f3f3f3;">
+                    Your selected deputy is no longer available, and the job has been reopened so you can choose another suitable option.
+                  </p>
+                </div>
 
-              <p>
-                We wanted to let you know that <strong>${escapeHtml(
-                  musicianDisplayName || "the allocated deputy"
-                )}</strong> is no longer available for <strong>${escapeHtml(jobTitle)}</strong>.
-              </p>
+                <div style="background:#ffffff; border:1px solid #e8e8e8; border-top:0; border-radius:0 0 20px 20px; padding:32px;">
+                  <p style="margin:0 0 18px; font-size:16px; line-height:1.7; color:#333;">
+                    Hi ${escapeHtml(normaliseString(job?.createdByName || "there"))},
+                  </p>
 
-              <p>
-                The deputy job has now been <strong>reopened</strong>, so you can return to the job board and allocate another deputy when ready.
-              </p>
+                  <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
+                    We wanted to let you know that <strong>${escapeHtml(
+                      musicianDisplayName || "the allocated deputy"
+                    )}</strong> is no longer available for <strong>${escapeHtml(jobTitle)}</strong>.
+                  </p>
 
-              <p>
-                To help make reallocation as quick and straightforward as possible, we’ve included the full job details below for reference.
-              </p>
+                  <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#444;">
+                    The deputy job has now been <strong>reopened</strong>, so you can return to the job board and allocate another deputy when ready.
+                    To help make reallocation as quick and straightforward as possible, we’ve included the full job details below for reference.
+                  </p>
 
-              <h3 style="margin: 24px 0 10px;">Declined deputy</h3>
-              <ul style="padding-left: 20px; margin: 0 0 18px;">
-                <li><strong>Name:</strong> ${escapeHtml(musicianDisplayName || "Not provided")}</li>
-                <li><strong>Email:</strong> ${escapeHtml(musicianEmail || "Not provided")}</li>
-                <li><strong>Phone:</strong> ${escapeHtml(musicianPhone || "Not provided")}</li>
-              </ul>
+                  <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
+                    <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Declined deputy</h3>
+                    <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
+                      <li><strong>Name:</strong> ${escapeHtml(musicianDisplayName || "Not provided")}</li>
+                      <li><strong>Email:</strong> ${escapeHtml(musicianEmail || "Not provided")}</li>
+                      <li><strong>Phone:</strong> ${escapeHtml(musicianPhone || "Not provided")}</li>
+                    </ul>
+                  </div>
 
-              <h3 style="margin: 24px 0 10px;">Job details</h3>
-              <ul style="padding-left: 20px; margin: 0 0 18px;">
-                ${renderDetailRow("Job", jobTitle)}
-                ${renderDetailRow("Date", dateText)}
-                ${renderDetailRow("Call time", callTime)}
-                ${renderDetailRow("Finish time", finishTime)}
-                ${renderDetailRow("Location", location)}
-                ${renderDetailRow("Fee", feeText)}
-                ${renderDetailListRow("Required instruments", requiredInstruments)}
-                ${renderDetailListRow("Essential skills", essentialSkills)}
-                ${renderDetailListRow("Required skills", requiredSkills)}
-                ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
-                ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
-                ${renderDetailListRow("Genres", genres)}
-                ${renderDetailListRow("Tags", tags)}
-                ${renderDetailListRow("Set lengths", setLengths)}
-                ${renderDetailListRow("What's included", whatsIncluded)}
-                ${renderDetailListRow("Claimable expenses", claimableExpenses)}
-                ${renderDetailRow("Notes", notes)}
-              </ul>
+                  <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
+                    <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Job details</h3>
+                    <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
+                      ${renderDetailRow("Job", jobTitle)}
+                      ${renderDetailRow("Date", dateText)}
+                      ${renderDetailRow("Call time", callTime)}
+                      ${renderDetailRow("Finish time", finishTime)}
+                      ${renderDetailRow("Location", location)}
+                      ${renderDetailRow("Fee", feeText)}
+                      ${renderDetailListRow("Required instruments", requiredInstruments)}
+                      ${renderDetailListRow("Essential skills", essentialSkills)}
+                      ${renderDetailListRow("Required skills", requiredSkills)}
+                      ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
+                      ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
+                      ${renderDetailListRow("Genres", genres)}
+                      ${renderDetailListRow("Tags", tags)}
+                      ${renderDetailListRow("Set lengths", setLengths)}
+                      ${renderDetailListRow("What's included", whatsIncluded)}
+                      ${renderDetailListRow("Claimable expenses", claimableExpenses)}
+                      ${renderDetailRow("Notes", notes)}
+                    </ul>
+                  </div>
 
-              <p>
-                Thank you for using <strong>The Supreme Collective</strong> to source your deputy. If you’d like, you can now allocate another suitable applicant or return to the job board to review your options.
-              </p>
+                  <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
+                    Thank you for using <strong>The Supreme Collective</strong> to source your deputy. If you’d like, you can now allocate another suitable applicant or return to the job board to review your options.
+                  </p>
 
-              <p>
-                If you need any help choosing a replacement or if anything about the job has changed, just reply to this email and we’ll be happy to help.
-              </p>
+                  <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
+                    If you need any help choosing a replacement or if anything about the job has changed, just reply to this email and we’ll be happy to help.
+                  </p>
 
-              <p>
-                Best wishes,<br/>
-                <strong>The Supreme Collective</strong>
-              </p>
+                  <div style="margin-top:18px; display:grid; gap:12px;">
+                    <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+                      <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+                        P.S.
+                      </p>
+                      <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+                        Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
+                      </p>
+                    </div>
+
+                    <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+                      <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+                        Also...
+                      </p>
+                      <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+                        Think your act could be a great fit for <strong>The Supreme Collective</strong>? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.
+                      </p>
+                    </div>
+                  </div>
+
+                  <p style="margin:24px 0 0; font-size:15px; line-height:1.7; color:#444;">
+                    Best wishes,<br/>
+                    <strong>The Supreme Collective</strong>
+                  </p>
+                </div>
+              </div>
             </div>
           `,
         });

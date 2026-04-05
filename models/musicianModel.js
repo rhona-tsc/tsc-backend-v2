@@ -386,6 +386,14 @@ lastLoginAt: { type: Date, default: null, index: true },
       },
     },
 
+    stripeConnect: {
+      accountId: { type: String, default: "" },
+      onboardingComplete: { type: Boolean, default: false },
+      chargesEnabled: { type: Boolean, default: false },
+      payoutsEnabled: { type: Boolean, default: false },
+      detailsSubmitted: { type: Boolean, default: false },
+    },
+
     dateRegistered: { type: Date, default: Date.now },
   },
   { minimize: false, strict: true }

@@ -42,7 +42,7 @@ const deputyJobApplicationSchema = new mongoose.Schema(
     declinedAt: { type: Date, default: null },
     withdrawnAt: { type: Date, default: null },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const deputyJobNotificationSchema = new mongoose.Schema(
@@ -62,18 +62,18 @@ const deputyJobNotificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-     enum: [
-  "job_created_preview",
-  "job_created",
-  "application_received_preview",
-  "application_received",
-  "allocation_preview",
-  "allocation",
-  "allocation_request",
-  "booking_confirmation_preview",
-  "booking_confirmation",
-  "manual",
-],
+      enum: [
+        "job_created_preview",
+        "job_created",
+        "application_received_preview",
+        "application_received",
+        "allocation_preview",
+        "allocation",
+        "allocation_request",
+        "booking_confirmation_preview",
+        "booking_confirmation",
+        "manual",
+      ],
       default: "job_created",
     },
     subject: { type: String, default: "", trim: true },
@@ -88,7 +88,7 @@ const deputyJobNotificationSchema = new mongoose.Schema(
     sentAt: { type: Date, default: Date.now },
     error: { type: String, default: "" },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const deputyJobMatchSnapshotSchema = new mongoose.Schema(
@@ -116,7 +116,7 @@ const deputyJobMatchSnapshotSchema = new mongoose.Schema(
     notified: { type: Boolean, default: false },
     notifiedAt: { type: Date, default: null },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const deputyJobPaymentEventSchema = new mongoose.Schema(
@@ -154,7 +154,7 @@ const deputyJobPaymentEventSchema = new mongoose.Schema(
     createdAt: { type: Date, default: Date.now },
     metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const deputyJobSchema = new mongoose.Schema(
@@ -210,6 +210,7 @@ const deputyJobSchema = new mongoose.Schema(
     setupIntentStatus: { type: String, default: "", trim: true },
     paymentIntentId: { type: String, default: "", trim: true },
     paymentIntentStatus: { type: String, default: "", trim: true },
+    latestTransferId: { type: String, default: "", trim: true },
 
     grossAmount: { type: Number, default: 0 },
     commissionAmount: { type: Number, default: 0 },
@@ -277,7 +278,7 @@ const deputyJobSchema = new mongoose.Schema(
     },
     createdByName: { type: String, default: "" },
     createdByEmail: { type: String, default: "", trim: true, lowercase: true },
-createdByPhone: { type: String, default: "", trim: true },
+    createdByPhone: { type: String, default: "", trim: true },
     applications: { type: [deputyJobApplicationSchema], default: [] },
 
     matchedMusicianIds: [
@@ -313,7 +314,7 @@ createdByPhone: { type: String, default: "", trim: true },
     bookedMusicianName: { type: String, default: "" },
     bookingConfirmedAt: { type: Date, default: null },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 deputyJobSchema.index({ createdAt: -1 });
@@ -326,7 +327,6 @@ deputyJobSchema.index({ paymentStatus: 1, releaseOn: 1, createdAt: -1 });
 deputyJobSchema.index({ payoutStatus: 1, releaseOn: 1, createdAt: -1 });
 
 const deputyJobModel =
-  mongoose.models.deputyjob ||
-  mongoose.model("deputyjob", deputyJobSchema);
+  mongoose.models.deputyjob || mongoose.model("deputyjob", deputyJobSchema);
 
 export default deputyJobModel;
