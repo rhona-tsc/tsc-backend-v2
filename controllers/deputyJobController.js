@@ -246,6 +246,30 @@ const parseDateOrNull = (value) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const getOrdinalSuffix = (day) => {
+  const numericDay = Number(day);
+  if (!Number.isInteger(numericDay)) return "";
+  if (numericDay >= 11 && numericDay <= 13) return "th";
+
+  const lastDigit = numericDay % 10;
+  if (lastDigit === 1) return "st";
+  if (lastDigit === 2) return "nd";
+  if (lastDigit === 3) return "rd";
+  return "th";
+};
+
+const formatDeputyOpportunityDate = (value) => {
+  const parsed = parseDateOrNull(value);
+  if (!parsed) return normaliseString(value);
+
+  const dayName = parsed.toLocaleDateString("en-GB", { weekday: "long" });
+  const monthName = parsed.toLocaleDateString("en-GB", { month: "long" });
+  const dayOfMonth = parsed.getDate();
+  const year = parsed.getFullYear();
+
+  return `${dayName} ${dayOfMonth}${getOrdinalSuffix(dayOfMonth)} of ${monthName} ${year}`;
+};
+
 const buildDefaultReleaseOn = (eventDate) => {
   const parsed = parseDateOrNull(eventDate);
   if (!parsed) return null;
@@ -627,7 +651,10 @@ const buildJobNotificationPreview = ({
   const jobBoardUrl = `${siteBase}/deputy-jobs`;
   const jobUrl = job?._id ? `${siteBase}/deputy-jobs/${job._id}` : jobBoardUrl;
 
-  const subject = `${safeTitle}${safeDate ? ` – ${safeDate}` : ""}`;
+  const formattedSubjectDate = formatDeputyOpportunityDate(safeDate);
+  const subject = formattedSubjectDate
+    ? `${safeTitle} | Deputy Opportunity for ${formattedSubjectDate}`
+    : `${safeTitle} | Deputy Opportunity`;
 
   const detailRowsHtml = [
     renderDetailRow("Date", safeDate),
