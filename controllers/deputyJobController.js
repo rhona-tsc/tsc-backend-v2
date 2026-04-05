@@ -25,8 +25,46 @@ const normaliseArray = (value) => {
 const normaliseString = (value) => String(value || "").trim();
 
 const normaliseCurrency = (value) => {
-  const safe = normaliseString(value || "£").toUpperCase();
-  return safe || "£";
+  const raw = normaliseString(value || "GBP").toUpperCase();
+  if (!raw || raw === "£") return "GBP";
+  return raw;
+};
+
+const formatMoney = (value, currency = "GBP") => {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount)) return "TBC";
+
+  const safeCurrency = normaliseCurrency(currency || "GBP");
+
+  if (safeCurrency === "GBP") {
+    return `£${amount.toFixed(2).replace(/\.00$/, "")}`;
+  }
+
+  try {
+    return new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency: safeCurrency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+      .format(amount)
+      .replace(/\.00$/, "");
+  } catch {
+    return `£${amount.toFixed(2).replace(/\.00$/, "")}`;
+  }
+};
+
+const getDeputyNetFeeAmount = (job = {}) => {
+  const deputyNetAmount = Number(job?.deputyNetAmount || 0);
+  if (Number.isFinite(deputyNetAmount) && deputyNetAmount > 0) return deputyNetAmount;
+
+  const fee = Number(job?.fee || 0);
+  return Number.isFinite(fee) && fee > 0 ? fee : 0;
+};
+
+const getDeputyNetFeeText = (job = {}) => {
+  const netAmount = getDeputyNetFeeAmount(job);
+  return netAmount > 0 ? formatMoney(netAmount, job?.currency || "GBP") : "TBC";
 };
 
 const asObjectIdString = (value) => {
@@ -875,9 +913,7 @@ const buildBookingConfirmationPreview = ({ job, musician }) => {
   const location = normaliseString(
     job?.location || job?.venue || job?.locationName || "Location TBC"
   );
-  const feeText = job?.fee
-    ? `${normaliseCurrency(job?.currency || "£")} ${Number(job.fee)}`
-    : "TBC";
+ const feeText = getDeputyNetFeeText(job);
 
   const requiredInstruments = normaliseList(job?.requiredInstruments);
   const essentialSkills = normaliseList(job?.essentialRoles);
@@ -908,17 +944,19 @@ const payoutHtml = payout.hasPayoutDetails
   ? `
     <p>
       <strong>Payment</strong><br/>
-      Your payment is due to be processed automatically on
-      <strong>${escapeHtml(paymentDate || "TBC")}</strong>
-      into the ${escapeHtml(payout.accountType.toLowerCase())} account ending
-      <strong>***${escapeHtml(payout.ending)}</strong>.
+      Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
+      Provided your bank details remain up to date, payment can typically be expected
+      <strong>5–7 days after the gig</strong> into the ${escapeHtml(
+        payout.accountType.toLowerCase()
+      )} account ending <strong>***${escapeHtml(payout.ending)}</strong>.
     </p>
   `
   : `
     <p>
       <strong>Payment</strong><br/>
-      We do not currently have complete payout details on file for you.
-      Please update your profile now to ensure payment can be processed for this gig.
+      Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
+      We do not currently have complete bank details on file for you, so please update your records now to ensure payout can be made.
+      Once your bank details are in place, payment can typically be expected <strong>5–7 days after the gig</strong>.
     </p>
     <p style="margin: 16px 0 20px;">
       <a
@@ -961,8 +999,7 @@ const payoutHtml = payout.hasPayoutDetails
         ${renderDetailRow("Call time", callTime)}
         ${renderDetailRow("Finish time", finishTime)}
         ${renderDetailRow("Location", location)}
-        ${renderDetailRow("Fee", feeText)}
-        ${renderDetailListRow("Required instruments", requiredInstruments)}
+${renderDetailRow("Net fee", feeText)}        ${renderDetailListRow("Required instruments", requiredInstruments)}
         ${renderDetailListRow("Essential skills", essentialSkills)}
         ${renderDetailListRow("Required skills", requiredSkills)}
         ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
@@ -1006,8 +1043,7 @@ const payoutHtml = payout.hasPayoutDetails
     callTime ? `Call time: ${callTime}` : "",
     finishTime ? `Finish time: ${finishTime}` : "",
     `Location: ${location || "TBC"}`,
-    `Fee: ${feeText}`,
-    requiredInstruments.length
+`Net fee: ${feeText}`,    requiredInstruments.length
       ? `Required instruments: ${requiredInstruments.join(", ")}`
       : "",
     essentialSkills.length ? `Essential skills: ${essentialSkills.join(", ")}` : "",
@@ -1028,9 +1064,8 @@ const payoutHtml = payout.hasPayoutDetails
     notes ? `Notes: ${notes}` : "",
     ``,
     payout.hasPayoutDetails
-      ? `Your payment is due to be processed on ${paymentDate || "TBC"} into the account ending ***${payout.ending}.`
-      : `Your payment is due to be processed on ${paymentDate || "TBC"}. Please update your profile now to ensure payment can be processed: ${profileUrl}`,
-    ``,
+  ? `Your net fee for this gig is ${feeText}. Provided your bank details remain up to date, payment can typically be expected 5–7 days after the gig into the account ending ***${payout.ending}.`
+  : `Your net fee for this gig is ${feeText}. We do not currently have complete bank details on file for you, so please update your profile now to ensure payout can be processed. Once your bank details are in place, payment can typically be expected 5–7 days after the gig: ${profileUrl}`,
     `Band contact details:`,
     `Name: ${bandContactName}`,
     `Email: ${bandContactEmail}`,
@@ -2363,6 +2398,17 @@ export const sendDeputyBookingEmail = async (req, res) => {
 
     const preview = buildBookingConfirmationPreview({ job, musician });
 
+    try {
+      await sendEmail({
+        to: musician.email || "",
+        subject: preview.subject,
+        html: preview.html,
+        text: preview.text,
+      });
+    } catch (sendBookingEmailError) {
+      console.error("❌ Failed to send deputy booking confirmation email:", sendBookingEmailError);
+    }
+
     job.notifications = [
       ...(job.notifications || []),
       {
@@ -2487,8 +2533,7 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
     const location =
       normaliseString(job.venue || job.locationName || job.location || "Location TBC");
     const dateText = normaliseString(job.eventDate || "TBC");
-    const feeText = Number(job?.fee || 0) ? `£${Number(job.fee).toLocaleString("en-GB")}` : "TBC";
-
+const feeText = getDeputyNetFeeText(job);
     const musicianEmail =
       normaliseString(musician.email || matchedApplication?.email || "").toLowerCase();
     const musicianPhone =
@@ -2564,6 +2609,8 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
             job?.createdByEmail || "hello@thesupremecollective.co.uk"
           );
           const bandContactPhone = normaliseString(job?.createdByPhone || "");
+          const payout = getMusicianPayoutSummary(musician);
+const profileUrl = getMusicianProfileUrl(musician);
 
           await sendEmail({
             to: musicianEmail,
@@ -2590,7 +2637,7 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
                   ${renderDetailRow("Call time", callTime)}
                   ${renderDetailRow("Finish time", finishTime)}
                   ${renderDetailRow("Location", location)}
-                  ${renderDetailRow("Fee", feeText)}
+                  ${renderDetailRow("Net fee", feeText)}
                   ${renderDetailListRow("Required instruments", requiredInstruments)}
                   ${renderDetailListRow("Essential skills", essentialSkills)}
                   ${renderDetailListRow("Required skills", requiredSkills)}
@@ -2604,10 +2651,37 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
                   ${renderDetailRow("Notes", notes)}
                 </ul>
 
-                <p>
-                  <strong>Payment processing:</strong><br/>
-                  Unless otherwise agreed, payment is due to be processed on <strong>${escapeHtml(paymentDate)}</strong>.
-                </p>
+               ${payout.hasPayoutDetails ? `
+  <p>
+    <strong>Payment processing:</strong><br/>
+    Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
+    Provided your bank details remain up to date, payment can typically be expected <strong>5–7 days after the gig</strong>
+    into the ${escapeHtml(payout.accountType.toLowerCase())} account ending <strong>***${escapeHtml(payout.ending)}</strong>.
+  </p>
+` : `
+  <p>
+    <strong>Payment processing:</strong><br/>
+    Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
+    We do not currently have complete bank details on file for you, so please update your records now to ensure payout can be made.
+    Once your bank details are in place, payment can typically be expected <strong>5–7 days after the gig</strong>.
+  </p>
+  <p style="margin: 16px 0 20px;">
+    <a
+      href="${escapeHtml(profileUrl)}"
+      style="
+        display:inline-block;
+        background:#111;
+        color:#fff;
+        text-decoration:none;
+        padding:12px 18px;
+        border-radius:8px;
+        font-weight:600;
+      "
+    >
+      Update payment details
+    </a>
+  </p>
+`}
 
                 <h3 style="margin: 24px 0 10px;">Band contact details</h3>
                 <ul style="padding-left: 20px; margin: 0 0 18px;">
