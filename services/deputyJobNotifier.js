@@ -144,15 +144,29 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             Sent via <strong>The Supreme Collective</strong> deputy system.
           </p>
 
-          <div style="margin-top:18px; padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
-            <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-              Apply directly
-            </p>
-            <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
-              If the button above does not open, copy and paste this link into your browser:<br/>
-              <a href="${safeApplyUrl}">${safeApplyUrl}</a>
-            </p>
-          </div>
+         <div style="margin-top:18px; display:grid; gap:12px;">
+  <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+    <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+      P.S.
+    </p>
+    <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+      Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
+    </p>
+  </div>
+
+  <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+    <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+      Also...
+    </p>
+    <p style="margin:0 0 10px; font-size:14px; line-height:1.7; color:#444;">
+      Think your act could be a great fit for <strong>The Supreme Collective</strong>? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.
+    </p>
+    <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+      If the button above does not open, copy and paste this link into your browser:<br/>
+      <a href="${safeApplyUrl}">${safeApplyUrl}</a>
+    </p>
+  </div>
+</div>
         </div>
       </div>
     </div>
@@ -187,6 +201,8 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
     "",
     `View & apply: ${applyUrl}`,
     "",
+"P.S. Did you know you can also post your own deputy jobs through The Supreme Collective? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.",
+"P.S. Think your act could be a great fit for The Supreme Collective? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.",    "",
     "Sent via The Supreme Collective deputy system.",
   ]
     .filter(Boolean)

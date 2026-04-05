@@ -25,8 +25,8 @@ const normaliseArray = (value) => {
 const normaliseString = (value) => String(value || "").trim();
 
 const normaliseCurrency = (value) => {
-  const safe = normaliseString(value || "GBP").toUpperCase();
-  return safe || "GBP";
+  const safe = normaliseString(value || "£").toUpperCase();
+  return safe || "£";
 };
 
 const asObjectIdString = (value) => {
@@ -313,7 +313,7 @@ const pushPaymentEvent = (job, event = {}) => {
       type: event.type || "manual_adjustment",
       status: normaliseString(event.status || ""),
       amount: Number(event.amount || 0),
-      currency: normaliseCurrency(event.currency || job.currency || "GBP"),
+      currency: normaliseCurrency(event.currency || job.currency || "£"),
       stripeCustomerId: normaliseString(event.stripeCustomerId || job.stripeCustomerId || ""),
       setupIntentId: normaliseString(event.setupIntentId || job.setupIntentId || ""),
       paymentIntentId: normaliseString(event.paymentIntentId || job.paymentIntentId || ""),
@@ -502,7 +502,7 @@ const attemptDeputyJobCharge = async ({ job, createdBy = null }) => {
   try {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amountPence,
-      currency: String(job.currency || "GBP").toLowerCase(),
+      currency: String(job.currency || "£").toLowerCase(),
       customer: job.stripeCustomerId,
       payment_method: job.defaultPaymentMethodId,
       off_session: true,
@@ -751,14 +751,25 @@ const buildJobNotificationPreview = ({
             You can make any changes in the job board before sending the live notification to matched musicians.
           </p>
 
-          <div style="margin-top:18px; padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
-            <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-              P.S.
-            </p>
-            <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
-              Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
-            </p>
-          </div>
+          <div style="margin-top:18px; display:grid; gap:12px;">
+  <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+    <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+      P.S.
+    </p>
+    <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+      Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
+    </p>
+  </div>
+
+  <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+    <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+      Also...
+    </p>
+    <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+      Think your act could be a great fit for <strong>The Supreme Collective</strong>? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.
+    </p>
+  </div>
+</div>
         </div>
       </div>
     </div>
@@ -805,8 +816,8 @@ const buildJobNotificationPreview = ({
     `View deputy job: ${jobUrl}`,
     `Open job board: ${jobBoardUrl}`,
     "",
-    "P.S. Did you know you can also post your own deputy jobs through The Supreme Collective? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.",
-    "",
+"P.S. Did you know you can also post your own deputy jobs through The Supreme Collective? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.",
+"P.S. Think your act could be a great fit for The Supreme Collective? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.",    "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -865,7 +876,7 @@ const buildBookingConfirmationPreview = ({ job, musician }) => {
     job?.location || job?.venue || job?.locationName || "Location TBC"
   );
   const feeText = job?.fee
-    ? `${normaliseCurrency(job?.currency || "GBP")} ${Number(job.fee)}`
+    ? `${normaliseCurrency(job?.currency || "£")} ${Number(job.fee)}`
     : "TBC";
 
   const requiredInstruments = normaliseList(job?.requiredInstruments);
@@ -1068,7 +1079,7 @@ const buildJobPayloadFromRequest = (req) => {
     claimableExpenses = [],
     claimableExpensesOther = "",
     fee = 0,
-    currency = "GBP",
+    currency = "£",
     notes = "",
     clientName = "",
     clientEmail = "",
