@@ -1,5 +1,5 @@
 // musicianController.js
-
+import Stripe from "stripe";
 import validator from "validator";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -16,6 +16,15 @@ import { postcodes as POSTCODE_MAP_ARR } from "../utils/postcodes.js";
 const POSTCODE_MAP =
   (Array.isArray(POSTCODE_MAP_ARR) && POSTCODE_MAP_ARR[0]) || {};
 
+  const stripeSecretKey =
+  process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY || "";
+
+const stripe = stripeSecretKey
+  ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
+  : null;
+
+const normaliseString = (value) => String(value || "").trim();
+const normaliseEmail = (value) => normaliseString(value).toLowerCase();
 // ----------------------- Utilities -----------------------
 
 const safeJSONParse = (data, fallback = undefined) => {
@@ -890,6 +899,87 @@ const isSelf = isSelfById || isSelfBySlug;
     return res.status(500).json({ success: false, message: "Server error" });
   }
 }
+
+const createStripeConnectOnboardingLink = async (req, res) => {
+  try {
+    if (!stripe) {
+      return res.status(500).json({
+        success: false,
+        message: "Stripe is not configured on the server",
+      });
+    }
+
+    const musicianId = req.user?._id || req.user?.id;
+    if (!musicianId) {
+      return res.status(401).json({
+        success: false,
+        message: "You must be logged in",
+      });
+    }
+
+    const musician = await musicianModel.findById(musicianId);
+    if (!musician) {
+      return res.status(404).json({
+        success: false,
+        message: "Musician not found",
+      });
+    }
+
+    const siteBase = (
+      process.env.PUBLIC_SITE_URL ||
+      process.env.FRONTEND_URL ||
+      "https://thesupremecollective.co.uk"
+    ).replace(/\/$/, "");
+
+    let accountId = normaliseString(musician?.stripeConnect?.accountId || "");
+
+    if (!accountId) {
+      const account = await stripe.accounts.create({
+        type: "express",
+        country: "GB",
+        email: normaliseEmail(musician.email || ""),
+        business_type: "individual",
+        metadata: {
+          musicianId: String(musician._id),
+        },
+      });
+
+      accountId = account.id;
+
+      musician.stripeConnect = {
+        ...(musician.stripeConnect || {}),
+        accountId,
+        onboardingComplete: false,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        detailsSubmitted: false,
+      };
+
+      musician.markModified("stripeConnect");
+      await musician.save();
+    }
+
+    const accountLink = await stripe.accountLinks.create({
+      account: accountId,
+      refresh_url: `${siteBase}/stripe-connect/refresh`,
+      return_url: `${siteBase}/stripe-connect/return`,
+      type: "account_onboarding",
+    });
+
+    return res.json({
+      success: true,
+      url: accountLink.url,
+      accountId,
+    });
+  } catch (error) {
+    console.error("❌ createStripeConnectOnboardingLink error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create Stripe onboarding link",
+      error: error.message,
+    });
+  }
+};
 
 const registerDeputy = async (req, res) => {
   const reqId =
@@ -3177,6 +3267,7 @@ export {
   listActs,
   suggestDeputies,
   appendDeputyRepertoire,
+  createStripeConnectOnboardingLink,
   addAct,
   removeAct,
   singleAct,

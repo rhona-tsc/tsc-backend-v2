@@ -134,6 +134,8 @@ const deputyJobPaymentEventSchema = new mongoose.Schema(
         "payment_cancelled",
         "payout_marked_pending",
         "payout_marked_paid",
+        "payout_transfer_failed",
+        "payout_transfer_succeeded",
         "manual_adjustment",
       ],
       default: "manual_adjustment",

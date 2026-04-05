@@ -9,6 +9,9 @@ import { sendDeputyAllocationWhatsApp, toE164 } from "../utils/twilioClient.js";
 import { sendWhatsAppText } from "../utils/twilioClient.js";
 import { sendEmail } from "../utils/sendEmail.js";
 
+const DEPUTY_JOB_BCC_EMAIL =
+  process.env.DEPUTY_JOB_BCC_EMAIL || "hello@thesupremecollective.co.uk";
+
 const normaliseArray = (value) => {
   if (Array.isArray(value)) {
     return value.map((item) => String(item || "").trim()).filter(Boolean);
@@ -1623,12 +1626,13 @@ export const createDeputyJob = async (req, res) => {
     });
 
     try {
-      await sendEmail({
-        to: previewRecipientEmail,
-        subject: `[Preview] ${matcherResult.previewNotification.subject}`,
-        html: matcherResult.previewNotification.html,
-        text: matcherResult.previewNotification.text,
-      });
+    await sendEmail({
+  to: previewRecipientEmail,
+  bcc: DEPUTY_JOB_BCC_EMAIL,
+  subject: `[Preview] ${matcherResult.previewNotification.subject}`,
+  html: matcherResult.previewNotification.html,
+  text: matcherResult.previewNotification.text,
+});
     } catch (previewEmailError) {
       console.error("❌ Failed to send deputy job preview email:", previewEmailError);
     }
@@ -2402,6 +2406,7 @@ export const sendDeputyBookingEmail = async (req, res) => {
       await sendEmail({
         to: musician.email || "",
         subject: preview.subject,
+        bcc: DEPUTY_JOB_BCC_EMAIL,
         html: preview.html,
         text: preview.text,
       });
@@ -2613,94 +2618,95 @@ const feeText = getDeputyNetFeeText(job);
 const profileUrl = getMusicianProfileUrl(musician);
 
           await sendEmail({
-            to: musicianEmail,
-            subject: `Confirmed: ${jobTitle}`,
-            html: `
-              <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
-                <p>Hi ${escapeHtml(normaliseString(musician.firstName || "there"))},</p>
+  to: musicianEmail,
+  bcc: DEPUTY_JOB_BCC_EMAIL,
+  subject: `Confirmed: ${jobTitle}`,
+  html: `
+    <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
+      <p>Hi ${escapeHtml(normaliseString(musician.firstName || "there"))},</p>
 
-                <p>
-                  Thank you for confirming your availability for <strong>${escapeHtml(jobTitle)}</strong> —
-                  please consider yourself booked.
-                </p>
+      <p>
+        Thank you for confirming your availability for <strong>${escapeHtml(jobTitle)}</strong> —
+        please consider yourself booked.
+      </p>
 
-                <p>
-                  The band knows you have confirmed the booking, and they have your contact details.
-                  Please find the full job details and band contact information below so you can get in touch directly about timings,
-                  setlist details, logistics, arrival information, parking, dress code, and anything else needed to ensure a smooth performance.
-                </p>
+      <p>
+        The band knows you have confirmed the booking, and they have your contact details.
+        Please find the full job details and band contact information below so you can get in touch directly about timings,
+        setlist details, logistics, arrival information, parking, dress code, and anything else needed to ensure a smooth performance.
+      </p>
 
-                <h3 style="margin: 24px 0 10px;">Gig details</h3>
-                <ul style="padding-left: 20px; margin: 0 0 18px;">
-                  ${renderDetailRow("Job", jobTitle)}
-                  ${renderDetailRow("Date", dateText)}
-                  ${renderDetailRow("Call time", callTime)}
-                  ${renderDetailRow("Finish time", finishTime)}
-                  ${renderDetailRow("Location", location)}
-                  ${renderDetailRow("Net fee", feeText)}
-                  ${renderDetailListRow("Required instruments", requiredInstruments)}
-                  ${renderDetailListRow("Essential skills", essentialSkills)}
-                  ${renderDetailListRow("Required skills", requiredSkills)}
-                  ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
-                  ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
-                  ${renderDetailListRow("Genres", genres)}
-                  ${renderDetailListRow("Tags", tags)}
-                  ${renderDetailListRow("Set lengths", setLengths)}
-                  ${renderDetailListRow("What's included", whatsIncluded)}
-                  ${renderDetailListRow("Claimable expenses", claimableExpenses)}
-                  ${renderDetailRow("Notes", notes)}
-                </ul>
+      <h3 style="margin: 24px 0 10px;">Gig details</h3>
+      <ul style="padding-left: 20px; margin: 0 0 18px;">
+        ${renderDetailRow("Job", jobTitle)}
+        ${renderDetailRow("Date", dateText)}
+        ${renderDetailRow("Call time", callTime)}
+        ${renderDetailRow("Finish time", finishTime)}
+        ${renderDetailRow("Location", location)}
+        ${renderDetailRow("Net fee", feeText)}
+        ${renderDetailListRow("Required instruments", requiredInstruments)}
+        ${renderDetailListRow("Essential skills", essentialSkills)}
+        ${renderDetailListRow("Required skills", requiredSkills)}
+        ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
+        ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
+        ${renderDetailListRow("Genres", genres)}
+        ${renderDetailListRow("Tags", tags)}
+        ${renderDetailListRow("Set lengths", setLengths)}
+        ${renderDetailListRow("What's included", whatsIncluded)}
+        ${renderDetailListRow("Claimable expenses", claimableExpenses)}
+        ${renderDetailRow("Notes", notes)}
+      </ul>
 
-               ${payout.hasPayoutDetails ? `
-  <p>
-    <strong>Payment processing:</strong><br/>
-    Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
-    Provided your bank details remain up to date, payment can typically be expected <strong>5–7 days after the gig</strong>
-    into the ${escapeHtml(payout.accountType.toLowerCase())} account ending <strong>***${escapeHtml(payout.ending)}</strong>.
-  </p>
-` : `
-  <p>
-    <strong>Payment processing:</strong><br/>
-    Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
-    We do not currently have complete bank details on file for you, so please update your records now to ensure payout can be made.
-    Once your bank details are in place, payment can typically be expected <strong>5–7 days after the gig</strong>.
-  </p>
-  <p style="margin: 16px 0 20px;">
-    <a
-      href="${escapeHtml(profileUrl)}"
-      style="
-        display:inline-block;
-        background:#111;
-        color:#fff;
-        text-decoration:none;
-        padding:12px 18px;
-        border-radius:8px;
-        font-weight:600;
-      "
-    >
-      Update payment details
-    </a>
-  </p>
-`}
+      ${payout.hasPayoutDetails ? `
+        <p>
+          <strong>Payment processing:</strong><br/>
+          Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
+          Provided your bank details remain up to date, payment can typically be expected <strong>5–7 days after the gig</strong>
+          into the ${escapeHtml(payout.accountType.toLowerCase())} account ending <strong>***${escapeHtml(payout.ending)}</strong>.
+        </p>
+      ` : `
+        <p>
+          <strong>Payment processing:</strong><br/>
+          Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
+          We do not currently have complete bank details on file for you, so please update your records now to ensure payout can be made.
+          Once your bank details are in place, payment can typically be expected <strong>5–7 days after the gig</strong>.
+        </p>
+        <p style="margin: 16px 0 20px;">
+          <a
+            href="${escapeHtml(profileUrl)}"
+            style="
+              display:inline-block;
+              background:#111;
+              color:#fff;
+              text-decoration:none;
+              padding:12px 18px;
+              border-radius:8px;
+              font-weight:600;
+            "
+          >
+            Update payment details
+          </a>
+        </p>
+      `}
 
-                <h3 style="margin: 24px 0 10px;">Band contact details</h3>
-                <ul style="padding-left: 20px; margin: 0 0 18px;">
-                  ${renderDetailRow("Name", bandContactName)}
-                  ${renderDetailRow("Email", bandContactEmail)}
-                  ${renderDetailRow("Phone", bandContactPhone)}
-                </ul>
+      <h3 style="margin: 24px 0 10px;">Band contact details</h3>
+      <ul style="padding-left: 20px; margin: 0 0 18px;">
+        ${renderDetailRow("Name", bandContactName)}
+        ${renderDetailRow("Email", bandContactEmail)}
+        ${renderDetailRow("Phone", bandContactPhone)}
+      </ul>
 
-                <p>
-                  If anything changes or you have any trouble getting hold of the band, just reply to this email and we’ll be happy to help.
-                </p>
+      <p>
+        If anything changes or you have any trouble getting hold of the band, just reply to this email and we’ll be happy to help.
+      </p>
 
-                <p>
-                  Best wishes,<br/>
-                  <strong>The Supreme Collective</strong>
-                </p>
-              </div>
-            `,
-          });
+      <p>
+        Best wishes,<br/>
+        <strong>The Supreme Collective</strong>
+      </p>
+    </div>
+  `,
+});
         } catch (musicianEmailError) {
           console.error("❌ Failed to send musician deputy acceptance email:", musicianEmailError);
         }
@@ -2730,10 +2736,11 @@ const profileUrl = getMusicianProfileUrl(musician);
               })
             : "TBC";
 
-      await sendEmail({
-        to: posterEmail,
-        subject: `Deputy accepted: ${jobTitle}`,
-        html: `
+     await sendEmail({
+  to: posterEmail,
+  bcc: DEPUTY_JOB_BCC_EMAIL,
+  subject: `Deputy accepted: ${jobTitle}`,
+  html: `
           <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
             <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
               <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
@@ -2926,9 +2933,10 @@ const profileUrl = getMusicianProfileUrl(musician);
           const notes = normaliseString(job?.notes || "");
 
         await sendEmail({
-          to: posterEmail,
-          subject: `Deputy declined: ${jobTitle}`,
-          html: `
+  to: posterEmail,
+  bcc: DEPUTY_JOB_BCC_EMAIL,
+  subject: `Deputy declined: ${jobTitle}`,
+  html: `
             <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
               <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
                 <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">

@@ -8,7 +8,11 @@ import verifyToken from "../middleware/musicianAuth.js";
 import musicianModel from "../models/musicianModel.js";
 import actModel from "../models/actModel.js";
 import PendingSong from "../models/pendingSongModel.js";
-import { appendDeputyRepertoire, suggestDeputies } from "../controllers/musicianController.js";
+import {
+  appendDeputyRepertoire,
+  suggestDeputies,
+  createStripeConnectOnboardingLink,
+} from "../controllers/musicianController.js";
 import {
   addAct, listActs, removeAct, singleAct, updateActStatus,
   registerMusician, loginMusician, saveActDraft, saveAmendmentDraft,
@@ -183,6 +187,44 @@ router.post("/account/change-phone", verifyToken, async (req, res) => {
     return res.status(500).json({ success: false, message: "Phone update failed." });
   }
 });
+
+// GET /api/musician/account/stripe-connect/status
+router.get("/account/stripe-connect/status", verifyToken, async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorised." });
+    }
+
+    const user = await musicianModel.findById(userId).lean();
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const stripeConnect = user.stripeConnect || {
+      accountId: "",
+      onboardingComplete: false,
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      detailsSubmitted: false,
+    };
+
+    return res.json({
+      success: true,
+      stripeConnect,
+    });
+  } catch (err) {
+    console.error("❌ /account/stripe-connect/status failed:", err);
+    return res.status(500).json({ success: false, message: "Failed to fetch Stripe Connect status." });
+  }
+});
+
+// POST /api/musician/account/stripe-connect/onboarding-link
+router.post(
+  "/account/stripe-connect/onboarding-link",
+  verifyToken,
+  createStripeConnectOnboardingLink
+);
 
 /* ---------------- Deputy registration ---------------- */
 router.post("/moderation/register-deputy", uploadFields, registerDeputy);

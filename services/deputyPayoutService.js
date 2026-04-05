@@ -147,7 +147,7 @@ const location = normaliseString(job?.venue || job?.locationName || job?.locatio
       <p><strong>Gross booking amount:</strong> ${grossAmount}</p>
       <p><strong>Commission amount:</strong> ${commissionAmount}</p>
       <p><strong>Your net amount:</strong> ${deputyNetAmount}</p>
-      <p><strong>Payout released:</strong> ${payoutPaidAt}</p>
+     
       <p><strong>Payout released:</strong> ${payoutPaidAt}</p>
 ${transferId ? `<p><strong>Stripe transfer reference:</strong> ${transferId}</p>` : ""}
       <p>If anything looks incorrect, please reply to this email.</p>
@@ -162,7 +162,6 @@ ${transferId ? `<p><strong>Stripe transfer reference:</strong> ${transferId}</p>
     `Gross booking amount: ${grossAmount}`,
     `Commission amount: ${commissionAmount}`,
     `Your net amount: ${deputyNetAmount}`,
-    `Payout released: ${payoutPaidAt}`,
     `Payout released: ${payoutPaidAt}`,
 transferId ? `Stripe transfer reference: ${transferId}` : "",
     "If anything looks incorrect, please reply to this email.",
@@ -319,13 +318,13 @@ const sendInternalFinanceSummary = async ({ transporter, summary }) => {
   };
 };
 
-const markJobPendingForPayout = async (jobId) => {
+const markJobPendingForPayout = async (jobId, asOfDate = new Date()) => {
   return deputyJobModel.findOneAndUpdate(
     {
       _id: jobId,
       paymentStatus: "paid",
       payoutStatus: { $in: PAYOUT_READY_STATUSES },
-      releaseOn: { $lte: new Date() },
+      releaseOn: { $lte: asOfDate },
     },
     {
       $set: {
@@ -337,7 +336,7 @@ const markJobPendingForPayout = async (jobId) => {
 };
 
 const releaseDeputyPayout = async ({ job, transporter }) => {
-  const lockedJob = await markJobPendingForPayout(job._id);
+ const lockedJob = await markJobPendingForPayout(job._id, job.releaseOn || new Date());
   if (!lockedJob) {
     return {
       success: false,
