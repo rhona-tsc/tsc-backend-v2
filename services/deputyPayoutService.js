@@ -240,11 +240,7 @@ const sendDeputyRemittanceAdvice = async ({ transporter, job, musician }) => {
   };
 };
 
-const normaliseCurrency = (value) => {
-  const raw = normaliseString(value || "GBP").toUpperCase();
-  if (!raw || raw === "£") return "GBP";
-  return raw;
-};
+
 
 const buildFinanceSummaryEmail = ({ runAt, checkedCount, releasedCount, totalReleased, currency = "GBP", releasedJobs = [], failures = [] }) => {
   const subject = `Deputy payout summary – ${formatDate(runAt)}`;
