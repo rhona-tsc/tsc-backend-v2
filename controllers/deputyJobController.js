@@ -145,9 +145,8 @@ const renderDetailListRow = (label, values = []) => {
 
 const getMusicianPayoutSettingsUrl = (musician = {}) => {
   const siteBase = (
-    process.env.PUBLIC_SITE_URL ||
-    process.env.FRONTEND_URL ||
-    "https://thesupremecollective.co.uk"
+    
+    "https://admin.thesupremecollective.co.uk"
   ).replace(/\/$/, "");
 
   return `${siteBase}/account/payout-settings`;
@@ -733,9 +732,7 @@ const buildJobNotificationPreview = ({
   const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
 
   const siteBase = (
-    process.env.PUBLIC_SITE_URL ||
-    process.env.FRONTEND_URL ||
-    "https://thesupremecollective.co.uk"
+    "https://admin.thesupremecollective.co.uk"
   ).replace(/\/$/, "");
 
   const jobBoardUrl = `${siteBase}/deputy-jobs`;
