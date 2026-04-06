@@ -578,7 +578,7 @@ const attemptDeputyJobCharge = async ({ job, createdBy = null }) => {
   try {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amountPence,
-      currency: String(job.currency || "£").toLowerCase(),
+      currency: String(job.currency || "GBP").toLowerCase(),
       customer: job.stripeCustomerId,
       payment_method: job.defaultPaymentMethodId,
       off_session: true,
@@ -1177,7 +1177,7 @@ const buildJobPayloadFromRequest = (req) => {
     claimableExpenses = [],
     claimableExpensesOther = "",
     fee = 0,
-    currency = "£",
+    currency = "GBP",
     notes = "",
     clientName = "",
     clientEmail = "",
@@ -2727,6 +2727,30 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       return res.status(200).send("<Response/>");
     }
 
+    const getOrdinalSuffix = (day) => {
+  const n = Number(day);
+  if (n >= 11 && n <= 13) return "th";
+  const last = n % 10;
+  if (last === 1) return "st";
+  if (last === 2) return "nd";
+  if (last === 3) return "rd";
+  return "th";
+};
+
+const formatFullDate = (value) => {
+  if (!value) return "TBC";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return normaliseString(value) || "TBC";
+
+  const weekday = date.toLocaleDateString("en-GB", { weekday: "long" });
+  const month = date.toLocaleDateString("en-GB", { month: "long" });
+  const day = date.getDate();
+  const year = date.getFullYear();
+
+  return `${weekday}, ${day}${getOrdinalSuffix(day)} ${month} ${year}`;
+};
+
     const musicianName = [musician.firstName, musician.lastName]
       .filter(Boolean)
       .join(" ")
@@ -2743,10 +2767,10 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
     const jobTitle = normaliseString(
       job.title || job.instrument || "Deputy opportunity",
     );
-    const location = normaliseString(
-      job.venue || job.locationName || job.location || "Location TBC",
-    );
-    const dateText = normaliseString(job.eventDate || "TBC");
+const location = normaliseString(
+  job.location || job.locationName || job.venue || "Location TBC",
+);
+const dateText = formatFullDate(job.eventDate);
     const feeText = getDeputyNetFeeText(job);
     const musicianEmail = normaliseString(
       musician.email || matchedApplication?.email || "",
