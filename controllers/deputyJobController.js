@@ -736,8 +736,7 @@ const buildJobNotificationPreview = ({
   ).replace(/\/$/, "");
 
   const jobBoardUrl = `${siteBase}/deputy-jobs`;
-  const jobUrl = job?._id ? `${siteBase}/deputy-jobs/${job._id}` : jobBoardUrl;
-
+const jobUrl = jobBoardUrl;
   const formattedSubjectDate = formatDeputyOpportunityDate(safeDate);
   const subject = formattedSubjectDate
     ? `${safeTitle} | Deputy Opportunity for ${formattedSubjectDate}`
