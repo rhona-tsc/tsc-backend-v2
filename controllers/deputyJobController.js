@@ -59,7 +59,8 @@ const formatMoney = (value, currency = "GBP") => {
 
 const getDeputyNetFeeAmount = (job = {}) => {
   const deputyNetAmount = Number(job?.deputyNetAmount || 0);
-  if (Number.isFinite(deputyNetAmount) && deputyNetAmount > 0) return deputyNetAmount;
+  if (Number.isFinite(deputyNetAmount) && deputyNetAmount > 0)
+    return deputyNetAmount;
 
   const fee = Number(job?.fee || 0);
   return Number.isFinite(fee) && fee > 0 ? fee : 0;
@@ -87,13 +88,17 @@ const stripe = stripeSecretKey
 const normaliseEmail = (value) => normaliseString(value).toLowerCase();
 
 const normaliseBoolean = (value) => {
-  if (value === true || value === "true" || value === 1 || value === "1") return true;
-  if (value === false || value === "false" || value === 0 || value === "0") return false;
+  if (value === true || value === "true" || value === 1 || value === "1")
+    return true;
+  if (value === false || value === "false" || value === 0 || value === "0")
+    return false;
   return Boolean(value);
 };
 
 const normaliseStringArray = (value) =>
-  normaliseArray(value).map((item) => normaliseString(item)).filter(Boolean);
+  normaliseArray(value)
+    .map((item) => normaliseString(item))
+    .filter(Boolean);
 
 const normalisePhoneValue = (value = "") => {
   const raw = String(value || "").trim();
@@ -126,7 +131,6 @@ const normaliseList = (value) => {
   return [];
 };
 
-
 const renderDetailRow = (label, value) => {
   const safeValue = String(value || "").trim();
   if (!safeValue) return "";
@@ -139,52 +143,65 @@ const renderDetailListRow = (label, values = []) => {
   return `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(safeValues.join(", "))}</li>`;
 };
 
-
-
-const getMusicianProfileUrl = (musician = {}) => {
+const getMusicianPayoutSettingsUrl = (musician = {}) => {
   const siteBase = (
     process.env.PUBLIC_SITE_URL ||
     process.env.FRONTEND_URL ||
     "https://thesupremecollective.co.uk"
   ).replace(/\/$/, "");
 
-  const slug = String(musician?.musicianSlug || "").trim();
-  const id = String(musician?._id || musician?.musicianId || "").trim();
-
-  if (slug) return `${siteBase}/musician/${slug}`;
-  if (id) return `${siteBase}/musician/${id}`;
-  return `${siteBase}/my-account`;
+  return `${siteBase}/account/payout-settings`;
 };
 
 const getMusicianPayoutSummary = (musician = {}) => {
-  const sortCode = String(musician?.bank_account?.sort_code || "").replace(/\D/g, "");
-  const accountNumber = String(musician?.bank_account?.account_number || "").replace(/\D/g, "");
+  const stripeConnect = musician?.stripeConnect || {};
+
+  const hasStripeAccount = Boolean(
+    String(stripeConnect.accountId || "").trim(),
+  );
+  const detailsSubmitted = Boolean(stripeConnect.detailsSubmitted);
+  const chargesEnabled = Boolean(stripeConnect.chargesEnabled);
+  const payoutsEnabled = Boolean(stripeConnect.payoutsEnabled);
+
+  const isStripeReady = hasStripeAccount && detailsSubmitted && payoutsEnabled;
+
+  const sortCode = String(musician?.bank_account?.sort_code || "").replace(
+    /\D/g,
+    "",
+  );
+  const accountNumber = String(
+    musician?.bank_account?.account_number || "",
+  ).replace(/\D/g, "");
   const accountName = String(musician?.bank_account?.account_name || "").trim();
   const accountType = String(musician?.bank_account?.account_type || "").trim();
 
-  const hasSortCode = sortCode.length === 6;
-  const hasAccountNumber = accountNumber.length >= 6;
-  const hasAccountName = Boolean(accountName);
-  const hasAccountType = Boolean(accountType);
-
-  const hasPayoutDetails =
-    hasSortCode && hasAccountNumber && hasAccountName && hasAccountType;
+  const hasManualBankDetails =
+    sortCode.length === 6 &&
+    accountNumber.length >= 6 &&
+    Boolean(accountName) &&
+    Boolean(accountType);
 
   return {
-    hasPayoutDetails,
-    hasSortCode,
-    hasAccountNumber,
-    hasAccountName,
-    hasAccountType,
+    hasPayoutDetails: isStripeReady,
+    isStripeReady,
+    hasStripeAccount,
+    detailsSubmitted,
+    chargesEnabled,
+    payoutsEnabled,
+
+    hasManualBankDetails,
+    hasSortCode: sortCode.length === 6,
+    hasAccountNumber: accountNumber.length >= 6,
+    hasAccountName: Boolean(accountName),
+    hasAccountType: Boolean(accountType),
+
     sortCode,
     accountNumber,
     accountName,
     accountType,
-    ending: hasAccountNumber ? accountNumber.slice(-3) : "",
+    ending: accountNumber ? accountNumber.slice(-3) : "",
   };
 };
-
-
 
 const buildPhoneVariants = (value = "") => {
   const normalised = normalisePhoneValue(value);
@@ -215,7 +232,9 @@ const phonesMatch = (left, right) => {
 };
 
 const interpretDeputyReply = (raw = "") => {
-  const low = String(raw || "").toLowerCase().trim();
+  const low = String(raw || "")
+    .toLowerCase()
+    .trim();
   if (!low) return null;
 
   if (
@@ -247,7 +266,7 @@ const interpretDeputyReply = (raw = "") => {
 
 const extractDeputyJobIdFromReply = (raw = "") => {
   const match = String(raw || "").match(
-    /(?:djyes|djno|deputyyes|deputyno)_([a-f\d]{24})/i
+    /(?:djyes|djno|deputyyes|deputyno)_([a-f\d]{24})/i,
   );
   return match ? match[1] : "";
 };
@@ -255,7 +274,8 @@ const extractDeputyJobIdFromReply = (raw = "") => {
 const withDeputyJobAliases = (job) => {
   if (!job) return job;
 
-  const source = typeof job.toObject === "function" ? job.toObject() : { ...job };
+  const source =
+    typeof job.toObject === "function" ? job.toObject() : { ...job };
 
   return {
     ...source,
@@ -266,7 +286,9 @@ const withDeputyJobAliases = (job) => {
     locationName: source.locationName || source.venue || source.location || "",
     location: source.location || source.locationName || source.venue || "",
     setLengths: Array.isArray(source.setLengths) ? source.setLengths : [],
-    whatsIncluded: Array.isArray(source.whatsIncluded) ? source.whatsIncluded : [],
+    whatsIncluded: Array.isArray(source.whatsIncluded)
+      ? source.whatsIncluded
+      : [],
     whatsIncludedOther: source.whatsIncludedOther || "",
     claimableExpenses: Array.isArray(source.claimableExpenses)
       ? source.claimableExpenses
@@ -330,11 +352,13 @@ const buildLedgerAmounts = ({
   const safeCommissionAmount = Number(commissionAmount || 0);
   const safeDeputyNetAmount = Number(deputyNetAmount || 0);
 
-  const finalDeputyNetAmount = safeDeputyNetAmount > 0 ? safeDeputyNetAmount : safeFee;
+  const finalDeputyNetAmount =
+    safeDeputyNetAmount > 0 ? safeDeputyNetAmount : safeFee;
   const finalGrossAmount =
     safeGrossAmount > 0
       ? safeGrossAmount
-      : finalDeputyNetAmount + (safeCommissionAmount > 0 ? safeCommissionAmount : 0);
+      : finalDeputyNetAmount +
+        (safeCommissionAmount > 0 ? safeCommissionAmount : 0);
   const finalCommissionAmount =
     safeCommissionAmount > 0
       ? safeCommissionAmount
@@ -355,11 +379,17 @@ const pushPaymentEvent = (job, event = {}) => {
       status: normaliseString(event.status || ""),
       amount: Number(event.amount || 0),
       currency: normaliseCurrency(event.currency || job.currency || "£"),
-      stripeCustomerId: normaliseString(event.stripeCustomerId || job.stripeCustomerId || ""),
-      setupIntentId: normaliseString(event.setupIntentId || job.setupIntentId || ""),
-      paymentIntentId: normaliseString(event.paymentIntentId || job.paymentIntentId || ""),
+      stripeCustomerId: normaliseString(
+        event.stripeCustomerId || job.stripeCustomerId || "",
+      ),
+      setupIntentId: normaliseString(
+        event.setupIntentId || job.setupIntentId || "",
+      ),
+      paymentIntentId: normaliseString(
+        event.paymentIntentId || job.paymentIntentId || "",
+      ),
       paymentMethodId: normaliseString(
-        event.paymentMethodId || job.defaultPaymentMethodId || ""
+        event.paymentMethodId || job.defaultPaymentMethodId || "",
       ),
       note: normaliseString(event.note || ""),
       createdBy: event.createdBy || null,
@@ -378,9 +408,10 @@ const ensureStripeReady = (res) => {
   return false;
 };
 
-
 const ensureCronSecret = (req, res) => {
-  const expectedSecret = normaliseString(process.env.CRON_SECRET || process.env.DEPUTY_PAYOUT_CRON_SECRET || "");
+  const expectedSecret = normaliseString(
+    process.env.CRON_SECRET || process.env.DEPUTY_PAYOUT_CRON_SECRET || "",
+  );
 
   if (!expectedSecret) {
     res.status(500).json({
@@ -391,7 +422,10 @@ const ensureCronSecret = (req, res) => {
   }
 
   const providedSecret = normaliseString(
-    req.headers["x-cron-secret"] || req.headers["x-payout-cron-secret"] || req.body?.cronSecret || ""
+    req.headers["x-cron-secret"] ||
+      req.headers["x-payout-cron-secret"] ||
+      req.body?.cronSecret ||
+      "",
   );
 
   if (providedSecret !== expectedSecret) {
@@ -424,7 +458,9 @@ const createOrRefreshDeputyJobSetupIntentInternal = async ({
 
   const safeClientName = normaliseString(clientName || job?.clientName || "");
   const safeClientEmail = normaliseEmail(clientEmail || job?.clientEmail || "");
-  const safeClientPhone = normaliseString(clientPhone || job?.clientPhone || "");
+  const safeClientPhone = normaliseString(
+    clientPhone || job?.clientPhone || "",
+  );
 
   if (!safeClientEmail) {
     return {
@@ -558,17 +594,26 @@ const attemptDeputyJobCharge = async ({ job, createdBy = null }) => {
 
     job.paymentIntentId = paymentIntent.id || "";
     job.paymentIntentStatus = paymentIntent.status || "";
-    job.paymentStatus = paymentIntent.status === "succeeded" ? "paid" : "charge_pending";
-    job.chargedAt = paymentIntent.status === "succeeded" ? new Date() : job.chargedAt || null;
+    job.paymentStatus =
+      paymentIntent.status === "succeeded" ? "paid" : "charge_pending";
+    job.chargedAt =
+      paymentIntent.status === "succeeded" ? new Date() : job.chargedAt || null;
     job.paymentFailureReason = "";
 
     if (paymentIntent.status === "succeeded") {
-      job.payoutStatus = job.releaseOn ? "scheduled" : job.payoutStatus || "not_ready";
-      job.payoutScheduledAt = job.releaseOn ? new Date() : job.payoutScheduledAt || null;
+      job.payoutStatus = job.releaseOn
+        ? "scheduled"
+        : job.payoutStatus || "not_ready";
+      job.payoutScheduledAt = job.releaseOn
+        ? new Date()
+        : job.payoutScheduledAt || null;
     }
 
     pushPaymentEvent(job, {
-      type: paymentIntent.status === "succeeded" ? "payment_succeeded" : "payment_intent_created",
+      type:
+        paymentIntent.status === "succeeded"
+          ? "payment_succeeded"
+          : "payment_intent_created",
       status: paymentIntent.status || "",
       amount: Number(job.grossAmount || job.fee || 0),
       currency: job.currency,
@@ -646,8 +691,12 @@ const buildMatchSnapshot = (musician = {}) => ({
     instrument: musician?._debug?.instrument || musician?.instrument || "",
     roleFit: Number(musician?._debug?.roleFit || 0),
     genreFit: Number(musician?._debug?.genreFit || 0),
-    locationFit: Number(musician?._debug?.locScore || musician?._debug?.locationFit || 0),
-    songFit: Number(musician?._debug?.songOverlapPct || musician?._debug?.songFit || 0),
+    locationFit: Number(
+      musician?._debug?.locScore || musician?._debug?.locationFit || 0,
+    ),
+    songFit: Number(
+      musician?._debug?.songOverlapPct || musician?._debug?.songFit || 0,
+    ),
   },
   notified: false,
   notifiedAt: null,
@@ -659,11 +708,11 @@ const buildJobNotificationPreview = ({
   previewRecipientEmail = "",
 }) => {
   const safeTitle = normaliseString(
-    job?.title || job?.instrument || "Deputy opportunity"
+    job?.title || job?.instrument || "Deputy opportunity",
   );
   const safeDate = normaliseString(job?.eventDate || job?.date || "");
   const safeVenue = normaliseString(
-    job?.venue || job?.locationName || job?.location || ""
+    job?.venue || job?.locationName || job?.location || "",
   );
   const safeFee = Number(job?.fee || 0);
   const safeCurrency = normaliseCurrency(job?.currency);
@@ -702,9 +751,7 @@ const buildJobNotificationPreview = ({
     renderDetailRow("Call time", callTime),
     renderDetailRow("Finish time", finishTime),
     renderDetailRow("Location", safeVenue),
-    safeFee
-      ? renderDetailRow("Fee", `${safeCurrency} ${safeFee}`)
-      : "",
+    safeFee ? renderDetailRow("Fee", `${safeCurrency} ${safeFee}`) : "",
     renderDetailListRow("Required instruments", requiredInstruments),
     renderDetailListRow("Essential skills", essentialSkills),
     renderDetailListRow("Required skills", requiredSkills),
@@ -837,7 +884,9 @@ const buildJobNotificationPreview = ({
     essentialSkills.length
       ? `Essential skills: ${essentialSkills.join(", ")}`
       : "",
-    requiredSkills.length ? `Required skills: ${requiredSkills.join(", ")}` : "",
+    requiredSkills.length
+      ? `Required skills: ${requiredSkills.join(", ")}`
+      : "",
     preferredExtraSkills.length
       ? `Preferred extra skills: ${preferredExtraSkills.join(", ")}`
       : "",
@@ -857,8 +906,9 @@ const buildJobNotificationPreview = ({
     `View deputy job: ${jobUrl}`,
     `Open job board: ${jobBoardUrl}`,
     "",
-"P.S. Did you know you can also post your own deputy jobs through The Supreme Collective? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.",
-"P.S. Think your act could be a great fit for The Supreme Collective? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.",    "",
+    "P.S. Did you know you can also post your own deputy jobs through The Supreme Collective? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.",
+    "P.S. Think your act could be a great fit for The Supreme Collective? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.",
+    "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -873,18 +923,24 @@ const buildJobNotificationPreview = ({
 };
 
 const buildAllocationEmailPreview = ({ job, musician }) => {
-  const name = [musician?.firstName, musician?.lastName].filter(Boolean).join(" ").trim() || "Deputy";
-  const title = normaliseString(job?.title || job?.instrument || "Deputy opportunity");
+  const name =
+    [musician?.firstName, musician?.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim() || "Deputy";
+  const title = normaliseString(
+    job?.title || job?.instrument || "Deputy opportunity",
+  );
   const safeCurrency = normaliseCurrency(job?.currency);
   const subject = `Allocated: ${title}`;
   const html = `
     <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
       <h2 style="margin-bottom: 12px;">Allocation preview</h2>
-      <p>Hi ${name},</p>
-      <p>You have been selected for <strong>${title}</strong>.</p>
-      ${job?.eventDate ? `<p><strong>Date:</strong> ${job.eventDate}</p>` : ""}
-      ${(job?.venue || job?.locationName || job?.location) ? `<p><strong>Location:</strong> ${job.venue || job.locationName || job.location}</p>` : ""}
-      ${job?.fee ? `<p><strong>Fee:</strong> ${safeCurrency} ${job.fee}</p>` : ""}
+      <p>Hi ${escapeHtml(name)},</p>
+      <p>You have been selected for <strong>${escapeHtml(title)}</strong>.</p>
+      ${job?.eventDate ? `<p><strong>Date:</strong> ${escapeHtml(job.eventDate)}</p>` : ""}
+      ${job?.venue || job?.locationName || job?.location ? `<p><strong>Location:</strong> ${escapeHtml(job.venue || job.locationName || job.location)}</p>` : ""}
+      ${job?.fee ? `<p><strong>Fee:</strong> ${escapeHtml(`${safeCurrency} ${job.fee}`)}</p>` : ""}
       <p>This is a preview of the allocation email.</p>
     </div>
   `;
@@ -892,7 +948,7 @@ const buildAllocationEmailPreview = ({ job, musician }) => {
     `Hi ${name},`,
     `You have been selected for ${title}.`,
     job?.eventDate ? `Date: ${job.eventDate}` : "",
-    (job?.venue || job?.locationName || job?.location)
+    job?.venue || job?.locationName || job?.location
       ? `Location: ${job.venue || job.locationName || job.location}`
       : "",
     job?.fee ? `Fee: ${safeCurrency} ${job.fee}` : "",
@@ -907,16 +963,21 @@ const buildAllocationEmailPreview = ({ job, musician }) => {
 const buildBookingConfirmationPreview = ({ job, musician }) => {
   const firstName = normaliseString(musician?.firstName || "there");
   const fullName =
-    [musician?.firstName, musician?.lastName].filter(Boolean).join(" ").trim() || "Deputy";
-  const jobTitle = normaliseString(job?.title || job?.instrument || "Deputy opportunity");
+    [musician?.firstName, musician?.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim() || "Deputy";
+  const jobTitle = normaliseString(
+    job?.title || job?.instrument || "Deputy opportunity",
+  );
 
   const dateText = normaliseString(job?.eventDate || job?.date || "TBC");
   const callTime = normaliseString(job?.callTime || job?.startTime || "");
   const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
   const location = normaliseString(
-    job?.location || job?.venue || job?.locationName || "Location TBC"
+    job?.location || job?.venue || job?.locationName || "Location TBC",
   );
- const feeText = getDeputyNetFeeText(job);
+  const feeText = getDeputyNetFeeText(job);
 
   const requiredInstruments = normaliseList(job?.requiredInstruments);
   const essentialSkills = normaliseList(job?.essentialRoles);
@@ -929,41 +990,38 @@ const buildBookingConfirmationPreview = ({ job, musician }) => {
   const whatsIncluded = normaliseList(job?.whatsIncluded);
   const claimableExpenses = normaliseList(job?.claimableExpenses);
   const notes = normaliseString(job?.notes || "");
-  const paymentDate =
-    job?.releaseOn instanceof Date
-      ? job.releaseOn.toLocaleDateString("en-GB")
-      : normaliseString(job?.releaseOn || "");
+  // Removed unused paymentDate constant
 
-  const bandContactName = normaliseString(job?.createdByName || "The Supreme Collective");
+  const bandContactName = normaliseString(
+    job?.createdByName || "The Supreme Collective",
+  );
   const bandContactEmail = normaliseString(
-    job?.createdByEmail || "hello@thesupremecollective.co.uk"
+    job?.createdByEmail || "hello@thesupremecollective.co.uk",
   );
   const bandContactPhone = normaliseString(job?.createdByPhone || "");
 
   const payout = getMusicianPayoutSummary(musician);
-const profileUrl = getMusicianProfileUrl(musician);
+  const payoutSettingsUrl = getMusicianPayoutSettingsUrl(musician);
 
-const payoutHtml = payout.hasPayoutDetails
-  ? `
+  const payoutHtml = payout.hasPayoutDetails
+    ? `
     <p>
       <strong>Payment</strong><br/>
       Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
-      Provided your bank details remain up to date, payment can typically be expected
-      <strong>5–7 days after the gig</strong> into the ${escapeHtml(
-        payout.accountType.toLowerCase()
-      )} account ending <strong>***${escapeHtml(payout.ending)}</strong>.
+     Provided your Stripe payout setup remains active, payment can typically be expected
+<strong>5–7 days after the gig</strong> to your connected Stripe account.
     </p>
   `
-  : `
+    : `
     <p>
       <strong>Payment</strong><br/>
       Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
-      We do not currently have complete bank details on file for you, so please update your records now to ensure payout can be made.
-      Once your bank details are in place, payment can typically be expected <strong>5–7 days after the gig</strong>.
+      We do not currently have an active Stripe payout setup on file for you, so please complete your payout setup now to ensure payment can be processed.
+      Once your Stripe payout setup is complete, payment can typically be expected <strong>5–7 days after the gig</strong>.
     </p>
     <p style="margin: 16px 0 20px;">
       <a
-        href="${escapeHtml(profileUrl)}"
+        href="${escapeHtml(payoutSettingsUrl)}"
         style="
           display:inline-block;
           background:#111;
@@ -1046,11 +1104,16 @@ ${renderDetailRow("Net fee", feeText)}        ${renderDetailListRow("Required in
     callTime ? `Call time: ${callTime}` : "",
     finishTime ? `Finish time: ${finishTime}` : "",
     `Location: ${location || "TBC"}`,
-`Net fee: ${feeText}`,    requiredInstruments.length
+    `Net fee: ${feeText}`,
+    requiredInstruments.length
       ? `Required instruments: ${requiredInstruments.join(", ")}`
       : "",
-    essentialSkills.length ? `Essential skills: ${essentialSkills.join(", ")}` : "",
-    requiredSkills.length ? `Required skills: ${requiredSkills.join(", ")}` : "",
+    essentialSkills.length
+      ? `Essential skills: ${essentialSkills.join(", ")}`
+      : "",
+    requiredSkills.length
+      ? `Required skills: ${requiredSkills.join(", ")}`
+      : "",
     preferredExtraSkills.length
       ? `Preferred extra skills: ${preferredExtraSkills.join(", ")}`
       : "",
@@ -1066,9 +1129,9 @@ ${renderDetailRow("Net fee", feeText)}        ${renderDetailListRow("Required in
       : "",
     notes ? `Notes: ${notes}` : "",
     ``,
-    payout.hasPayoutDetails
-  ? `Your net fee for this gig is ${feeText}. Provided your bank details remain up to date, payment can typically be expected 5–7 days after the gig into the account ending ***${payout.ending}.`
-  : `Your net fee for this gig is ${feeText}. We do not currently have complete bank details on file for you, so please update your profile now to ensure payout can be processed. Once your bank details are in place, payment can typically be expected 5–7 days after the gig: ${profileUrl}`,
+payout.hasPayoutDetails
+  ? `Your net fee for this gig is ${feeText}. Provided your Stripe payout setup remains active, payment can typically be expected 5–7 days after the gig to your connected Stripe account.`
+  : `Your net fee for this gig is ${feeText}. We do not currently have an active Stripe payout setup on file for you, so please complete your payout setup now to ensure payment can be processed. Once your Stripe payout setup is complete, payment can typically be expected 5–7 days after the gig: ${payoutSettingsUrl}`,
     `Band contact details:`,
     `Name: ${bandContactName}`,
     `Email: ${bandContactEmail}`,
@@ -1142,9 +1205,7 @@ const buildJobPayloadFromRequest = (req) => {
   const resolvedClaimableExpenses = normaliseStringArray(claimableExpenses);
 
   const primaryInstrument =
-    normaliseString(instrument) ||
-    resolvedInstruments[0] ||
-    "";
+    normaliseString(instrument) || resolvedInstruments[0] || "";
 
   const effectiveIsVocalSlot =
     isVocalSlot === true ||
@@ -1152,7 +1213,7 @@ const buildJobPayloadFromRequest = (req) => {
     /vocal|singer|rapper|rap|mc/i.test(primaryInstrument);
 
   const matcherDesiredRoles = Array.from(
-    new Set([...resolvedRequiredSkills, ...resolvedDesiredRoles])
+    new Set([...resolvedRequiredSkills, ...resolvedDesiredRoles]),
   );
 
   const resolvedEventDate = normaliseString(eventDate || date);
@@ -1175,7 +1236,7 @@ const buildJobPayloadFromRequest = (req) => {
     normaliseString(postcode) ||
     (() => {
       const match = resolvedLocation.match(
-        /([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})/i
+        /([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})/i,
       );
       return match ? match[1].toUpperCase() : "";
     })();
@@ -1217,7 +1278,10 @@ const buildJobPayloadFromRequest = (req) => {
       deputyNetAmount,
     }),
     releaseOn: parseDateOrNull(releaseOn),
-    mode: normaliseString(mode || "preview").toLowerCase() === "send" ? "send" : "preview",
+    mode:
+      normaliseString(mode || "preview").toLowerCase() === "send"
+        ? "send"
+        : "preview",
   };
 };
 
@@ -1269,13 +1333,17 @@ const runMatcherForJob = async ({
 };
 
 const getMatchedMusiciansForJob = async (job) => {
-  const ids = Array.isArray(job?.matchedMusicianIds) ? job.matchedMusicianIds : [];
+  const ids = Array.isArray(job?.matchedMusicianIds)
+    ? job.matchedMusicianIds
+    : [];
   if (!ids.length) return [];
 
-  return musicianModel.find(
-    { _id: { $in: ids } },
-    "firstName lastName email phone phoneNumber musicianSlug profilePhoto profilePicture profileImage profilePic profile_picture additionalImages"
-  ).lean();
+  return musicianModel
+    .find(
+      { _id: { $in: ids } },
+      "firstName lastName email phone phoneNumber musicianSlug profilePhoto profilePicture profileImage profilePic profile_picture additionalImages",
+    )
+    .lean();
 };
 
 const findApplicationFromJob = (job, musicianId) => {
@@ -1284,7 +1352,7 @@ const findApplicationFromJob = (job, musicianId) => {
 
   return (
     (Array.isArray(job?.applications) ? job.applications : []).find(
-      (application) => asObjectIdString(application?.musicianId) === targetId
+      (application) => asObjectIdString(application?.musicianId) === targetId,
     ) || null
   );
 };
@@ -1293,7 +1361,9 @@ const hydrateMusicianFromApplication = async (application = {}) => {
   const applicationMusicianId = asObjectIdString(application?.musicianId);
 
   if (applicationMusicianId) {
-    const musicianDoc = await musicianModel.findById(applicationMusicianId).lean();
+    const musicianDoc = await musicianModel
+      .findById(applicationMusicianId)
+      .lean();
     if (musicianDoc) return musicianDoc;
   }
 
@@ -1324,7 +1394,7 @@ const findMatchedMusicianFromJob = async (job, musicianId) => {
 
   const matchedMusicians = await getMatchedMusiciansForJob(job);
   const matchedMusician = matchedMusicians.find(
-    (m) => asObjectIdString(m?._id) === targetId
+    (m) => asObjectIdString(m?._id) === targetId,
   );
 
   if (matchedMusician) return matchedMusician;
@@ -1358,29 +1428,43 @@ const parseDeputyReplyCode = (raw = "") => {
   };
 };
 
-const findApplicationByAnyIdentity = (job, { musicianId = "", phone = "", email = "" } = {}) => {
+const findApplicationByAnyIdentity = (
+  job,
+  { musicianId = "", phone = "", email = "" } = {},
+) => {
   const safeMusicianId = asObjectIdString(musicianId);
   const safePhone = toE164(phone);
   const safeEmail = normaliseEmail(email);
 
   return (
-    (Array.isArray(job?.applications) ? job.applications : []).find((application) => {
-      const applicationMusicianId = asObjectIdString(application?.musicianId);
-      const applicationPhone = toE164(application?.phone || application?.phoneNormalized || "");
-      const applicationEmail = normaliseEmail(application?.email || "");
+    (Array.isArray(job?.applications) ? job.applications : []).find(
+      (application) => {
+        const applicationMusicianId = asObjectIdString(application?.musicianId);
+        const applicationPhone = toE164(
+          application?.phone || application?.phoneNormalized || "",
+        );
+        const applicationEmail = normaliseEmail(application?.email || "");
 
-      if (safeMusicianId && applicationMusicianId === safeMusicianId) return true;
-      if (safePhone && applicationPhone === safePhone) return true;
-      if (safeEmail && applicationEmail && applicationEmail === safeEmail) return true;
-      return false;
-    }) || null
+        if (safeMusicianId && applicationMusicianId === safeMusicianId)
+          return true;
+        if (safePhone && applicationPhone === safePhone) return true;
+        if (safeEmail && applicationEmail && applicationEmail === safeEmail)
+          return true;
+        return false;
+      },
+    ) || null
   );
 };
 
 const applyBookedStateToJob = (job, musician) => {
   const now = new Date();
-  const safeMusicianId = asObjectIdString(musician?._id || musician?.musicianId);
-  const fullName = [musician?.firstName, musician?.lastName].filter(Boolean).join(" ").trim();
+  const safeMusicianId = asObjectIdString(
+    musician?._id || musician?.musicianId,
+  );
+  const fullName = [musician?.firstName, musician?.lastName]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
 
   job.status = "filled";
   job.workflowStage = "booking_confirmed";
@@ -1389,7 +1473,8 @@ const applyBookedStateToJob = (job, musician) => {
   job.bookingConfirmedAt = now;
 
   job.applications = (job.applications || []).map((application) => {
-    const sameMusician = asObjectIdString(application?.musicianId) === safeMusicianId;
+    const sameMusician =
+      asObjectIdString(application?.musicianId) === safeMusicianId;
 
     return {
       ...application,
@@ -1404,7 +1489,9 @@ const applyBookedStateToJob = (job, musician) => {
 const findDeputyApplicationByPhone = (job, phone = "") => {
   const applications = Array.isArray(job?.applications) ? job.applications : [];
   return (
-    applications.find((application) => phonesMatch(application?.phone, phone)) || null
+    applications.find((application) =>
+      phonesMatch(application?.phone, phone),
+    ) || null
   );
 };
 
@@ -1435,12 +1522,20 @@ const findDeputyJobFromInboundReply = async ({
       .limit(50);
 
     const matchedJob = recentAllocatedJobs.find((candidateJob) => {
-      const allocatedApplication = findDeputyApplicationByPhone(candidateJob, fromRaw);
+      const allocatedApplication = findDeputyApplicationByPhone(
+        candidateJob,
+        fromRaw,
+      );
       if (allocatedApplication) return true;
 
-      return (Array.isArray(candidateJob.notifications) ? candidateJob.notifications : []).some(
+      return (
+        Array.isArray(candidateJob.notifications)
+          ? candidateJob.notifications
+          : []
+      ).some(
         (notification) =>
-          notification?.channel === "whatsapp" && phonesMatch(notification?.phone, fromRaw)
+          notification?.channel === "whatsapp" &&
+          phonesMatch(notification?.phone, fromRaw),
       );
     });
 
@@ -1476,7 +1571,8 @@ export const createDeputyJob = async (req, res) => {
     }
 
     const createdBy = req.user?._id || null;
-    const createdByName = `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim();
+    const createdByName =
+      `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim();
     const createdByEmail = req.user?.email || "";
     const createdByPhone = req.user?.phone || req.user?.phoneNumber || "";
 
@@ -1496,7 +1592,9 @@ export const createDeputyJob = async (req, res) => {
       location: built.resolvedLocation,
       county: built.inferredCounty,
       postcode: built.inferredPostcode,
-      genres: built.resolvedGenres.length ? built.resolvedGenres : built.resolvedTags,
+      genres: built.resolvedGenres.length
+        ? built.resolvedGenres
+        : built.resolvedTags,
       tags: built.resolvedTags,
       essentialRoles: built.resolvedEssentialRoles,
       requiredSkills: built.resolvedRequiredSkills,
@@ -1516,8 +1614,12 @@ export const createDeputyJob = async (req, res) => {
       grossAmount: built.grossAmount,
       commissionAmount: built.commissionAmount,
       deputyNetAmount: built.deputyNetAmount,
-      releaseOn: built.releaseOn || buildDefaultReleaseOn(built.resolvedEventDate),
-      paymentStatus: built.saveClientCard && built.clientEmail ? "setup_required" : "not_started",
+      releaseOn:
+        built.releaseOn || buildDefaultReleaseOn(built.resolvedEventDate),
+      paymentStatus:
+        built.saveClientCard && built.clientEmail
+          ? "setup_required"
+          : "not_started",
       payoutStatus: "not_ready",
       createdBy,
       createdByName,
@@ -1525,7 +1627,8 @@ export const createDeputyJob = async (req, res) => {
       createdByPhone,
       status: built.mode === "send" ? "open" : "preview",
       previewMode: built.mode !== "send",
-      workflowStage: built.mode === "send" ? "sent_to_matches" : "preview_ready",
+      workflowStage:
+        built.mode === "send" ? "sent_to_matches" : "preview_ready",
     });
 
     let setupIntentResult = null;
@@ -1540,25 +1643,28 @@ export const createDeputyJob = async (req, res) => {
           createdBy,
         });
       } catch (setupIntentError) {
-        console.error("❌ createDeputyJob setup intent error:", setupIntentError);
+        console.error(
+          "❌ createDeputyJob setup intent error:",
+          setupIntentError,
+        );
         job.paymentStatus = "setup_required";
       }
     }
 
-  const matcherResult = await runMatcherForJob({
-  job,
-  previewRecipientEmail: built.clientEmail || createdByEmail,
-  createdBy,
-  primaryInstrument: built.primaryInstrument,
-  effectiveIsVocalSlot: built.effectiveIsVocalSlot,
-  resolvedEssentialRoles: built.resolvedEssentialRoles,
-  matcherDesiredRoles: built.matcherDesiredRoles,
-  resolvedSecondaryInstruments: built.resolvedSecondaryInstruments,
-  resolvedGenres: built.resolvedGenres,
-  resolvedTags: built.resolvedTags,
-  inferredCounty: built.inferredCounty,
-  inferredPostcode: built.inferredPostcode,
-});
+    const matcherResult = await runMatcherForJob({
+      job,
+      previewRecipientEmail: built.clientEmail || createdByEmail,
+      createdBy,
+      primaryInstrument: built.primaryInstrument,
+      effectiveIsVocalSlot: built.effectiveIsVocalSlot,
+      resolvedEssentialRoles: built.resolvedEssentialRoles,
+      matcherDesiredRoles: built.matcherDesiredRoles,
+      resolvedSecondaryInstruments: built.resolvedSecondaryInstruments,
+      resolvedGenres: built.resolvedGenres,
+      resolvedTags: built.resolvedTags,
+      inferredCounty: built.inferredCounty,
+      inferredPostcode: built.inferredPostcode,
+    });
 
     job.matchedMusicianIds = matcherResult.matchedMusicianIds;
     job.matchedMusicians = matcherResult.matchedMusicians;
@@ -1577,67 +1683,80 @@ export const createDeputyJob = async (req, res) => {
 
       job.notifiedMusicianIds = sentIds;
       job.notifications = notificationResults;
-      job.notifiedCount = notificationResults.filter((r) => r.status === "sent").length;
+      job.notifiedCount = notificationResults.filter(
+        (r) => r.status === "sent",
+      ).length;
       job.status = "open";
       job.previewMode = false;
       job.workflowStage = "sent_to_matches";
       job.matchedMusicians = job.matchedMusicians.map((m) => ({
         ...m,
-        notified: sentIds.some((id) => asObjectIdString(id) === asObjectIdString(m.musicianId)),
-        notifiedAt: sentIds.some((id) => asObjectIdString(id) === asObjectIdString(m.musicianId))
+        notified: sentIds.some(
+          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
+        ),
+        notifiedAt: sentIds.some(
+          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
+        )
           ? new Date()
           : null,
       }));
-  } else {
-  job.notifiedMusicianIds = [];
-  job.notifiedCount = 0;
-  job.status = "preview";
-  job.previewMode = true;
-  job.workflowStage = "preview_ready";
+    } else {
+      job.notifiedMusicianIds = [];
+      job.notifiedCount = 0;
+      job.status = "preview";
+      job.previewMode = true;
+      job.workflowStage = "preview_ready";
 
-  job.notifications = matcherResult.previewNotification.recipients.map((recipient) => ({
-    musicianId: recipient.musicianId,
-    email: recipient.email,
-    phone: recipient.phone || "",
-    channel: "email",
-    type: "job_created_preview",
-    subject: matcherResult.previewNotification.subject,
-    previewHtml: matcherResult.previewNotification.html,
-    previewText: matcherResult.previewNotification.text,
-    status: "preview",
-    sentAt: new Date(),
-  }));
+      job.notifications = matcherResult.previewNotification.recipients.map(
+        (recipient) => ({
+          musicianId: recipient.musicianId,
+          email: recipient.email,
+          phone: recipient.phone || "",
+          channel: "email",
+          type: "job_created_preview",
+          subject: matcherResult.previewNotification.subject,
+          previewHtml: matcherResult.previewNotification.html,
+          previewText: matcherResult.previewNotification.text,
+          status: "preview",
+          sentAt: new Date(),
+        }),
+      );
 
-  const previewRecipientEmail = normaliseEmail(built.clientEmail || createdByEmail || "");
+      const previewRecipientEmail = normaliseEmail(
+        built.clientEmail || createdByEmail || "",
+      );
 
-  if (previewRecipientEmail) {
-    job.notifications.unshift({
-      musicianId: null,
-      email: previewRecipientEmail,
-      phone: "",
-      channel: "email",
-      type: "job_created_preview",
-      subject: `[Preview] ${matcherResult.previewNotification.subject}`,
-      previewHtml: matcherResult.previewNotification.html,
-      previewText: matcherResult.previewNotification.text,
-      status: "sent",
-      sentAt: new Date(),
-      error: "",
-    });
+      if (previewRecipientEmail) {
+        job.notifications.unshift({
+          musicianId: null,
+          email: previewRecipientEmail,
+          phone: "",
+          channel: "email",
+          type: "job_created_preview",
+          subject: `[Preview] ${matcherResult.previewNotification.subject}`,
+          previewHtml: matcherResult.previewNotification.html,
+          previewText: matcherResult.previewNotification.text,
+          status: "sent",
+          sentAt: new Date(),
+          error: "",
+        });
 
-    try {
-    await sendEmail({
-  to: previewRecipientEmail,
-  bcc: DEPUTY_JOB_BCC_EMAIL,
-  subject: `[Preview] ${matcherResult.previewNotification.subject}`,
-  html: matcherResult.previewNotification.html,
-  text: matcherResult.previewNotification.text,
-});
-    } catch (previewEmailError) {
-      console.error("❌ Failed to send deputy job preview email:", previewEmailError);
+        try {
+          await sendEmail({
+            to: previewRecipientEmail,
+            bcc: DEPUTY_JOB_BCC_EMAIL,
+            subject: `[Preview] ${matcherResult.previewNotification.subject}`,
+            html: matcherResult.previewNotification.html,
+            text: matcherResult.previewNotification.text,
+          });
+        } catch (previewEmailError) {
+          console.error(
+            "❌ Failed to send deputy job preview email:",
+            previewEmailError,
+          );
+        }
+      }
     }
-  }
-}
 
     await job.save();
 
@@ -1679,9 +1798,18 @@ export const listDeputyJobs = async (req, res) => {
     const jobs = await deputyJobModel
       .find({})
       .sort({ createdAt: -1 })
-      .populate("matchedMusicianIds", "firstName lastName email musicianSlug profilePhoto profilePicture")
-      .populate("allocatedMusicianId", "firstName lastName email musicianSlug profilePhoto profilePicture")
-      .populate("bookedMusicianId", "firstName lastName email musicianSlug profilePhoto profilePicture")
+      .populate(
+        "matchedMusicianIds",
+        "firstName lastName email musicianSlug profilePhoto profilePicture",
+      )
+      .populate(
+        "allocatedMusicianId",
+        "firstName lastName email musicianSlug profilePhoto profilePicture",
+      )
+      .populate(
+        "bookedMusicianId",
+        "firstName lastName email musicianSlug profilePhoto profilePicture",
+      )
       .lean();
 
     const formattedJobs = jobs.map((job) => withDeputyJobAliases(job));
@@ -1689,7 +1817,9 @@ export const listDeputyJobs = async (req, res) => {
     res.json({ success: true, jobs: formattedJobs });
   } catch (error) {
     console.error("❌ listDeputyJobs error:", error);
-    res.status(500).json({ success: false, message: "Failed to fetch deputy jobs" });
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch deputy jobs" });
   }
 };
 
@@ -1697,19 +1827,32 @@ export const getDeputyJobById = async (req, res) => {
   try {
     const job = await deputyJobModel
       .findById(req.params.id)
-      .populate("matchedMusicianIds", "firstName lastName email musicianSlug profilePhoto profilePicture")
-      .populate("allocatedMusicianId", "firstName lastName email musicianSlug profilePhoto profilePicture")
-      .populate("bookedMusicianId", "firstName lastName email musicianSlug profilePhoto profilePicture")
+      .populate(
+        "matchedMusicianIds",
+        "firstName lastName email musicianSlug profilePhoto profilePicture",
+      )
+      .populate(
+        "allocatedMusicianId",
+        "firstName lastName email musicianSlug profilePhoto profilePicture",
+      )
+      .populate(
+        "bookedMusicianId",
+        "firstName lastName email musicianSlug profilePhoto profilePicture",
+      )
       .lean();
 
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
     }
 
     return res.json({ success: true, job: withDeputyJobAliases(job) });
   } catch (error) {
     console.error("❌ getDeputyJobById error:", error);
-    return res.status(500).json({ success: false, message: "Failed to fetch deputy job" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch deputy job" });
   }
 };
 
@@ -1717,7 +1860,9 @@ export const listDeputyJobMatches = async (req, res) => {
   try {
     const job = await deputyJobModel.findById(req.params.id).lean();
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
     }
 
     return res.json({
@@ -1728,7 +1873,9 @@ export const listDeputyJobMatches = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ listDeputyJobMatches error:", error);
-    return res.status(500).json({ success: false, message: "Failed to fetch deputy job matches" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch deputy job matches" });
   }
 };
 
@@ -1736,21 +1883,30 @@ export const applyToDeputyJob = async (req, res) => {
   try {
     const job = await deputyJobModel.findById(req.params.id);
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
     }
 
     const authenticatedMusicianId =
-      req.user?._id || req.user?.id || req.user?.userId || req.user?.musicianId || null;
+      req.user?._id ||
+      req.user?.id ||
+      req.user?.userId ||
+      req.user?.musicianId ||
+      null;
 
     if (!authenticatedMusicianId) {
       return res.status(401).json({
         success: false,
-        message: "You must be logged in as a musician to apply for this opportunity",
+        message:
+          "You must be logged in as a musician to apply for this opportunity",
       });
     }
 
     const alreadyApplied = job.applications.some(
-      (a) => asObjectIdString(a.musicianId) === asObjectIdString(authenticatedMusicianId)
+      (a) =>
+        asObjectIdString(a.musicianId) ===
+        asObjectIdString(authenticatedMusicianId),
     );
 
     if (alreadyApplied) {
@@ -1760,11 +1916,15 @@ export const applyToDeputyJob = async (req, res) => {
       });
     }
 
-    const musician = await musicianModel.findById(authenticatedMusicianId).lean();
+    const musician = await musicianModel
+      .findById(authenticatedMusicianId)
+      .lean();
 
     const matchedSnapshot = Array.isArray(job.matchedMusicians)
       ? job.matchedMusicians.find(
-          (m) => asObjectIdString(m.musicianId) === asObjectIdString(authenticatedMusicianId)
+          (m) =>
+            asObjectIdString(m.musicianId) ===
+            asObjectIdString(authenticatedMusicianId),
         )
       : null;
 
@@ -1783,15 +1943,9 @@ export const applyToDeputyJob = async (req, res) => {
         req.user?.lastName ||
         "",
       email:
-        musician?.email ||
-        musician?.basicInfo?.email ||
-        req.user?.email ||
-        "",
+        musician?.email || musician?.basicInfo?.email || req.user?.email || "",
       phone:
-        musician?.phone ||
-        musician?.basicInfo?.phone ||
-        req.user?.phone ||
-        "",
+        musician?.phone || musician?.basicInfo?.phone || req.user?.phone || "",
       musicianSlug: musician?.musicianSlug || "",
       profileImage:
         musician?.profilePhoto ||
@@ -1800,10 +1954,7 @@ export const applyToDeputyJob = async (req, res) => {
         musician?.profilePic ||
         musician?.profile_picture ||
         "",
-      postcode:
-        musician?.address?.postcode ||
-        musician?.postcode ||
-        "",
+      postcode: musician?.address?.postcode || musician?.postcode || "",
       status: "applied",
       appliedAt: new Date(),
       deputyMatchScore: Number(matchedSnapshot?.deputyMatchScore || 0),
@@ -1816,7 +1967,9 @@ export const applyToDeputyJob = async (req, res) => {
       },
     });
 
-    job.applicationCount = Array.isArray(job.applications) ? job.applications.length : 0;
+    job.applicationCount = Array.isArray(job.applications)
+      ? job.applications.length
+      : 0;
     if (job.workflowStage === "sent_to_matches") {
       job.workflowStage = "applications_open";
     }
@@ -1838,7 +1991,9 @@ export const sendDeputyJobNotifications = async (req, res) => {
   try {
     const job = await deputyJobModel.findById(req.params.id);
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
     }
 
     const matches = await getMatchedMusiciansForJob(job);
@@ -1854,14 +2009,20 @@ export const sendDeputyJobNotifications = async (req, res) => {
 
     job.notifiedMusicianIds = sentIds;
     job.notifications = notificationResults;
-    job.notifiedCount = notificationResults.filter((r) => r.status === "sent").length;
+    job.notifiedCount = notificationResults.filter(
+      (r) => r.status === "sent",
+    ).length;
     job.status = "open";
     job.previewMode = false;
     job.workflowStage = "sent_to_matches";
     job.matchedMusicians = (job.matchedMusicians || []).map((m) => ({
       ...m,
-      notified: sentIds.some((id) => asObjectIdString(id) === asObjectIdString(m.musicianId)),
-      notifiedAt: sentIds.some((id) => asObjectIdString(id) === asObjectIdString(m.musicianId))
+      notified: sentIds.some(
+        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
+      ),
+      notifiedAt: sentIds.some(
+        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
+      )
         ? new Date()
         : null,
     }));
@@ -1892,7 +2053,9 @@ export const createDeputyJobSetupIntent = async (req, res) => {
 
     const job = await deputyJobModel.findById(req.params.id);
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
     }
 
     const result = await createOrRefreshDeputyJobSetupIntentInternal({
@@ -1948,10 +2111,14 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
     const job = await deputyJobModel.findById(req.params.id);
 
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
     }
 
-    const effectiveSetupIntentId = normaliseString(setupIntentId || job.setupIntentId || "");
+    const effectiveSetupIntentId = normaliseString(
+      setupIntentId || job.setupIntentId || "",
+    );
     if (!effectiveSetupIntentId) {
       return res.status(400).json({
         success: false,
@@ -1959,13 +2126,15 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
       });
     }
 
-    const setupIntent = await stripe.setupIntents.retrieve(effectiveSetupIntentId);
+    const setupIntent = await stripe.setupIntents.retrieve(
+      effectiveSetupIntentId,
+    );
     const resolvedPaymentMethodId =
       normaliseString(paymentMethodId) ||
       normaliseString(
         typeof setupIntent.payment_method === "string"
           ? setupIntent.payment_method
-          : setupIntent.payment_method?.id || ""
+          : setupIntent.payment_method?.id || "",
       );
 
     if (!resolvedPaymentMethodId) {
@@ -2053,7 +2222,9 @@ export const chargeDeputyJob = async (req, res) => {
 
     const job = await deputyJobModel.findById(req.params.id);
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
     }
 
     const chargeResult = await attemptDeputyJobCharge({
@@ -2117,16 +2288,22 @@ export const previewDeputyAllocation = async (req, res) => {
     const job = await deputyJobModel.findById(req.params.id);
 
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
     }
 
     if (!musicianId) {
-      return res.status(400).json({ success: false, message: "musicianId is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "musicianId is required" });
     }
 
     const musician = await findMatchedMusicianFromJob(job, musicianId);
     if (!musician) {
-      return res.status(404).json({ success: false, message: "Matched musician not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Matched musician not found" });
     }
 
     const preview = buildAllocationEmailPreview({ job, musician });
@@ -2152,18 +2329,24 @@ export const confirmDeputyAllocation = async (req, res) => {
     const job = await deputyJobModel.findById(req.params.id);
 
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
     }
 
     if (!musicianId) {
-      return res.status(400).json({ success: false, message: "musicianId is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "musicianId is required" });
     }
 
     const application = findApplicationFromJob(job, musicianId);
     const musician = await findMatchedMusicianFromJob(job, musicianId);
 
     if (!musician) {
-      return res.status(404).json({ success: false, message: "Matched musician not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Matched musician not found" });
     }
 
     const now = new Date();
@@ -2193,21 +2376,21 @@ export const confirmDeputyAllocation = async (req, res) => {
       return {
         ...existingApplication,
         status: sameMusician ? "allocated" : existingApplication.status,
-        allocatedAt: sameMusician ? now : existingApplication.allocatedAt || null,
+        allocatedAt: sameMusician
+          ? now
+          : existingApplication.allocatedAt || null,
         musicianSlug:
           sameMusician && !existingApplication.musicianSlug
             ? musician?.musicianSlug || ""
             : existingApplication.musicianSlug || "",
         profileImage:
           sameMusician && !existingApplication.profileImage
-            ? (
-                musician?.profilePhoto ||
-                musician?.profilePicture ||
-                musician?.profileImage ||
-                musician?.profilePic ||
-                musician?.profile_picture ||
-                ""
-              )
+            ? musician?.profilePhoto ||
+              musician?.profilePicture ||
+              musician?.profileImage ||
+              musician?.profilePic ||
+              musician?.profile_picture ||
+              ""
             : existingApplication.profileImage || "",
         phoneNormalized:
           sameMusician && !existingApplication.phoneNormalized
@@ -2215,7 +2398,7 @@ export const confirmDeputyAllocation = async (req, res) => {
                 musician?.phone ||
                   musician?.phoneNumber ||
                   existingApplication.phone ||
-                  ""
+                  "",
               )
             : existingApplication.phoneNormalized ||
               toE164(existingApplication.phone || ""),
@@ -2238,7 +2421,7 @@ export const confirmDeputyAllocation = async (req, res) => {
         musician?.phoneNumber ||
         application?.phoneNormalized ||
         application?.phone ||
-        ""
+        "",
     );
 
     if (targetPhone) {
@@ -2262,7 +2445,7 @@ export const confirmDeputyAllocation = async (req, res) => {
         channel: targetPhone ? "whatsapp" : "email",
         type: "allocation_request",
         subject: `Deputy allocation request: ${normaliseString(
-          job.title || job.instrument || "Deputy opportunity"
+          job.title || job.instrument || "Deputy opportunity",
         )}`,
         previewHtml: "",
         previewText: `Allocation request sent via ${
@@ -2274,8 +2457,8 @@ export const confirmDeputyAllocation = async (req, res) => {
         error: whatsappResult?.sid
           ? ""
           : targetPhone
-          ? "WhatsApp allocation send failed"
-          : "No phone number available for allocation message",
+            ? "WhatsApp allocation send failed"
+            : "No phone number available for allocation message",
       },
     ];
 
@@ -2288,8 +2471,8 @@ export const confirmDeputyAllocation = async (req, res) => {
       message: chargeResult?.success
         ? "Deputy allocated, WhatsApp sent and client charged"
         : whatsappResult?.sid
-        ? "Deputy allocated and WhatsApp sent"
-        : "Deputy allocated",
+          ? "Deputy allocated and WhatsApp sent"
+          : "Deputy allocated",
       job: formattedJob,
       allocatedMusician: musician,
       chargeResult,
@@ -2346,11 +2529,11 @@ export const previewDeputyBookingEmail = async (req, res) => {
       musician,
       payout: {
         hasPayoutDetails: payout.hasPayoutDetails,
-        hasSortCode: payout.hasSortCode,
-        hasAccountNumber: payout.hasAccountNumber,
-        hasAccountName: payout.hasAccountName,
-        hasAccountType: payout.hasAccountType,
-        accountEnding: payout.ending ? `***${payout.ending}` : "",
+        isStripeReady: payout.isStripeReady,
+        hasStripeAccount: payout.hasStripeAccount,
+        detailsSubmitted: payout.detailsSubmitted,
+        chargesEnabled: payout.chargesEnabled,
+        payoutsEnabled: payout.payoutsEnabled,
       },
       preview,
     });
@@ -2370,28 +2553,38 @@ export const sendDeputyBookingEmail = async (req, res) => {
     const job = await deputyJobModel.findById(req.params.id);
 
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
     }
 
     const targetMusicianId = musicianId || job.allocatedMusicianId;
     if (!targetMusicianId) {
-      return res.status(400).json({ success: false, message: "No allocated musician to confirm" });
+      return res
+        .status(400)
+        .json({ success: false, message: "No allocated musician to confirm" });
     }
 
     const musician = await findMatchedMusicianFromJob(job, targetMusicianId);
     if (!musician) {
-      return res.status(404).json({ success: false, message: "Allocated musician not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Allocated musician not found" });
     }
 
     job.status = "filled";
     job.workflowStage = "booking_confirmed";
     job.bookedMusicianId = musician._id;
-    job.bookedMusicianName = [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim();
+    job.bookedMusicianName = [musician.firstName, musician.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
     job.bookingConfirmedAt = new Date();
 
     job.applications = (job.applications || []).map((application) => {
       const sameMusician =
-        asObjectIdString(application.musicianId) === asObjectIdString(musician._id);
+        asObjectIdString(application.musicianId) ===
+        asObjectIdString(musician._id);
 
       return {
         ...application,
@@ -2411,7 +2604,10 @@ export const sendDeputyBookingEmail = async (req, res) => {
         text: preview.text,
       });
     } catch (sendBookingEmailError) {
-      console.error("❌ Failed to send deputy booking confirmation email:", sendBookingEmailError);
+      console.error(
+        "❌ Failed to send deputy booking confirmation email:",
+        sendBookingEmailError,
+      );
     }
 
     job.notifications = [
@@ -2456,19 +2652,26 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
     const bodyText = normaliseString(req.body?.Body || "");
     const buttonText = normaliseString(req.body?.ButtonText || "");
     const buttonPayload = normaliseString(req.body?.ButtonPayload || "");
-    const repliedSid = normaliseString(req.body?.OriginalRepliedMessageSid || "");
+    const repliedSid = normaliseString(
+      req.body?.OriginalRepliedMessageSid || "",
+    );
     const inboundMessageSid = normaliseString(req.body?.MessageSid || "");
     const fromRaw = normaliseString(req.body?.From || req.body?.WaId || "");
     const fromPhone = toE164(fromRaw);
 
-    const rawReply = (buttonPayload || buttonText || bodyText).trim().toLowerCase();
+    const rawReply = (buttonPayload || buttonText || bodyText)
+      .trim()
+      .toLowerCase();
 
     let action = null;
     if (["yes", "yes, book me in!"].includes(rawReply)) action = "accept";
     if (
-      ["notavailable", "not available now", "changedmind", "changed my mind"].includes(
-        rawReply
-      )
+      [
+        "notavailable",
+        "not available now",
+        "changedmind",
+        "changed my mind",
+      ].includes(rawReply)
     ) {
       action = "decline";
     }
@@ -2477,30 +2680,33 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       return res.status(200).send("<Response/>");
     }
 
-  const job = await deputyJobModel.findOne({
-  notifications: {
-    $elemMatch: {
-      providerMessageId: repliedSid,
-      channel: "whatsapp",
-      type: { $in: ["allocation_request", "allocation"] },
-    },
-  },
-});
+    const job = await deputyJobModel.findOne({
+      notifications: {
+        $elemMatch: {
+          providerMessageId: repliedSid,
+          channel: "whatsapp",
+          type: { $in: ["allocation_request", "allocation"] },
+        },
+      },
+    });
 
     if (!job) {
-      console.warn("⚠️ twilioInboundDeputyAllocation: no deputy job found for replied SID", {
-        repliedSid,
-        fromPhone,
-      });
+      console.warn(
+        "⚠️ twilioInboundDeputyAllocation: no deputy job found for replied SID",
+        {
+          repliedSid,
+          fromPhone,
+        },
+      );
       return res.status(200).send("<Response/>");
     }
 
-   const allocationNotification = (job.notifications || []).find(
-  (item) =>
-    String(item?.providerMessageId || "") === repliedSid &&
-    String(item?.channel || "") === "whatsapp" &&
-    ["allocation_request", "allocation"].includes(String(item?.type || ""))
-);
+    const allocationNotification = (job.notifications || []).find(
+      (item) =>
+        String(item?.providerMessageId || "") === repliedSid &&
+        String(item?.channel || "") === "whatsapp" &&
+        ["allocation_request", "allocation"].includes(String(item?.type || "")),
+    );
 
     const matchedApplication = findApplicationByAnyIdentity(job, {
       musicianId: allocationNotification?.musicianId || job.allocatedMusicianId,
@@ -2512,7 +2718,7 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       job,
       allocationNotification?.musicianId ||
         matchedApplication?.musicianId ||
-        job.allocatedMusicianId
+        job.allocatedMusicianId,
     );
 
     if (!musician) {
@@ -2524,7 +2730,10 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       return res.status(200).send("<Response/>");
     }
 
-    const musicianName = [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim();
+    const musicianName = [musician.firstName, musician.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
     const musicianDisplayName = [
       normaliseString(musician?.firstName || ""),
       normaliseString(musician?.lastName || "").charAt(0)
@@ -2534,24 +2743,30 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       .filter(Boolean)
       .join(" ")
       .trim();
-    const jobTitle = normaliseString(job.title || job.instrument || "Deputy opportunity");
-    const location =
-      normaliseString(job.venue || job.locationName || job.location || "Location TBC");
+    const jobTitle = normaliseString(
+      job.title || job.instrument || "Deputy opportunity",
+    );
+    const location = normaliseString(
+      job.venue || job.locationName || job.location || "Location TBC",
+    );
     const dateText = normaliseString(job.eventDate || "TBC");
-const feeText = getDeputyNetFeeText(job);
-    const musicianEmail =
-      normaliseString(musician.email || matchedApplication?.email || "").toLowerCase();
+    const feeText = getDeputyNetFeeText(job);
+    const musicianEmail = normaliseString(
+      musician.email || matchedApplication?.email || "",
+    ).toLowerCase();
     const musicianPhone =
       fromPhone ||
       toE164(
         musician.phone ||
           musician.phoneNumber ||
           matchedApplication?.phone ||
-          ""
+          "",
       ) ||
       "";
 
-    const posterEmail = normaliseString(job.createdByEmail || job.clientEmail || "").toLowerCase();
+    const posterEmail = normaliseString(
+      job.createdByEmail || job.clientEmail || "",
+    ).toLowerCase();
 
     if (action === "accept") {
       applyBookedStateToJob(job, musician);
@@ -2579,17 +2794,24 @@ const feeText = getDeputyNetFeeText(job);
         try {
           await sendWhatsAppText(
             musicianPhone,
-            "Wonderful! Please consider yourself booked. We’ll let the band know, and you should hear from them shortly."
+            "Wonderful! Please consider yourself booked. We’ll let the band know, and you should hear from them shortly.",
           );
         } catch (whatsAppError) {
-          console.error("❌ Failed to send deputy acceptance WhatsApp confirmation:", whatsAppError);
+          console.error(
+            "❌ Failed to send deputy acceptance WhatsApp confirmation:",
+            whatsAppError,
+          );
         }
       }
 
       if (musicianEmail) {
         try {
-          const callTime = normaliseString(job?.callTime || job?.startTime || "");
-          const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
+          const callTime = normaliseString(
+            job?.callTime || job?.startTime || "",
+          );
+          const finishTime = normaliseString(
+            job?.finishTime || job?.endTime || "",
+          );
           const notes = normaliseString(job?.notes || "");
           const requiredInstruments = normaliseList(job?.requiredInstruments);
           const essentialSkills = normaliseList(job?.essentialRoles);
@@ -2609,19 +2831,21 @@ const feeText = getDeputyNetFeeText(job);
                 year: "numeric",
               })
             : "TBC";
-          const bandContactName = normaliseString(job?.createdByName || "The Supreme Collective");
+          const bandContactName = normaliseString(
+            job?.createdByName || "The Supreme Collective",
+          );
           const bandContactEmail = normaliseString(
-            job?.createdByEmail || "hello@thesupremecollective.co.uk"
+            job?.createdByEmail || "hello@thesupremecollective.co.uk",
           );
           const bandContactPhone = normaliseString(job?.createdByPhone || "");
           const payout = getMusicianPayoutSummary(musician);
-const profileUrl = getMusicianProfileUrl(musician);
+          const payoutSettingsUrl = getMusicianPayoutSettingsUrl(musician);
 
           await sendEmail({
-  to: musicianEmail,
-  bcc: DEPUTY_JOB_BCC_EMAIL,
-  subject: `Confirmed: ${jobTitle}`,
-  html: `
+            to: musicianEmail,
+            bcc: DEPUTY_JOB_BCC_EMAIL,
+            subject: `Confirmed: ${jobTitle}`,
+            html: `
     <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
       <p>Hi ${escapeHtml(normaliseString(musician.firstName || "there"))},</p>
 
@@ -2657,37 +2881,41 @@ const profileUrl = getMusicianProfileUrl(musician);
         ${renderDetailRow("Notes", notes)}
       </ul>
 
-      ${payout.hasPayoutDetails ? `
-        <p>
-          <strong>Payment processing:</strong><br/>
-          Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
-          Provided your bank details remain up to date, payment can typically be expected <strong>5–7 days after the gig</strong>
-          into the ${escapeHtml(payout.accountType.toLowerCase())} account ending <strong>***${escapeHtml(payout.ending)}</strong>.
-        </p>
-      ` : `
-        <p>
-          <strong>Payment processing:</strong><br/>
-          Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
-          We do not currently have complete bank details on file for you, so please update your records now to ensure payout can be made.
-          Once your bank details are in place, payment can typically be expected <strong>5–7 days after the gig</strong>.
-        </p>
-        <p style="margin: 16px 0 20px;">
-          <a
-            href="${escapeHtml(profileUrl)}"
-            style="
-              display:inline-block;
-              background:#111;
-              color:#fff;
-              text-decoration:none;
-              padding:12px 18px;
-              border-radius:8px;
-              font-weight:600;
-            "
-          >
-            Update payment details
-          </a>
-        </p>
-      `}
+ ${
+  payout.hasPayoutDetails
+    ? `
+      <p>
+        <strong>Payment processing:</strong><br/>
+        Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
+        Provided your Stripe payout setup remains active, payment can typically be expected <strong>5–7 days after the gig</strong>
+        to your connected Stripe account.
+      </p>
+    `
+    : `
+      <p>
+        <strong>Payment processing:</strong><br/>
+        Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
+        We do not currently have an active Stripe payout setup on file for you, so please complete your payout setup now to ensure payment can be processed.
+        Once your Stripe payout setup is complete, payment can typically be expected <strong>5–7 days after the gig</strong>.
+      </p>
+      <p style="margin: 16px 0 20px;">
+        <a
+          href="${escapeHtml(payoutSettingsUrl)}"
+          style="
+            display:inline-block;
+            background:#111;
+            color:#fff;
+            text-decoration:none;
+            padding:12px 18px;
+            border-radius:8px;
+            font-weight:600;
+          "
+        >
+          Complete Stripe payout setup
+        </a>
+      </p>
+    `
+}
 
       <h3 style="margin: 24px 0 10px;">Band contact details</h3>
       <ul style="padding-left: 20px; margin: 0 0 18px;">
@@ -2706,9 +2934,12 @@ const profileUrl = getMusicianProfileUrl(musician);
       </p>
     </div>
   `,
-});
+          });
         } catch (musicianEmailError) {
-          console.error("❌ Failed to send musician deputy acceptance email:", musicianEmailError);
+          console.error(
+            "❌ Failed to send musician deputy acceptance email:",
+            musicianEmailError,
+          );
         }
       }
 
@@ -2724,8 +2955,12 @@ const profileUrl = getMusicianProfileUrl(musician);
           const setLengths = normaliseList(job?.setLengths);
           const whatsIncluded = normaliseList(job?.whatsIncluded);
           const claimableExpenses = normaliseList(job?.claimableExpenses);
-          const callTime = normaliseString(job?.callTime || job?.startTime || "");
-          const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
+          const callTime = normaliseString(
+            job?.callTime || job?.startTime || "",
+          );
+          const finishTime = normaliseString(
+            job?.finishTime || job?.endTime || "",
+          );
           const notes = normaliseString(job?.notes || "");
           const paymentDate = job?.releaseOn
             ? new Date(job.releaseOn).toLocaleDateString("en-GB", {
@@ -2736,11 +2971,11 @@ const profileUrl = getMusicianProfileUrl(musician);
               })
             : "TBC";
 
-     await sendEmail({
-  to: posterEmail,
-  bcc: DEPUTY_JOB_BCC_EMAIL,
-  subject: `Deputy accepted: ${jobTitle}`,
-  html: `
+          await sendEmail({
+            to: posterEmail,
+            bcc: DEPUTY_JOB_BCC_EMAIL,
+            subject: `Deputy accepted: ${jobTitle}`,
+            html: `
           <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
             <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
               <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
@@ -2762,7 +2997,7 @@ const profileUrl = getMusicianProfileUrl(musician);
 
                 <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
                   Great news — <strong>${escapeHtml(
-                    musicianName || "your selected deputy"
+                    musicianName || "your selected deputy",
                   )}</strong> has accepted the deputy booking for <strong>${escapeHtml(jobTitle)}</strong>.
                 </p>
 
@@ -2777,13 +3012,13 @@ const profileUrl = getMusicianProfileUrl(musician);
                   <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Deputy contact details</h3>
                   <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
                     <li><strong>Name:</strong> ${escapeHtml(
-                      musicianName || "Not provided"
+                      musicianName || "Not provided",
                     )}</li>
                     <li><strong>Email:</strong> ${escapeHtml(
-                      musicianEmail || "Not provided"
+                      musicianEmail || "Not provided",
                     )}</li>
                     <li><strong>Phone:</strong> ${escapeHtml(
-                      musicianPhone || "Not provided"
+                      musicianPhone || "Not provided",
                     )}</li>
                   </ul>
                 </div>
@@ -2854,9 +3089,12 @@ const profileUrl = getMusicianProfileUrl(musician);
             </div>
           </div>
         `,
-      });
+          });
         } catch (posterEmailError) {
-          console.error("❌ Failed to send poster deputy acceptance email:", posterEmailError);
+          console.error(
+            "❌ Failed to send poster deputy acceptance email:",
+            posterEmailError,
+          );
         }
       }
 
@@ -2865,7 +3103,9 @@ const profileUrl = getMusicianProfileUrl(musician);
 
     if (action === "decline") {
       const now = new Date();
-      const safeMusicianId = asObjectIdString(musician._id || musician.musicianId);
+      const safeMusicianId = asObjectIdString(
+        musician._id || musician.musicianId,
+      );
 
       job.status = "open";
       job.workflowStage = "sent_to_matches";
@@ -2877,7 +3117,8 @@ const profileUrl = getMusicianProfileUrl(musician);
       job.bookingConfirmedAt = null;
 
       job.applications = (job.applications || []).map((application) => {
-        const sameMusician = asObjectIdString(application?.musicianId) === safeMusicianId;
+        const sameMusician =
+          asObjectIdString(application?.musicianId) === safeMusicianId;
 
         return {
           ...application,
@@ -2909,14 +3150,17 @@ const profileUrl = getMusicianProfileUrl(musician);
         try {
           await sendWhatsAppText(
             musicianPhone,
-            "Thanks for letting us know. We’ve updated the job and will look for another deputy."
+            "Thanks for letting us know. We’ve updated the job and will look for another deputy.",
           );
         } catch (whatsAppError) {
-          console.error("❌ Failed to send deputy decline WhatsApp confirmation:", whatsAppError);
+          console.error(
+            "❌ Failed to send deputy decline WhatsApp confirmation:",
+            whatsAppError,
+          );
         }
       }
 
-   if (posterEmail) {
+      if (posterEmail) {
         try {
           const requiredInstruments = normaliseList(job?.requiredInstruments);
           const essentialSkills = normaliseList(job?.essentialRoles);
@@ -2928,15 +3172,19 @@ const profileUrl = getMusicianProfileUrl(musician);
           const setLengths = normaliseList(job?.setLengths);
           const whatsIncluded = normaliseList(job?.whatsIncluded);
           const claimableExpenses = normaliseList(job?.claimableExpenses);
-          const callTime = normaliseString(job?.callTime || job?.startTime || "");
-          const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
+          const callTime = normaliseString(
+            job?.callTime || job?.startTime || "",
+          );
+          const finishTime = normaliseString(
+            job?.finishTime || job?.endTime || "",
+          );
           const notes = normaliseString(job?.notes || "");
 
-        await sendEmail({
-  to: posterEmail,
-  bcc: DEPUTY_JOB_BCC_EMAIL,
-  subject: `Deputy declined: ${jobTitle}`,
-  html: `
+          await sendEmail({
+            to: posterEmail,
+            bcc: DEPUTY_JOB_BCC_EMAIL,
+            subject: `Deputy declined: ${jobTitle}`,
+            html: `
             <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
               <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
                 <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
@@ -2958,7 +3206,7 @@ const profileUrl = getMusicianProfileUrl(musician);
 
                   <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
                     We wanted to let you know that <strong>${escapeHtml(
-                      musicianDisplayName || "the allocated deputy"
+                      musicianDisplayName || "the allocated deputy",
                     )}</strong> is no longer available for <strong>${escapeHtml(jobTitle)}</strong>.
                   </p>
 
@@ -3035,11 +3283,14 @@ const profileUrl = getMusicianProfileUrl(musician);
               </div>
             </div>
           `,
-        });
-      } catch (posterEmailError) {
-        console.error("❌ Failed to send poster deputy decline email:", posterEmailError);
+          });
+        } catch (posterEmailError) {
+          console.error(
+            "❌ Failed to send poster deputy decline email:",
+            posterEmailError,
+          );
+        }
       }
-    }
 
       return res.status(200).send("<Response/>");
     }
@@ -3127,7 +3378,8 @@ export const twilioInboundDeputyJob = async (req, res) => {
 
       job.applications = (job.applications || []).map((existingApplication) => {
         const sameMusician =
-          asObjectIdString(existingApplication.musicianId) === asObjectIdString(musician._id);
+          asObjectIdString(existingApplication.musicianId) ===
+          asObjectIdString(musician._id);
 
         return {
           ...existingApplication,
@@ -3141,13 +3393,16 @@ export const twilioInboundDeputyJob = async (req, res) => {
         {
           musicianId: musician._id,
           email: musician.email || application?.email || "",
-          phone: musician.phone || musician.phoneNumber || application?.phone || "",
+          phone:
+            musician.phone || musician.phoneNumber || application?.phone || "",
           channel: "whatsapp",
           type: "booking_confirmation",
           subject: `Accepted via WhatsApp: ${job.title || job.instrument || "Deputy job"}`,
           previewText: `Accepted by ${
-            [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim() ||
-            "allocated deputy"
+            [musician.firstName, musician.lastName]
+              .filter(Boolean)
+              .join(" ")
+              .trim() || "allocated deputy"
           }`,
           providerMessageId: repliedSid,
           status: "sent",
@@ -3166,7 +3421,8 @@ export const twilioInboundDeputyJob = async (req, res) => {
     }
 
     job.status = "open";
-    job.workflowStage = job.notifiedCount > 0 ? "sent_to_matches" : "applications_open";
+    job.workflowStage =
+      job.notifiedCount > 0 ? "sent_to_matches" : "applications_open";
     job.bookedMusicianId = null;
     job.bookedMusicianName = "";
     job.bookingConfirmedAt = null;
@@ -3176,7 +3432,8 @@ export const twilioInboundDeputyJob = async (req, res) => {
 
     job.applications = (job.applications || []).map((existingApplication) => {
       const sameMusician =
-        asObjectIdString(existingApplication.musicianId) === asObjectIdString(musician._id);
+        asObjectIdString(existingApplication.musicianId) ===
+        asObjectIdString(musician._id);
 
       return {
         ...existingApplication,
@@ -3190,13 +3447,16 @@ export const twilioInboundDeputyJob = async (req, res) => {
       {
         musicianId: musician._id,
         email: musician.email || application?.email || "",
-        phone: musician.phone || musician.phoneNumber || application?.phone || "",
+        phone:
+          musician.phone || musician.phoneNumber || application?.phone || "",
         channel: "whatsapp",
         type: "manual",
         subject: `Declined via WhatsApp: ${job.title || job.instrument || "Deputy job"}`,
         previewText: `Declined by ${
-          [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim() ||
-          "allocated deputy"
+          [musician.firstName, musician.lastName]
+            .filter(Boolean)
+            .join(" ")
+            .trim() || "allocated deputy"
         }`,
         providerMessageId: repliedSid,
         status: "sent",
@@ -3233,20 +3493,28 @@ export const updateDeputyJobApplicationStatus = async (req, res) => {
     ];
 
     if (!allowedStatuses.includes(normaliseString(status))) {
-      return res.status(400).json({ success: false, message: "Invalid application status" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid application status" });
     }
 
     const job = await deputyJobModel.findById(id);
     if (!job) {
-      return res.status(404).json({ success: false, message: "Deputy job not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
     }
 
     const applicationIndex = (job.applications || []).findIndex(
-      (application) => asObjectIdString(application.musicianId) === asObjectIdString(musicianId)
+      (application) =>
+        asObjectIdString(application.musicianId) ===
+        asObjectIdString(musicianId),
     );
 
     if (applicationIndex === -1) {
-      return res.status(404).json({ success: false, message: "Application not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Application not found" });
     }
 
     const nextStatus = normaliseString(status);
@@ -3254,11 +3522,16 @@ export const updateDeputyJobApplicationStatus = async (req, res) => {
     job.applications[applicationIndex].notes = normaliseString(notes);
 
     const now = new Date();
-    if (nextStatus === "shortlisted") job.applications[applicationIndex].shortlistedAt = now;
-    if (nextStatus === "allocated") job.applications[applicationIndex].allocatedAt = now;
-    if (nextStatus === "booked") job.applications[applicationIndex].bookedAt = now;
-    if (nextStatus === "declined") job.applications[applicationIndex].declinedAt = now;
-    if (nextStatus === "withdrawn") job.applications[applicationIndex].withdrawnAt = now;
+    if (nextStatus === "shortlisted")
+      job.applications[applicationIndex].shortlistedAt = now;
+    if (nextStatus === "allocated")
+      job.applications[applicationIndex].allocatedAt = now;
+    if (nextStatus === "booked")
+      job.applications[applicationIndex].bookedAt = now;
+    if (nextStatus === "declined")
+      job.applications[applicationIndex].declinedAt = now;
+    if (nextStatus === "withdrawn")
+      job.applications[applicationIndex].withdrawnAt = now;
 
     await job.save();
 
@@ -3275,6 +3548,55 @@ export const updateDeputyJobApplicationStatus = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to update application status",
+      error: error.message,
+    });
+  }
+};
+
+export const getStripeConnectPayoutStatus = async (req, res) => {
+  try {
+    const musicianId = req.user?._id || req.user?.id;
+    if (!musicianId) {
+      return res.status(401).json({
+        success: false,
+        message: "You must be logged in",
+      });
+    }
+
+    const musician = await musicianModel.findById(musicianId).lean();
+    if (!musician) {
+      return res.status(404).json({
+        success: false,
+        message: "Musician not found",
+      });
+    }
+
+    const stripeConnect = musician?.stripeConnect || {};
+
+    const accountId = normaliseString(stripeConnect.accountId || "");
+    const detailsSubmitted = Boolean(stripeConnect.detailsSubmitted);
+    const chargesEnabled = Boolean(stripeConnect.chargesEnabled);
+    const payoutsEnabled = Boolean(stripeConnect.payoutsEnabled);
+
+    let status = "not_connected";
+    if (accountId) status = "incomplete";
+    if (accountId && detailsSubmitted && payoutsEnabled) status = "ready";
+
+    return res.json({
+      success: true,
+      payoutStatus: {
+        status,
+        accountId,
+        detailsSubmitted,
+        chargesEnabled,
+        payoutsEnabled,
+      },
+    });
+  } catch (error) {
+    console.error("❌ getStripeConnectPayoutStatus error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch payout status",
       error: error.message,
     });
   }

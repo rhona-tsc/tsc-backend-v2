@@ -1,4 +1,5 @@
 import express from "express";
+import Stripe from "stripe";
 import multer from "multer";
 import mongoose from "mongoose";
 import { emailContract } from "../controllers/musicianController.js";
@@ -22,8 +23,16 @@ import {
 import bookingModel from "../models/bookingModel.js";
 import { autosaveMusicianForm, listAutosaveHistory } from "../controllers/musicianAutosave.controller.js";
 import bcrypt from "bcryptjs";
+import { getStripeConnectPayoutStatus } from "../controllers/deputyJobController.js";
 
 const router = express.Router();
+
+const stripeSecretKey =
+  process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY || "";
+
+const stripe = stripeSecretKey
+  ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
+  : null;
 
 const isObjectIdLike = (value = "") => mongoose.Types.ObjectId.isValid(String(value || ""));
 
@@ -196,18 +205,51 @@ router.get("/account/stripe-connect/status", verifyToken, async (req, res) => {
       return res.status(401).json({ success: false, message: "Unauthorised." });
     }
 
-    const user = await musicianModel.findById(userId).lean();
+    const user = await musicianModel.findById(userId);
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    const stripeConnect = user.stripeConnect || {
+    let stripeConnect = user.stripeConnect || {
       accountId: "",
       onboardingComplete: false,
       chargesEnabled: false,
       payoutsEnabled: false,
       detailsSubmitted: false,
     };
+
+    const accountId = String(stripeConnect.accountId || "").trim();
+
+    if (accountId && stripe) {
+      try {
+        const account = await stripe.accounts.retrieve(accountId);
+
+        const refreshedStripeConnect = {
+          ...stripeConnect,
+          accountId,
+          onboardingComplete: Boolean(account.details_submitted && account.payouts_enabled),
+          chargesEnabled: Boolean(account.charges_enabled),
+          payoutsEnabled: Boolean(account.payouts_enabled),
+          detailsSubmitted: Boolean(account.details_submitted),
+        };
+
+        const hasChanged =
+          Boolean(user.stripeConnect?.onboardingComplete) !== Boolean(refreshedStripeConnect.onboardingComplete) ||
+          Boolean(user.stripeConnect?.chargesEnabled) !== Boolean(refreshedStripeConnect.chargesEnabled) ||
+          Boolean(user.stripeConnect?.payoutsEnabled) !== Boolean(refreshedStripeConnect.payoutsEnabled) ||
+          Boolean(user.stripeConnect?.detailsSubmitted) !== Boolean(refreshedStripeConnect.detailsSubmitted);
+
+        if (hasChanged) {
+          user.stripeConnect = refreshedStripeConnect;
+          user.markModified("stripeConnect");
+          await user.save();
+        }
+
+        stripeConnect = refreshedStripeConnect;
+      } catch (stripeErr) {
+        console.error("❌ Failed to refresh Stripe Connect status from Stripe:", stripeErr);
+      }
+    }
 
     return res.json({
       success: true,
@@ -224,6 +266,12 @@ router.post(
   "/account/stripe-connect/onboarding-link",
   verifyToken,
   createStripeConnectOnboardingLink
+);
+
+router.get(
+  "/account/payout-status",
+  verifyToken,
+  getStripeConnectPayoutStatus
 );
 
 /* ---------------- Deputy registration ---------------- */

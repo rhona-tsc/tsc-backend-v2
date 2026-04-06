@@ -16,10 +16,24 @@ const stripe = stripeSecretKey
 const normaliseString = (value) => String(value || "").trim();
 const normaliseEmail = (value) => normaliseString(value).toLowerCase();
 
+const escapeHtml = (value = "") =>
+  String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
 const parseDateOrNull = (value) => {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const normaliseCurrency = (value) => {
+  const raw = normaliseString(value || "GBP").toUpperCase();
+  if (!raw || raw === "£") return "GBP";
+  return raw;
 };
 
 const formatMoney = (value = 0, currency = "GBP") => {
@@ -27,7 +41,7 @@ const formatMoney = (value = 0, currency = "GBP") => {
   try {
     return new Intl.NumberFormat("en-GB", {
       style: "currency",
-      currency: normaliseString(currency || "GBP") || "GBP",
+      currency: normaliseCurrency(currency || "GBP"),
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount);
@@ -116,11 +130,29 @@ const getReadyDeputyJobsForPayout = async (asOfDate = new Date()) => {
   return deputyJobModel.find({
     workflowStage: "booking_confirmed",
     paymentStatus: "paid",
-    payoutStatus: { $in: PAYOUT_READY_STATUSES },
+    payoutStatus: "scheduled",
     releaseOn: { $lte: asOfDate },
     bookedMusicianId: { $ne: null },
     deputyNetAmount: { $gt: 0 },
   });
+};
+
+const markJobPendingForPayout = async (jobId, asOfDate = new Date()) => {
+  return deputyJobModel.findOneAndUpdate(
+    {
+      _id: jobId,
+      paymentStatus: "paid",
+      payoutStatus: "scheduled",
+      releaseOn: { $lte: asOfDate },
+    },
+    {
+      $set: {
+        payoutStatus: "pending",
+        payoutStartedAt: new Date(),
+      },
+    },
+    { new: true }
+  );
 };
 
 const buildDeputyRemittanceEmail = ({ job, musician }) => {
@@ -128,22 +160,25 @@ const buildDeputyRemittanceEmail = ({ job, musician }) => {
     .filter(Boolean)
     .join(" ")
     .trim() || "there";
+  const safeMusicianName = escapeHtml(musicianName);
   const jobTitle = normaliseString(job?.title || job?.instrument || "Deputy booking");
+  const safeJobTitle = escapeHtml(jobTitle);
   const subject = `Remittance advice – ${jobTitle} – ${formatDate(job?.eventDate)}`;
   const grossAmount = formatMoney(job?.grossAmount || job?.fee || 0, job?.currency || "GBP");
   const commissionAmount = formatMoney(job?.commissionAmount || 0, job?.currency || "GBP");
   const deputyNetAmount = formatMoney(job?.deputyNetAmount || 0, job?.currency || "GBP");
- const payoutPaidAt = formatDateTime(job?.payoutPaidAt || new Date());
-const transferId = normaliseString(job?.latestTransferId || "");
-const location = normaliseString(job?.venue || job?.locationName || job?.location || "TBC");
+  const payoutPaidAt = formatDateTime(job?.payoutPaidAt || new Date());
+  const transferId = normaliseString(job?.latestTransferId || "");
+  const location = normaliseString(job?.venue || job?.locationName || job?.location || "TBC");
+  const safeLocation = escapeHtml(location);
   const html = `
     <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
       <h2 style="margin-bottom: 12px;">Remittance advice</h2>
-      <p>Hi ${musicianName},</p>
-      <p>Your deputy payment has been released for <strong>${jobTitle}</strong>.</p>
+      <p>Hi ${safeMusicianName},</p>
+      <p>Your deputy payment has been released for <strong>${safeJobTitle}</strong>.</p>
 
       <p><strong>Event date:</strong> ${formatDate(job?.eventDate)}</p>
-      <p><strong>Location:</strong> ${location}</p>
+      <p><strong>Location:</strong> ${safeLocation}</p>
       <p><strong>Gross booking amount:</strong> ${grossAmount}</p>
       <p><strong>Commission amount:</strong> ${commissionAmount}</p>
       <p><strong>Your net amount:</strong> ${deputyNetAmount}</p>
@@ -163,7 +198,7 @@ ${transferId ? `<p><strong>Stripe transfer reference:</strong> ${transferId}</p>
     `Commission amount: ${commissionAmount}`,
     `Your net amount: ${deputyNetAmount}`,
     `Payout released: ${payoutPaidAt}`,
-transferId ? `Stripe transfer reference: ${transferId}` : "",
+    transferId ? `Stripe transfer reference: ${transferId}` : "",
     "If anything looks incorrect, please reply to this email.",
   ].join("\n");
 
@@ -205,28 +240,39 @@ const sendDeputyRemittanceAdvice = async ({ transporter, job, musician }) => {
   };
 };
 
+const normaliseCurrency = (value) => {
+  const raw = normaliseString(value || "GBP").toUpperCase();
+  if (!raw || raw === "£") return "GBP";
+  return raw;
+};
+
 const buildFinanceSummaryEmail = ({ runAt, checkedCount, releasedCount, totalReleased, currency = "GBP", releasedJobs = [], failures = [] }) => {
   const subject = `Deputy payout summary – ${formatDate(runAt)}`;
   const totalReleasedFormatted = formatMoney(totalReleased, currency);
 
- const releasedRowsHtml = releasedJobs.length
-  ? releasedJobs
-      .map(
-        (item) => `
+  const releasedRowsHtml = releasedJobs.length
+    ? releasedJobs
+        .map(
+          (item) => `
           <tr>
-            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.jobTitle}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.musicianName}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.eventDate}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.amount}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${item.transferId || "—"}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.jobTitle)}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.musicianName)}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.eventDate)}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.amount)}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">${escapeHtml(item.transferId || "—")}</td>
           </tr>
         `
-      )
-      .join("")
-  : `<tr><td colspan="5" style="padding: 8px;">No payouts released.</td></tr>`;
+        )
+        .join("")
+    : `<tr><td colspan="5" style="padding: 8px;">No payouts released.</td></tr>`;
 
   const failuresHtml = failures.length
-    ? `<ul>${failures.map((item) => `<li>${item.jobTitle}: ${item.reason}</li>`).join("")}</ul>`
+    ? `<ul>${failures
+        .map(
+          (item) =>
+            `<li>${escapeHtml(item.jobTitle)}: ${escapeHtml(item.reason)}</li>`
+        )
+        .join("")}</ul>`
     : `<p>No failures.</p>`;
 
   const html = `
@@ -268,7 +314,8 @@ const buildFinanceSummaryEmail = ({ runAt, checkedCount, releasedCount, totalRel
     "Released payouts:",
     ...(releasedJobs.length
       ? releasedJobs.map(
-(item) => `${item.jobTitle} | ${item.musicianName} | ${item.eventDate} | ${item.amount} | ${item.transferId || "—"}`        )
+          (item) => `${item.jobTitle} | ${item.musicianName} | ${item.eventDate} | ${item.amount} | ${item.transferId || "—"}`
+        )
       : ["No payouts released."]),
     "",
     "Failures:",
@@ -318,22 +365,6 @@ const sendInternalFinanceSummary = async ({ transporter, summary }) => {
   };
 };
 
-const markJobPendingForPayout = async (jobId, asOfDate = new Date()) => {
-  return deputyJobModel.findOneAndUpdate(
-    {
-      _id: jobId,
-      paymentStatus: "paid",
-      payoutStatus: { $in: PAYOUT_READY_STATUSES },
-      releaseOn: { $lte: asOfDate },
-    },
-    {
-      $set: {
-        payoutStatus: "pending",
-      },
-    },
-    { new: true }
-  );
-};
 
 const releaseDeputyPayout = async ({ job, transporter }) => {
  const lockedJob = await markJobPendingForPayout(job._id, job.releaseOn || new Date());
@@ -433,7 +464,7 @@ const releaseDeputyPayout = async ({ job, transporter }) => {
   try {
     transfer = await stripe.transfers.create({
       amount: transferAmountPence,
-      currency: normaliseString(lockedJob.currency || "GBP").toLowerCase() || "gbp",
+      currency: normaliseCurrency(lockedJob.currency || "GBP").toLowerCase(),
       destination: normaliseString(musician?.stripeConnect?.accountId || ""),
       metadata: {
         deputyJobId: String(lockedJob._id),
@@ -491,6 +522,21 @@ const releaseDeputyPayout = async ({ job, transporter }) => {
     job: lockedJob,
     musician,
   });
+
+  if (!remittanceResult?.success) {
+    pushPaymentEvent(lockedJob, {
+      type: "remittance_email_failed",
+      status: remittanceResult?.skipped ? "skipped" : "failed",
+      amount: Number(lockedJob.deputyNetAmount || 0),
+      currency: lockedJob.currency,
+      note: remittanceResult?.reason || "Failed to send deputy remittance advice",
+      metadata: {
+        musicianId: String(musician._id),
+        musicianEmail: normaliseEmail(musician.email || ""),
+      },
+    });
+    await lockedJob.save();
+  }
 
   return {
     success: true,
