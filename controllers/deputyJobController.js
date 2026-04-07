@@ -852,9 +852,7 @@ const jobBoardUrl = `${siteBase}/deputy-jobs`;
             ${escapeHtml(safeTitle)}
           </h2>
 
-          <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#444;">
-            Sorry — there was an error with the links in the previous email about this job. The links below should now work correctly. If you have not yet logged in, onboarded, or updated your profile with The Supreme Collective, you may be prompted to log in first. If you cannot log in, please use the forgot password option to create a new password. Once logged in, you should be taken through to the job page. You can also access the deputy job board from your dashboard after logging in.
-          </p>
+
 
           <div style="margin:0 0 24px;">
             <a
