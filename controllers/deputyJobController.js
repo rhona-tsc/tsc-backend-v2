@@ -1726,6 +1726,27 @@ export const createDeputyJob = async (req, res) => {
       inferredPostcode: built.inferredPostcode,
     });
 
+    console.log("🎯 createDeputyJob matcher result", {
+  mode: built.mode,
+  primaryInstrument: built.primaryInstrument,
+  isVocalSlot: built.effectiveIsVocalSlot,
+  county: built.inferredCounty,
+  postcode: built.inferredPostcode,
+  genres: built.resolvedGenres,
+  essentialRoles: built.resolvedEssentialRoles,
+  desiredRoles: built.matcherDesiredRoles,
+  secondaryInstruments: built.resolvedSecondaryInstruments,
+  matchedCount: matcherResult.matches.length,
+  firstMatches: matcherResult.matches.slice(0, 5).map((m) => ({
+    id: m._id,
+    firstName: m.firstName,
+    lastName: m.lastName,
+    email: m.email,
+    deputyMatchScore: m.deputyMatchScore,
+    matchPct: m.matchPct,
+  })),
+});
+
     job.matchedMusicianIds = matcherResult.matchedMusicianIds;
     job.matchedMusicians = matcherResult.matchedMusicians;
     job.matchedCount = matcherResult.matches.length;
