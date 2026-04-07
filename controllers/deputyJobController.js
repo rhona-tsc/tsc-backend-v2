@@ -798,8 +798,8 @@ const buildJobNotificationPreview = ({
 const jobBoardUrl = `${siteBase}/deputy-jobs`;
   const formattedSubjectDate = formatDeputyOpportunityDate(safeDate);
   const subject = formattedSubjectDate
-    ? `${safeTitle} | Deputy Opportunity for ${formattedSubjectDate}`
-    : `${safeTitle} | Deputy Opportunity`;
+    ? `Corrected Links: ${safeTitle} | Deputy Opportunity for ${formattedSubjectDate}`
+    : `Corrected Links: ${safeTitle} | Deputy Opportunity`;
 
   const detailRowsHtml = [
     renderDetailRow("Date", safeDate),
@@ -853,7 +853,7 @@ const jobBoardUrl = `${siteBase}/deputy-jobs`;
           </h2>
 
           <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#444;">
-            Please review the details below and use the button to open the deputy job directly in the job board.
+            Sorry — there was an error with the links in the previous email about this job. The links below should now work correctly. If you have not yet logged in, onboarded, or updated your profile with The Supreme Collective, you may be prompted to log in first. If you cannot log in, please use the forgot password option to create a new password. Once logged in, you should be taken through to the job page. You can also access the deputy job board from your dashboard after logging in.
           </p>
 
           <div style="margin:0 0 24px;">
@@ -922,7 +922,11 @@ const jobBoardUrl = `${siteBase}/deputy-jobs`;
     "The Supreme Collective",
     "Deputy Opportunity Preview",
     "",
-    "This is a preview of the deputy job notification email before it is sent out.",
+    "There was an error with the links in the previous email about this job. The links below should now work correctly.",
+    "If you have not yet logged in, onboarded, or updated your profile with The Supreme Collective, you may be prompted to log in first.",
+    "If you cannot log in, please use the forgot password option to create a new password.",
+    "Once logged in, you should be taken through to the job page.",
+    "You can also access the deputy job board from your dashboard after logging in.",
     safePreviewRecipientEmail
       ? `Preview recipient: ${safePreviewRecipientEmail}`
       : "",
@@ -3886,21 +3890,45 @@ export const sendDeputyJobTestNotification = async (req, res) => {
       previewRecipientEmail: testEmail,
     });
 
+    const correctionIntroHtml = `
+      <div style="margin:0 0 24px; padding:18px 20px; border:1px solid #f1d0d1; background:#fff7f7; border-radius:16px; font-family:Arial, sans-serif; color:#333; line-height:1.7;">
+        <p style="margin:0 0 12px;"><strong>Quick update:</strong> there was an error with the links in the last email that went out about this deputy job. The links in this email should now work correctly.</p>
+        <p style="margin:0 0 12px;">If you have not yet registered with The Supreme Collective, updated your profile, logged in, or completed onboarding, you may be prompted to log in first.</p>
+        <p style="margin:0 0 12px;">If you cannot log in, please use the <strong>Forgot password</strong> option to create a new password. Once that is done, you should be able to continue through to the job page.</p>
+        <p style="margin:0;">You can also find the deputy job board link from your dashboard once you are logged in.</p>
+      </div>
+    `;
+
+    const correctionIntroText = [
+      "Quick update: there was an error with the links in the last email that went out about this deputy job. The links in this email should now work correctly.",
+      "",
+      "If you have not yet registered with The Supreme Collective, updated your profile, logged in, or completed onboarding, you may be prompted to log in first.",
+      "",
+      "If you cannot log in, please use the Forgot password option to create a new password. Once that is done, you should be able to continue through to the job page.",
+      "",
+      "You can also find the deputy job board link from your dashboard once you are logged in.",
+    ].join("\n");
+
+    const emailHtml = `${correctionIntroHtml}${previewNotification?.html || ""}`;
+    const emailText = [correctionIntroText, previewNotification?.text || ""]
+      .filter(Boolean)
+      .join("\n\n");
+
     console.log("🟣 sendDeputyJobTestNotification: preview built", {
       subject: previewNotification?.subject || "",
       recipients: previewNotification?.recipients || [],
-      hasHtml: Boolean(previewNotification?.html),
-      hasText: Boolean(previewNotification?.text),
-      htmlLength: previewNotification?.html?.length || 0,
-      textLength: previewNotification?.text?.length || 0,
+      hasHtml: Boolean(emailHtml),
+      hasText: Boolean(emailText),
+      htmlLength: emailHtml?.length || 0,
+      textLength: emailText?.length || 0,
     });
 
     const emailResult = await sendEmail({
       to: testEmail,
       bcc: DEPUTY_JOB_BCC_EMAIL,
       subject: `[Test] ${previewNotification.subject}`,
-      html: previewNotification.html,
-      text: previewNotification.text,
+      html: emailHtml,
+      text: emailText,
     });
 
     console.log("🟣 sendDeputyJobTestNotification: sendEmail result", emailResult);
@@ -3914,8 +3942,8 @@ export const sendDeputyJobTestNotification = async (req, res) => {
         channel: "email",
         type: "job_created_preview",
         subject: `[Test] ${previewNotification.subject}`,
-        previewHtml: previewNotification.html,
-        previewText: previewNotification.text,
+        previewHtml: emailHtml,
+        previewText: emailText,
         status: emailResult?.ok ? "sent" : "failed",
         sentAt: new Date(),
         error: emailResult?.ok ? "" : emailResult?.error || "Email send failed",
@@ -3930,7 +3958,11 @@ export const sendDeputyJobTestNotification = async (req, res) => {
         ? `Test notification sent to ${testEmail}`
         : `Test notification failed for ${testEmail}`,
       testEmail,
-      previewNotification,
+      previewNotification: {
+        ...previewNotification,
+        html: emailHtml,
+        text: emailText,
+      },
       emailResult,
     });
   } catch (error) {
