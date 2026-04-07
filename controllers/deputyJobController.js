@@ -3904,3 +3904,52 @@ export const resendDeputyJobNotifications = async (req, res) => {
     });
   }
 };
+
+export const createDeputyJobSetupIntent = async (req, res) => {
+  try {
+    if (!ensureStripeReady(res)) return;
+
+    const job = await deputyJobModel.findById(req.params.id);
+    if (!job) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
+    }
+
+    const result = await createOrRefreshDeputyJobSetupIntentInternal({
+      job,
+      clientName: req.body?.clientName || job.clientName || "",
+      clientEmail: req.body?.clientEmail || job.clientEmail || "",
+      clientPhone: req.body?.clientPhone || job.clientPhone || "",
+      createdBy: req.user?._id || null,
+    });
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.message || "Failed to create SetupIntent",
+      });
+    }
+
+    await job.save();
+
+    const formattedJob = withDeputyJobAliases(job);
+
+    return res.json({
+      success: true,
+      message: "SetupIntent created",
+      clientSecret: result.clientSecret,
+      setupIntentId: result.setupIntentId,
+      stripeCustomerId: result.stripeCustomerId,
+      paymentStatus: result.paymentStatus,
+      job: formattedJob,
+    });
+  } catch (error) {
+    console.error("❌ createDeputyJobSetupIntent error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create SetupIntent",
+      error: error.message,
+    });
+  }
+};
