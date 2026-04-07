@@ -4012,10 +4012,61 @@ export const resendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-    const notificationResults = await notifyMusiciansAboutDeputyJob({
-      job,
-      musicians: matches,
-    });
+    const correctionIntroHtml = `
+      <div style="margin:0 0 24px; padding:18px 20px; border:1px solid #f1d0d1; background:#fff7f7; border-radius:16px; font-family:Arial, sans-serif; color:#333; line-height:1.7;">
+        <p style="margin:0 0 12px;"><strong>Quick update:</strong> there was an error with the links in the last email that went out about this deputy job. The links in this email should now work correctly.</p>
+        <p style="margin:0 0 12px;">If you have not yet registered with The Supreme Collective, updated your profile, logged in, or completed onboarding, you may be prompted to log in first.</p>
+        <p style="margin:0 0 12px;">If you cannot log in, please use the <strong>Forgot password</strong> option to create a new password. Once that is done, you should be able to continue through to the job page.</p>
+        <p style="margin:0;">You can also find the deputy job board link from your dashboard once you are logged in.</p>
+      </div>
+    `;
+
+    const correctionIntroText = [
+      "Quick update: there was an error with the links in the last email that went out about this deputy job. The links in this email should now work correctly.",
+      "",
+      "If you have not yet registered with The Supreme Collective, updated your profile, logged in, or completed onboarding, you may be prompted to log in first.",
+      "",
+      "If you cannot log in, please use the Forgot password option to create a new password. Once that is done, you should be able to continue through to the job page.",
+      "",
+      "You can also find the deputy job board link from your dashboard once you are logged in.",
+    ].join("\n");
+
+    const notificationResults = [];
+
+    for (const musician of matches) {
+      const preview = buildJobNotificationPreview({
+        job,
+        musicians: [musician],
+        previewRecipientEmail: normaliseEmail(musician?.email || ""),
+      });
+
+      const emailHtml = `${correctionIntroHtml}${preview?.html || ""}`;
+      const emailText = [correctionIntroText, preview?.text || ""]
+        .filter(Boolean)
+        .join("\n\n");
+
+      const emailResult = await sendEmail({
+        to: musician?.email || "",
+        bcc: DEPUTY_JOB_BCC_EMAIL,
+        subject: `Corrected Links: ${preview.subject}`,
+        html: emailHtml,
+        text: emailText,
+      });
+
+      notificationResults.push({
+        musicianId: musician?._id || musician?.musicianId || null,
+        email: musician?.email || "",
+        phone: musician?.phone || musician?.phoneNumber || "",
+        channel: "email",
+        type: "job_created_corrected",
+        subject: `Corrected Links: ${preview.subject}`,
+        previewHtml: emailHtml,
+        previewText: emailText,
+        status: emailResult?.ok ? "sent" : "failed",
+        sentAt: new Date(),
+        error: emailResult?.ok ? "" : emailResult?.error || "Email send failed",
+      });
+    }
 
     const sentIds = notificationResults
       .filter((r) => r.status === "sent" && r.musicianId)
@@ -4049,6 +4100,7 @@ export const resendDeputyJobNotifications = async (req, res) => {
       message: "Corrected notifications resent",
       job: withDeputyJobAliases(job),
       notifiedCount: sentIds.length,
+      notificationResults,
     });
   } catch (error) {
     console.error("❌ resendDeputyJobNotifications error:", error);
