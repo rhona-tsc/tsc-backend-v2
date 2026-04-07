@@ -1758,6 +1758,18 @@ export const createDeputyJob = async (req, res) => {
         musicians: matcherResult.matches,
       });
 
+      console.log("notificationResults:", notificationResults);
+
+      console.log(
+  "matched musician emails:",
+  matcherResult.matches.map((m) => ({
+    id: m._id,
+    email: m.email,
+    firstName: m.firstName,
+    lastName: m.lastName,
+  }))
+);
+
       const sentIds = notificationResults
         .filter((r) => r.status === "sent" && r.musicianId)
         .map((r) => r.musicianId);

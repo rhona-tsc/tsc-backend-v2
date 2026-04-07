@@ -2,8 +2,23 @@
 import nodemailer from "nodemailer";
 
 const normaliseBaseUrl = (value = "") => String(value || "").replace(/\/+$/, "");
+
 const DEPUTY_JOB_BCC_EMAIL = String(
   process.env.DEPUTY_JOB_BCC_EMAIL || "hello@thesupremecollective.co.uk"
+).trim();
+
+const SMTP_HOST = String(process.env.SMTP_HOST || "").trim();
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_USER = String(process.env.SMTP_USER || "").trim();
+const SMTP_PASS = String(process.env.SMTP_PASS || "").trim();
+const SMTP_FROM_NAME = String(
+  process.env.SMTP_FROM_NAME || "The Supreme Collective"
+).trim();
+const SMTP_FROM_EMAIL = String(
+  process.env.SMTP_FROM_EMAIL || SMTP_USER || "hello@thesupremecollective.co.uk"
+).trim();
+const SMTP_REPLY_TO = String(
+  process.env.SMTP_REPLY_TO || SMTP_FROM_EMAIL || "hello@thesupremecollective.co.uk"
 ).trim();
 
 const escapeHtml = (value = "") =>
@@ -55,15 +70,19 @@ const formatDeputyOpportunityDate = (value) => {
 };
 
 const formatEmailSubject = (job = {}) => {
-  const safeTitle = String(job?.title || job?.instrument || "Deputy opportunity").trim();
-  const formattedDate = formatDeputyOpportunityDate(job?.eventDate || job?.date || "");
+  const safeTitle = String(
+    job?.title || job?.instrument || "Deputy opportunity"
+  ).trim();
+  const formattedDate = formatDeputyOpportunityDate(
+    job?.eventDate || job?.date || ""
+  );
 
   return formattedDate
     ? `${safeTitle} | Deputy Opportunity for ${formattedDate}`
     : `${safeTitle} | Deputy Opportunity`;
 };
 
-const formatFee = (value) => {  
+const formatFee = (value) => {
   if (value === undefined || value === null || value === "") return "TBC";
 
   const numeric = Number(value);
@@ -73,18 +92,43 @@ const formatFee = (value) => {
 };
 
 const buildLocation = (job = {}) =>
-  job.locationName || job.venueName || job.county || job.postcode || "TBC";
+  job.locationName ||
+  job.venue ||
+  job.venueName ||
+  job.location ||
+  job.county ||
+  job.postcode ||
+  "TBC";
 
 const buildTime = (job = {}) => {
-  const start = job.startTime || "TBC";
-  return job.endTime ? `${start} – ${job.endTime}` : start;
+  const start = job.startTime || job.callTime || "TBC";
+  const end = job.endTime || job.finishTime || "";
+  return end ? `${start} – ${end}` : start;
+};
+
+const buildTransporter = () => {
+  if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
+    throw new Error(
+      "Missing SMTP configuration. Required: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS"
+    );
+  }
+
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_PORT === 465,
+    auth: {
+      user: SMTP_USER,
+      pass: SMTP_PASS,
+    },
+  });
 };
 
 const buildHtmlEmail = ({ musician, job, applyUrl }) => {
   const firstName = musician?.firstName ? escapeHtml(musician.firstName) : "there";
   const safeTitle = escapeHtml(job?.title || job?.instrument || "Deputy opportunity");
   const instrument = escapeHtml(job?.instrument || job?.title || "TBC");
-  const date = escapeHtml(formatDate(job?.eventDate));
+  const date = escapeHtml(formatDate(job?.eventDate || job?.date));
   const time = escapeHtml(buildTime(job));
   const location = escapeHtml(buildLocation(job));
   const fee = escapeHtml(formatFee(job?.fee));
@@ -146,39 +190,39 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             Sent via <strong>The Supreme Collective</strong> deputy system.
           </p>
 
-         <div style="margin-top:18px; display:grid; gap:12px;">
-  <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
-    <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-      P.S.
-    </p>
-    <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
-      Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
-    </p>
-  </div>
+          <div style="margin-top:18px; display:grid; gap:12px;">
+            <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+              <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+                P.S.
+              </p>
+              <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+                Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
+              </p>
+            </div>
 
-  <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
-    <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-      Also...
-    </p>
-    <p style="margin:0 0 10px; font-size:14px; line-height:1.7; color:#444;">
-      Think your act could be a great fit for <strong>The Supreme Collective</strong>? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.
-    </p>
-    <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
-      If the button above does not open, copy and paste this link into your browser:<br/>
-      <a href="${safeApplyUrl}">${safeApplyUrl}</a>
-    </p>
-  </div>
+            <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+              <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+                Also...
+              </p>
+              <p style="margin:0 0 10px; font-size:14px; line-height:1.7; color:#444;">
+                Think your act could be a great fit for <strong>The Supreme Collective</strong>? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.
+              </p>
+              <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+                If the button above does not open, copy and paste this link into your browser:<br/>
+                <a href="${safeApplyUrl}">${safeApplyUrl}</a>
+              </p>
+            </div>
 
-  <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
-    <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-      Apply directly
-    </p>
-    <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
-      If the button above does not open, copy and paste this link into your browser:<br/>
-      <a href="${safeApplyUrl}">${safeApplyUrl}</a>
-    </p>
-  </div>
-</div>
+            <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
+              <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+                Apply directly
+              </p>
+              <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+                If the button above does not open, copy and paste this link into your browser:<br/>
+                <a href="${safeApplyUrl}">${safeApplyUrl}</a>
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -189,7 +233,7 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
   const firstName = musician?.firstName || "there";
   const safeTitle = job?.title || job?.instrument || "Deputy opportunity";
   const instrument = job?.instrument || job?.title || "TBC";
-  const date = formatDate(job?.eventDate);
+  const date = formatDate(job?.eventDate || job?.date);
   const time = buildTime(job);
   const location = buildLocation(job);
   const fee = formatFee(job?.fee);
@@ -225,27 +269,17 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
 export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => {
   const results = [];
 
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
-    throw new Error("Missing email credentials");
-  }
-
   const frontendBaseUrl = normaliseBaseUrl(process.env.FRONTEND_URL);
   if (!frontendBaseUrl) {
     throw new Error("Missing FRONTEND_URL");
   }
 
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_PASS,
-    },
-  });
+  const transporter = buildTransporter();
 
   for (const musician of musicians) {
     const musicianId = musician?._id || musician?.id || null;
     const email = String(musician?.email || "").trim();
-    const phone = musician?.phone || "";
+    const phone = musician?.phone || musician?.phoneNumber || "";
 
     try {
       if (!email) {
@@ -263,14 +297,17 @@ export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => 
 
       const applyUrl = `${frontendBaseUrl}/deputy-jobs/${job?._id}`;
       const subject = formatEmailSubject(job);
+      const text = buildTextEmail({ musician, job, applyUrl });
+      const html = buildHtmlEmail({ musician, job, applyUrl });
 
       await transporter.sendMail({
-        from: `"The Supreme Collective" <${process.env.GMAIL_USER}>`,
+        from: `"${SMTP_FROM_NAME}" <${SMTP_FROM_EMAIL}>`,
+        replyTo: SMTP_REPLY_TO,
         to: email,
-        bcc: DEPUTY_JOB_BCC_EMAIL,
+        ...(DEPUTY_JOB_BCC_EMAIL ? { bcc: DEPUTY_JOB_BCC_EMAIL } : {}),
         subject,
-        text: buildTextEmail({ musician, job, applyUrl }),
-        html: buildHtmlEmail({ musician, job, applyUrl }),
+        text,
+        html,
       });
 
       results.push({
@@ -279,7 +316,11 @@ export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => 
         phone,
         channel: "email",
         status: "sent",
+        subject,
+        previewText: text,
+        previewHtml: html,
         sentAt: new Date(),
+        error: "",
       });
     } catch (error) {
       results.push({
@@ -288,6 +329,9 @@ export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => 
         phone,
         channel: "email",
         status: "failed",
+        subject: formatEmailSubject(job),
+        previewText: "",
+        previewHtml: "",
         sentAt: new Date(),
         error: error.message || "Unknown error",
       });
@@ -295,4 +339,18 @@ export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => 
   }
 
   return results;
+};
+
+export const previewDeputyJobEmail = async ({ job, musician }) => {
+  const frontendBaseUrl = normaliseBaseUrl(process.env.FRONTEND_URL);
+  const applyUrl = `${frontendBaseUrl}/deputy-jobs/${job?._id}`;
+
+  return {
+    subject: formatEmailSubject(job),
+    text: buildTextEmail({ musician, job, applyUrl }),
+    html: buildHtmlEmail({ musician, job, applyUrl }),
+    from: `"${SMTP_FROM_NAME}" <${SMTP_FROM_EMAIL}>`,
+    replyTo: SMTP_REPLY_TO,
+    bcc: DEPUTY_JOB_BCC_EMAIL,
+  };
 };
