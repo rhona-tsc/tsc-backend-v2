@@ -794,8 +794,8 @@ const buildJobNotificationPreview = ({
     "https://admin.thesupremecollective.co.uk"
   ).replace(/\/$/, "");
 
-  const jobBoardUrl = `${siteBase}/deputy-jobs`;
-const jobUrl = jobBoardUrl;
+  const jobUrl = `${siteBase}/deputy-jobs/${job?._id}`;
+const jobBoardUrl = `${siteBase}/deputy-jobs`;
   const formattedSubjectDate = formatDeputyOpportunityDate(safeDate);
   const subject = formattedSubjectDate
     ? `${safeTitle} | Deputy Opportunity for ${formattedSubjectDate}`
