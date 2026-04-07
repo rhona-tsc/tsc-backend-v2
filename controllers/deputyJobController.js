@@ -85,7 +85,43 @@ const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
   : null;
 
+
 const normaliseEmail = (value) => normaliseString(value).toLowerCase();
+
+const DEFAULT_DEPUTY_STRIPE_FEE_PERCENT = Number(
+  process.env.DEPUTY_STRIPE_FEE_PERCENT ||
+    process.env.STRIPE_CARD_FEE_PERCENT ||
+    0,
+);
+
+const DEFAULT_DEPUTY_STRIPE_FEE_FIXED = Number(
+  process.env.DEPUTY_STRIPE_FEE_FIXED ||
+    process.env.STRIPE_CARD_FEE_FIXED ||
+    0,
+);
+
+const roundMoney = (value) => {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 100) / 100;
+};
+
+const estimateDeputyStripeFee = ({
+  grossAmount = 0,
+  percent = DEFAULT_DEPUTY_STRIPE_FEE_PERCENT,
+  fixed = DEFAULT_DEPUTY_STRIPE_FEE_FIXED,
+}) => {
+  const safeGross = Number(grossAmount || 0);
+  const safePercent = Number(percent || 0);
+  const safeFixed = Number(fixed || 0);
+
+  if (!Number.isFinite(safeGross) || safeGross <= 0) return 0;
+
+  const percentageFee = safePercent > 0 ? safeGross * (safePercent / 100) : 0;
+  const fixedFee = safeFixed > 0 ? safeFixed : 0;
+
+  return roundMoney(percentageFee + fixedFee);
+};
 
 const normaliseBoolean = (value) => {
   if (value === true || value === "true" || value === 1 || value === "1")
@@ -345,28 +381,51 @@ const buildLedgerAmounts = ({
   grossAmount = 0,
   commissionAmount = 0,
   deputyNetAmount = 0,
+  stripeFeeAmount = null,
+  deductStripeFeesFromDeputy = true,
 }) => {
   const safeFee = Number(fee || 0);
   const safeGrossAmount = Number(grossAmount || 0);
   const safeCommissionAmount = Number(commissionAmount || 0);
   const safeDeputyNetAmount = Number(deputyNetAmount || 0);
 
-  const finalDeputyNetAmount =
-    safeDeputyNetAmount > 0 ? safeDeputyNetAmount : safeFee;
   const finalGrossAmount =
-    safeGrossAmount > 0
-      ? safeGrossAmount
-      : finalDeputyNetAmount +
-        (safeCommissionAmount > 0 ? safeCommissionAmount : 0);
-  const finalCommissionAmount =
+    safeGrossAmount > 0 ? safeGrossAmount : safeFee > 0 ? safeFee : 0;
+
+  const estimatedStripeFee =
+    stripeFeeAmount === null ||
+    stripeFeeAmount === undefined ||
+    stripeFeeAmount === ""
+      ? estimateDeputyStripeFee({ grossAmount: finalGrossAmount })
+      : roundMoney(Number(stripeFeeAmount || 0));
+
+  const finalStripeFeeAmount =
+    deductStripeFeesFromDeputy && finalGrossAmount > 0 ? estimatedStripeFee : 0;
+
+  let finalDeputyNetAmount =
+    safeDeputyNetAmount > 0
+      ? safeDeputyNetAmount
+      : finalGrossAmount - safeCommissionAmount - finalStripeFeeAmount;
+
+  finalDeputyNetAmount = roundMoney(Math.max(finalDeputyNetAmount, 0));
+
+  let finalCommissionAmount =
     safeCommissionAmount > 0
       ? safeCommissionAmount
-      : Math.max(finalGrossAmount - finalDeputyNetAmount, 0);
+      : roundMoney(
+          Math.max(
+            finalGrossAmount - finalDeputyNetAmount - finalStripeFeeAmount,
+            0,
+          ),
+        );
+
+  finalCommissionAmount = roundMoney(Math.max(finalCommissionAmount, 0));
 
   return {
-    grossAmount: finalGrossAmount,
+    grossAmount: roundMoney(finalGrossAmount),
     commissionAmount: finalCommissionAmount,
     deputyNetAmount: finalDeputyNetAmount,
+    stripeFeeAmount: roundMoney(finalStripeFeeAmount),
   };
 };
 
@@ -1184,6 +1243,8 @@ const buildJobPayloadFromRequest = (req) => {
     grossAmount = 0,
     commissionAmount = 0,
     deputyNetAmount = 0,
+    stripeFeeAmount = null,
+    deductStripeFeesFromDeputy = true,
     releaseOn = null,
     saveClientCard = true,
     mode = "preview",
@@ -1272,6 +1333,8 @@ const buildJobPayloadFromRequest = (req) => {
       grossAmount,
       commissionAmount,
       deputyNetAmount,
+      stripeFeeAmount,
+      deductStripeFeesFromDeputy: normaliseBoolean(deductStripeFeesFromDeputy),
     }),
     releaseOn: parseDateOrNull(releaseOn),
     mode:
@@ -1610,6 +1673,7 @@ export const createDeputyJob = async (req, res) => {
       grossAmount: built.grossAmount,
       commissionAmount: built.commissionAmount,
       deputyNetAmount: built.deputyNetAmount,
+      stripeFeeAmount: built.stripeFeeAmount,
       releaseOn:
         built.releaseOn || buildDefaultReleaseOn(built.resolvedEventDate),
       paymentStatus:
@@ -2358,10 +2422,18 @@ export const confirmDeputyAllocation = async (req, res) => {
     job.releaseOn = job.releaseOn || buildDefaultReleaseOn(job.eventDate);
 
     if (!job.grossAmount && !job.commissionAmount && !job.deputyNetAmount) {
-      const ledger = buildLedgerAmounts({ fee: job.fee });
+      const ledger = buildLedgerAmounts({
+        fee: job.fee,
+        grossAmount: job.grossAmount,
+        commissionAmount: job.commissionAmount,
+        deputyNetAmount: job.deputyNetAmount,
+        stripeFeeAmount: job.stripeFeeAmount,
+        deductStripeFeesFromDeputy: true,
+      });
       job.grossAmount = ledger.grossAmount;
       job.commissionAmount = ledger.commissionAmount;
       job.deputyNetAmount = ledger.deputyNetAmount;
+      job.stripeFeeAmount = ledger.stripeFeeAmount;
     }
 
     job.applications = (job.applications || []).map((existingApplication) => {

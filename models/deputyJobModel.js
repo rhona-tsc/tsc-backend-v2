@@ -201,7 +201,7 @@ const deputyJobSchema = new mongoose.Schema(
     fee: { type: Number, default: 0 },
     currency: { type: String, default: "GBP", trim: true, uppercase: true },
     notes: { type: String, default: "", trim: true },
-
+    stripeFeeAmount: { type: Number, default: 0 },
     clientName: { type: String, default: "", trim: true },
     clientEmail: { type: String, default: "", trim: true, lowercase: true },
     clientPhone: { type: String, default: "", trim: true },
