@@ -3712,21 +3712,63 @@ export const getStripeConnectPayoutStatus = async (req, res) => {
 
 export const previewDeputyJobNotification = async (req, res) => {
   try {
+    console.log("🟣 previewDeputyJobNotification hit", {
+      jobId: req.params?.id,
+      method: req.method,
+      body: req.body,
+      userId: req.user?._id || req.user?.id || null,
+      userEmail: req.user?.email || null,
+    });
+
     const job = await deputyJobModel.findById(req.params.id);
 
     if (!job) {
+      console.warn("⚠️ previewDeputyJobNotification: job not found", {
+        jobId: req.params?.id,
+      });
+
       return res.status(404).json({
         success: false,
         message: "Deputy job not found",
       });
     }
 
+    console.log("🟣 previewDeputyJobNotification: job found", {
+      jobId: String(job._id),
+      title: job.title || "",
+      instrument: job.instrument || "",
+      createdByEmail: job.createdByEmail || "",
+      status: job.status || "",
+      workflowStage: job.workflowStage || "",
+    });
+
     const matches = (await getMatchedMusiciansForJob(job)) || [];
+
+    console.log("🟣 previewDeputyJobNotification: matches loaded", {
+      jobId: String(job._id),
+      matchedCount: matches.length,
+      firstMatches: matches.slice(0, 10).map((m) => ({
+        id: m?._id || m?.musicianId || null,
+        firstName: m?.firstName || "",
+        lastName: m?.lastName || "",
+        email: m?.email || "",
+        phone: m?.phone || m?.phoneNumber || "",
+        deputyMatchScore: m?.deputyMatchScore || null,
+        matchPct: m?.matchPct || null,
+      })),
+    });
 
     const previewRecipientEmail =
       normaliseEmail(req.body?.previewEmail || "") ||
       normaliseEmail(req.user?.email || "") ||
       normaliseEmail(job.createdByEmail || "");
+
+    console.log("🟣 previewDeputyJobNotification: recipient resolution", {
+      bodyPreviewEmail: req.body?.previewEmail || "",
+      userEmail: req.user?.email || "",
+      jobCreatedByEmail: job.createdByEmail || "",
+      resolvedPreviewRecipientEmail: previewRecipientEmail || "",
+    });
 
     const previewNotification = buildJobNotificationPreview({
       job,
@@ -3734,15 +3776,38 @@ export const previewDeputyJobNotification = async (req, res) => {
       previewRecipientEmail,
     });
 
+    console.log("🟣 previewDeputyJobNotification: preview built", {
+      subject: previewNotification?.subject || "",
+      recipientsCount: Array.isArray(previewNotification?.recipients)
+        ? previewNotification.recipients.length
+        : 0,
+      recipients: Array.isArray(previewNotification?.recipients)
+        ? previewNotification.recipients.map((r) => ({
+            musicianId: r?.musicianId || null,
+            email: r?.email || "",
+            firstName: r?.firstName || "",
+            lastName: r?.lastName || "",
+          }))
+        : [],
+      hasHtml: Boolean(previewNotification?.html),
+      hasText: Boolean(previewNotification?.text),
+      htmlLength: previewNotification?.html?.length || 0,
+      textLength: previewNotification?.text?.length || 0,
+    });
+
     return res.json({
       success: true,
       job: withDeputyJobAliases(job),
       matchedCount: matches.length,
       previewNotification,
-      recipients: previewNotification.recipients || [],
+      recipients: previewNotification?.recipients || [],
     });
   } catch (error) {
-    console.error("❌ previewDeputyJobNotification error:", error);
+    console.error("❌ previewDeputyJobNotification error:", {
+      message: error?.message,
+      stack: error?.stack,
+    });
+
     return res.status(500).json({
       success: false,
       message: "Failed to preview deputy job notification",
@@ -3753,27 +3818,67 @@ export const previewDeputyJobNotification = async (req, res) => {
 
 export const sendDeputyJobTestNotification = async (req, res) => {
   try {
+    console.log("🟣 sendDeputyJobTestNotification hit", {
+      jobId: req.params?.id,
+      method: req.method,
+      body: req.body,
+      userId: req.user?._id || req.user?.id || null,
+      userEmail: req.user?.email || null,
+    });
+
     const job = await deputyJobModel.findById(req.params.id);
 
     if (!job) {
+      console.warn("⚠️ sendDeputyJobTestNotification: job not found", {
+        jobId: req.params?.id,
+      });
+
       return res.status(404).json({
         success: false,
         message: "Deputy job not found",
       });
     }
 
+    console.log("🟣 sendDeputyJobTestNotification: job found", {
+      jobId: String(job._id),
+      title: job.title || "",
+      instrument: job.instrument || "",
+      createdByEmail: job.createdByEmail || "",
+    });
+
     const testEmail = normaliseEmail(
       req.body?.email || req.user?.email || job.createdByEmail || ""
     );
 
+    console.log("🟣 sendDeputyJobTestNotification: resolved test email", {
+      bodyEmail: req.body?.email || "",
+      userEmail: req.user?.email || "",
+      jobCreatedByEmail: job.createdByEmail || "",
+      testEmail,
+    });
+
     if (!testEmail) {
+      console.warn("⚠️ sendDeputyJobTestNotification: no test email resolved");
+
       return res.status(400).json({
         success: false,
         message: "A test email address is required",
       });
     }
 
-    const matches = await getMatchedMusiciansForJob(job);
+    const matches = (await getMatchedMusiciansForJob(job)) || [];
+
+    console.log("🟣 sendDeputyJobTestNotification: matches loaded", {
+      matchedCount: matches.length,
+      firstMatches: matches.slice(0, 10).map((m) => ({
+        id: m?._id || m?.musicianId || null,
+        firstName: m?.firstName || "",
+        lastName: m?.lastName || "",
+        email: m?.email || "",
+        deputyMatchScore: m?.deputyMatchScore || null,
+        matchPct: m?.matchPct || null,
+      })),
+    });
 
     const previewNotification = buildJobNotificationPreview({
       job,
@@ -3781,13 +3886,24 @@ export const sendDeputyJobTestNotification = async (req, res) => {
       previewRecipientEmail: testEmail,
     });
 
-    await sendEmail({
+    console.log("🟣 sendDeputyJobTestNotification: preview built", {
+      subject: previewNotification?.subject || "",
+      recipients: previewNotification?.recipients || [],
+      hasHtml: Boolean(previewNotification?.html),
+      hasText: Boolean(previewNotification?.text),
+      htmlLength: previewNotification?.html?.length || 0,
+      textLength: previewNotification?.text?.length || 0,
+    });
+
+    const emailResult = await sendEmail({
       to: testEmail,
       bcc: DEPUTY_JOB_BCC_EMAIL,
       subject: `[Test] ${previewNotification.subject}`,
       html: previewNotification.html,
       text: previewNotification.text,
     });
+
+    console.log("🟣 sendDeputyJobTestNotification: sendEmail result", emailResult);
 
     job.notifications = [
       ...(job.notifications || []),
@@ -3800,22 +3916,29 @@ export const sendDeputyJobTestNotification = async (req, res) => {
         subject: `[Test] ${previewNotification.subject}`,
         previewHtml: previewNotification.html,
         previewText: previewNotification.text,
-        status: "sent",
+        status: emailResult?.ok ? "sent" : "failed",
         sentAt: new Date(),
-        error: "",
+        error: emailResult?.ok ? "" : emailResult?.error || "Email send failed",
       },
     ];
 
     await job.save();
 
     return res.json({
-      success: true,
-      message: `Test notification sent to ${testEmail}`,
+      success: Boolean(emailResult?.ok),
+      message: emailResult?.ok
+        ? `Test notification sent to ${testEmail}`
+        : `Test notification failed for ${testEmail}`,
       testEmail,
       previewNotification,
+      emailResult,
     });
   } catch (error) {
-    console.error("❌ sendDeputyJobTestNotification error:", error);
+    console.error("❌ sendDeputyJobTestNotification error:", {
+      message: error?.message,
+      stack: error?.stack,
+    });
+
     return res.status(500).json({
       success: false,
       message: "Failed to send test notification",
