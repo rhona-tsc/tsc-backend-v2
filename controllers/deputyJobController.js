@@ -1628,7 +1628,10 @@ export const createDeputyJob = async (req, res) => {
         message: "At least one required instrument or role is required",
       });
     }
-
+const hasSavedCardDetails =
+  Boolean(normaliseString(job?.stripeCustomerId)) &&
+  Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+  job?.paymentStatus === "ready_to_charge";
     const createdBy = req.user?._id || null;
     const createdByName =
       `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim();
@@ -1752,8 +1755,8 @@ export const createDeputyJob = async (req, res) => {
     job.matchedCount = matcherResult.matches.length;
     job.notifications = [];
 
-    if (built.mode === "send") {
-      const notificationResults = await notifyMusiciansAboutDeputyJob({
+if (built.mode === "send" && hasSavedCardDetails) {
+        const notificationResults = await notifyMusiciansAboutDeputyJob({
         job,
         musicians: matcherResult.matches,
       });
@@ -1859,7 +1862,7 @@ export const createDeputyJob = async (req, res) => {
       success: true,
       message:
         built.mode === "send"
-          ? "Deputy job created and notifications sent"
+          ? "Deputy job created add your card details to notify matches"
           : "Deputy job created in preview mode",
       mode: built.mode,
       job: formattedJob,
@@ -2083,13 +2086,41 @@ export const applyToDeputyJob = async (req, res) => {
 export const sendDeputyJobNotifications = async (req, res) => {
   try {
     const job = await deputyJobModel.findById(req.params.id);
+
     if (!job) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Deputy job not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    const hasSavedCardDetails =
+      Boolean(normaliseString(job?.stripeCustomerId)) &&
+      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+      job?.paymentStatus === "ready_to_charge";
+
+    if (!hasSavedCardDetails) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Card details must be completed and saved before deputy notifications can be sent.",
+        canSendNotifications: false,
+        requiresCardSetup: true,
+        job: withDeputyJobAliases(job),
+      });
     }
 
     const matches = await getMatchedMusiciansForJob(job);
+
+    if (!Array.isArray(matches) || !matches.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No matched musicians found for this deputy job.",
+        canSendNotifications: false,
+        requiresCardSetup: false,
+        job: withDeputyJobAliases(job),
+      });
+    }
 
     const notificationResults = await notifyMusiciansAboutDeputyJob({
       job,
@@ -2103,18 +2134,19 @@ export const sendDeputyJobNotifications = async (req, res) => {
     job.notifiedMusicianIds = sentIds;
     job.notifications = notificationResults;
     job.notifiedCount = notificationResults.filter(
-      (r) => r.status === "sent",
+      (r) => r.status === "sent"
     ).length;
     job.status = "open";
     job.previewMode = false;
     job.workflowStage = "sent_to_matches";
+
     job.matchedMusicians = (job.matchedMusicians || []).map((m) => ({
       ...m,
       notified: sentIds.some(
-        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
+        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
       ),
       notifiedAt: sentIds.some(
-        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
+        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
       )
         ? new Date()
         : null,
@@ -2122,12 +2154,12 @@ export const sendDeputyJobNotifications = async (req, res) => {
 
     await job.save();
 
-    const formattedJob = withDeputyJobAliases(job);
-
     return res.json({
       success: true,
       message: "Notifications sent",
-      job: formattedJob,
+      canSendNotifications: true,
+      requiresCardSetup: false,
+      job: withDeputyJobAliases(job),
       notifiedCount: job.notifiedCount,
     });
   } catch (error) {
@@ -2135,55 +2167,6 @@ export const sendDeputyJobNotifications = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to send deputy job notifications",
-      error: error.message,
-    });
-  }
-};
-
-export const createDeputyJobSetupIntent = async (req, res) => {
-  try {
-    if (!ensureStripeReady(res)) return;
-
-    const job = await deputyJobModel.findById(req.params.id);
-    if (!job) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Deputy job not found" });
-    }
-
-    const result = await createOrRefreshDeputyJobSetupIntentInternal({
-      job,
-      clientName: req.body?.clientName || job.clientName || "",
-      clientEmail: req.body?.clientEmail || job.clientEmail || "",
-      clientPhone: req.body?.clientPhone || job.clientPhone || "",
-      createdBy: req.user?._id || null,
-    });
-
-    if (!result.success) {
-      return res.status(400).json({
-        success: false,
-        message: result.message || "Failed to create SetupIntent",
-      });
-    }
-
-    await job.save();
-
-    const formattedJob = withDeputyJobAliases(job);
-
-    return res.json({
-      success: true,
-      message: "SetupIntent created",
-      clientSecret: result.clientSecret,
-      setupIntentId: result.setupIntentId,
-      stripeCustomerId: result.stripeCustomerId,
-      paymentStatus: result.paymentStatus,
-      job: formattedJob,
-    });
-  } catch (error) {
-    console.error("❌ createDeputyJobSetupIntent error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create SetupIntent",
       error: error.message,
     });
   }
