@@ -19,6 +19,9 @@ import {
   runDeputyPayoutCron,
   twilioInboundDeputyJob,
   twilioInboundDeputyAllocation,
+  previewDeputyJobNotification,
+  sendDeputyJobTestNotification,
+  resendDeputyJobNotifications,
 } from "../controllers/deputyJobController.js";
 import authUser from "../middleware/auth.js";
 
@@ -35,6 +38,10 @@ deputyJobRouter.post(
   express.urlencoded({ extended: false }),
   twilioInboundDeputyAllocation
 );
+
+deputyJobRouter.post("/:id/preview-notification", authUser, previewDeputyJobNotification);
+deputyJobRouter.post("/:id/send-test-notification", authUser, sendDeputyJobTestNotification);
+deputyJobRouter.post("/:id/resend-notifications", authUser, resendDeputyJobNotifications);
 /**
  * Create / list
  * POST /api/deputy-jobs/preview

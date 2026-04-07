@@ -3709,3 +3709,198 @@ export const getStripeConnectPayoutStatus = async (req, res) => {
     });
   }
 };
+
+export const previewDeputyJobNotification = async (req, res) => {
+  try {
+    const job = await deputyJobModel.findById(req.params.id);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    const matches = await getMatchedMusiciansForJob(job);
+
+    const previewNotification = buildJobNotificationPreview({
+      job,
+      musicians: matches,
+      previewRecipientEmail:
+        normaliseEmail(req.body?.previewEmail || "") ||
+        normaliseEmail(req.user?.email || "") ||
+        normaliseEmail(job.createdByEmail || ""),
+    });
+
+    return res.json({
+      success: true,
+      job: withDeputyJobAliases(job),
+      matchedCount: matches.length,
+      previewNotification,
+      recipients: previewNotification.recipients,
+    });
+  } catch (error) {
+    console.error("❌ previewDeputyJobNotification error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to preview deputy job notification",
+      error: error.message,
+    });
+  }
+};
+
+export const sendDeputyJobTestNotification = async (req, res) => {
+  try {
+    const job = await deputyJobModel.findById(req.params.id);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    const testEmail = normaliseEmail(
+      req.body?.email || req.user?.email || job.createdByEmail || ""
+    );
+
+    if (!testEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "A test email address is required",
+      });
+    }
+
+    const matches = await getMatchedMusiciansForJob(job);
+
+    const previewNotification = buildJobNotificationPreview({
+      job,
+      musicians: matches,
+      previewRecipientEmail: testEmail,
+    });
+
+    await sendEmail({
+      to: testEmail,
+      bcc: DEPUTY_JOB_BCC_EMAIL,
+      subject: `[Test] ${previewNotification.subject}`,
+      html: previewNotification.html,
+      text: previewNotification.text,
+    });
+
+    job.notifications = [
+      ...(job.notifications || []),
+      {
+        musicianId: null,
+        email: testEmail,
+        phone: "",
+        channel: "email",
+        type: "job_created_preview",
+        subject: `[Test] ${previewNotification.subject}`,
+        previewHtml: previewNotification.html,
+        previewText: previewNotification.text,
+        status: "sent",
+        sentAt: new Date(),
+        error: "",
+      },
+    ];
+
+    await job.save();
+
+    return res.json({
+      success: true,
+      message: `Test notification sent to ${testEmail}`,
+      testEmail,
+      previewNotification,
+    });
+  } catch (error) {
+    console.error("❌ sendDeputyJobTestNotification error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send test notification",
+      error: error.message,
+    });
+  }
+};
+
+export const resendDeputyJobNotifications = async (req, res) => {
+  try {
+    const job = await deputyJobModel.findById(req.params.id);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    const hasSavedCardDetails =
+      Boolean(normaliseString(job?.stripeCustomerId)) &&
+      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+      job?.paymentStatus === "ready_to_charge";
+
+    if (!hasSavedCardDetails) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Card details must be completed and saved before deputy notifications can be sent.",
+        job: withDeputyJobAliases(job),
+      });
+    }
+
+    const matches = await getMatchedMusiciansForJob(job);
+
+    if (!Array.isArray(matches) || !matches.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No matched musicians found for this deputy job.",
+        job: withDeputyJobAliases(job),
+      });
+    }
+
+    const notificationResults = await notifyMusiciansAboutDeputyJob({
+      job,
+      musicians: matches,
+    });
+
+    const sentIds = notificationResults
+      .filter((r) => r.status === "sent" && r.musicianId)
+      .map((r) => r.musicianId);
+
+    job.notifiedMusicianIds = sentIds;
+    job.notifications = [
+      ...(job.notifications || []),
+      ...notificationResults,
+    ];
+    job.notifiedCount = sentIds.length;
+    job.status = "open";
+    job.previewMode = false;
+    job.workflowStage = "sent_to_matches";
+    job.matchedMusicians = (job.matchedMusicians || []).map((m) => ({
+      ...m,
+      notified: sentIds.some(
+        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+      ),
+      notifiedAt: sentIds.some(
+        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+      )
+        ? new Date()
+        : m.notifiedAt || null,
+    }));
+
+    await job.save();
+
+    return res.json({
+      success: true,
+      message: "Corrected notifications resent",
+      job: withDeputyJobAliases(job),
+      notifiedCount: sentIds.length,
+    });
+  } catch (error) {
+    console.error("❌ resendDeputyJobNotifications error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to resend deputy job notifications",
+      error: error.message,
+    });
+  }
+};
