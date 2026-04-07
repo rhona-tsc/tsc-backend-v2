@@ -269,9 +269,9 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
 export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => {
   const results = [];
 
-  const frontendBaseUrl = normaliseBaseUrl(process.env.FRONTEND_URL);
+  const frontendBaseUrl = normaliseBaseUrl(process.env.ADMIN_FRONTEND_URL);
   if (!frontendBaseUrl) {
-    throw new Error("Missing FRONTEND_URL");
+    throw new Error("Missing ADMIN_FRONTEND_URL");
   }
 
   const transporter = buildTransporter();
@@ -342,7 +342,7 @@ export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => 
 };
 
 export const previewDeputyJobEmail = async ({ job, musician }) => {
-  const frontendBaseUrl = normaliseBaseUrl(process.env.FRONTEND_URL);
+  const frontendBaseUrl = normaliseBaseUrl(process.env.ADMIN_FRONTEND_URL);
   const applyUrl = `${frontendBaseUrl}/deputy-jobs/${job?._id}`;
 
   return {
