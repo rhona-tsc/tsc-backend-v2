@@ -27,6 +27,10 @@ import authUser from "../middleware/auth.js";
 
 const deputyJobRouter = express.Router();
 
+/**
+ * Twilio inbound webhooks
+ * These must stay public and use form-urlencoded parsing.
+ */
 deputyJobRouter.post(
   "/twilio/inbound",
   express.urlencoded({ extended: false }),
@@ -39,40 +43,43 @@ deputyJobRouter.post(
   twilioInboundDeputyAllocation
 );
 
-deputyJobRouter.post("/:id/preview-notification", authUser, previewDeputyJobNotification);
-deputyJobRouter.post("/:id/send-test-notification", authUser, sendDeputyJobTestNotification);
-deputyJobRouter.post("/:id/resend-notifications", authUser, resendDeputyJobNotifications);
+/**
+ * Preview / test / resend notifications for an existing job
+ */
+deputyJobRouter.post(
+  "/:id/preview-notification",
+  authUser,
+  previewDeputyJobNotification
+);
+
+deputyJobRouter.post(
+  "/:id/send-test-notification",
+  authUser,
+  sendDeputyJobTestNotification
+);
+
+deputyJobRouter.post(
+  "/:id/resend-notifications",
+  authUser,
+  resendDeputyJobNotifications
+);
+
 /**
  * Create / list
- * POST /api/deputy-jobs/preview
- * Build the job, run matcher, and return preview output without actually sending.
  */
 deputyJobRouter.post("/preview", authUser, previewDeputyJob);
-
-/**
- * POST /api/deputy-jobs
- * Create the actual deputy job.
- * Controller can still support req.query.preview=true if you want,
- * but keeping preview as its own route makes frontend flow cleaner.
- */
 deputyJobRouter.post("/", authUser, createDeputyJob);
-
-/**
- * GET /api/deputy-jobs
- * List all deputy jobs visible to the current user.
- */
 deputyJobRouter.get("/", authUser, listDeputyJobs);
 
 /**
  * Read job + matches
- * IMPORTANT: keep /:id/matches before /:id
+ * Keep /:id/matches before /:id
  */
 deputyJobRouter.get("/:id/matches", authUser, listDeputyJobMatches);
 deputyJobRouter.get("/:id", authUser, getDeputyJobById);
 
 /**
  * Send notifications after preview confirmation
- * POST /api/deputy-jobs/:id/send-notifications
  */
 deputyJobRouter.post(
   "/:id/send-notifications",
@@ -82,9 +89,6 @@ deputyJobRouter.post(
 
 /**
  * Payment setup + charging
- * 1. Create a SetupIntent to save the client card
- * 2. Save the resulting default payment method
- * 3. Optionally trigger a manual charge
  */
 deputyJobRouter.post(
   "/:id/create-setup-intent",
@@ -98,31 +102,19 @@ deputyJobRouter.post(
   saveDeputyJobPaymentMethod
 );
 
-deputyJobRouter.post(
-  "/:id/charge",
-  authUser,
-  chargeDeputyJob
-);
+deputyJobRouter.post("/:id/charge", authUser, chargeDeputyJob);
 
 /**
  * Daily payout cron
- * POST /api/deputy-jobs/run-payout-cron
- * Protected with x-cron-secret header checked in the controller.
+ * Protected in controller with cron secret
  */
 deputyJobRouter.post("/run-payout-cron", runDeputyPayoutCron);
 
 /**
  * Applications
- * POST /api/deputy-jobs/:id/apply
- * Musician applies to the job
  */
 deputyJobRouter.post("/:id/apply", authUser, applyToDeputyJob);
 
-/**
- * PATCH /api/deputy-jobs/:id/applications/:musicianId/status
- * Admin/agent updates application state:
- * applied / shortlisted / allocated / booked / declined / withdrawn
- */
 deputyJobRouter.patch(
   "/:id/applications/:musicianId/status",
   authUser,
@@ -131,10 +123,6 @@ deputyJobRouter.patch(
 
 /**
  * Allocation workflow
- * 1. Preview allocation email
- * 2. Confirm allocation
- * 3. Preview booking confirmation email
- * 4. Send booking confirmation email
  */
 deputyJobRouter.post(
   "/:id/preview-allocation",
