@@ -1628,10 +1628,7 @@ export const createDeputyJob = async (req, res) => {
         message: "At least one required instrument or role is required",
       });
     }
-const hasSavedCardDetails =
-  Boolean(normaliseString(job?.stripeCustomerId)) &&
-  Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-  job?.paymentStatus === "ready_to_charge";
+
     const createdBy = req.user?._id || null;
     const createdByName =
       `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim();
@@ -1754,7 +1751,10 @@ const hasSavedCardDetails =
     job.matchedMusicians = matcherResult.matchedMusicians;
     job.matchedCount = matcherResult.matches.length;
     job.notifications = [];
-
+const hasSavedCardDetails =
+  Boolean(normaliseString(job?.stripeCustomerId)) &&
+  Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+  job?.paymentStatus === "ready_to_charge";
 if (built.mode === "send" && hasSavedCardDetails) {
         const notificationResults = await notifyMusiciansAboutDeputyJob({
         job,
@@ -3721,15 +3721,17 @@ export const previewDeputyJobNotification = async (req, res) => {
       });
     }
 
-    const matches = await getMatchedMusiciansForJob(job);
+    const matches = (await getMatchedMusiciansForJob(job)) || [];
+
+    const previewRecipientEmail =
+      normaliseEmail(req.body?.previewEmail || "") ||
+      normaliseEmail(req.user?.email || "") ||
+      normaliseEmail(job.createdByEmail || "");
 
     const previewNotification = buildJobNotificationPreview({
       job,
       musicians: matches,
-      previewRecipientEmail:
-        normaliseEmail(req.body?.previewEmail || "") ||
-        normaliseEmail(req.user?.email || "") ||
-        normaliseEmail(job.createdByEmail || ""),
+      previewRecipientEmail,
     });
 
     return res.json({
@@ -3737,7 +3739,7 @@ export const previewDeputyJobNotification = async (req, res) => {
       job: withDeputyJobAliases(job),
       matchedCount: matches.length,
       previewNotification,
-      recipients: previewNotification.recipients,
+      recipients: previewNotification.recipients || [],
     });
   } catch (error) {
     console.error("❌ previewDeputyJobNotification error:", error);
