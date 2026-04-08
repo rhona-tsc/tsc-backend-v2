@@ -264,21 +264,44 @@ router.post("/save-draft", wrap("POST /save-draft", saveActDraftV2));
 router.post("/create", requireAnyAuth, wrap("POST /create", createActV2));
 router.put("/update/:id", requireAnyAuth, wrap("PUT /update/:id", updateActV2));
 
-router.post("/trash", wrap("POST /trash", trashAct));
-router.get("/trashed", wrap("GET /trashed", getTrashedActs));
-router.delete("/delete-permanent", wrap("DELETE /delete-permanent", deleteActPermanently));
-router.post("/restore", wrap("POST /restore", restoreAct));
+router.post("/trash", requireAnyAuth, wrap("POST /trash", trashAct));
+router.get("/trashed", requireAnyAuth, wrap("GET /trashed", getTrashedActs));
+router.delete(
+  "/delete-permanent",
+  requireAnyAuth,
+  wrap("DELETE /delete-permanent", deleteActPermanently)
+);
+router.post("/restore", requireAnyAuth, wrap("POST /restore", restoreAct));
 router.get("/list", wrap("GET /list", getAllActsV2));
 router.get("/cards", wrap("GET /cards", getActCards));
 
-
-router.post("/security-update/:id", wrap("POST /security-update/:id", updateActV2));
-router.get("/my-drafts", wrap("GET /my-drafts", getMyDrafts));
-router.put("/save-pending-changes/:id", wrap("PUT /save-pending-changes/:id", savePendingChanges));
-router.put("/approve-pending-changes/:id", wrap("PUT /approve-pending-changes/:id", approvePendingChanges));
-router.put("/reject-pending-changes/:id", wrap("PUT /reject-pending-changes/:id", rejectPendingChanges));
-router.get("/moderation-count", wrap("GET /moderation-count", getModerationCount));
-router.post("/update-status", wrap("POST /update-status", updateActStatus));
+router.post(
+  "/security-update/:id",
+  requireAnyAuth,
+  wrap("POST /security-update/:id", updateActV2)
+);
+router.get("/my-drafts", requireAnyAuth, wrap("GET /my-drafts", getMyDrafts));
+router.put(
+  "/save-pending-changes/:id",
+  requireAnyAuth,
+  wrap("PUT /save-pending-changes/:id", savePendingChanges)
+);
+router.put(
+  "/approve-pending-changes/:id",
+  requireAnyAuth,
+  wrap("PUT /approve-pending-changes/:id", approvePendingChanges)
+);
+router.put(
+  "/reject-pending-changes/:id",
+  requireAnyAuth,
+  wrap("PUT /reject-pending-changes/:id", rejectPendingChanges)
+);
+router.get(
+  "/moderation-count",
+  requireAnyAuth,
+  wrap("GET /moderation-count", getModerationCount)
+);
+router.post("/update-status", requireAnyAuth, wrap("POST /update-status", updateActStatus));
 
 router.get("/filter-data", wrap("GET /filter-data", filterDataInline));
 
@@ -294,6 +317,7 @@ router.get(
 
 router.get(
   "/acts/:id",
+  requireAnyAuth,
   (req, res, next) => {
     console.log("📡 Route hit: GET /api/v2/acts/:id", req.params.id);
     next();
@@ -301,7 +325,7 @@ router.get(
   wrap("GET /acts/:id", getActByIdV2)
 );
 
-router.get("/:id([0-9a-fA-F]{24})", wrap("GET /:id", getActByIdV2));
+router.get("/:id([0-9a-fA-F]{24})", requireAnyAuth, wrap("GET /:id", getActByIdV2));
 router.get("/:slug", wrap("GET /:slug", getActBySlugV2));
 
 export default router;

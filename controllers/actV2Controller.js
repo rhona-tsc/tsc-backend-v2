@@ -59,8 +59,58 @@ const buildSetDoc = (obj, prefix = "", out = {}) => {
 };
 
 
+
 // Helper to validate ObjectIds
 const isValidObjectId = (v) => mongoose.isValidObjectId(String(v || ""));
+
+// ────────────── Ownership + Auth helpers ──────────────
+const getAuthUserId = (req) => {
+  const candidate = req.user?.id || req.user?._id || req.headers.userid || req.headers.userId || null;
+  return isValidObjectId(candidate) ? String(candidate) : null;
+};
+
+const getAuthUserRole = (req) =>
+  String(req.user?.role || req.headers.userrole || "")
+    .trim()
+    .toLowerCase();
+
+const buildOwnershipFilter = (userId) => {
+  if (!userId) return null;
+  return {
+    $or: [
+      { createdBy: userId },
+      { owner: userId },
+      { ownerId: userId },
+      { registeredBy: userId },
+      { userId: userId },
+      { musicianId: userId },
+      { owners: userId },
+    ],
+  };
+};
+
+const canAccessAct = (act, userId) => {
+  if (!act || !userId) return false;
+  const uid = String(userId);
+  const candidates = [
+    act.createdBy,
+    act.owner,
+    act.ownerId,
+    act.registeredBy,
+    act.userId,
+    act.musicianId,
+  ]
+    .filter(Boolean)
+    .map((value) => String(value));
+
+  if (candidates.includes(uid)) return true;
+
+  if (Array.isArray(act.owners) && act.owners.map((value) => String(value)).includes(uid)) {
+    return true;
+  }
+
+  return false;
+};
 
 const coerceBool = (v) => {
   if (Array.isArray(v)) return Boolean(v[0]);
@@ -177,6 +227,19 @@ export const updateActV2 = async (req, res) => {
     const existingAct = await actModel.findById(actId);
     if (!existingAct) {
       return res.status(404).json({ error: "Act not found" });
+    }
+
+    const authUserId = getAuthUserId(req);
+    const authUserRole = getAuthUserRole(req);
+
+    if (authUserRole === "musician") {
+      if (!authUserId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      if (!canAccessAct(existingAct, authUserId)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
     }
 
     const incoming = req.body || {};
@@ -363,6 +426,9 @@ export const getActByIdV2 = async (req, res) => {
         ? true
         : !["0", "false", "no"].includes(String(withReviewsRaw).toLowerCase());
 
+    const authUserId = getAuthUserId(req);
+    const authUserRole = getAuthUserRole(req);
+
     let q = actModel.findById(id);
 
     // Optional: let you call /api/act/:id?withReviews=false for lightweight fetches
@@ -374,6 +440,16 @@ export const getActByIdV2 = async (req, res) => {
 
     if (!act) {
       return res.status(404).json({ success: false, error: "not_found" });
+    }
+
+    if (authUserRole === "musician") {
+      if (!authUserId) {
+        return res.status(401).json({ success: false, error: "unauthorized" });
+      }
+
+      if (!canAccessAct(act, authUserId)) {
+        return res.status(403).json({ success: false, error: "forbidden" });
+      }
     }
 
     // ✅ Ensure consistent rating fields on the single-act payload too.
@@ -786,30 +862,27 @@ end();
         dbg("❗ musician role without user id → 401");
         return res.status(401).json({ success: false, message: "Unauthorized: Missing user id" });
       }
-      const uid   = String(authUserId);
-      const ownOr = [
-        { createdBy: uid }, { owner: uid }, { ownerId: uid },
-        { registeredBy: uid }, { userId: uid }, { musicianId: uid }, { owners: uid },
-      ];
+      const ownershipFilter = buildOwnershipFilter(String(authUserId));
       if (filter.$or) {
         filter.$and = filter.$and || [];
-        filter.$and.push({ $or: ownOr });
+        filter.$and.push({ $or: filter.$or });
+        filter.$and.push(ownershipFilter);
+        delete filter.$or;
       } else {
-        filter.$or = ownOr;
+        Object.assign(filter, ownershipFilter);
       }
-      dbg("applied musician ownership:", p({ uid }));
+      dbg("applied musician ownership:", p({ uid: String(authUserId) }));
     } else if (mineFlag) {
       const uid = String(req.query.authorId || authUserId || "");
       if (uid) {
-        const mineOr = [
-          { createdBy: uid }, { owner: uid }, { ownerId: uid },
-          { registeredBy: uid }, { userId: uid }, { musicianId: uid }, { owners: uid },
-        ];
+        const ownershipFilter = buildOwnershipFilter(uid);
         if (filter.$or) {
           filter.$and = filter.$and || [];
-          filter.$and.push({ $or: mineOr });
+          filter.$and.push({ $or: filter.$or });
+          filter.$and.push(ownershipFilter);
+          delete filter.$or;
         } else {
-          filter.$or = mineOr;
+          Object.assign(filter, ownershipFilter);
         }
         dbg("applied mineFlag ownership:", p({ uid }));
       } else {
@@ -982,7 +1055,7 @@ end();
   
   export const getMyDrafts = async (req, res) => {
     try {
-      const userId = req.user?.id || req.headers.userid || null;
+      const userId = getAuthUserId(req);
       if (!userId) {
         return res.status(401).json({ error: "Unauthorized: Missing user ID" });
       }

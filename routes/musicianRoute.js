@@ -53,6 +53,41 @@ const resolveMusicianObjectId = async (value) => {
   return doc?._id ? String(doc._id) : null;
 };
 
+const canUserAccessAct = ({ user, act }) => {
+  if (!user || !act) return false;
+
+  const userRole = String(user.role || "").trim().toLowerCase();
+  if (userRole === "agent") return true;
+
+  const userId = String(
+    user.id || user._id || user.userId || user.musicianId || ""
+  ).trim();
+
+  if (!userId) return false;
+
+  const candidateIds = [
+    act.createdBy,
+    act.owner,
+    act.ownerId,
+    act.registeredBy,
+    act.userId,
+    act.musicianId,
+  ]
+    .flatMap((value) => {
+      if (Array.isArray(value)) return value;
+      return value ? [value] : [];
+    })
+    .map((value) => {
+      if (!value) return "";
+      if (typeof value === "string") return value.trim();
+      if (typeof value === "object" && value?._id) return String(value._id).trim();
+      return String(value).trim();
+    })
+    .filter(Boolean);
+
+  return candidateIds.includes(userId);
+};
+
 // ⚠️ removed the router.use(...) CORS shim – global CORS in server.js handles it
 
 const uploadFields = upload.fields([
@@ -457,14 +492,24 @@ router.post("/acts/remove", removeAct);
 router.post("/acts/status", agentAuth, updateActStatus);
 
 // Legacy: get act by ObjectId  (kept for compatibility; prefer /acts/single)
-router.get("/acts/get/:id", async (req, res) => {
+router.get("/acts/get/:id", verifyToken, async (req, res) => {
   try {
     const act = await actModel.findById(req.params.id);
-    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
-    res.status(200).json({ success: true, act });
+    if (!act) {
+      return res.status(404).json({ success: false, message: "Act not found" });
+    }
+
+    if (!canUserAccessAct({ user: req.user, act })) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to view this act",
+      });
+    }
+
+    return res.status(200).json({ success: true, act });
   } catch (err) {
     console.error("Error in GET /api/musician/acts/get/:id", err);
-    res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
