@@ -1689,8 +1689,7 @@ export const createDeputyJob = async (req, res) => {
       createdByPhone,
       status: built.mode === "send" ? "open" : "preview",
       previewMode: built.mode !== "send",
-      workflowStage:
-        built.mode === "send" ? "payment_setup_required" : "preview_ready",
+      workflowStage: built.mode === "send" ? "created" : "preview_ready",
     });
 
     let setupIntentResult = null;
@@ -1805,9 +1804,7 @@ export const createDeputyJob = async (req, res) => {
       job.notifiedCount = 0;
       job.status = "open";
       job.previewMode = false;
-      job.workflowStage = hasSavedCardDetails
-        ? "sent_to_matches"
-        : "payment_setup_required";
+      job.workflowStage = "created";
       job.notifications = [];
     } else {
       job.notifiedMusicianIds = [];
@@ -2292,7 +2289,7 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
     const shouldAutoSendNotifications =
       job.previewMode === false &&
       normaliseString(job.status).toLowerCase() === "open" &&
-      ["payment_setup_required", "open", "awaiting_card_setup"].includes(
+      ["created", "open"].includes(
         normaliseString(job.workflowStage).toLowerCase()
       );
 
@@ -2341,7 +2338,7 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
         job.notifiedCount = 0;
         job.status = "open";
         job.previewMode = false;
-        job.workflowStage = "ready_to_charge";
+        job.workflowStage = "created";
       }
     }
 
