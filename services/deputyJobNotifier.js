@@ -229,10 +229,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
         
             </div>
 
-            <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
-              <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-                Apply directly
-              </p>
+          
              
             </div>
           </div>
