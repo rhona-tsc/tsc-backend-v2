@@ -798,8 +798,8 @@ const buildJobNotificationPreview = ({
 const jobBoardUrl = `${siteBase}/deputy-jobs`;
   const formattedSubjectDate = formatDeputyOpportunityDate(safeDate);
   const subject = formattedSubjectDate
-    ? `Corrected Links: ${safeTitle} | Deputy Opportunity for ${formattedSubjectDate}`
-    : `Corrected Links: ${safeTitle} | Deputy Opportunity`;
+    ? `${safeTitle} | Deputy Opportunity for ${formattedSubjectDate}`
+    : `${safeTitle} | Deputy Opportunity`;
 
   const detailRowsHtml = [
     renderDetailRow("Date", safeDate),
