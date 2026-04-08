@@ -1249,7 +1249,7 @@ const buildJobPayloadFromRequest = (req) => {
     deductStripeFeesFromDeputy = true,
     releaseOn = null,
     saveClientCard = true,
-    mode = "preview",
+    mode = "send",
   } = req.body || {};
 
   const resolvedInstruments = normaliseArray(requiredInstruments);
@@ -1340,9 +1340,9 @@ const buildJobPayloadFromRequest = (req) => {
     }),
     releaseOn: parseDateOrNull(releaseOn),
     mode:
-      normaliseString(mode || "preview").toLowerCase() === "send"
-        ? "send"
-        : "preview",
+      normaliseString(mode || "send").toLowerCase() === "preview"
+        ? "preview"
+        : "send",
   };
 };
 
@@ -1690,7 +1690,7 @@ export const createDeputyJob = async (req, res) => {
       status: built.mode === "send" ? "open" : "preview",
       previewMode: built.mode !== "send",
       workflowStage:
-        built.mode === "send" ? "sent_to_matches" : "preview_ready",
+        built.mode === "send" ? "payment_setup_required" : "preview_ready",
     });
 
     let setupIntentResult = null;
@@ -1707,7 +1707,7 @@ export const createDeputyJob = async (req, res) => {
       } catch (setupIntentError) {
         console.error(
           "❌ createDeputyJob setup intent error:",
-          setupIntentError,
+          setupIntentError
         );
         job.paymentStatus = "setup_required";
       }
@@ -1729,36 +1729,38 @@ export const createDeputyJob = async (req, res) => {
     });
 
     console.log("🎯 createDeputyJob matcher result", {
-  mode: built.mode,
-  primaryInstrument: built.primaryInstrument,
-  isVocalSlot: built.effectiveIsVocalSlot,
-  county: built.inferredCounty,
-  postcode: built.inferredPostcode,
-  genres: built.resolvedGenres,
-  essentialRoles: built.resolvedEssentialRoles,
-  desiredRoles: built.matcherDesiredRoles,
-  secondaryInstruments: built.resolvedSecondaryInstruments,
-  matchedCount: matcherResult.matches.length,
-  firstMatches: matcherResult.matches.slice(0, 5).map((m) => ({
-    id: m._id,
-    firstName: m.firstName,
-    lastName: m.lastName,
-    email: m.email,
-    deputyMatchScore: m.deputyMatchScore,
-    matchPct: m.matchPct,
-  })),
-});
+      mode: built.mode,
+      primaryInstrument: built.primaryInstrument,
+      isVocalSlot: built.effectiveIsVocalSlot,
+      county: built.inferredCounty,
+      postcode: built.inferredPostcode,
+      genres: built.resolvedGenres,
+      essentialRoles: built.resolvedEssentialRoles,
+      desiredRoles: built.matcherDesiredRoles,
+      secondaryInstruments: built.resolvedSecondaryInstruments,
+      matchedCount: matcherResult.matches.length,
+      firstMatches: matcherResult.matches.slice(0, 5).map((m) => ({
+        id: m._id,
+        firstName: m.firstName,
+        lastName: m.lastName,
+        email: m.email,
+        deputyMatchScore: m.deputyMatchScore,
+        matchPct: m.matchPct,
+      })),
+    });
 
     job.matchedMusicianIds = matcherResult.matchedMusicianIds;
     job.matchedMusicians = matcherResult.matchedMusicians;
     job.matchedCount = matcherResult.matches.length;
     job.notifications = [];
-const hasSavedCardDetails =
-  Boolean(normaliseString(job?.stripeCustomerId)) &&
-  Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-  job?.paymentStatus === "ready_to_charge";
-if (built.mode === "send" && hasSavedCardDetails) {
-        const notificationResults = await notifyMusiciansAboutDeputyJob({
+
+    const hasSavedCardDetails =
+      Boolean(normaliseString(job?.stripeCustomerId)) &&
+      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+      job?.paymentStatus === "ready_to_charge";
+
+    if (built.mode === "send" && hasSavedCardDetails) {
+      const notificationResults = await notifyMusiciansAboutDeputyJob({
         job,
         musicians: matcherResult.matches,
       });
@@ -1766,14 +1768,14 @@ if (built.mode === "send" && hasSavedCardDetails) {
       console.log("notificationResults:", notificationResults);
 
       console.log(
-  "matched musician emails:",
-  matcherResult.matches.map((m) => ({
-    id: m._id,
-    email: m.email,
-    firstName: m.firstName,
-    lastName: m.lastName,
-  }))
-);
+        "matched musician emails:",
+        matcherResult.matches.map((m) => ({
+          id: m._id,
+          email: m.email,
+          firstName: m.firstName,
+          lastName: m.lastName,
+        }))
+      );
 
       const sentIds = notificationResults
         .filter((r) => r.status === "sent" && r.musicianId)
@@ -1782,7 +1784,7 @@ if (built.mode === "send" && hasSavedCardDetails) {
       job.notifiedMusicianIds = sentIds;
       job.notifications = notificationResults;
       job.notifiedCount = notificationResults.filter(
-        (r) => r.status === "sent",
+        (r) => r.status === "sent"
       ).length;
       job.status = "open";
       job.previewMode = false;
@@ -1790,14 +1792,23 @@ if (built.mode === "send" && hasSavedCardDetails) {
       job.matchedMusicians = job.matchedMusicians.map((m) => ({
         ...m,
         notified: sentIds.some(
-          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
+          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
         ),
         notifiedAt: sentIds.some(
-          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
+          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
         )
           ? new Date()
           : null,
       }));
+    } else if (built.mode === "send") {
+      job.notifiedMusicianIds = [];
+      job.notifiedCount = 0;
+      job.status = "open";
+      job.previewMode = false;
+      job.workflowStage = hasSavedCardDetails
+        ? "sent_to_matches"
+        : "payment_setup_required";
+      job.notifications = [];
     } else {
       job.notifiedMusicianIds = [];
       job.notifiedCount = 0;
@@ -1817,11 +1828,11 @@ if (built.mode === "send" && hasSavedCardDetails) {
           previewText: matcherResult.previewNotification.text,
           status: "preview",
           sentAt: new Date(),
-        }),
+        })
       );
 
       const previewRecipientEmail = normaliseEmail(
-        built.clientEmail || createdByEmail || "",
+        built.clientEmail || createdByEmail || ""
       );
 
       if (previewRecipientEmail) {
@@ -1850,7 +1861,7 @@ if (built.mode === "send" && hasSavedCardDetails) {
         } catch (previewEmailError) {
           console.error(
             "❌ Failed to send deputy job preview email:",
-            previewEmailError,
+            previewEmailError
           );
         }
       }
@@ -1864,7 +1875,9 @@ if (built.mode === "send" && hasSavedCardDetails) {
       success: true,
       message:
         built.mode === "send"
-          ? "Deputy job created add your card details to notify matches"
+          ? hasSavedCardDetails
+            ? "Deputy job created and notifications sent"
+            : "Deputy job created. Add your card details to notify matches"
           : "Deputy job created in preview mode",
       mode: built.mode,
       job: formattedJob,
