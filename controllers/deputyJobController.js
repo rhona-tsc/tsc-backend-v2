@@ -2202,14 +2202,16 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
     const job = await deputyJobModel.findById(req.params.id);
 
     if (!job) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Deputy job not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
     }
 
     const effectiveSetupIntentId = normaliseString(
-      setupIntentId || job.setupIntentId || "",
+      setupIntentId || job.setupIntentId || ""
     );
+
     if (!effectiveSetupIntentId) {
       return res.status(400).json({
         success: false,
@@ -2218,14 +2220,15 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
     }
 
     const setupIntent = await stripe.setupIntents.retrieve(
-      effectiveSetupIntentId,
+      effectiveSetupIntentId
     );
+
     const resolvedPaymentMethodId =
       normaliseString(paymentMethodId) ||
       normaliseString(
         typeof setupIntent.payment_method === "string"
           ? setupIntent.payment_method
-          : setupIntent.payment_method?.id || "",
+          : setupIntent.payment_method?.id || ""
       );
 
     if (!resolvedPaymentMethodId) {
@@ -2286,16 +2289,77 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
       });
     }
 
+    const shouldAutoSendNotifications =
+      job.previewMode === false &&
+      normaliseString(job.status).toLowerCase() === "open" &&
+      ["payment_setup_required", "open", "awaiting_card_setup"].includes(
+        normaliseString(job.workflowStage).toLowerCase()
+      );
+
+    let notificationResults = [];
+    let autoSent = false;
+
+    if (shouldAutoSendNotifications) {
+      const matches = await getMatchedMusiciansForJob(job);
+
+      if (Array.isArray(matches) && matches.length) {
+        notificationResults = await notifyMusiciansAboutDeputyJob({
+          job,
+          musicians: matches,
+        });
+
+        const sentIds = notificationResults
+          .filter((r) => r.status === "sent" && r.musicianId)
+          .map((r) => r.musicianId);
+
+        job.notifiedMusicianIds = sentIds;
+        job.notifications = [
+          ...(Array.isArray(job.notifications) ? job.notifications : []),
+          ...notificationResults,
+        ];
+        job.notifiedCount = notificationResults.filter(
+          (r) => r.status === "sent"
+        ).length;
+        job.status = "open";
+        job.previewMode = false;
+        job.workflowStage = "sent_to_matches";
+        job.matchedMusicians = (job.matchedMusicians || []).map((m) => ({
+          ...m,
+          notified: sentIds.some(
+            (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+          ),
+          notifiedAt: sentIds.some(
+            (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+          )
+            ? new Date()
+            : m.notifiedAt || null,
+        }));
+
+        autoSent = true;
+      } else {
+        job.notifiedMusicianIds = [];
+        job.notifiedCount = 0;
+        job.status = "open";
+        job.previewMode = false;
+        job.workflowStage = "ready_to_charge";
+      }
+    }
+
     await job.save();
 
     const formattedJob = withDeputyJobAliases(job);
 
     return res.json({
       success: true,
-      message: "Payment method saved",
+      message: autoSent
+        ? `Payment method saved and ${job.notifiedCount || 0} notifications sent`
+        : "Payment method saved",
       job: formattedJob,
       defaultPaymentMethodId: resolvedPaymentMethodId,
       paymentStatus: job.paymentStatus,
+      notifiedCount: job.notifiedCount || 0,
+      autoSentNotifications: autoSent,
+      notificationResults,
     });
   } catch (error) {
     console.error("❌ saveDeputyJobPaymentMethod error:", error);
