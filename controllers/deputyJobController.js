@@ -2289,7 +2289,7 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
     const shouldAutoSendNotifications =
       job.previewMode === false &&
       normaliseString(job.status).toLowerCase() === "open" &&
-      ["created", "open"].includes(
+      ["created", "open", "payment_setup_required"].includes(
         normaliseString(job.workflowStage).toLowerCase()
       );
 
@@ -2297,9 +2297,59 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
     let autoSent = false;
 
     if (shouldAutoSendNotifications) {
-      const matches = await getMatchedMusiciansForJob(job);
+      const matcherResult = await runMatcherForJob({
+        job,
+        previewRecipientEmail: job.clientEmail || job.createdByEmail || "",
+        createdBy: job.createdBy || null,
+        primaryInstrument: job.instrument,
+        effectiveIsVocalSlot: Boolean(job.isVocalSlot),
+        resolvedEssentialRoles: Array.isArray(job.essentialRoles)
+          ? job.essentialRoles
+          : [],
+        matcherDesiredRoles: Array.isArray(job.desiredRoles)
+          ? job.desiredRoles
+          : [],
+        resolvedSecondaryInstruments: Array.isArray(job.secondaryInstruments)
+          ? job.secondaryInstruments
+          : [],
+        resolvedGenres: Array.isArray(job.genres) ? job.genres : [],
+        resolvedTags: Array.isArray(job.tags) ? job.tags : [],
+        inferredCounty: job.county || "",
+        inferredPostcode: job.postcode || "",
+      });
 
-      if (Array.isArray(matches) && matches.length) {
+      const matches = Array.isArray(matcherResult?.matches)
+        ? matcherResult.matches
+        : [];
+
+      job.matchedMusicianIds = matcherResult?.matchedMusicianIds || [];
+      job.matchedMusicians = matcherResult?.matchedMusicians || [];
+      job.matchedCount = matches.length;
+
+      console.log("🎸 saveDeputyJobPaymentMethod rematch input", {
+        jobId: String(job._id),
+        instrument: job.instrument,
+        isVocalSlot: job.isVocalSlot,
+        essentialRoles: job.essentialRoles,
+        desiredRoles: job.desiredRoles,
+        secondaryInstruments: job.secondaryInstruments,
+        genres: job.genres,
+        county: job.county,
+        postcode: job.postcode,
+      });
+
+      console.log("🎯 saveDeputyJobPaymentMethod rematch result", {
+        matchedCount: matches.length,
+        firstMatches: matches.slice(0, 10).map((m) => ({
+          id: m._id,
+          firstName: m.firstName,
+          lastName: m.lastName,
+          email: m.email,
+          instrumentation: m.instrumentation,
+        })),
+      });
+
+      if (matches.length) {
         notificationResults = await notifyMusiciansAboutDeputyJob({
           job,
           musicians: matches,

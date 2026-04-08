@@ -83,9 +83,100 @@ const ROLE_ALIASES = {
   ],
 };
 
+const INSTRUMENT_ALIASES = {
+  guitar: [
+    "guitarist",
+    "lead guitarist",
+    "rhythm guitarist",
+    "electric guitar",
+    "acoustic guitar",
+    "gtr",
+    "lead guitar",
+  ],
+  guitarist: [
+    "guitar",
+    "lead guitarist",
+    "rhythm guitarist",
+    "electric guitar",
+    "acoustic guitar",
+    "gtr",
+    "lead guitar",
+  ],
+  "lead guitarist": [
+    "guitar",
+    "guitarist",
+    "lead guitar",
+    "electric guitar",
+    "acoustic guitar",
+    "gtr",
+  ],
+  "lead guitar": [
+    "guitar",
+    "guitarist",
+    "lead guitarist",
+    "electric guitar",
+    "acoustic guitar",
+    "gtr",
+  ],
+  "rhythm guitarist": [
+    "guitar",
+    "guitarist",
+    "rhythm guitar",
+    "electric guitar",
+    "acoustic guitar",
+    "gtr",
+  ],
+  bass: ["bass guitar", "bassist", "electric bass"],
+  bassist: ["bass", "bass guitar", "electric bass"],
+  "bass guitar": ["bass", "bassist", "electric bass"],
+  drums: ["drummer", "drum kit"],
+  drummer: ["drums", "drum kit"],
+  keys: ["keyboard", "keyboardist", "piano", "keys player"],
+  keyboard: ["keys", "keyboardist", "piano", "keys player"],
+  keyboardist: ["keys", "keyboard", "piano", "keys player"],
+  piano: ["keys", "keyboard", "keyboardist", "pianist"],
+  pianist: ["piano", "keys", "keyboard", "keyboardist"],
+  sax: ["saxophone", "saxophonist"],
+  saxophone: ["sax", "saxophonist"],
+  saxophonist: ["sax", "saxophone"],
+};
+
 const aliasSet = new Map(
   Object.entries(ROLE_ALIASES).map(([k, arr]) => [norm(k), new Set(arr.map(norm))])
 );
+
+const instrumentAliasSet = new Map(
+  Object.entries(INSTRUMENT_ALIASES).map(([k, arr]) => [
+    norm(k),
+    new Set(arr.map(norm)),
+  ])
+);
+
+const instrumentSimilarity = (a, b) => {
+  const A = norm(a);
+  const B = norm(b);
+
+  if (!A || !B) return 0;
+  if (A === B) return 1;
+  if (instrumentAliasSet.get(A)?.has(B) || instrumentAliasSet.get(B)?.has(A)) {
+    return 1;
+  }
+
+  if (A.includes(B) || B.includes(A)) return 0.9;
+
+  const tokensA = new Set(A.split(/[^a-z0-9]+/).filter(Boolean));
+  const tokensB = new Set(B.split(/[^a-z0-9]+/).filter(Boolean));
+
+  if (!tokensA.size || !tokensB.size) return 0;
+
+  let intersection = 0;
+  for (const token of tokensA) {
+    if (tokensB.has(token)) intersection += 1;
+  }
+
+  const jaccard = intersection / (tokensA.size + tokensB.size - intersection);
+  return jaccard >= 0.5 ? 0.7 : 0;
+};
 
 const countyKey = (name = "") => String(name).toLowerCase().replace(/\s+/g, "_");
 
@@ -182,12 +273,7 @@ const hasInstrument = (musician, wanted) => {
   const target = norm(wanted);
   if (!target) return true;
 
-  return instruments.some(
-    (instrument) =>
-      instrument === target ||
-      instrument.includes(target) ||
-      target.includes(instrument)
-  );
+  return instruments.some((instrument) => instrumentSimilarity(instrument, target) >= 0.7);
 };
 
 const hasAnySecondary = (musician, wanted = []) => {
@@ -453,6 +539,7 @@ export const findMatchingMusiciansForDeputyJob = async ({
     .map((musician) => {
       const roleFit = desiredRoleScore(musician, desiredRoles);
       const genreFit = genreScore(musician, genres);
+      const instrumentFit = hasInstrument(musician, instrument) ? 1 : 0;
       const locationFit = scoreLocation({
         targetCounty: resolvedCounty,
         targetPostcode: postcode,
@@ -461,11 +548,12 @@ export const findMatchingMusiciansForDeputyJob = async ({
         neighbourCounties,
       });
 
-      let weightRoles = desiredRoles.length ? 0.15 : 0;
-      let weightGenres = genres.length ? 0.2 : 0;
-      let weightLocation = 0.65;
+      let weightInstrument = instrument ? 0.35 : 0;
+      let weightRoles = desiredRoles.length ? 0.1 : 0;
+      let weightGenres = genres.length ? 0.15 : 0;
+      let weightLocation = 0.4;
       let weightFemaleLeadBoost =
-        femaleLeadOnly || requestedGender ? 0.35 : 0;
+        femaleLeadOnly || requestedGender ? 0.2 : 0;
 
       const femaleLeadFit = femaleLeadOnly
         ? isLeadFemaleVocalist(musician)
@@ -478,13 +566,19 @@ export const findMatchingMusiciansForDeputyJob = async ({
           : 0;
 
       const weightTotal =
-        weightRoles + weightGenres + weightLocation + weightFemaleLeadBoost;
+        weightInstrument +
+        weightRoles +
+        weightGenres +
+        weightLocation +
+        weightFemaleLeadBoost;
+      weightInstrument /= weightTotal;
       weightRoles /= weightTotal;
       weightGenres /= weightTotal;
       weightLocation /= weightTotal;
       weightFemaleLeadBoost /= weightTotal;
 
       const deputyMatchScore =
+        instrumentFit * weightInstrument +
         roleFit * weightRoles +
         genreFit * weightGenres +
         locationFit * weightLocation +
@@ -492,6 +586,7 @@ export const findMatchingMusiciansForDeputyJob = async ({
 
       return {
         ...musician,
+        instrumentFit,
         femaleLeadFit,
         requestedGender,
         leadOnly,

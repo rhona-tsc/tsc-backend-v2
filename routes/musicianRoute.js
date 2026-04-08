@@ -499,11 +499,36 @@ router.get("/acts/get/:id", verifyToken, async (req, res) => {
       return res.status(404).json({ success: false, message: "Act not found" });
     }
 
-    if (!canUserAccessAct({ user: req.user, act })) {
-      return res.status(403).json({
-        success: false,
-        message: "You do not have permission to view this act",
-      });
+    const authUserId =
+      req.user?.id || req.user?._id || req.headers.userid || req.headers.userId || null;
+    const authUserRole = String(req.user?.role || req.headers.userrole || "")
+      .trim()
+      .toLowerCase();
+
+    if (authUserRole === "musician") {
+      if (!authUserId) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+      }
+
+      const uid = String(authUserId);
+      const candidates = [
+        act.createdBy,
+        act.owner,
+        act.ownerId,
+        act.registeredBy,
+        act.userId,
+        act.musicianId,
+      ]
+        .filter(Boolean)
+        .map((value) => String(value));
+
+      const ownsAct =
+        candidates.includes(uid) ||
+        (Array.isArray(act.owners) && act.owners.map(String).includes(uid));
+
+      if (!ownsAct) {
+        return res.status(403).json({ success: false, message: "Forbidden" });
+      }
     }
 
     return res.status(200).json({ success: true, act });
