@@ -21,6 +21,19 @@ const SMTP_REPLY_TO = String(
   process.env.SMTP_REPLY_TO || SMTP_FROM_EMAIL || "hello@thesupremecollective.co.uk"
 ).trim();
 
+
+const buildLocation = (job = {}) =>
+  job.location ||
+  job.locationName ||
+  job.venue ||
+  job.venueName ||
+  [job.venue, job.locationName, job.county, job.postcode]
+    .filter(Boolean)
+    .join(", ") ||
+  job.county ||
+  job.postcode ||
+  "TBC";
+
 const escapeHtml = (value = "") =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -91,14 +104,20 @@ const formatFee = (value) => {
   return `£${numeric.toFixed(2).replace(/\.00$/, "")}`;
 };
 
-const buildLocation = (job = {}) =>
-  job.locationName ||
-  job.venue ||
-  job.venueName ||
-  job.location ||
-  job.county ||
-  job.postcode ||
-  "TBC";
+const getDeputyFeeForEmail = (job = {}) => {
+  const deputyNetAmount = Number(job?.deputyNetAmount);
+  if (Number.isFinite(deputyNetAmount) && deputyNetAmount > 0) {
+    return deputyNetAmount;
+  }
+
+  const fee = Number(job?.fee);
+  if (Number.isFinite(fee) && fee > 0) {
+    return fee;
+  }
+
+  return job?.deputyNetAmount ?? job?.fee ?? "";
+};
+
 
 const buildTime = (job = {}) => {
   const start = job.startTime || job.callTime || "TBC";
@@ -131,7 +150,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
   const date = escapeHtml(formatDate(job?.eventDate || job?.date));
   const time = escapeHtml(buildTime(job));
   const location = escapeHtml(buildLocation(job));
-  const fee = escapeHtml(formatFee(job?.fee));
+  const fee = escapeHtml(formatFee(getDeputyFeeForEmail(job)));
   const notes = job?.notes
     ? `<li><strong>Notes:</strong> ${escapeHtml(job.notes)}</li>`
     : "";
@@ -181,7 +200,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
               <li><strong>Date:</strong> ${date}</li>
               <li><strong>Time:</strong> ${time}</li>
               <li><strong>Location:</strong> ${location}</li>
-              <li><strong>Fee:</strong> ${fee}</li>
+              <li><strong>Deputy fee:</strong> ${fee}</li>
               ${notes}
             </ul>
           </div>
@@ -230,7 +249,7 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
   const date = formatDate(job?.eventDate || job?.date);
   const time = buildTime(job);
   const location = buildLocation(job);
-  const fee = formatFee(job?.fee);
+  const fee = formatFee(getDeputyFeeForEmail(job));
   const notes = job?.notes ? `Notes: ${job.notes}` : "";
 
   return [
@@ -246,7 +265,7 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
     `Date: ${date}`,
     `Time: ${time}`,
     `Location: ${location}`,
-    `Fee: ${fee}`,
+    `Deputy fee: ${fee}`,
     notes,
     "",
     `View & apply: ${applyUrl}`,
@@ -262,6 +281,7 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
 
 export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => {
   const results = [];
+  let hasSentBccCopy = false;
 
   const frontendBaseUrl = normaliseBaseUrl(process.env.ADMIN_FRONTEND_URL);
   if (!frontendBaseUrl) {
@@ -293,16 +313,21 @@ export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => 
       const subject = formatEmailSubject(job);
       const text = buildTextEmail({ musician, job, applyUrl });
       const html = buildHtmlEmail({ musician, job, applyUrl });
+      const shouldBccThisEmail = Boolean(DEPUTY_JOB_BCC_EMAIL) && !hasSentBccCopy;
 
       await transporter.sendMail({
         from: `"${SMTP_FROM_NAME}" <${SMTP_FROM_EMAIL}>`,
         replyTo: SMTP_REPLY_TO,
         to: email,
-        ...(DEPUTY_JOB_BCC_EMAIL ? { bcc: DEPUTY_JOB_BCC_EMAIL } : {}),
+        ...(shouldBccThisEmail ? { bcc: DEPUTY_JOB_BCC_EMAIL } : {}),
         subject,
         text,
         html,
       });
+
+      if (shouldBccThisEmail) {
+        hasSentBccCopy = true;
+      }
 
       results.push({
         musicianId,

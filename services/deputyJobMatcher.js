@@ -200,42 +200,71 @@ const getVocalTypes = (musician) =>
     ? musician.vocals.type.map(norm).filter(Boolean)
     : [];
 
+
 const getVocalGender = (musician) => norm(musician?.vocals?.gender || "");
 
-const isFemaleVocalist = (musician) => {
-  const vocalTypes = getVocalTypes(musician);
-  const gender = getVocalGender(musician);
+const wantsFemaleJob = (value = "") => /\bfemale\b/.test(norm(value));
+const wantsMaleJob = (value = "") => /\bmale\b/.test(norm(value));
 
-  const hasVocalType = vocalTypes.some(
-    (type) =>
-      type.includes("lead vocalist") ||
-      type.includes("backing vocalist") ||
-      type.includes("vocalist-instrumentalist")
-  );
-
-  return hasVocalType && gender === "female";
+const getRequestedVocalGender = (instrument = "") => {
+  const target = norm(instrument);
+  if (wantsFemaleJob(target)) return "female";
+  if (wantsMaleJob(target)) return "male";
+  return "";
 };
 
-const isLeadFemaleVocalist = (musician) => {
-  const vocalTypes = getVocalTypes(musician);
+const matchesRequestedGender = (musician, requestedGender = "") => {
+  if (!requestedGender) return true;
+
   const gender = getVocalGender(musician);
+  if (!gender) return true;
 
-  const hasLeadType = vocalTypes.some((type) =>
-    type.includes("lead vocalist")
-  );
-
-  return hasLeadType && gender === "female";
+  return gender === requestedGender;
 };
+
+const wantsLeadVocalist = (instrument = "") => {
+  const target = norm(instrument);
+  return (
+    target.includes("lead vocalist") ||
+    target.includes("lead vocal") ||
+    target.includes("lead singer") ||
+    target.includes("vocalist") ||
+    target.includes("singer")
+  );
+};
+
+const wantsGuitar = (instrument = "") => {
+  const target = norm(instrument);
+  return target.includes("guitar");
+};
+
+const wantsVocalistInstrumentalist = (instrument = "") => {
+  const target = norm(instrument);
+  return (
+    /vocalist[-\s]*instrumentalist/.test(target) ||
+    /singer[-\s]*instrumentalist/.test(target) ||
+    (wantsLeadVocalist(target) && wantsGuitar(target))
+  );
+};
+
+const isLeadVocalist = (musician) => {
+  const vocalTypes = getVocalTypes(musician);
+  return vocalTypes.some((type) => type.includes("lead vocalist"));
+};
+
+const isLeadVocalistInstrumentalist = (musician, requiredInstrument = "") => {
+  if (!isLeadVocalist(musician)) return false;
+  if (!requiredInstrument) return true;
+  return hasInstrument(musician, requiredInstrument);
+};
+
+
+const isLeadFemaleVocalist = (musician) =>
+  isLeadVocalist(musician) && matchesRequestedGender(musician, "female");
 
 const wantsFemaleLeadVocalist = (instrument = "") => {
   const target = norm(instrument);
-  return (
-    target.includes("female") &&
-    (target.includes("lead vocalist") ||
-      target.includes("lead vocal") ||
-      target.includes("vocalist") ||
-      target.includes("singer"))
-  );
+  return wantsFemaleJob(target) && wantsLeadVocalist(target);
 };
 
 const isVocalist = (musician) => {
@@ -383,20 +412,38 @@ export const findMatchingMusiciansForDeputyJob = async ({
 
   const resolvedCounty = county || countyFromPostcode(postcode);
   const neighbourCounties = neighboursForCounty(resolvedCounty);
+  const requestedGender = getRequestedVocalGender(instrument);
   const femaleLeadOnly = wantsFemaleLeadVocalist(instrument);
+  const leadOnly = wantsLeadVocalist(instrument);
+  const vocalistInstrumentalistOnly = wantsVocalistInstrumentalist(instrument);
+  const requiredInstrumentForVocalist = wantsGuitar(instrument) ? "guitar" : "";
 
   const filtered = pool
     .filter((musician) => {
       if (!hasAllEssentialRoles(musician, essentialRoles)) return false;
 
       if (isVocalSlot) {
+        if (!matchesRequestedGender(musician, requestedGender)) return false;
+
         if (femaleLeadOnly) {
           if (!isLeadFemaleVocalist(musician)) return false;
+        } else if (vocalistInstrumentalistOnly) {
+          if (
+            !isLeadVocalistInstrumentalist(
+              musician,
+              requiredInstrumentForVocalist
+            )
+          ) {
+            return false;
+          }
+        } else if (leadOnly) {
+          if (!isLeadVocalist(musician)) return false;
         } else if (!isVocalist(musician)) {
           return false;
         }
-      } else if (!hasInstrument(musician, instrument)) {
-        return false;
+      } else {
+        if (!matchesRequestedGender(musician, requestedGender)) return false;
+        if (!hasInstrument(musician, instrument)) return false;
       }
 
       if (!hasAnySecondary(musician, secondaryInstruments)) return false;
@@ -417,13 +464,18 @@ export const findMatchingMusiciansForDeputyJob = async ({
       let weightRoles = desiredRoles.length ? 0.15 : 0;
       let weightGenres = genres.length ? 0.2 : 0;
       let weightLocation = 0.65;
-      let weightFemaleLeadBoost = femaleLeadOnly ? 0.35 : 0;
+      let weightFemaleLeadBoost =
+        femaleLeadOnly || requestedGender ? 0.35 : 0;
 
       const femaleLeadFit = femaleLeadOnly
         ? isLeadFemaleVocalist(musician)
           ? 1
           : 0
-        : 0;
+        : requestedGender
+          ? matchesRequestedGender(musician, requestedGender)
+            ? 1
+            : 0
+          : 0;
 
       const weightTotal =
         weightRoles + weightGenres + weightLocation + weightFemaleLeadBoost;
@@ -441,6 +493,9 @@ export const findMatchingMusiciansForDeputyJob = async ({
       return {
         ...musician,
         femaleLeadFit,
+        requestedGender,
+        leadOnly,
+        vocalistInstrumentalistOnly,
         vocalTypes: getVocalTypes(musician),
         vocalGender: getVocalGender(musician),
         deputyMatchScore,
