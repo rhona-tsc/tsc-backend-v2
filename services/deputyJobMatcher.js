@@ -190,6 +190,11 @@ const hasInstrument = (musician, wanted) => {
   );
 };
 
+const hasAnySecondary = (musician, wanted = []) => {
+  if (!wanted.length) return true;
+  return wanted.some((item) => hasInstrument(musician, item));
+};
+
 const getVocalTypes = (musician) =>
   Array.isArray(musician?.vocals?.type)
     ? musician.vocals.type.map(norm).filter(Boolean)
