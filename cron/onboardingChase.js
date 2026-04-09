@@ -7,10 +7,19 @@ import musicianModel from "../models/musicianModel.js";
 const FRONTEND_URL = String(process.env.ADMIN_FRONTEND_URL || "").replace(/\/$/, "");
 
 // Email "From" identity (prefer env, fallback to hello@)
-const FROM_EMAIL = String(process.env.EMAIL_FROM || "hello@thesupremecollective.co.uk").trim();
-const FROM_NAME = String(process.env.SMTP_FROM_NAME || "The Supreme Collective").trim();
-const FROM_HEADER = FROM_NAME ? `${FROM_NAME} <${FROM_EMAIL}>` : FROM_EMAIL;
-const REPLY_TO = String(process.env.SMTP_REPLY_TO || FROM_EMAIL).trim();
+const cleanHeaderValue = (value = "") =>
+  String(value || "")
+    .replace(/[<>]/g, "")
+    .replace(/[\r\n]+/g, " ")
+    .trim();
+
+const FROM_EMAIL = cleanHeaderValue(
+  process.env.EMAIL_FROM || "hello@thesupremecollective.co.uk"
+);
+const FROM_NAME = cleanHeaderValue(
+  process.env.SMTP_FROM_NAME || "The Supreme Collective"
+);
+const REPLY_TO = cleanHeaderValue(process.env.SMTP_REPLY_TO || FROM_EMAIL);
 
 // Nodemailer
 const transporter = nodemailer.createTransport({
@@ -21,7 +30,16 @@ const transporter = nodemailer.createTransport({
 });
 
 async function sendEmail({ to, subject, html }) {
-  await transporter.sendMail({ from: FROM_HEADER, replyTo: REPLY_TO, to, subject, html });
+  await transporter.sendMail({
+    from: {
+      name: FROM_NAME,
+      address: FROM_EMAIL,
+    },
+    replyTo: REPLY_TO,
+    to,
+    subject,
+    html,
+  });
 }
 
 function sha256(input) {
