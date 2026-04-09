@@ -1346,6 +1346,8 @@ const buildJobPayloadFromRequest = (req) => {
   };
 };
 
+const MATCH_LIMIT_SEND = null;
+const MATCH_LIMIT_PREVIEW = null;
 const runMatcherForJob = async ({
   job,
   previewRecipientEmail,
@@ -1359,7 +1361,10 @@ const runMatcherForJob = async ({
   resolvedTags,
   inferredCounty,
   inferredPostcode,
+  mode = "send",
 }) => {
+  const effectiveLimit =
+    mode === "preview" ? MATCH_LIMIT_PREVIEW : MATCH_LIMIT_SEND;
   const matches = await findMatchingMusiciansForDeputyJob({
     instrument: primaryInstrument,
     isVocalSlot: effectiveIsVocalSlot,
@@ -1370,23 +1375,25 @@ const runMatcherForJob = async ({
     county: inferredCounty,
     postcode: inferredPostcode,
     excludeIds: createdBy ? [String(createdBy)] : [],
-    limit: 100,
   });
+  const limitedMatches = Number.isFinite(Number(effectiveLimit))
+    ? matches.slice(0, Number(effectiveLimit))
+    : matches;
 
-  const matchedMusicianIds = matches
+  const matchedMusicianIds = limitedMatches
     .map((m) => m?._id || m?.id)
     .filter(Boolean);
 
-  const matchedMusicians = matches.map(buildMatchSnapshot);
+  const matchedMusicians = limitedMatches.map(buildMatchSnapshot);
 
   const previewNotification = buildJobNotificationPreview({
     job,
-    musicians: matches,
+    musicians: limitedMatches,
     previewRecipientEmail,
   });
 
   return {
-    matches,
+    matches: limitedMatches,
     matchedMusicianIds,
     matchedMusicians,
     previewNotification,
@@ -1725,6 +1732,7 @@ export const createDeputyJob = async (req, res) => {
       resolvedTags: built.resolvedTags,
       inferredCounty: built.inferredCounty,
       inferredPostcode: built.inferredPostcode,
+      mode: built.mode,
     });
 
     console.log("🎯 createDeputyJob matcher result", {
@@ -2316,6 +2324,7 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
         resolvedTags: Array.isArray(job.tags) ? job.tags : [],
         inferredCounty: job.county || "",
         inferredPostcode: job.postcode || "",
+        mode: "send",
       });
 
       const matches = Array.isArray(matcherResult?.matches)

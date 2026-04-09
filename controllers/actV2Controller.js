@@ -134,45 +134,64 @@ const normalizeCountyFees = (countyFees = {}) => {
   return Object.entries(countyFees).reduce((acc, [county, value]) => {
     if (!county) return acc;
 
-    // Legacy shape: { Essex: 25 } or { Essex: "25" }
+    // Legacy/simple shape: { Essex: 25 } or { Essex: "25" }
     if (
       typeof value === "number" ||
       typeof value === "string" ||
       value === null ||
       value === ""
     ) {
-      const fee = coerceNumberOrNull(value);
-      acc[county] = {
-        fee,
-        isFree: fee === null ? false : false,
-        travelsToCounty: fee !== null,
-      };
+      acc[county] = value === null || value === "" ? "" : String(value);
       return acc;
     }
 
     if (typeof value === "object") {
-      const fee = coerceNumberOrNull(
-        value.fee ?? value.price ?? value.amount ?? value.countyFee
-      );
+      const fee = value.fee ?? value.price ?? value.amount ?? value.countyFee ?? "";
+      acc[county] = fee === null || fee === undefined || fee === "" ? "" : String(fee);
+    }
 
-      const isFree = Boolean(
-        value.isFree ?? value.free ?? value.complimentary ?? false
-      );
+    return acc;
+  }, {});
+};
 
-      const travelsToCounty = Boolean(
-        value.travelsToCounty ??
-          value.available ??
-          value.enabled ??
-          value.allowed ??
-          (isFree || fee !== null)
-      );
+const normalizeCountyTravelSettings = (settings = {}, fallbackCountyFees = {}) => {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    settings = {};
+  }
+
+  const allCountyKeys = new Set([
+    ...Object.keys(settings || {}),
+    ...Object.keys(fallbackCountyFees || {}),
+  ]);
+
+  return Array.from(allCountyKeys).reduce((acc, county) => {
+    const rawSetting = settings?.[county];
+
+    if (rawSetting && typeof rawSetting === "object" && !Array.isArray(rawSetting)) {
+      const fee =
+        rawSetting.fee === null || rawSetting.fee === undefined || rawSetting.fee === ""
+          ? ""
+          : String(rawSetting.fee);
 
       acc[county] = {
+        available:
+          typeof rawSetting.available === "boolean"
+            ? rawSetting.available
+            : fee !== "",
         fee,
-        isFree,
-        travelsToCounty,
       };
+      return acc;
     }
+
+    const legacyFee = fallbackCountyFees?.[county];
+    acc[county] = {
+      available:
+        legacyFee !== null && legacyFee !== undefined && legacyFee !== "",
+      fee:
+        legacyFee === null || legacyFee === undefined || legacyFee === ""
+          ? ""
+          : String(legacyFee),
+    };
 
     return acc;
   }, {});
@@ -253,6 +272,14 @@ export const updateActV2 = async (req, res) => {
       req.body.countyFees = incoming.countyFees;
     }
 
+    if (incoming.countyTravelSettings && typeof incoming.countyTravelSettings === "object") {
+      incoming.countyTravelSettings = normalizeCountyTravelSettings(
+        incoming.countyTravelSettings,
+        incoming.countyFees || existingAct?.countyFees || {}
+      );
+      req.body.countyTravelSettings = incoming.countyTravelSettings;
+    }
+
     console.log("🧪 updateActV2 incoming has lineups?", Array.isArray(incoming.lineups));
 console.log("🧪 updateActV2 incoming has deputies anywhere?", hasDeputiesAnywhere(incoming));
 
@@ -275,6 +302,24 @@ if (Array.isArray(incoming.lineups) && incoming.lineups[0]?.bandMembers?.[0]) {
     }, {});
 
     const $set = buildSetDoc(incoming);
+
+    // Replace legacy county fee objects atomically instead of using dotted paths.
+    // Some older acts store countyFees as simple scalar values per county, so
+    // trying to set countyFees.X.fee causes Mongo to throw:
+    // "Cannot create field 'fee' in element {X: 25}".
+    if (Object.prototype.hasOwnProperty.call(incoming, "countyFees")) {
+      $set.countyFees = incoming.countyFees;
+      Object.keys($set).forEach((key) => {
+        if (key.startsWith("countyFees.")) delete $set[key];
+      });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(incoming, "countyTravelSettings")) {
+      $set.countyTravelSettings = incoming.countyTravelSettings;
+      Object.keys($set).forEach((key) => {
+        if (key.startsWith("countyTravelSettings.")) delete $set[key];
+      });
+    }
 
     const deputySetKeys = findSetKeysContaining($set, "deputies");
 console.log("🧪 buildSetDoc produced deputies keys:", deputySetKeys);
@@ -529,6 +574,13 @@ export const saveActDraftV2 = async (req, res) => {
       data.countyFees = normalizeCountyFees(data.countyFees);
       req.body.countyFees = data.countyFees;
     }
+    if (data.countyTravelSettings && typeof data.countyTravelSettings === "object") {
+      data.countyTravelSettings = normalizeCountyTravelSettings(
+        data.countyTravelSettings,
+        data.countyFees || {}
+      );
+      req.body.countyTravelSettings = data.countyTravelSettings;
+    }
     const status = "draft"; // force draft on autosave
 
     if (data._id) {
@@ -544,6 +596,20 @@ if (Array.isArray(data.lineups) && data.lineups[0]?.bandMembers?.[0]) {
 }
 
       const $set = buildSetDoc(data);
+
+      if (Object.prototype.hasOwnProperty.call(data, "countyFees")) {
+        $set.countyFees = data.countyFees;
+        Object.keys($set).forEach((key) => {
+          if (key.startsWith("countyFees.")) delete $set[key];
+        });
+      }
+
+      if (Object.prototype.hasOwnProperty.call(data, "countyTravelSettings")) {
+        $set.countyTravelSettings = data.countyTravelSettings;
+        Object.keys($set).forEach((key) => {
+          if (key.startsWith("countyTravelSettings.")) delete $set[key];
+        });
+      }
 
       const deputySetKeys = findSetKeysContaining($set, "deputies");
 console.log("🧪 draft buildSetDoc produced deputies keys:", deputySetKeys);
