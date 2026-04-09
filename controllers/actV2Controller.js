@@ -236,6 +236,31 @@ const normalizeLineupBooleans = (lineups = []) => {
   }));
 };
 
+const expandCountyTravelSettingsToModelFields = (countyTravelSettings = {}) => {
+  const countyFees = {};
+  const countyTravelAvailability = {};
+
+  if (
+    !countyTravelSettings ||
+    typeof countyTravelSettings !== "object" ||
+    Array.isArray(countyTravelSettings)
+  ) {
+    return { countyFees, countyTravelAvailability };
+  }
+
+  Object.entries(countyTravelSettings).forEach(([county, config]) => {
+    countyTravelAvailability[county] = Boolean(config?.available);
+
+    const rawFee = config?.fee;
+    countyFees[county] =
+      rawFee === "" || rawFee === null || rawFee === undefined
+        ? null
+        : Number(rawFee);
+  });
+
+  return { countyFees, countyTravelAvailability };
+};
+
 export const updateActV2 = async (req, res) => {
   try {
     const actId = req.params.id;
@@ -267,6 +292,7 @@ export const updateActV2 = async (req, res) => {
       incoming.lineups = normalizeLineupBooleans(incoming.lineups);
       req.body.lineups = incoming.lineups;
     }
+
     if (incoming.countyFees && typeof incoming.countyFees === "object") {
       incoming.countyFees = normalizeCountyFees(incoming.countyFees);
       req.body.countyFees = incoming.countyFees;
@@ -278,14 +304,23 @@ export const updateActV2 = async (req, res) => {
         incoming.countyFees || existingAct?.countyFees || {}
       );
       req.body.countyTravelSettings = incoming.countyTravelSettings;
+
+      const { countyFees, countyTravelAvailability } =
+        expandCountyTravelSettingsToModelFields(incoming.countyTravelSettings);
+
+      incoming.countyFees = countyFees;
+      incoming.countyTravelAvailability = countyTravelAvailability;
+
+      req.body.countyFees = countyFees;
+      req.body.countyTravelAvailability = countyTravelAvailability;
     }
 
     console.log("🧪 updateActV2 incoming has lineups?", Array.isArray(incoming.lineups));
-console.log("🧪 updateActV2 incoming has deputies anywhere?", hasDeputiesAnywhere(incoming));
+    console.log("🧪 updateActV2 incoming has deputies anywhere?", hasDeputiesAnywhere(incoming));
 
-if (Array.isArray(incoming.lineups) && incoming.lineups[0]?.bandMembers?.[0]) {
-  console.log("🧪 sample incoming deputies[0]:", incoming.lineups[0].bandMembers[0].deputies?.[0]);
-}
+    if (Array.isArray(incoming.lineups) && incoming.lineups[0]?.bandMembers?.[0]) {
+      console.log("🧪 sample incoming deputies[0]:", incoming.lineups[0].bandMembers[0].deputies?.[0]);
+    }
 
     const isSubmit = incoming.submit === true || incoming.submit === "true";
 
@@ -303,10 +338,6 @@ if (Array.isArray(incoming.lineups) && incoming.lineups[0]?.bandMembers?.[0]) {
 
     const $set = buildSetDoc(incoming);
 
-    // Replace legacy county fee objects atomically instead of using dotted paths.
-    // Some older acts store countyFees as simple scalar values per county, so
-    // trying to set countyFees.X.fee causes Mongo to throw:
-    // "Cannot create field 'fee' in element {X: 25}".
     if (Object.prototype.hasOwnProperty.call(incoming, "countyFees")) {
       $set.countyFees = incoming.countyFees;
       Object.keys($set).forEach((key) => {
@@ -314,20 +345,22 @@ if (Array.isArray(incoming.lineups) && incoming.lineups[0]?.bandMembers?.[0]) {
       });
     }
 
-    if (Object.prototype.hasOwnProperty.call(incoming, "countyTravelSettings")) {
-      $set.countyTravelSettings = incoming.countyTravelSettings;
+    if (Object.prototype.hasOwnProperty.call(incoming, "countyTravelAvailability")) {
+      $set.countyTravelAvailability = incoming.countyTravelAvailability;
       Object.keys($set).forEach((key) => {
-        if (key.startsWith("countyTravelSettings.")) delete $set[key];
+        if (key.startsWith("countyTravelAvailability.")) delete $set[key];
       });
     }
 
+    delete $set.countyTravelSettings;
+    Object.keys($set).forEach((key) => {
+      if (key.startsWith("countyTravelSettings.")) delete $set[key];
+    });
+
     const deputySetKeys = findSetKeysContaining($set, "deputies");
-console.log("🧪 buildSetDoc produced deputies keys:", deputySetKeys);
+    console.log("🧪 buildSetDoc produced deputies keys:", deputySetKeys);
+    console.log("🧪 buildSetDoc sets 'lineups' directly?", Object.prototype.hasOwnProperty.call($set, "lineups"));
 
-// helpful: confirm whether you're setting whole lineups vs dotted paths
-console.log("🧪 buildSetDoc sets 'lineups' directly?", Object.prototype.hasOwnProperty.call($set, "lineups"));
-
-    // Guard immutable/ownerish fields
     delete $set.createdBy;
     delete $set.createdByRole;
     delete $set.owner;
@@ -337,7 +370,7 @@ console.log("🧪 buildSetDoc sets 'lineups' directly?", Object.prototype.hasOwn
     delete $set.musicianId;
     delete $set.owners;
 
-    $set.status = nextStatus; // authoritative status
+    $set.status = nextStatus;
 
     const updatedAct = await actModel.findByIdAndUpdate(
       actId,
@@ -346,16 +379,17 @@ console.log("🧪 buildSetDoc sets 'lineups' directly?", Object.prototype.hasOwn
     );
 
     console.log("✅ updateActV2 updatedAct has deputies anywhere?", hasDeputiesAnywhere(updatedAct));
-if (updatedAct?.lineups?.[0]?.bandMembers?.[0]) {
-  console.log("✅ sample saved deputies[0]:", updatedAct.lineups[0].bandMembers[0].deputies?.[0]);
-}
+    if (updatedAct?.lineups?.[0]?.bandMembers?.[0]) {
+      console.log("✅ sample saved deputies[0]:", updatedAct.lineups[0].bandMembers[0].deputies?.[0]);
+    }
 
     if (!updatedAct) {
       return res.status(404).json({ error: "Act not found" });
     }
 
-    // 🔄 Keep card in sync
-    try { await upsertActCardFromAct(updatedAct); } catch (e) {
+    try {
+      await upsertActCardFromAct(updatedAct);
+    } catch (e) {
       console.warn("⚠️ Card upsert after update failed:", e.message);
     }
 
@@ -373,14 +407,31 @@ export const createActV2 = async (req, res) => {
 
     const data = req.body || {};
 
-    // Never trust client-sent ownership fields
     const cleaned = { ...data };
+
     if (Array.isArray(cleaned.lineups)) {
       cleaned.lineups = normalizeLineupBooleans(cleaned.lineups);
     }
+
     if (cleaned.countyFees && typeof cleaned.countyFees === "object") {
       cleaned.countyFees = normalizeCountyFees(cleaned.countyFees);
     }
+
+    if (cleaned.countyTravelSettings && typeof cleaned.countyTravelSettings === "object") {
+      cleaned.countyTravelSettings = normalizeCountyTravelSettings(
+        cleaned.countyTravelSettings,
+        cleaned.countyFees || {}
+      );
+
+      const { countyFees, countyTravelAvailability } =
+        expandCountyTravelSettingsToModelFields(cleaned.countyTravelSettings);
+
+      cleaned.countyFees = countyFees;
+      cleaned.countyTravelAvailability = countyTravelAvailability;
+    }
+
+    delete cleaned.countyTravelSettings;
+
     delete cleaned.createdBy;
     delete cleaned.createdByRole;
     delete cleaned.createdByEmail;
@@ -392,7 +443,6 @@ export const createActV2 = async (req, res) => {
     delete cleaned.musicianId;
     delete cleaned.owners;
 
-    // Resolve auth identity (must be an ObjectId for createdBy)
     const headerUserId = req.headers.userid || req.headers.userId || null;
     const candidateId = req.user?.id || req.user?._id || headerUserId || null;
     const authUserId = isValidObjectId(candidateId) ? String(candidateId) : null;
@@ -403,13 +453,12 @@ export const createActV2 = async (req, res) => {
 
     console.log("🔦 Creating act with lightingSystem:", cleaned.lightingSystem);
     console.log("📜 Creating act with setlist:", cleaned.setlist);
-console.log("🧾 auth check", {
-  hasReqUser: !!req.user,
-  reqUser: req.user,
-  useridHeader: req.headers.userid,
-});
-    // If we can't identify the creator as an ObjectId, fail fast.
-    // This prevents accidental saving of an email into createdBy.
+    console.log("🧾 auth check", {
+      hasReqUser: !!req.user,
+      reqUser: req.user,
+      useridHeader: req.headers.userid,
+    });
+
     if (!authUserId) {
       console.warn("🚫 createActV2 blocked: missing/invalid auth user id", {
         candidateId,
@@ -424,7 +473,6 @@ console.log("🧾 auth check", {
       });
     }
 
-    // Status: allow draft/pending etc from client, but default to pending
     const finalStatus = cleaned.status || "pending";
     console.log("📌 Final status before save:", finalStatus);
 
@@ -439,7 +487,6 @@ console.log("🧾 auth check", {
 
     await newAct.save();
 
-    // 🔄 Upsert/refresh the lightweight card row
     try {
       await upsertActCardFromAct(newAct);
     } catch (e) {
@@ -497,9 +544,6 @@ export const getActByIdV2 = async (req, res) => {
       }
     }
 
-    // ✅ Ensure consistent rating fields on the single-act payload too.
-    // The DB may not store averageRating/reviewCount on the main act doc,
-    // but the frontend expects them.
     const pickReviewsArray = (doc) => {
       if (Array.isArray(doc?.reviews) && doc.reviews.length) return doc.reviews;
       if (Array.isArray(doc?.tscReviews) && doc.tscReviews.length) return doc.tscReviews;
@@ -517,7 +561,6 @@ export const getActByIdV2 = async (req, res) => {
         .filter((n) => Number.isFinite(n) && n > 0);
       if (!nums.length) return null;
       const sum = nums.reduce((a, b) => a + b, 0);
-      // nearest 0.5
       return Math.round((sum / nums.length) * 2) / 2;
     })();
 
@@ -531,14 +574,105 @@ export const getActByIdV2 = async (req, res) => {
 
     const ensuredAverageRating = storedAvg ?? derivedAvg ?? 0;
     const ensuredReviewCount = storedCount ?? derivedCount ?? 0;
-
-    // Some frontend paths expect actId; mirror _id for compatibility.
     const ensuredActId = act?.actId || String(act?._id || "");
 
-    // Mutate the lean object safely
+    // Rebuild countyTravelSettings for frontend compatibility
+    const countyFeesObj =
+      act?.countyFees instanceof Map
+        ? Object.fromEntries(act.countyFees.entries())
+        : act?.countyFees && typeof act.countyFees === "object" && !Array.isArray(act.countyFees)
+        ? act.countyFees
+        : {};
+
+    const countyTravelAvailabilityObj =
+      act?.countyTravelAvailability instanceof Map
+        ? Object.fromEntries(act.countyTravelAvailability.entries())
+        : act?.countyTravelAvailability &&
+          typeof act.countyTravelAvailability === "object" &&
+          !Array.isArray(act.countyTravelAvailability)
+        ? act.countyTravelAvailability
+        : {};
+
+    const countyKeys = new Set([
+      ...Object.keys(countyFeesObj || {}),
+      ...Object.keys(countyTravelAvailabilityObj || {}),
+    ]);
+
+    const countyTravelSettings = Array.from(countyKeys).reduce((acc, county) => {
+      const rawFee = countyFeesObj?.[county];
+      const rawAvailable = countyTravelAvailabilityObj?.[county];
+
+      acc[county] = {
+        available: rawAvailable === true,
+        fee:
+          rawFee === null || rawFee === undefined || rawFee === ""
+            ? ""
+            : String(rawFee),
+      };
+
+      return acc;
+    }, {});
+
+    // Normalize lineups for frontend compatibility
+    if (Array.isArray(act.lineups)) {
+      act.lineups = act.lineups.map((lineup) => {
+        const normalizedLineup = { ...lineup };
+
+        if (
+          normalizedLineup.ceremonySets &&
+          typeof normalizedLineup.ceremonySets === "object" &&
+          !Array.isArray(normalizedLineup.ceremonySets)
+        ) {
+          normalizedLineup.ceremonySets =
+            normalizedLineup.ceremonySets instanceof Map
+              ? Object.fromEntries(normalizedLineup.ceremonySets.entries())
+              : normalizedLineup.ceremonySets;
+        }
+
+        if (Array.isArray(normalizedLineup.bandMembers)) {
+          normalizedLineup.bandMembers = normalizedLineup.bandMembers.map((member) => {
+            const rawRates = Array.isArray(member?.additionalPerformanceRates)
+              ? member.additionalPerformanceRates
+              : Array.isArray(member?.additionalPerformanceFees)
+              ? member.additionalPerformanceFees
+              : [];
+
+            const additionalPerformanceRates = rawRates.map((rate) => {
+              const rawDuration =
+                rate?.duration ?? rate?.minutes ?? rate?.label ?? "";
+
+              const cleanedDuration =
+                rawDuration === null || rawDuration === undefined || rawDuration === ""
+                  ? ""
+                  : String(rawDuration).replace(/[^0-9.]/g, "");
+
+              const rawFee =
+                rate?.fee === null || rate?.fee === undefined || rate?.fee === ""
+                  ? ""
+                  : String(rate.fee).replace(/[^0-9.]/g, "");
+
+              return {
+                minutes: cleanedDuration === "" ? null : Number(cleanedDuration),
+                label: cleanedDuration,
+                fee: rawFee === "" ? null : Number(rawFee),
+              };
+            });
+
+            return {
+              ...member,
+              additionalPerformanceRates,
+            };
+          });
+        }
+
+        return normalizedLineup;
+      });
+    }
+
     act.averageRating = ensuredAverageRating;
     act.reviewCount = ensuredReviewCount;
     act.actId = ensuredActId;
+    act.countyTravelSettings = countyTravelSettings;
 
     console.log("🧪[getActByIdV2] ensured rating summary:", {
       _id: act?._id,
@@ -553,6 +687,8 @@ export const getActByIdV2 = async (req, res) => {
       reviewCount: act?.reviewCount,
       hasReviews: Array.isArray(act?.reviews),
       reviewsLen: Array.isArray(act?.reviews) ? act.reviews.length : null,
+      hasCountyTravelSettings: !!act?.countyTravelSettings,
+      countyTravelSettingsCount: Object.keys(act?.countyTravelSettings || {}).length,
     });
 
     return res.status(200).json({ success: true, act });
@@ -566,22 +702,35 @@ export const getActByIdV2 = async (req, res) => {
 export const saveActDraftV2 = async (req, res) => {
   try {
     const data = req.body || {};
+
     if (Array.isArray(data.lineups)) {
       data.lineups = normalizeLineupBooleans(data.lineups);
       req.body.lineups = data.lineups;
     }
+
     if (data.countyFees && typeof data.countyFees === "object") {
       data.countyFees = normalizeCountyFees(data.countyFees);
       req.body.countyFees = data.countyFees;
     }
+
     if (data.countyTravelSettings && typeof data.countyTravelSettings === "object") {
       data.countyTravelSettings = normalizeCountyTravelSettings(
         data.countyTravelSettings,
         data.countyFees || {}
       );
       req.body.countyTravelSettings = data.countyTravelSettings;
+
+      const { countyFees, countyTravelAvailability } =
+        expandCountyTravelSettingsToModelFields(data.countyTravelSettings);
+
+      data.countyFees = countyFees;
+      data.countyTravelAvailability = countyTravelAvailability;
+
+      req.body.countyFees = countyFees;
+      req.body.countyTravelAvailability = countyTravelAvailability;
     }
-    const status = "draft"; // force draft on autosave
+
+    const status = "draft";
 
     if (data._id) {
       const existing = await actModel.findById(data._id);
@@ -590,10 +739,10 @@ export const saveActDraftV2 = async (req, res) => {
       }
 
       console.log("🧪 saveActDraftV2 incoming has lineups?", Array.isArray(data.lineups));
-console.log("🧪 saveActDraftV2 incoming has deputies anywhere?", hasDeputiesAnywhere(data));
-if (Array.isArray(data.lineups) && data.lineups[0]?.bandMembers?.[0]) {
-  console.log("🧪 draft sample incoming deputies[0]:", data.lineups[0].bandMembers[0].deputies?.[0]);
-}
+      console.log("🧪 saveActDraftV2 incoming has deputies anywhere?", hasDeputiesAnywhere(data));
+      if (Array.isArray(data.lineups) && data.lineups[0]?.bandMembers?.[0]) {
+        console.log("🧪 draft sample incoming deputies[0]:", data.lineups[0].bandMembers[0].deputies?.[0]);
+      }
 
       const $set = buildSetDoc(data);
 
@@ -604,16 +753,21 @@ if (Array.isArray(data.lineups) && data.lineups[0]?.bandMembers?.[0]) {
         });
       }
 
-      if (Object.prototype.hasOwnProperty.call(data, "countyTravelSettings")) {
-        $set.countyTravelSettings = data.countyTravelSettings;
+      if (Object.prototype.hasOwnProperty.call(data, "countyTravelAvailability")) {
+        $set.countyTravelAvailability = data.countyTravelAvailability;
         Object.keys($set).forEach((key) => {
-          if (key.startsWith("countyTravelSettings.")) delete $set[key];
+          if (key.startsWith("countyTravelAvailability.")) delete $set[key];
         });
       }
 
+      delete $set.countyTravelSettings;
+      Object.keys($set).forEach((key) => {
+        if (key.startsWith("countyTravelSettings.")) delete $set[key];
+      });
+
       const deputySetKeys = findSetKeysContaining($set, "deputies");
-console.log("🧪 draft buildSetDoc produced deputies keys:", deputySetKeys);
-console.log("🧪 draft buildSetDoc sets 'lineups' directly?", Object.prototype.hasOwnProperty.call($set, "lineups"));
+      console.log("🧪 draft buildSetDoc produced deputies keys:", deputySetKeys);
+      console.log("🧪 draft buildSetDoc sets 'lineups' directly?", Object.prototype.hasOwnProperty.call($set, "lineups"));
 
       $set.status = status;
 
@@ -630,18 +784,18 @@ console.log("🧪 draft buildSetDoc sets 'lineups' directly?", Object.prototype.
       );
 
       console.log("✅ draft updated has deputies anywhere?", hasDeputiesAnywhere(updated));
-if (updated?.lineups?.[0]?.bandMembers?.[0]) {
-  console.log("✅ draft sample saved deputies[0]:", updated.lineups[0].bandMembers[0].deputies?.[0]);
-}
+      if (updated?.lineups?.[0]?.bandMembers?.[0]) {
+        console.log("✅ draft sample saved deputies[0]:", updated.lineups[0].bandMembers[0].deputies?.[0]);
+      }
 
-      // 🔄 Keep card table consistent (service should ignore drafts if that’s your rule)
-      try { await upsertActCardFromAct(updated); } catch (e) {
+      try {
+        await upsertActCardFromAct(updated);
+      } catch (e) {
         console.warn("⚠️ Card upsert after draft update failed:", e.message);
       }
 
       return res.status(200).json({ message: "Draft updated", _id: updated._id });
     } else {
-      // Creating a new draft
       const headerUserId = req.headers.userid || req.headers.userId || null;
       const candidateId = req.user?.id || req.user?._id || headerUserId || null;
       const authUserId = isValidObjectId(candidateId) ? String(candidateId) : null;
@@ -657,7 +811,8 @@ if (updated?.lineups?.[0]?.bandMembers?.[0]) {
           : {}),
       };
 
-      // Never trust client-sent ownership fields
+      delete toCreate.countyTravelSettings;
+
       delete toCreate.owner;
       delete toCreate.ownerId;
       delete toCreate.registeredBy;
@@ -668,8 +823,9 @@ if (updated?.lineups?.[0]?.bandMembers?.[0]) {
       const doc = new actModel(toCreate);
       await doc.save();
 
-      // 🔄 Card upsert (likely a no-op for draft)
-      try { await upsertActCardFromAct(doc); } catch (e) {
+      try {
+        await upsertActCardFromAct(doc);
+      } catch (e) {
         console.warn("⚠️ Card upsert after draft create failed:", e.message);
       }
 
