@@ -1078,6 +1078,9 @@ const registerDeputy = async (req, res) => {
       );
     }
 
+const existingStatus = musician.status;
+const isExistingMusician = !createdNew;
+
     // Parse payload blobs
     const basicInfo = safeParse(body.basicInfo, {});
     const address = safeParse(body.address, musician.address || {});
@@ -1539,6 +1542,30 @@ musician.markModified("backline");
 musician.markModified("additionalEquipment");
 musician.bank_account = bank;
 musician.markModified("bank_account");
+
+// Mark profile edit metadata when a user updates their own deputy profile
+if (isExistingMusician) {
+  musician.profileLastEditedAt = new Date();
+  musician.profileUpdatedByUser = true;
+
+  // If this person was previously approved and has now edited their profile,
+  // move them into the review queue.
+  if (
+    existingStatus &&
+    String(existingStatus).toLowerCase() === "approved"
+  ) {
+    musician.status = "Approved, changes pending";
+  }
+}
+
+// For brand new registrations, keep them pending
+if (createdNew) {
+  musician.profileLastEditedAt = new Date();
+  musician.profileUpdatedByUser = true;
+  musician.status = musician.status || "pending";
+}
+
+
     const saved = await musician.save();
 
     await sendInternalSignupNotification({
@@ -2239,16 +2266,41 @@ const listPendingDeputies = async (req, res) => {
   }
 };
 
+
 const approveDeputy = async (req, res) => {
-  const { id } = req.body;
   try {
-    await musicianModel.findByIdAndUpdate(id, { status: "approved" });
-    res.json({ success: true, message: "Deputy approved" });
+    const { id } = req.body;
+
+    const musician = await musicianModel.findById(id);
+    if (!musician) {
+      return res.status(404).json({
+        success: false,
+        message: "Musician not found",
+      });
+    }
+
+    musician.status = "approved";
+    musician.profileLastReviewedAt = new Date();
+    musician.profileUpdatedByUser = false;
+
+    await musician.save();
+
+    return res.json({
+      success: true,
+      message: "Deputy approved successfully",
+      deputy: {
+        _id: musician._id,
+        status: musician.status,
+        profileLastReviewedAt: musician.profileLastReviewedAt,
+        profileUpdatedByUser: musician.profileUpdatedByUser,
+      },
+    });
   } catch (err) {
-    console.error(err);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to approve deputy" });
+    console.error("❌ Failed to approve deputy:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to approve deputy",
+    });
   }
 };
 

@@ -169,18 +169,18 @@ export const listChangesPendingDeputies = async (_req, res) => {
 
 export const listDeputiesReviewQueue = async (req, res) => {
   try {
-    const raw = req.query.statuses || "";
-    const statuses = raw
-      .split(",")
-      .map((s) => decodeURIComponent(s).trim())
-      .filter(Boolean);
+    const rawStatuses = req.query.statuses;
 
-    const wanted = statuses.length
-      ? statuses
+    const wanted = Array.isArray(rawStatuses)
+      ? rawStatuses.map((s) => String(s).trim()).filter(Boolean)
+      : rawStatuses
+      ? [String(rawStatuses).trim()]
       : ["pending", "Approved, changes pending"];
 
     console.log("🧾 review-queue statuses:", wanted);
+
     const { deputies, statusCounts } = await fetchByStatuses(wanted);
+
     console.log("📦 review-queue ->", deputies.length);
 
     return res.json({
@@ -188,11 +188,21 @@ export const listDeputiesReviewQueue = async (req, res) => {
       deputies,
       total: deputies.length,
       statusCounts,
-      sample: deputies.slice(0, 10).map((d) => ({ id: d._id, name: d.name, status: d.status })),
+      sample: deputies.slice(0, 10).map((d) => ({
+        id: d._id,
+        name:
+          d.name ||
+          `${d.firstName || ""} ${d.lastName || ""}`.trim() ||
+          d.email,
+        status: d.status,
+      })),
     });
   } catch (err) {
     console.error("❌ listDeputiesReviewQueue error:", err);
-    res.status(500).json({ success: false, message: "Server error" });
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };
 

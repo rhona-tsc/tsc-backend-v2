@@ -395,8 +395,12 @@ lastLoginAt: { type: Date, default: null, index: true },
     },
 
     dateRegistered: { type: Date, default: Date.now },
+    profileLastEditedAt: { type: Date, default: null },
+profileLastReviewedAt: { type: Date, default: null },
+profileUpdatedByUser: { type: Boolean, default: false },
   },
-  { minimize: false, strict: true }
+  { minimize: false, strict: true },
+  { timestamps: true }
 );
 
 musicianSchema.pre("validate", async function (next) {
