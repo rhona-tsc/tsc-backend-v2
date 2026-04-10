@@ -169,40 +169,53 @@ export const listChangesPendingDeputies = async (_req, res) => {
 
 export const listDeputiesReviewQueue = async (req, res) => {
   try {
-    const rawStatuses = req.query.statuses;
+    const all = String(req.query.all || "").toLowerCase() === "true";
 
-    const wanted = Array.isArray(rawStatuses)
-      ? rawStatuses.map((s) => String(s).trim()).filter(Boolean)
-      : rawStatuses
-      ? [String(rawStatuses).trim()]
+    if (all) {
+      const deputies = await musicianModel
+        .find({ role: { $in: ["musician", "deputy"] } })
+        .select(
+          "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt"
+        )
+        .lean();
+
+      return res.json({
+        success: true,
+        deputies,
+        total: deputies.length,
+      });
+    }
+
+    const rawStatuses = req.query.statuses;
+    const statuses = Array.isArray(rawStatuses)
+      ? rawStatuses.flatMap((s) => String(s).split(","))
+      : String(rawStatuses || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+    const wanted = statuses.length
+      ? statuses
       : ["pending", "Approved, changes pending"];
 
-    console.log("🧾 review-queue statuses:", wanted);
-
-    const { deputies, statusCounts } = await fetchByStatuses(wanted);
-
-    console.log("📦 review-queue ->", deputies.length);
+    const deputies = await musicianModel
+      .find({
+        role: { $in: ["musician", "deputy"] },
+        status: { $in: wanted },
+      })
+      .select(
+        "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt"
+      )
+      .lean();
 
     return res.json({
       success: true,
       deputies,
       total: deputies.length,
-      statusCounts,
-      sample: deputies.slice(0, 10).map((d) => ({
-        id: d._id,
-        name:
-          d.name ||
-          `${d.firstName || ""} ${d.lastName || ""}`.trim() ||
-          d.email,
-        status: d.status,
-      })),
     });
   } catch (err) {
     console.error("❌ listDeputiesReviewQueue error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
