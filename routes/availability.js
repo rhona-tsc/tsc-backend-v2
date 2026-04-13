@@ -427,12 +427,12 @@ if (userId) {
     if (!actId)
       return res.status(400).json({ success: false, message: "Missing actId" });
 
-    // 🧮 Increment numberOfShortlistsIn
+    // 🧮 Increment numberOfShortlistsIn and loveCount
     const updated = await Act.findByIdAndUpdate(
       actId,
-      { $inc: { numberOfShortlistsIn: 1 } },
+      { $inc: { numberOfShortlistsIn: 1, loveCount: 1 } },
       { new: true }
-    ).select("_id name tscName numberOfShortlistsIn");
+    ).select("_id name tscName numberOfShortlistsIn loveCount");
 
 
     // Intentionally do NOT trigger availability from shortlist count changes.
@@ -465,11 +465,14 @@ router.patch("/act/:id/decrement-shortlist", async (req, res) => {
             numberOfShortlistsIn: {
               $max: [0, { $subtract: ["$numberOfShortlistsIn", 1] }],
             },
+            loveCount: {
+              $max: [0, { $subtract: ["$loveCount", 1] }],
+            },
           },
         },
       ],
       { new: true }
-    ).select("_id name tscName numberOfShortlistsIn");
+    ).select("_id name tscName numberOfShortlistsIn loveCount");
 
     res.json({ success: true, act: updated });
   } catch (err) {
