@@ -13,43 +13,71 @@ const router = express.Router();
 router.post("/search", searchActCards);
 
 router.get("/cards", async (req, res) => {
-  console.log("🔥 /api/act/cards HIT from:", __filename);
   try {
     const { status, limit = 200, sort = "-createdAt", skip = 0 } = req.query;
 
     const q = {};
     if (status) {
-      const arr = String(status)
-        .split(",")
-        .map((s) => String(s || "").trim())
-        .filter(Boolean);
-
-      if (arr.length) {
-        q.$or = arr.map((value) => ({
-          status: {
-            $regex: `^${String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
-            $options: "i",
-          },
-        }));
-      }
+      const arr = String(status).split(",").map(s => s.trim());
+      q.status = { $in: arr };
     }
 
     const sortObj = {};
     String(sort)
       .split(",")
-      .map((s) => s.trim())
+      .map(s => s.trim())
       .filter(Boolean)
-      .forEach((k) => {
+      .forEach(k => {
         if (k.startsWith("-")) sortObj[k.slice(1)] = -1;
         else sortObj[k] = 1;
       });
 
     const items = await actCardModel
       .find(q)
+      .select(
+        [
+          "actId",
+          "name",
+          "tscName",
+          "slug",
+          "imageUrl",
+          "images",
+          "basePrice",
+          "minDisplayPrice",
+          "availabilityBadge",
+          "status",
+          "genres",
+          "instruments",
+          "leadRole",
+          "vocalist",
+          "timesShortlisted",
+          "numberOfShortlistsIn",
+          "createdAt",
+          "updatedAt",
+          "bestseller",
+          "bestSeller",
+          "isTest",
+        ].join(" ")
+      )
       .sort(sortObj)
       .skip(Number(skip) || 0)
       .limit(Number(limit) || 200)
       .lean();
+
+    console.log("🔥 /api/act/cards source", {
+      model: actCardModel?.collection?.name,
+      count: items.length,
+      first: items[0]
+        ? {
+            actId: items[0].actId,
+            tscName: items[0].tscName,
+            imageUrl: items[0].imageUrl,
+            basePrice: items[0].basePrice,
+            minDisplayPrice: items[0].minDisplayPrice,
+            status: items[0].status,
+          }
+        : null,
+    });
 
     res.json({ success: true, acts: items, items });
   } catch (err) {
@@ -72,7 +100,34 @@ router.post("/cards/backfill", async (req, res) => {
 
     const acts = await actModel
       .find(q)
-      .select("_id name tscName images coverImage profileImage formattedPrice lineups numberOfShortlistsIn timesShortlisted status amendment")
+      .select(
+        [
+          "_id",
+          "name",
+          "tscName",
+          "slug",
+          "images",
+          "coverImage",
+          "profileImage",
+          "formattedPrice",
+          "minDisplayPrice",
+          "lineups",
+          "numberOfShortlistsIn",
+          "timesShortlisted",
+          "status",
+          "bestseller",
+          "bestSeller",
+          "updatedAt",
+          "createdAt",
+          "isTest",
+          "genres",
+          "genre",
+          "instruments",
+          "instrumentation",
+          "leadRole",
+          "vocalist",
+        ].join(" ")
+      )
       .lean();
 
     let updated = 0;
@@ -80,6 +135,13 @@ router.post("/cards/backfill", async (req, res) => {
       await upsertActCardFromAct(act);
       updated++;
     }
+
+    console.log("✅ /api/act/cards/backfill complete", {
+      sourceModel: actModel?.collection?.name,
+      targetModel: actCardModel?.collection?.name,
+      updated,
+      statuses: statuses?.length ? statuses : ["all"],
+    });
 
     res.json({ ok: true, updated });
   } catch (err) {

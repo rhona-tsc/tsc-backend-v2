@@ -49,6 +49,10 @@ const normalizeExtraKey = (k = "") =>
 /* Returns cards with extra fields needed for client-side filters */
 export async function getActCards(req, res) {
   console.log("🔥 getActCards using collection:", actModel.collection.name);
+  console.log("🔥 getActCards source", {
+  model: actModel?.collection?.name,
+  first: cards[0],
+});
   try {
     const statuses = String(req.query.status || "approved,live")
       .split(",")
@@ -777,6 +781,10 @@ export async function getActCards(req, res) {
 /* ------------------------------ searchActCards --------------------------- */
 /* Uses an aggregation so we can FLATTEN nested genre arrays and match them */
 export async function searchActCards(req, res) {
+  console.log("🔥 searchActCards source", {
+  model: ActFilterCard?.collection?.name,
+  first: cards[0],
+});
   try {
     const {
       // arrays from UI:
