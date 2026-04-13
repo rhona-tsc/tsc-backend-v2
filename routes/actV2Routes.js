@@ -272,8 +272,7 @@ router.delete(
   wrap("DELETE /delete-permanent", deleteActPermanently)
 );
 router.post("/restore", requireAnyAuth, wrap("POST /restore", restoreAct));
-router.get("/list", wrap("GET /list", getAllActsV2));
-router.get("/cards", wrap("GET /cards", getActCards));
+
 router.post(
   "/security-update/:id",
   requireAnyAuth,
@@ -312,16 +311,6 @@ router.get(
     next();
   },
   wrap("GET /acts", getAllActsV2)
-);
-
-router.get(
-  "/acts/:id",
-  requireAnyAuth,
-  (req, res, next) => {
-    console.log("📡 Route hit: GET /api/v2/acts/:id", req.params.id);
-    next();
-  },
-  wrap("GET /acts/:id", getActByIdV2)
 );
 
 router.get("/:id([0-9a-fA-F]{24})", requireAnyAuth, wrap("GET /:id", getActByIdV2));

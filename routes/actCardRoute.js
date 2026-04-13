@@ -18,16 +18,27 @@ router.get("/cards", async (req, res) => {
 
     const q = {};
     if (status) {
-      const arr = String(status).split(",").map(s => s.trim());
-      q.status = { $in: arr };
+      const arr = String(status)
+        .split(",")
+        .map((s) => String(s || "").trim())
+        .filter(Boolean);
+
+      if (arr.length) {
+        q.$or = arr.map((value) => ({
+          status: {
+            $regex: `^${String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+            $options: "i",
+          },
+        }));
+      }
     }
 
     const sortObj = {};
     String(sort)
       .split(",")
-      .map(s => s.trim())
+      .map((s) => s.trim())
       .filter(Boolean)
-      .forEach(k => {
+      .forEach((k) => {
         if (k.startsWith("-")) sortObj[k.slice(1)] = -1;
         else sortObj[k] = 1;
       });
@@ -39,7 +50,7 @@ router.get("/cards", async (req, res) => {
       .limit(Number(limit) || 200)
       .lean();
 
-    res.json({ items });
+    res.json({ success: true, acts: items, items });
   } catch (err) {
     console.error("❌ GET /act/cards failed:", err);
     res.status(500).json({ error: "Failed to fetch act cards" });
