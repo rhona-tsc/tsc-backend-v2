@@ -3282,7 +3282,6 @@ export {
   singleAct,
   emailContract,
   updateActStatus,
-  registerMusician,
   loginMusician,
   saveActDraft,
   saveAmendmentDraft,
