@@ -73,13 +73,15 @@ const transporter = nodemailer.createTransport({
 });
 
 async function sendEmail({ to, subject, html }) {
-  await transporter.sendMail({
-    from: FROM_HEADER,
-    replyTo: REPLY_TO,
-    to,
-    subject,
-    html,
-  });
+  const fromName = process.env.EMAIL_FROM_NAME || "The Supreme Collective";
+const fromAddress = process.env.EMAIL_FROM_ADDRESS || "hello@thesupremecollective.co.uk";
+
+await transporter.sendMail({
+  from: `"${fromName}" <${fromAddress}>`,
+  to,
+  subject,
+  html,
+});
 }
 
 // --- Bulk invite summary email helpers ---

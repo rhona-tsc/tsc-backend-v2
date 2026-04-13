@@ -13,7 +13,6 @@ import cloudinary from "./config/cloudinary.js";
 import feedbackRoutes from "./routes/feedbackRoutes.js";
 import noticeRoutes from "./routes/noticeRoutes.js";
 import actPreSubmissionRoutes from "./routes/actPreSubmissionRoutes.js";
-import router from "./routes/debugRoutes.js";
 import shortlistRoutes from "./routes/shortlist.js";
 import invoiceRoutes from "./routes/invoiceRoutes.js";
 import userRouter from "./routes/userRoute.js";
@@ -30,7 +29,6 @@ import musicianLoginRouter from "./routes/musicianLoginRoute.js";
 import allocationRoutes from "./routes/allocationRoutes.js";
 import availabilityRoutes from "./routes/availability.js";
 import paymentsRouter from "./routes/payments.js";
-import musicianRoutes from "./routes/musicianRoute.js";
 import accountRouter from "./routes/accountRoute.js";
 import bookingBoardRoutes from "./routes/bookingBoardRoutes.js";
 import uploadRoutes from "./routes/upload.js";
@@ -324,7 +322,6 @@ app.use("/api/agent-dashboard", agentDashboardRoutes);
 app.use("/api/user", userRouter);
 app.use("/api/auth", authRoutes);
 app.use("/api/account", accountRouter);
-
 app.use("/api/musician", musicianRouter);
 
 app.use("/api/act", actV2Routes);
@@ -388,7 +385,6 @@ app.use("/api/payments", paymentsRouter);
 
 
 // Upload & musician routes (duplicate kept for compatibility)
-app.use("/api/musician", musicianRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api", adminRoutes);
 /* -------------------------------------------------------------------------- */

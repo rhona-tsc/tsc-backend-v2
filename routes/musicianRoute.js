@@ -15,8 +15,7 @@ import {
   createStripeConnectOnboardingLink,
 } from "../controllers/musicianController.js";
 import {
-  addAct, listActs, removeAct, singleAct, updateActStatus,
-  registerMusician, loginMusician, saveActDraft, saveAmendmentDraft,
+  addAct, listActs, removeAct, singleAct, updateActStatus, loginMusician, saveActDraft, saveAmendmentDraft,
   approveAmendment, registerDeputy, listPendingDeputies, approveDeputy,
   rejectDeputy, updateAct, rejectAct, refreshAccessToken, logoutMusician, getDeputyById
 } from "../controllers/musicianController.js";
@@ -109,7 +108,7 @@ const uploadFields = upload.fields([
 ]);
 
 /* ---------------- AUTH (musician) ---------------- */
-router.post("/auth/register", registerMusician);
+router.post("/auth/register", uploadFields, registerDeputy);
 router.post("/auth/login", loginMusician);
 router.post("/auth/refresh", refreshAccessToken);
 router.post("/auth/logout", logoutMusician);

@@ -1681,50 +1681,7 @@ const saveActDraft = async (req, res) => {
   }
 };
 
-// Registration (generic)
-const registerMusician = async (req, res) => {
-  try {
-    let profileUrl = "";
-    if (req.file) {
-      const result = await uploader(req.file.path, "musicians");
-      profileUrl = result.secure_url;
-    }
 
-    const newMusician = new musicianModel({
-      ...JSON.parse(req.body), // or parse fields manually
-profile_picture: profileUrl,      // removed coverHeroImage: coverHeroUrl (undefined here)
-    });
-
-    await newMusician.save();
-
-    await sendInternalSignupNotification({
-      subject: `New Musician Signup – ${newMusician.firstName || ""} ${newMusician.lastName || ""}`.trim(),
-      html: `
-        <h3>New Musician Signup</h3>
-        <p><strong>Name:</strong> ${newMusician.firstName || ""} ${newMusician.lastName || ""}</p>
-        <p><strong>Email:</strong> ${newMusician.email || "—"}</p>
-        <p><strong>Phone:</strong> ${newMusician.phone || "—"}</p>
-        <p><strong>Status:</strong> ${newMusician.status || "pending"}</p>
-        <hr/>
-        <p>Submitted via musician registration flow.</p>
-      `,
-    });
-    res.status(201).json({
-      success: true,
-      message: "Musician registered",
-      musician: {
-        _id: newMusician._id,
-        musicianSlug: newMusician.musicianSlug || "",
-        canonicalPath: newMusician.musicianSlug
-          ? `/musician/${newMusician.musicianSlug}`
-          : `/musician/${newMusician._id}`,
-      },
-    });
-    } catch (err) {
-    console.error("❌ Registration failed:", err);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-};
 
 const saveAmendmentDraft = async (req, res) => {
   const { id, updates } = req.body;
