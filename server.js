@@ -18,7 +18,7 @@ import invoiceRoutes from "./routes/invoiceRoutes.js";
 import userRouter from "./routes/userRoute.js";
 import musicianRouter from "./routes/musicianRoute.js";
 import actV2Routes from "./routes/actV2Routes.js";
-import actCardRoutes from "./routes/actCardRoutes.js";
+import actCardRoute from "./routes/actCardRout.js";
 import cartRouter from "./routes/cartRoute.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
 import googleRoutes from "./routes/google.js";
@@ -323,7 +323,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/account", accountRouter);
 app.use("/api/musician", musicianRouter);
 
-app.use("/api/act", actCardRoutes);
+app.use("/api/act", actCardRoute);
 app.use("/api/act", actV2Routes);
 app.use("/api/musician/act-v2", actV2Routes);
 
