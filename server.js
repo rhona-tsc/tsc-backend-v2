@@ -18,7 +18,7 @@ import invoiceRoutes from "./routes/invoiceRoutes.js";
 import userRouter from "./routes/userRoute.js";
 import musicianRouter from "./routes/musicianRoute.js";
 import actV2Routes from "./routes/actV2Routes.js";
-import actCardRoute from "./routes/actCardRout.js";
+import actCardRoute from "./routes/actCardRoute.js";
 import cartRouter from "./routes/cartRoute.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
 import googleRoutes from "./routes/google.js";
