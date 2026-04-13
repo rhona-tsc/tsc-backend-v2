@@ -48,6 +48,7 @@ const normalizeExtraKey = (k = "") =>
 /* -------------------------------- getActCards ---------------------------- */
 /* Returns cards with extra fields needed for client-side filters */
 export async function getActCards(req, res) {
+  console.log("🔥 getActCards using collection:", actModel.collection.name);
   try {
     const statuses = String(req.query.status || "approved,live")
       .split(",")

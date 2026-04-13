@@ -13,6 +13,7 @@ const router = express.Router();
 router.post("/search", searchActCards);
 
 router.get("/cards", async (req, res) => {
+  console.log("🔥 /api/act/cards HIT from:", __filename);
   try {
     const { status, limit = 200, sort = "-createdAt", skip = 0 } = req.query;
 
