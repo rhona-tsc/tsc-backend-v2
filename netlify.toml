@@ -17,6 +17,16 @@ to = "/404.html"
 status = 404
 conditions = { Host = ["*.ngrok-free.app", "*.ngrok.io"] }
 
+[[redirects]]
+  from = "/*"
+  to = "https://thesupremecollective.co.uk/:splat"
+  status = 301
+  force = true
+  conditions = { Host = ["www.thesupremecollective.co.uk"] }
+
+# Netlify already handles http -> https for your custom domain,
+# so the only host-level redirect you need here is www -> non-www.
+
 # Lets you call /api/... in both dev and prod
 [[redirects]]
   from = "/api/*"
