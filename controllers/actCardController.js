@@ -49,9 +49,12 @@ const normalizeExtraKey = (k = "") =>
 /* Returns cards with extra fields needed for client-side filters */
 export async function getActCards(req, res) {
   try {
-    const statuses = String(req.query.status || "approved,live")
+    const rawStatuses = String(
+      req.query.status || "approved,live,approved_changes_pending"
+    )
       .split(",")
-      .map((s) => s.trim());
+      .map((s) => String(s || "").trim())
+      .filter(Boolean);
 
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const sort = String(req.query.sort || "-createdAt");
@@ -65,63 +68,132 @@ export async function getActCards(req, res) {
         else sortObj[k] = 1;
       });
 
+    const escapeRegex = (s = "") =>
+      String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const normalizeStatusToken = (s = "") =>
+      String(s)
+        .trim()
+        .toLowerCase()
+        .replace(/,/g, "")
+        .replace(/&/g, "and")
+        .replace(/[_\s-]+/g, " ");
+
+    const statusAliases = (s = "") => {
+      const n = normalizeStatusToken(s);
+      const out = new Set([n]);
+
+      if (n === "approved") out.add("approved");
+      if (n === "live") out.add("live");
+
+      if (
+        n === "approved changes pending" ||
+        n === "approved_changes_pending"
+      ) {
+        out.add("approved changes pending");
+        out.add("approved changes pending");
+      }
+
+      if (
+        n === "live changes pending" ||
+        n === "live_changes_pending"
+      ) {
+        out.add("live changes pending");
+      }
+
+      return Array.from(out);
+    };
+
+    const statusRegexes = rawStatuses.flatMap((s) =>
+      statusAliases(s).map(
+        (alias) => new RegExp(`^${escapeRegex(alias).replace(/\s+/g, "[\\s_-]*")}$`, "i")
+      )
+    );
+
     const cards = await actModel.aggregate([
-      { $match: { status: { $in: statuses } } },
+      {
+        $match: {
+          $expr: {
+            $or: statusRegexes.map((rx) => ({
+              $regexMatch: {
+                input: {
+                  $replaceAll: {
+                    input: {
+                      $replaceAll: {
+                        input: { $toLower: { $ifNull: ["$status", ""] } },
+                        find: ",",
+                        replacement: "",
+                      },
+                    },
+                    find: "&",
+                    replacement: "and",
+                  },
+                },
+                regex: rx,
+              },
+            })),
+          },
+        },
+      },
 
-      // ✅ Include both possible schema names so we can normalize later
-    {
-  $project: {
-    actId: "$_id",
-    name: 1,
-    tscName: 1,
-    slug: 1, // ✅ ADD THIS
+      {
+        $project: {
+          actId: "$_id",
+          name: 1,
+          tscName: 1,
+          slug: 1,
 
-    numberOfShortlistsIn: 1,
-    timesShortlisted: 1,
-    availabilityBadge: 1,
+          numberOfShortlistsIn: 1,
+          timesShortlisted: 1,
+          availabilityBadge: 1,
 
-    profileImage: 1,
-    coverImage: 1,
-    images: 1,
-    lineups: 1,
-    reviews: 1,
+          profileImage: 1,
+          coverImage: 1,
+          images: 1,
+          lineups: 1,
+          reviews: 1,
 
-    countyFees: 1,
-    useCountyTravelFee: 1,
+          countyFees: 1,
+          useCountyTravelFee: 1,
 
-    formattedPrice: 1,
-    minDisplayPrice: 1,
-    extras: 1,
+          formattedPrice: 1,
+          minDisplayPrice: 1,
+          extras: 1,
 
-    createdAt: 1,
-    updatedAt: 1,
-    bestseller: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          bestseller: 1,
 
-    loveCount: {
-      $ifNull: [
-        "$loveCount",
-        { $ifNull: ["$timesShortlisted", { $ifNull: ["$numberOfShortlistsIn", 0] }] },
-      ],
-    },
+          loveCount: {
+            $ifNull: [
+              "$loveCount",
+              {
+                $ifNull: [
+                  "$timesShortlisted",
+                  { $ifNull: ["$numberOfShortlistsIn", 0] },
+                ],
+              },
+            ],
+          },
 
-    genres: 1,
-    genre: 1,
-    instruments: 1,
-    instrumentation: 1,
+          genres: 1,
+          genre: 1,
+          instruments: 1,
+          instrumentation: 1,
 
-    vocalist: 1,
-    leadVocalist: 1,
-    leadRole: 1,
+          vocalist: 1,
+          leadVocalist: 1,
+          leadRole: 1,
 
-    lineupSizes: 1,
-    pliAmount: 1,
-    pa: 1,
-    light: 1,
-    status: 1,
-    isTest: 1,
-  },
-},
-      // ✅ Reviews: normalize + derive summary fields for UI (preview panel / cards)
+          lineupSizes: 1,
+          pliAmount: 1,
+          pa: 1,
+          light: 1,
+          status: 1,
+          isTest: 1,
+        },
+      },
+
       {
         $addFields: {
           reviews: { $ifNull: ["$reviews", []] },
@@ -143,7 +215,9 @@ export async function getActCards(req, res) {
                 },
               },
               as: "n",
-              cond: { $and: [{ $ne: ["$$n", null] }, { $gt: ["$$n", 0] }] },
+              cond: {
+                $and: [{ $ne: ["$$n", null] }, { $gt: ["$$n", 0] }],
+              },
             },
           },
         },
@@ -157,13 +231,11 @@ export async function getActCards(req, res) {
               0,
             ],
           },
-          // Keep a small preview array for lightweight UI usage
           reviewsPreview: { $slice: ["$reviews", 3] },
         },
       },
       { $project: { _reviewRatings: 0 } },
 
-      // Candidate images & base_fee snapshot
       {
         $addFields: {
           _img_prof: { $first: "$profileImage" },
@@ -185,13 +257,6 @@ export async function getActCards(req, res) {
         },
       },
 
-      {
-  $addFields: {
-    slug: { $ifNull: ["$slug", "$_filterCard.slug"] },
-  },
-},
-
-      // ✅ Normalize genres + instruments so frontend always gets arrays
       {
         $addFields: {
           _genresRaw: {
@@ -215,7 +280,12 @@ export async function getActCards(req, res) {
               "$_genresRaw",
               {
                 $cond: [
-                  { $and: [{ $ne: ["$_genresRaw", null] }, { $ne: ["$_genresRaw", ""] }] },
+                  {
+                    $and: [
+                      { $ne: ["$_genresRaw", null] },
+                      { $ne: ["$_genresRaw", ""] },
+                    ],
+                  },
                   {
                     $map: {
                       input: { $split: [{ $toString: "$_genresRaw" }, ","] },
@@ -235,7 +305,12 @@ export async function getActCards(req, res) {
               "$_instrumentsRaw",
               {
                 $cond: [
-                  { $and: [{ $ne: ["$_instrumentsRaw", null] }, { $ne: ["$_instrumentsRaw", ""] }] },
+                  {
+                    $and: [
+                      { $ne: ["$_instrumentsRaw", null] },
+                      { $ne: ["$_instrumentsRaw", ""] },
+                    ],
+                  },
                   {
                     $map: {
                       input: { $split: [{ $toString: "$_instrumentsRaw" }, ","] },
@@ -251,7 +326,6 @@ export async function getActCards(req, res) {
         },
       },
 
-      // ✅ Derive leadRole from smallest lineup (so vocalist-guitarist works)
       {
         $addFields: {
           _lineupsWithSize: {
@@ -265,7 +339,10 @@ export async function getActCards(req, res) {
             },
           },
           _sortedLineupDocs: {
-            $sortArray: { input: "$_lineupsWithSize", sortBy: { membersLen: 1 } },
+            $sortArray: {
+              input: "$_lineupsWithSize",
+              sortBy: { membersLen: 1 },
+            },
           },
           _smallestLineupDoc: { $first: "$_sortedLineupDocs" },
         },
@@ -273,9 +350,9 @@ export async function getActCards(req, res) {
 
       {
         $addFields: {
-          _membersSmallest: { $ifNull: ["$_smallestLineupDoc.lineup.bandMembers", []] },
-
-          // Any vocalist?
+          _membersSmallest: {
+            $ifNull: ["$_smallestLineupDoc.lineup.bandMembers", []],
+          },
           _vocalists: {
             $filter: {
               input: { $ifNull: ["$_smallestLineupDoc.lineup.bandMembers", []] },
@@ -287,7 +364,12 @@ export async function getActCards(req, res) {
                       $toString: {
                         $ifNull: [
                           "$$m.customRole",
-                          { $ifNull: ["$$m.role", { $ifNull: ["$$m.instrument", ""] }] },
+                          {
+                            $ifNull: [
+                              "$$m.role",
+                              { $ifNull: ["$$m.instrument", ""] },
+                            ],
+                          },
                         ],
                       },
                     },
@@ -316,7 +398,12 @@ export async function getActCards(req, res) {
                             $toString: {
                               $ifNull: [
                                 "$$m.customRole",
-                                { $ifNull: ["$$m.role", { $ifNull: ["$$m.instrument", ""] }] },
+                                {
+                                  $ifNull: [
+                                    "$$m.role",
+                                    { $ifNull: ["$$m.instrument", ""] },
+                                  ],
+                                },
                               ],
                             },
                           },
@@ -330,7 +417,12 @@ export async function getActCards(req, res) {
               in: {
                 $ifNull: [
                   { $first: "$$compoundVocals" },
-                  { $ifNull: [{ $first: "$_vocalists" }, { $first: "$_membersSmallest" }] },
+                  {
+                    $ifNull: [
+                      { $first: "$_vocalists" },
+                      { $first: "$_membersSmallest" },
+                    ],
+                  },
                 ],
               },
             },
@@ -346,18 +438,26 @@ export async function getActCards(req, res) {
                 $toString: {
                   $ifNull: [
                     "$_bestVocalist.customRole",
-                    { $ifNull: ["$_bestVocalist.role", { $ifNull: ["$_bestVocalist.instrument", ""] }] },
+                    {
+                      $ifNull: [
+                        "$_bestVocalist.role",
+                        { $ifNull: ["$_bestVocalist.instrument", ""] },
+                      ],
+                    },
                   ],
                 },
               },
             },
           },
 
-          // Only set derived leadRole if explicit leadRole is missing/blank
           leadRole: {
             $let: {
               vars: {
-                explicit: { $trim: { input: { $toString: { $ifNull: ["$leadRole", ""] } } } },
+                explicit: {
+                  $trim: {
+                    input: { $toString: { $ifNull: ["$leadRole", ""] } },
+                  },
+                },
                 best: { $toLower: "$_bestRoleStr" },
               },
               in: {
@@ -368,14 +468,29 @@ export async function getActCards(req, res) {
                     $cond: [
                       {
                         $and: [
-                          { $regexMatch: { input: "$$best", regex: /vocal|singer/ } },
-                          { $regexMatch: { input: "$$best", regex: /guitar|gtr/ } },
+                          {
+                            $regexMatch: {
+                              input: "$$best",
+                              regex: /vocal|singer/,
+                            },
+                          },
+                          {
+                            $regexMatch: {
+                              input: "$$best",
+                              regex: /guitar|gtr/,
+                            },
+                          },
                         ],
                       },
                       "Vocalist-Guitarist",
                       {
                         $cond: [
-                          { $regexMatch: { input: "$$best", regex: /vocal|singer/ } },
+                          {
+                            $regexMatch: {
+                              input: "$$best",
+                              regex: /vocal|singer/,
+                            },
+                          },
                           "Vocalist",
                           "",
                         ],
@@ -387,18 +502,25 @@ export async function getActCards(req, res) {
             },
           },
 
-          // Also set a simple vocalist flag if you want (optional but helpful)
           vocalist: {
             $let: {
               vars: {
-                explicitV: { $trim: { input: { $toString: { $ifNull: ["$vocalist", ""] } } } },
+                explicitV: {
+                  $trim: {
+                    input: { $toString: { $ifNull: ["$vocalist", ""] } },
+                  },
+                },
               },
               in: {
                 $cond: [
                   { $gt: [{ $strLenCP: "$$explicitV" }, 0] },
                   "$$explicitV",
                   {
-                    $cond: [{ $gt: [{ $size: "$_vocalists" }, 0] }, "Vocalist", ""],
+                    $cond: [
+                      { $gt: [{ $size: "$_vocalists" }, 0] },
+                      "Vocalist",
+                      "",
+                    ],
                   },
                 ],
               },
@@ -407,7 +529,6 @@ export async function getActCards(req, res) {
         },
       },
 
-      // --- Your existing fee/travel logic unchanged ---
       {
         $addFields: {
           _lineupCalc: {
@@ -435,7 +556,11 @@ export async function getActCards(req, res) {
                                   },
                                 },
                                 as: "r",
-                                in: { $toDouble: { $ifNull: ["$$r.additionalFee", 0] } },
+                                in: {
+                                  $toDouble: {
+                                    $ifNull: ["$$r.additionalFee", 0],
+                                  },
+                                },
                               },
                             },
                           },
@@ -480,7 +605,11 @@ export async function getActCards(req, res) {
               },
               in: {
                 $min: {
-                  $filter: { input: "$$arr", as: "v", cond: { $gt: ["$$v", 0] } },
+                  $filter: {
+                    input: "$$arr",
+                    as: "v",
+                    cond: { $gt: ["$$v", 0] },
+                  },
                 },
               },
             },
@@ -492,7 +621,10 @@ export async function getActCards(req, res) {
       {
         $addFields: {
           _sortedLineups: {
-            $sortArray: { input: "$_lineupCalc", sortBy: { membersLen: 1, bareFee: 1 } },
+            $sortArray: {
+              input: "$_lineupCalc",
+              sortBy: { membersLen: 1, bareFee: 1 },
+            },
           },
           _imageUrl: {
             $let: {
@@ -535,7 +667,10 @@ export async function getActCards(req, res) {
             ],
           },
           loveCount: {
-            $ifNull: ["$numberOfShortlistsIn", { $ifNull: ["$timesShortlisted", 0] }],
+            $ifNull: [
+              "$numberOfShortlistsIn",
+              { $ifNull: ["$timesShortlisted", 0] },
+            ],
           },
         },
       },
@@ -561,7 +696,6 @@ export async function getActCards(req, res) {
         },
       },
 
-      // 🔗 Pull filter-card fields (extras / DJ services / normalized arrays) so client-side filters work
       {
         $lookup: {
           from: ActFilterCard.collection.name,
@@ -571,9 +705,11 @@ export async function getActCards(req, res) {
         },
       },
       { $addFields: { _filterCard: { $first: "$_filterCard" } } },
+
       {
         $addFields: {
-          // Prefer act fields if present, otherwise fall back to ActFilterCard
+          slug: { $ifNull: ["$slug", "$_filterCard.slug"] },
+
           genres: {
             $cond: [
               { $gt: [{ $size: { $ifNull: ["$genres", []] } }, 0] },
@@ -596,7 +732,6 @@ export async function getActCards(req, res) {
             ],
           },
 
-          // Ensure `extras` is present (many client filters depend on this)
           extras: {
             $cond: [
               {
@@ -616,16 +751,12 @@ export async function getActCards(req, res) {
             ],
           },
 
-     
-
-          // Other fields sometimes used by filters
           pliAmount: { $ifNull: ["$pliAmount", "$_filterCard.pliAmount"] },
           pa: { $ifNull: ["$pa", "$_filterCard.pa"] },
           light: { $ifNull: ["$light", "$_filterCard.light"] },
         },
       },
 
-      // Tidy up
       {
         $project: {
           _img_prof: 0,
@@ -657,7 +788,6 @@ export async function getActCards(req, res) {
           useCountyTravelFee: 0,
           formattedPrice: 0,
 
-          // optional: you can also hide raw schema names if you want
           genre: 0,
           instrumentation: 0,
           _filterCard: 0,
@@ -668,16 +798,11 @@ export async function getActCards(req, res) {
       { $limit: limit },
     ]);
 
-    // 🔧 Normalize + tag vocalist roles so instrument filters like
-    // "Male Vocalist" and "MC/Rapper" work even when the raw role is
-    // "Lead Male Vocal / Rapper".
     const splitInstrumentParts = (val) => {
       const parts = [];
       const push = (s) => {
         const t = String(s || "").trim();
         if (!t) return;
-        // Some cards store instruments as one big string using pipes.
-        // Split on pipes first, then commas.
         t.split("|").forEach((chunk) => {
           String(chunk)
             .split(",")
@@ -699,8 +824,6 @@ export async function getActCards(req, res) {
 
       if (has(/vocal|singer/)) tags.add("Vocalist");
 
-      // ✅ Vocalist-Guitarist (covers Vocalist-Guitarist, Vocalist-Acoustic Guitarist, etc)
-      // Any role string that contains both a vocalist term and a guitar term.
       if (
         has(
           /\b(vocal|vocalist|singer)\b.*\b(guitar|guitarist)\b|\b(guitar|guitarist)\b.*\b(vocal|vocalist|singer)\b/
@@ -709,19 +832,14 @@ export async function getActCards(req, res) {
         tags.add("Vocalist-Guitarist");
       }
 
-      // ✅ Lead Vocalist (any gender): any role containing both "lead" and a vocal term
-      // Examples matched:
-      // - "Lead Male Vocal / Rapper"
-      // - "Lead Female Vocal"
-      // - "Male Lead Vocalist"
-      // - "Lead Vocal"
-      if (has(/\blead\b.*\b(vocal|vocalist|singer)\b|\b(vocal|vocalist|singer)\b.*\blead\b/)) {
+      if (
+        has(
+          /\blead\b.*\b(vocal|vocalist|singer)\b|\b(vocal|vocalist|singer)\b.*\blead\b/
+        )
+      ) {
         tags.add("Lead Vocalist");
       }
 
-      // ✅ Male Vocalist (STRICT lead only)
-      // Matches: "Male Lead Vocalist", "Male Lead Vocal", "Lead Male Vocalist", "Lead Male Vocal",
-      // and optionally " / Rapper".
       if (
         has(
           /\b(?:male\s*lead\s*vocal(?:ist)?|lead\s*male\s*vocal(?:ist)?)(?:\s*\/\s*rapper)?\b/
@@ -730,16 +848,16 @@ export async function getActCards(req, res) {
         tags.add("Male Vocalist");
       }
 
-      // Female vocalist (kept as-is)
-      if (has(/(lead\s*)?female\s*(vocal|singer)|female\s*lead\s*(vocal|singer)/)) {
+      if (
+        has(
+          /(lead\s*)?female\s*(vocal|singer)|female\s*lead\s*(vocal|singer)/
+        )
+      ) {
         tags.add("Female Vocalist");
       }
 
-      // ✅ MC / Rapper (this WILL pick up "Lead Female Vocal / Rapper" etc)
       if (has(/\bmc\b|m\/?c|rapper/)) tags.add("MC/Rapper");
 
-      // ✅ Electric / Acoustic Guitar (strict)
-      // "Electric Guitar" must NOT match "Acoustic Guitar".
       if (has(/\belectric\s*guitar\b|\belectric\s*guitarist\b/)) {
         tags.add("Electric Guitar");
       }
@@ -748,10 +866,10 @@ export async function getActCards(req, res) {
         tags.add("Acoustic Guitar");
       }
 
-      // ✅ Bass category (Acoustic/Electric/Double Bass + Bass Guitar)
-      // Includes common variants and avoids accidental matches like "bassoon".
       if (
-        has(/\b(?:acoustic|electric|double)\s*bass\b|\bbass\s*guitar\b|\bvocalist[-\s]*bassist\b|\bbassist\b/)
+        has(
+          /\b(?:acoustic|electric|double)\s*bass\b|\bbass\s*guitar\b|\bvocalist[-\s]*bassist\b|\bbassist\b/
+        )
       ) {
         tags.add("Bass");
       }
@@ -762,12 +880,16 @@ export async function getActCards(req, res) {
     for (const c of cards) {
       const parts = splitInstrumentParts(c?.instruments);
       const tags = deriveVocalTags(parts);
-      // Preserve original parts but add the normalized tags.
-      const merged = Array.from(new Set([...(parts || []), ...(tags || [])])).filter(Boolean);
+      const merged = Array.from(
+        new Set([...(parts || []), ...(tags || [])])
+      ).filter(Boolean);
       if (merged.length) c.instruments = merged;
     }
 
-    res.set("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=600");
+    res.set(
+      "Cache-Control",
+      "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
+    );
     return res.json({ success: true, acts: cards });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
