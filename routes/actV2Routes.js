@@ -272,9 +272,8 @@ router.delete(
   wrap("DELETE /delete-permanent", deleteActPermanently)
 );
 router.post("/restore", requireAnyAuth, wrap("POST /restore", restoreAct));
-router.get("/list", requireAnyAuth, wrap("GET /list", getAllActsV2));
-router.get("/cards", requireAnyAuth, wrap("GET /cards", getActCards));
-
+router.get("/list", wrap("GET /list", getAllActsV2));
+router.get("/cards", wrap("GET /cards", getActCards));
 router.post(
   "/security-update/:id",
   requireAnyAuth,
