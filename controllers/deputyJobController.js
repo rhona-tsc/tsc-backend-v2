@@ -2651,11 +2651,14 @@ export const confirmDeputyAllocation = async (req, res) => {
     });
 
     let chargeResult = null;
-    if (job.stripeCustomerId && job.defaultPaymentMethodId) {
-      chargeResult = await attemptDeputyJobCharge({
-        job,
-        createdBy: req.user?._id || null,
-      });
+   if (job.paymentStatus === "paid") {
+  chargeResult = { success: true, message: "Already paid" };
+} else if (job.stripeCustomerId && job.defaultPaymentMethodId) {
+  chargeResult = await attemptDeputyJobCharge({
+    job,
+    createdBy: req.user?._id || null,
+  });
+
     } else if (job.clientEmail) {
       job.paymentStatus = "setup_required";
     }
