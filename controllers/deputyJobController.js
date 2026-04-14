@@ -2661,6 +2661,23 @@ export const confirmDeputyAllocation = async (req, res) => {
     }
 
    let whatsappResult = null;
+
+   const rawTargetPhone =
+  musician?.phone ||
+  musician?.phoneNumber ||
+  application?.phoneNormalized ||
+  application?.phone ||
+  "";
+
+const targetPhone = toE164(rawTargetPhone);
+
+console.log("📲 Allocation WhatsApp target", {
+  jobId: String(job._id),
+  musicianId: String(musician._id),
+  targetPhone,
+  rawPhone: rawTargetPhone,
+});
+
 let whatsappErrorMessage = "";
 
 if (targetPhone) {
@@ -2702,11 +2719,11 @@ if (targetPhone) {
         providerMessageId: whatsappResult?.sid || "",
         status: whatsappResult?.sid ? "sent" : "failed",
         sentAt: new Date(),
-        error: whatsappResult?.sid
-          ? ""
-          : targetPhone
-            ? "WhatsApp allocation send failed"
-            : "No phone number available for allocation message",
+       error: whatsappResult?.sid
+  ? ""
+  : targetPhone
+    ? whatsappErrorMessage || "WhatsApp allocation send failed"
+    : "No phone number available for allocation message",
       },
     ];
 
