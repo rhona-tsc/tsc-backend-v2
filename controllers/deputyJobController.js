@@ -4410,7 +4410,7 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
 };
 
 export const sendDeputyJobNotificationsToUnnotified =
-  resendDeputyJobNotifications;
+  sendRemainingDeputyJobNotifications;
   
 export const createDeputyJobSetupIntent = async (req, res) => {
   try {

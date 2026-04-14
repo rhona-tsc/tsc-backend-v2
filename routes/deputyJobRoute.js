@@ -23,8 +23,10 @@ import {
   sendDeputyJobTestNotification,
   resendDeputyJobNotifications,
   sendDeputyJobNotificationsToUnnotified,
+  sendRemainingDeputyJobNotifications,
 } from "../controllers/deputyJobController.js";
 import authUser from "../middleware/auth.js";
+import { auth } from "googleapis/build/src/apis/abusiveexperiencereport/index.js";
 
 const deputyJobRouter = express.Router();
 
@@ -69,6 +71,12 @@ deputyJobRouter.post(
   "/:id/send-unnotified-notifications",
   authUser,
   sendDeputyJobNotificationsToUnnotified
+);
+
+deputyJobRouter.post(
+  "/:id/send-remaining-notifications",
+  authUser,
+  sendRemainingDeputyJobNotifications
 );
 
 /**
