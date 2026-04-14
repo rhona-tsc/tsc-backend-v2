@@ -1404,14 +1404,40 @@ const getMatchedMusiciansForJob = async (job) => {
   const ids = Array.isArray(job?.matchedMusicianIds)
     ? job.matchedMusicianIds
     : [];
-  if (!ids.length) return [];
 
-  return musicianModel
-    .find(
-      { _id: { $in: ids } },
-      "firstName lastName email phone phoneNumber musicianSlug profilePhoto profilePicture profileImage profilePic profile_picture additionalImages",
-    )
-    .lean();
+  if (ids.length) {
+    return musicianModel
+      .find(
+        { _id: { $in: ids } },
+        "firstName lastName email phone phoneNumber musicianSlug profilePhoto profilePicture profileImage profilePic profile_picture additionalImages"
+      )
+      .lean();
+  }
+
+  const matches = await findMatchingMusiciansForDeputyJob({
+    instrument: job?.instrument || job?.requiredInstruments?.[0] || "",
+    isVocalSlot: Boolean(job?.isVocalSlot),
+    essentialRoles: Array.isArray(job?.essentialRoles) ? job.essentialRoles : [],
+    desiredRoles: Array.isArray(job?.desiredRoles) ? job.desiredRoles : [],
+    secondaryInstruments: Array.isArray(job?.secondaryInstruments)
+      ? job.secondaryInstruments
+      : [],
+    genres: Array.isArray(job?.genres) && job.genres.length
+      ? job.genres
+      : job?.tags || [],
+    county: job?.county || "",
+    postcode: job?.postcode || "",
+    excludeIds: job?.createdBy ? [String(job.createdBy)] : [],
+  });
+
+  job.matchedMusicianIds = matches
+    .map((m) => m?._id || m?.id)
+    .filter(Boolean);
+
+  job.matchedMusicians = matches.map(buildMatchSnapshot);
+  job.matchedCount = matches.length;
+
+  return matches;
 };
 
 const findApplicationFromJob = (job, musicianId) => {
