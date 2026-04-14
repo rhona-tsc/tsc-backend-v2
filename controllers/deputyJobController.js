@@ -1763,7 +1763,8 @@ export const createDeputyJob = async (req, res) => {
 
     const hasSavedCardDetails =
       Boolean(normaliseString(job?.stripeCustomerId)) &&
-      Boolean(normaliseString(job?.defaultPaymentMethodId));
+      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+      job?.paymentStatus === "ready_to_charge";
 
     if (built.mode === "send" && hasSavedCardDetails) {
       const notificationResults = await notifyMusiciansAboutDeputyJob({
@@ -1857,6 +1858,7 @@ export const createDeputyJob = async (req, res) => {
         try {
           await sendEmail({
             to: previewRecipientEmail,
+            bcc: DEPUTY_JOB_BCC_EMAIL,
             subject: `[Preview] ${matcherResult.previewNotification.subject}`,
             html: matcherResult.previewNotification.html,
             text: matcherResult.previewNotification.text,
@@ -2112,9 +2114,10 @@ export const sendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-const hasSavedCardDetails =
-    Boolean(normaliseString(job?.stripeCustomerId)) &&
-    Boolean(normaliseString(job?.defaultPaymentMethodId));
+    const hasSavedCardDetails =
+      Boolean(normaliseString(job?.stripeCustomerId)) &&
+      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+      job?.paymentStatus === "ready_to_charge";
 
     if (!hasSavedCardDetails) {
       return res.status(400).json({
@@ -2815,6 +2818,7 @@ export const sendDeputyBookingEmail = async (req, res) => {
       await sendEmail({
         to: musician.email || "",
         subject: preview.subject,
+        bcc: DEPUTY_JOB_BCC_EMAIL,
         html: preview.html,
         text: preview.text,
       });
@@ -3082,6 +3086,7 @@ const dateText = formatFullDate(job.eventDate);
 
           await sendEmail({
             to: musicianEmail,
+            bcc: DEPUTY_JOB_BCC_EMAIL,
             subject: `Confirmed: ${jobTitle}`,
             html: `
     <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
@@ -4116,9 +4121,10 @@ export const resendDeputyJobNotifications = async (req, res) => {
       });
     }
 
- const hasSavedCardDetails =
-  Boolean(normaliseString(job?.stripeCustomerId)) &&
-  Boolean(normaliseString(job?.defaultPaymentMethodId));
+    const hasSavedCardDetails =
+      Boolean(normaliseString(job?.stripeCustomerId)) &&
+      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+      job?.paymentStatus === "ready_to_charge";
 
     if (!hasSavedCardDetails) {
       return res.status(400).json({
@@ -4132,12 +4138,43 @@ export const resendDeputyJobNotifications = async (req, res) => {
     const matches = await getMatchedMusiciansForJob(job);
 
     if (!Array.isArray(matches) || !matches.length) {
-      return res.status(400).json({
-        success: false,
-        message: "No matched musicians found for this deputy job.",
-        job: withDeputyJobAliases(job),
-      });
-    }
+  return res.status(400).json({
+    success: false,
+    message: "No matched musicians found for this deputy job.",
+    job: withDeputyJobAliases(job),
+  });
+}
+
+    const alreadyNotifiedIds = new Set(
+  [
+    ...(Array.isArray(job.notifiedMusicianIds) ? job.notifiedMusicianIds : []),
+    ...(Array.isArray(job.notifications)
+      ? job.notifications
+          .filter((n) => n?.status === "sent" && n?.musicianId)
+          .map((n) => n.musicianId)
+      : []),
+  ]
+    .map((id) => asObjectIdString(id))
+    .filter(Boolean)
+);
+
+const remainingMatches = matches.filter((musician) => {
+  const musicianId = asObjectIdString(
+    musician?._id || musician?.id || musician?.musicianId
+  );
+  return musicianId && !alreadyNotifiedIds.has(musicianId);
+});
+
+if (!remainingMatches.length) {
+  return res.json({
+    success: true,
+    message: "No remaining matched musicians to notify",
+    job: withDeputyJobAliases(job),
+    newlyNotifiedCount: 0,
+    notificationResults: [],
+  });
+}
+
 
     const correctionIntroHtml = `
       <div style="margin:0 0 24px; padding:18px 20px; border:1px solid #f1d0d1; background:#fff7f7; border-radius:16px; font-family:Arial, sans-serif; color:#333; line-height:1.7;">
@@ -4159,9 +4196,9 @@ export const resendDeputyJobNotifications = async (req, res) => {
     ].join("\n");
 
     const notificationResults = [];
-let hasSentBccCopy = false;
-    for (const musician of matches) {
-      const preview = buildJobNotificationPreview({
+
+for (const musician of remainingMatches) {
+        const preview = buildJobNotificationPreview({
         job,
         musicians: [musician],
         previewRecipientEmail: normaliseEmail(musician?.email || ""),
@@ -4172,19 +4209,13 @@ let hasSentBccCopy = false;
         .filter(Boolean)
         .join("\n\n");
 
-      const shouldBccThisEmail = Boolean(DEPUTY_JOB_BCC_EMAIL) && !hasSentBccCopy;
-
-const emailResult = await sendEmail({
-  to: musician?.email || "",
-  ...(shouldBccThisEmail ? { bcc: DEPUTY_JOB_BCC_EMAIL } : {}),
-  subject: `Corrected Links: ${preview.subject}`,
-  html: emailHtml,
-  text: emailText,
-});
-
-if (shouldBccThisEmail && emailResult?.ok) {
-  hasSentBccCopy = true;
-}
+      const emailResult = await sendEmail({
+        to: musician?.email || "",
+        bcc: DEPUTY_JOB_BCC_EMAIL,
+        subject: `Corrected Links: ${preview.subject}`,
+        html: emailHtml,
+        text: emailText,
+      });
 
       notificationResults.push({
         musicianId: musician?._id || musician?.musicianId || null,
@@ -4205,18 +4236,31 @@ if (shouldBccThisEmail && emailResult?.ok) {
       .filter((r) => r.status === "sent" && r.musicianId)
       .map((r) => r.musicianId);
 
-    job.notifiedMusicianIds = sentIds;
+    const allSentIds = Array.from(
+  new Set(
+    [
+      ...(Array.isArray(job.notifiedMusicianIds) ? job.notifiedMusicianIds : []),
+      ...sentIds,
+    ]
+      .map((id) => asObjectIdString(id))
+      .filter(Boolean)
+  )
+);
+
+job.notifiedMusicianIds = allSentIds;
+job.notifiedCount = allSentIds.length;
+
     job.notifications = [
       ...(job.notifications || []),
       ...notificationResults,
     ];
-    job.notifiedCount = sentIds.length;
+
     job.status = "open";
     job.previewMode = false;
     job.workflowStage = "sent_to_matches";
     job.matchedMusicians = (job.matchedMusicians || []).map((m) => ({
       ...m,
-      notified: sentIds.some(
+      notified: allSentIds.some(
         (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
       ),
       notifiedAt: sentIds.some(
@@ -4232,7 +4276,8 @@ if (shouldBccThisEmail && emailResult?.ok) {
       success: true,
       message: "Corrected notifications resent",
       job: withDeputyJobAliases(job),
-      notifiedCount: sentIds.length,
+      newlyNotifiedCount: sentIds.length,
+notifiedCount: job.notifiedCount,
       notificationResults,
     });
   } catch (error) {
@@ -4365,8 +4410,8 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
 };
 
 export const sendDeputyJobNotificationsToUnnotified =
-  sendRemainingDeputyJobNotifications;
-
+  resendDeputyJobNotifications;
+  
 export const createDeputyJobSetupIntent = async (req, res) => {
   try {
     if (!ensureStripeReady(res)) return;
