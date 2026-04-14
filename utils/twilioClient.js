@@ -384,8 +384,20 @@ export const sendDeputyAllocationWhatsApp = async ({
     ? Array.from(new Set(locationParts)).join(", ")
     : job?.location || "Location TBC";
 
-  const fee = String(Number(job?.fee || 0) || "");
-  const firstName =
+const grossFee = Number(job?.fee || job?.grossAmount || 0);
+const storedNetFee = Number(job?.deputyNetAmount || 0);
+const stripeFee = Number(job?.stripeFeeAmount || 0);
+
+const netFeeValue =
+  storedNetFee > 0
+    ? storedNetFee
+    : grossFee > 0 && stripeFee > 0
+      ? grossFee - stripeFee
+      : grossFee;
+
+const fee = netFeeValue > 0 ? String(Math.round(netFeeValue)) : "";
+
+const firstName =
     musician?.firstName ||
     musician?.firstname ||
     musician?.basicInfo?.firstName ||
@@ -422,7 +434,7 @@ return sendWhatsAppMessage({
   dateISO: job?.eventDate || "",
   address: location,
   role: roleLabel,
-  finalFee: Number(job?.fee || 0),
+finalFee: netFeeValue,
   skipFeeCompute: true,
   smsBody: smsBody,
   contentSid: allocationContentSid,
