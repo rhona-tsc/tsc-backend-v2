@@ -1568,19 +1568,7 @@ if (createdNew) {
 
     const saved = await musician.save();
 
-    await sendInternalSignupNotification({
-      subject: `New Musician Signup – ${saved.firstName || ""} ${saved.lastName || ""}`.trim(),
-      html: `
-        <h3>New Musician Signup</h3>
-        <p><strong>Name:</strong> ${saved.firstName || ""} ${saved.lastName || ""}</p>
-        <p><strong>Email:</strong> ${saved.email || "—"}</p>
-        <p><strong>Phone:</strong> ${saved.phone || saved.basicInfo?.phone || "—"}</p>
-        <p><strong>Status:</strong> ${saved.status || "pending"}</p>
-        <p><strong>Type:</strong> ${createdNew ? "New musician/deputy registration" : "Existing musician/deputy updated registration"}</p>
-        <hr/>
-        <p>Submitted via musician registration flow.</p>
-      `,
-    });
+
 
     // END snapshot: read back from DB to confirm persisted shape
     const roundTrip = await musicianModel.findById(saved._id).lean();

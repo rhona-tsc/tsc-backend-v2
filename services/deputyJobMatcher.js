@@ -287,7 +287,14 @@ const getVocalTypes = (musician) =>
     : [];
 
 
-const getVocalGender = (musician) => norm(musician?.vocals?.gender || "");
+const getVocalGender = (musician) =>
+  norm(
+    musician?.vocals?.gender ||
+      musician?.vocalGender ||
+      musician?.gender ||
+      musician?.basicInfo?.gender ||
+      ""
+  );
 
 const wantsFemaleJob = (value = "") => /\bfemale\b/.test(norm(value));
 const wantsMaleJob = (value = "") => /\bmale\b/.test(norm(value));
@@ -335,7 +342,35 @@ const wantsVocalistInstrumentalist = (instrument = "") => {
 
 const isLeadVocalist = (musician) => {
   const vocalTypes = getVocalTypes(musician);
-  return vocalTypes.some((type) => type.includes("lead vocalist"));
+
+  if (
+    vocalTypes.some(
+      (type) =>
+        type.includes("lead vocalist") ||
+        type.includes("lead vocal") ||
+        type.includes("lead singer") ||
+        type.includes("female lead vocalist") ||
+        type.includes("male lead vocalist") ||
+        type.includes("vocalist")
+    )
+  ) {
+    return true;
+  }
+
+  const instruments = Array.isArray(musician?.instrumentation)
+    ? musician.instrumentation.map((item) => norm(item?.instrument || item))
+    : [];
+
+  return instruments.some(
+    (instrument) =>
+      instrument.includes("lead vocalist") ||
+      instrument.includes("lead vocal") ||
+      instrument.includes("lead singer") ||
+      instrument.includes("female lead vocalist") ||
+      instrument.includes("male lead vocalist") ||
+      instrument.includes("vocalist") ||
+      instrument.includes("singer")
+  );
 };
 
 const isLeadVocalistInstrumentalist = (musician, requiredInstrument = "") => {
@@ -491,7 +526,15 @@ export const findMatchingMusiciansForDeputyJob = async ({
   const pool = await musicianModel
     .find({
       role: "musician",
-      status: { $in: ["approved", "Approved, changes pending"] },
+      status: {
+        $in: [
+          "approved",
+          "Approved",
+          "Approved, changes pending",
+          "approved_changes_pending",
+          "live_changes_pending",
+        ],
+      },
       ...(excludeIds.length ? { _id: { $nin: excludeIds } } : {}),
     })
     .lean();
