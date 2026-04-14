@@ -868,7 +868,7 @@ if (!deputy) {
 
     // Optional: access control — allow self or agents
     const me = req.user; // set by verifyToken
-    const meId = me?._id?.toString?.() || "";
+    const meId = String(me?._id || me?.id || me?.userId || me?.musicianId || "");
 const meSlug = String(me?.musicianSlug || "").trim();
 
 const isSelfById = isObjectId && meId === identifier;
