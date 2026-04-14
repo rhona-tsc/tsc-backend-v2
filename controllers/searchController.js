@@ -1,4 +1,6 @@
 import ActFilterCard from "../models/ActFilterCard.js";
+import actCardModel from "../models/actCard.model.js";
+import actModel from "../models/actModel.js";
 
 
 const APPROVED_LIKE = [
@@ -26,6 +28,62 @@ function toArray(v) {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+async function hydrateLoveCounts(cards = []) {
+  if (!Array.isArray(cards) || cards.length === 0) return [];
+
+  const ids = cards
+    .map((card) => String(card?.actId || card?._id || card?.id || ""))
+    .filter(Boolean);
+
+  if (!ids.length) return cards;
+
+  const [actCards, acts] = await Promise.all([
+    actCardModel
+      .find({ actId: { $in: ids } })
+      .select("actId loveCount timesShortlisted numberOfShortlistsIn")
+      .lean(),
+    actModel
+      .find({ _id: { $in: ids } })
+      .select("_id loveCount timesShortlisted numberOfShortlistsIn")
+      .lean(),
+  ]);
+
+  const byId = new Map();
+
+  for (const row of actCards || []) {
+    byId.set(String(row.actId || row._id || ""), row);
+  }
+
+  for (const row of acts || []) {
+    const id = String(row._id || row.actId || "");
+    byId.set(id, { ...(byId.get(id) || {}), ...row });
+  }
+
+  return cards.map((card) => {
+    const id = String(card?.actId || card?._id || card?.id || "");
+    const source = byId.get(id) || {};
+    const loveCount =
+      Number(
+        source?.loveCount ??
+          card?.loveCount ??
+          source?.timesShortlisted ??
+          card?.timesShortlisted ??
+          source?.numberOfShortlistsIn ??
+          card?.numberOfShortlistsIn ??
+          0
+      ) || 0;
+
+    return {
+      ...card,
+      loveCount,
+      timesShortlisted:
+        Number(card?.timesShortlisted ?? source?.timesShortlisted ?? 0) || 0,
+      numberOfShortlistsIn:
+        Number(card?.numberOfShortlistsIn ?? source?.numberOfShortlistsIn ?? 0) || 0,
+    };
+  });
 }
 
 export const getFilterCards = async (req, res) => {
@@ -56,6 +114,10 @@ export const getFilterCards = async (req, res) => {
         { name: { $regex: q, $options: "i" } },
         { tscName: { $regex: q, $options: "i" } },
       ];
+    }
+    const ids = toArray(req.query.ids);
+    if (ids.length) {
+      baseMatch.actId = { $in: ids };
     }
 
     // genre/instrument/lineup are multi-value (comma OK)
@@ -116,11 +178,15 @@ export const getFilterCards = async (req, res) => {
         ActFilterCard.countDocuments(baseMatch),
       ]);
 
+      const enrichedCards = await hydrateLoveCounts(cards);
+
       return res.json({
         page,
         limit,
         total,
-        results: cards,
+        results: enrichedCards,
+        cards: enrichedCards,
+        acts: enrichedCards,
       });
     }
 
@@ -221,11 +287,15 @@ export const getFilterCards = async (req, res) => {
     const cards = Array.isArray(facet?.[0]?.data) ? facet[0].data : [];
     const total = Number(facet?.[0]?.total?.[0]?.n || 0);
 
+    const enrichedCards = await hydrateLoveCounts(cards);
+
     return res.json({
       page,
       limit,
       total,
-      results: cards,
+      results: enrichedCards,
+      cards: enrichedCards,
+      acts: enrichedCards,
     });
   } catch (err) {
     console.error("GET /api/v2/search/cards error:", err);

@@ -35,51 +35,96 @@ router.get("/cards", async (req, res) => {
     const items = await actCardModel
       .find(q)
       .select(
-        [
-          "actId",
-          "name",
-          "tscName",
-          "slug",
-          "imageUrl",
-          "images",
-          "basePrice",
-          "minDisplayPrice",
-          "availabilityBadge",
-          "status",
-          "genres",
-          "instruments",
-          "leadRole",
-          "vocalist",
-          "timesShortlisted",
-          "numberOfShortlistsIn",
-          "createdAt",
-          "updatedAt",
-          "bestseller",
-          "bestSeller",
-          "isTest",
-        ].join(" ")
-      )
+  [
+    "actId",
+    "name",
+    "tscName",
+    "slug",
+    "imageUrl",
+    "images",
+    "basePrice",
+    "minDisplayPrice",
+    "availabilityBadge",
+    "status",
+    "genres",
+    "instruments",
+    "leadRole",
+    "vocalist",
+    "loveCount",
+    "timesShortlisted",
+    "numberOfShortlistsIn",
+    "createdAt",
+    "updatedAt",
+    "bestseller",
+    "bestSeller",
+    "isTest",
+  ].join(" ")
+)
       .sort(sortObj)
       .skip(Number(skip) || 0)
       .limit(Number(limit) || 200)
       .lean();
 
+    // Keep counters fresh from the acts collection. actcards can be stale if the
+    // card was built before loveCount existed or before a shortlist update.
+    const actIds = items
+      .map((item) => item?.actId)
+      .filter(Boolean);
+
+    const sourceActs = actIds.length
+      ? await actModel
+          .find({ _id: { $in: actIds } })
+          .select("_id loveCount timesShortlisted numberOfShortlistsIn")
+          .lean()
+      : [];
+
+    const countsByActId = new Map(
+      sourceActs.map((act) => [
+        String(act._id),
+        {
+          loveCount: Number(act.loveCount ?? act.timesShortlisted ?? act.numberOfShortlistsIn ?? 0) || 0,
+          timesShortlisted: Number(act.timesShortlisted ?? 0) || 0,
+          numberOfShortlistsIn: Number(act.numberOfShortlistsIn ?? 0) || 0,
+        },
+      ])
+    );
+
+    const hydratedItems = items.map((item) => {
+      const counts = countsByActId.get(String(item?.actId || ""));
+      if (!counts) {
+        return {
+          ...item,
+          loveCount: Number(item?.loveCount ?? item?.timesShortlisted ?? item?.numberOfShortlistsIn ?? 0) || 0,
+          timesShortlisted: Number(item?.timesShortlisted ?? 0) || 0,
+          numberOfShortlistsIn: Number(item?.numberOfShortlistsIn ?? 0) || 0,
+        };
+      }
+
+      return {
+        ...item,
+        loveCount: counts.loveCount,
+        timesShortlisted: counts.timesShortlisted,
+        numberOfShortlistsIn: counts.numberOfShortlistsIn,
+      };
+    });
+
     console.log("🔥 /api/act/cards source", {
       model: actCardModel?.collection?.name,
-      count: items.length,
-      first: items[0]
+      count: hydratedItems.length,
+      first: hydratedItems[0]
         ? {
-            actId: items[0].actId,
-            tscName: items[0].tscName,
-            imageUrl: items[0].imageUrl,
-            basePrice: items[0].basePrice,
-            minDisplayPrice: items[0].minDisplayPrice,
-            status: items[0].status,
+            actId: hydratedItems[0].actId,
+            tscName: hydratedItems[0].tscName,
+            imageUrl: hydratedItems[0].imageUrl,
+            basePrice: hydratedItems[0].basePrice,
+            minDisplayPrice: hydratedItems[0].minDisplayPrice,
+            loveCount: hydratedItems[0].loveCount,
+            status: hydratedItems[0].status,
           }
         : null,
     });
 
-    res.json({ success: true, acts: items, items });
+    res.json({ success: true, acts: hydratedItems, items: hydratedItems });
   } catch (err) {
     console.error("❌ GET /act/cards failed:", err);
     res.status(500).json({ error: "Failed to fetch act cards" });
@@ -113,6 +158,7 @@ router.post("/cards/backfill", async (req, res) => {
           "minDisplayPrice",
           "lineups",
           "numberOfShortlistsIn",
+          "loveCount",
           "timesShortlisted",
           "status",
           "bestseller",
