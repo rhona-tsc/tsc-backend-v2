@@ -4165,7 +4165,7 @@ export const resendDeputyJobNotifications = async (req, res) => {
     ].join("\n");
 
     const notificationResults = [];
-
+let hasSentBccCopy = false;
     for (const musician of matches) {
       const preview = buildJobNotificationPreview({
         job,
@@ -4178,13 +4178,19 @@ export const resendDeputyJobNotifications = async (req, res) => {
         .filter(Boolean)
         .join("\n\n");
 
-      const emailResult = await sendEmail({
-        to: musician?.email || "",
-        bcc: DEPUTY_JOB_BCC_EMAIL,
-        subject: `Corrected Links: ${preview.subject}`,
-        html: emailHtml,
-        text: emailText,
-      });
+      const shouldBccThisEmail = Boolean(DEPUTY_JOB_BCC_EMAIL) && !hasSentBccCopy;
+
+const emailResult = await sendEmail({
+  to: musician?.email || "",
+  ...(shouldBccThisEmail ? { bcc: DEPUTY_JOB_BCC_EMAIL } : {}),
+  subject: `Corrected Links: ${preview.subject}`,
+  html: emailHtml,
+  text: emailText,
+});
+
+if (shouldBccThisEmail && emailResult?.ok) {
+  hasSentBccCopy = true;
+}
 
       notificationResults.push({
         musicianId: musician?._id || musician?.musicianId || null,
@@ -4366,7 +4372,7 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
 
 export const sendDeputyJobNotificationsToUnnotified =
   sendRemainingDeputyJobNotifications;
-  
+
 export const createDeputyJobSetupIntent = async (req, res) => {
   try {
     if (!ensureStripeReady(res)) return;
