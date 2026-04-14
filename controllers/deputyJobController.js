@@ -1763,8 +1763,7 @@ export const createDeputyJob = async (req, res) => {
 
     const hasSavedCardDetails =
       Boolean(normaliseString(job?.stripeCustomerId)) &&
-      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      job?.paymentStatus === "ready_to_charge";
+      Boolean(normaliseString(job?.defaultPaymentMethodId));
 
     if (built.mode === "send" && hasSavedCardDetails) {
       const notificationResults = await notifyMusiciansAboutDeputyJob({
@@ -1858,7 +1857,6 @@ export const createDeputyJob = async (req, res) => {
         try {
           await sendEmail({
             to: previewRecipientEmail,
-            bcc: DEPUTY_JOB_BCC_EMAIL,
             subject: `[Preview] ${matcherResult.previewNotification.subject}`,
             html: matcherResult.previewNotification.html,
             text: matcherResult.previewNotification.text,
@@ -2115,8 +2113,8 @@ export const sendDeputyJobNotifications = async (req, res) => {
     }
 
 const hasSavedCardDetails =
-  Boolean(normaliseString(job?.stripeCustomerId)) &&
-  Boolean(normaliseString(job?.defaultPaymentMethodId));
+    Boolean(normaliseString(job?.stripeCustomerId)) &&
+    Boolean(normaliseString(job?.defaultPaymentMethodId));
 
     if (!hasSavedCardDetails) {
       return res.status(400).json({
@@ -2817,7 +2815,6 @@ export const sendDeputyBookingEmail = async (req, res) => {
       await sendEmail({
         to: musician.email || "",
         subject: preview.subject,
-        bcc: DEPUTY_JOB_BCC_EMAIL,
         html: preview.html,
         text: preview.text,
       });
@@ -3085,7 +3082,6 @@ const dateText = formatFullDate(job.eventDate);
 
           await sendEmail({
             to: musicianEmail,
-            bcc: DEPUTY_JOB_BCC_EMAIL,
             subject: `Confirmed: ${jobTitle}`,
             html: `
     <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
