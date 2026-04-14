@@ -408,31 +408,40 @@ export const sendDeputyAllocationWhatsApp = async ({
     "🤍 TSC",
   ].join("\n");
 
-  return sendWhatsAppMessage({
-    to,
-    member: musician,
-    dateISO: job?.eventDate || "",
-    address: location,
+  const allocationContentSid = String(
+  process.env.TWILIO_JOB_ALLOCATION_REQUEST_SID || ""
+).trim();
+
+if (!allocationContentSid) {
+  throw new Error("Missing TWILIO_JOB_ALLOCATION_REQUEST_SID");
+}
+
+return sendWhatsAppMessage({
+  to,
+  member: musician,
+  dateISO: job?.eventDate || "",
+  address: location,
+  role: roleLabel,
+  finalFee: Number(job?.fee || 0),
+  skipFeeCompute: true,
+  smsBody: smsBody,
+  contentSid: allocationContentSid,
+  allowContentSidFallback: false,
+  variables: {
+    "1": String(firstName || "there").trim() || "there",
+    "2": formattedDate,
+    "3": location,
+    "4": roleLabel,
+    "5": actName,
+    "6": fee || "TBC",
+    firstName: String(firstName || "there").trim() || "there",
+    date: formattedDate,
+    location,
     role: roleLabel,
-    finalFee: Number(job?.fee || 0),
-    skipFeeCompute: true,
-    smsBody,
-    contentSid: process.env.TWILIO_JOB_ALLOCATION_REQUEST_SID,
-    variables: {
-      "1": String(firstName || "there").trim() || "there",
-      "2": formattedDate,
-      "3": location,
-      "4": roleLabel,
-      "5": actName,
-      "6": fee || "TBC",
-      firstName: String(firstName || "there").trim() || "there",
-      date: formattedDate,
-      location,
-      role: roleLabel,
-      actName,
-      fee: fee || "TBC",
-    },
-  });
+    actName,
+    fee: fee || "TBC",
+  },
+});
 };
 
 export const sendDeputyAllocationDeclinedWhatsApp = async ({
