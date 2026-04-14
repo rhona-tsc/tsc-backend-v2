@@ -2909,21 +2909,33 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       .toLowerCase();
 
     let action = null;
-    if (["yes", "yes, book me in!"].includes(rawReply)) action = "accept";
-    if (
-      [
-        "notavailable",
-        "not available now",
-        "changedmind",
-        "changed my mind",
-      ].includes(rawReply)
-    ) {
-      action = "decline";
-    }
 
-    if (!action || !repliedSid) {
-      return res.status(200).send("<Response/>");
-    }
+const normalisedReply = rawReply
+  .replace(/\s+/g, " ")
+  .trim()
+  .toLowerCase();
+
+const compactReply = normalisedReply.replace(/\s+/g, "");
+
+if (
+  normalisedReply === "yes" ||
+  normalisedReply === "yes, book me in!" ||
+  normalisedReply === "i am available" ||
+  normalisedReply === "i'm available" ||
+  normalisedReply === "available" ||
+  normalisedReply.includes("book me in")
+) {
+  action = "accept";
+}
+
+if (
+  compactReply === "notavailable" ||
+  normalisedReply.includes("not available") ||
+  normalisedReply.includes("unavailable") ||
+  normalisedReply.includes("changed my mind")
+) {
+  action = "decline";
+}
 
     const job = await deputyJobModel.findOne({
       notifications: {
