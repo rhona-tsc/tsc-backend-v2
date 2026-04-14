@@ -4245,6 +4245,128 @@ export const resendDeputyJobNotifications = async (req, res) => {
   }
 };
 
+export const sendRemainingDeputyJobNotifications = async (req, res) => {
+  try {
+    const job = await deputyJobModel.findById(req.params.id);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    const hasSavedCardDetails =
+      Boolean(normaliseString(job?.stripeCustomerId)) &&
+      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+      job?.paymentStatus === "ready_to_charge";
+
+    if (!hasSavedCardDetails) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Card details must be completed and saved before deputy notifications can be sent.",
+        job: withDeputyJobAliases(job),
+      });
+    }
+
+    const matches = await getMatchedMusiciansForJob(job);
+
+    const alreadyNotifiedIds = new Set(
+      [
+        ...(Array.isArray(job.notifiedMusicianIds) ? job.notifiedMusicianIds : []),
+        ...(Array.isArray(job.notifications)
+          ? job.notifications
+              .filter((n) => n?.status === "sent")
+              .map((n) => n?.musicianId)
+          : []),
+      ]
+        .map((id) => asObjectIdString(id))
+        .filter(Boolean)
+    );
+
+    const remainingMatches = matches.filter((musician) => {
+      const musicianId = asObjectIdString(musician?._id || musician?.id);
+      return musicianId && !alreadyNotifiedIds.has(musicianId);
+    });
+
+    if (!remainingMatches.length) {
+      return res.json({
+        success: true,
+        message: "No remaining matched musicians to notify",
+        job: withDeputyJobAliases(job),
+        newlyNotifiedCount: 0,
+        notificationResults: [],
+      });
+    }
+
+    const notificationResults = await notifyMusiciansAboutDeputyJob({
+      job,
+      musicians: remainingMatches,
+    });
+
+    const newSentIds = notificationResults
+      .filter((r) => r.status === "sent" && r.musicianId)
+      .map((r) => r.musicianId);
+
+    const allSentIds = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(job.notifiedMusicianIds) ? job.notifiedMusicianIds : []),
+          ...newSentIds,
+        ]
+          .map((id) => asObjectIdString(id))
+          .filter(Boolean)
+      )
+    );
+
+    job.notifiedMusicianIds = allSentIds;
+    job.notifications = [
+      ...(Array.isArray(job.notifications) ? job.notifications : []),
+      ...notificationResults,
+    ];
+    job.notifiedCount = allSentIds.length;
+    job.status = "open";
+    job.previewMode = false;
+    job.workflowStage = "sent_to_matches";
+
+    job.matchedMusicians = (job.matchedMusicians || []).map((m) => {
+      const id = asObjectIdString(m?.musicianId);
+      const wasNewlySent = newSentIds.some(
+        (sentId) => asObjectIdString(sentId) === id
+      );
+
+      return {
+        ...m,
+        notified: allSentIds.includes(id),
+        notifiedAt: wasNewlySent ? new Date() : m.notifiedAt || null,
+      };
+    });
+
+    await job.save();
+
+    return res.json({
+      success: true,
+      message: `${newSentIds.length} remaining matched musicians notified`,
+      job: withDeputyJobAliases(job),
+      matchedCount: matches.length,
+      newlyNotifiedCount: newSentIds.length,
+      notifiedCount: job.notifiedCount,
+      notificationResults,
+    });
+  } catch (error) {
+    console.error("❌ sendRemainingDeputyJobNotifications error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send remaining deputy job notifications",
+      error: error.message,
+    });
+  }
+};
+
+export const sendDeputyJobNotificationsToUnnotified =
+  sendRemainingDeputyJobNotifications;
+  
 export const createDeputyJobSetupIntent = async (req, res) => {
   try {
     if (!ensureStripeReady(res)) return;

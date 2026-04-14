@@ -22,6 +22,7 @@ import {
   previewDeputyJobNotification,
   sendDeputyJobTestNotification,
   resendDeputyJobNotifications,
+  sendDeputyJobNotificationsToUnnotified,
 } from "../controllers/deputyJobController.js";
 import authUser from "../middleware/auth.js";
 
@@ -62,6 +63,12 @@ deputyJobRouter.post(
   "/:id/resend-notifications",
   authUser,
   resendDeputyJobNotifications
+);
+
+deputyJobRouter.post(
+  "/:id/send-unnotified-notifications",
+  authUser,
+  sendDeputyJobNotificationsToUnnotified
 );
 
 /**
