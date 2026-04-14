@@ -2660,26 +2660,29 @@ export const confirmDeputyAllocation = async (req, res) => {
       job.paymentStatus = "setup_required";
     }
 
-    let whatsappResult = null;
-    const targetPhone = toE164(
-      musician?.phone ||
-        musician?.phoneNumber ||
-        application?.phoneNormalized ||
-        application?.phone ||
-        "",
-    );
+   let whatsappResult = null;
+let whatsappErrorMessage = "";
 
-    if (targetPhone) {
-      try {
-        whatsappResult = await sendDeputyAllocationWhatsApp({
-          to: targetPhone,
-          job,
-          musician,
-        });
-      } catch (whatsappError) {
-        console.error("❌ sendDeputyAllocationWhatsApp error:", whatsappError);
-      }
-    }
+if (targetPhone) {
+  try {
+    whatsappResult = await sendDeputyAllocationWhatsApp({
+      to: targetPhone,
+      job,
+      musician,
+    });
+  } catch (whatsappError) {
+    whatsappErrorMessage =
+      whatsappError?.message || "WhatsApp allocation send failed";
+
+    console.error("❌ sendDeputyAllocationWhatsApp error:", {
+      jobId: String(job._id),
+      musicianId: String(musician._id),
+      targetPhone,
+      message: whatsappErrorMessage,
+      stack: whatsappError?.stack,
+    });
+  }
+}
 
     job.notifications = [
       ...(job.notifications || []),
