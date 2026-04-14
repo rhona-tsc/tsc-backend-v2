@@ -2114,10 +2114,9 @@ export const sendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-    const hasSavedCardDetails =
-      Boolean(normaliseString(job?.stripeCustomerId)) &&
-      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      job?.paymentStatus === "ready_to_charge";
+const hasSavedCardDetails =
+  Boolean(normaliseString(job?.stripeCustomerId)) &&
+  Boolean(normaliseString(job?.defaultPaymentMethodId));
 
     if (!hasSavedCardDetails) {
       return res.status(400).json({
@@ -4121,10 +4120,9 @@ export const resendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-    const hasSavedCardDetails =
-      Boolean(normaliseString(job?.stripeCustomerId)) &&
-      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      job?.paymentStatus === "ready_to_charge";
+ const hasSavedCardDetails =
+  Boolean(normaliseString(job?.stripeCustomerId)) &&
+  Boolean(normaliseString(job?.defaultPaymentMethodId));
 
     if (!hasSavedCardDetails) {
       return res.status(400).json({
