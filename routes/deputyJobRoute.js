@@ -24,6 +24,7 @@ import {
   resendDeputyJobNotifications,
   sendDeputyJobNotificationsToUnnotified,
   sendRemainingDeputyJobNotifications,
+    rematchAndSendDeputyJobNotifications,
 } from "../controllers/deputyJobController.js";
 import authUser from "../middleware/auth.js";
 import { auth } from "googleapis/build/src/apis/abusiveexperiencereport/index.js";
@@ -100,6 +101,12 @@ deputyJobRouter.post(
   "/:id/send-notifications",
   authUser,
   sendDeputyJobNotifications
+);
+
+deputyJobRouter.post(
+  "/:id/rematch-and-send-notifications",
+  authUser,
+  rematchAndSendDeputyJobNotifications
 );
 
 /**

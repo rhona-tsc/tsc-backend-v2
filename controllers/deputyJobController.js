@@ -2815,6 +2815,176 @@ export const previewDeputyBookingEmail = async (req, res) => {
   }
 };
 
+export const rematchAndSendDeputyJobNotifications = async (req, res) => {
+  try {
+    const job = await deputyJobModel.findById(req.params.id);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    const hasSavedCardDetails =
+      Boolean(normaliseString(job?.stripeCustomerId)) &&
+      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+      ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
+
+    if (!hasSavedCardDetails) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Card details must be completed and saved before deputy notifications can be sent.",
+        job: withDeputyJobAliases(job),
+      });
+    }
+
+    const matcherResult = await runMatcherForJob({
+      job,
+      previewRecipientEmail: job.clientEmail || job.createdByEmail || "",
+      createdBy: job.createdBy || null,
+      primaryInstrument: job.instrument,
+      effectiveIsVocalSlot: Boolean(job.isVocalSlot),
+      resolvedEssentialRoles: Array.isArray(job.essentialRoles)
+        ? job.essentialRoles
+        : [],
+      matcherDesiredRoles: Array.isArray(job.desiredRoles)
+        ? job.desiredRoles
+        : [],
+      resolvedSecondaryInstruments: Array.isArray(job.secondaryInstruments)
+        ? job.secondaryInstruments
+        : [],
+      resolvedGenres: Array.isArray(job.genres) ? job.genres : [],
+      resolvedTags: Array.isArray(job.tags) ? job.tags : [],
+      inferredCounty: job.county || "",
+      inferredPostcode: job.postcode || "",
+      mode: "send",
+    });
+
+    const matches = Array.isArray(matcherResult.matches)
+      ? matcherResult.matches
+      : [];
+
+    if (!matches.length) {
+      job.matchedMusicianIds = [];
+      job.matchedMusicians = [];
+      job.matchedCount = 0;
+      await job.save();
+
+      return res.status(400).json({
+        success: false,
+        message: "No matching musicians found for this deputy job.",
+        job: withDeputyJobAliases(job),
+      });
+    }
+
+    job.matchedMusicianIds = matcherResult.matchedMusicianIds;
+    job.matchedMusicians = matcherResult.matchedMusicians;
+    job.matchedCount = matches.length;
+
+    const alreadyNotifiedIds = new Set(
+      [
+        ...(Array.isArray(job.notifiedMusicianIds)
+          ? job.notifiedMusicianIds
+          : []),
+        ...(Array.isArray(job.notifications)
+          ? job.notifications
+              .filter((n) => n?.status === "sent" && n?.musicianId)
+              .map((n) => n.musicianId)
+          : []),
+      ]
+        .map((id) => asObjectIdString(id))
+        .filter(Boolean)
+    );
+
+    const remainingMatches = matches.filter((musician) => {
+      const id = asObjectIdString(
+        musician?._id || musician?.id || musician?.musicianId
+      );
+      return id && !alreadyNotifiedIds.has(id);
+    });
+
+    if (!remainingMatches.length) {
+      await job.save();
+
+      return res.json({
+        success: true,
+        message: "Matched musicians refreshed, but no remaining musicians to notify.",
+        job: withDeputyJobAliases(job),
+        matchedCount: job.matchedCount,
+        newlyNotifiedCount: 0,
+        notifiedCount: job.notifiedCount || 0,
+        notificationResults: [],
+      });
+    }
+
+    const notificationResults = await notifyMusiciansAboutDeputyJob({
+      job,
+      musicians: remainingMatches,
+    });
+
+    const newSentIds = notificationResults
+      .filter((r) => r.status === "sent" && r.musicianId)
+      .map((r) => r.musicianId);
+
+    const allSentIds = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(job.notifiedMusicianIds)
+            ? job.notifiedMusicianIds
+            : []),
+          ...newSentIds,
+        ]
+          .map((id) => asObjectIdString(id))
+          .filter(Boolean)
+      )
+    );
+
+    job.notifiedMusicianIds = allSentIds;
+    job.notifications = [
+      ...(Array.isArray(job.notifications) ? job.notifications : []),
+      ...notificationResults,
+    ];
+    job.notifiedCount = allSentIds.length;
+    job.status = "open";
+    job.previewMode = false;
+    job.workflowStage = "sent_to_matches";
+
+    job.matchedMusicians = (job.matchedMusicians || []).map((m) => {
+      const id = asObjectIdString(m?.musicianId);
+      const wasSentNow = newSentIds.some(
+        (sentId) => asObjectIdString(sentId) === id
+      );
+
+      return {
+        ...m,
+        notified: allSentIds.includes(id),
+        notifiedAt: wasSentNow ? new Date() : m.notifiedAt || null,
+      };
+    });
+
+    await job.save();
+
+    return res.json({
+      success: true,
+      message: `${newSentIds.length} matched musicians notified`,
+      job: withDeputyJobAliases(job),
+      matchedCount: matches.length,
+      newlyNotifiedCount: newSentIds.length,
+      notifiedCount: job.notifiedCount,
+      notificationResults,
+    });
+  } catch (error) {
+    console.error("❌ rematchAndSendDeputyJobNotifications error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to rematch and send deputy job notifications",
+      error: error.message,
+    });
+  }
+};
+
 export const sendDeputyBookingEmail = async (req, res) => {
   try {
     const { musicianId = "" } = req.body || {};
