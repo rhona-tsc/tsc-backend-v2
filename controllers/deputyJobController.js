@@ -1210,47 +1210,51 @@ payout.hasPayoutDetails
 
 const buildJobPayloadFromRequest = (req) => {
   const {
-    title = "",
-    date = "",
-    eventDate = "",
-    callTime = "",
-    startTime = "",
-    finishTime = "",
-    endTime = "",
-    venue = "",
-    locationName = "",
-    location = "",
-    county = "",
-    postcode = "",
-    instrument = "",
-    requiredInstruments = [],
-    isVocalSlot = false,
-    genres = [],
-    tags = [],
-    essentialRoles = [],
-    requiredSkills = [],
-    desiredRoles = [],
-    secondaryInstruments = [],
-    setLengths = [],
-    whatsIncluded = [],
-    whatsIncludedOther = "",
-    claimableExpenses = [],
-    claimableExpensesOther = "",
-    fee = 0,
-    currency = "GBP",
-    notes = "",
-    clientName = "",
-    clientEmail = "",
-    clientPhone = "",
-    grossAmount = 0,
-    commissionAmount = 0,
-    deputyNetAmount = 0,
-    stripeFeeAmount = null,
-    deductStripeFeesFromDeputy = true,
-    releaseOn = null,
-    saveClientCard = true,
-    mode = "send",
-  } = req.body || {};
+  title = "",
+  date = "",
+  eventDate = "",
+  callTime = "",
+  startTime = "",
+  finishTime = "",
+  endTime = "",
+  venue = "",
+  locationName = "",
+  location = "",
+  county = "",
+  postcode = "",
+  instrument = "",
+  requiredInstruments = [],
+  isVocalSlot = false,
+  genres = [],
+  tags = [],
+  essentialRoles = [],
+  requiredSkills = [],
+  desiredRoles = [],
+  secondaryInstruments = [],
+  setLengths = [],
+  whatsIncluded = [],
+  whatsIncludedOther = "",
+  claimableExpenses = [],
+  claimableExpensesOther = "",
+  fee = 0,
+  currency = "GBP",
+  notes = "",
+  clientName = "",
+  clientEmail = "",
+  clientPhone = "",
+  grossAmount = 0,
+  commissionAmount = 0,
+  deputyNetAmount = 0,
+  stripeFeeAmount = null,
+  deductStripeFeesFromDeputy = true,
+  releaseOn = null,
+  saveClientCard = true,
+  mode = "send",
+  jobType = "booked",
+} = req.body || {};
+
+const requestedJobType =
+  normaliseString(jobType).toLowerCase() === "enquiry" ? "enquiry" : "booked";
 
   const resolvedInstruments = normaliseArray(requiredInstruments);
   const resolvedEssentialRoles = normaliseArray(essentialRoles);
@@ -1343,6 +1347,7 @@ const buildJobPayloadFromRequest = (req) => {
       normaliseString(mode || "send").toLowerCase() === "preview"
         ? "preview"
         : "send",
+        jobType: requestedJobType,
   };
 };
 
@@ -1494,6 +1499,91 @@ const findMatchedMusicianFromJob = async (job, musicianId) => {
   if (matchedMusician) return matchedMusician;
 
   return musicianModel.findById(targetId).lean();
+};
+
+const canManuallyAllocateDeputyJob = (req) => {
+  const email = normaliseEmail(req?.user?.email || req?.user?.useremail || "");
+  const role = normaliseString(req?.user?.role || req?.user?.userrole || "").toLowerCase();
+
+  return (
+    email === "hello@thesupremecollective.co.uk" ||
+    role === "admin" ||
+    role === "agent"
+  );
+};
+
+const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
+  const targetId = asObjectIdString(musician?._id);
+  if (!targetId) return;
+
+  const existingApplications = Array.isArray(job.applications) ? job.applications : [];
+  const existingIndex = existingApplications.findIndex(
+    (application) => asObjectIdString(application?.musicianId) === targetId,
+  );
+
+  const baseApplication = {
+    musicianId: musician._id,
+    firstName:
+      musician?.firstName ||
+      musician?.firstname ||
+      musician?.basicInfo?.firstName ||
+      "",
+    lastName:
+      musician?.lastName ||
+      musician?.lastname ||
+      musician?.basicInfo?.lastName ||
+      "",
+    email: musician?.email || musician?.basicInfo?.email || "",
+    phone:
+      musician?.phone ||
+      musician?.phoneNumber ||
+      musician?.basicInfo?.phone ||
+      "",
+    musicianSlug: musician?.musicianSlug || "",
+    profileImage:
+      musician?.profilePhoto ||
+      musician?.profilePicture ||
+      musician?.profileImage ||
+      musician?.profilePic ||
+      musician?.profile_picture ||
+      "",
+    postcode: musician?.address?.postcode || musician?.postcode || "",
+    status: "allocated",
+    notes: "",
+    deputyMatchScore: 0,
+    matchSummary: {
+      instrument: job?.instrument || "",
+      roleFit: 0,
+      genreFit: 0,
+      locationFit: 0,
+      songFit: 0,
+    },
+    appliedAt: now,
+    shortlistedAt: null,
+    allocatedAt: now,
+    bookedAt: null,
+    declinedAt: null,
+    withdrawnAt: null,
+    phoneNormalized: toE164(
+      musician?.phone || musician?.phoneNumber || musician?.basicInfo?.phone || "",
+    ),
+  };
+
+  if (existingIndex === -1) {
+    job.applications = [...existingApplications, baseApplication];
+  } else {
+    job.applications = existingApplications.map((application, index) => {
+      if (index !== existingIndex) return application;
+
+      return {
+        ...application,
+        ...baseApplication,
+        appliedAt: application?.appliedAt || now,
+      };
+    });
+  }
+
+  job.applicationCount = Array.isArray(job.applications) ? job.applications.length : 0;
 };
 
 const buildDeputyReplyCode = (jobId, musicianId, action) => {
@@ -1657,6 +1747,21 @@ export const createDeputyJob = async (req, res) => {
   try {
     const built = buildJobPayloadFromRequest(req);
 
+    const userEmail = normaliseEmail(req.user?.email || req.user?.useremail || "");
+const userRole = normaliseString(req.user?.role || req.user?.userrole || "").toLowerCase();
+
+const canCreateEnquiryPost =
+  userEmail === "hello@thesupremecollective.co.uk" ||
+  userRole === "admin" ||
+  userRole === "agent";
+
+if (built.jobType === "enquiry" && !canCreateEnquiryPost) {
+  return res.status(403).json({
+    success: false,
+    message: "Only admins and agents can create enquiry deputy posts",
+  });
+}
+
     if (!built.primaryInstrument) {
       return res.status(400).json({
         success: false,
@@ -1712,9 +1817,11 @@ export const createDeputyJob = async (req, res) => {
       releaseOn:
         built.releaseOn || buildDefaultReleaseOn(built.resolvedEventDate),
       paymentStatus:
-        built.saveClientCard && built.clientEmail
-          ? "setup_required"
-          : "not_started",
+  built.jobType === "enquiry"
+    ? "not_required"
+    : built.saveClientCard && built.clientEmail
+      ? "setup_required"
+      : "not_started",
       payoutStatus: "not_ready",
       createdBy,
       createdByName,
@@ -1723,12 +1830,18 @@ export const createDeputyJob = async (req, res) => {
       status: built.mode === "send" ? "open" : "preview",
       previewMode: built.mode !== "send",
       workflowStage: built.mode === "send" ? "created" : "preview_ready",
+      jobType: built.jobType,
+isEnquiryOnly: built.jobType === "enquiry",
     });
 
     let setupIntentResult = null;
 
-    if (built.saveClientCard && built.clientEmail && stripe) {
-      try {
+if (
+  built.jobType !== "enquiry" &&
+  built.saveClientCard &&
+  built.clientEmail &&
+  stripe
+) {      try {
         setupIntentResult = await createOrRefreshDeputyJobSetupIntentInternal({
           job,
           clientName: built.clientName,
@@ -1787,10 +1900,15 @@ export const createDeputyJob = async (req, res) => {
     job.matchedCount = matcherResult.matches.length;
     job.notifications = [];
 
-    const hasSavedCardDetails =
-      Boolean(normaliseString(job?.stripeCustomerId)) &&
-      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      job?.paymentStatus === "ready_to_charge";
+    const isEnquiryJob = built.jobType === "enquiry";
+
+const hasSavedCardDetails =
+  isEnquiryJob ||
+  (
+    Boolean(normaliseString(job?.stripeCustomerId)) &&
+    Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+    job?.paymentStatus === "ready_to_charge"
+  );
 
     if (built.mode === "send" && hasSavedCardDetails) {
       const notificationResults = await notifyMusiciansAboutDeputyJob({
@@ -2140,21 +2258,21 @@ export const sendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-    const hasSavedCardDetails =
-      Boolean(normaliseString(job?.stripeCustomerId)) &&
-      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      job?.paymentStatus === "ready_to_charge";
+   const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
 
-    if (!hasSavedCardDetails) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Card details must be completed and saved before deputy notifications can be sent.",
-        canSendNotifications: false,
-        requiresCardSetup: true,
-        job: withDeputyJobAliases(job),
-      });
-    }
+const hasSavedCardDetails =
+  Boolean(normaliseString(job?.stripeCustomerId)) &&
+  Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+  ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
+
+if (!isEnquiryJob && !hasSavedCardDetails) {
+  return res.status(400).json({
+    success: false,
+    message:
+      "Card details must be completed and saved before deputy notifications can be sent.",
+    job: withDeputyJobAliases(job),
+  });
+}
 
     const matches = await getMatchedMusiciansForJob(job);
 
@@ -2650,18 +2768,22 @@ export const confirmDeputyAllocation = async (req, res) => {
       };
     });
 
-    let chargeResult = null;
-   if (job.paymentStatus === "paid") {
-  chargeResult = { success: true, message: "Already paid" };
-} else if (job.stripeCustomerId && job.defaultPaymentMethodId) {
-  chargeResult = await attemptDeputyJobCharge({
-    job,
-    createdBy: req.user?._id || null,
-  });
+ const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
 
-    } else if (job.clientEmail) {
-      job.paymentStatus = "setup_required";
-    }
+let chargeResult = null;
+
+if (!isEnquiryJob) {
+  if (job.stripeCustomerId && job.defaultPaymentMethodId) {
+    chargeResult = await attemptDeputyJobCharge({
+      job,
+      createdBy: req.user?._id || null,
+    });
+  } else if (job.clientEmail) {
+    job.paymentStatus = "setup_required";
+  }
+} else {
+  job.paymentStatus = "not_required";
+}
 
    let whatsappResult = null;
 
@@ -2826,19 +2948,21 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-    const hasSavedCardDetails =
-      Boolean(normaliseString(job?.stripeCustomerId)) &&
-      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
+  const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
 
-    if (!hasSavedCardDetails) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Card details must be completed and saved before deputy notifications can be sent.",
-        job: withDeputyJobAliases(job),
-      });
-    }
+const hasSavedCardDetails =
+  Boolean(normaliseString(job?.stripeCustomerId)) &&
+  Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+  ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
+
+if (!isEnquiryJob && !hasSavedCardDetails) {
+  return res.status(400).json({
+    success: false,
+    message:
+      "Card details must be completed and saved before deputy notifications can be sent.",
+    job: withDeputyJobAliases(job),
+  });
+}
 
     const matcherResult = await runMatcherForJob({
       job,
@@ -4532,19 +4656,21 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
       });
     }
 
-    const hasSavedCardDetails =
-      Boolean(normaliseString(job?.stripeCustomerId)) &&
-      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      job?.paymentStatus === "ready_to_charge";
+  const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
 
-    if (!hasSavedCardDetails) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Card details must be completed and saved before deputy notifications can be sent.",
-        job: withDeputyJobAliases(job),
-      });
-    }
+const hasSavedCardDetails =
+  Boolean(normaliseString(job?.stripeCustomerId)) &&
+  Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+  ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
+
+if (!isEnquiryJob && !hasSavedCardDetails) {
+  return res.status(400).json({
+    success: false,
+    message:
+      "Card details must be completed and saved before deputy notifications can be sent.",
+    job: withDeputyJobAliases(job),
+  });
+}
 
     const matches = await getMatchedMusiciansForJob(job);
 
@@ -4691,3 +4817,202 @@ export const createDeputyJobSetupIntent = async (req, res) => {
     });
   }
 };
+
+export const closeDeputyJob = async (req, res) => {
+  try {
+    const job = await deputyJobModel.findById(req.params.id);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    job.status = "closed";
+    job.workflowStage = "closed";
+
+    await job.save();
+
+    return res.json({
+      success: true,
+      message: "Deputy job closed successfully",
+      job: withDeputyJobAliases(job),
+    });
+  } catch (error) {
+    console.error("❌ closeDeputyJob error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to close deputy job",
+      error: error.message,
+    });
+  }
+};
+export const manualAllocateDeputyJob = async (req, res) => {
+  try {
+    if (!canManuallyAllocateDeputyJob(req)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admin or agent users can manually allocate deputy jobs",
+      });
+    }
+
+    const { musicianId } = req.body || {};
+    const job = await deputyJobModel.findById(req.params.id);
+const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    if (!musicianId) {
+      return res.status(400).json({
+        success: false,
+        message: "musicianId is required",
+      });
+    }
+
+    const musician = await musicianModel.findById(musicianId).lean();
+
+    if (!musician) {
+      return res.status(404).json({
+        success: false,
+        message: "Musician not found",
+      });
+    }
+
+    const now = new Date();
+
+    upsertManualApplicationForAllocation({ job, musician, now });
+
+    job.allocatedMusicianId = musician._id;
+    job.allocatedMusicianName = [musician.firstName, musician.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    job.allocatedAt = now;
+    job.status = "allocated";
+    job.workflowStage = "allocated";
+    job.releaseOn = job.releaseOn || buildDefaultReleaseOn(job.eventDate);
+
+    if (!job.grossAmount && !job.commissionAmount && !job.deputyNetAmount) {
+      const ledger = buildLedgerAmounts({
+        fee: job.fee,
+        grossAmount: job.grossAmount,
+        commissionAmount: job.commissionAmount,
+        deputyNetAmount: job.deputyNetAmount,
+        stripeFeeAmount: job.stripeFeeAmount,
+        deductStripeFeesFromDeputy: true,
+      });
+      job.grossAmount = ledger.grossAmount;
+      job.commissionAmount = ledger.commissionAmount;
+      job.deputyNetAmount = ledger.deputyNetAmount;
+      job.stripeFeeAmount = ledger.stripeFeeAmount;
+    }
+
+   let chargeResult = null;
+
+if (!isEnquiryJob) {
+  if (job.stripeCustomerId && job.defaultPaymentMethodId) {
+    chargeResult = await attemptDeputyJobCharge({
+      job,
+      createdBy: req.user?._id || null,
+    });
+  } else if (job.clientEmail) {
+    job.paymentStatus = "setup_required";
+  }
+} else {
+  job.paymentStatus = "not_required";
+}
+
+    const application = findApplicationFromJob(job, musician._id);
+    const targetPhone = toE164(
+      musician?.phone ||
+        musician?.phoneNumber ||
+        application?.phoneNormalized ||
+        application?.phone ||
+        "",
+    );
+
+    let whatsappResult = null;
+    let whatsappErrorMessage = "";
+
+    if (targetPhone) {
+      try {
+        whatsappResult = await sendDeputyAllocationWhatsApp({
+          to: targetPhone,
+          job,
+          musician,
+        });
+      } catch (whatsappError) {
+        whatsappErrorMessage =
+          whatsappError?.message || "WhatsApp allocation send failed";
+
+        console.error("❌ manualAllocateDeputyJob sendDeputyAllocationWhatsApp error:", {
+          jobId: String(job._id),
+          musicianId: String(musician._id),
+          targetPhone,
+          message: whatsappErrorMessage,
+          stack: whatsappError?.stack,
+        });
+      }
+    }
+
+    job.notifications = [
+      ...(job.notifications || []),
+      {
+        musicianId: musician._id,
+        email: musician.email || application?.email || "",
+        phone: targetPhone || "",
+        channel: targetPhone ? "whatsapp" : "email",
+        type: "allocation_request_manual",
+        subject: `Deputy allocation request: ${normaliseString(
+          job.title || job.instrument || "Deputy opportunity",
+        )}`,
+        previewHtml: "",
+        previewText: `Manual allocation request sent via ${
+          targetPhone ? "WhatsApp" : "fallback"
+        } to ${[musician.firstName, musician.lastName].filter(Boolean).join(" ").trim()}`,
+        providerMessageId: whatsappResult?.sid || "",
+        status: whatsappResult?.sid ? "sent" : "failed",
+        sentAt: new Date(),
+        error: whatsappResult?.sid
+          ? ""
+          : targetPhone
+            ? whatsappErrorMessage || "WhatsApp allocation send failed"
+            : "No phone number available for allocation message",
+      },
+    ];
+
+    await job.save();
+
+    return res.json({
+      success: true,
+      message: chargeResult?.success
+        ? "Deputy manually allocated, WhatsApp sent and client charged"
+        : whatsappResult?.sid
+          ? "Deputy manually allocated and WhatsApp sent"
+          : "Deputy manually allocated",
+      job: withDeputyJobAliases(job),
+      allocatedMusician: musician,
+      chargeResult,
+      whatsappResult: whatsappResult
+        ? {
+            sid: whatsappResult.sid || "",
+            status: whatsappResult.status || "",
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error("❌ manualAllocateDeputyJob error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to manually allocate deputy",
+      error: error.message,
+    });
+  }
+};
+

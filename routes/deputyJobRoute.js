@@ -24,10 +24,12 @@ import {
   resendDeputyJobNotifications,
   sendDeputyJobNotificationsToUnnotified,
   sendRemainingDeputyJobNotifications,
-    rematchAndSendDeputyJobNotifications,
+  rematchAndSendDeputyJobNotifications,
+  createDeputyEnquiryJob,
+  closeDeputyJob,
+  manualAllocateDeputyJob,
 } from "../controllers/deputyJobController.js";
 import authUser from "../middleware/auth.js";
-import { auth } from "googleapis/build/src/apis/abusiveexperiencereport/index.js";
 
 const deputyJobRouter = express.Router();
 
@@ -108,6 +110,24 @@ deputyJobRouter.post(
   authUser,
   rematchAndSendDeputyJobNotifications
 );
+
+deputyJobRouter.post(
+  "/:id/close",
+  authUser,
+  closeDeputyJob
+);
+
+deputyJobRouter.post(
+  "/:id/manual-allocate",
+  authUser,
+  manualAllocateDeputyJob
+);
+
+/**
+ * Enquiry-only deputy jobs
+ * Separate endpoint for enquiry posts that do not require card setup.
+ */
+deputyJobRouter.post("/enquiry", authUser, createDeputyEnquiryJob);
 
 /**
  * Payment setup + charging

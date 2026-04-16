@@ -403,6 +403,7 @@ const firstName =
     musician?.basicInfo?.firstName ||
     musician?.name ||
     "there";
+  const profileUrl = buildProfileUrl(musician);
 
   const roleLabel =
     job?.instrument ||
@@ -413,47 +414,70 @@ const firstName =
     job?.instrument ||
     "Deputy opportunity";
 
-  const smsBody = [
-    `Hi ${firstName},`,
-    `You've been selected for a booking on ${formattedDate} in ${location} for the role of ${roleLabel} for the job titled \"${actName}\", at a fee of £${fee || "TBC"}.`,
-    "As you applied for this gig, please confirm whether you'd like to accept the booking.",
-    "🤍 TSC",
-  ].join("\n");
+const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+
+const introLine = isEnquiryJob
+  ? `You've been presented as a deputy for an enquiry on ${formattedDate} at ${location} for the role of ${roleLabel}, at a fee of £${fee || "TBC"}.`
+  : `You've been selected for a booking on ${formattedDate} at ${location} for the role of ${roleLabel}, at a fee of £${fee || "TBC"}.`;
+
+const confirmLine = isEnquiryJob
+  ? "Please make sure your profile is up to date as the client will review it when considering you for the booking."
+  : "As you applied for this gig, please confirm whether you'd like to accept the booking.";
+
+const enquirySmsBody = [
+  `Hi ${firstName},`,
+  introLine,
+  confirmLine,
+  profileUrl ? `Check your profile here: ${profileUrl}` : "",
+  "🤍 TSC",
+]
+  .filter(Boolean)
+  .join("\n");
+
+const bookingSmsBody = [
+  `Hi ${firstName},`,
+  introLine,
+  confirmLine,
+  "🤍 TSC",
+].join("\n");
+
+  if (isEnquiryJob) {
+    return sendWhatsAppText(to, enquirySmsBody);
+  }
 
   const allocationContentSid = String(
-  process.env.TWILIO_JOB_ALLOCATION_REQUEST_SID || ""
-).trim();
+    process.env.TWILIO_JOB_ALLOCATION_REQUEST_SID || ""
+  ).trim();
 
-if (!allocationContentSid) {
-  throw new Error("Missing TWILIO_JOB_ALLOCATION_REQUEST_SID");
-}
+  if (!allocationContentSid) {
+    throw new Error("Missing TWILIO_JOB_ALLOCATION_REQUEST_SID");
+  }
 
-return sendWhatsAppMessage({
-  to,
-  member: musician,
-  dateISO: job?.eventDate || "",
-  address: location,
-  role: roleLabel,
-finalFee: netFeeValue,
-  skipFeeCompute: true,
-  smsBody: smsBody,
-  contentSid: allocationContentSid,
-  allowContentSidFallback: false,
-  variables: {
-    "1": String(firstName || "there").trim() || "there",
-    "2": formattedDate,
-    "3": location,
-    "4": roleLabel,
-    "5": actName,
-    "6": fee || "TBC",
-    firstName: String(firstName || "there").trim() || "there",
-    date: formattedDate,
-    location,
+  return sendWhatsAppMessage({
+    to,
+    member: musician,
+    dateISO: job?.eventDate || "",
+    address: location,
     role: roleLabel,
-    actName,
-    fee: fee || "TBC",
-  },
-});
+    finalFee: netFeeValue,
+    skipFeeCompute: true,
+    smsBody: bookingSmsBody,
+    contentSid: allocationContentSid,
+    variables: {
+      "1": String(firstName || "there").trim() || "there",
+      "2": formattedDate,
+      "3": location,
+      "4": roleLabel,
+      "5": actName,
+      "6": fee || "TBC",
+      firstName: String(firstName || "there").trim() || "there",
+      date: formattedDate,
+      location,
+      role: roleLabel,
+      actName,
+      fee: fee || "TBC",
+    },
+  });
 };
 
 export const sendDeputyAllocationDeclinedWhatsApp = async ({
