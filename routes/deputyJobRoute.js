@@ -25,7 +25,6 @@ import {
   sendDeputyJobNotificationsToUnnotified,
   sendRemainingDeputyJobNotifications,
   rematchAndSendDeputyJobNotifications,
-  createDeputyEnquiryJob,
   closeDeputyJob,
   manualAllocateDeputyJob,
 } from "../controllers/deputyJobController.js";
@@ -127,7 +126,6 @@ deputyJobRouter.post(
  * Enquiry-only deputy jobs
  * Separate endpoint for enquiry posts that do not require card setup.
  */
-deputyJobRouter.post("/enquiry", authUser, createDeputyEnquiryJob);
 
 /**
  * Payment setup + charging
