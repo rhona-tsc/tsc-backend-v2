@@ -386,6 +386,114 @@ router.post("/autosave", verifyToken, autosaveMusicianForm);
 router.get("/autosave/history/:musicianId", verifyToken, listAutosaveHistory);
 
 /* ---------------- Musician profile & listing (READ-ONLY) ---------------- */
+// GET /api/musician/search?query=...
+router.get("/search", verifyToken, async (req, res) => {
+  try {
+    const query = String(req.query?.query || req.query?.q || "").trim();
+    const limit = Math.min(Math.max(Number(req.query?.limit || 12), 1), 30);
+
+    if (!query || query.length < 2) {
+      return res.json({ success: true, musicians: [] });
+    }
+
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escapedQuery, "i");
+
+    const orFilters = [
+      { firstName: regex },
+      { lastName: regex },
+      { email: regex },
+      { phone: regex },
+      { phoneNumber: regex },
+      { musicianSlug: regex },
+      { "basicInfo.firstName": regex },
+      { "basicInfo.lastName": regex },
+      { "basicInfo.email": regex },
+      { "basicInfo.phone": regex },
+      { "instrumentation.instrument": regex },
+      { other_skills: regex },
+    ];
+
+    const musicians = await musicianModel
+      .find({
+        $and: [
+          {
+            $or: [
+              { role: "musician" },
+              { role: "deputy" },
+              { role: { $exists: false } },
+              { isDeputy: true },
+            ],
+          },
+          { $or: orFilters },
+        ],
+      })
+      .select(
+        "firstName lastName email phone phoneNumber musicianSlug profilePhoto profilePicture profileImage profilePic profile_picture additionalImages instrumentation other_skills status basicInfo address"
+      )
+      .limit(limit)
+      .lean();
+
+    const formatted = musicians.map((musician) => {
+      const firstName =
+        musician.firstName ||
+        musician.firstname ||
+        musician.basicInfo?.firstName ||
+        "";
+      const lastName =
+        musician.lastName ||
+        musician.lastname ||
+        musician.basicInfo?.lastName ||
+        "";
+      const email = musician.email || musician.basicInfo?.email || "";
+      const phone =
+        musician.phone ||
+        musician.phoneNumber ||
+        musician.basicInfo?.phone ||
+        "";
+
+      return {
+        _id: musician._id,
+        musicianId: musician._id,
+        firstName,
+        lastName,
+        name: [firstName, lastName].filter(Boolean).join(" ").trim(),
+        email,
+        phone,
+        musicianSlug: musician.musicianSlug || "",
+        profileImage:
+          musician.profilePhoto ||
+          musician.profilePicture ||
+          musician.profileImage ||
+          musician.profilePic ||
+          musician.profile_picture ||
+          "",
+        photoUrl:
+          musician.profilePhoto ||
+          musician.profilePicture ||
+          musician.profileImage ||
+          musician.profilePic ||
+          musician.profile_picture ||
+          "",
+        additionalImages: musician.additionalImages || [],
+        instrumentation: Array.isArray(musician.instrumentation)
+          ? musician.instrumentation
+          : [],
+        skills: Array.isArray(musician.other_skills)
+          ? musician.other_skills
+          : [],
+        postcode: musician.address?.postcode || musician.postcode || "",
+        status: musician.status || "",
+      };
+    });
+
+    return res.json({ success: true, musicians: formatted });
+  } catch (err) {
+    console.error("❌ Error searching musicians:", err);
+    return res.status(500).json({ success: false, message: "Failed to search musicians" });
+  }
+});
+
 // GET /api/musician?status=approved
 router.get("/", async (req, res) => {
   try {
