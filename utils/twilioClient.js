@@ -416,18 +416,20 @@ const firstName =
 
 const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
 
-const introLine = isEnquiryJob
-  ? `You've been presented as a deputy for an enquiry on ${formattedDate} at ${location} for the role of ${roleLabel}, at a fee of £${fee || "TBC"}.`
-  : `You've been selected for a booking on ${formattedDate} at ${location} for the role of ${roleLabel}, at a fee of £${fee || "TBC"}.`;
+const enquiryIntroLine = `You've been presented as a deputy for an enquiry on ${formattedDate} at ${location} for the role of ${roleLabel}, at a fee of £${fee || "TBC"}.`;
 
-const confirmLine = isEnquiryJob
-  ? "Please make sure your profile is up to date as the client will review it when considering you for the booking."
-  : "As you applied for this gig, please confirm whether you'd like to accept the booking.";
+const bookingIntroLine = `You've been selected for a booking on ${formattedDate} at ${location} for the role of ${roleLabel}, at a fee of £${fee || "TBC"}.`;
+
+const enquiryFollowUpLine =
+  "Please make sure your profile is up to date, as the client will review it when considering you for the booking.";
+
+const bookingFollowUpLine =
+  "As you applied for this gig, please confirm whether you'd like to accept the booking.";
 
 const enquirySmsBody = [
   `Hi ${firstName},`,
-  introLine,
-  confirmLine,
+  enquiryIntroLine,
+  enquiryFollowUpLine,
   profileUrl ? `Check your profile here: ${profileUrl}` : "",
   "🤍 TSC",
 ]
@@ -436,8 +438,8 @@ const enquirySmsBody = [
 
 const bookingSmsBody = [
   `Hi ${firstName},`,
-  introLine,
-  confirmLine,
+  bookingIntroLine,
+  bookingFollowUpLine,
   "🤍 TSC",
 ].join("\n");
 

@@ -27,6 +27,7 @@ import {
   rematchAndSendDeputyJobNotifications,
   closeDeputyJob,
   manualAllocateDeputyJob,
+  presentDeputyApplicant,
 } from "../controllers/deputyJobController.js";
 import authUser from "../middleware/auth.js";
 
@@ -115,6 +116,13 @@ deputyJobRouter.post(
   authUser,
   closeDeputyJob
 );
+
+deputyJobRouter.post(
+  "/:id/present-applicant",
+  authUser,
+  presentDeputyApplicant
+);
+
 
 deputyJobRouter.post(
   "/:id/manual-allocate",

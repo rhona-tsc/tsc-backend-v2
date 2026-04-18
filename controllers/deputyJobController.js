@@ -5,7 +5,11 @@ import musicianModel from "../models/musicianModel.js";
 import { findMatchingMusiciansForDeputyJob } from "../services/deputyJobMatcher.js";
 import { notifyMusiciansAboutDeputyJob } from "../services/deputyJobNotifier.js";
 import { runDeputyPayoutRelease } from "../services/deputyPayoutService.js";
-import { sendDeputyAllocationWhatsApp, toE164 } from "../utils/twilioClient.js";
+import {
+  sendDeputyAllocationWhatsApp,
+  sendDeputyAllocationDeclinedWhatsApp,
+  toE164,
+} from "../utils/twilioClient.js";
 import { sendWhatsAppText } from "../utils/twilioClient.js";
 import { sendEmail } from "../utils/sendEmail.js";
 
@@ -1017,6 +1021,82 @@ const buildAllocationEmailPreview = ({ job, musician }) => {
   return { subject, html, text };
 };
 
+const buildApplicantPresentedEmailPreview = ({ job, musician }) => {
+  const firstName = normaliseString(musician?.firstName || "there");
+  const fullName =
+    [musician?.firstName, musician?.lastName].filter(Boolean).join(" ").trim() ||
+    "Deputy";
+  const jobTitle = normaliseString(
+    job?.title || job?.instrument || "Deputy opportunity",
+  );
+  const dateText = normaliseString(job?.eventDate || job?.date || "TBC");
+  const location = normaliseString(
+    job?.location || job?.venue || job?.locationName || "Location TBC",
+  );
+  const feeText = getDeputyNetFeeText(job);
+
+  const profileUrl = musician?.musicianSlug
+    ? `https://thesupremecollective.co.uk/musician/${musician.musicianSlug}`
+    : musician?._id
+      ? `https://thesupremecollective.co.uk/musician/${musician._id}`
+      : "";
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111; max-width: 700px;">
+      <h2 style="margin-bottom: 12px;">You’ve been presented for an enquiry</h2>
+      <p>Hi ${escapeHtml(firstName)},</p>
+      <p>
+        You’ve been presented to a client as a possible fit for
+        <strong>${escapeHtml(jobTitle)}</strong>.
+      </p>
+      <p>
+        At this stage, this is an enquiry rather than a confirmed booking.
+        Please make sure your profile is fully up to date, as the client may review it when considering their options.
+      </p>
+      <ul style="padding-left: 20px; margin: 0 0 18px;">
+        ${renderDetailRow("Date", dateText)}
+        ${renderDetailRow("Location", location)}
+        ${renderDetailRow("Fee", feeText)}
+      </ul>
+      ${
+        profileUrl
+          ? `<p><a href="${escapeHtml(profileUrl)}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;">View your profile</a></p>`
+          : ""
+      }
+      <p>We’ll be in touch if the client would like to proceed.</p>
+      <p>Best,<br/>The Supreme Collective</p>
+    </div>
+  `;
+
+  const text = [
+    `Hi ${firstName},`,
+    "",
+    `You’ve been presented to a client as a possible fit for ${jobTitle}.`,
+    "This is currently an enquiry rather than a confirmed booking.",
+    "Please make sure your profile is fully up to date, as the client may review it when considering their options.",
+    "",
+    `Date: ${dateText}`,
+    `Location: ${location}`,
+    `Fee: ${feeText}`,
+    profileUrl ? `Profile: ${profileUrl}` : "",
+    "",
+    "We’ll be in touch if the client would like to proceed.",
+    "",
+    "Best,",
+    "The Supreme Collective",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    subject: `Enquiry presentation: ${jobTitle}`,
+    html,
+    text,
+    musicianName: fullName,
+    profileUrl,
+  };
+};
+
 const buildBookingConfirmationPreview = ({ job, musician }) => {
   const firstName = normaliseString(musician?.firstName || "there");
   const fullName =
@@ -1584,6 +1664,86 @@ const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
   }
 
   job.applicationCount = Array.isArray(job.applications) ? job.applications.length : 0;
+};
+
+const upsertPresentedApplicationForEnquiry = ({ job, musician, now }) => {
+  const targetId = asObjectIdString(musician?._id);
+  if (!targetId) return;
+
+  const existingApplications = Array.isArray(job.applications)
+    ? job.applications
+    : [];
+
+  const existingIndex = existingApplications.findIndex(
+    (application) => asObjectIdString(application?.musicianId) === targetId,
+  );
+
+  const baseApplication = {
+    musicianId: musician._id,
+    firstName:
+      musician?.firstName ||
+      musician?.firstname ||
+      musician?.basicInfo?.firstName ||
+      "",
+    lastName:
+      musician?.lastName ||
+      musician?.lastname ||
+      musician?.basicInfo?.lastName ||
+      "",
+    email: musician?.email || musician?.basicInfo?.email || "",
+    phone:
+      musician?.phone ||
+      musician?.phoneNumber ||
+      musician?.basicInfo?.phone ||
+      "",
+    musicianSlug: musician?.musicianSlug || "",
+    profileImage:
+      musician?.profilePhoto ||
+      musician?.profilePicture ||
+      musician?.profileImage ||
+      musician?.profilePic ||
+      musician?.profile_picture ||
+      "",
+    postcode: musician?.address?.postcode || musician?.postcode || "",
+    status: "presented",
+    notes: "",
+    deputyMatchScore: 0,
+    matchSummary: {
+      instrument: job?.instrument || "",
+      roleFit: 0,
+      genreFit: 0,
+      locationFit: 0,
+      songFit: 0,
+    },
+    appliedAt: now,
+    shortlistedAt: null,
+    presentedAt: now,
+    allocatedAt: null,
+    bookedAt: null,
+    declinedAt: null,
+    withdrawnAt: null,
+    phoneNormalized: toE164(
+      musician?.phone || musician?.phoneNumber || musician?.basicInfo?.phone || "",
+    ),
+  };
+
+  if (existingIndex === -1) {
+    job.applications = [...existingApplications, baseApplication];
+  } else {
+    job.applications = existingApplications.map((application, index) => {
+      if (index !== existingIndex) return application;
+
+      return {
+        ...application,
+        ...baseApplication,
+        appliedAt: application?.appliedAt || now,
+      };
+    });
+  }
+
+  job.applicationCount = Array.isArray(job.applications)
+    ? job.applications.length
+    : 0;
 };
 
 const buildDeputyReplyCode = (jobId, musicianId, action) => {
@@ -4088,6 +4248,7 @@ export const updateDeputyJobApplicationStatus = async (req, res) => {
       "booked",
       "declined",
       "withdrawn",
+      "presented",
     ];
 
     if (!allowedStatuses.includes(normaliseString(status))) {
@@ -4115,11 +4276,15 @@ export const updateDeputyJobApplicationStatus = async (req, res) => {
         .json({ success: false, message: "Application not found" });
     }
 
+ 
+
     const nextStatus = normaliseString(status);
     job.applications[applicationIndex].status = nextStatus;
     job.applications[applicationIndex].notes = normaliseString(notes);
 
     const now = new Date();
+       if (nextStatus === "presented")
+  job.applications[applicationIndex].presentedAt = now;
     if (nextStatus === "shortlisted")
       job.applications[applicationIndex].shortlistedAt = now;
     if (nextStatus === "allocated")
@@ -4848,6 +5013,159 @@ export const closeDeputyJob = async (req, res) => {
     });
   }
 };
+
+export const presentDeputyApplicant = async (req, res) => {
+  try {
+    if (!canManuallyAllocateDeputyJob(req)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admin or agent users can present deputy applicants",
+      });
+    }
+
+    const { musicianId } = req.body || {};
+    const safeMusicianId = asObjectIdString(musicianId);
+
+    if (!safeMusicianId) {
+      return res.status(400).json({
+        success: false,
+        message: "musicianId is required",
+      });
+    }
+
+    const job = await deputyJobModel.findById(req.params.id);
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    if (String(job?.jobType || "").toLowerCase() !== "enquiry") {
+      return res.status(400).json({
+        success: false,
+        message: "Applicants can only be presented on enquiry deputy jobs",
+      });
+    }
+
+    const musician = await findMatchedMusicianFromJob(job, safeMusicianId);
+    if (!musician) {
+      return res.status(404).json({
+        success: false,
+        message: "Musician not found",
+      });
+    }
+
+    const now = new Date();
+    upsertPresentedApplicationForEnquiry({ job, musician, now });
+
+    const email = normaliseEmail(
+      musician?.email || musician?.basicInfo?.email || "",
+    );
+    const phone = toE164(
+      musician?.phone || musician?.phoneNumber || musician?.basicInfo?.phone || "",
+    );
+
+    const notificationPreview = buildApplicantPresentedEmailPreview({
+      job,
+      musician,
+    });
+
+    let whatsappSid = "";
+    let whatsappErrorMessage = "";
+    let emailSent = false;
+
+    if (phone) {
+      try {
+        const whatsappResult = await sendDeputyAllocationWhatsApp({
+          to: phone,
+          job,
+          musician,
+        });
+        whatsappSid = whatsappResult?.sid || "";
+      } catch (whatsappError) {
+        whatsappErrorMessage =
+          whatsappError?.message || "WhatsApp presentation send failed";
+        console.error("❌ presentDeputyApplicant WhatsApp error:", {
+          jobId: String(job._id),
+          musicianId: String(musician._id),
+          phone,
+          message: whatsappErrorMessage,
+        });
+      }
+    }
+
+    if (email) {
+      try {
+        await sendEmail({
+          to: email,
+          bcc: DEPUTY_JOB_BCC_EMAIL,
+          subject: notificationPreview.subject,
+          html: notificationPreview.html,
+          text: notificationPreview.text,
+        });
+        emailSent = true;
+      } catch (emailError) {
+        console.error("❌ presentDeputyApplicant email error:", {
+          jobId: String(job._id),
+          musicianId: String(musician._id),
+          email,
+          message: emailError?.message || "Email send failed",
+        });
+      }
+    }
+
+    job.notifications = [
+      ...(Array.isArray(job.notifications) ? job.notifications : []),
+      {
+        musicianId: musician._id,
+        email,
+        phone,
+        channel: whatsappSid ? "whatsapp" : "email",
+        type: "applicant_presented",
+        subject: notificationPreview.subject,
+        previewHtml: notificationPreview.html,
+        previewText: notificationPreview.text,
+        providerMessageId: whatsappSid,
+        status: whatsappSid || emailSent ? "sent" : "failed",
+        sentAt: new Date(),
+        error:
+          whatsappSid || emailSent
+            ? ""
+            : whatsappErrorMessage || "No contact details available",
+      },
+    ];
+
+    await job.save();
+
+    return res.json({
+      success: true,
+      message: "Applicant presented to client",
+      job: withDeputyJobAliases(job),
+      musician: {
+        _id: musician._id,
+        firstName: musician.firstName || musician.basicInfo?.firstName || "",
+        lastName: musician.lastName || musician.basicInfo?.lastName || "",
+        email,
+        phone,
+        musicianSlug: musician.musicianSlug || "",
+      },
+      notification: {
+        whatsappSid,
+        email,
+      },
+    });
+  } catch (error) {
+    console.error("❌ presentDeputyApplicant error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to present applicant",
+      error: error.message,
+    });
+  }
+};
+
+
 export const manualAllocateDeputyJob = async (req, res) => {
   try {
     if (!canManuallyAllocateDeputyJob(req)) {

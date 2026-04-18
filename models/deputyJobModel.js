@@ -22,8 +22,10 @@ const deputyJobApplicationSchema = new mongoose.Schema(
         "booked",
         "declined",
         "withdrawn",
+        "presented",
       ],
       default: "applied",
+      
     },
     notes: { type: String, default: "", trim: true },
 
@@ -37,6 +39,7 @@ const deputyJobApplicationSchema = new mongoose.Schema(
     },
 
     shortlistedAt: { type: Date, default: null },
+    presentedAt: { type: Date, default: null },
     allocatedAt: { type: Date, default: null },
     bookedAt: { type: Date, default: null },
     declinedAt: { type: Date, default: null },
@@ -75,6 +78,8 @@ const deputyJobNotificationSchema = new mongoose.Schema(
         "booking_confirmation",
         "allocation_request_manua",
         "manual",
+"applicant_presented",
+        
       ],
       default: "job_created",
     },
