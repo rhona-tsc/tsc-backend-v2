@@ -4968,7 +4968,7 @@ if (!isEnquiryJob) {
         email: musician.email || application?.email || "",
         phone: targetPhone || "",
         channel: targetPhone ? "whatsapp" : "email",
-        type: "allocation_request_manual",
+        type: "allocation_request",
         subject: `Deputy allocation request: ${normaliseString(
           job.title || job.instrument || "Deputy opportunity",
         )}`,
