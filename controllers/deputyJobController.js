@@ -89,7 +89,6 @@ const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
   : null;
 
-
 const normaliseEmail = (value) => normaliseString(value).toLowerCase();
 
 const DEFAULT_DEPUTY_STRIPE_FEE_PERCENT = Number(
@@ -99,9 +98,7 @@ const DEFAULT_DEPUTY_STRIPE_FEE_PERCENT = Number(
 );
 
 const DEFAULT_DEPUTY_STRIPE_FEE_FIXED = Number(
-  process.env.DEPUTY_STRIPE_FEE_FIXED ||
-    process.env.STRIPE_CARD_FEE_FIXED ||
-    0,
+  process.env.DEPUTY_STRIPE_FEE_FIXED || process.env.STRIPE_CARD_FEE_FIXED || 0,
 );
 
 const roundMoney = (value) => {
@@ -184,10 +181,10 @@ const renderDetailListRow = (label, values = []) => {
 };
 
 const getMusicianPayoutSettingsUrl = (musician = {}) => {
-  const siteBase = (
-    
-    "https://admin.thesupremecollective.co.uk"
-  ).replace(/\/$/, "");
+  const siteBase = "https://admin.thesupremecollective.co.uk".replace(
+    /\/$/,
+    "",
+  );
 
   return `${siteBase}/account/payout-settings`;
 };
@@ -794,12 +791,13 @@ const buildJobNotificationPreview = ({
   const callTime = normaliseString(job?.callTime || job?.startTime || "");
   const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
 
-  const siteBase = (
-    "https://admin.thesupremecollective.co.uk"
-  ).replace(/\/$/, "");
+  const siteBase = "https://admin.thesupremecollective.co.uk".replace(
+    /\/$/,
+    "",
+  );
 
   const jobUrl = `${siteBase}/deputy-jobs/${job?._id}`;
-const jobBoardUrl = `${siteBase}/deputy-jobs`;
+  const jobBoardUrl = `${siteBase}/deputy-jobs`;
   const formattedSubjectDate = formatDeputyOpportunityDate(safeDate);
   const subject = formattedSubjectDate
     ? `${safeTitle} | Deputy Opportunity for ${formattedSubjectDate}`
@@ -1024,8 +1022,10 @@ const buildAllocationEmailPreview = ({ job, musician }) => {
 const buildApplicantPresentedEmailPreview = ({ job, musician }) => {
   const firstName = normaliseString(musician?.firstName || "there");
   const fullName =
-    [musician?.firstName, musician?.lastName].filter(Boolean).join(" ").trim() ||
-    "Deputy";
+    [musician?.firstName, musician?.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim() || "Deputy";
   const jobTitle = normaliseString(
     job?.title || job?.instrument || "Deputy opportunity",
   );
@@ -1266,9 +1266,9 @@ ${renderDetailRow("Net fee", feeText)}        ${renderDetailListRow("Required in
       : "",
     notes ? `Notes: ${notes}` : "",
     ``,
-payout.hasPayoutDetails
-  ? `Your net fee for this gig is ${feeText}. Provided your Stripe payout setup remains active, payment can typically be expected 5–7 days after the gig to your connected Stripe account.`
-  : `Your net fee for this gig is ${feeText}. We do not currently have an active Stripe payout setup on file for you, so please complete your payout setup now to ensure payment can be processed. Once your Stripe payout setup is complete, payment can typically be expected 5–7 days after the gig: ${payoutSettingsUrl}`,
+    payout.hasPayoutDetails
+      ? `Your net fee for this gig is ${feeText}. Provided your Stripe payout setup remains active, payment can typically be expected 5–7 days after the gig to your connected Stripe account.`
+      : `Your net fee for this gig is ${feeText}. We do not currently have an active Stripe payout setup on file for you, so please complete your payout setup now to ensure payment can be processed. Once your Stripe payout setup is complete, payment can typically be expected 5–7 days after the gig: ${payoutSettingsUrl}`,
     `Band contact details:`,
     `Name: ${bandContactName}`,
     `Email: ${bandContactEmail}`,
@@ -1290,51 +1290,51 @@ payout.hasPayoutDetails
 
 const buildJobPayloadFromRequest = (req) => {
   const {
-  title = "",
-  date = "",
-  eventDate = "",
-  callTime = "",
-  startTime = "",
-  finishTime = "",
-  endTime = "",
-  venue = "",
-  locationName = "",
-  location = "",
-  county = "",
-  postcode = "",
-  instrument = "",
-  requiredInstruments = [],
-  isVocalSlot = false,
-  genres = [],
-  tags = [],
-  essentialRoles = [],
-  requiredSkills = [],
-  desiredRoles = [],
-  secondaryInstruments = [],
-  setLengths = [],
-  whatsIncluded = [],
-  whatsIncludedOther = "",
-  claimableExpenses = [],
-  claimableExpensesOther = "",
-  fee = 0,
-  currency = "GBP",
-  notes = "",
-  clientName = "",
-  clientEmail = "",
-  clientPhone = "",
-  grossAmount = 0,
-  commissionAmount = 0,
-  deputyNetAmount = 0,
-  stripeFeeAmount = null,
-  deductStripeFeesFromDeputy = true,
-  releaseOn = null,
-  saveClientCard = true,
-  mode = "send",
-  jobType = "booked",
-} = req.body || {};
+    title = "",
+    date = "",
+    eventDate = "",
+    callTime = "",
+    startTime = "",
+    finishTime = "",
+    endTime = "",
+    venue = "",
+    locationName = "",
+    location = "",
+    county = "",
+    postcode = "",
+    instrument = "",
+    requiredInstruments = [],
+    isVocalSlot = false,
+    genres = [],
+    tags = [],
+    essentialRoles = [],
+    requiredSkills = [],
+    desiredRoles = [],
+    secondaryInstruments = [],
+    setLengths = [],
+    whatsIncluded = [],
+    whatsIncludedOther = "",
+    claimableExpenses = [],
+    claimableExpensesOther = "",
+    fee = 0,
+    currency = "GBP",
+    notes = "",
+    clientName = "",
+    clientEmail = "",
+    clientPhone = "",
+    grossAmount = 0,
+    commissionAmount = 0,
+    deputyNetAmount = 0,
+    stripeFeeAmount = null,
+    deductStripeFeesFromDeputy = true,
+    releaseOn = null,
+    saveClientCard = true,
+    mode = "send",
+    jobType = "booked",
+  } = req.body || {};
 
-const requestedJobType =
-  normaliseString(jobType).toLowerCase() === "enquiry" ? "enquiry" : "booked";
+  const requestedJobType =
+    normaliseString(jobType).toLowerCase() === "enquiry" ? "enquiry" : "booked";
 
   const resolvedInstruments = normaliseArray(requiredInstruments);
   const resolvedEssentialRoles = normaliseArray(essentialRoles);
@@ -1427,7 +1427,7 @@ const requestedJobType =
       normaliseString(mode || "send").toLowerCase() === "preview"
         ? "preview"
         : "send",
-        jobType: requestedJobType,
+    jobType: requestedJobType,
   };
 };
 
@@ -1494,7 +1494,7 @@ const getMatchedMusiciansForJob = async (job) => {
     return musicianModel
       .find(
         { _id: { $in: ids } },
-        "firstName lastName email phone phoneNumber musicianSlug profilePhoto profilePicture profileImage profilePic profile_picture additionalImages"
+        "firstName lastName email phone phoneNumber musicianSlug profilePhoto profilePicture profileImage profilePic profile_picture additionalImages",
       )
       .lean();
   }
@@ -1502,22 +1502,23 @@ const getMatchedMusiciansForJob = async (job) => {
   const matches = await findMatchingMusiciansForDeputyJob({
     instrument: job?.instrument || job?.requiredInstruments?.[0] || "",
     isVocalSlot: Boolean(job?.isVocalSlot),
-    essentialRoles: Array.isArray(job?.essentialRoles) ? job.essentialRoles : [],
+    essentialRoles: Array.isArray(job?.essentialRoles)
+      ? job.essentialRoles
+      : [],
     desiredRoles: Array.isArray(job?.desiredRoles) ? job.desiredRoles : [],
     secondaryInstruments: Array.isArray(job?.secondaryInstruments)
       ? job.secondaryInstruments
       : [],
-    genres: Array.isArray(job?.genres) && job.genres.length
-      ? job.genres
-      : job?.tags || [],
+    genres:
+      Array.isArray(job?.genres) && job.genres.length
+        ? job.genres
+        : job?.tags || [],
     county: job?.county || "",
     postcode: job?.postcode || "",
     excludeIds: job?.createdBy ? [String(job.createdBy)] : [],
   });
 
-  job.matchedMusicianIds = matches
-    .map((m) => m?._id || m?.id)
-    .filter(Boolean);
+  job.matchedMusicianIds = matches.map((m) => m?._id || m?.id).filter(Boolean);
 
   job.matchedMusicians = matches.map(buildMatchSnapshot);
   job.matchedCount = matches.length;
@@ -1583,7 +1584,9 @@ const findMatchedMusicianFromJob = async (job, musicianId) => {
 
 const canManuallyAllocateDeputyJob = (req) => {
   const email = normaliseEmail(req?.user?.email || req?.user?.useremail || "");
-  const role = normaliseString(req?.user?.role || req?.user?.userrole || "").toLowerCase();
+  const role = normaliseString(
+    req?.user?.role || req?.user?.userrole || "",
+  ).toLowerCase();
 
   return (
     email === "hello@thesupremecollective.co.uk" ||
@@ -1596,7 +1599,9 @@ const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
   const targetId = asObjectIdString(musician?._id);
   if (!targetId) return;
 
-  const existingApplications = Array.isArray(job.applications) ? job.applications : [];
+  const existingApplications = Array.isArray(job.applications)
+    ? job.applications
+    : [];
   const existingIndex = existingApplications.findIndex(
     (application) => asObjectIdString(application?.musicianId) === targetId,
   );
@@ -1645,7 +1650,10 @@ const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
     declinedAt: null,
     withdrawnAt: null,
     phoneNormalized: toE164(
-      musician?.phone || musician?.phoneNumber || musician?.basicInfo?.phone || "",
+      musician?.phone ||
+        musician?.phoneNumber ||
+        musician?.basicInfo?.phone ||
+        "",
     ),
   };
 
@@ -1663,7 +1671,9 @@ const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
     });
   }
 
-  job.applicationCount = Array.isArray(job.applications) ? job.applications.length : 0;
+  job.applicationCount = Array.isArray(job.applications)
+    ? job.applications.length
+    : 0;
 };
 
 const upsertPresentedApplicationForEnquiry = ({ job, musician, now }) => {
@@ -1723,7 +1733,10 @@ const upsertPresentedApplicationForEnquiry = ({ job, musician, now }) => {
     declinedAt: null,
     withdrawnAt: null,
     phoneNormalized: toE164(
-      musician?.phone || musician?.phoneNumber || musician?.basicInfo?.phone || "",
+      musician?.phone ||
+        musician?.phoneNumber ||
+        musician?.basicInfo?.phone ||
+        "",
     ),
   };
 
@@ -1907,20 +1920,24 @@ export const createDeputyJob = async (req, res) => {
   try {
     const built = buildJobPayloadFromRequest(req);
 
-    const userEmail = normaliseEmail(req.user?.email || req.user?.useremail || "");
-const userRole = normaliseString(req.user?.role || req.user?.userrole || "").toLowerCase();
+    const userEmail = normaliseEmail(
+      req.user?.email || req.user?.useremail || "",
+    );
+    const userRole = normaliseString(
+      req.user?.role || req.user?.userrole || "",
+    ).toLowerCase();
 
-const canCreateEnquiryPost =
-  userEmail === "hello@thesupremecollective.co.uk" ||
-  userRole === "admin" ||
-  userRole === "agent";
+    const canCreateEnquiryPost =
+      userEmail === "hello@thesupremecollective.co.uk" ||
+      userRole === "admin" ||
+      userRole === "agent";
 
-if (built.jobType === "enquiry" && !canCreateEnquiryPost) {
-  return res.status(403).json({
-    success: false,
-    message: "Only admins and agents can create enquiry deputy posts",
-  });
-}
+    if (built.jobType === "enquiry" && !canCreateEnquiryPost) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins and agents can create enquiry deputy posts",
+      });
+    }
 
     if (!built.primaryInstrument) {
       return res.status(400).json({
@@ -1977,11 +1994,11 @@ if (built.jobType === "enquiry" && !canCreateEnquiryPost) {
       releaseOn:
         built.releaseOn || buildDefaultReleaseOn(built.resolvedEventDate),
       paymentStatus:
-  built.jobType === "enquiry"
-    ? "not_required"
-    : built.saveClientCard && built.clientEmail
-      ? "setup_required"
-      : "not_started",
+        built.jobType === "enquiry"
+          ? "not_required"
+          : built.saveClientCard && built.clientEmail
+            ? "setup_required"
+            : "not_started",
       payoutStatus: "not_ready",
       createdBy,
       createdByName,
@@ -1991,17 +2008,18 @@ if (built.jobType === "enquiry" && !canCreateEnquiryPost) {
       previewMode: built.mode !== "send",
       workflowStage: built.mode === "send" ? "created" : "preview_ready",
       jobType: built.jobType,
-isEnquiryOnly: built.jobType === "enquiry",
+      isEnquiryOnly: built.jobType === "enquiry",
     });
 
     let setupIntentResult = null;
 
-if (
-  built.jobType !== "enquiry" &&
-  built.saveClientCard &&
-  built.clientEmail &&
-  stripe
-) {      try {
+    if (
+      built.jobType !== "enquiry" &&
+      built.saveClientCard &&
+      built.clientEmail &&
+      stripe
+    ) {
+      try {
         setupIntentResult = await createOrRefreshDeputyJobSetupIntentInternal({
           job,
           clientName: built.clientName,
@@ -2012,7 +2030,7 @@ if (
       } catch (setupIntentError) {
         console.error(
           "❌ createDeputyJob setup intent error:",
-          setupIntentError
+          setupIntentError,
         );
         job.paymentStatus = "setup_required";
       }
@@ -2062,13 +2080,11 @@ if (
 
     const isEnquiryJob = built.jobType === "enquiry";
 
-const hasSavedCardDetails =
-  isEnquiryJob ||
-  (
-    Boolean(normaliseString(job?.stripeCustomerId)) &&
-    Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-    job?.paymentStatus === "ready_to_charge"
-  );
+    const hasSavedCardDetails =
+      isEnquiryJob ||
+      (Boolean(normaliseString(job?.stripeCustomerId)) &&
+        Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+        job?.paymentStatus === "ready_to_charge");
 
     if (built.mode === "send" && hasSavedCardDetails) {
       const notificationResults = await notifyMusiciansAboutDeputyJob({
@@ -2085,7 +2101,7 @@ const hasSavedCardDetails =
           email: m.email,
           firstName: m.firstName,
           lastName: m.lastName,
-        }))
+        })),
       );
 
       const sentIds = notificationResults
@@ -2095,7 +2111,7 @@ const hasSavedCardDetails =
       job.notifiedMusicianIds = sentIds;
       job.notifications = notificationResults;
       job.notifiedCount = notificationResults.filter(
-        (r) => r.status === "sent"
+        (r) => r.status === "sent",
       ).length;
       job.status = "open";
       job.previewMode = false;
@@ -2103,10 +2119,10 @@ const hasSavedCardDetails =
       job.matchedMusicians = job.matchedMusicians.map((m) => ({
         ...m,
         notified: sentIds.some(
-          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
         ),
         notifiedAt: sentIds.some(
-          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
         )
           ? new Date()
           : null,
@@ -2137,11 +2153,11 @@ const hasSavedCardDetails =
           previewText: matcherResult.previewNotification.text,
           status: "preview",
           sentAt: new Date(),
-        })
+        }),
       );
 
       const previewRecipientEmail = normaliseEmail(
-        built.clientEmail || createdByEmail || ""
+        built.clientEmail || createdByEmail || "",
       );
 
       if (previewRecipientEmail) {
@@ -2170,7 +2186,7 @@ const hasSavedCardDetails =
         } catch (previewEmailError) {
           console.error(
             "❌ Failed to send deputy job preview email:",
-            previewEmailError
+            previewEmailError,
           );
         }
       }
@@ -2418,21 +2434,21 @@ export const sendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-   const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+    const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
 
-const hasSavedCardDetails =
-  Boolean(normaliseString(job?.stripeCustomerId)) &&
-  Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-  ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
+    const hasSavedCardDetails =
+      Boolean(normaliseString(job?.stripeCustomerId)) &&
+      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+      ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
 
-if (!isEnquiryJob && !hasSavedCardDetails) {
-  return res.status(400).json({
-    success: false,
-    message:
-      "Card details must be completed and saved before deputy notifications can be sent.",
-    job: withDeputyJobAliases(job),
-  });
-}
+    if (!isEnquiryJob && !hasSavedCardDetails) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Card details must be completed and saved before deputy notifications can be sent.",
+        job: withDeputyJobAliases(job),
+      });
+    }
 
     const matches = await getMatchedMusiciansForJob(job);
 
@@ -2458,7 +2474,7 @@ if (!isEnquiryJob && !hasSavedCardDetails) {
     job.notifiedMusicianIds = sentIds;
     job.notifications = notificationResults;
     job.notifiedCount = notificationResults.filter(
-      (r) => r.status === "sent"
+      (r) => r.status === "sent",
     ).length;
     job.status = "open";
     job.previewMode = false;
@@ -2467,10 +2483,10 @@ if (!isEnquiryJob && !hasSavedCardDetails) {
     job.matchedMusicians = (job.matchedMusicians || []).map((m) => ({
       ...m,
       notified: sentIds.some(
-        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
       ),
       notifiedAt: sentIds.some(
-        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
       )
         ? new Date()
         : null,
@@ -2518,7 +2534,7 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
     }
 
     const effectiveSetupIntentId = normaliseString(
-      setupIntentId || job.setupIntentId || ""
+      setupIntentId || job.setupIntentId || "",
     );
 
     if (!effectiveSetupIntentId) {
@@ -2529,7 +2545,7 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
     }
 
     const setupIntent = await stripe.setupIntents.retrieve(
-      effectiveSetupIntentId
+      effectiveSetupIntentId,
     );
 
     const resolvedPaymentMethodId =
@@ -2537,7 +2553,7 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
       normaliseString(
         typeof setupIntent.payment_method === "string"
           ? setupIntent.payment_method
-          : setupIntent.payment_method?.id || ""
+          : setupIntent.payment_method?.id || "",
       );
 
     if (!resolvedPaymentMethodId) {
@@ -2602,7 +2618,7 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
       job.previewMode === false &&
       normaliseString(job.status).toLowerCase() === "open" &&
       ["created", "open", "payment_setup_required"].includes(
-        normaliseString(job.workflowStage).toLowerCase()
+        normaliseString(job.workflowStage).toLowerCase(),
       );
 
     let notificationResults = [];
@@ -2678,7 +2694,7 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
           ...notificationResults,
         ];
         job.notifiedCount = notificationResults.filter(
-          (r) => r.status === "sent"
+          (r) => r.status === "sent",
         ).length;
         job.status = "open";
         job.previewMode = false;
@@ -2686,10 +2702,10 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
         job.matchedMusicians = (job.matchedMusicians || []).map((m) => ({
           ...m,
           notified: sentIds.some(
-            (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+            (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
           ),
           notifiedAt: sentIds.some(
-            (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+            (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
           )
             ? new Date()
             : m.notifiedAt || null,
@@ -2928,63 +2944,63 @@ export const confirmDeputyAllocation = async (req, res) => {
       };
     });
 
- const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+    const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
 
-let chargeResult = null;
+    let chargeResult = null;
 
-if (!isEnquiryJob) {
-  if (job.stripeCustomerId && job.defaultPaymentMethodId) {
-    chargeResult = await attemptDeputyJobCharge({
-      job,
-      createdBy: req.user?._id || null,
-    });
-  } else if (job.clientEmail) {
-    job.paymentStatus = "setup_required";
-  }
-} else {
-  job.paymentStatus = "not_required";
-}
+    if (!isEnquiryJob) {
+      if (job.stripeCustomerId && job.defaultPaymentMethodId) {
+        chargeResult = await attemptDeputyJobCharge({
+          job,
+          createdBy: req.user?._id || null,
+        });
+      } else if (job.clientEmail) {
+        job.paymentStatus = "setup_required";
+      }
+    } else {
+      job.paymentStatus = "not_required";
+    }
 
-   let whatsappResult = null;
+    let whatsappResult = null;
 
-   const rawTargetPhone =
-  musician?.phone ||
-  musician?.phoneNumber ||
-  application?.phoneNormalized ||
-  application?.phone ||
-  "";
+    const rawTargetPhone =
+      musician?.phone ||
+      musician?.phoneNumber ||
+      application?.phoneNormalized ||
+      application?.phone ||
+      "";
 
-const targetPhone = toE164(rawTargetPhone);
+    const targetPhone = toE164(rawTargetPhone);
 
-console.log("📲 Allocation WhatsApp target", {
-  jobId: String(job._id),
-  musicianId: String(musician._id),
-  targetPhone,
-  rawPhone: rawTargetPhone,
-});
-
-let whatsappErrorMessage = "";
-
-if (targetPhone) {
-  try {
-    whatsappResult = await sendDeputyAllocationWhatsApp({
-      to: targetPhone,
-      job,
-      musician,
-    });
-  } catch (whatsappError) {
-    whatsappErrorMessage =
-      whatsappError?.message || "WhatsApp allocation send failed";
-
-    console.error("❌ sendDeputyAllocationWhatsApp error:", {
+    console.log("📲 Allocation WhatsApp target", {
       jobId: String(job._id),
       musicianId: String(musician._id),
       targetPhone,
-      message: whatsappErrorMessage,
-      stack: whatsappError?.stack,
+      rawPhone: rawTargetPhone,
     });
-  }
-}
+
+    let whatsappErrorMessage = "";
+
+    if (targetPhone) {
+      try {
+        whatsappResult = await sendDeputyAllocationWhatsApp({
+          to: targetPhone,
+          job,
+          musician,
+        });
+      } catch (whatsappError) {
+        whatsappErrorMessage =
+          whatsappError?.message || "WhatsApp allocation send failed";
+
+        console.error("❌ sendDeputyAllocationWhatsApp error:", {
+          jobId: String(job._id),
+          musicianId: String(musician._id),
+          targetPhone,
+          message: whatsappErrorMessage,
+          stack: whatsappError?.stack,
+        });
+      }
+    }
 
     job.notifications = [
       ...(job.notifications || []),
@@ -3004,11 +3020,11 @@ if (targetPhone) {
         providerMessageId: whatsappResult?.sid || "",
         status: whatsappResult?.sid ? "sent" : "failed",
         sentAt: new Date(),
-       error: whatsappResult?.sid
-  ? ""
-  : targetPhone
-    ? whatsappErrorMessage || "WhatsApp allocation send failed"
-    : "No phone number available for allocation message",
+        error: whatsappResult?.sid
+          ? ""
+          : targetPhone
+            ? whatsappErrorMessage || "WhatsApp allocation send failed"
+            : "No phone number available for allocation message",
       },
     ];
 
@@ -3108,21 +3124,21 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-  const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+    const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
 
-const hasSavedCardDetails =
-  Boolean(normaliseString(job?.stripeCustomerId)) &&
-  Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-  ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
+    const hasSavedCardDetails =
+      Boolean(normaliseString(job?.stripeCustomerId)) &&
+      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+      ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
 
-if (!isEnquiryJob && !hasSavedCardDetails) {
-  return res.status(400).json({
-    success: false,
-    message:
-      "Card details must be completed and saved before deputy notifications can be sent.",
-    job: withDeputyJobAliases(job),
-  });
-}
+    if (!isEnquiryJob && !hasSavedCardDetails) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Card details must be completed and saved before deputy notifications can be sent.",
+        job: withDeputyJobAliases(job),
+      });
+    }
 
     const matcherResult = await runMatcherForJob({
       job,
@@ -3179,12 +3195,12 @@ if (!isEnquiryJob && !hasSavedCardDetails) {
           : []),
       ]
         .map((id) => asObjectIdString(id))
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
     const remainingMatches = matches.filter((musician) => {
       const id = asObjectIdString(
-        musician?._id || musician?.id || musician?.musicianId
+        musician?._id || musician?.id || musician?.musicianId,
       );
       return id && !alreadyNotifiedIds.has(id);
     });
@@ -3194,7 +3210,8 @@ if (!isEnquiryJob && !hasSavedCardDetails) {
 
       return res.json({
         success: true,
-        message: "Matched musicians refreshed, but no remaining musicians to notify.",
+        message:
+          "Matched musicians refreshed, but no remaining musicians to notify.",
         job: withDeputyJobAliases(job),
         matchedCount: job.matchedCount,
         newlyNotifiedCount: 0,
@@ -3221,8 +3238,8 @@ if (!isEnquiryJob && !hasSavedCardDetails) {
           ...newSentIds,
         ]
           .map((id) => asObjectIdString(id))
-          .filter(Boolean)
-      )
+          .filter(Boolean),
+      ),
     );
 
     job.notifiedMusicianIds = allSentIds;
@@ -3238,7 +3255,7 @@ if (!isEnquiryJob && !hasSavedCardDetails) {
     job.matchedMusicians = (job.matchedMusicians || []).map((m) => {
       const id = asObjectIdString(m?.musicianId);
       const wasSentNow = newSentIds.some(
-        (sentId) => asObjectIdString(sentId) === id
+        (sentId) => asObjectIdString(sentId) === id,
       );
 
       return {
@@ -3374,45 +3391,50 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
     const bodyText = normaliseString(req.body?.Body || "");
     const buttonText = normaliseString(req.body?.ButtonText || "");
     const buttonPayload = normaliseString(req.body?.ButtonPayload || "");
-    const repliedSid = normaliseString(
-      req.body?.OriginalRepliedMessageSid || "",
-    );
+    const repliedSid = normaliseString(req.body?.OriginalRepliedMessageSid || "");
     const inboundMessageSid = normaliseString(req.body?.MessageSid || "");
     const fromRaw = normaliseString(req.body?.From || req.body?.WaId || "");
     const fromPhone = toE164(fromRaw);
 
-    const rawReply = (buttonPayload || buttonText || bodyText)
-      .trim()
-      .toLowerCase();
+    const rawReply = (buttonPayload || buttonText || bodyText).trim().toLowerCase();
+    const normalisedReply = rawReply.replace(/\s+/g, " ").trim().toLowerCase();
+    const compactReply = normalisedReply.replace(/\s+/g, "");
 
     let action = null;
 
-const normalisedReply = rawReply
-  .replace(/\s+/g, " ")
-  .trim()
-  .toLowerCase();
+    // Accept
+    if (
+      normalisedReply === "yes" ||
+      normalisedReply === "yes, book me in!" ||
+      normalisedReply === "i am available" ||
+      normalisedReply === "i'm available" ||
+      normalisedReply === "available" ||
+      normalisedReply.includes("book me in")
+    ) {
+      action = "accept";
+    }
 
-const compactReply = normalisedReply.replace(/\s+/g, "");
+    // Decline
+    if (
+      compactReply === "notavailable" ||
+      normalisedReply.includes("not available") ||
+      normalisedReply.includes("unavailable") ||
+      normalisedReply.includes("changed my mind")
+    ) {
+      action = "decline";
+    }
 
-if (
-  normalisedReply === "yes" ||
-  normalisedReply === "yes, book me in!" ||
-  normalisedReply === "i am available" ||
-  normalisedReply === "i'm available" ||
-  normalisedReply === "available" ||
-  normalisedReply.includes("book me in")
-) {
-  action = "accept";
-}
-
-if (
-  compactReply === "notavailable" ||
-  normalisedReply.includes("not available") ||
-  normalisedReply.includes("unavailable") ||
-  normalisedReply.includes("changed my mind")
-) {
-  action = "decline";
-}
+    // IMPORTANT: bail out early if we can't interpret the reply
+    if (!action) {
+      console.warn("⚠️ twilioInboundDeputyAllocation: unrecognised reply", {
+        bodyText,
+        buttonText,
+        buttonPayload,
+        fromPhone,
+        repliedSid,
+      });
+      return res.status(200).send("<Response/>");
+    }
 
     const job = await deputyJobModel.findOne({
       notifications: {
@@ -3425,13 +3447,10 @@ if (
     });
 
     if (!job) {
-      console.warn(
-        "⚠️ twilioInboundDeputyAllocation: no deputy job found for replied SID",
-        {
-          repliedSid,
-          fromPhone,
-        },
-      );
+      console.warn("⚠️ twilioInboundDeputyAllocation: no deputy job found for replied SID", {
+        repliedSid,
+        fromPhone,
+      });
       return res.status(200).send("<Response/>");
     }
 
@@ -3448,50 +3467,50 @@ if (
       email: allocationNotification?.email || "",
     });
 
-    const musician = await findMatchedMusicianFromJob(
-      job,
+    const targetMusicianId =
       allocationNotification?.musicianId ||
-        matchedApplication?.musicianId ||
-        job.allocatedMusicianId,
-    );
+      matchedApplication?.musicianId ||
+      job.allocatedMusicianId;
+
+    const musician = targetMusicianId
+      ? await musicianModel.findById(targetMusicianId).lean()
+      : null;
 
     if (!musician) {
       console.warn("⚠️ twilioInboundDeputyAllocation: musician not found", {
         jobId: String(job._id),
         repliedSid,
         fromPhone,
+        targetMusicianId: String(targetMusicianId || ""),
       });
       return res.status(200).send("<Response/>");
     }
 
     const getOrdinalSuffix = (day) => {
-  const n = Number(day);
-  if (n >= 11 && n <= 13) return "th";
-  const last = n % 10;
-  if (last === 1) return "st";
-  if (last === 2) return "nd";
-  if (last === 3) return "rd";
-  return "th";
-};
+      const n = Number(day);
+      if (n >= 11 && n <= 13) return "th";
+      const last = n % 10;
+      if (last === 1) return "st";
+      if (last === 2) return "nd";
+      if (last === 3) return "rd";
+      return "th";
+    };
 
-const formatFullDate = (value) => {
-  if (!value) return "TBC";
+    const formatFullDate = (value) => {
+      if (!value) return "TBC";
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return normaliseString(value) || "TBC";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return normaliseString(value) || "TBC";
 
-  const weekday = date.toLocaleDateString("en-GB", { weekday: "long" });
-  const month = date.toLocaleDateString("en-GB", { month: "long" });
-  const day = date.getDate();
-  const year = date.getFullYear();
+      const weekday = date.toLocaleDateString("en-GB", { weekday: "long" });
+      const month = date.toLocaleDateString("en-GB", { month: "long" });
+      const day = date.getDate();
+      const year = date.getFullYear();
 
-  return `${weekday}, ${day}${getOrdinalSuffix(day)} ${month} ${year}`;
-};
+      return `${weekday}, ${day}${getOrdinalSuffix(day)} ${month} ${year}`;
+    };
 
-    const musicianName = [musician.firstName, musician.lastName]
-      .filter(Boolean)
-      .join(" ")
-      .trim();
+    const musicianName = [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim();
     const musicianDisplayName = [
       normaliseString(musician?.firstName || ""),
       normaliseString(musician?.lastName || "").charAt(0)
@@ -3501,32 +3520,22 @@ const formatFullDate = (value) => {
       .filter(Boolean)
       .join(" ")
       .trim();
-    const jobTitle = normaliseString(
-      job.title || job.instrument || "Deputy opportunity",
-    );
-const location = normaliseString(
-  job.location || job.locationName || job.venue || "Location TBC",
-);
-const dateText = formatFullDate(job.eventDate);
+
+    const jobTitle = normaliseString(job.title || job.instrument || "Deputy opportunity");
+    const location = normaliseString(job.location || job.locationName || job.venue || "Location TBC");
+    const dateText = formatFullDate(job.eventDate);
     const feeText = getDeputyNetFeeText(job);
-    const musicianEmail = normaliseString(
-      musician.email || matchedApplication?.email || "",
-    ).toLowerCase();
+
+    const musicianEmail = normaliseString(musician.email || matchedApplication?.email || "").toLowerCase();
     const musicianPhone =
       fromPhone ||
-      toE164(
-        musician.phone ||
-          musician.phoneNumber ||
-          matchedApplication?.phone ||
-          "",
-      ) ||
+      toE164(musician.phone || musician.phoneNumber || matchedApplication?.phone || "") ||
       "";
 
-    const posterEmail = normaliseString(
-      job.createdByEmail || job.clientEmail || "",
-    ).toLowerCase();
+    const posterEmail = normaliseString(job.createdByEmail || job.clientEmail || "").toLowerCase();
 
     if (action === "accept") {
+      // Mark booked/filled etc (your helper should set the correct job fields)
       applyBookedStateToJob(job, musician);
 
       job.notifications = [
@@ -3536,7 +3545,7 @@ const dateText = formatFullDate(job.eventDate);
           email: musicianEmail,
           phone: musicianPhone,
           channel: "whatsapp",
-          type: "booking_confirmation",
+          type: "allocation_accepted",
           subject: `Deputy accepted: ${jobTitle}`,
           previewHtml: "",
           previewText: `Accepted via WhatsApp by ${musicianName}`,
@@ -3548,6 +3557,7 @@ const dateText = formatFullDate(job.eventDate);
 
       await job.save();
 
+      // WhatsApp confirmation back to musician
       if (musicianPhone) {
         try {
           await sendWhatsAppText(
@@ -3555,21 +3565,15 @@ const dateText = formatFullDate(job.eventDate);
             "Wonderful! Please consider yourself booked. We’ll let the band know, and you should hear from them shortly.",
           );
         } catch (whatsAppError) {
-          console.error(
-            "❌ Failed to send deputy acceptance WhatsApp confirmation:",
-            whatsAppError,
-          );
+          console.error("❌ Failed to send deputy acceptance WhatsApp confirmation:", whatsAppError);
         }
       }
 
+      // Email the musician full details
       if (musicianEmail) {
         try {
-          const callTime = normaliseString(
-            job?.callTime || job?.startTime || "",
-          );
-          const finishTime = normaliseString(
-            job?.finishTime || job?.endTime || "",
-          );
+          const callTime = normaliseString(job?.callTime || job?.startTime || "");
+          const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
           const notes = normaliseString(job?.notes || "");
           const requiredInstruments = normaliseList(job?.requiredInstruments);
           const essentialSkills = normaliseList(job?.essentialRoles);
@@ -3581,21 +3585,11 @@ const dateText = formatFullDate(job.eventDate);
           const setLengths = normaliseList(job?.setLengths);
           const whatsIncluded = normaliseList(job?.whatsIncluded);
           const claimableExpenses = normaliseList(job?.claimableExpenses);
-          const paymentDate = job?.releaseOn
-            ? new Date(job.releaseOn).toLocaleDateString("en-GB", {
-                weekday: "long",
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              })
-            : "TBC";
-          const bandContactName = normaliseString(
-            job?.createdByName || "The Supreme Collective",
-          );
-          const bandContactEmail = normaliseString(
-            job?.createdByEmail || "hello@thesupremecollective.co.uk",
-          );
+
+          const bandContactName = normaliseString(job?.createdByName || "The Supreme Collective");
+          const bandContactEmail = normaliseString(job?.createdByEmail || "hello@thesupremecollective.co.uk");
           const bandContactPhone = normaliseString(job?.createdByPhone || "");
+
           const payout = getMusicianPayoutSummary(musician);
           const payoutSettingsUrl = getMusicianPayoutSettingsUrl(musician);
 
@@ -3604,103 +3598,93 @@ const dateText = formatFullDate(job.eventDate);
             bcc: DEPUTY_JOB_BCC_EMAIL,
             subject: `Confirmed: ${jobTitle}`,
             html: `
-    <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
-      <p>Hi ${escapeHtml(normaliseString(musician.firstName || "there"))},</p>
+              <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
+                <p>Hi ${escapeHtml(normaliseString(musician.firstName || "there"))},</p>
 
-      <p>
-        Thank you for confirming your availability for <strong>${escapeHtml(jobTitle)}</strong> —
-        please consider yourself booked.
-      </p>
+                <p>
+                  Thank you for confirming your availability for <strong>${escapeHtml(jobTitle)}</strong> —
+                  please consider yourself booked.
+                </p>
 
-      <p>
-        The band knows you have confirmed the booking, and they have your contact details.
-        Please find the full job details and band contact information below so you can get in touch directly about timings,
-        setlist details, logistics, arrival information, parking, dress code, and anything else needed to ensure a smooth performance.
-      </p>
+                <p>
+                  The band knows you have confirmed the booking, and they have your contact details.
+                  Please find the full job details and band contact information below so you can get in touch directly about timings,
+                  setlist details, logistics, arrival information, parking, dress code, and anything else needed to ensure a smooth performance.
+                </p>
 
-      <h3 style="margin: 24px 0 10px;">Gig details</h3>
-      <ul style="padding-left: 20px; margin: 0 0 18px;">
-        ${renderDetailRow("Job", jobTitle)}
-        ${renderDetailRow("Date", dateText)}
-        ${renderDetailRow("Call time", callTime)}
-        ${renderDetailRow("Finish time", finishTime)}
-        ${renderDetailRow("Location", location)}
-        ${renderDetailRow("Net fee", feeText)}
-        ${renderDetailListRow("Required instruments", requiredInstruments)}
-        ${renderDetailListRow("Essential skills", essentialSkills)}
-        ${renderDetailListRow("Required skills", requiredSkills)}
-        ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
-        ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
-        ${renderDetailListRow("Genres", genres)}
-        ${renderDetailListRow("Tags", tags)}
-        ${renderDetailListRow("Set lengths", setLengths)}
-        ${renderDetailListRow("What's included", whatsIncluded)}
-        ${renderDetailListRow("Claimable expenses", claimableExpenses)}
-        ${renderDetailRow("Notes", notes)}
-      </ul>
+                <h3 style="margin: 24px 0 10px;">Gig details</h3>
+                <ul style="padding-left: 20px; margin: 0 0 18px;">
+                  ${renderDetailRow("Job", jobTitle)}
+                  ${renderDetailRow("Date", dateText)}
+                  ${renderDetailRow("Call time", callTime)}
+                  ${renderDetailRow("Finish time", finishTime)}
+                  ${renderDetailRow("Location", location)}
+                  ${renderDetailRow("Net fee", feeText)}
+                  ${renderDetailListRow("Required instruments", requiredInstruments)}
+                  ${renderDetailListRow("Essential skills", essentialSkills)}
+                  ${renderDetailListRow("Required skills", requiredSkills)}
+                  ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
+                  ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
+                  ${renderDetailListRow("Genres", genres)}
+                  ${renderDetailListRow("Tags", tags)}
+                  ${renderDetailListRow("Set lengths", setLengths)}
+                  ${renderDetailListRow("What's included", whatsIncluded)}
+                  ${renderDetailListRow("Claimable expenses", claimableExpenses)}
+                  ${renderDetailRow("Notes", notes)}
+                </ul>
 
- ${
-  payout.hasPayoutDetails
-    ? `
-      <p>
-        <strong>Payment processing:</strong><br/>
-        Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
-        Provided your Stripe payout setup remains active, payment can typically be expected <strong>5–7 days after the gig</strong>
-        to your connected Stripe account.
-      </p>
-    `
-    : `
-      <p>
-        <strong>Payment processing:</strong><br/>
-        Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
-        We do not currently have an active Stripe payout setup on file for you, so please complete your payout setup now to ensure payment can be processed.
-        Once your Stripe payout setup is complete, payment can typically be expected <strong>5–7 days after the gig</strong>.
-      </p>
-      <p style="margin: 16px 0 20px;">
-        <a
-          href="${escapeHtml(payoutSettingsUrl)}"
-          style="
-            display:inline-block;
-            background:#111;
-            color:#fff;
-            text-decoration:none;
-            padding:12px 18px;
-            border-radius:8px;
-            font-weight:600;
-          "
-        >
-          Complete Stripe payout setup
-        </a>
-      </p>
-    `
-}
+                ${
+                  payout.hasPayoutDetails
+                    ? `
+                      <p>
+                        <strong>Payment processing:</strong><br/>
+                        Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
+                        Provided your Stripe payout setup remains active, payment can typically be expected <strong>5–7 days after the gig</strong>
+                        to your connected Stripe account.
+                      </p>
+                    `
+                    : `
+                      <p>
+                        <strong>Payment processing:</strong><br/>
+                        Your net fee for this gig is <strong>${escapeHtml(feeText)}</strong>.
+                        We do not currently have an active Stripe payout setup on file for you, so please complete your payout setup now to ensure payment can be processed.
+                        Once your Stripe payout setup is complete, payment can typically be expected <strong>5–7 days after the gig</strong>.
+                      </p>
+                      <p style="margin: 16px 0 20px;">
+                        <a
+                          href="${escapeHtml(payoutSettingsUrl)}"
+                          style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;"
+                        >
+                          Complete Stripe payout setup
+                        </a>
+                      </p>
+                    `
+                }
 
-      <h3 style="margin: 24px 0 10px;">Band contact details</h3>
-      <ul style="padding-left: 20px; margin: 0 0 18px;">
-        ${renderDetailRow("Name", bandContactName)}
-        ${renderDetailRow("Email", bandContactEmail)}
-        ${renderDetailRow("Phone", bandContactPhone)}
-      </ul>
+                <h3 style="margin: 24px 0 10px;">Band contact details</h3>
+                <ul style="padding-left: 20px; margin: 0 0 18px;">
+                  ${renderDetailRow("Name", bandContactName)}
+                  ${renderDetailRow("Email", bandContactEmail)}
+                  ${renderDetailRow("Phone", bandContactPhone)}
+                </ul>
 
-      <p>
-        If anything changes or you have any trouble getting hold of the band, just reply to this email and we’ll be happy to help.
-      </p>
+                <p>
+                  If anything changes or you have any trouble getting hold of the band, just reply to this email and we’ll be happy to help.
+                </p>
 
-      <p>
-        Best wishes,<br/>
-        <strong>The Supreme Collective</strong>
-      </p>
-    </div>
-  `,
+                <p>
+                  Best wishes,<br/>
+                  <strong>The Supreme Collective</strong>
+                </p>
+              </div>
+            `,
           });
         } catch (musicianEmailError) {
-          console.error(
-            "❌ Failed to send musician deputy acceptance email:",
-            musicianEmailError,
-          );
+          console.error("❌ Failed to send musician deputy acceptance email:", musicianEmailError);
         }
       }
 
+      // Email the poster/band
       if (posterEmail) {
         try {
           const requiredInstruments = normaliseList(job?.requiredInstruments);
@@ -3713,13 +3697,11 @@ const dateText = formatFullDate(job.eventDate);
           const setLengths = normaliseList(job?.setLengths);
           const whatsIncluded = normaliseList(job?.whatsIncluded);
           const claimableExpenses = normaliseList(job?.claimableExpenses);
-          const callTime = normaliseString(
-            job?.callTime || job?.startTime || "",
-          );
-          const finishTime = normaliseString(
-            job?.finishTime || job?.endTime || "",
-          );
+
+          const callTime = normaliseString(job?.callTime || job?.startTime || "");
+          const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
           const notes = normaliseString(job?.notes || "");
+
           const paymentDate = job?.releaseOn
             ? new Date(job.releaseOn).toLocaleDateString("en-GB", {
                 weekday: "long",
@@ -3734,136 +3716,96 @@ const dateText = formatFullDate(job.eventDate);
             bcc: DEPUTY_JOB_BCC_EMAIL,
             subject: `Deputy accepted: ${jobTitle}`,
             html: `
-          <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
-            <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
-              <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
-                <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700;">
-                  The Supreme Collective
-                </p>
-                <h1 style="margin:12px 0 0; font-size:28px; line-height:1.2; color:#fff;">
-                  Deputy Accepted
-                </h1>
-                <p style="margin:12px 0 0; font-size:15px; line-height:1.6; color:#f3f3f3;">
-                  Your selected deputy has confirmed their availability and is now booked for this job.
-                </p>
-              </div>
-
-              <div style="background:#ffffff; border:1px solid #e8e8e8; border-top:0; border-radius:0 0 20px 20px; padding:32px;">
-                <p style="margin:0 0 18px; font-size:16px; line-height:1.7; color:#333;">
-                  Hi ${escapeHtml(normaliseString(job?.createdByName || "there"))},
-                </p>
-
-                <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
-                  Great news — <strong>${escapeHtml(
-                    musicianName || "your selected deputy",
-                  )}</strong> has accepted the deputy booking for <strong>${escapeHtml(jobTitle)}</strong>.
-                </p>
-
-                <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#444;">
-                  Thank you for using <strong>The Supreme Collective</strong> to find your deputy.
-                  Please now get in touch with them directly to share the setlist, timings,
-                  dress code, logistics, arrival details, parking instructions, and any other
-                  information needed to help ensure a smooth and successful performance.
-                </p>
-
-                <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
-                  <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Deputy contact details</h3>
-                  <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
-                    <li><strong>Name:</strong> ${escapeHtml(
-                      musicianName || "Not provided",
-                    )}</li>
-                    <li><strong>Email:</strong> ${escapeHtml(
-                      musicianEmail || "Not provided",
-                    )}</li>
-                    <li><strong>Phone:</strong> ${escapeHtml(
-                      musicianPhone || "Not provided",
-                    )}</li>
-                  </ul>
-                </div>
-
-                <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
-                  <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Confirmed job details</h3>
-                  <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
-                    ${renderDetailRow("Job", jobTitle)}
-                    ${renderDetailRow("Date", dateText)}
-                    ${renderDetailRow("Call time", callTime)}
-                    ${renderDetailRow("Finish time", finishTime)}
-                    ${renderDetailRow("Location", location)}
-                    ${renderDetailRow("Fee", feeText)}
-                    ${renderDetailListRow("Required instruments", requiredInstruments)}
-                    ${renderDetailListRow("Essential skills", essentialSkills)}
-                    ${renderDetailListRow("Required skills", requiredSkills)}
-                    ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
-                    ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
-                    ${renderDetailListRow("Genres", genres)}
-                    ${renderDetailListRow("Tags", tags)}
-                    ${renderDetailListRow("Set lengths", setLengths)}
-                    ${renderDetailListRow("What's included", whatsIncluded)}
-                    ${renderDetailListRow("Claimable expenses", claimableExpenses)}
-                    ${renderDetailRow("Notes", notes)}
-                  </ul>
-                </div>
-
-                <div style="margin-bottom:24px; padding:20px; border:1px solid #f1d0d1; background:#fff7f7; border-radius:16px;">
-                  <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-                    Payment processing
-                  </p>
-                  <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
-                    Unless otherwise agreed, payment is due to be processed on
-                    <strong>${escapeHtml(paymentDate)}</strong>.
-                  </p>
-                </div>
-
-                <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
-                  If anything changes or you need any support before the event,
-                  just reply to this email and we’ll be happy to help.
-                </p>
-
-                <div style="margin-top:18px; display:grid; gap:12px;">
-                  <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
-                    <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-                      P.S.
+              <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
+                <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
+                  <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
+                    <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700;">
+                      The Supreme Collective
                     </p>
-                    <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
-                      Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
+                    <h1 style="margin:12px 0 0; font-size:28px; line-height:1.2; color:#fff;">
+                      Deputy Accepted
+                    </h1>
+                    <p style="margin:12px 0 0; font-size:15px; line-height:1.6; color:#f3f3f3;">
+                      Your selected deputy has confirmed their availability and is now booked for this job.
                     </p>
                   </div>
 
-                  <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
-                    <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-                      Also...
+                  <div style="background:#ffffff; border:1px solid #e8e8e8; border-top:0; border-radius:0 0 20px 20px; padding:32px;">
+                    <p style="margin:0 0 18px; font-size:16px; line-height:1.7; color:#333;">
+                      Hi ${escapeHtml(normaliseString(job?.createdByName || "there"))},
                     </p>
-                    <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
-                      Think your act could be a great fit for <strong>The Supreme Collective</strong>? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.
+
+                    <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
+                      Great news — <strong>${escapeHtml(musicianName || "your selected deputy")}</strong> has accepted the deputy booking for
+                      <strong>${escapeHtml(jobTitle)}</strong>.
+                    </p>
+
+                    <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#444;">
+                      Please now get in touch with them directly to share the setlist, timings, dress code, logistics, arrival details, parking instructions, and anything else needed.
+                    </p>
+
+                    <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
+                      <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Deputy contact details</h3>
+                      <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
+                        <li><strong>Name:</strong> ${escapeHtml(musicianName || "Not provided")}</li>
+                        <li><strong>Email:</strong> ${escapeHtml(musicianEmail || "Not provided")}</li>
+                        <li><strong>Phone:</strong> ${escapeHtml(musicianPhone || "Not provided")}</li>
+                      </ul>
+                    </div>
+
+                    <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
+                      <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Confirmed job details</h3>
+                      <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
+                        ${renderDetailRow("Job", jobTitle)}
+                        ${renderDetailRow("Date", dateText)}
+                        ${renderDetailRow("Call time", callTime)}
+                        ${renderDetailRow("Finish time", finishTime)}
+                        ${renderDetailRow("Location", location)}
+                        ${renderDetailRow("Fee", feeText)}
+                        ${renderDetailListRow("Required instruments", requiredInstruments)}
+                        ${renderDetailListRow("Essential skills", essentialSkills)}
+                        ${renderDetailListRow("Required skills", requiredSkills)}
+                        ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
+                        ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
+                        ${renderDetailListRow("Genres", genres)}
+                        ${renderDetailListRow("Tags", tags)}
+                        ${renderDetailListRow("Set lengths", setLengths)}
+                        ${renderDetailListRow("What's included", whatsIncluded)}
+                        ${renderDetailListRow("Claimable expenses", claimableExpenses)}
+                        ${renderDetailRow("Notes", notes)}
+                      </ul>
+                    </div>
+
+                    <div style="margin-bottom:24px; padding:20px; border:1px solid #f1d0d1; background:#fff7f7; border-radius:16px;">
+                      <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+                        Payment processing
+                      </p>
+                      <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+                        Unless otherwise agreed, payment is due to be processed on <strong>${escapeHtml(paymentDate)}</strong>.
+                      </p>
+                    </div>
+
+                    <p style="margin:24px 0 0; font-size:15px; line-height:1.7; color:#444;">
+                      Best wishes,<br/>
+                      <strong>The Supreme Collective</strong>
                     </p>
                   </div>
                 </div>
-
-                <p style="margin:24px 0 0; font-size:15px; line-height:1.7; color:#444;">
-                  Best wishes,<br/>
-                  <strong>The Supreme Collective</strong>
-                </p>
               </div>
-            </div>
-          </div>
-        `,
+            `,
           });
         } catch (posterEmailError) {
-          console.error(
-            "❌ Failed to send poster deputy acceptance email:",
-            posterEmailError,
-          );
+          console.error("❌ Failed to send poster deputy acceptance email:", posterEmailError);
         }
       }
 
       return res.status(200).send("<Response/>");
     }
 
-    if (action === "decline") {
+    // action === "decline"
+    {
       const now = new Date();
-      const safeMusicianId = asObjectIdString(
-        musician._id || musician.musicianId,
-      );
+      const safeMusicianId = asObjectIdString(musician._id || musician.musicianId);
 
       job.status = "open";
       job.workflowStage = "sent_to_matches";
@@ -3875,9 +3817,7 @@ const dateText = formatFullDate(job.eventDate);
       job.bookingConfirmedAt = null;
 
       job.applications = (job.applications || []).map((application) => {
-        const sameMusician =
-          asObjectIdString(application?.musicianId) === safeMusicianId;
-
+        const sameMusician = asObjectIdString(application?.musicianId) === safeMusicianId;
         return {
           ...application,
           status: sameMusician ? "declined" : application.status,
@@ -3892,13 +3832,13 @@ const dateText = formatFullDate(job.eventDate);
           email: musicianEmail,
           phone: musicianPhone,
           channel: "whatsapp",
-          type: "manual",
+          type: "allocation_declined",
           subject: `Deputy declined: ${jobTitle}`,
           previewHtml: "",
           previewText: `Declined via WhatsApp by ${musicianName}`,
           providerMessageId: inboundMessageSid,
           status: "sent",
-          sentAt: new Date(),
+          sentAt: now,
         },
       ];
 
@@ -3911,10 +3851,7 @@ const dateText = formatFullDate(job.eventDate);
             "Thanks for letting us know. We’ve updated the job and will look for another deputy.",
           );
         } catch (whatsAppError) {
-          console.error(
-            "❌ Failed to send deputy decline WhatsApp confirmation:",
-            whatsAppError,
-          );
+          console.error("❌ Failed to send deputy decline WhatsApp confirmation:", whatsAppError);
         }
       }
 
@@ -3930,12 +3867,9 @@ const dateText = formatFullDate(job.eventDate);
           const setLengths = normaliseList(job?.setLengths);
           const whatsIncluded = normaliseList(job?.whatsIncluded);
           const claimableExpenses = normaliseList(job?.claimableExpenses);
-          const callTime = normaliseString(
-            job?.callTime || job?.startTime || "",
-          );
-          const finishTime = normaliseString(
-            job?.finishTime || job?.endTime || "",
-          );
+
+          const callTime = normaliseString(job?.callTime || job?.startTime || "");
+          const finishTime = normaliseString(job?.finishTime || job?.endTime || "");
           const notes = normaliseString(job?.notes || "");
 
           await sendEmail({
@@ -3943,117 +3877,82 @@ const dateText = formatFullDate(job.eventDate);
             bcc: DEPUTY_JOB_BCC_EMAIL,
             subject: `Deputy declined: ${jobTitle}`,
             html: `
-            <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
-              <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
-                <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
-                  <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700;">
-                    The Supreme Collective
-                  </p>
-                  <h1 style="margin:12px 0 0; font-size:28px; line-height:1.2; color:#fff;">
-                    Deputy Declined
-                  </h1>
-                  <p style="margin:12px 0 0; font-size:15px; line-height:1.6; color:#f3f3f3;">
-                    Your selected deputy is no longer available, and the job has been reopened so you can choose another suitable option.
-                  </p>
-                </div>
-
-                <div style="background:#ffffff; border:1px solid #e8e8e8; border-top:0; border-radius:0 0 20px 20px; padding:32px;">
-                  <p style="margin:0 0 18px; font-size:16px; line-height:1.7; color:#333;">
-                    Hi ${escapeHtml(normaliseString(job?.createdByName || "there"))},
-                  </p>
-
-                  <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
-                    We wanted to let you know that <strong>${escapeHtml(
-                      musicianDisplayName || "the allocated deputy",
-                    )}</strong> is no longer available for <strong>${escapeHtml(jobTitle)}</strong>.
-                  </p>
-
-                  <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#444;">
-                    The deputy job has now been <strong>reopened</strong>, so you can return to the job board and allocate another deputy when ready.
-                    To help make reallocation as quick and straightforward as possible, we’ve included the full job details below for reference.
-                  </p>
-
-                  <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
-                    <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Declined deputy</h3>
-                    <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
-                      <li><strong>Name:</strong> ${escapeHtml(musicianDisplayName || "Not provided")}</li>
-                      <li><strong>Email:</strong> ${escapeHtml(musicianEmail || "Not provided")}</li>
-                      <li><strong>Phone:</strong> ${escapeHtml(musicianPhone || "Not provided")}</li>
-                    </ul>
+              <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
+                <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
+                  <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
+                    <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700;">
+                      The Supreme Collective
+                    </p>
+                    <h1 style="margin:12px 0 0; font-size:28px; line-height:1.2; color:#fff;">
+                      Deputy Declined
+                    </h1>
+                    <p style="margin:12px 0 0; font-size:15px; line-height:1.6; color:#f3f3f3;">
+                      Your selected deputy is no longer available, and the job has been reopened so you can choose another suitable option.
+                    </p>
                   </div>
 
-                  <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
-                    <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Job details</h3>
-                    <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
-                      ${renderDetailRow("Job", jobTitle)}
-                      ${renderDetailRow("Date", dateText)}
-                      ${renderDetailRow("Call time", callTime)}
-                      ${renderDetailRow("Finish time", finishTime)}
-                      ${renderDetailRow("Location", location)}
-                      ${renderDetailRow("Fee", feeText)}
-                      ${renderDetailListRow("Required instruments", requiredInstruments)}
-                      ${renderDetailListRow("Essential skills", essentialSkills)}
-                      ${renderDetailListRow("Required skills", requiredSkills)}
-                      ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
-                      ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
-                      ${renderDetailListRow("Genres", genres)}
-                      ${renderDetailListRow("Tags", tags)}
-                      ${renderDetailListRow("Set lengths", setLengths)}
-                      ${renderDetailListRow("What's included", whatsIncluded)}
-                      ${renderDetailListRow("Claimable expenses", claimableExpenses)}
-                      ${renderDetailRow("Notes", notes)}
-                    </ul>
-                  </div>
+                  <div style="background:#ffffff; border:1px solid #e8e8e8; border-top:0; border-radius:0 0 20px 20px; padding:32px;">
+                    <p style="margin:0 0 18px; font-size:16px; line-height:1.7; color:#333;">
+                      Hi ${escapeHtml(normaliseString(job?.createdByName || "there"))},
+                    </p>
 
-                  <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
-                    Thank you for using <strong>The Supreme Collective</strong> to source your deputy. If you’d like, you can now allocate another suitable applicant or return to the job board to review your options.
-                  </p>
+                    <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
+                      We wanted to let you know that <strong>${escapeHtml(musicianDisplayName || "the allocated deputy")}</strong> is no longer available for
+                      <strong>${escapeHtml(jobTitle)}</strong>.
+                    </p>
 
-                  <p style="margin:0 0 16px; font-size:15px; line-height:1.7; color:#444;">
-                    If you need any help choosing a replacement or if anything about the job has changed, just reply to this email and we’ll be happy to help.
-                  </p>
+                    <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#444;">
+                      The deputy job has now been <strong>reopened</strong>, so you can return to the job board and allocate another deputy when ready.
+                    </p>
 
-                  <div style="margin-top:18px; display:grid; gap:12px;">
-                    <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
-                      <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-                        P.S.
-                      </p>
-                      <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
-                        Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
-                      </p>
+                    <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
+                      <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Declined deputy</h3>
+                      <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
+                        <li><strong>Name:</strong> ${escapeHtml(musicianDisplayName || "Not provided")}</li>
+                        <li><strong>Email:</strong> ${escapeHtml(musicianEmail || "Not provided")}</li>
+                        <li><strong>Phone:</strong> ${escapeHtml(musicianPhone || "Not provided")}</li>
+                      </ul>
                     </div>
 
-                    <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px;">
-                      <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-                        Also...
-                      </p>
-                      <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
-                        Think your act could be a great fit for <strong>The Supreme Collective</strong>? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.
-                      </p>
+                    <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
+                      <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Job details</h3>
+                      <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
+                        ${renderDetailRow("Job", jobTitle)}
+                        ${renderDetailRow("Date", dateText)}
+                        ${renderDetailRow("Call time", callTime)}
+                        ${renderDetailRow("Finish time", finishTime)}
+                        ${renderDetailRow("Location", location)}
+                        ${renderDetailRow("Fee", feeText)}
+                        ${renderDetailListRow("Required instruments", requiredInstruments)}
+                        ${renderDetailListRow("Essential skills", essentialSkills)}
+                        ${renderDetailListRow("Required skills", requiredSkills)}
+                        ${renderDetailListRow("Preferred extra skills", preferredExtraSkills)}
+                        ${renderDetailListRow("Secondary instruments", secondaryInstruments)}
+                        ${renderDetailListRow("Genres", genres)}
+                        ${renderDetailListRow("Tags", tags)}
+                        ${renderDetailListRow("Set lengths", setLengths)}
+                        ${renderDetailListRow("What's included", whatsIncluded)}
+                        ${renderDetailListRow("Claimable expenses", claimableExpenses)}
+                        ${renderDetailRow("Notes", notes)}
+                      </ul>
                     </div>
-                  </div>
 
-                  <p style="margin:24px 0 0; font-size:15px; line-height:1.7; color:#444;">
-                    Best wishes,<br/>
-                    <strong>The Supreme Collective</strong>
-                  </p>
+                    <p style="margin:24px 0 0; font-size:15px; line-height:1.7; color:#444;">
+                      Best wishes,<br/>
+                      <strong>The Supreme Collective</strong>
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          `,
+            `,
           });
         } catch (posterEmailError) {
-          console.error(
-            "❌ Failed to send poster deputy decline email:",
-            posterEmailError,
-          );
+          console.error("❌ Failed to send poster deputy decline email:", posterEmailError);
         }
       }
 
       return res.status(200).send("<Response/>");
     }
-
-    return res.status(200).send("<Response/>");
   } catch (error) {
     console.error("❌ twilioInboundDeputyAllocation error:", error);
     return res.status(200).send("<Response/>");
@@ -4276,15 +4175,13 @@ export const updateDeputyJobApplicationStatus = async (req, res) => {
         .json({ success: false, message: "Application not found" });
     }
 
- 
-
     const nextStatus = normaliseString(status);
     job.applications[applicationIndex].status = nextStatus;
     job.applications[applicationIndex].notes = normaliseString(notes);
 
     const now = new Date();
-       if (nextStatus === "presented")
-  job.applications[applicationIndex].presentedAt = now;
+    if (nextStatus === "presented")
+      job.applications[applicationIndex].presentedAt = now;
     if (nextStatus === "shortlisted")
       job.applications[applicationIndex].shortlistedAt = now;
     if (nextStatus === "allocated")
@@ -4502,7 +4399,7 @@ export const sendDeputyJobTestNotification = async (req, res) => {
     });
 
     const testEmail = normaliseEmail(
-      req.body?.email || req.user?.email || job.createdByEmail || ""
+      req.body?.email || req.user?.email || job.createdByEmail || "",
     );
 
     console.log("🟣 sendDeputyJobTestNotification: resolved test email", {
@@ -4582,7 +4479,10 @@ export const sendDeputyJobTestNotification = async (req, res) => {
       text: emailText,
     });
 
-    console.log("🟣 sendDeputyJobTestNotification: sendEmail result", emailResult);
+    console.log(
+      "🟣 sendDeputyJobTestNotification: sendEmail result",
+      emailResult,
+    );
 
     job.notifications = [
       ...(job.notifications || []),
@@ -4658,43 +4558,44 @@ export const resendDeputyJobNotifications = async (req, res) => {
     const matches = await getMatchedMusiciansForJob(job);
 
     if (!Array.isArray(matches) || !matches.length) {
-  return res.status(400).json({
-    success: false,
-    message: "No matched musicians found for this deputy job.",
-    job: withDeputyJobAliases(job),
-  });
-}
+      return res.status(400).json({
+        success: false,
+        message: "No matched musicians found for this deputy job.",
+        job: withDeputyJobAliases(job),
+      });
+    }
 
     const alreadyNotifiedIds = new Set(
-  [
-    ...(Array.isArray(job.notifiedMusicianIds) ? job.notifiedMusicianIds : []),
-    ...(Array.isArray(job.notifications)
-      ? job.notifications
-          .filter((n) => n?.status === "sent" && n?.musicianId)
-          .map((n) => n.musicianId)
-      : []),
-  ]
-    .map((id) => asObjectIdString(id))
-    .filter(Boolean)
-);
+      [
+        ...(Array.isArray(job.notifiedMusicianIds)
+          ? job.notifiedMusicianIds
+          : []),
+        ...(Array.isArray(job.notifications)
+          ? job.notifications
+              .filter((n) => n?.status === "sent" && n?.musicianId)
+              .map((n) => n.musicianId)
+          : []),
+      ]
+        .map((id) => asObjectIdString(id))
+        .filter(Boolean),
+    );
 
-const remainingMatches = matches.filter((musician) => {
-  const musicianId = asObjectIdString(
-    musician?._id || musician?.id || musician?.musicianId
-  );
-  return musicianId && !alreadyNotifiedIds.has(musicianId);
-});
+    const remainingMatches = matches.filter((musician) => {
+      const musicianId = asObjectIdString(
+        musician?._id || musician?.id || musician?.musicianId,
+      );
+      return musicianId && !alreadyNotifiedIds.has(musicianId);
+    });
 
-if (!remainingMatches.length) {
-  return res.json({
-    success: true,
-    message: "No remaining matched musicians to notify",
-    job: withDeputyJobAliases(job),
-    newlyNotifiedCount: 0,
-    notificationResults: [],
-  });
-}
-
+    if (!remainingMatches.length) {
+      return res.json({
+        success: true,
+        message: "No remaining matched musicians to notify",
+        job: withDeputyJobAliases(job),
+        newlyNotifiedCount: 0,
+        notificationResults: [],
+      });
+    }
 
     const correctionIntroHtml = `
       <div style="margin:0 0 24px; padding:18px 20px; border:1px solid #f1d0d1; background:#fff7f7; border-radius:16px; font-family:Arial, sans-serif; color:#333; line-height:1.7;">
@@ -4717,8 +4618,8 @@ if (!remainingMatches.length) {
 
     const notificationResults = [];
 
-for (const musician of remainingMatches) {
-        const preview = buildJobNotificationPreview({
+    for (const musician of remainingMatches) {
+      const preview = buildJobNotificationPreview({
         job,
         musicians: [musician],
         previewRecipientEmail: normaliseEmail(musician?.email || ""),
@@ -4757,23 +4658,22 @@ for (const musician of remainingMatches) {
       .map((r) => r.musicianId);
 
     const allSentIds = Array.from(
-  new Set(
-    [
-      ...(Array.isArray(job.notifiedMusicianIds) ? job.notifiedMusicianIds : []),
-      ...sentIds,
-    ]
-      .map((id) => asObjectIdString(id))
-      .filter(Boolean)
-  )
-);
+      new Set(
+        [
+          ...(Array.isArray(job.notifiedMusicianIds)
+            ? job.notifiedMusicianIds
+            : []),
+          ...sentIds,
+        ]
+          .map((id) => asObjectIdString(id))
+          .filter(Boolean),
+      ),
+    );
 
-job.notifiedMusicianIds = allSentIds;
-job.notifiedCount = allSentIds.length;
+    job.notifiedMusicianIds = allSentIds;
+    job.notifiedCount = allSentIds.length;
 
-    job.notifications = [
-      ...(job.notifications || []),
-      ...notificationResults,
-    ];
+    job.notifications = [...(job.notifications || []), ...notificationResults];
 
     job.status = "open";
     job.previewMode = false;
@@ -4781,10 +4681,10 @@ job.notifiedCount = allSentIds.length;
     job.matchedMusicians = (job.matchedMusicians || []).map((m) => ({
       ...m,
       notified: allSentIds.some(
-        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
       ),
       notifiedAt: sentIds.some(
-        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
       )
         ? new Date()
         : m.notifiedAt || null,
@@ -4797,7 +4697,7 @@ job.notifiedCount = allSentIds.length;
       message: "Corrected notifications resent",
       job: withDeputyJobAliases(job),
       newlyNotifiedCount: sentIds.length,
-notifiedCount: job.notifiedCount,
+      notifiedCount: job.notifiedCount,
       notificationResults,
     });
   } catch (error) {
@@ -4821,27 +4721,29 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
       });
     }
 
-  const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+    const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
 
-const hasSavedCardDetails =
-  Boolean(normaliseString(job?.stripeCustomerId)) &&
-  Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-  ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
+    const hasSavedCardDetails =
+      Boolean(normaliseString(job?.stripeCustomerId)) &&
+      Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+      ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
 
-if (!isEnquiryJob && !hasSavedCardDetails) {
-  return res.status(400).json({
-    success: false,
-    message:
-      "Card details must be completed and saved before deputy notifications can be sent.",
-    job: withDeputyJobAliases(job),
-  });
-}
+    if (!isEnquiryJob && !hasSavedCardDetails) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Card details must be completed and saved before deputy notifications can be sent.",
+        job: withDeputyJobAliases(job),
+      });
+    }
 
     const matches = await getMatchedMusiciansForJob(job);
 
     const alreadyNotifiedIds = new Set(
       [
-        ...(Array.isArray(job.notifiedMusicianIds) ? job.notifiedMusicianIds : []),
+        ...(Array.isArray(job.notifiedMusicianIds)
+          ? job.notifiedMusicianIds
+          : []),
         ...(Array.isArray(job.notifications)
           ? job.notifications
               .filter((n) => n?.status === "sent")
@@ -4849,7 +4751,7 @@ if (!isEnquiryJob && !hasSavedCardDetails) {
           : []),
       ]
         .map((id) => asObjectIdString(id))
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
     const remainingMatches = matches.filter((musician) => {
@@ -4879,12 +4781,14 @@ if (!isEnquiryJob && !hasSavedCardDetails) {
     const allSentIds = Array.from(
       new Set(
         [
-          ...(Array.isArray(job.notifiedMusicianIds) ? job.notifiedMusicianIds : []),
+          ...(Array.isArray(job.notifiedMusicianIds)
+            ? job.notifiedMusicianIds
+            : []),
           ...newSentIds,
         ]
           .map((id) => asObjectIdString(id))
-          .filter(Boolean)
-      )
+          .filter(Boolean),
+      ),
     );
 
     job.notifiedMusicianIds = allSentIds;
@@ -4900,7 +4804,7 @@ if (!isEnquiryJob && !hasSavedCardDetails) {
     job.matchedMusicians = (job.matchedMusicians || []).map((m) => {
       const id = asObjectIdString(m?.musicianId);
       const wasNewlySent = newSentIds.some(
-        (sentId) => asObjectIdString(sentId) === id
+        (sentId) => asObjectIdString(sentId) === id,
       );
 
       return {
@@ -4933,7 +4837,7 @@ if (!isEnquiryJob && !hasSavedCardDetails) {
 
 export const sendDeputyJobNotificationsToUnnotified =
   sendRemainingDeputyJobNotifications;
-  
+
 export const createDeputyJobSetupIntent = async (req, res) => {
   try {
     if (!ensureStripeReady(res)) return;
@@ -5063,7 +4967,10 @@ export const presentDeputyApplicant = async (req, res) => {
       musician?.email || musician?.basicInfo?.email || "",
     );
     const phone = toE164(
-      musician?.phone || musician?.phoneNumber || musician?.basicInfo?.phone || "",
+      musician?.phone ||
+        musician?.phoneNumber ||
+        musician?.basicInfo?.phone ||
+        "",
     );
 
     const notificationPreview = buildApplicantPresentedEmailPreview({
@@ -5165,7 +5072,6 @@ export const presentDeputyApplicant = async (req, res) => {
   }
 };
 
-
 export const manualAllocateDeputyJob = async (req, res) => {
   try {
     if (!canManuallyAllocateDeputyJob(req)) {
@@ -5175,9 +5081,12 @@ export const manualAllocateDeputyJob = async (req, res) => {
       });
     }
 
-    const { musicianId } = req.body || {};
+    const {
+      musicianId,
+      skipCharge = false,
+      retryAllocationOnly = false,
+    } = req.body || {};
     const job = await deputyJobModel.findById(req.params.id);
-const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
 
     if (!job) {
       return res.status(404).json({
@@ -5186,12 +5095,35 @@ const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
       });
     }
 
+    const isEnquiryJob =
+      String(job?.jobType || "").toLowerCase() === "enquiry";
+
     if (!musicianId) {
       return res.status(400).json({
         success: false,
         message: "musicianId is required",
       });
     }
+
+    const hasSuccessfulCharge =
+      Boolean(job?.chargedAt) ||
+      String(job?.paymentStatus || "").toLowerCase() === "paid" ||
+      (Array.isArray(job?.paymentEvents) &&
+        job.paymentEvents.some((event) => {
+          const type = String(event?.type || "").toLowerCase();
+          const status = String(event?.status || "").toLowerCase();
+          return (
+            (type === "payment_succeeded" ||
+              type === "charge_succeeded" ||
+              type === "payment_intent_succeeded") &&
+            status === "succeeded"
+          );
+        }));
+
+    const shouldSkipCharge =
+      Boolean(skipCharge) ||
+      Boolean(retryAllocationOnly) ||
+      hasSuccessfulCharge;
 
     const musician = await musicianModel.findById(musicianId).lean();
 
@@ -5231,20 +5163,27 @@ const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
       job.stripeFeeAmount = ledger.stripeFeeAmount;
     }
 
-   let chargeResult = null;
+    let chargeResult = null;
 
-if (!isEnquiryJob) {
-  if (job.stripeCustomerId && job.defaultPaymentMethodId) {
-    chargeResult = await attemptDeputyJobCharge({
-      job,
-      createdBy: req.user?._id || null,
-    });
-  } else if (job.clientEmail) {
-    job.paymentStatus = "setup_required";
-  }
-} else {
-  job.paymentStatus = "not_required";
-}
+    if (!isEnquiryJob) {
+      if (shouldSkipCharge) {
+        chargeResult = {
+          success: true,
+          skipped: true,
+          alreadyCharged: true,
+          message: "Charge skipped because payment already succeeded",
+        };
+      } else if (job.stripeCustomerId && job.defaultPaymentMethodId) {
+        chargeResult = await attemptDeputyJobCharge({
+          job,
+          createdBy: req.user?._id || null,
+        });
+      } else if (job.clientEmail) {
+        job.paymentStatus = "setup_required";
+      }
+    } else {
+      job.paymentStatus = "not_required";
+    }
 
     const application = findApplicationFromJob(job, musician._id);
     const targetPhone = toE164(
@@ -5269,13 +5208,16 @@ if (!isEnquiryJob) {
         whatsappErrorMessage =
           whatsappError?.message || "WhatsApp allocation send failed";
 
-        console.error("❌ manualAllocateDeputyJob sendDeputyAllocationWhatsApp error:", {
-          jobId: String(job._id),
-          musicianId: String(musician._id),
-          targetPhone,
-          message: whatsappErrorMessage,
-          stack: whatsappError?.stack,
-        });
+        console.error(
+          "❌ manualAllocateDeputyJob sendDeputyAllocationWhatsApp error:",
+          {
+            jobId: String(job._id),
+            musicianId: String(musician._id),
+            targetPhone,
+            message: whatsappErrorMessage,
+            stack: whatsappError?.stack,
+          },
+        );
       }
     }
 
@@ -5307,13 +5249,19 @@ if (!isEnquiryJob) {
 
     await job.save();
 
-    return res.json({
-      success: true,
-      message: chargeResult?.success
+    const responseMessage = chargeResult?.skipped
+      ? whatsappResult?.sid
+        ? "Deputy manually allocated and WhatsApp resent. Existing successful payment was reused"
+        : "Deputy manually allocated. Existing successful payment was reused"
+      : chargeResult?.success
         ? "Deputy manually allocated, WhatsApp sent and client charged"
         : whatsappResult?.sid
           ? "Deputy manually allocated and WhatsApp sent"
-          : "Deputy manually allocated",
+          : "Deputy manually allocated";
+
+    return res.json({
+      success: true,
+      message: responseMessage,
       job: withDeputyJobAliases(job),
       allocatedMusician: musician,
       chargeResult,
@@ -5333,4 +5281,3 @@ if (!isEnquiryJob) {
     });
   }
 };
-
