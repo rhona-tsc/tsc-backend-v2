@@ -49,6 +49,29 @@ function getTwilioClient() {
 }
 
 // -------------------- Helpers --------------------
+// Public site base (for profile links in messages)
+const PUBLIC_SITE_BASE = (
+  process.env.PUBLIC_SITE_URL ||
+  process.env.FRONTEND_URL ||
+  "http://localhost:5174"
+).replace(/\/$/, "");
+
+// Build a public musician profile URL (accepts musician doc or id/slug string)
+const buildProfileUrl = (musicianLike) => {
+  if (!musicianLike) return "";
+
+  if (typeof musicianLike === "string") {
+    const raw = musicianLike.trim();
+    return raw ? `${PUBLIC_SITE_BASE}/musician/${raw}` : "";
+  }
+
+  const slug = String(musicianLike?.musicianSlug || "").trim();
+  const id = String(musicianLike?._id || musicianLike?.musicianId || "").trim();
+
+  if (slug) return `${PUBLIC_SITE_BASE}/musician/${slug}`;
+  if (id) return `${PUBLIC_SITE_BASE}/musician/${id}`;
+  return "";
+};
 /** Normalize to E.164 (+44…) and strip any whatsapp: prefix */
 export const toE164 = (raw = "") => {
   let s = String(raw)
@@ -217,28 +240,6 @@ export async function sendWhatsAppMessage(opts = {}) {
     return typeof url === "string" && url.trim().startsWith("http") ? url.trim() : "";
   }
 
-  const PUBLIC_SITE_BASE = (
-    process.env.PUBLIC_SITE_URL ||
-    process.env.FRONTEND_URL ||
-    "http://localhost:5174"
-  ).replace(/\/$/, "");
-  const buildProfileUrl = (musicianLike) => {
-    if (!musicianLike) return "";
-
-    if (typeof musicianLike === "string") {
-      const raw = musicianLike.trim();
-      return raw ? `${PUBLIC_SITE_BASE}/musician/${raw}` : "";
-    }
-
-    const slug = String(musicianLike?.musicianSlug || "").trim();
-    const id = String(
-      musicianLike?._id || musicianLike?.musicianId || ""
-    ).trim();
-
-    if (slug) return `${PUBLIC_SITE_BASE}/musician/${slug}`;
-    if (id) return `${PUBLIC_SITE_BASE}/musician/${id}`;
-    return "";
-  };
 
 const memberDisplayName = displayNameOf(member || {}, false);
 const memberNames = firstLast(memberDisplayName);
@@ -403,6 +404,7 @@ const firstName =
     musician?.basicInfo?.firstName ||
     musician?.name ||
     "there";
+    
   const profileUrl = buildProfileUrl(musician);
 
   const roleLabel =
