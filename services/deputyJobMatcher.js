@@ -356,12 +356,16 @@ const matchesRequestedGender = (musician, requestedGender = "") => {
 
 const wantsLeadVocalist = (instrument = "") => {
   const target = norm(instrument);
+
+  // Only treat as "lead" when "lead" is explicitly present
   return (
     target.includes("lead vocalist") ||
     target.includes("lead vocal") ||
     target.includes("lead singer") ||
-    target.includes("vocalist") ||
-    target.includes("singer")
+        target.includes("lead male vocalist") ||
+    target.includes("lead female vocalist") ||
+
+    /\blead\b/.test(target)
   );
 };
 
@@ -547,21 +551,15 @@ export const findMatchingMusiciansForDeputyJob = async ({
       if (isVocalSlot) {
         if (!matchesRequestedGender(musician, requestedGender)) return false;
 
-        if (femaleLeadOnly) {
-          if (!isLeadFemaleVocalist(musician)) return false;
-        } else if (vocalistInstrumentalistOnly) {
-          if (
-            !isLeadVocalistInstrumentalist(
-              musician,
-              requiredInstrumentForVocalist
-            )
-          ) {
-            return false;
-          }
-        } else if (leadOnly) {
-          if (!isLeadVocalist(musician)) return false;
-        } else if (!isVocalist(musician)) {
-          return false;
+    if (femaleLeadOnly) {
+  // Loosen: accept any vocalist, as long as gender matches (or gender is unknown)
+  if (!isVocalist(musician)) return false;
+  if (!matchesRequestedGender(musician, "female")) return false;
+} else if (leadOnly) {
+  // Prefer lead, but don’t hard-fail imperfect data
+  if (!isVocalist(musician)) return false;
+} else if (!isVocalist(musician)) {
+  return false;
         }
       } else {
         if (!matchesRequestedGender(musician, requestedGender)) return false;
