@@ -190,7 +190,9 @@ const countyFromPostcode = (postcode = "") => {
   for (const [county, districts] of Object.entries(POSTCODE_MAP)) {
     if (
       Array.isArray(districts) &&
-      districts.some((district) => outward.startsWith(String(district).toUpperCase().trim()))
+      districts.some((district) =>
+        outward.startsWith(String(district).toUpperCase().trim()),
+      )
     ) {
       return county.replace(/_/g, " ");
     }
@@ -205,7 +207,7 @@ const neighboursForCounty = (countyName = "") => {
   if (direct.length) return direct;
 
   const mine = new Set(
-    (POSTCODE_MAP[key] || []).map((value) => String(value).toUpperCase().trim())
+    (POSTCODE_MAP[key] || []).map((value) => String(value).toUpperCase().trim()),
   );
 
   if (!mine.size) return [];
@@ -214,7 +216,7 @@ const neighboursForCounty = (countyName = "") => {
   for (const [candidateCountyKey, prefixes] of Object.entries(POSTCODE_MAP)) {
     if (candidateCountyKey === key) continue;
     const overlaps = (prefixes || []).some((prefix) =>
-      mine.has(String(prefix).toUpperCase().trim())
+      mine.has(String(prefix).toUpperCase().trim()),
     );
     if (overlaps) out.add(candidateCountyKey.replace(/_/g, " "));
   }
@@ -273,31 +275,91 @@ const hasInstrument = (musician, wanted) => {
   const target = norm(wanted);
   if (!target) return true;
 
-  return instruments.some((instrument) => instrumentSimilarity(instrument, target) >= 0.7);
+  return instruments.some(
+    (instrument) => instrumentSimilarity(instrument, target) >= 0.7,
+  );
 };
 
 const hasAnySecondary = (musician, wanted = []) => {
   if (!wanted.length) return true;
   return wanted.some((item) => hasInstrument(musician, item));
 };
-const getArrayValues = (value) => {
-  if (!Array.isArray(value)) return [];
 
-  return value
+const getArrayValues = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === "string") return item;
+
+        return (
+          item?.instrument ||
+          item?.role ||
+          item?.skill ||
+          item?.type ||
+          item?.name ||
+          item?.label ||
+          item?.value ||
+          ""
+        );
+      })
+      .map(norm)
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value.split(",").map(norm).filter(Boolean);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.values(value)
+      .flatMap((item) => getArrayValues(item))
+      .map(norm)
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const getMusicianSearchableText = (musician = {}) => {
+  return [
+    musician?.bio,
+    musician?.tagLine,
+    musician?.role,
+    musician?.customRole,
+    musician?.basicInfo?.firstName,
+    musician?.basicInfo?.lastName,
+    musician?.gender,
+    musician?.vocalGender,
+    musician?.vocals?.gender,
+    ...(Array.isArray(musician?.genres) ? musician.genres : []),
+    ...(Array.isArray(musician?.other_skills) ? musician.other_skills : []),
+    ...(Array.isArray(musician?.instrumentation) ? musician.instrumentation : []),
+    ...(Array.isArray(musician?.vocals?.type) ? musician.vocals.type : []),
+  ]
+    .flatMap((item) => {
+      if (Array.isArray(item)) return item;
+      if (item && typeof item === "object") return Object.values(item);
+      return [item];
+    })
     .map((item) => {
       if (typeof item === "string") return item;
-
-      return (
-        item?.instrument ||
-        item?.role ||
-        item?.skill ||
-        item?.type ||
-        item?.name ||
-        ""
-      );
+      if (item && typeof item === "object") {
+        return (
+          item?.instrument ||
+          item?.role ||
+          item?.skill ||
+          item?.type ||
+          item?.name ||
+          item?.label ||
+          item?.value ||
+          ""
+        );
+      }
+      return "";
     })
     .map(norm)
-    .filter(Boolean);
+    .filter(Boolean)
+    .join(" ");
 };
 
 const getVocalTypes = (musician) => {
@@ -306,7 +368,7 @@ const getVocalTypes = (musician) => {
   const skills = getArrayValues(musician?.other_skills);
 
   return Array.from(new Set([...explicitTypes, ...instruments, ...skills])).filter(
-    (value) => /vocal|singer|lead vocal|backing vocal|bv|rap|mc/.test(value)
+    (value) => /vocal|singer|lead vocal|backing vocal|bv|rap|mc/.test(value),
   );
 };
 
@@ -316,7 +378,7 @@ const getVocalGender = (musician) => {
       musician?.vocalGender ||
       musician?.gender ||
       musician?.basicInfo?.gender ||
-      ""
+      "",
   );
 
   if (explicitGender) return explicitGender;
@@ -333,6 +395,22 @@ const getVocalGender = (musician) => {
   return "";
 };
 
+const hasFemaleSignal = (musician = {}) => {
+  const explicitGender = getVocalGender(musician);
+  if (explicitGender === "female") return true;
+
+  const searchable = getMusicianSearchableText(musician);
+  return /\bfemale\b|\bwoman\b|\blady\b|\bgirl\b/.test(searchable);
+};
+
+const hasMaleSignal = (musician = {}) => {
+  const explicitGender = getVocalGender(musician);
+  if (explicitGender === "male") return true;
+
+  const searchable = getMusicianSearchableText(musician);
+  return /\bmale\b|\bman\b|\bguy\b|\bboy\b/.test(searchable);
+};
+
 const wantsFemaleJob = (value = "") => /\bfemale\b/.test(norm(value));
 const wantsMaleJob = (value = "") => /\bmale\b/.test(norm(value));
 
@@ -346,25 +424,26 @@ const getRequestedVocalGender = (instrument = "") => {
 const matchesRequestedGender = (musician, requestedGender = "") => {
   if (!requestedGender) return true;
 
-  const gender = getVocalGender(musician);
+  if (requestedGender === "female") {
+    return !hasMaleSignal(musician);
+  }
 
-  // Important: unknown gender should still pass.
-  if (!gender) return true;
+  if (requestedGender === "male") {
+    return !hasFemaleSignal(musician);
+  }
 
-  return gender === requestedGender;
+  return true;
 };
 
 const wantsLeadVocalist = (instrument = "") => {
   const target = norm(instrument);
 
-  // Only treat as "lead" when "lead" is explicitly present
   return (
     target.includes("lead vocalist") ||
     target.includes("lead vocal") ||
     target.includes("lead singer") ||
-        target.includes("lead male vocalist") ||
+    target.includes("lead male vocalist") ||
     target.includes("lead female vocalist") ||
-
     /\blead\b/.test(target)
   );
 };
@@ -383,16 +462,21 @@ const wantsVocalistInstrumentalist = (instrument = "") => {
 const isLeadVocalist = (musician) => {
   const vocalTypes = getVocalTypes(musician);
 
-  return vocalTypes.some(
-    (type) =>
-      type.includes("lead vocalist") ||
-      type.includes("lead vocal") ||
-      type.includes("lead singer") ||
-      type.includes("female lead vocalist") ||
-      type.includes("male lead vocalist") ||
-      type.includes("vocalist") ||
-      type.includes("singer")
-  );
+  if (
+    vocalTypes.some(
+      (type) =>
+        type.includes("lead vocalist") ||
+        type.includes("lead vocal") ||
+        type.includes("lead singer") ||
+        type.includes("female lead vocalist") ||
+        type.includes("male lead vocalist"),
+    )
+  ) {
+    return true;
+  }
+
+  const searchable = getMusicianSearchableText(musician);
+  return /\blead vocalist\b|\blead vocal\b|\blead singer\b/.test(searchable);
 };
 
 const isLeadVocalistInstrumentalist = (musician, requiredInstrument = "") => {
@@ -421,7 +505,14 @@ const isVocalist = (musician) => {
   if (rapValue === "true" || rapValue === "yes") return true;
 
   const skills = getArrayValues(musician?.other_skills);
-  return skills.some((skill) => /backing\s*voc|bv|vocal|singer/.test(skill));
+  if (skills.some((skill) => /backing\s*voc|bv|vocal|singer/.test(skill))) {
+    return true;
+  }
+
+  const searchable = getMusicianSearchableText(musician);
+  return /\bvocalist\b|\bsinger\b|\blead vocal\b|\blead singer\b|\bbacking vocal\b|\bbacking singer\b|\bbv\b|\brapper\b|\bmc\b/.test(
+    searchable,
+  );
 };
 
 const hasAllEssentialRoles = (musician, essentialRoles = []) => {
@@ -432,7 +523,7 @@ const hasAllEssentialRoles = (musician, essentialRoles = []) => {
       ...getArrayValues(musician?.other_skills),
       ...getArrayValues(musician?.instrumentation),
       ...getVocalTypes(musician),
-    ])
+    ]),
   );
 
   return essentialRoles.every((requiredRole) => {
@@ -441,12 +532,14 @@ const hasAllEssentialRoles = (musician, essentialRoles = []) => {
 
     if (/backing\s*voc|backing vocalist|bv/.test(wanted)) {
       return searchableRoles.some((type) =>
-        /backing\s*voc|backing vocalist|bv|lead\s*voc|lead vocalist|lead singer|vocalist|singer/.test(type)
+        /backing\s*voc|backing vocalist|bv|lead\s*voc|lead vocalist|lead singer|vocalist|singer/.test(
+          type,
+        ),
       );
     }
 
     return searchableRoles.some(
-      (existingRole) => roleSimilarity(existingRole, requiredRole) >= 0.6
+      (existingRole) => roleSimilarity(existingRole, requiredRole) >= 0.6,
     );
   });
 };
@@ -454,13 +547,13 @@ const hasAllEssentialRoles = (musician, essentialRoles = []) => {
 const desiredRoleScore = (musician, desiredRoles = []) => {
   if (!desiredRoles.length) return 0;
 
-const skills = Array.from(
-  new Set([
-    ...getArrayValues(musician?.other_skills),
-    ...getArrayValues(musician?.instrumentation),
-    ...getVocalTypes(musician),
-  ])
-);
+  const skills = Array.from(
+    new Set([
+      ...getArrayValues(musician?.other_skills),
+      ...getArrayValues(musician?.instrumentation),
+      ...getVocalTypes(musician),
+    ]),
+  );
 
   let total = 0;
   let count = 0;
@@ -530,11 +623,10 @@ export const findMatchingMusiciansForDeputyJob = async ({
   limit = 100,
 }) => {
   const pool = await musicianModel
-  .find({
-    role: "musician",
-    ...(excludeIds.length ? { _id: { $nin: excludeIds } } : {}),
-  })
-  .lean();
+    .find({
+      ...(excludeIds.length ? { _id: { $nin: excludeIds } } : {}),
+    })
+    .lean();
 
   const resolvedCounty = county || countyFromPostcode(postcode);
   const neighbourCounties = neighboursForCounty(resolvedCounty);
@@ -551,15 +643,21 @@ export const findMatchingMusiciansForDeputyJob = async ({
       if (isVocalSlot) {
         if (!matchesRequestedGender(musician, requestedGender)) return false;
 
-    if (femaleLeadOnly) {
-  // Loosen: accept any vocalist, as long as gender matches (or gender is unknown)
-  if (!isVocalist(musician)) return false;
-  if (!matchesRequestedGender(musician, "female")) return false;
-} else if (leadOnly) {
-  // Prefer lead, but don’t hard-fail imperfect data
-  if (!isVocalist(musician)) return false;
-} else if (!isVocalist(musician)) {
-  return false;
+        if (femaleLeadOnly) {
+          if (!isVocalist(musician)) return false;
+        } else if (vocalistInstrumentalistOnly) {
+          if (
+            !isLeadVocalistInstrumentalist(
+              musician,
+              requiredInstrumentForVocalist,
+            )
+          ) {
+            return false;
+          }
+        } else if (leadOnly) {
+          if (!isVocalist(musician)) return false;
+        } else if (!isVocalist(musician)) {
+          return false;
         }
       } else {
         if (!matchesRequestedGender(musician, requestedGender)) return false;
@@ -573,11 +671,20 @@ export const findMatchingMusiciansForDeputyJob = async ({
     .map((musician) => {
       const roleFit = desiredRoleScore(musician, desiredRoles);
       const genreFit = genreScore(musician, genres);
-      const instrumentFit = hasInstrument(musician, instrument) ? 1 : 0;
+      const instrumentFit = isVocalSlot
+        ? isVocalist(musician)
+          ? 1
+          : 0
+        : hasInstrument(musician, instrument)
+          ? 1
+          : 0;
+
       const locationFit = scoreLocation({
         targetCounty: resolvedCounty,
         targetPostcode: postcode,
-        musicianCounty: musician?.address?.county || countyFromPostcode(musician?.address?.postcode),
+        musicianCounty:
+          musician?.address?.county ||
+          countyFromPostcode(musician?.address?.postcode),
         musicianPostcode: musician?.address?.postcode,
         neighbourCounties,
       });
@@ -590,7 +697,7 @@ export const findMatchingMusiciansForDeputyJob = async ({
         femaleLeadOnly || requestedGender ? 0.2 : 0;
 
       const femaleLeadFit = femaleLeadOnly
-        ? isLeadFemaleVocalist(musician)
+        ? matchesRequestedGender(musician, "female") && isVocalist(musician)
           ? 1
           : 0
         : requestedGender
@@ -605,6 +712,7 @@ export const findMatchingMusiciansForDeputyJob = async ({
         weightGenres +
         weightLocation +
         weightFemaleLeadBoost;
+
       weightInstrument /= weightTotal;
       weightRoles /= weightTotal;
       weightGenres /= weightTotal;
@@ -628,11 +736,33 @@ export const findMatchingMusiciansForDeputyJob = async ({
         vocalTypes: getVocalTypes(musician),
         vocalGender: getVocalGender(musician),
         deputyMatchScore,
-        deputyMatchPercent: Math.round(Math.max(0, Math.min(1, deputyMatchScore)) * 100),
+        deputyMatchPercent: Math.round(
+          Math.max(0, Math.min(1, deputyMatchScore)) * 100,
+        ),
       };
     })
     .sort((a, b) => b.deputyMatchScore - a.deputyMatchScore)
     .slice(0, limit);
+
+  console.log("🎯 deputy matcher results", {
+    instrument,
+    isVocalSlot,
+    requestedGender,
+    femaleLeadOnly,
+    leadOnly,
+    vocalistInstrumentalistOnly,
+    poolCount: pool.length,
+    filteredCount: filtered.length,
+    firstMatches: filtered.slice(0, 10).map((musician) => ({
+      id: musician?._id,
+      firstName: musician?.firstName || musician?.basicInfo?.firstName || "",
+      lastName: musician?.lastName || musician?.basicInfo?.lastName || "",
+      email: musician?.email || musician?.basicInfo?.email || "",
+      vocalGender: musician?.vocalGender,
+      vocalTypes: musician?.vocalTypes,
+      deputyMatchPercent: musician?.deputyMatchPercent,
+    })),
+  });
 
   return filtered;
 };
