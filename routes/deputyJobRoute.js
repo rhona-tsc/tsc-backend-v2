@@ -87,7 +87,13 @@ deputyJobRouter.post(
  */
 deputyJobRouter.post("/preview", authUser, previewDeputyJob);
 deputyJobRouter.post("/", authUser, createDeputyJob);
-deputyJobRouter.get("/", authUser, listDeputyJobs);
+deputyJobRouter.get("/", authUser, (req, res, next) => {
+
+  res.set("Cache-Control", "no-store");
+
+  next();
+
+}, listDeputyJobs);
 
 /**
  * Read job + matches

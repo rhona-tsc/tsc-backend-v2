@@ -526,20 +526,11 @@ export const findMatchingMusiciansForDeputyJob = async ({
   limit = 100,
 }) => {
   const pool = await musicianModel
-    .find({
-      role: "musician",
-      status: {
-        $in: [
-          "approved",
-          "Approved",
-          "Approved, changes pending",
-          "approved_changes_pending",
-          "live_changes_pending",
-        ],
-      },
-      ...(excludeIds.length ? { _id: { $nin: excludeIds } } : {}),
-    })
-    .lean();
+  .find({
+    role: "musician",
+    ...(excludeIds.length ? { _id: { $nin: excludeIds } } : {}),
+  })
+  .lean();
 
   const resolvedCounty = county || countyFromPostcode(postcode);
   const neighbourCounties = neighboursForCounty(resolvedCounty);

@@ -334,7 +334,9 @@ const deputyJobSchema = new mongoose.Schema(
 
 deputyJobSchema.index({ createdAt: -1 });
 deputyJobSchema.index({ status: 1, createdAt: -1 });
+deputyJobSchema.index({ status: 1, jobType: 1 });
 deputyJobSchema.index({ createdBy: 1, createdAt: -1 });
+deputyJobSchema.index({ eventDate: 1 });
 deputyJobSchema.index({ allocatedMusicianId: 1, eventDate: 1 });
 deputyJobSchema.index({ bookedMusicianId: 1, eventDate: 1 });
 deputyJobSchema.index({ stripeCustomerId: 1, createdAt: -1 });

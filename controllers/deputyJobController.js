@@ -2234,28 +2234,56 @@ export const listDeputyJobs = async (req, res) => {
     const jobs = await deputyJobModel
       .find({})
       .sort({ createdAt: -1 })
-      .populate(
-        "matchedMusicianIds",
-        "firstName lastName email musicianSlug profilePhoto profilePicture",
-      )
-      .populate(
+      .select([
+        "title",
+        "date",
+        "eventDate",
+        "callTime",
+        "startTime",
+        "finishTime",
+        "endTime",
+        "venue",
+        "locationName",
+        "location",
+        "county",
+        "postcode",
+        "requiredInstruments",
+        "requiredSkills",
+        "tags",
+        "fee",
+        "currency",
+        "grossAmount",
+        "commissionAmount",
+        "deputyNetAmount",
+        "paymentStatus",
+        "payoutStatus",
+        "releaseOn",
+        "chargedAt",
+        "defaultPaymentMethodId",
+        "stripeCustomerId",
+        "status",
+        "jobType",
+        "createdBy",
+        "createdByEmail",
+        "createdByName",
         "allocatedMusicianId",
-        "firstName lastName email musicianSlug profilePhoto profilePicture",
-      )
-      .populate(
+        "allocatedMusicianName",
         "bookedMusicianId",
-        "firstName lastName email musicianSlug profilePhoto profilePicture",
-      )
+        "bookedMusicianName",
+        "applicationCount",
+        "matchedCount",
+        "updatedAt",
+        "createdAt",
+        // optionally: "applications" ONLY if you truly need it in the list panel
+      ].join(" "))
+      .populate("allocatedMusicianId", "firstName lastName email musicianSlug profilePhoto profilePicture")
+      .populate("bookedMusicianId", "firstName lastName email musicianSlug profilePhoto profilePicture")
       .lean();
 
-    const formattedJobs = jobs.map((job) => withDeputyJobAliases(job));
-
-    res.json({ success: true, jobs: formattedJobs });
+    res.json({ success: true, jobs: jobs.map(withDeputyJobAliases) });
   } catch (error) {
     console.error("❌ listDeputyJobs error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch deputy jobs" });
+    res.status(500).json({ success: false, message: "Failed to fetch deputy jobs" });
   }
 };
 
