@@ -1430,9 +1430,9 @@ const buildJobPayloadFromRequest = (req) => {
     jobType: requestedJobType,
   };
 };
+const MATCH_LIMIT_SEND = undefined;
+const MATCH_LIMIT_PREVIEW = undefined;
 
-const MATCH_LIMIT_SEND = null;
-const MATCH_LIMIT_PREVIEW = null;
 const runMatcherForJob = async ({
   job,
   previewRecipientEmail,
@@ -1450,6 +1450,7 @@ const runMatcherForJob = async ({
 }) => {
   const effectiveLimit =
     mode === "preview" ? MATCH_LIMIT_PREVIEW : MATCH_LIMIT_SEND;
+
   const matches = await findMatchingMusiciansForDeputyJob({
     instrument: primaryInstrument,
     isVocalSlot: effectiveIsVocalSlot,
@@ -1461,9 +1462,11 @@ const runMatcherForJob = async ({
     postcode: inferredPostcode,
     excludeIds: createdBy ? [String(createdBy)] : [],
   });
-  const limitedMatches = Number.isFinite(Number(effectiveLimit))
-    ? matches.slice(0, Number(effectiveLimit))
-    : matches;
+
+  const limitedMatches =
+    typeof effectiveLimit === "number" && effectiveLimit > 0
+      ? matches.slice(0, effectiveLimit)
+      : matches;
 
   const matchedMusicianIds = limitedMatches
     .map((m) => m?._id || m?.id)
