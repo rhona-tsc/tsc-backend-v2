@@ -620,7 +620,7 @@ export const findMatchingMusiciansForDeputyJob = async ({
   county = "",
   postcode = "",
   excludeIds = [],
-  limit = 100,
+  limit = null,
 }) => {
   const pool = await musicianModel
     .find({
@@ -741,8 +741,9 @@ export const findMatchingMusiciansForDeputyJob = async ({
         ),
       };
     })
-    .sort((a, b) => b.deputyMatchScore - a.deputyMatchScore)
-    .slice(0, limit);
+   .sort((a, b) => b.deputyMatchScore - a.deputyMatchScore);
+
+const finalResults = limit ? filtered.slice(0, limit) : filtered;
 
   console.log("🎯 deputy matcher results", {
     instrument,
@@ -764,5 +765,5 @@ export const findMatchingMusiciansForDeputyJob = async ({
     })),
   });
 
-  return filtered;
+  return finalResults;
 };
