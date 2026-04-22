@@ -2294,10 +2294,71 @@ export const getDeputyJobById = async (req, res) => {
   try {
     const job = await deputyJobModel
       .findById(req.params.id)
-      .populate(
-        "matchedMusicianIds",
-        "firstName lastName email musicianSlug profilePhoto profilePicture",
-      )
+      .select([
+        "title",
+        "instrument",
+        "requiredInstruments",
+        "isVocalSlot",
+        "date",
+        "eventDate",
+        "callTime",
+        "startTime",
+        "finishTime",
+        "endTime",
+        "venue",
+        "locationName",
+        "location",
+        "county",
+        "postcode",
+        "genres",
+        "tags",
+        "essentialRoles",
+        "requiredSkills",
+        "desiredRoles",
+        "secondaryInstruments",
+        "setLengths",
+        "whatsIncluded",
+        "whatsIncludedOther",
+        "claimableExpenses",
+        "claimableExpensesOther",
+        "fee",
+        "currency",
+        "grossAmount",
+        "commissionAmount",
+        "deputyNetAmount",
+        "stripeFeeAmount",
+        "notes",
+        "clientName",
+        "clientEmail",
+        "clientPhone",
+        "paymentStatus",
+        "payoutStatus",
+        "releaseOn",
+        "chargedAt",
+        "payoutScheduledAt",
+        "payoutPaidAt",
+        "paymentFailureReason",
+        "status",
+        "workflowStage",
+        "jobType",
+        "isEnquiryOnly",
+        "previewMode",
+        "createdBy",
+        "createdByName",
+        "createdByEmail",
+        "createdByPhone",
+        "matchedCount",
+        "notifiedCount",
+        "applicationCount",
+        "allocatedMusicianId",
+        "allocatedMusicianName",
+        "allocatedAt",
+        "bookedMusicianId",
+        "bookedMusicianName",
+        "bookingConfirmedAt",
+        "createdAt",
+        "updatedAt",
+      ].join(" "))
       .populate(
         "allocatedMusicianId",
         "firstName lastName email musicianSlug profilePhoto profilePicture",
@@ -3988,9 +4049,8 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
                     <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
                       <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Declined deputy</h3>
                       <ul style="padding-left:20px; margin:0; font-size:14px; line-height:1.8; color:#333;">
-                        <li><strong>Name:</strong> ${escapeHtml(musicianDisplayName || "Not provided")}</li>
-                        <li><strong>Email:</strong> ${escapeHtml(musicianEmail || "Not provided")}</li>
-                        <li><strong>Phone:</strong> ${escapeHtml(musicianPhone || "Not provided")}</li>
+                        <strong>Name:</strong> ${escapeHtml(musicianDisplayName || "Not provided")}
+
                       </ul>
                     </div>
 
@@ -5358,6 +5418,78 @@ export const manualAllocateDeputyJob = async (req, res) => {
       success: false,
       message: "Failed to manually allocate deputy",
       error: error.message,
+    });
+  }
+};
+
+export const listDeputyJobApplications = async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 20, 200));
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+
+    const job = await deputyJobModel
+      .findById(req.params.id)
+      .select("applications applicationCount")
+      .lean();
+
+    if (!job) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
+    }
+
+    const applications = Array.isArray(job.applications) ? job.applications : [];
+    const total = Number(job.applicationCount || applications.length || 0);
+
+    return res.json({
+      success: true,
+      applications: applications.slice(offset, offset + limit),
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
+    });
+  } catch (error) {
+    console.error("❌ listDeputyJobApplications error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch deputy job applications",
+    });
+  }
+};
+
+export const listDeputyJobNotifications = async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 20, 200));
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+
+    const job = await deputyJobModel
+      .findById(req.params.id)
+      .select("notifications notifiedCount")
+      .lean();
+
+    if (!job) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
+    }
+
+    const notifications = Array.isArray(job.notifications) ? job.notifications : [];
+    const total = Number(job.notifiedCount || notifications.length || 0);
+
+    return res.json({
+      success: true,
+      notifications: notifications.slice(offset, offset + limit),
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < notifications.length,
+    });
+  } catch (error) {
+    console.error("❌ listDeputyJobNotifications error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch deputy job notifications",
     });
   }
 };
