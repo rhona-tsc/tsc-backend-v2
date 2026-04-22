@@ -21,6 +21,15 @@ const SMTP_REPLY_TO = String(
   process.env.SMTP_REPLY_TO || SMTP_FROM_EMAIL || "hello@thesupremecollective.co.uk"
 ).trim();
 
+const SMTP_RATE_LIMIT_DELAY_MS = Number(
+  process.env.SMTP_RATE_LIMIT_DELAY_MS || 750
+);
+const SMTP_BATCH_SIZE = Number(process.env.SMTP_BATCH_SIZE || 20);
+const SMTP_BATCH_PAUSE_MS = Number(process.env.SMTP_BATCH_PAUSE_MS || 10000);
+
+const delay = (ms = 0) =>
+  new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+
 
 const buildLocation = (job = {}) =>
   job.location ||
@@ -136,6 +145,9 @@ const buildTransporter = () => {
     host: SMTP_HOST,
     port: SMTP_PORT,
     secure: SMTP_PORT === 465,
+    pool: true,
+    maxConnections: 1,
+    maxMessages: Infinity,
     auth: {
       user: SMTP_USER,
       pass: SMTP_PASS,
@@ -286,75 +298,95 @@ export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => 
   }
 
   const transporter = buildTransporter();
+  let sentSincePause = 0;
 
-  for (const musician of musicians) {
-    const musicianId = musician?._id || musician?.id || null;
-    const email = String(musician?.email || "").trim();
-    const phone = musician?.phone || musician?.phoneNumber || "";
+  try {
+    for (const musician of musicians) {
+      const musicianId = musician?._id || musician?.id || null;
+      const email = String(musician?.email || "").trim();
+      const phone = musician?.phone || musician?.phoneNumber || "";
 
-    try {
-      if (!email) {
+      try {
+        if (!email) {
+          results.push({
+            musicianId,
+            email: "",
+            phone,
+            channel: "email",
+            status: "skipped",
+            sentAt: new Date(),
+            error: "Missing recipient email",
+          });
+          continue;
+        }
+
+        const applyUrl = `${frontendBaseUrl}/deputy-jobs/${job?._id}`;
+        const subject = formatEmailSubject(job);
+        const text = buildTextEmail({ musician, job, applyUrl });
+        const html = buildHtmlEmail({ musician, job, applyUrl });
+        const shouldBccThisEmail = Boolean(DEPUTY_JOB_BCC_EMAIL) && !hasSentBccCopy;
+
+        await transporter.sendMail({
+          from: `"${SMTP_FROM_NAME}" <${SMTP_FROM_EMAIL}>`,
+          replyTo: SMTP_REPLY_TO,
+          to: email,
+          ...(shouldBccThisEmail ? { bcc: DEPUTY_JOB_BCC_EMAIL } : {}),
+          subject,
+          text,
+          html,
+        });
+
+        if (shouldBccThisEmail) {
+          hasSentBccCopy = true;
+        }
+
+        sentSincePause += 1;
+
         results.push({
           musicianId,
-          email: "",
+          email,
           phone,
           channel: "email",
-          status: "skipped",
+          status: "sent",
+          subject,
+          previewText: text,
+          previewHtml: html,
           sentAt: new Date(),
-          error: "Missing recipient email",
+          error: "",
         });
-        continue;
+
+        if (SMTP_RATE_LIMIT_DELAY_MS > 0) {
+          await delay(SMTP_RATE_LIMIT_DELAY_MS);
+        }
+
+        if (
+          SMTP_BATCH_SIZE > 0 &&
+          SMTP_BATCH_PAUSE_MS > 0 &&
+          sentSincePause >= SMTP_BATCH_SIZE
+        ) {
+          await delay(SMTP_BATCH_PAUSE_MS);
+          sentSincePause = 0;
+        }
+      } catch (error) {
+        results.push({
+          musicianId,
+          email,
+          phone,
+          channel: "email",
+          status: "failed",
+          subject: formatEmailSubject(job),
+          previewText: "",
+          previewHtml: "",
+          sentAt: new Date(),
+          error: error.message || "Unknown error",
+        });
       }
-
-      const applyUrl = `${frontendBaseUrl}/deputy-jobs/${job?._id}`;
-      const subject = formatEmailSubject(job);
-      const text = buildTextEmail({ musician, job, applyUrl });
-      const html = buildHtmlEmail({ musician, job, applyUrl });
-      const shouldBccThisEmail = Boolean(DEPUTY_JOB_BCC_EMAIL) && !hasSentBccCopy;
-
-      await transporter.sendMail({
-        from: `"${SMTP_FROM_NAME}" <${SMTP_FROM_EMAIL}>`,
-        replyTo: SMTP_REPLY_TO,
-        to: email,
-        ...(shouldBccThisEmail ? { bcc: DEPUTY_JOB_BCC_EMAIL } : {}),
-        subject,
-        text,
-        html,
-      });
-
-      if (shouldBccThisEmail) {
-        hasSentBccCopy = true;
-      }
-
-      results.push({
-        musicianId,
-        email,
-        phone,
-        channel: "email",
-        status: "sent",
-        subject,
-        previewText: text,
-        previewHtml: html,
-        sentAt: new Date(),
-        error: "",
-      });
-    } catch (error) {
-      results.push({
-        musicianId,
-        email,
-        phone,
-        channel: "email",
-        status: "failed",
-        subject: formatEmailSubject(job),
-        previewText: "",
-        previewHtml: "",
-        sentAt: new Date(),
-        error: error.message || "Unknown error",
-      });
     }
-  }
 
-  return results;
+    return results;
+  } finally {
+    await transporter.close();
+  }
 };
 
 export const previewDeputyJobEmail = async ({ job, musician }) => {
