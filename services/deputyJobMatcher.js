@@ -326,8 +326,6 @@ const getMusicianSearchableText = (musician = {}) => {
     musician?.tagLine,
     musician?.role,
     musician?.customRole,
-    musician?.basicInfo?.firstName,
-    musician?.basicInfo?.lastName,
     musician?.gender,
     musician?.vocalGender,
     musician?.vocals?.gender,
@@ -368,7 +366,10 @@ const getVocalTypes = (musician) => {
   const skills = getArrayValues(musician?.other_skills);
 
   return Array.from(new Set([...explicitTypes, ...instruments, ...skills])).filter(
-    (value) => /vocal|singer|lead vocal|backing vocal|bv|rap|mc/.test(value),
+    (value) =>
+      /\bvocalist\b|\bvocals\b|\bvocal\b|\bsinger\b|\blead vocalist\b|\blead vocal\b|\blead singer\b|\bbacking vocalist\b|\bbacking vocals\b|\bbacking vocal\b|\bbacking singer\b|\bbv\b|\brapper\b|\brap\b|\bmc\b|\bemcee\b/.test(
+        value,
+      ),
   );
 };
 
@@ -462,21 +463,14 @@ const wantsVocalistInstrumentalist = (instrument = "") => {
 const isLeadVocalist = (musician) => {
   const vocalTypes = getVocalTypes(musician);
 
-  if (
-    vocalTypes.some(
-      (type) =>
-        type.includes("lead vocalist") ||
-        type.includes("lead vocal") ||
-        type.includes("lead singer") ||
-        type.includes("female lead vocalist") ||
-        type.includes("male lead vocalist"),
-    )
-  ) {
-    return true;
-  }
-
-  const searchable = getMusicianSearchableText(musician);
-  return /\blead vocalist\b|\blead vocal\b|\blead singer\b/.test(searchable);
+  return vocalTypes.some(
+    (type) =>
+      type.includes("lead vocalist") ||
+      type.includes("lead vocal") ||
+      type.includes("lead singer") ||
+      type.includes("female lead vocalist") ||
+      type.includes("male lead vocalist"),
+  );
 };
 
 const isLeadVocalistInstrumentalist = (musician, requiredInstrument = "") => {
@@ -497,7 +491,13 @@ const isVocalist = (musician) => {
   if (vocalTypes.length) return true;
 
   const instruments = getArrayValues(musician?.instrumentation);
-  if (instruments.some((instrument) => /vocal|singer|rap|mc/.test(instrument))) {
+  if (
+    instruments.some((instrument) =>
+      /\bvocalist\b|\bvocals\b|\bvocal\b|\bsinger\b|\brapper\b|\brap\b|\bmc\b|\bemcee\b/.test(
+        instrument,
+      ),
+    )
+  ) {
     return true;
   }
 
@@ -505,13 +505,10 @@ const isVocalist = (musician) => {
   if (rapValue === "true" || rapValue === "yes") return true;
 
   const skills = getArrayValues(musician?.other_skills);
-  if (skills.some((skill) => /backing\s*voc|bv|vocal|singer/.test(skill))) {
-    return true;
-  }
-
-  const searchable = getMusicianSearchableText(musician);
-  return /\bvocalist\b|\bsinger\b|\blead vocal\b|\blead singer\b|\bbacking vocal\b|\bbacking singer\b|\bbv\b|\brapper\b|\bmc\b/.test(
-    searchable,
+  return skills.some((skill) =>
+    /\bbacking vocalist\b|\bbacking vocals\b|\bbacking vocal\b|\bbacking singer\b|\bbv\b|\bvocalist\b|\bvocals\b|\bvocal\b|\bsinger\b|\brapper\b|\brap\b|\bmc\b|\bemcee\b/.test(
+      skill,
+    ),
   );
 };
 
@@ -624,6 +621,7 @@ export const findMatchingMusiciansForDeputyJob = async ({
 }) => {
   const pool = await musicianModel
     .find({
+      role: "musician",
       ...(excludeIds.length ? { _id: { $nin: excludeIds } } : {}),
     })
     .lean();
