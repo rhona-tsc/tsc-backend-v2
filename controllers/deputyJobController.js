@@ -721,6 +721,23 @@ const attemptDeputyJobCharge = async ({ job, createdBy = null }) => {
   }
 };
 
+const maskEmailForManageView = (value = "") => {
+  const email = normaliseString(value).toLowerCase();
+  if (!email || !email.includes("@")) return "";
+
+  const [localPart, domain] = email.split("@");
+  if (!localPart || !domain) return email;
+
+  const safeLocal =
+    localPart.length <= 2
+      ? `${localPart.charAt(0) || ""}*`
+      : `${localPart.slice(0, 2)}${"*".repeat(
+          Math.max(localPart.length - 2, 1),
+        )}`;
+
+  return `${safeLocal}@${domain}`;
+};
+
 const buildRecipientPreview = (musicians = []) =>
   musicians.map((m) => ({
     musicianId: m?._id || m?.id || null,
@@ -2381,6 +2398,160 @@ export const getDeputyJobById = async (req, res) => {
     return res
       .status(500)
       .json({ success: false, message: "Failed to fetch deputy job" });
+  }
+};
+
+export const getDeputyJobApplications = async (req, res) => {
+  try {
+    const job = await deputyJobModel
+      .findById(req.params.id)
+      .select([
+        "title",
+        "instrument",
+        "status",
+        "workflowStage",
+        "jobType",
+        "eventDate",
+        "date",
+        "callTime",
+        "startTime",
+        "finishTime",
+        "endTime",
+        "venue",
+        "locationName",
+        "location",
+        "county",
+        "postcode",
+        "createdBy",
+        "createdByName",
+        "createdByEmail",
+        "managerEmail",
+        "applicationCount",
+        "applications",
+        "allocatedMusicianId",
+        "allocatedMusicianName",
+        "allocatedAt",
+        "bookedMusicianId",
+        "bookedMusicianName",
+        "bookingConfirmedAt",
+        "updatedAt",
+        "createdAt",
+      ].join(" "))
+      .lean();
+
+    if (!job) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Deputy job not found" });
+    }
+
+    const requesterEmail = normaliseEmail(
+      req?.user?.email || req?.user?.useremail || "",
+    );
+    const requesterRole = normaliseString(
+      req?.user?.role || req?.user?.userrole || "",
+    ).toLowerCase();
+
+    const isPrivilegedViewer =
+      requesterEmail === "hello@thesupremecollective.co.uk" ||
+      requesterRole === "admin" ||
+      requesterRole === "agent";
+
+    const isJobManager = Boolean(
+      requesterEmail &&
+        [
+          normaliseEmail(job?.createdByEmail || ""),
+          normaliseEmail(job?.managerEmail || ""),
+        ].includes(requesterEmail),
+    );
+
+    if (!isPrivilegedViewer && !isJobManager) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to view these applications",
+      });
+    }
+
+    const applications = Array.isArray(job?.applications) ? job.applications : [];
+
+    const sanitizedApplications = applications.map((application) => {
+      const firstName = normaliseString(application?.firstName || "");
+      const lastName = normaliseString(application?.lastName || "");
+      const lastInitial = lastName ? `${lastName.charAt(0).toUpperCase()}.` : "";
+
+      return {
+        musicianId: application?.musicianId || null,
+        firstName,
+        lastName: isPrivilegedViewer ? lastName : lastInitial,
+        fullName: isPrivilegedViewer
+          ? [firstName, lastName].filter(Boolean).join(" ")
+          : [firstName, lastInitial].filter(Boolean).join(" "),
+        email: isPrivilegedViewer
+          ? normaliseString(application?.email || "")
+          : maskEmailForManageView(application?.email || ""),
+        phone: isPrivilegedViewer ? normaliseString(application?.phone || "") : "",
+        musicianSlug: normaliseString(application?.musicianSlug || ""),
+        profileImage: normaliseString(application?.profileImage || ""),
+        postcode: normaliseString(application?.postcode || ""),
+        status: normaliseString(application?.status || "applied"),
+        appliedAt: application?.appliedAt || null,
+        shortlistedAt: application?.shortlistedAt || null,
+        presentedAt: application?.presentedAt || null,
+        allocatedAt: application?.allocatedAt || null,
+        bookedAt: application?.bookedAt || null,
+        declinedAt: application?.declinedAt || null,
+        withdrawnAt: application?.withdrawnAt || null,
+        notes: normaliseString(application?.notes || ""),
+        deputyMatchScore: Number(application?.deputyMatchScore || 0),
+        matchSummary: {
+          instrument: normaliseString(application?.matchSummary?.instrument || ""),
+          roleFit: Number(application?.matchSummary?.roleFit || 0),
+          genreFit: Number(application?.matchSummary?.genreFit || 0),
+          locationFit: Number(application?.matchSummary?.locationFit || 0),
+          songFit: Number(application?.matchSummary?.songFit || 0),
+        },
+      };
+    });
+
+    return res.json({
+      success: true,
+      job: {
+        _id: job._id,
+        title: normaliseString(job?.title || job?.instrument || "Deputy job"),
+        instrument: normaliseString(job?.instrument || ""),
+        status: normaliseString(job?.status || ""),
+        workflowStage: normaliseString(job?.workflowStage || ""),
+        jobType: normaliseString(job?.jobType || ""),
+        eventDate: job?.eventDate || job?.date || null,
+        callTime: normaliseString(job?.callTime || job?.startTime || ""),
+        finishTime: normaliseString(job?.finishTime || job?.endTime || ""),
+        location:
+          normaliseString(job?.location || "") ||
+          [job?.venue, job?.locationName, job?.county, job?.postcode]
+            .map((item) => normaliseString(item))
+            .filter(Boolean)
+            .join(", "),
+        applicationCount: Number(job?.applicationCount || sanitizedApplications.length || 0),
+        allocatedMusicianId: job?.allocatedMusicianId || null,
+        allocatedMusicianName: normaliseString(job?.allocatedMusicianName || ""),
+        allocatedAt: job?.allocatedAt || null,
+        bookedMusicianId: job?.bookedMusicianId || null,
+        bookedMusicianName: normaliseString(job?.bookedMusicianName || ""),
+        bookingConfirmedAt: job?.bookingConfirmedAt || null,
+        createdByName: normaliseString(job?.createdByName || ""),
+        createdByEmail: isPrivilegedViewer
+          ? normaliseString(job?.createdByEmail || "")
+          : maskEmailForManageView(job?.createdByEmail || ""),
+      },
+      applications: sanitizedApplications,
+      canViewFullContactDetails: isPrivilegedViewer,
+    });
+  } catch (error) {
+    console.error("❌ getDeputyJobApplications error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch deputy job applications",
+    });
   }
 };
 
@@ -5418,78 +5589,6 @@ export const manualAllocateDeputyJob = async (req, res) => {
       success: false,
       message: "Failed to manually allocate deputy",
       error: error.message,
-    });
-  }
-};
-
-export const listDeputyJobApplications = async (req, res) => {
-  try {
-    const limit = Math.max(1, Math.min(Number(req.query.limit) || 20, 200));
-    const offset = Math.max(0, Number(req.query.offset) || 0);
-
-    const job = await deputyJobModel
-      .findById(req.params.id)
-      .select("applications applicationCount")
-      .lean();
-
-    if (!job) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Deputy job not found" });
-    }
-
-    const applications = Array.isArray(job.applications) ? job.applications : [];
-    const total = Number(job.applicationCount || applications.length || 0);
-
-    return res.json({
-      success: true,
-      applications: applications.slice(offset, offset + limit),
-      total,
-      limit,
-      offset,
-      hasMore: offset + limit < total,
-    });
-  } catch (error) {
-    console.error("❌ listDeputyJobApplications error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch deputy job applications",
-    });
-  }
-};
-
-export const listDeputyJobNotifications = async (req, res) => {
-  try {
-    const limit = Math.max(1, Math.min(Number(req.query.limit) || 20, 200));
-    const offset = Math.max(0, Number(req.query.offset) || 0);
-
-    const job = await deputyJobModel
-      .findById(req.params.id)
-      .select("notifications notifiedCount")
-      .lean();
-
-    if (!job) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Deputy job not found" });
-    }
-
-    const notifications = Array.isArray(job.notifications) ? job.notifications : [];
-    const total = Number(job.notifiedCount || notifications.length || 0);
-
-    return res.json({
-      success: true,
-      notifications: notifications.slice(offset, offset + limit),
-      total,
-      limit,
-      offset,
-      hasMore: offset + limit < notifications.length,
-    });
-  } catch (error) {
-    console.error("❌ listDeputyJobNotifications error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch deputy job notifications",
     });
   }
 };

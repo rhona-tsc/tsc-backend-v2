@@ -4,6 +4,7 @@ import {
   createDeputyJob,
   listDeputyJobs,
   getDeputyJobById,
+   getDeputyJobApplications,
   applyToDeputyJob,
   previewDeputyJob,
   sendDeputyJobNotifications,
@@ -101,6 +102,8 @@ deputyJobRouter.get("/", authUser, (req, res, next) => {
  */
 deputyJobRouter.get("/:id/matches", authUser, listDeputyJobMatches);
 deputyJobRouter.get("/:id", authUser, getDeputyJobById);
+
+deputyJobRouter.get("/:id/applications", authUser, getDeputyJobApplications);
 
 /**
  * Send notifications after preview confirmation
