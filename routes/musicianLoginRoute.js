@@ -463,7 +463,7 @@ musicianLoginRouter.post("/forgot-password", async (req, res) => {
 
     const rawToken = crypto.randomBytes(32).toString("hex");
     user.resetTokenHash = sha256(rawToken);
-    user.resetTokenExpires = new Date(Date.now() + 60 * 60 * 1000); // 1h
+    user.resetTokenExpires = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days
     await user.save();
 
     const link = `${FRONTEND_URL}/reset-password?token=${rawToken}&email=${encodeURIComponent(
@@ -477,7 +477,7 @@ musicianLoginRouter.post("/forgot-password", async (req, res) => {
         <p>Hi ${user.firstName || ""},</p>
         <p>You requested a password reset. Click below to reset it:</p>
         <p><a href="${link}">Reset password</a></p>
-        <p>This link expires in 1 hour. If you didn’t request this, you can ignore this email.</p>
+        <p>This link expires in 3 days. If you didn’t request this, you can ignore this email.</p>
       `,
     });
 
