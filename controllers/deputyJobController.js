@@ -3458,7 +3458,9 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
     const hasSavedCardDetails =
       Boolean(normaliseString(job?.stripeCustomerId)) &&
       Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
+      ["ready_to_charge", "paid"].includes(
+        normaliseString(job?.paymentStatus),
+      );
 
     if (!isEnquiryJob && !hasSavedCardDetails) {
       return res.status(400).json({
@@ -3503,6 +3505,8 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
             matchedMusicianIds: [],
             matchedMusicians: [],
             matchedCount: 0,
+            notifiedMusicianIds: [],
+            notifiedCount: 0,
           },
         },
       );
@@ -3516,48 +3520,53 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-    const existingSentIds = [
-      ...(Array.isArray(job.notifiedMusicianIds) ? job.notifiedMusicianIds : []),
-      ...(Array.isArray(job.notifications)
-        ? job.notifications
-            .filter((n) => n?.status === "sent" && n?.musicianId)
-            .map((n) => n.musicianId)
-        : []),
-    ]
-      .map((id) => asObjectIdString(id))
+    // ONLY successful sends count as "already notified"
+    const existingSuccessfulNotifications = Array.isArray(job.notifications)
+      ? job.notifications.filter((n) => n?.status === "sent")
+      : [];
+
+    const existingSentIds = existingSuccessfulNotifications
+      .map((n) => asObjectIdString(n?.musicianId))
+      .filter(Boolean);
+
+    const existingSentEmails = existingSuccessfulNotifications
+      .map((n) => normaliseEmail(n?.email || ""))
       .filter(Boolean);
 
     const alreadyNotifiedIds = new Set(existingSentIds);
+    const alreadyNotifiedEmails = new Set(existingSentEmails);
 
     const remainingMatches = matches.filter((musician) => {
       const id = asObjectIdString(
         musician?._id || musician?.id || musician?.musicianId,
       );
-      return id && !alreadyNotifiedIds.has(id);
+      const email = normaliseEmail(musician?.email || "");
+
+      if (id && alreadyNotifiedIds.has(id)) return false;
+      if (email && alreadyNotifiedEmails.has(email)) return false;
+
+      return true;
     });
 
     if (!remainingMatches.length) {
-      const allSentIds = Array.from(
-        new Set([
-          ...existingSentIds,
-          ...matcherResult.matchedMusicianIds
-            .map((id) => asObjectIdString(id))
-            .filter(Boolean),
-        ]),
+      const refreshedMatchedMusicians = (matcherResult.matchedMusicians || []).map(
+        (m) => {
+          const id = asObjectIdString(m?.musicianId);
+          const email = normaliseEmail(m?.email || "");
+
+          const existingSuccessful = existingSuccessfulNotifications.find(
+            (n) =>
+              (id && asObjectIdString(n?.musicianId) === id) ||
+              (email && normaliseEmail(n?.email || "") === email),
+          );
+
+          return {
+            ...m,
+            notified: Boolean(existingSuccessful),
+            notifiedAt: existingSuccessful?.sentAt || null,
+          };
+        },
       );
-
-      const refreshedMatchedMusicians = (matcherResult.matchedMusicians || []).map((m) => {
-        const id = asObjectIdString(m?.musicianId);
-        const existingSnapshot = (Array.isArray(job.matchedMusicians) ? job.matchedMusicians : []).find(
-          (existing) => asObjectIdString(existing?.musicianId) === id,
-        );
-
-        return {
-          ...m,
-          notified: allSentIds.includes(id),
-          notifiedAt: existingSnapshot?.notifiedAt || null,
-        };
-      });
 
       await deputyJobModel.updateOne(
         { _id: job._id },
@@ -3566,6 +3575,8 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
             matchedMusicianIds: matcherResult.matchedMusicianIds,
             matchedMusicians: refreshedMatchedMusicians,
             matchedCount: matches.length,
+            notifiedMusicianIds: existingSentIds,
+            notifiedCount: existingSuccessfulNotifications.length,
           },
         },
       );
@@ -3579,7 +3590,11 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
         job: withDeputyJobAliases(refreshedJob || job),
         matchedCount: matches.length,
         newlyNotifiedCount: 0,
-        notifiedCount: Number(refreshedJob?.notifiedCount || job?.notifiedCount || 0),
+        notifiedCount: Number(
+          refreshedJob?.notifiedCount ||
+            existingSuccessfulNotifications.length ||
+            0,
+        ),
         notificationResults: [],
       });
     }
@@ -3589,16 +3604,24 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       musicians: remainingMatches,
     });
 
-    const newSentIds = notificationResults
-      .filter((r) => r.status === "sent" && r.musicianId)
-      .map((r) => r.musicianId);
+    const newSuccessfulNotifications = notificationResults.filter(
+      (r) => r?.status === "sent",
+    );
+
+    const newSentIds = newSuccessfulNotifications
+      .map((r) => asObjectIdString(r?.musicianId))
+      .filter(Boolean);
+
+    const newSentEmails = newSuccessfulNotifications
+      .map((r) => normaliseEmail(r?.email || ""))
+      .filter(Boolean);
 
     const allSentIds = Array.from(
-      new Set(
-        [...existingSentIds, ...newSentIds]
-          .map((id) => asObjectIdString(id))
-          .filter(Boolean),
-      ),
+      new Set([...existingSentIds, ...newSentIds].filter(Boolean)),
+    );
+
+    const allSentEmails = new Set(
+      [...existingSentEmails, ...newSentEmails].filter(Boolean),
     );
 
     const refreshedJobDoc = await deputyJobModel.findById(job._id);
@@ -3610,47 +3633,55 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       });
     }
 
+    const existingNotifications = Array.isArray(refreshedJobDoc.notifications)
+      ? refreshedJobDoc.notifications
+      : [];
+
     refreshedJobDoc.matchedMusicianIds = matcherResult.matchedMusicianIds;
     refreshedJobDoc.matchedCount = matches.length;
     refreshedJobDoc.notifiedMusicianIds = allSentIds;
     refreshedJobDoc.notifications = [
-      ...(Array.isArray(refreshedJobDoc.notifications)
-        ? refreshedJobDoc.notifications
-        : []),
+      ...existingNotifications,
       ...notificationResults,
     ];
-    refreshedJobDoc.notifiedCount = allSentIds.length;
+
+    // ONLY successful sends count here
+    refreshedJobDoc.notifiedCount = refreshedJobDoc.notifications.filter(
+      (n) => n?.status === "sent",
+    ).length;
+
     refreshedJobDoc.status = "open";
     refreshedJobDoc.previewMode = false;
     refreshedJobDoc.workflowStage = "sent_to_matches";
 
-    refreshedJobDoc.matchedMusicians = (matcherResult.matchedMusicians || []).map((m) => {
-      const id = asObjectIdString(m?.musicianId);
-      const existingSnapshot = (Array.isArray(refreshedJobDoc.matchedMusicians)
-        ? refreshedJobDoc.matchedMusicians
-        : []
-      ).find((existing) => asObjectIdString(existing?.musicianId) === id);
-      const wasSentNow = newSentIds.some(
-        (sentId) => asObjectIdString(sentId) === id,
-      );
+    refreshedJobDoc.matchedMusicians = (matcherResult.matchedMusicians || []).map(
+      (m) => {
+        const id = asObjectIdString(m?.musicianId);
+        const email = normaliseEmail(m?.email || "");
 
-      return {
-        ...m,
-        notified: allSentIds.includes(id),
-        notifiedAt: wasSentNow
-          ? new Date()
-          : existingSnapshot?.notifiedAt || null,
-      };
-    });
+        const sentNotification = refreshedJobDoc.notifications.find(
+          (n) =>
+            n?.status === "sent" &&
+            ((id && asObjectIdString(n?.musicianId) === id) ||
+              (email && normaliseEmail(n?.email || "") === email)),
+        );
+
+        return {
+          ...m,
+          notified: Boolean(sentNotification),
+          notifiedAt: sentNotification?.sentAt || null,
+        };
+      },
+    );
 
     await refreshedJobDoc.save();
 
     return res.json({
       success: true,
-      message: `${newSentIds.length} matched musicians notified`,
+      message: `${newSuccessfulNotifications.length} matched musicians notified`,
       job: withDeputyJobAliases(refreshedJobDoc),
       matchedCount: matches.length,
-      newlyNotifiedCount: newSentIds.length,
+      newlyNotifiedCount: newSuccessfulNotifications.length,
       notifiedCount: refreshedJobDoc.notifiedCount,
       notificationResults,
     });
