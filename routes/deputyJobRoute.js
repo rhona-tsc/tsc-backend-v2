@@ -29,6 +29,7 @@ import {
   closeDeputyJob,
   manualAllocateDeputyJob,
   presentDeputyApplicant,
+  retryFailedDeputyJobNotifications,
 } from "../controllers/deputyJobController.js";
 import authUser from "../middleware/auth.js";
 
@@ -118,6 +119,12 @@ deputyJobRouter.post(
   "/:id/rematch-and-send-notifications",
   authUser,
   rematchAndSendDeputyJobNotifications
+);
+
+deputyJobRouter.post(
+  "/deputy-jobs/:id/retry-failed-notifications",
+  authUser,
+retryFailedDeputyJobNotifications
 );
 
 deputyJobRouter.post(

@@ -1107,13 +1107,9 @@ const buildApplicantPresentedEmailPreview = ({ job, musician }) => {
             >
               Sign in to update profile
             </a>
-
-            <a
-              href="${escapeHtml(dashboardUrl)}"
-              style="display:inline-block; background:#111; color:#fff; text-decoration:none; padding:14px 22px; border-radius:999px; font-size:14px; font-weight:700;"
-            >
-              Open dashboard
-            </a>
+</div>
+          
+          <div style="margin:0 0 24px; display:flex; flex-wrap:wrap; gap:12px;">
 
             ${
               profileUrl
@@ -5685,6 +5681,184 @@ export const manualAllocateDeputyJob = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to manually allocate deputy",
+      error: error.message,
+    });
+  }
+};
+
+
+export const retryFailedDeputyJobNotifications = async (req, res) => {
+  try {
+    const job = await deputyJobModel.findById(req.params.id);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    const failedNotifications = Array.isArray(job.notifications)
+      ? job.notifications.filter((n) => n?.status === "failed")
+      : [];
+
+    if (!failedNotifications.length) {
+      return res.json({
+        success: true,
+        message: "No failed notifications found for this job.",
+        job: withDeputyJobAliases(job),
+        retryCount: 0,
+        notificationResults: [],
+      });
+    }
+
+    const failedMusicianIds = Array.from(
+      new Set(
+        failedNotifications
+          .map((n) => asObjectIdString(n?.musicianId))
+          .filter(Boolean),
+      ),
+    );
+
+    const failedEmails = Array.from(
+      new Set(
+        failedNotifications
+          .map((n) => normaliseEmail(n?.email || ""))
+          .filter(Boolean),
+      ),
+    );
+
+    let musicians = [];
+
+    if (failedMusicianIds.length) {
+      const musiciansById = await musicianModel
+        .find({
+          _id: { $in: failedMusicianIds },
+        })
+        .lean();
+
+      musicians.push(...musiciansById);
+    }
+
+    if (failedEmails.length) {
+      const existingIds = new Set(
+        musicians.map((m) => asObjectIdString(m?._id)).filter(Boolean),
+      );
+
+      const musiciansByEmail = await musicianModel
+        .find({
+          email: { $in: failedEmails },
+        })
+        .lean();
+
+      for (const musician of musiciansByEmail) {
+        const id = asObjectIdString(musician?._id);
+        if (!id || existingIds.has(id)) continue;
+        musicians.push(musician);
+      }
+    }
+
+    // fallback for failed notifications that have email but no matching musician doc
+    const fallbackEmailOnlyRecipients = failedNotifications
+      .filter((n) => {
+        const email = normaliseEmail(n?.email || "");
+        if (!email) return false;
+
+        const alreadyLoaded = musicians.some(
+          (m) => normaliseEmail(m?.email || "") === email,
+        );
+
+        return !alreadyLoaded;
+      })
+      .map((n) => ({
+        _id: n?.musicianId || null,
+        id: n?.musicianId || null,
+        firstName: "",
+        lastName: "",
+        email: normaliseEmail(n?.email || ""),
+        phone: n?.phone || "",
+      }));
+
+    musicians.push(...fallbackEmailOnlyRecipients);
+
+    if (!musicians.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No resendable failed recipients could be resolved.",
+        job: withDeputyJobAliases(job),
+      });
+    }
+
+    const notificationResults = await notifyMusiciansAboutDeputyJob({
+      job,
+      musicians,
+    });
+
+    const successfulNotifications = notificationResults.filter(
+      (r) => r?.status === "sent",
+    );
+
+    const successfulIds = successfulNotifications
+      .map((r) => asObjectIdString(r?.musicianId))
+      .filter(Boolean);
+
+    const allSuccessfulIds = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(job.notifications)
+            ? job.notifications
+                .filter((n) => n?.status === "sent")
+                .map((n) => asObjectIdString(n?.musicianId))
+            : []),
+          ...successfulIds,
+        ].filter(Boolean),
+      ),
+    );
+
+    job.notifications = [
+      ...(Array.isArray(job.notifications) ? job.notifications : []),
+      ...notificationResults,
+    ];
+
+    job.notifiedMusicianIds = allSuccessfulIds;
+    job.notifiedCount = job.notifications.filter(
+      (n) => n?.status === "sent",
+    ).length;
+
+    if (Array.isArray(job.matchedMusicians)) {
+      job.matchedMusicians = job.matchedMusicians.map((m) => {
+        const id = asObjectIdString(m?.musicianId);
+
+        const sentNotification = job.notifications.find(
+          (n) =>
+            n?.status === "sent" &&
+            id &&
+            asObjectIdString(n?.musicianId) === id,
+        );
+
+        return {
+          ...m,
+          notified: Boolean(sentNotification),
+          notifiedAt: sentNotification?.sentAt || m?.notifiedAt || null,
+        };
+      });
+    }
+
+    await job.save();
+
+    return res.json({
+      success: true,
+      message: `${successfulNotifications.length} failed notifications retried successfully.`,
+      job: withDeputyJobAliases(job),
+      retryCount: musicians.length,
+      successCount: successfulNotifications.length,
+      notificationResults,
+    });
+  } catch (error) {
+    console.error("❌ retryFailedDeputyJobNotifications error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to retry failed deputy job notifications",
       error: error.message,
     });
   }
