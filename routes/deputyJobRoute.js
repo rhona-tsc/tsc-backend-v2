@@ -122,7 +122,7 @@ deputyJobRouter.post(
 );
 
 deputyJobRouter.post(
-  "/deputy-jobs/:id/retry-failed-notifications",
+  "/:id/retry-failed-notifications",
   authUser,
 retryFailedDeputyJobNotifications
 );
