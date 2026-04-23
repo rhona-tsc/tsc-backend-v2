@@ -1043,6 +1043,7 @@ const buildApplicantPresentedEmailPreview = ({ job, musician }) => {
       .filter(Boolean)
       .join(" ")
       .trim() || "Deputy";
+
   const jobTitle = normaliseString(
     job?.title || job?.instrument || "Deputy opportunity",
   );
@@ -1058,30 +1059,92 @@ const buildApplicantPresentedEmailPreview = ({ job, musician }) => {
       ? `https://thesupremecollective.co.uk/musician/${musician._id}`
       : "";
 
+  const adminLoginUrl = "https://admin.thesupremecollective.co.uk/login";
+  const dashboardUrl = "https://admin.thesupremecollective.co.uk";
+
   const html = `
-    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111; max-width: 700px;">
-      <h2 style="margin-bottom: 12px;">You’ve been presented for an enquiry</h2>
-      <p>Hi ${escapeHtml(firstName)},</p>
-      <p>
-        You’ve been presented to a client as a possible fit for
-        <strong>${escapeHtml(jobTitle)}</strong>.
-      </p>
-      <p>
-        At this stage, this is an enquiry rather than a confirmed booking.
-        Please make sure your profile is fully up to date, as the client may review it when considering their options.
-      </p>
-      <ul style="padding-left: 20px; margin: 0 0 18px;">
-        ${renderDetailRow("Date", dateText)}
-        ${renderDetailRow("Location", location)}
-        ${renderDetailRow("Fee", feeText)}
-      </ul>
-      ${
-        profileUrl
-          ? `<p><a href="${escapeHtml(profileUrl)}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600;">View your profile</a></p>`
-          : ""
-      }
-      <p>We’ll be in touch if the client would like to proceed.</p>
-      <p>Best,<br/>The Supreme Collective</p>
+    <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
+      <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
+        <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
+          <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700;">
+            The Supreme Collective
+          </p>
+          <h1 style="margin:12px 0 0; font-size:28px; line-height:1.2; color:#fff;">
+            You’ve Been Presented for an Enquiry
+          </h1>
+          <p style="margin:12px 0 0; font-size:15px; line-height:1.6; color:#f3f3f3;">
+            A client is considering you as a possible fit for an upcoming opportunity.
+          </p>
+        </div>
+
+        <div style="background:#ffffff; border:1px solid #e8e8e8; border-top:0; border-radius:0 0 20px 20px; padding:32px;">
+          <p style="margin:0 0 18px; font-size:16px; line-height:1.7; color:#333;">
+            Hi ${escapeHtml(firstName)},
+          </p>
+
+          <p style="margin:0 0 18px; font-size:15px; line-height:1.7; color:#444;">
+            You’ve been presented to a client as a possible fit for
+            <strong>${escapeHtml(jobTitle)}</strong>.
+          </p>
+
+          <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#444;">
+            At this stage, this is an enquiry rather than a confirmed booking. Please make sure your profile is fully up to date, as the client may review it when considering their options.
+          </p>
+
+          <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
+            <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Enquiry details</h3>
+            <ul style="margin:0; padding-left:20px; font-size:14px; line-height:1.8; color:#333;">
+              ${renderDetailRow("Date", dateText)}
+              ${renderDetailRow("Location", location)}
+              ${renderDetailRow("Fee", feeText)}
+            </ul>
+          </div>
+
+          <div style="margin:0 0 24px; display:flex; flex-wrap:wrap; gap:12px;">
+            <a
+              href="${escapeHtml(adminLoginUrl)}"
+              style="display:inline-block; background:#ff6667; color:#fff; text-decoration:none; padding:14px 22px; border-radius:999px; font-size:14px; font-weight:700;"
+            >
+              Sign in to update profile
+            </a>
+
+            <a
+              href="${escapeHtml(dashboardUrl)}"
+              style="display:inline-block; background:#111; color:#fff; text-decoration:none; padding:14px 22px; border-radius:999px; font-size:14px; font-weight:700;"
+            >
+              Open dashboard
+            </a>
+
+            ${
+              profileUrl
+                ? `<a
+                    href="${escapeHtml(profileUrl)}"
+                    style="display:inline-block; background:#fff; color:#111; text-decoration:none; padding:14px 22px; border-radius:999px; font-size:14px; font-weight:700; border:1px solid #dcdcdc;"
+                  >
+                    View public profile
+                  </a>`
+                : ""
+            }
+          </div>
+
+          <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px; margin-bottom:20px;">
+            <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
+              Top tip
+            </p>
+            <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
+              Sign in to your dashboard and check that your photos, bio, genres, instruments, videos, rates, travel details, and recent performance material are all fully up to date.
+            </p>
+          </div>
+
+          <p style="margin:0 0 14px; font-size:14px; line-height:1.7; color:#555;">
+            We’ll be in touch if the client would like to proceed.
+          </p>
+
+          <p style="margin:0; font-size:14px; line-height:1.7; color:#555;">
+            Best,<br/>The Supreme Collective
+          </p>
+        </div>
+      </div>
     </div>
   `;
 
@@ -1095,7 +1158,10 @@ const buildApplicantPresentedEmailPreview = ({ job, musician }) => {
     `Date: ${dateText}`,
     `Location: ${location}`,
     `Fee: ${feeText}`,
-    profileUrl ? `Profile: ${profileUrl}` : "",
+    "",
+    `Sign in to update your profile: ${adminLoginUrl}`,
+    `Dashboard: ${dashboardUrl}`,
+    profileUrl ? `Public profile: ${profileUrl}` : "",
     "",
     "We’ll be in touch if the client would like to proceed.",
     "",
