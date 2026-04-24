@@ -30,6 +30,8 @@ import {
   manualAllocateDeputyJob,
   presentDeputyApplicant,
   retryFailedDeputyJobNotifications,
+  manualApplyDeputyJob,
+  manualApplyAndPresentDeputyJob,
 } from "../controllers/deputyJobController.js";
 import authUser from "../middleware/auth.js";
 
@@ -144,6 +146,18 @@ deputyJobRouter.post(
   "/:id/manual-allocate",
   authUser,
   manualAllocateDeputyJob
+);
+
+deputyJobRouter.post(
+  "/:id/manual-apply",
+  authUser,
+  manualApplyDeputyJob
+);
+
+deputyJobRouter.post(
+  "/:id/manual-apply-and-present",
+  authUser,
+  manualApplyAndPresentDeputyJob
 );
 
 /**

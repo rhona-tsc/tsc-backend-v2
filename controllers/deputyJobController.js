@@ -5863,3 +5863,362 @@ export const retryFailedDeputyJobNotifications = async (req, res) => {
     });
   }
 };
+
+export const manualApplyDeputyJob = async (req, res) => {
+  try {
+    const job = await deputyJobModel.findById(req.params.id);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    const musicianId = String(req.body?.musicianId || "").trim();
+
+    if (!musicianId) {
+      return res.status(400).json({
+        success: false,
+        message: "musicianId is required",
+      });
+    }
+
+    const musician = await musicianModel.findById(musicianId).lean();
+
+    if (!musician) {
+      return res.status(404).json({
+        success: false,
+        message: "Musician not found",
+      });
+    }
+
+    const existingApplicationIndex = Array.isArray(job.applications)
+      ? job.applications.findIndex(
+          (application) =>
+            String(application?.musicianId || "") === String(musician._id)
+        )
+      : -1;
+
+    if (existingApplicationIndex !== -1) {
+      return res.status(400).json({
+        success: false,
+        message: "This musician is already on the applications list",
+        job: withDeputyJobAliases(job),
+      });
+    }
+
+    const firstName = String(
+      musician?.firstName || musician?.basicInfo?.firstName || ""
+    ).trim();
+
+    const lastName = String(
+      musician?.lastName || musician?.basicInfo?.lastName || ""
+    ).trim();
+
+    const email = String(
+      musician?.email || musician?.basicInfo?.email || ""
+    )
+      .trim()
+      .toLowerCase();
+
+    const phone = String(
+      musician?.phone || musician?.phoneNumber || musician?.basicInfo?.phone || ""
+    ).trim();
+
+    const deputyMatchScore = Number(musician?.deputyMatchScore || 0);
+
+    job.applications = Array.isArray(job.applications) ? job.applications : [];
+
+    job.applications.push({
+      musicianId: musician._id,
+      firstName,
+      lastName,
+      email,
+      phone,
+      appliedAt: new Date(),
+      status: "applied",
+      notes: "Added manually by admin/agent",
+      deputyMatchScore,
+      matchSummary: {
+        instrument: String(job?.instrument || ""),
+        roleFit: 0,
+        genreFit: 0,
+        locationFit: 0,
+        songFit: 0,
+      },
+    });
+
+    job.applicationCount = job.applications.length;
+
+    if (!Array.isArray(job.matchedMusicianIds)) {
+      job.matchedMusicianIds = [];
+    }
+
+    const alreadyInMatchedIds = job.matchedMusicianIds.some(
+      (id) => String(id) === String(musician._id)
+    );
+
+    if (!alreadyInMatchedIds) {
+      job.matchedMusicianIds.push(musician._id);
+    }
+
+    job.matchedCount = Array.isArray(job.matchedMusicians)
+      ? Math.max(job.matchedMusicians.length, job.applications.length)
+      : job.applications.length;
+
+    if (!Array.isArray(job.matchedMusicians)) {
+      job.matchedMusicians = [];
+    }
+
+    const existingMatchedSnapshotIndex = job.matchedMusicians.findIndex(
+      (entry) => String(entry?.musicianId || "") === String(musician._id)
+    );
+
+    if (existingMatchedSnapshotIndex === -1) {
+      job.matchedMusicians.push({
+        musicianId: musician._id,
+        firstName,
+        lastName,
+        email,
+        phone,
+        profilePicture: String(
+          musician?.profilePicture ||
+            musician?.profilePhoto ||
+            musician?.profileImage ||
+            ""
+        ).trim(),
+        musicianSlug: String(musician?.musicianSlug || "").trim(),
+        deputyMatchScore,
+        matchPct: Math.round(deputyMatchScore || 0),
+        matchSummary: {
+          instrument: String(job?.instrument || ""),
+          roleFit: 0,
+          genreFit: 0,
+          locationFit: 0,
+          songFit: 0,
+        },
+        notified: false,
+        notifiedAt: null,
+      });
+    }
+
+    await job.save();
+
+    return res.json({
+      success: true,
+      message: "Applicant added successfully",
+      job: withDeputyJobAliases(job),
+      application: job.applications[job.applications.length - 1],
+    });
+  } catch (error) {
+    console.error("❌ manualApplyDeputyJob error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to manually add applicant",
+      error: error.message,
+    });
+  }
+};
+
+export const manualApplyAndPresentDeputyJob = async (req, res) => {
+  try {
+    const job = await deputyJobModel.findById(req.params.id);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
+    }
+
+    const musicianId = String(req.body?.musicianId || "").trim();
+
+    if (!musicianId) {
+      return res.status(400).json({
+        success: false,
+        message: "musicianId is required",
+      });
+    }
+
+    const musician = await musicianModel.findById(musicianId).lean();
+
+    if (!musician) {
+      return res.status(404).json({
+        success: false,
+        message: "Musician not found",
+      });
+    }
+
+    const isEnquiryJob =
+      String(job?.jobType || "").trim().toLowerCase() === "enquiry";
+
+    if (!isEnquiryJob) {
+      return res.status(400).json({
+        success: false,
+        message: "Manual apply and present is only available for enquiry jobs",
+      });
+    }
+
+    const firstName = String(
+      musician?.firstName || musician?.basicInfo?.firstName || ""
+    ).trim();
+
+    const lastName = String(
+      musician?.lastName || musician?.basicInfo?.lastName || ""
+    ).trim();
+
+    const email = String(
+      musician?.email || musician?.basicInfo?.email || ""
+    )
+      .trim()
+      .toLowerCase();
+
+    const phone = String(
+      musician?.phone || musician?.phoneNumber || musician?.basicInfo?.phone || ""
+    ).trim();
+
+    const deputyMatchScore = Number(musician?.deputyMatchScore || 0);
+
+    job.applications = Array.isArray(job.applications) ? job.applications : [];
+
+    let application = job.applications.find(
+      (item) => String(item?.musicianId || "") === String(musician._id)
+    );
+
+    if (!application) {
+      application = {
+        musicianId: musician._id,
+        firstName,
+        lastName,
+        email,
+        phone,
+        appliedAt: new Date(),
+        status: "applied",
+        notes: "Added manually by admin/agent",
+        deputyMatchScore,
+        matchSummary: {
+          instrument: String(job?.instrument || ""),
+          roleFit: 0,
+          genreFit: 0,
+          locationFit: 0,
+          songFit: 0,
+        },
+      };
+
+      job.applications.push(application);
+    }
+
+    application.firstName = firstName;
+    application.lastName = lastName;
+    application.email = email;
+    application.phone = phone;
+    application.status = "presented";
+    application.presentedAt = new Date();
+    application.notes = application.notes
+      ? `${application.notes} | Presented manually by admin/agent`
+      : "Presented manually by admin/agent";
+
+    job.applicationCount = job.applications.length;
+
+    if (!Array.isArray(job.matchedMusicianIds)) {
+      job.matchedMusicianIds = [];
+    }
+
+    const alreadyInMatchedIds = job.matchedMusicianIds.some(
+      (id) => String(id) === String(musician._id)
+    );
+
+    if (!alreadyInMatchedIds) {
+      job.matchedMusicianIds.push(musician._id);
+    }
+
+    if (!Array.isArray(job.matchedMusicians)) {
+      job.matchedMusicians = [];
+    }
+
+    const existingMatchedSnapshotIndex = job.matchedMusicians.findIndex(
+      (entry) => String(entry?.musicianId || "") === String(musician._id)
+    );
+
+    if (existingMatchedSnapshotIndex === -1) {
+      job.matchedMusicians.push({
+        musicianId: musician._id,
+        firstName,
+        lastName,
+        email,
+        phone,
+        profilePicture: String(
+          musician?.profilePicture ||
+            musician?.profilePhoto ||
+            musician?.profileImage ||
+            ""
+        ).trim(),
+        musicianSlug: String(musician?.musicianSlug || "").trim(),
+        deputyMatchScore,
+        matchPct: Math.round(deputyMatchScore || 0),
+        matchSummary: {
+          instrument: String(job?.instrument || ""),
+          roleFit: 0,
+          genreFit: 0,
+          locationFit: 0,
+          songFit: 0,
+        },
+        notified: false,
+        notifiedAt: null,
+      });
+    }
+
+    job.matchedCount = job.matchedMusicians.length;
+
+    const preview = buildApplicantPresentedEmailPreview({
+      job,
+      musician,
+    });
+
+    if (email) {
+      await sendEmail({
+        to: email,
+        subject: preview.subject,
+        html: preview.html,
+        text: preview.text,
+      });
+    }
+
+    if (!Array.isArray(job.notifications)) {
+      job.notifications = [];
+    }
+
+    job.notifications.push({
+      musicianId: musician._id,
+      email,
+      phone,
+      channel: "email",
+      type: "applicant_presented",
+      subject: preview.subject,
+      previewHtml: preview.html,
+      previewText: preview.text,
+      status: email ? "sent" : "skipped",
+      sentAt: new Date(),
+      error: email ? "" : "Missing recipient email",
+    });
+
+    await job.save();
+
+    return res.json({
+      success: true,
+      message: email
+        ? "Applicant added and presented successfully"
+        : "Applicant added and marked as presented, but no email address was available",
+      job: withDeputyJobAliases(job),
+      application,
+    });
+  } catch (error) {
+    console.error("❌ manualApplyAndPresentDeputyJob error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to manually add and present applicant",
+      error: error.message,
+    });
+  }
+};
