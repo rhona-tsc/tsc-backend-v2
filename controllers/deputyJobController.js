@@ -823,13 +823,19 @@ const formatFee = (value, currency = "GBP") => {
 };
 
 const buildHtmlEmail = ({ musician, job, applyUrl }) => {
-  const firstName = musician?.firstName ? escapeHtml(musician.firstName) : "there";
-  const safeTitle = escapeHtml(job?.title || job?.instrument || "Deputy opportunity");
+  const firstName = musician?.firstName
+    ? escapeHtml(musician.firstName)
+    : "there";
+  const safeTitle = escapeHtml(
+    job?.title || job?.instrument || "Deputy opportunity",
+  );
   const instrument = escapeHtml(job?.instrument || job?.title || "TBC");
   const date = escapeHtml(formatDate(job?.eventDate || job?.date));
   const time = escapeHtml(buildTime(job));
   const location = escapeHtml(buildLocation(job));
-  const fee = escapeHtml(formatFee(getDeputyFeeForEmail(job), job?.currency || "GBP"));
+  const fee = escapeHtml(
+    formatFee(getDeputyFeeForEmail(job), job?.currency || "GBP"),
+  );
   const notes = job?.notes
     ? `<li style="margin:0 0 8px;"><strong>Notes:</strong> ${escapeHtml(job.notes)}</li>`
     : "";
@@ -838,29 +844,39 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
   const WEBSITE_URL = "https://thesupremecollective.co.uk";
   const ADMIN_URL = "https://admin.thesupremecollective.co.uk";
   const INSTAGRAM_URL = "https://instagram.com/thesupremecollective";
-  const YOUTUBE_URL = "https://www.youtube.com/channel/UC6HhRZA4XLVajrz5vk5vn2A";
+  const YOUTUBE_URL =
+    "https://www.youtube.com/channel/UC6HhRZA4XLVajrz5vk5vn2A";
   const GOOGLE_REVIEWS_URL =
     "https://www.google.com/search?q=the+supreme+collective&oq=the+supreme+collective&aqs=chrome.0.0i355i512j46i175i199i512j0i22i30l3j69i60j69i61l2.4878j0j7&sourceid=chrome&ie=UTF-8#lrd=0x751df2ff4f2e30d:0xb1f44d25caa515eb,1,,,";
+  const UNSUBSCRIBE_SUBJECT = encodeURIComponent(
+    "Please unsubscribe me from The Supreme Collective",
+  );
+  const UNSUBSCRIBE_BODY = encodeURIComponent(
+    "Please hit send to unsubscribe from The Supreme Collective",
+  );
+  const UNSUBSCRIBE_URL = `mailto:hello@thesupremecollective.co.uk?subject=${UNSUBSCRIBE_SUBJECT}&body=${UNSUBSCRIBE_BODY}`;
 
-  // replace these with your real hosted asset URLs
-  const POST_JOB_IMAGE_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777045523/post-your-own-dep-jobs_l0jy6s.png";
-  const LIST_ACT_IMAGE_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777045541/wanna-list-your-act_mrnyse.png";
-  const SIGN_OFF_GIF_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777045559/TSC_Signature_2026_svgxr5.gif";
+  const POST_JOB_IMAGE_URL =
+    "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777045523/post-your-own-dep-jobs_l0jy6s.png";
+  const LIST_ACT_IMAGE_URL =
+    "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777045541/wanna-list-your-act_mrnyse.png";
+  const SIGN_OFF_GIF_URL =
+    "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777045559/TSC_Signature_2026_svgxr5.gif";
 
   const shareText = encodeURIComponent(
-    `I thought this deputy opportunity might be a great fit for you: ${applyUrl}`
+    `I thought this deputy opportunity might be a great fit for you: ${applyUrl}`,
   );
 
   const whatsappShareUrl = `https://wa.me/?text=${shareText}`;
   const mailtoShareUrl = `mailto:?subject=${encodeURIComponent(
-    `Deputy opportunity: ${job?.title || job?.instrument || "Deputy opportunity"}`
+    `Deputy opportunity: ${job?.title || job?.instrument || "Deputy opportunity"}`,
   )}&body=${shareText}`;
 
   return `
     <div style="margin:0; padding:0; background:#f3f4f6; font-family:Arial, Helvetica, sans-serif; color:#111111;">
       <div style="max-width:720px; margin:0 auto; padding:28px 16px;">
 
-        <div style="background:#0d1b5e; border-radius:28px 28px 0 0; overflow:hidden;">
+        <div style="background:#111111; border-radius:28px 28px 0 0; overflow:hidden;">
           <div style="padding:18px 28px 8px;">
             <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700;">
               The Supreme Collective
@@ -871,7 +887,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             <h1 style="margin:8px 0 10px; font-size:34px; line-height:1.05; color:#ffffff; font-weight:800;">
               Deputy Opportunity
             </h1>
-            <p style="margin:0; font-size:16px; line-height:1.7; color:#e9ecff;">
+            <p style="margin:0; font-size:16px; line-height:1.7; color:#f3f3f3;">
               A new opportunity has come in that may be a great fit for you.
             </p>
           </div>
@@ -888,10 +904,10 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
 
           <div style="margin:0 0 22px; padding:22px; background:#fff6f6; border:1px solid #ffd6d7; border-radius:22px;">
             <p style="margin:0 0 8px; font-size:12px; letter-spacing:1.5px; text-transform:uppercase; color:#ff6667; font-weight:700;">
-              Opportunity
+              Role
             </p>
             <h2 style="margin:0; font-size:30px; line-height:1.15; color:#111111; font-weight:800;">
-              ${safeTitle}
+              ${instrument}
             </h2>
           </div>
 
@@ -907,6 +923,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
           <div style="margin-bottom:28px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:22px;">
             <h3 style="margin:0 0 14px; font-size:16px; color:#111111;">Job details</h3>
             <ul style="margin:0; padding-left:20px; font-size:14px; line-height:1.8; color:#333333;">
+              <li style="margin:0 0 8px;"><strong>Opportunity:</strong> ${safeTitle}</li>
               <li style="margin:0 0 8px;"><strong>Role:</strong> ${instrument}</li>
               <li style="margin:0 0 8px;"><strong>Date:</strong> ${date}</li>
               <li style="margin:0 0 8px;"><strong>Time:</strong> ${time}</li>
@@ -916,34 +933,34 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             </ul>
           </div>
 
-          <div style="margin:0 0 28px; padding:22px; background:#0d1b5e; border-radius:22px;">
+          <div style="margin:0 0 28px; padding:22px; background:#111111; border-radius:22px;">
             <h3 style="margin:0 0 10px; font-size:18px; color:#ffffff;">Share this opportunity</h3>
-            <p style="margin:0 0 18px; font-size:14px; line-height:1.7; color:#e9ecff;">
+            <p style="margin:0 0 18px; font-size:14px; line-height:1.7; color:#f3f3f3;">
               Know someone who could be a brilliant fit? Feel free to share this opportunity with them.
             </p>
 
             <table role="presentation" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="padding:0 10px 10px 0;">
+                <td style="padding:0 10px 10px 0; text-align:center;">
                   <a
                     href="${whatsappShareUrl}"
-                    style="display:inline-block; background:#25D366; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:13px; font-weight:700;"
+                    style="display:inline-block; min-width:170px; background:#25D366; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:13px; font-weight:700; text-align:center;"
                   >
                     Share on WhatsApp
                   </a>
                 </td>
-                <td style="padding:0 10px 10px 0;">
+                <td style="padding:0 10px 10px 0; text-align:center;">
                   <a
                     href="${mailtoShareUrl}"
-                    style="display:inline-block; background:#ffffff; color:#111111; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:13px; font-weight:700;"
+                    style="display:inline-block; min-width:170px; background:#ffffff; color:#111111; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:13px; font-weight:700; text-align:center;"
                   >
                     Share by email
                   </a>
                 </td>
-                <td style="padding:0 0 10px 0;">
+                <td style="padding:0 0 10px 0; text-align:center;">
                   <a
                     href="${safeApplyUrl}"
-                    style="display:inline-block; background:transparent; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:13px; font-weight:700; border:1px solid rgba(255,255,255,0.35);"
+                    style="display:inline-block; min-width:150px; background:transparent; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:13px; font-weight:700; text-align:center; border:1px solid rgba(255,255,255,0.35);"
                   >
                     Copy / open link
                   </a>
@@ -958,11 +975,11 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             </p>
           </div>
 
-          <div style="margin:28px 0 10px;">
+          <div style="margin:28px 0 22px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td valign="top" width="50%" style="padding-right:8px;">
-                  <a href="${WEBSITE_URL}" style="text-decoration:none;">
+                <td valign="top" width="50%" style="padding-right:10px;">
+                  <a href="${WEBSITE_URL}" style="text-decoration:none; display:block;">
                     <img
                       src="${POST_JOB_IMAGE_URL}"
                       alt="Post your own deputy jobs"
@@ -970,8 +987,8 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                     />
                   </a>
                 </td>
-                <td valign="top" width="50%" style="padding-left:8px;">
-                  <a href="${WEBSITE_URL}" style="text-decoration:none;">
+                <td valign="top" width="50%" style="padding-left:10px;">
+                  <a href="${WEBSITE_URL}" style="text-decoration:none; display:block;">
                     <img
                       src="${LIST_ACT_IMAGE_URL}"
                       alt="Wanna list your act?"
@@ -983,7 +1000,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             </table>
           </div>
 
-          <div style="margin:10px 0 28px;">
+          <div style="margin:0 0 28px; padding-top:6px;">
             <p style="margin:0 0 8px; font-size:14px; line-height:1.7; color:#444444;">
               Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
             </p>
@@ -992,58 +1009,62 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             </p>
           </div>
 
-          <div style="margin:0 0 28px; padding:22px; background:#fafafa; border:1px solid #ececec; border-radius:22px;">
-            <h3 style="margin:0 0 14px; font-size:16px; color:#111111;">Find us online</h3>
-
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">
-              <tr>
-                <td style="padding:0 10px 10px 0;">
-                  <a href="${INSTAGRAM_URL}" style="display:inline-block; text-decoration:none; background:#ff6667; color:#ffffff; padding:10px 14px; border-radius:999px; font-size:13px; font-weight:700;">
-                    Instagram
-                  </a>
-                </td>
-                <td style="padding:0 10px 10px 0;">
-                  <a href="${YOUTUBE_URL}" style="display:inline-block; text-decoration:none; background:#111111; color:#ffffff; padding:10px 14px; border-radius:999px; font-size:13px; font-weight:700;">
-                    YouTube
-                  </a>
-                </td>
-                <td style="padding:0 10px 10px 0;">
-                  <a href="${WEBSITE_URL}" style="display:inline-block; text-decoration:none; background:#0d1b5e; color:#ffffff; padding:10px 14px; border-radius:999px; font-size:13px; font-weight:700;">
-                    Website
-                  </a>
-                </td>
-                <td style="padding:0 0 10px 0;">
-                  <a href="${GOOGLE_REVIEWS_URL}" style="display:inline-block; text-decoration:none; background:#ffffff; color:#111111; padding:10px 14px; border-radius:999px; font-size:13px; font-weight:700; border:1px solid #d9d9d9;">
-                    ★★★★★ Google reviews
-                  </a>
-                </td>
-              </tr>
-            </table>
-
-            <p style="margin:0; font-size:14px; line-height:1.7; color:#555555;">
-              Keep your profile up to date by signing in here:
-              <a href="${ADMIN_URL}" style="color:#ff6667; text-decoration:none; font-weight:700;"> admin.thesupremecollective.co.uk</a>
-            </p>
-          </div>
+          <p style="margin:0; font-size:15px; line-height:1.7; color:#444444;">
+            Best wishes,<br />
+            <strong>The Supreme Collective</strong>
+          </p>
 
           ${
             SIGN_OFF_GIF_URL
               ? `
-                <div style="text-align:center; margin:10px 0 18px;">
+                <div style="text-align:center; margin:18px 0 24px;">
                   <img
                     src="${SIGN_OFF_GIF_URL}"
                     alt="The Supreme Collective"
-                    style="max-width:260px; width:100%; height:auto; border:0;"
+                    style="max-width:340px; width:100%; height:auto; border:0;"
                   />
                 </div>
               `
               : ""
           }
 
-          <p style="margin:0; font-size:15px; line-height:1.7; color:#444444;">
-            Best wishes,<br />
-            <strong>The Supreme Collective</strong>
-          </p>
+          <div style="margin:0 0 8px; padding:22px; background:#fafafa; border:1px solid #ececec; border-radius:22px;">
+            <h3 style="margin:0 0 14px; font-size:16px; color:#111111;">Find us online</h3>
+
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">
+              <tr>
+                <td style="padding:0 12px 10px 0;">
+                  <a href="${INSTAGRAM_URL}" style="text-decoration:none; font-size:22px; line-height:1;">📸</a>
+                </td>
+                <td style="padding:0 12px 10px 0;">
+                  <a href="${YOUTUBE_URL}" style="text-decoration:none; font-size:22px; line-height:1;">▶️</a>
+                </td>
+                <td style="padding:0 12px 10px 0;">
+                  <a href="${WEBSITE_URL}" style="text-decoration:none; font-size:22px; line-height:1;">🌐</a>
+                </td>
+                <td style="padding:0 0 10px 0;">
+                  <a href="${GOOGLE_REVIEWS_URL}" style="text-decoration:none; font-size:22px; line-height:1;">⭐</a>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 16px; font-size:14px; line-height:1.7; color:#555555;">
+              Keep your profile up to date by signing in here:
+              <a href="${ADMIN_URL}" style="color:#ff6667; text-decoration:none; font-weight:700;"> admin.thesupremecollective.co.uk</a>
+            </p>
+
+            <div style="padding-top:16px; border-top:1px solid #e3e3e3;">
+              <p style="margin:0 0 8px; font-size:12px; line-height:1.7; color:#777777;">
+                Copyright © 2026 The Supreme Collective Ltd. All rights reserved.
+              </p>
+              <p style="margin:0 0 8px; font-size:12px; line-height:1.7; color:#777777;">
+                Registered Office: 71-75, Shelton Street, Covent Garden, London, WC2H 9JQ, United Kingdom | Company Number: 16883956
+              </p>
+              <p style="margin:0; font-size:12px; line-height:1.7; color:#777777;">
+                <a href="${UNSUBSCRIBE_URL}" style="color:#ff6667; text-decoration:none; font-weight:700;">Unsubscribe</a>
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1066,6 +1087,8 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
   const YOUTUBE_URL = "https://www.youtube.com/channel/UC6HhRZA4XLVajrz5vk5vn2A";
   const GOOGLE_REVIEWS_URL =
     "https://www.google.com/search?q=the+supreme+collective&oq=the+supreme+collective&aqs=chrome.0.0i355i512j46i175i199i512j0i22i30l3j69i60j69i61l2.4878j0j7&sourceid=chrome&ie=UTF-8#lrd=0x751df2ff4f2e30d:0xb1f44d25caa515eb,1,,,";
+  const UNSUBSCRIBE_URL =
+    "mailto:hello@thesupremecollective.co.uk?subject=Please%20unsubscribe%20me%20from%20The%20Supreme%20Collective&body=Please%20hit%20send%20to%20unsubscribe%20from%20The%20Supreme%20Collective";
 
   return [
     "THE SUPREME COLLECTIVE",
@@ -1102,6 +1125,10 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
     "",
     "Best wishes,",
     "The Supreme Collective",
+    "",
+    "Copyright © 2026 The Supreme Collective Ltd. All rights reserved.",
+    "Registered Office: 71-75, Shelton Street, Covent Garden, London, WC2H 9JQ, United Kingdom | Company Number: 16883956",
+    `Unsubscribe: ${UNSUBSCRIBE_URL}`,
   ]
     .filter(Boolean)
     .join("\n");
