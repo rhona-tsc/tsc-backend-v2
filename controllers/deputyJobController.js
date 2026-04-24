@@ -6094,7 +6094,7 @@ export const manualApplyAndPresentDeputyJob = async (req, res) => {
         email,
         phone,
         appliedAt: new Date(),
-        status: "applied",
+        status: "presented",
         notes: "Added manually by admin/agent",
         deputyMatchScore,
         matchSummary: {
