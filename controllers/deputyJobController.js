@@ -4737,22 +4737,55 @@ export const previewDeputyJobNotification = async (req, res) => {
       recipientsCount: Array.isArray(previewNotification?.recipients)
         ? previewNotification.recipients.length
         : 0,
-      recipients: Array.isArray(previewNotification?.recipients)
-        ? previewNotification.recipients.map((r) => ({
-            musicianId: r?.musicianId || null,
-            email: r?.email || "",
-            firstName: r?.firstName || "",
-            lastName: r?.lastName || "",
-          }))
-        : [],
       hasHtml: Boolean(previewNotification?.html),
       hasText: Boolean(previewNotification?.text),
       htmlLength: previewNotification?.html?.length || 0,
       textLength: previewNotification?.text?.length || 0,
     });
 
+    let emailSent = false;
+    let emailError = "";
+
+    if (previewRecipientEmail) {
+      try {
+        await sendEmail({
+          to: previewRecipientEmail,
+          bcc: DEPUTY_JOB_BCC_EMAIL,
+          subject: `[Preview] ${previewNotification.subject}`,
+          html: previewNotification.html,
+          text: previewNotification.text,
+        });
+
+        emailSent = true;
+
+        console.log("✅ previewDeputyJobNotification: preview email sent", {
+          to: previewRecipientEmail,
+          subject: `[Preview] ${previewNotification.subject}`,
+        });
+      } catch (sendError) {
+        emailError = sendError?.message || "Failed to send preview email";
+
+        console.error(
+          "❌ previewDeputyJobNotification: failed to send preview email",
+          {
+            to: previewRecipientEmail,
+            message: sendError?.message,
+            stack: sendError?.stack,
+          }
+        );
+      }
+    }
+
     return res.json({
       success: true,
+      message: emailSent
+        ? `Preview email sent to ${previewRecipientEmail}`
+        : previewRecipientEmail
+        ? "Preview generated, but email failed to send"
+        : "Preview generated successfully",
+      emailSent,
+      emailError,
+      previewRecipientEmail,
       job: withDeputyJobAliases(job),
       matchedCount: matches.length,
       previewNotification,
