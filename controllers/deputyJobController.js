@@ -878,7 +878,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
   const mailtoShareUrl = `mailto:?subject=${encodeURIComponent(
     `Deputy opportunity: ${job?.title || job?.instrument || "Deputy opportunity"}`,
   )}&body=${shareText}`;
-  const facebookShareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(applyUrl)}`;
+  // const facebookShareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(applyUrl)}`;
 
   return `
     <div style="margin:0; padding:0; background:#f3f4f6; font-family:Arial, Helvetica, sans-serif; color:#111111;">
@@ -966,18 +966,10 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                 </td>
                 <td style="padding:0 10px 10px 0; text-align:center;">
                   <a
-                    href="${facebookShareUrl}"
-                    style="display:inline-block; min-width:170px; background:#1877F2; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center;"
-                  >
-                    Share on Facebook
-                  </a>
-                </td>
-                <td style="padding:0 0 10px 0; text-align:center;">
-                  <a
                     href="${safeApplyUrl}"
-                    style="display:inline-block; min-width:150px; background:transparent; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center; border:1px solid rgba(255,255,255,0.35);"
+                    style="display:inline-block; min-width:170px; background:transparent; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center; border:1px solid rgba(255,255,255,0.35);"
                   >
-                    Copy / open link
+                    Copy job link
                   </a>
                 </td>
               </tr>
@@ -1028,19 +1020,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             <strong>The Supreme Collective</strong>
           </p>
 
-          ${
-            SIGN_OFF_GIF_URL
-              ? `
-                <div style="text-align:center; margin:18px 0 24px;">
-                  <img
-                    src="${SIGN_OFF_GIF_URL}"
-                    alt="The Supreme Collective"
-                    style="display:block; width:100%; max-width:620px; height:auto; border:0; margin:0 auto;"
-                  />
-                </div>
-              `
-              : ""
-          }
+        
 
           <div style="margin:0 0 8px; padding:22px; background:#fafafa; border:1px solid #ececec; border-radius:22px;">
             <h3 style="margin:0 0 14px; font-size:16px; color:#111111;">Find us online</h3>
@@ -1079,7 +1059,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                     <img
                       src="${GOOGLE_REVIEWS_ICON_URL}"
                       alt="Google reviews"
-                      style="display:block; width:32px; height:32px; border:0;"
+                      style="display:block; width:64px; height:32px; border:0; object-fit:contain;"
                     />
                   </a>
                 </td>
@@ -1135,7 +1115,7 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
   const mailtoShareUrl = `mailto:?subject=${encodeURIComponent(
     `Deputy opportunity: ${job?.title || job?.instrument || "Deputy opportunity"}`,
   )}&body=${shareText}`;
-  const facebookShareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(applyUrl)}`;
+  // const facebookShareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(applyUrl)}`;
 
   return [
     "THE SUPREME COLLECTIVE",
@@ -1158,8 +1138,7 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
     "Share this opportunity with someone you think would be a great fit:",
     `WhatsApp: ${whatsappShareUrl}`,
     `Email: ${mailtoShareUrl}`,
-    `Facebook: ${facebookShareUrl}`,
-    `Direct link: ${applyUrl}`,
+    `Copy job link: ${applyUrl}`,
     "",
     "Did you know you can also post your own deputy jobs through The Supreme Collective? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.",
     "",
