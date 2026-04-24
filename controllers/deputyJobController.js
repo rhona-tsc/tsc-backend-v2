@@ -848,6 +848,14 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
     "https://www.youtube.com/channel/UC6HhRZA4XLVajrz5vk5vn2A";
   const GOOGLE_REVIEWS_URL =
     "https://www.google.com/search?q=the+supreme+collective&oq=the+supreme+collective&aqs=chrome.0.0i355i512j46i175i199i512j0i22i30l3j69i60j69i61l2.4878j0j7&sourceid=chrome&ie=UTF-8#lrd=0x751df2ff4f2e30d:0xb1f44d25caa515eb,1,,,";
+  const INSTAGRAM_ICON_URL =
+    "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777056960/instagram-icon_rtespa.png";
+  const YOUTUBE_ICON_URL =
+    "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777056960/1_lo9yf6.png";
+  const GOOGLE_REVIEWS_ICON_URL =
+    "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777056960/google-icon_oinn1r.png";
+  const WEBSITE_ICON_URL =
+    "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777056960/website-icon_fdpn7k.png";
   const UNSUBSCRIBE_SUBJECT = encodeURIComponent(
     "Please unsubscribe me from The Supreme Collective",
   );
@@ -876,14 +884,14 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
     <div style="margin:0; padding:0; background:#f3f4f6; font-family:Arial, Helvetica, sans-serif; color:#111111;">
       <div style="max-width:720px; margin:0 auto; padding:28px 16px;">
 
-        <div style="background:#111111; border-radius:28px 28px 0 0; overflow:hidden;">
+        <div style="background:#111111; border-radius:28px 28px 0 0; overflow:hidden; text-align:center;">
           <div style="padding:18px 28px 8px;">
-            <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700;">
+            <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700; text-align:center;">
               The Supreme Collective
             </p>
           </div>
 
-          <div style="padding:0 28px 30px;">
+          <div style="padding:0 28px 30px; text-align:center;">
             <h1 style="margin:8px 0 10px; font-size:34px; line-height:1.05; color:#ffffff; font-weight:800;">
               Deputy Opportunity
             </h1>
@@ -911,10 +919,10 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             </h2>
           </div>
 
-          <div style="margin:0 0 26px;">
+          <div style="margin:0 0 26px; text-align:center;">
             <a
               href="${safeApplyUrl}"
-              style="display:inline-block; background:#ff6667; color:#ffffff; text-decoration:none; padding:14px 24px; border-radius:999px; font-size:14px; font-weight:700;"
+              style="display:inline-block; background:#ff6667; color:#ffffff; text-decoration:none; padding:14px 24px; border-radius:999px; font-size:16px; font-weight:700;"
             >
               View & apply
             </a>
@@ -923,7 +931,6 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
           <div style="margin-bottom:28px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:22px;">
             <h3 style="margin:0 0 14px; font-size:16px; color:#111111;">Job details</h3>
             <ul style="margin:0; padding-left:20px; font-size:14px; line-height:1.8; color:#333333;">
-              <li style="margin:0 0 8px;"><strong>Opportunity:</strong> ${safeTitle}</li>
               <li style="margin:0 0 8px;"><strong>Role:</strong> ${instrument}</li>
               <li style="margin:0 0 8px;"><strong>Date:</strong> ${date}</li>
               <li style="margin:0 0 8px;"><strong>Time:</strong> ${time}</li>
@@ -944,7 +951,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                 <td style="padding:0 10px 10px 0; text-align:center;">
                   <a
                     href="${whatsappShareUrl}"
-                    style="display:inline-block; min-width:170px; background:#25D366; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:13px; font-weight:700; text-align:center;"
+                    style="display:inline-block; min-width:170px; background:#25D366; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center;"
                   >
                     Share on WhatsApp
                   </a>
@@ -952,7 +959,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                 <td style="padding:0 10px 10px 0; text-align:center;">
                   <a
                     href="${mailtoShareUrl}"
-                    style="display:inline-block; min-width:170px; background:#ffffff; color:#111111; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:13px; font-weight:700; text-align:center;"
+                    style="display:inline-block; min-width:170px; background:#ffffff; color:#111111; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center;"
                   >
                     Share by email
                   </a>
@@ -960,7 +967,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                 <td style="padding:0 0 10px 0; text-align:center;">
                   <a
                     href="${safeApplyUrl}"
-                    style="display:inline-block; min-width:150px; background:transparent; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:13px; font-weight:700; text-align:center; border:1px solid rgba(255,255,255,0.35);"
+                    style="display:inline-block; min-width:150px; background:transparent; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center; border:1px solid rgba(255,255,255,0.35);"
                   >
                     Copy / open link
                   </a>
@@ -969,11 +976,6 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             </table>
           </div>
 
-          <div style="margin:0 0 12px;">
-            <p style="margin:0 0 14px; font-size:14px; line-height:1.7; color:#555555;">
-              Sent via <strong>The Supreme Collective</strong> deputy system.
-            </p>
-          </div>
 
           <div style="margin:28px 0 22px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -1000,8 +1002,8 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             </table>
           </div>
 
-          <div style="margin:0 0 28px; padding-top:6px;">
-            <p style="margin:0 0 8px; font-size:14px; line-height:1.7; color:#444444;">
+          <div style="margin:0 0 28px; padding-top:18px;">
+            <p style="margin:0 0 16px; font-size:14px; line-height:1.7; color:#444444;">
               Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
             </p>
             <p style="margin:0; font-size:14px; line-height:1.7; color:#444444;">
@@ -1021,7 +1023,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                   <img
                     src="${SIGN_OFF_GIF_URL}"
                     alt="The Supreme Collective"
-                    style="max-width:340px; width:100%; height:auto; border:0;"
+                    style="max-width:460px; width:100%; height:auto; border:0;"
                   />
                 </div>
               `
@@ -1033,17 +1035,41 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
 
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">
               <tr>
-                <td style="padding:0 12px 10px 0;">
-                  <a href="${INSTAGRAM_URL}" style="text-decoration:none; font-size:22px; line-height:1;">📸</a>
+                <td style="padding:0 14px 10px 0;">
+                  <a href="${INSTAGRAM_URL}" style="text-decoration:none; display:inline-block;">
+                    <img
+                      src="${INSTAGRAM_ICON_URL}"
+                      alt="Instagram"
+                      style="display:block; width:32px; height:32px; border:0;"
+                    />
+                  </a>
                 </td>
-                <td style="padding:0 12px 10px 0;">
-                  <a href="${YOUTUBE_URL}" style="text-decoration:none; font-size:22px; line-height:1;">▶️</a>
+                <td style="padding:0 14px 10px 0;">
+                  <a href="${YOUTUBE_URL}" style="text-decoration:none; display:inline-block;">
+                    <img
+                      src="${YOUTUBE_ICON_URL}"
+                      alt="YouTube"
+                      style="display:block; width:32px; height:32px; border:0;"
+                    />
+                  </a>
                 </td>
-                <td style="padding:0 12px 10px 0;">
-                  <a href="${WEBSITE_URL}" style="text-decoration:none; font-size:22px; line-height:1;">🌐</a>
+                <td style="padding:0 14px 10px 0;">
+                  <a href="${WEBSITE_URL}" style="text-decoration:none; display:inline-block;">
+                    <img
+                      src="${WEBSITE_ICON_URL}"
+                      alt="Website"
+                      style="display:block; width:32px; height:32px; border:0;"
+                    />
+                  </a>
                 </td>
                 <td style="padding:0 0 10px 0;">
-                  <a href="${GOOGLE_REVIEWS_URL}" style="text-decoration:none; font-size:22px; line-height:1;">⭐</a>
+                  <a href="${GOOGLE_REVIEWS_URL}" style="text-decoration:none; display:inline-block;">
+                    <img
+                      src="${GOOGLE_REVIEWS_ICON_URL}"
+                      alt="Google reviews"
+                      style="display:block; width:32px; height:32px; border:0;"
+                    />
+                  </a>
                 </td>
               </tr>
             </table>
