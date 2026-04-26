@@ -16,7 +16,7 @@ import { postcodes as POSTCODE_MAP_ARR } from "../utils/postcodes.js";
 const POSTCODE_MAP =
   (Array.isArray(POSTCODE_MAP_ARR) && POSTCODE_MAP_ARR[0]) || {};
 
-  const stripeSecretKey =
+const stripeSecretKey =
   process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY || "";
 
 const stripe = stripeSecretKey
@@ -49,7 +49,9 @@ const normalizeAdditionalPerformanceFees = (fees) => {
           : String(item.duration).trim();
 
       const fee =
-        item.fee === null || item.fee === undefined || String(item.fee).trim() === ""
+        item.fee === null ||
+        item.fee === undefined ||
+        String(item.fee).trim() === ""
           ? ""
           : Number(item.fee);
 
@@ -83,7 +85,7 @@ const uploadToCloudinary = (buffer, originalname, resourceType = "image") =>
           console.log(`✅ Successfully uploaded ${safeName}`);
           resolve(result);
         }
-      }
+      },
     );
 
     uploadStream.end(buffer);
@@ -94,7 +96,9 @@ const INTERNAL_SIGNUP_EMAIL = "hello@thesupremecollective.co.uk";
 const sendInternalSignupNotification = async ({ subject, html }) => {
   try {
     if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
-      console.warn("⚠️ Internal signup notification skipped: missing GMAIL credentials");
+      console.warn(
+        "⚠️ Internal signup notification skipped: missing GMAIL credentials",
+      );
       return;
     }
 
@@ -198,7 +202,7 @@ const saveDeputyWithRetry = async ({ staleDoc, parsedData }) => {
     if (Array.isArray(staleDoc.repertoire)) {
       fresh.repertoire = mergeRepertoireObjectsUnique(
         fresh.repertoire || [],
-        staleDoc.repertoire || []
+        staleDoc.repertoire || [],
       );
       fresh.markModified("repertoire");
     }
@@ -207,7 +211,7 @@ const saveDeputyWithRetry = async ({ staleDoc, parsedData }) => {
     if (Array.isArray(staleDoc.selectedSongs)) {
       fresh.selectedSongs = mergeSelectedSongsUnique(
         fresh.selectedSongs || [],
-        staleDoc.selectedSongs || []
+        staleDoc.selectedSongs || [],
       );
       fresh.markModified("selectedSongs");
     }
@@ -836,44 +840,43 @@ const _norm = (s = "") => String(s).trim().toLowerCase().replace(/\s+/g, " ");
 
 // lightweight aliasing for role “families”
 
-
-
-
 // ----------------------- Controllers -----------------------
 
 // Fetch a single deputy by ID
 async function getDeputyById(req, res) {
   try {
     const identifier = String(
-  req.params.identifier || req.params.slug || req.params.id || ""
-).trim();
+      req.params.identifier || req.params.slug || req.params.id || "",
+    ).trim();
 
-if (!identifier) {
-  return res
-    .status(400)
-    .json({ success: false, message: "Missing musician identifier" });
-}
+    if (!identifier) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing musician identifier" });
+    }
 
-const isObjectId = mongoose.isValidObjectId(identifier);
+    const isObjectId = mongoose.isValidObjectId(identifier);
 
-let deputy = null;
+    let deputy = null;
 
-if (isObjectId) {
-  deputy = await musicianModel.findById(identifier).lean();
-}
+    if (isObjectId) {
+      deputy = await musicianModel.findById(identifier).lean();
+    }
 
-if (!deputy) {
-  deputy = await musicianModel.findOne({ musicianSlug: identifier }).lean();
-}
+    if (!deputy) {
+      deputy = await musicianModel.findOne({ musicianSlug: identifier }).lean();
+    }
 
     // Optional: access control — allow self or agents
     const me = req.user; // set by verifyToken
-    const meId = String(me?._id || me?.id || me?.userId || me?.musicianId || "");
-const meSlug = String(me?.musicianSlug || "").trim();
+    const meId = String(
+      me?._id || me?.id || me?.userId || me?.musicianId || "",
+    );
+    const meSlug = String(me?.musicianSlug || "").trim();
 
-const isSelfById = isObjectId && meId === identifier;
-const isSelfBySlug = !!meSlug && meSlug === identifier;
-const isSelf = isSelfById || isSelfBySlug;
+    const isSelfById = isObjectId && meId === identifier;
+    const isSelfBySlug = !!meSlug && meSlug === identifier;
+    const isSelf = isSelfById || isSelfBySlug;
     const isAgent = (me?.role || me?.userRole || "").toLowerCase() === "agent";
     if (!isSelf && !isAgent) {
       return res.status(403).json({ success: false, message: "Forbidden" });
@@ -894,7 +897,7 @@ const isSelf = isSelfById || isSelfBySlug;
           : `/musician/${deputy._id}`,
       },
     });
-    } catch (e) {
+  } catch (e) {
     console.error(e);
     return res.status(500).json({ success: false, message: "Server error" });
   }
@@ -962,7 +965,7 @@ const createStripeConnectOnboardingLink = async (req, res) => {
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
       refresh_url: `${siteBase}/account/payout-settings?refresh=1`,
-return_url: `${siteBase}/account/payout-settings?return=1`,
+      return_url: `${siteBase}/account/payout-settings?return=1`,
       type: "account_onboarding",
     });
 
@@ -1033,7 +1036,7 @@ const registerDeputy = async (req, res) => {
     // helpers
     const safeParse = (v, fallback) => {
       try {
-        return v && typeof v === "string" ? JSON.parse(v) : v ?? fallback;
+        return v && typeof v === "string" ? JSON.parse(v) : (v ?? fallback);
       } catch {
         return fallback;
       }
@@ -1074,12 +1077,12 @@ const registerDeputy = async (req, res) => {
       console.log(
         "🟡 Updating existing musician:",
         email,
-        musician._id.toString()
+        musician._id.toString(),
       );
     }
 
-const existingStatus = musician.status;
-const isExistingMusician = !createdNew;
+    const existingStatus = musician.status;
+    const isExistingMusician = !createdNew;
 
     // Parse payload blobs
     const basicInfo = safeParse(body.basicInfo, {});
@@ -1098,15 +1101,15 @@ const isExistingMusician = !createdNew;
     const sessions = safeParse(body.sessions, []);
     const function_bands_performed_with = safeParse(
       body.function_bands_performed_with,
-      []
+      [],
     );
     const original_bands_performed_with = safeParse(
       body.original_bands_performed_with,
-      []
+      [],
     );
     const social_media_links = safeParse(body.social_media_links, []);
     const customRepertoire =
-  typeof body.customRepertoire === "string" ? body.customRepertoire : "";
+      typeof body.customRepertoire === "string" ? body.customRepertoire : "";
     const selectedSongs = safeParse(body.selectedSongs, []);
     const other_skills = safeParse(body.other_skills, []);
     const logistics = safeParse(body.logistics, []);
@@ -1125,13 +1128,13 @@ const isExistingMusician = !createdNew;
     const functionBandsClean = normalizeBandRefs(
       function_bands_performed_with,
       "function_band_name",
-      "function_band_leader_email"
+      "function_band_leader_email",
     );
 
     const originalBandsClean = normalizeBandRefs(
       original_bands_performed_with,
       "original_band_name",
-      "original_band_leader_email"
+      "original_band_leader_email",
     );
 
     // ---- Video links: accept JSON array/string, normalize to [{title,url}] and drop empties
@@ -1154,7 +1157,7 @@ const isExistingMusician = !createdNew;
           body.firstName ??
           musician.basicInfo?.firstName ??
           musician.firstName ??
-          ""
+          "",
       ).trim(),
 
       lastName: String(
@@ -1162,7 +1165,7 @@ const isExistingMusician = !createdNew;
           body.lastName ??
           musician.basicInfo?.lastName ??
           musician.lastName ??
-          ""
+          "",
       ).trim(),
 
       phone: String(
@@ -1170,7 +1173,7 @@ const isExistingMusician = !createdNew;
           body.phone ??
           musician.basicInfo?.phone ??
           musician.phone ??
-          ""
+          "",
       ).trim(),
 
       // prefer the already-normalized `email` you computed above
@@ -1179,7 +1182,7 @@ const isExistingMusician = !createdNew;
           body.email ??
           musician.basicInfo?.email ??
           email ??
-          ""
+          "",
       )
         .trim()
         .toLowerCase(),
@@ -1195,7 +1198,7 @@ const isExistingMusician = !createdNew;
       .filter((x) => x.url);
 
     const tscApprovedFunctionBandVideoLinks = parseArrayField(
-      body.tscApprovedFunctionBandVideoLinks
+      body.tscApprovedFunctionBandVideoLinks,
     )
       .map((x) => ({
         title: (x?.title || "").trim(),
@@ -1211,7 +1214,7 @@ const isExistingMusician = !createdNew;
       .filter((x) => x.url);
 
     const tscApprovedOriginalBandVideoLinks = parseArrayField(
-      body.tscApprovedOriginalBandVideoLinks
+      body.tscApprovedOriginalBandVideoLinks,
     )
       .map((x) => ({
         title: (x?.title || "").trim(),
@@ -1236,20 +1239,22 @@ const isExistingMusician = !createdNew;
     const djEquipmentCategories = safeParse(body.djEquipmentCategories, []);
     const djGearRequired = safeParse(body.djGearRequired, []);
     const instrumentSpecsRaw = safeParse(body.instrumentSpecs, []);
-const instrumentSpecs = (Array.isArray(instrumentSpecsRaw) ? instrumentSpecsRaw : [])
-  .map((x) => ({
-    name: String(x?.name || "").trim(),
-    wattage: Number(x?.wattage || 0),
-  }))
-  .filter((x) => x.name || x.wattage > 0);
+    const instrumentSpecs = (
+      Array.isArray(instrumentSpecsRaw) ? instrumentSpecsRaw : []
+    )
+      .map((x) => ({
+        name: String(x?.name || "").trim(),
+        wattage: Number(x?.wattage || 0),
+      }))
+      .filter((x) => x.name || x.wattage > 0);
     // wardrobe / extra images as URL strings
     const digitalWardrobeBlackTie = urlArray(body.digitalWardrobeBlackTie);
     const digitalWardrobeFormal = urlArray(body.digitalWardrobeFormal);
     const digitalWardrobeSmartCasual = urlArray(
-      body.digitalWardrobeSmartCasual
+      body.digitalWardrobeSmartCasual,
     );
     const digitalWardrobeSessionAllBlack = urlArray(
-      body.digitalWardrobeSessionAllBlack
+      body.digitalWardrobeSessionAllBlack,
     );
     const additionalImages = urlArray(body.additionalImages);
 
@@ -1265,7 +1270,7 @@ const instrumentSpecs = (Array.isArray(instrumentSpecsRaw) ? instrumentSpecsRaw 
           .map((x) =>
             typeof x === "string"
               ? { title: "", url: x }
-              : { title: x?.title || "", url: x?.url || "" }
+              : { title: x?.title || "", url: x?.url || "" },
           )
           .filter((m) => m.url);
       }
@@ -1282,7 +1287,7 @@ const instrumentSpecs = (Array.isArray(instrumentSpecsRaw) ? instrumentSpecsRaw 
           .map((x) =>
             typeof x === "string"
               ? { title: "", url: x }
-              : { title: x?.title || "", url: x?.url || "" }
+              : { title: x?.title || "", url: x?.url || "" },
           )
           .filter((m) => m.url);
       }
@@ -1340,7 +1345,7 @@ const instrumentSpecs = (Array.isArray(instrumentSpecsRaw) ? instrumentSpecsRaw 
         deputy_contract_signed: body.deputy_contract_signed,
         dateRegistered: body.dateRegistered,
       },
-      { maxArray: 3 }
+      { maxArray: 3 },
     );
     console.groupCollapsed(`🧪 START parsed payload [${reqId}]`);
     console.log(normalizedPreview);
@@ -1405,7 +1410,7 @@ const instrumentSpecs = (Array.isArray(instrumentSpecsRaw) ? instrumentSpecsRaw 
     musician.function_bands_performed_with = functionBandsClean;
     musician.original_bands_performed_with = originalBandsClean;
     musician.social_media_links = social_media_links;
-musician.customRepertoire = customRepertoire;
+    musician.customRepertoire = customRepertoire;
     musician.selectedSongs = selectedSongs;
     musician.other_skills = other_skills;
     musician.logistics = logistics;
@@ -1433,7 +1438,7 @@ musician.customRepertoire = customRepertoire;
     musician.djEquipmentCategories = djEquipmentCategories;
     musician.djGearRequired = djGearRequired;
     musician.instrumentSpecs = instrumentSpecs;
-musician.additionalEquipment = additionalEquipment;
+    musician.additionalEquipment = additionalEquipment;
     // wardrobe/images
     musician.digitalWardrobeBlackTie = digitalWardrobeBlackTie;
     musician.digitalWardrobeFormal = digitalWardrobeFormal;
@@ -1459,47 +1464,68 @@ musician.additionalEquipment = additionalEquipment;
       ? vocalsParsed.genres
       : [];
 
-  const isHttpUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s);
+    const isHttpUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s);
 
-// 1) If file uploaded, use it
-if (req.files?.profilePicture?.[0]) {
-  const f = req.files.profilePicture[0];
-  if (f.buffer) {
-    const up = await uploader(f.buffer, f.originalname || "profile.jpg", "musicians");
-    musician.profilePhoto = up.secure_url;
-  } else if (f.path && /^https?:\/\//i.test(f.path)) {
-    musician.profilePhoto = f.path;
-  }
-} else {
-  // 2) Otherwise accept URL string from body
-  const bodyProfileUrl = body.profilePhoto || body.profilePicture || null;
-  if (isHttpUrl(bodyProfileUrl)) musician.profilePhoto = bodyProfileUrl;
-}
+    const isHttpUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s);
 
-if (req.files?.coverHeroImage?.[0]) {
-  const f = req.files.coverHeroImage[0];
-  if (f.buffer) {
-    const up = await uploader(f.buffer, f.originalname || "cover.jpg", "musicians");
-    musician.coverHeroImage = up.secure_url;
-  } else if (f.path && /^https?:\/\//i.test(f.path)) {
-    musician.coverHeroImage = f.path;
-  }
-} else {
-  if (isHttpUrl(body.coverHeroImage)) musician.coverHeroImage = body.coverHeroImage;
+    const resolveFileOrUrl = async ({
+      file,
+      bodyUrl,
+      fallback = "",
+      uploadName,
+    }) => {
+      if (file) {
+        if (file.buffer) {
+          const uploaded = await uploader(
+            file.buffer,
+            file.originalname || uploadName,
+            "musicians",
+          );
+          return uploaded?.secure_url || fallback;
+        }
 
-}
+        if (file.path && isHttpUrl(file.path)) {
+          return file.path;
+        }
+      }
 
-if (req.files?.coverHeroImage?.[0]) {
-  const f = req.files.coverHeroImage[0];
+      if (isHttpUrl(bodyUrl)) {
+        return bodyUrl;
+      }
 
-  if (f.buffer) {
-    const up = await uploader(f.buffer, f.originalname || "cover.jpg", "musicians");
-    musician.coverHeroImage = up.secure_url;
-  } else if (f.path && /^https?:\/\//i.test(f.path)) {
-    // multer-storage-cloudinary often gives a URL-ish path
-    musician.coverHeroImage = f.path;
-  }
-}
+      return fallback;
+    };
+
+    const profileFile =
+      req.files?.profilePicture?.[0] || req.files?.profilePhoto?.[0] || null;
+    const coverFile = req.files?.coverHeroImage?.[0] || null;
+
+    const resolvedProfilePhoto = await resolveFileOrUrl({
+      file: profileFile,
+      bodyUrl: body.profilePhoto || body.profilePicture,
+      fallback: musician.profilePhoto || musician.profilePicture || "",
+      uploadName: "profile.jpg",
+    });
+
+    const resolvedCoverHeroImage = await resolveFileOrUrl({
+      file: coverFile,
+      bodyUrl: body.coverHeroImage,
+      fallback: musician.coverHeroImage || "",
+      uploadName: "cover.jpg",
+    });
+
+    if (resolvedProfilePhoto) {
+      musician.profilePhoto = resolvedProfilePhoto;
+      musician.profilePicture = resolvedProfilePhoto; // keep both in sync if your app reads either
+    }
+
+    if (resolvedCoverHeroImage) {
+      musician.coverHeroImage = resolvedCoverHeroImage;
+    }
+
+    musician.markModified("profilePhoto");
+    musician.markModified("profilePicture");
+    musician.markModified("coverHeroImage");
 
     // mark modified where helpful
     musician.markModified("vocalMics");
@@ -1525,59 +1551,67 @@ if (req.files?.coverHeroImage?.[0]) {
     musician.markModified("coverMp3s");
     musician.markModified("originalMp3s");
     musician.markModified("vocals");
-musician.markModified("cableLogistics");
-musician.markModified("extensionCableLogistics");
-musician.markModified("uplights");
-musician.markModified("tbars");
-musician.markModified("lightBars");
-musician.markModified("discoBall");
-musician.markModified("otherLighting");
-musician.markModified("paSpeakerSpecs");
-musician.markModified("mixingDesk");
-musician.markModified("floorMonitorSpecs");
-musician.markModified("djEquipment");
-musician.markModified("djEquipmentCategories");
-musician.markModified("djGearRequired");
-musician.markModified("backline");
-musician.markModified("additionalEquipment");
-musician.bank_account = bank;
-musician.markModified("bank_account");
+    musician.markModified("cableLogistics");
+    musician.markModified("extensionCableLogistics");
+    musician.markModified("uplights");
+    musician.markModified("tbars");
+    musician.markModified("lightBars");
+    musician.markModified("discoBall");
+    musician.markModified("otherLighting");
+    musician.markModified("paSpeakerSpecs");
+    musician.markModified("mixingDesk");
+    musician.markModified("floorMonitorSpecs");
+    musician.markModified("djEquipment");
+    musician.markModified("djEquipmentCategories");
+    musician.markModified("djGearRequired");
+    musician.markModified("backline");
+    musician.markModified("additionalEquipment");
+    musician.bank_account = bank;
+    musician.markModified("bank_account");
 
-// Mark profile edit metadata when a user updates their own deputy profile
-if (isExistingMusician) {
-  musician.profileLastEditedAt = new Date();
-  musician.profileUpdatedByUser = true;
+    // Mark profile edit metadata when a user updates their own deputy profile
+    if (isExistingMusician) {
+      musician.profileLastEditedAt = new Date();
+      musician.profileUpdatedByUser = true;
 
-  // If this person was previously approved and has now edited their profile,
-  // move them into the review queue.
-  if (
-    existingStatus &&
-    String(existingStatus).toLowerCase() === "approved"
-  ) {
-    musician.status = "Approved, changes pending";
-  }
-}
+      // If this person was previously approved and has now edited their profile,
+      // move them into the review queue.
+      if (
+        existingStatus &&
+        String(existingStatus).toLowerCase() === "approved"
+      ) {
+        musician.status = "Approved, changes pending";
+      }
+    }
 
-// For brand new registrations, keep them pending
-if (createdNew) {
-  musician.profileLastEditedAt = new Date();
-  musician.profileUpdatedByUser = true;
-  musician.status = musician.status || "pending";
-}
+    // For brand new registrations, keep them pending
+    if (createdNew) {
+      musician.profileLastEditedAt = new Date();
+      musician.profileUpdatedByUser = true;
+      musician.status = musician.status || "pending";
+    }
 
+    console.log("🖼️ final image fields before save", {
+      profilePhoto: musician.profilePhoto,
+      profilePicture: musician.profilePicture,
+      coverHeroImage: musician.coverHeroImage,
+    });
 
     const saved = await musician.save();
 
-
-
     // END snapshot: read back from DB to confirm persisted shape
     const roundTrip = await musicianModel.findById(saved._id).lean();
+    console.log("🖼️ round trip image fields", {
+      profilePhoto: roundTrip?.profilePhoto,
+      profilePicture: roundTrip?.profilePicture,
+      coverHeroImage: roundTrip?.coverHeroImage,
+    });
     console.groupCollapsed(
-      `✅ SAVED & FETCHED BACK [${reqId}] id=${saved._id.toString()}`
+      `✅ SAVED & FETCHED BACK [${reqId}] id=${saved._id.toString()}`,
     );
     console.log(
       "Saved keys:",
-      Object.keys(saved.toObject ? saved.toObject() : saved)
+      Object.keys(saved.toObject ? saved.toObject() : saved),
     );
     console.log("Round-trip summary:", safePreview(roundTrip));
     console.groupEnd();
@@ -1590,7 +1624,7 @@ if (createdNew) {
       success: true,
       message: createdNew ? "Deputy submitted for approval" : "Deputy updated",
       requestId: reqId,
-            musician: {
+      musician: {
         _id: saved._id,
         musicianSlug: saved.musicianSlug || "",
         canonicalPath: saved.musicianSlug
@@ -1606,7 +1640,7 @@ if (createdNew) {
     const elapsed = Date.now() - startedAt;
     console.error(
       `❌ Deputy registration failed [${reqId}] after ${elapsed}ms:`,
-      err
+      err,
     );
     console.groupEnd();
     return res.status(400).json({
@@ -1624,7 +1658,7 @@ const createToken = (user) =>
     process.env.JWT_SECRET,
     {
       expiresIn: "7d",
-    }
+    },
   );
 
 const getMyDrafts = async (req, res) => {
@@ -1643,7 +1677,7 @@ const getMyDrafts = async (req, res) => {
 const saveActDraft = async (req, res) => {
   console.log(
     "✅ Received saveDraft payload:",
-    JSON.stringify(req.body, null, 2)
+    JSON.stringify(req.body, null, 2),
   );
   const { id } = req.body;
   const actData = req.body;
@@ -1668,8 +1702,6 @@ const saveActDraft = async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to save draft" });
   }
 };
-
-
 
 const saveAmendmentDraft = async (req, res) => {
   const { id, updates } = req.body;
@@ -1753,14 +1785,14 @@ const loginMusician = async (req, res) => {
         phone: user.phone,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "15m" }
+      { expiresIn: "15m" },
     );
 
     // 🔥 5) Create refresh token
     const refreshToken = jwt.sign(
       { id: user._id },
       process.env.JWT_REFRESH_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "7d" },
     );
 
     // 🔥 6) Set refresh token cookie
@@ -1774,7 +1806,7 @@ const loginMusician = async (req, res) => {
     console.log("✅ Login successful for:", user.email);
 
     // 🔥 7) Send safe response
-      return res.status(200).json({
+    return res.status(200).json({
       success: true,
       token: accessToken,
       userId: user._id,
@@ -1862,9 +1894,9 @@ const addAct = async (req, res) => {
     const lengthOfSetsParsed = safeJSONParse(req.body.lengthOfSets, []);
     const minimumIntervalLengthParsed = safeJSONParse(
       req.body.minimumIntervalLength,
-      []
+      [],
     );
-    
+
     const selectedSongsParsed = safeJSONParse(req.body.selectedSongs, []);
 
     const images = req.files.images || [];
@@ -1884,7 +1916,7 @@ const addAct = async (req, res) => {
       mp3Files.map(async (file, i) => ({
         title: mp3Titles[i],
         url: await uploadToCloudinary(file.buffer, file.originalname, "mp3s"),
-      }))
+      })),
     );
 
     let imagesUrl = [],
@@ -1897,7 +1929,7 @@ const addAct = async (req, res) => {
         images.map((file, index) => {
           const name = file.originalname || `image_${index}.jpg`;
           return uploadToCloudinary(file.buffer, name);
-        })
+        }),
       );
     }
 
@@ -1905,21 +1937,21 @@ const addAct = async (req, res) => {
       pliFileUrl = await uploadToCloudinary(
         pliFiles[0].buffer,
         pliFiles[0].originalname,
-        "raw"
+        "raw",
       );
     }
     if (patFiles.length) {
       patFileUrl = await uploadToCloudinary(
         patFiles[0].buffer,
         patFiles[0].originalname,
-        "raw"
+        "raw",
       );
     }
     if (riskAssessments.length) {
       riskAssessmentUrl = await uploadToCloudinary(
         riskAssessments[0].buffer,
         riskAssessments[0].originalname,
-        "raw"
+        "raw",
       );
     }
 
@@ -1957,36 +1989,36 @@ const addAct = async (req, res) => {
     });
 
     // Normalize additional roles into role/additionalFee arrays
-   lineups.forEach((lineup) => {
-  lineup.bandMembers = (lineup.bandMembers || []).map((member) => {
-    const normalizedAdditionalRoles = (member.additionalRoles || [])
-      .filter((role) => role && typeof role === "object" && role.role)
-      .map((role) => ({
-        ...role,
-        isEssential: !!role.isEssential,
-        role: role.role,
-        additionalFee: parseFloat(role.additionalFee || role.fee || 0),
-      }));
+    lineups.forEach((lineup) => {
+      lineup.bandMembers = (lineup.bandMembers || []).map((member) => {
+        const normalizedAdditionalRoles = (member.additionalRoles || [])
+          .filter((role) => role && typeof role === "object" && role.role)
+          .map((role) => ({
+            ...role,
+            isEssential: !!role.isEssential,
+            role: role.role,
+            additionalFee: parseFloat(role.additionalFee || role.fee || 0),
+          }));
 
-    const customRoles = [];
-    const additionalFees = [];
+        const customRoles = [];
+        const additionalFees = [];
 
-    normalizedAdditionalRoles.forEach((r) => {
-      if (r.role) customRoles.push(r.role);
-      additionalFees.push(parseFloat(r.additionalFee || 0));
+        normalizedAdditionalRoles.forEach((r) => {
+          if (r.role) customRoles.push(r.role);
+          additionalFees.push(parseFloat(r.additionalFee || 0));
+        });
+
+        return {
+          ...member,
+          additionalPerformanceFees: normalizeAdditionalPerformanceFees(
+            member.additionalPerformanceFees,
+          ),
+          additionalRoles: normalizedAdditionalRoles,
+          role: customRoles.filter((role) => !!role?.trim()),
+          additionalFee: additionalFees.filter((fee) => !isNaN(fee)),
+        };
+      });
     });
-
-    return {
-      ...member,
-      additionalPerformanceFees: normalizeAdditionalPerformanceFees(
-        member.additionalPerformanceFees
-      ),
-      additionalRoles: normalizedAdditionalRoles,
-      role: customRoles.filter((role) => !!role?.trim()),
-      additionalFee: additionalFees.filter((fee) => !isNaN(fee)),
-    };
-  });
-});
 
     const actData = {
       name,
@@ -2133,7 +2165,7 @@ const updateActStatus = async (req, res) => {
         ...(tscApprovedBio !== undefined ? { tscApprovedBio } : {}),
         ...(tscVideos !== undefined ? { tscVideos } : {}),
       },
-      { new: true }
+      { new: true },
     );
 
     if (!act)
@@ -2210,7 +2242,6 @@ const listPendingDeputies = async (req, res) => {
       .json({ success: false, message: "Failed to fetch pending deputies" });
   }
 };
-
 
 const approveDeputy = async (req, res) => {
   try {
@@ -2296,33 +2327,33 @@ const updateAct = async (req, res) => {
 
     if (images.length) {
       act.images = await Promise.all(
-        images.map((img) => uploadToCloudinary(img.buffer, img.originalname))
+        images.map((img) => uploadToCloudinary(img.buffer, img.originalname)),
       );
     }
     if (pliFile)
       act.pliFile = await uploadToCloudinary(
         pliFile.buffer,
         pliFile.originalname,
-        "raw"
+        "raw",
       );
     if (patFile)
       act.patFile = await uploadToCloudinary(
         patFile.buffer,
         patFile.originalname,
-        "raw"
+        "raw",
       );
     if (riskFile)
       act.riskAssessment = await uploadToCloudinary(
         riskFile.buffer,
         riskFile.originalname,
-        "raw"
+        "raw",
       );
     if (mp3Files.length) {
       act.mp3s = await Promise.all(
         mp3Files.map(async (file, i) => ({
           title: mp3Titles[i],
           url: await uploadToCloudinary(file.buffer, file.originalname, "mp3s"),
-        }))
+        })),
       );
     }
 
@@ -2332,7 +2363,8 @@ const updateAct = async (req, res) => {
     act.bio = bio || act.bio;
     if (tscApprovedBio !== undefined) act.tscApprovedBio = tscApprovedBio;
     if (tscDescription !== undefined) act.tscDescription = tscDescription;
-    if (tscVideos !== undefined) act.tscVideos = safeJSONParse(tscVideos, act.tscVideos || []);
+    if (tscVideos !== undefined)
+      act.tscVideos = safeJSONParse(tscVideos, act.tscVideos || []);
     act.status = status || act.status;
     act.pliAmount = Number(pliAmount) || act.pliAmount;
     act.pliExpiry = pliExpiry ? new Date(pliExpiry) : act.pliExpiry;
@@ -2341,20 +2373,21 @@ const updateAct = async (req, res) => {
     act.costPerMile = Number(costPerMile) || act.costPerMile;
 
     act.genre = safeJSONParse(req.body.genre, act.genre);
-const parsedLineups = safeJSONParse(req.body.lineups, act.lineups);
+    const parsedLineups = safeJSONParse(req.body.lineups, act.lineups);
 
-act.lineups = (parsedLineups || []).map((lineup) => ({
-  ...lineup,
-  bandMembers: (lineup.bandMembers || []).map((member) => ({
-    ...member,
-    additionalPerformanceFees: normalizeAdditionalPerformanceFees(
-      member.additionalPerformanceFees
-    ),
-  })),
-}));    act.extras = safeJSONParse(req.body.extras, act.extras);
+    act.lineups = (parsedLineups || []).map((lineup) => ({
+      ...lineup,
+      bandMembers: (lineup.bandMembers || []).map((member) => ({
+        ...member,
+        additionalPerformanceFees: normalizeAdditionalPerformanceFees(
+          member.additionalPerformanceFees,
+        ),
+      })),
+    }));
+    act.extras = safeJSONParse(req.body.extras, act.extras);
     act.selectedSongs = safeJSONParse(
       req.body.selectedSongs,
-      act.selectedSongs
+      act.selectedSongs,
     );
 
     await act.save();
@@ -2409,11 +2442,11 @@ const refreshAccessToken = async (req, res) => {
         const newAccessToken = jwt.sign(
           { id: user._id, email: user.email, role: user.role },
           process.env.JWT_SECRET,
-          { expiresIn: "15m" }
+          { expiresIn: "15m" },
         );
 
         return res.json({ success: true, token: newAccessToken });
-      }
+      },
     );
   } catch (error) {
     console.error("Refresh error:", error);
@@ -2447,7 +2480,7 @@ const emailContract = async (req, res) => {
       formData.deputy_contract_text || "<p>No contract content</p>",
       {
         waitUntil: "networkidle0",
-      }
+      },
     );
 
     const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
@@ -2487,7 +2520,6 @@ const emailContract = async (req, res) => {
   }
 };
 
-
 const appendDeputyRepertoire = async (req, res) => {
   try {
     const { id } = req.params;
@@ -2498,7 +2530,7 @@ const appendDeputyRepertoire = async (req, res) => {
     console.log("   • songs.length:", Array.isArray(songs) ? songs.length : 0);
     console.log(
       "   • songIds.length:",
-      Array.isArray(songIds) ? songIds.length : 0
+      Array.isArray(songIds) ? songIds.length : 0,
     );
 
     const deputy = await musicianModel.findById(id);
@@ -2524,7 +2556,7 @@ const appendDeputyRepertoire = async (req, res) => {
       // Fallback: fetch from master list by ids, then map down to bare objects
       const master = await Song.find(
         { _id: { $in: songIds } },
-        { title: 1, artist: 1, year: 1, genre: 1 }
+        { title: 1, artist: 1, year: 1, genre: 1 },
       ).lean();
       additions = master.map(normalize).filter((s) => s.title && s.artist);
     } else {
@@ -2543,7 +2575,7 @@ const appendDeputyRepertoire = async (req, res) => {
 
     const existingKeys = new Set((deputy.repertoire || []).map(keyOf));
     const uniqueAdditions = additions.filter(
-      (s) => !existingKeys.has(keyOf(s))
+      (s) => !existingKeys.has(keyOf(s)),
     );
 
     if (uniqueAdditions.length === 0) {
@@ -2561,7 +2593,7 @@ const appendDeputyRepertoire = async (req, res) => {
     await deputy.save();
 
     console.log(
-      `✅ Added ${uniqueAdditions.length} songs. New total: ${deputy.repertoire.length}`
+      `✅ Added ${uniqueAdditions.length} songs. New total: ${deputy.repertoire.length}`,
     );
 
     return res.json({
@@ -2605,7 +2637,7 @@ const aliasSet = new Map(
   Object.entries(ROLE_ALIASES).map(([k, arr]) => [
     _norm(k),
     new Set(arr.map(_norm)),
-  ])
+  ]),
 );
 
 const tokens = (s) =>
@@ -2686,7 +2718,7 @@ const _countyKey = (name = "") =>
 const neighboursForCounty = (countyName = "") => {
   const key = _countyKey(countyName);
   const mine = new Set(
-    (POSTCODE_MAP[key] || []).map((s) => String(s).toUpperCase().trim())
+    (POSTCODE_MAP[key] || []).map((s) => String(s).toUpperCase().trim()),
   );
   if (!mine.size) return [];
 
@@ -2694,7 +2726,7 @@ const neighboursForCounty = (countyName = "") => {
   for (const [cKey, prefixes] of Object.entries(POSTCODE_MAP)) {
     if (cKey === key) continue;
     const hasOverlap = (prefixes || []).some((p) =>
-      mine.has(String(p).toUpperCase().trim())
+      mine.has(String(p).toUpperCase().trim()),
     );
     if (hasOverlap) out.add(cKey);
   }
@@ -2786,7 +2818,7 @@ const suggestDeputies = async (req, res) => {
             arr
               .slice(0, i)
               .concat(arr.slice(i + 1))
-              .join(" ")
+              .join(" "),
           );
         }
         return out.map((s) => s.replace(/\s+/g, " ").trim());
@@ -2828,7 +2860,7 @@ const suggestDeputies = async (req, res) => {
     const _getOtherSkills = (m) =>
       (Array.isArray(m?.other_skills) ? m.other_skills : [])
         .map((s) =>
-          typeof s === "string" ? s : s?.label || s?.name || s?.title || ""
+          typeof s === "string" ? s : s?.label || s?.name || s?.title || "",
         )
         .map(_norm)
         .filter(Boolean);
@@ -2837,7 +2869,7 @@ const suggestDeputies = async (req, res) => {
       if (!required.length) return true;
       const skills = _getOtherSkills(m);
       return required.every((req) =>
-        skills.some((have) => roleSimilarity(have, req) >= 0.6)
+        skills.some((have) => roleSimilarity(have, req) >= 0.6),
       );
     };
 
@@ -2846,25 +2878,30 @@ const suggestDeputies = async (req, res) => {
       const Lraw = _norm(label);
 
       const canon = (s) => {
-  let x = _norm(s);
+        let x = _norm(s);
 
-  // vocals
-  if (/lead.*vocal|vocalist|singer|rap|mc/.test(x)) return "vocal";
+        // vocals
+        if (/lead.*vocal|vocalist|singer|rap|mc/.test(x)) return "vocal";
 
-  // bass BEFORE guitar (so "bass guitar" doesn't become "guitar")
-  if (/bass\s*guitar|bassist|electric\s*bass|acoustic\s*bass|\bbass\b/.test(x)) return "bass";
+        // bass BEFORE guitar (so "bass guitar" doesn't become "guitar")
+        if (
+          /bass\s*guitar|bassist|electric\s*bass|acoustic\s*bass|\bbass\b/.test(
+            x,
+          )
+        )
+          return "bass";
 
-  // guitar (covers electric/acoustic/etc)
-  if (/guitar/.test(x)) return "guitar";
+        // guitar (covers electric/acoustic/etc)
+        if (/guitar/.test(x)) return "guitar";
 
-  if (/keys|keyboard|piano/.test(x)) return "keyboard";
-  if (/drum|cajon|percussion/.test(x)) return "drums";
-  if (/sax/.test(x)) return "saxophone";
-  if (/trumpet/.test(x)) return "trumpet";
-  if (/trombone/.test(x)) return "trombone";
+        if (/keys|keyboard|piano/.test(x)) return "keyboard";
+        if (/drum|cajon|percussion/.test(x)) return "drums";
+        if (/sax/.test(x)) return "saxophone";
+        if (/trumpet/.test(x)) return "trumpet";
+        if (/trombone/.test(x)) return "trombone";
 
-  return x;
-};
+        return x;
+      };
 
       const L = canon(Lraw);
       const list = _instrumentLabels(m).map(canon);
@@ -2873,27 +2910,32 @@ const suggestDeputies = async (req, res) => {
 
     const hasAnyInstrument = (m, wanted) => {
       if (!wanted?.length) return true;
-    const canon = (s) => {
-  let x = _norm(s);
+      const canon = (s) => {
+        let x = _norm(s);
 
-  if (/lead.*vocal|vocalist|singer|rap|mc/.test(x)) return "vocal";
+        if (/lead.*vocal|vocalist|singer|rap|mc/.test(x)) return "vocal";
 
-  // bass BEFORE guitar
-  if (/bass\s*guitar|bassist|electric\s*bass|acoustic\s*bass|\bbass\b/.test(x)) return "bass";
+        // bass BEFORE guitar
+        if (
+          /bass\s*guitar|bassist|electric\s*bass|acoustic\s*bass|\bbass\b/.test(
+            x,
+          )
+        )
+          return "bass";
 
-  if (/guitar/.test(x)) return "guitar";
+        if (/guitar/.test(x)) return "guitar";
 
-  if (/keys|keyboard|piano/.test(x)) return "keyboard";
-  if (/drum|cajon|percussion/.test(x)) return "drums";
-  if (/sax/.test(x)) return "saxophone";
-  if (/trumpet/.test(x)) return "trumpet";
-  if (/trombone/.test(x)) return "trombone";
+        if (/keys|keyboard|piano/.test(x)) return "keyboard";
+        if (/drum|cajon|percussion/.test(x)) return "drums";
+        if (/sax/.test(x)) return "saxophone";
+        if (/trumpet/.test(x)) return "trumpet";
+        if (/trombone/.test(x)) return "trombone";
 
-  return x;
-};
+        return x;
+      };
 
-const labels = _instrumentLabels(m).map(canon);
-return wanted.map(canon).some((w) => labels.includes(w));
+      const labels = _instrumentLabels(m).map(canon);
+      return wanted.map(canon).some((w) => labels.includes(w));
     };
 
     const ROLE_ALIASES = {
@@ -2976,13 +3018,13 @@ return wanted.map(canon).some((w) => labels.includes(w));
         : inferredSecondaries;
 
     const desiredRoleSet = expandDesiredRoles(
-      Array.isArray(desiredRoles) ? desiredRoles : []
+      Array.isArray(desiredRoles) ? desiredRoles : [],
     );
 
     const actTitleKeys = new Set(
       (Array.isArray(actRepertoire) ? actRepertoire : [])
         .map(_titleKey)
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
     if (debug) {
@@ -2990,10 +3032,14 @@ return wanted.map(canon).some((w) => labels.includes(w));
         instrument,
         isVocalSlot,
         requiredRoles,
-        desiredRolesCount: Array.isArray(desiredRoles) ? desiredRoles.length : 0,
+        desiredRolesCount: Array.isArray(desiredRoles)
+          ? desiredRoles.length
+          : 0,
         wantedSecondaries,
         excludeIdsCount: Array.isArray(excludeIds) ? excludeIds.length : 0,
-        actRepertoireCount: Array.isArray(actRepertoire) ? actRepertoire.length : 0,
+        actRepertoireCount: Array.isArray(actRepertoire)
+          ? actRepertoire.length
+          : 0,
         actTitleKeysCount: actTitleKeys.size,
         actGenres,
         originLocation,
@@ -3010,7 +3056,7 @@ return wanted.map(canon).some((w) => labels.includes(w));
 
     const pool = await musicianModel
       .find(baseFilter, {
-                firstName: 1,
+        firstName: 1,
         lastName: 1,
         musicianSlug: 1,
         email: 1,
@@ -3136,14 +3182,14 @@ return wanted.map(canon).some((w) => labels.includes(w));
       const vocalGenres = Array.isArray(m?.vocals?.genres)
         ? m.vocals.genres
         : typeof m?.vocals?.genres === "string"
-        ? m.vocals.genres.split(",").map((s) => s.trim())
-        : [];
+          ? m.vocals.genres.split(",").map((s) => s.trim())
+          : [];
 
       const topGenres = Array.isArray(m?.genres)
         ? m.genres
         : typeof m?.genres === "string"
-        ? m.genres.split(",").map((s) => s.trim())
-        : [];
+          ? m.genres.split(",").map((s) => s.trim())
+          : [];
 
       const depGenres = topGenres.length ? topGenres : vocalGenres;
       const genreFit = computeGenreFit(actGenres, depGenres);
@@ -3187,12 +3233,14 @@ return wanted.map(canon).some((w) => labels.includes(w));
           profileImage: m?.profileImage,
           profilePic: m?.profilePic,
           profile_picture: m?.profile_picture,
-          additional0: Array.isArray(m?.additionalImages) ? m.additionalImages[0] : undefined,
+          additional0: Array.isArray(m?.additionalImages)
+            ? m.additionalImages[0]
+            : undefined,
         });
       }
 
       const item = {
-                id: String(m._id),
+        id: String(m._id),
         _id: m._id,
         musicianSlug: m.musicianSlug || "",
         canonicalPath: m.musicianSlug
@@ -3209,7 +3257,9 @@ return wanted.map(canon).some((w) => labels.includes(w));
         profilePicture: resolvedProfilePicture,
         // optional: keep raw fields for debugging / future migrations
         profilePhoto: m?.profilePhoto,
-        additionalImages: Array.isArray(m.additionalImages) ? m.additionalImages : [],
+        additionalImages: Array.isArray(m.additionalImages)
+          ? m.additionalImages
+          : [],
 
         address: m.address || {},
         repertoire: Array.isArray(m.repertoire) ? m.repertoire : [],
@@ -3230,7 +3280,12 @@ return wanted.map(canon).some((w) => labels.includes(w));
           locScore,
           originLoc: { county: originCountyRaw, postcode: originPostcode },
           deputyLoc: { county: deputyCountyRaw, postcode: deputyPostcode },
-          weights: { songs: wSongs, roles: wRoles, genre: wGenre, location: wLoc },
+          weights: {
+            songs: wSongs,
+            roles: wRoles,
+            genre: wGenre,
+            location: wLoc,
+          },
         };
       }
 
@@ -3239,13 +3294,19 @@ return wanted.map(canon).some((w) => labels.includes(w));
     }
 
     if (debug) {
-      console.log(`${reqTag} ✅ gates`, { passRoles, passVocal, passInst, passSec, pushed });
+      console.log(`${reqTag} ✅ gates`, {
+        passRoles,
+        passVocal,
+        passInst,
+        passSec,
+        pushed,
+      });
     }
 
     out.sort(
       (a, b) =>
         b.matchPct - a.matchPct ||
-        (a.lastName || "").localeCompare(b.lastName || "")
+        (a.lastName || "").localeCompare(b.lastName || ""),
     );
 
     return res.json({

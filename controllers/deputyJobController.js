@@ -1001,14 +1001,14 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
               </tr>
               <tr>
                 <td valign="top" width="50%" style="padding:16px 10px 0 0;">
-                  <div style="padding:18px 18px; background:#fafafa; border:1px solid #ececec; border-radius:18px; height:100%; box-sizing:border-box;">
+                  <div style="padding:0; background:transparent; border:0; border-radius:0; height:100%; box-sizing:border-box;">
                     <p style="margin:0; font-size:14px; line-height:1.7; color:#444444;">
                       Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
                     </p>
                   </div>
                 </td>
                 <td valign="top" width="50%" style="padding:16px 0 0 10px;">
-                  <div style="padding:18px 18px; background:#fafafa; border:1px solid #ececec; border-radius:18px; height:100%; box-sizing:border-box;">
+                  <div style="padding:0; background:transparent; border:0; border-radius:0; height:100%; box-sizing:border-box;">
                     <p style="margin:0; font-size:14px; line-height:1.7; color:#444444;">
                       Think your act could be a great fit for <strong>The Supreme Collective</strong>? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.
                     </p>
@@ -1022,8 +1022,11 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
 Thanks so much for considering this opportunity. Currently our matching system is under development and intentionally loose while musicians on The Books update their profiles over the coming months. This is to ensure people don't miss out on deputy opportunities that suit them. We will be tightening up our matching system in due course, and encourage you to update your profile to make sure you still get deputy notifications revelant to your skills. Thanks again, and we look forward to working with you!                    </p>
              
 
-          <p style="margin:0; font-size:15px; line-height:1.7; color:#444444;">
-            Best wishes,<br />
+          <p style="margin:0 0 18px; font-size:15px; line-height:1.7; color:#444444;">
+            Best wishes,
+          </p>
+
+          <p style="margin:0 0 18px; font-size:15px; line-height:1.7; color:#444444;">
             <strong>The Supreme Collective</strong>
           </p>
 
@@ -1035,12 +1038,12 @@ Thanks so much for considering this opportunity. Currently our matching system i
                 <td style="vertical-align:middle; text-align:left;">
                   <h3 style="margin:0; font-size:16px; color:#111111;">Find us online</h3>
                 </td>
-                <td style="vertical-align:middle; text-align:right; white-space:nowrap;">
-                  <a href="${GOOGLE_REVIEWS_URL}" style="text-decoration:none; display:inline-block;">
+                <td style="vertical-align:middle; text-align:right; white-space:nowrap; padding-left:24px;">
+                  <a href="${GOOGLE_REVIEWS_URL}" style="text-decoration:none; display:inline-block; margin-left:auto;">
                     <img
                       src="${GOOGLE_REVIEWS_ICON_URL}"
                       alt="Google reviews"
-                      style="display:block; width:192px; height:48px; border:0; object-fit:contain;"
+                      style="display:block; width:192px; height:48px; border:0; object-fit:contain; margin-left:auto;"
                     />
                   </a>
                 </td>
@@ -2240,10 +2243,11 @@ export const createDeputyJob = async (req, res) => {
       req.user?.role || req.user?.userrole || "",
     ).toLowerCase();
 
+    const isAdminManualPayUser =
+      userEmail === "hello@thesupremecollective.co.uk";
+
     const canCreateEnquiryPost =
-      userEmail === "hello@thesupremecollective.co.uk" ||
-      userRole === "admin" ||
-      userRole === "agent";
+      isAdminManualPayUser || userRole === "admin" || userRole === "agent";
 
     if (built.jobType === "enquiry" && !canCreateEnquiryPost) {
       return res.status(403).json({
@@ -2264,6 +2268,17 @@ export const createDeputyJob = async (req, res) => {
       `${req.user?.firstName || ""} ${req.user?.lastName || ""}`.trim();
     const createdByEmail = req.user?.email || "";
     const createdByPhone = req.user?.phone || req.user?.phoneNumber || "";
+
+    const isEnquiryJob = built.jobType === "enquiry";
+    const isManualPayJob = isAdminManualPayUser && !isEnquiryJob;
+
+    const initialPaymentStatus = isEnquiryJob
+      ? "not_required"
+      : isManualPayJob
+        ? "not_required"
+        : built.saveClientCard && built.clientEmail
+          ? "setup_required"
+          : "not_started";
 
     const job = await deputyJobModel.create({
       title: built.title,
@@ -2306,12 +2321,7 @@ export const createDeputyJob = async (req, res) => {
       stripeFeeAmount: built.stripeFeeAmount,
       releaseOn:
         built.releaseOn || buildDefaultReleaseOn(built.resolvedEventDate),
-      paymentStatus:
-        built.jobType === "enquiry"
-          ? "not_required"
-          : built.saveClientCard && built.clientEmail
-            ? "setup_required"
-            : "not_started",
+      paymentStatus: initialPaymentStatus,
       payoutStatus: "not_ready",
       createdBy,
       createdByName,
@@ -2327,7 +2337,8 @@ export const createDeputyJob = async (req, res) => {
     let setupIntentResult = null;
 
     if (
-      built.jobType !== "enquiry" &&
+      !isEnquiryJob &&
+      !isManualPayJob &&
       built.saveClientCard &&
       built.clientEmail &&
       stripe
@@ -2391,10 +2402,9 @@ export const createDeputyJob = async (req, res) => {
     job.matchedCount = matcherResult.matches.length;
     job.notifications = [];
 
-    const isEnquiryJob = built.jobType === "enquiry";
-
     const hasSavedCardDetails =
       isEnquiryJob ||
+      isManualPayJob ||
       (Boolean(normaliseString(job?.stripeCustomerId)) &&
         Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
         job?.paymentStatus === "ready_to_charge");
@@ -2514,7 +2524,9 @@ export const createDeputyJob = async (req, res) => {
       message:
         built.mode === "send"
           ? hasSavedCardDetails
-            ? "Deputy job created and notifications sent"
+            ? isManualPayJob
+              ? "Deputy job created and notifications sent (manual payment)"
+              : "Deputy job created and notifications sent"
             : "Deputy job created. Add your card details to notify matches"
           : "Deputy job created in preview mode",
       mode: built.mode,
@@ -2990,14 +3002,25 @@ export const sendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-    const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+    const isEnquiryJob =
+      String(job?.jobType || "").toLowerCase() === "enquiry";
+
+    const isAdminManualPayJob =
+      normaliseEmail(job?.createdByEmail || "") ===
+        "hello@thesupremecollective.co.uk" &&
+      normaliseString(job?.paymentStatus || "").toLowerCase() === "not_required";
 
     const hasSavedCardDetails =
       Boolean(normaliseString(job?.stripeCustomerId)) &&
       Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
+      ["ready_to_charge", "paid"].includes(
+        normaliseString(job?.paymentStatus),
+      );
 
-    if (!isEnquiryJob && !hasSavedCardDetails) {
+    const canSendWithoutCard =
+      isEnquiryJob || isAdminManualPayJob || hasSavedCardDetails;
+
+    if (!canSendWithoutCard) {
       return res.status(400).json({
         success: false,
         message:
@@ -3680,7 +3703,13 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-    const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+    const isEnquiryJob =
+      String(job?.jobType || "").toLowerCase() === "enquiry";
+
+    const isAdminManualPayJob =
+      normaliseEmail(job?.createdByEmail || "") ===
+        "hello@thesupremecollective.co.uk" &&
+      normaliseString(job?.paymentStatus || "").toLowerCase() === "not_required";
 
     const hasSavedCardDetails =
       Boolean(normaliseString(job?.stripeCustomerId)) &&
@@ -3689,7 +3718,10 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
         normaliseString(job?.paymentStatus),
       );
 
-    if (!isEnquiryJob && !hasSavedCardDetails) {
+    const canSendWithoutCard =
+      isEnquiryJob || isAdminManualPayJob || hasSavedCardDetails;
+
+    if (!canSendWithoutCard) {
       return res.status(400).json({
         success: false,
         message:
@@ -3747,7 +3779,6 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       });
     }
 
-    // ONLY successful sends count as "already notified"
     const existingSuccessfulNotifications = Array.isArray(job.notifications)
       ? job.notifications.filter((n) => n?.status === "sent")
       : [];
@@ -3847,10 +3878,6 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       new Set([...existingSentIds, ...newSentIds].filter(Boolean)),
     );
 
-    const allSentEmails = new Set(
-      [...existingSentEmails, ...newSentEmails].filter(Boolean),
-    );
-
     const refreshedJobDoc = await deputyJobModel.findById(job._id);
 
     if (!refreshedJobDoc) {
@@ -3872,7 +3899,6 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       ...notificationResults,
     ];
 
-    // ONLY successful sends count here
     refreshedJobDoc.notifiedCount = refreshedJobDoc.notifications.filter(
       (n) => n?.status === "sent",
     ).length;
@@ -5389,14 +5415,25 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
       });
     }
 
-    const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+    const isEnquiryJob =
+      String(job?.jobType || "").toLowerCase() === "enquiry";
+
+    const isAdminManualPayJob =
+      normaliseEmail(job?.createdByEmail || "") ===
+        "hello@thesupremecollective.co.uk" &&
+      normaliseString(job?.paymentStatus || "").toLowerCase() === "not_required";
 
     const hasSavedCardDetails =
       Boolean(normaliseString(job?.stripeCustomerId)) &&
       Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      ["ready_to_charge", "paid"].includes(normaliseString(job?.paymentStatus));
+      ["ready_to_charge", "paid"].includes(
+        normaliseString(job?.paymentStatus),
+      );
 
-    if (!isEnquiryJob && !hasSavedCardDetails) {
+    const canSendWithoutCard =
+      isEnquiryJob || isAdminManualPayJob || hasSavedCardDetails;
+
+    if (!canSendWithoutCard) {
       return res.status(400).json({
         success: false,
         message:
