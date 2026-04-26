@@ -1019,6 +1019,10 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
           </div>
 
           <p style="margin:0; font-size:15px; line-height:1.7; color:#444444;">
+Thanks so much for considering this opportunity. Currently our matching system is under development and intentionally loose while musicians on The Books update their profiles over the coming months. This is to ensure people don't miss out on deputy opportunities that suit them. We will be tightening up our matching system in due course, and encourage you to update your profile to make sure you still get deputy notifications revelant to your skills. Thanks again, and we look forward to working with you!                    </p>
+             
+
+          <p style="margin:0; font-size:15px; line-height:1.7; color:#444444;">
             Best wishes,<br />
             <strong>The Supreme Collective</strong>
           </p>
