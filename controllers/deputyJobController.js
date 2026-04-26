@@ -1026,51 +1026,51 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
         
 
           <div style="margin:0 0 8px; padding:22px; background:#fafafa; border:1px solid #ececec; border-radius:22px;">
-            <h3 style="margin:0 0 14px; font-size:16px; color:#111111;">Find us online</h3>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 14px;">
+              <tr>
+                <td style="vertical-align:middle; text-align:left;">
+                  <h3 style="margin:0; font-size:16px; color:#111111;">Find us online</h3>
+                </td>
+                <td style="vertical-align:middle; text-align:right; white-space:nowrap;">
+                  <a href="${GOOGLE_REVIEWS_URL}" style="text-decoration:none; display:inline-block;">
+                    <img
+                      src="${GOOGLE_REVIEWS_ICON_URL}"
+                      alt="Google reviews"
+                      style="display:block; width:192px; height:48px; border:0; object-fit:contain;"
+                    />
+                  </a>
+                </td>
+              </tr>
+            </table>
 
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">
               <tr>
-                <td style="padding:0;">
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                    <tr>
-                      <td style="padding:0 14px 10px 0; vertical-align:middle;">
-                        <a href="${INSTAGRAM_URL}" style="text-decoration:none; display:inline-block;">
-                          <img
-                            src="${INSTAGRAM_ICON_URL}"
-                            alt="Instagram"
-                            style="display:block; width:32px; height:32px; border:0;"
-                          />
-                        </a>
-                      </td>
-                      <td style="padding:0 14px 10px 0; vertical-align:middle;">
-                        <a href="${YOUTUBE_URL}" style="text-decoration:none; display:inline-block;">
-                          <img
-                            src="${YOUTUBE_ICON_URL}"
-                            alt="YouTube"
-                            style="display:block; width:32px; height:32px; border:0;"
-                          />
-                        </a>
-                      </td>
-                      <td style="padding:0 14px 10px 0; vertical-align:middle;">
-                        <a href="${WEBSITE_URL}" style="text-decoration:none; display:inline-block;">
-                          <img
-                            src="${WEBSITE_ICON_URL}"
-                            alt="Website"
-                            style="display:block; width:32px; height:32px; border:0;"
-                          />
-                        </a>
-                      </td>
-                      <td style="padding:0 0 10px 0; text-align:right; vertical-align:middle; width:100%;">
-                        <a href="${GOOGLE_REVIEWS_URL}" style="text-decoration:none; display:inline-block;">
-                          <img
-                            src="${GOOGLE_REVIEWS_ICON_URL}"
-                            alt="Google reviews"
-                            style="display:block; width:192px; height:48px; border:0; object-fit:contain;"
-                          />
-                        </a>
-                      </td>
-                    </tr>
-                  </table>
+                <td style="padding:0 14px 10px 0; vertical-align:middle;">
+                  <a href="${INSTAGRAM_URL}" style="text-decoration:none; display:inline-block;">
+                    <img
+                      src="${INSTAGRAM_ICON_URL}"
+                      alt="Instagram"
+                      style="display:block; width:32px; height:32px; border:0;"
+                    />
+                  </a>
+                </td>
+                <td style="padding:0 14px 10px 0; vertical-align:middle;">
+                  <a href="${YOUTUBE_URL}" style="text-decoration:none; display:inline-block;">
+                    <img
+                      src="${YOUTUBE_ICON_URL}"
+                      alt="YouTube"
+                      style="display:block; width:32px; height:32px; border:0;"
+                    />
+                  </a>
+                </td>
+                <td style="padding:0 14px 10px 0; vertical-align:middle;">
+                  <a href="${WEBSITE_URL}" style="text-decoration:none; display:inline-block;">
+                    <img
+                      src="${WEBSITE_ICON_URL}"
+                      alt="Website"
+                      style="display:block; width:32px; height:32px; border:0;"
+                    />
+                  </a>
                 </td>
               </tr>
             </table>
