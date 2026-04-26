@@ -1464,7 +1464,6 @@ const registerDeputy = async (req, res) => {
       ? vocalsParsed.genres
       : [];
 
-    const isHttpUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s);
 
     const isHttpUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s);
 
