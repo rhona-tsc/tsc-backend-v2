@@ -855,7 +855,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
   const GOOGLE_REVIEWS_ICON_URL =
     "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777059616/google-icon2_wc33od.png";
   const WEBSITE_ICON_URL =
-    "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777056960/website-icon_fdpn7k.png";
+    "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777207820/website-icon_nuahjk.png";
   const UNSUBSCRIBE_SUBJECT = encodeURIComponent(
     "Please unsubscribe me from The Supreme Collective",
   );
@@ -946,38 +946,34 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
               Know someone who could be a brilliant fit? Feel free to share this opportunity with them.
             </p>
 
-            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="padding:0 10px 10px 0; text-align:center;">
+                <td width="33.33%" style="padding:0 8px 10px 0; text-align:center;">
                   <a
                     href="${whatsappShareUrl}"
-                    style="display:inline-block; min-width:170px; background:#25D366; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center;"
+                    style="display:block; width:100%; box-sizing:border-box; background:#25D366; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center;"
                   >
                     Share on WhatsApp
                   </a>
                 </td>
-                <td style="padding:0 10px 10px 0; text-align:center;">
+                <td width="33.33%" style="padding:0 8px 10px 8px; text-align:center;">
                   <a
                     href="${mailtoShareUrl}"
-                    style="display:inline-block; min-width:170px; background:#ffffff; color:#111111; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center;"
+                    style="display:block; width:100%; box-sizing:border-box; background:#ffffff; color:#111111; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center;"
                   >
                     Share by email
                   </a>
                 </td>
-                <td style="padding:0 10px 10px 0; text-align:center;">
+                <td width="33.33%" style="padding:0 0 10px 8px; text-align:center;">
                   <a
                     href="${safeApplyUrl}"
-                    style="display:inline-block; min-width:170px; background:transparent; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center; border:1px solid rgba(255,255,255,0.35);"
+                    style="display:block; width:100%; box-sizing:border-box; background:transparent; color:#ffffff; text-decoration:none; padding:12px 18px; border-radius:999px; font-size:15px; font-weight:700; text-align:center; border:1px solid rgba(255,255,255,0.35);"
                   >
                     Copy job link
                   </a>
                 </td>
               </tr>
             </table>
-
-            <p style="margin:14px 0 0; font-size:12px; line-height:1.7; color:#cfcfcf;">
-              Instagram and TikTok do not support reliable pre-filled web share links for email recipients, so those are best shared by copying the opportunity link into the app manually.
-            </p>
           </div>
 
 
@@ -1003,16 +999,23 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                   </a>
                 </td>
               </tr>
+              <tr>
+                <td valign="top" width="50%" style="padding:16px 10px 0 0;">
+                  <div style="padding:18px 18px; background:#fafafa; border:1px solid #ececec; border-radius:18px; height:100%; box-sizing:border-box;">
+                    <p style="margin:0; font-size:14px; line-height:1.7; color:#444444;">
+                      Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
+                    </p>
+                  </div>
+                </td>
+                <td valign="top" width="50%" style="padding:16px 0 0 10px;">
+                  <div style="padding:18px 18px; background:#fafafa; border:1px solid #ececec; border-radius:18px; height:100%; box-sizing:border-box;">
+                    <p style="margin:0; font-size:14px; line-height:1.7; color:#444444;">
+                      Think your act could be a great fit for <strong>The Supreme Collective</strong>? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.
+                    </p>
+                  </div>
+                </td>
+              </tr>
             </table>
-          </div>
-
-          <div style="margin:0 0 28px; padding-top:18px;">
-            <p style="margin:0 0 16px; font-size:14px; line-height:1.7; color:#444444;">
-              Did you know you can also post your own deputy jobs through <strong>The Supreme Collective</strong>? You can reach a wide network of musicians and send your opportunity straight to matched players' inboxes in just a few clicks.
-            </p>
-            <p style="margin:0; font-size:14px; line-height:1.7; color:#444444;">
-              Think your act could be a great fit for <strong>The Supreme Collective</strong>? You’re very welcome to pre-submit your act for review and, if it feels like the right match, we’ll be in touch.
-            </p>
           </div>
 
           <p style="margin:0; font-size:15px; line-height:1.7; color:#444444;">
@@ -1027,41 +1030,47 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
 
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px;">
               <tr>
-                <td style="padding:0 14px 10px 0;">
-                  <a href="${INSTAGRAM_URL}" style="text-decoration:none; display:inline-block;">
-                    <img
-                      src="${INSTAGRAM_ICON_URL}"
-                      alt="Instagram"
-                      style="display:block; width:32px; height:32px; border:0;"
-                    />
-                  </a>
-                </td>
-                <td style="padding:0 14px 10px 0;">
-                  <a href="${YOUTUBE_URL}" style="text-decoration:none; display:inline-block;">
-                    <img
-                      src="${YOUTUBE_ICON_URL}"
-                      alt="YouTube"
-                      style="display:block; width:32px; height:32px; border:0;"
-                    />
-                  </a>
-                </td>
-                <td style="padding:0 14px 10px 0;">
-                  <a href="${WEBSITE_URL}" style="text-decoration:none; display:inline-block;">
-                    <img
-                      src="${WEBSITE_ICON_URL}"
-                      alt="Website"
-                      style="display:block; width:32px; height:32px; border:0;"
-                    />
-                  </a>
-                </td>
-                <td style="padding:0 0 10px 0;">
-                  <a href="${GOOGLE_REVIEWS_URL}" style="text-decoration:none; display:inline-block;">
-                    <img
-                      src="${GOOGLE_REVIEWS_ICON_URL}"
-                      alt="Google reviews"
-                      style="display:block; width:64px; height:32px; border:0; object-fit:contain;"
-                    />
-                  </a>
+                <td style="padding:0;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="padding:0 14px 10px 0; vertical-align:middle;">
+                        <a href="${INSTAGRAM_URL}" style="text-decoration:none; display:inline-block;">
+                          <img
+                            src="${INSTAGRAM_ICON_URL}"
+                            alt="Instagram"
+                            style="display:block; width:32px; height:32px; border:0;"
+                          />
+                        </a>
+                      </td>
+                      <td style="padding:0 14px 10px 0; vertical-align:middle;">
+                        <a href="${YOUTUBE_URL}" style="text-decoration:none; display:inline-block;">
+                          <img
+                            src="${YOUTUBE_ICON_URL}"
+                            alt="YouTube"
+                            style="display:block; width:32px; height:32px; border:0;"
+                          />
+                        </a>
+                      </td>
+                      <td style="padding:0 14px 10px 0; vertical-align:middle;">
+                        <a href="${WEBSITE_URL}" style="text-decoration:none; display:inline-block;">
+                          <img
+                            src="${WEBSITE_ICON_URL}"
+                            alt="Website"
+                            style="display:block; width:32px; height:32px; border:0;"
+                          />
+                        </a>
+                      </td>
+                      <td style="padding:0 0 10px 0; text-align:right; vertical-align:middle; width:100%;">
+                        <a href="${GOOGLE_REVIEWS_URL}" style="text-decoration:none; display:inline-block;">
+                          <img
+                            src="${GOOGLE_REVIEWS_ICON_URL}"
+                            alt="Google reviews"
+                            style="display:block; width:192px; height:48px; border:0; object-fit:contain;"
+                          />
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
             </table>
