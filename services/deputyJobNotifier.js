@@ -351,15 +351,11 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             </table>
           </div>
 
-          <p style="margin:0; font-size:15px; line-height:1.7; color:#444444;">
-Thanks so much for considering this opportunity. Currently our matching system is under development and intentionally loose while musicians on The Books update their profiles over the coming months. This is to ensure people don't miss out on deputy opportunities that suit them. We will be tightening up our matching system in due course, and encourage you to update your profile to make sure you still get deputy notifications revelant to your skills. Thanks again, and we look forward to working with you!                    </p>
-             
-
           <p style="margin:0 0 18px; font-size:15px; line-height:1.7; color:#444444;">
-            Best wishes,
+            Thanks so much for considering this opportunity. Currently our matching system is under development and intentionally loose while musicians on The Books update their profiles over the coming months. This is to ensure people don't miss out on deputy opportunities that suit them. We will be tightening up our matching system in due course, and encourage you to update your profile to make sure you still get deputy notifications revelant to your skills. Thanks again, and we look forward to working with you!
           </p>
-
           <p style="margin:0 0 18px; font-size:15px; line-height:1.7; color:#444444;">
+            Best wishes,<br />
             <strong>The Supreme Collective</strong>
           </p>
 
@@ -499,10 +495,7 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
     `YouTube: ${YOUTUBE_URL}`,
     `Google reviews: ${GOOGLE_REVIEWS_URL}`,
     "",
-    "Sent via The Supreme Collective deputy system.",
-    "",
-    "Best wishes,",
-    "The Supreme Collective",
+    "Best wishes,\nThe Supreme Collective",
     "",
     "Copyright © 2026 The Supreme Collective Ltd. All rights reserved.",
     "Registered Office: 71-75, Shelton Street, Covent Garden, London, WC2H 9JQ, United Kingdom | Company Number: 16883956",

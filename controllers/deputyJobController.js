@@ -591,6 +591,19 @@ const createOrRefreshDeputyJobSetupIntentInternal = async ({
   };
 };
 
+const canSkipCardRequirementForJob = ({ job = null, userEmail = "", userRole = "" }) => {
+  const safeEmail = normaliseEmail(userEmail || job?.createdByEmail || "");
+  const safeRole = normaliseString(userRole || "").toLowerCase();
+  const paymentStatus = normaliseString(job?.paymentStatus || "").toLowerCase();
+
+  return (
+    safeEmail === "hello@thesupremecollective.co.uk" ||
+    safeRole === "admin" ||
+    safeRole === "agent" ||
+    paymentStatus === "not_required"
+  );
+};
+
 const attemptDeputyJobCharge = async ({ job, createdBy = null }) => {
   if (!stripe) {
     return {
@@ -2243,11 +2256,10 @@ export const createDeputyJob = async (req, res) => {
       req.user?.role || req.user?.userrole || "",
     ).toLowerCase();
 
-    const isAdminManualPayUser =
-      userEmail === "hello@thesupremecollective.co.uk";
-
     const canCreateEnquiryPost =
-      isAdminManualPayUser || userRole === "admin" || userRole === "agent";
+      userEmail === "hello@thesupremecollective.co.uk" ||
+      userRole === "admin" ||
+      userRole === "agent";
 
     if (built.jobType === "enquiry" && !canCreateEnquiryPost) {
       return res.status(403).json({
@@ -2269,16 +2281,19 @@ export const createDeputyJob = async (req, res) => {
     const createdByEmail = req.user?.email || "";
     const createdByPhone = req.user?.phone || req.user?.phoneNumber || "";
 
-    const isEnquiryJob = built.jobType === "enquiry";
-    const isManualPayJob = isAdminManualPayUser && !isEnquiryJob;
+    const allowManualPayment =
+      userEmail === "hello@thesupremecollective.co.uk" ||
+      userRole === "admin" ||
+      userRole === "agent";
 
-    const initialPaymentStatus = isEnquiryJob
-      ? "not_required"
-      : isManualPayJob
+    const paymentStatus =
+      built.jobType === "enquiry"
         ? "not_required"
-        : built.saveClientCard && built.clientEmail
-          ? "setup_required"
-          : "not_started";
+        : allowManualPayment
+          ? "not_required"
+          : built.saveClientCard && built.clientEmail
+            ? "setup_required"
+            : "not_started";
 
     const job = await deputyJobModel.create({
       title: built.title,
@@ -2321,7 +2336,7 @@ export const createDeputyJob = async (req, res) => {
       stripeFeeAmount: built.stripeFeeAmount,
       releaseOn:
         built.releaseOn || buildDefaultReleaseOn(built.resolvedEventDate),
-      paymentStatus: initialPaymentStatus,
+      paymentStatus,
       payoutStatus: "not_ready",
       createdBy,
       createdByName,
@@ -2337,8 +2352,8 @@ export const createDeputyJob = async (req, res) => {
     let setupIntentResult = null;
 
     if (
-      !isEnquiryJob &&
-      !isManualPayJob &&
+      built.jobType !== "enquiry" &&
+      !allowManualPayment &&
       built.saveClientCard &&
       built.clientEmail &&
       stripe
@@ -2352,10 +2367,7 @@ export const createDeputyJob = async (req, res) => {
           createdBy,
         });
       } catch (setupIntentError) {
-        console.error(
-          "❌ createDeputyJob setup intent error:",
-          setupIntentError,
-        );
+        console.error("❌ createDeputyJob setup intent error:", setupIntentError);
         job.paymentStatus = "setup_required";
       }
     }
@@ -2376,35 +2388,20 @@ export const createDeputyJob = async (req, res) => {
       mode: built.mode,
     });
 
-    console.log("🎯 createDeputyJob matcher result", {
-      mode: built.mode,
-      primaryInstrument: built.primaryInstrument,
-      isVocalSlot: built.effectiveIsVocalSlot,
-      county: built.inferredCounty,
-      postcode: built.inferredPostcode,
-      genres: built.resolvedGenres,
-      essentialRoles: built.resolvedEssentialRoles,
-      desiredRoles: built.matcherDesiredRoles,
-      secondaryInstruments: built.resolvedSecondaryInstruments,
-      matchedCount: matcherResult.matches.length,
-      firstMatches: matcherResult.matches.slice(0, 5).map((m) => ({
-        id: m._id,
-        firstName: m.firstName,
-        lastName: m.lastName,
-        email: m.email,
-        deputyMatchScore: m.deputyMatchScore,
-        matchPct: m.matchPct,
-      })),
-    });
-
     job.matchedMusicianIds = matcherResult.matchedMusicianIds;
     job.matchedMusicians = matcherResult.matchedMusicians;
     job.matchedCount = matcherResult.matches.length;
     job.notifications = [];
 
-    const hasSavedCardDetails =
+    const isEnquiryJob = built.jobType === "enquiry";
+
+    const canSendWithoutCard =
       isEnquiryJob ||
-      isManualPayJob ||
+      allowManualPayment ||
+      normaliseString(job.paymentStatus).toLowerCase() === "not_required";
+
+    const hasSavedCardDetails =
+      canSendWithoutCard ||
       (Boolean(normaliseString(job?.stripeCustomerId)) &&
         Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
         job?.paymentStatus === "ready_to_charge");
@@ -2414,18 +2411,6 @@ export const createDeputyJob = async (req, res) => {
         job,
         musicians: matcherResult.matches,
       });
-
-      console.log("notificationResults:", notificationResults);
-
-      console.log(
-        "matched musician emails:",
-        matcherResult.matches.map((m) => ({
-          id: m._id,
-          email: m.email,
-          firstName: m.firstName,
-          lastName: m.lastName,
-        })),
-      );
 
       const sentIds = notificationResults
         .filter((r) => r.status === "sent" && r.musicianId)
@@ -2463,56 +2448,7 @@ export const createDeputyJob = async (req, res) => {
       job.status = "preview";
       job.previewMode = true;
       job.workflowStage = "preview_ready";
-
-      job.notifications = matcherResult.previewNotification.recipients.map(
-        (recipient) => ({
-          musicianId: recipient.musicianId,
-          email: recipient.email,
-          phone: recipient.phone || "",
-          channel: "email",
-          type: "job_created_preview",
-          subject: matcherResult.previewNotification.subject,
-          previewHtml: matcherResult.previewNotification.html,
-          previewText: matcherResult.previewNotification.text,
-          status: "preview",
-          sentAt: new Date(),
-        }),
-      );
-
-      const previewRecipientEmail = normaliseEmail(
-        built.clientEmail || createdByEmail || "",
-      );
-
-      if (previewRecipientEmail) {
-        job.notifications.unshift({
-          musicianId: null,
-          email: previewRecipientEmail,
-          phone: "",
-          channel: "email",
-          type: "job_created_preview",
-          subject: `[Preview] ${matcherResult.previewNotification.subject}`,
-          previewHtml: matcherResult.previewNotification.html,
-          previewText: matcherResult.previewNotification.text,
-          status: "sent",
-          sentAt: new Date(),
-          error: "",
-        });
-
-        try {
-          await sendEmail({
-            to: previewRecipientEmail,
-            bcc: DEPUTY_JOB_BCC_EMAIL,
-            subject: `[Preview] ${matcherResult.previewNotification.subject}`,
-            html: matcherResult.previewNotification.html,
-            text: matcherResult.previewNotification.text,
-          });
-        } catch (previewEmailError) {
-          console.error(
-            "❌ Failed to send deputy job preview email:",
-            previewEmailError,
-          );
-        }
-      }
+      job.notifications = [];
     }
 
     await job.save();
@@ -2524,9 +2460,7 @@ export const createDeputyJob = async (req, res) => {
       message:
         built.mode === "send"
           ? hasSavedCardDetails
-            ? isManualPayJob
-              ? "Deputy job created and notifications sent (manual payment)"
-              : "Deputy job created and notifications sent"
+            ? "Deputy job created and notifications sent"
             : "Deputy job created. Add your card details to notify matches"
           : "Deputy job created in preview mode",
       mode: built.mode,
@@ -3002,25 +2936,38 @@ export const sendDeputyJobNotifications = async (req, res) => {
       });
     }
 
+    const requesterEmail = normaliseEmail(
+      req.user?.email || req.user?.useremail || ""
+    );
+    const requesterRole = normaliseString(
+      req.user?.role || req.user?.userrole || ""
+    ).toLowerCase();
+
     const isEnquiryJob =
       String(job?.jobType || "").toLowerCase() === "enquiry";
 
     const isAdminManualPayJob =
-      normaliseEmail(job?.createdByEmail || "") ===
-        "hello@thesupremecollective.co.uk" &&
-      normaliseString(job?.paymentStatus || "").toLowerCase() === "not_required";
+      normaliseString(job?.paymentStatus || "").toLowerCase() ===
+        "not_required" &&
+      (
+        normaliseEmail(job?.createdByEmail || "") ===
+          "hello@thesupremecollective.co.uk" ||
+        requesterEmail === "hello@thesupremecollective.co.uk" ||
+        requesterRole === "admin" ||
+        requesterRole === "agent"
+      );
 
     const hasSavedCardDetails =
       Boolean(normaliseString(job?.stripeCustomerId)) &&
       Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      ["ready_to_charge", "paid"].includes(
-        normaliseString(job?.paymentStatus),
+      ["ready_to_charge", "charge_pending", "paid"].includes(
+        normaliseString(job?.paymentStatus).toLowerCase()
       );
 
     const canSendWithoutCard =
-      isEnquiryJob || isAdminManualPayJob || hasSavedCardDetails;
+      isEnquiryJob || isAdminManualPayJob;
 
-    if (!canSendWithoutCard) {
+    if (!canSendWithoutCard && !hasSavedCardDetails) {
       return res.status(400).json({
         success: false,
         message:
@@ -3053,23 +3000,23 @@ export const sendDeputyJobNotifications = async (req, res) => {
     job.notifiedMusicianIds = sentIds;
     job.notifications = notificationResults;
     job.notifiedCount = notificationResults.filter(
-      (r) => r.status === "sent",
+      (r) => r.status === "sent"
     ).length;
     job.status = "open";
     job.previewMode = false;
     job.workflowStage = "sent_to_matches";
 
-    job.matchedMusicians = (job.matchedMusicians || []).map((m) => ({
-      ...m,
-      notified: sentIds.some(
-        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
-      ),
-      notifiedAt: sentIds.some(
-        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
-      )
-        ? new Date()
-        : null,
-    }));
+    job.matchedMusicians = (job.matchedMusicians || []).map((m) => {
+      const wasSent = sentIds.some(
+        (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+      );
+
+      return {
+        ...m,
+        notified: wasSent,
+        notifiedAt: wasSent ? new Date() : m.notifiedAt || null,
+      };
+    });
 
     await job.save();
 
@@ -3703,25 +3650,38 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       });
     }
 
+    const requesterEmail = normaliseEmail(
+      req.user?.email || req.user?.useremail || ""
+    );
+    const requesterRole = normaliseString(
+      req.user?.role || req.user?.userrole || ""
+    ).toLowerCase();
+
     const isEnquiryJob =
       String(job?.jobType || "").toLowerCase() === "enquiry";
 
     const isAdminManualPayJob =
-      normaliseEmail(job?.createdByEmail || "") ===
-        "hello@thesupremecollective.co.uk" &&
-      normaliseString(job?.paymentStatus || "").toLowerCase() === "not_required";
+      normaliseString(job?.paymentStatus || "").toLowerCase() ===
+        "not_required" &&
+      (
+        normaliseEmail(job?.createdByEmail || "") ===
+          "hello@thesupremecollective.co.uk" ||
+        requesterEmail === "hello@thesupremecollective.co.uk" ||
+        requesterRole === "admin" ||
+        requesterRole === "agent"
+      );
 
     const hasSavedCardDetails =
       Boolean(normaliseString(job?.stripeCustomerId)) &&
       Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      ["ready_to_charge", "paid"].includes(
-        normaliseString(job?.paymentStatus),
+      ["ready_to_charge", "charge_pending", "paid"].includes(
+        normaliseString(job?.paymentStatus).toLowerCase()
       );
 
     const canSendWithoutCard =
-      isEnquiryJob || isAdminManualPayJob || hasSavedCardDetails;
+      isEnquiryJob || isAdminManualPayJob;
 
-    if (!canSendWithoutCard) {
+    if (!canSendWithoutCard && !hasSavedCardDetails) {
       return res.status(400).json({
         success: false,
         message:
@@ -3767,7 +3727,7 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
             notifiedMusicianIds: [],
             notifiedCount: 0,
           },
-        },
+        }
       );
 
       const refreshedJob = await deputyJobModel.findById(job._id).lean();
@@ -3796,7 +3756,7 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
 
     const remainingMatches = matches.filter((musician) => {
       const id = asObjectIdString(
-        musician?._id || musician?.id || musician?.musicianId,
+        musician?._id || musician?.id || musician?.musicianId
       );
       const email = normaliseEmail(musician?.email || "");
 
@@ -3815,7 +3775,7 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
           const existingSuccessful = existingSuccessfulNotifications.find(
             (n) =>
               (id && asObjectIdString(n?.musicianId) === id) ||
-              (email && normaliseEmail(n?.email || "") === email),
+              (email && normaliseEmail(n?.email || "") === email)
           );
 
           return {
@@ -3823,7 +3783,7 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
             notified: Boolean(existingSuccessful),
             notifiedAt: existingSuccessful?.sentAt || null,
           };
-        },
+        }
       );
 
       await deputyJobModel.updateOne(
@@ -3835,8 +3795,11 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
             matchedCount: matches.length,
             notifiedMusicianIds: existingSentIds,
             notifiedCount: existingSuccessfulNotifications.length,
+            status: "open",
+            previewMode: false,
+            workflowStage: "sent_to_matches",
           },
-        },
+        }
       );
 
       const refreshedJob = await deputyJobModel.findById(job._id).lean();
@@ -3851,7 +3814,7 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
         notifiedCount: Number(
           refreshedJob?.notifiedCount ||
             existingSuccessfulNotifications.length ||
-            0,
+            0
         ),
         notificationResults: [],
       });
@@ -3863,7 +3826,7 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
     });
 
     const newSuccessfulNotifications = notificationResults.filter(
-      (r) => r?.status === "sent",
+      (r) => r?.status === "sent"
     );
 
     const newSentIds = newSuccessfulNotifications
@@ -3875,7 +3838,11 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       .filter(Boolean);
 
     const allSentIds = Array.from(
-      new Set([...existingSentIds, ...newSentIds].filter(Boolean)),
+      new Set([...existingSentIds, ...newSentIds].filter(Boolean))
+    );
+
+    const allSentEmails = new Set(
+      [...existingSentEmails, ...newSentEmails].filter(Boolean)
     );
 
     const refreshedJobDoc = await deputyJobModel.findById(job._id);
@@ -3900,7 +3867,7 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
     ];
 
     refreshedJobDoc.notifiedCount = refreshedJobDoc.notifications.filter(
-      (n) => n?.status === "sent",
+      (n) => n?.status === "sent"
     ).length;
 
     refreshedJobDoc.status = "open";
@@ -3915,8 +3882,10 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
         const sentNotification = refreshedJobDoc.notifications.find(
           (n) =>
             n?.status === "sent" &&
-            ((id && asObjectIdString(n?.musicianId) === id) ||
-              (email && normaliseEmail(n?.email || "") === email)),
+            (
+              (id && asObjectIdString(n?.musicianId) === id) ||
+              (email && allSentEmails.has(email))
+            )
         );
 
         return {
@@ -3924,7 +3893,7 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
           notified: Boolean(sentNotification),
           notifiedAt: sentNotification?.sentAt || null,
         };
-      },
+      }
     );
 
     await refreshedJobDoc.save();
@@ -5415,25 +5384,38 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
       });
     }
 
+    const requesterEmail = normaliseEmail(
+      req.user?.email || req.user?.useremail || ""
+    );
+    const requesterRole = normaliseString(
+      req.user?.role || req.user?.userrole || ""
+    ).toLowerCase();
+
     const isEnquiryJob =
       String(job?.jobType || "").toLowerCase() === "enquiry";
 
     const isAdminManualPayJob =
-      normaliseEmail(job?.createdByEmail || "") ===
-        "hello@thesupremecollective.co.uk" &&
-      normaliseString(job?.paymentStatus || "").toLowerCase() === "not_required";
+      normaliseString(job?.paymentStatus || "").toLowerCase() ===
+        "not_required" &&
+      (
+        normaliseEmail(job?.createdByEmail || "") ===
+          "hello@thesupremecollective.co.uk" ||
+        requesterEmail === "hello@thesupremecollective.co.uk" ||
+        requesterRole === "admin" ||
+        requesterRole === "agent"
+      );
 
     const hasSavedCardDetails =
       Boolean(normaliseString(job?.stripeCustomerId)) &&
       Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-      ["ready_to_charge", "paid"].includes(
-        normaliseString(job?.paymentStatus),
+      ["ready_to_charge", "charge_pending", "paid"].includes(
+        normaliseString(job?.paymentStatus).toLowerCase()
       );
 
     const canSendWithoutCard =
-      isEnquiryJob || isAdminManualPayJob || hasSavedCardDetails;
+      isEnquiryJob || isAdminManualPayJob;
 
-    if (!canSendWithoutCard) {
+    if (!canSendWithoutCard && !hasSavedCardDetails) {
       return res.status(400).json({
         success: false,
         message:
@@ -5456,12 +5438,26 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
           : []),
       ]
         .map((id) => asObjectIdString(id))
-        .filter(Boolean),
+        .filter(Boolean)
+    );
+
+    const alreadyNotifiedEmails = new Set(
+      (Array.isArray(job.notifications) ? job.notifications : [])
+        .filter((n) => n?.status === "sent")
+        .map((n) => normaliseEmail(n?.email || ""))
+        .filter(Boolean)
     );
 
     const remainingMatches = matches.filter((musician) => {
-      const musicianId = asObjectIdString(musician?._id || musician?.id);
-      return musicianId && !alreadyNotifiedIds.has(musicianId);
+      const musicianId = asObjectIdString(
+        musician?._id || musician?.id || musician?.musicianId
+      );
+      const email = normaliseEmail(musician?.email || "");
+
+      if (musicianId && alreadyNotifiedIds.has(musicianId)) return false;
+      if (email && alreadyNotifiedEmails.has(email)) return false;
+
+      return true;
     });
 
     if (!remainingMatches.length) {
@@ -5492,8 +5488,8 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
           ...newSentIds,
         ]
           .map((id) => asObjectIdString(id))
-          .filter(Boolean),
-      ),
+          .filter(Boolean)
+      )
     );
 
     job.notifiedMusicianIds = allSentIds;
@@ -5501,21 +5497,26 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
       ...(Array.isArray(job.notifications) ? job.notifications : []),
       ...notificationResults,
     ];
-    job.notifiedCount = allSentIds.length;
+    job.notifiedCount = job.notifications.filter(
+      (n) => n?.status === "sent"
+    ).length;
     job.status = "open";
     job.previewMode = false;
     job.workflowStage = "sent_to_matches";
 
     job.matchedMusicians = (job.matchedMusicians || []).map((m) => {
       const id = asObjectIdString(m?.musicianId);
-      const wasNewlySent = newSentIds.some(
-        (sentId) => asObjectIdString(sentId) === id,
+
+      const sentNotification = job.notifications.find(
+        (n) =>
+          n?.status === "sent" &&
+          asObjectIdString(n?.musicianId) === id
       );
 
       return {
         ...m,
-        notified: allSentIds.includes(id),
-        notifiedAt: wasNewlySent ? new Date() : m.notifiedAt || null,
+        notified: Boolean(sentNotification),
+        notifiedAt: sentNotification?.sentAt || m.notifiedAt || null,
       };
     });
 
