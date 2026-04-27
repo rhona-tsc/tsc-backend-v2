@@ -152,6 +152,46 @@ const instrumentAliasSet = new Map(
   ])
 );
 
+const cleanRoleText = (value = "") => {
+  const v = norm(value)
+    .replace(/\bguiarist\b/g, "guitarist")
+    .replace(/\bvocalist[-\s]*instrumentalist\b/g, "vocalist instrumentalist")
+    .replace(/\bvocalist[-\s]*guitarist\b/g, "vocalist guitarist")
+    .replace(/\bsinger[-\s]*guitarist\b/g, "singer guitarist")
+    .replace(/\belectric guitarist\b/g, "guitarist")
+    .replace(/\bacoustic guitarist\b/g, "guitarist");
+
+  return v;
+};
+
+const hasGuitar = (musician) =>
+  ["guitar", "guitarist", "electric guitar", "acoustic guitar", "lead guitarist", "rhythm guitarist"]
+    .some((item) => hasInstrument(musician, item));
+
+const isVocalistInstrumentalistMusician = (musician, requiredInstrument = "") => {
+  if (!isVocalist(musician)) return false;
+
+  if (!requiredInstrument) {
+    const instruments = getArrayValues(musician?.instrumentation);
+    return instruments.some(
+      (item) =>
+        !/\bvocalist\b|\bvocals\b|\bvocal\b|\bsinger\b/.test(item)
+    );
+  }
+
+  return hasInstrument(musician, requiredInstrument);
+};
+
+const roleLooksLikeVocalistInstrumentalist = (value = "") => {
+  const v = cleanRoleText(value);
+  const hasVocal =
+    /\bvocalist\b|\bvocals\b|\bvocal\b|\bsinger\b/.test(v);
+  const hasInstrumentWord =
+    /\binstrumentalist\b|\bguitar\b|\bguitarist\b|\bpiano\b|\bkeys\b|\bkeyboard\b|\bsax\b|\bsaxophone\b|\bviolin\b|\bpercussion\b/.test(v);
+
+  return hasVocal && hasInstrumentWord;
+};
+
 const instrumentSimilarity = (a, b) => {
   const A = norm(a);
   const B = norm(b);
@@ -452,12 +492,15 @@ const wantsLeadVocalist = (instrument = "") => {
 const wantsGuitar = (instrument = "") => norm(instrument).includes("guitar");
 
 const wantsVocalistInstrumentalist = (instrument = "") => {
-  const target = norm(instrument);
-  return (
-    /vocalist[-\s]*instrumentalist/.test(target) ||
-    /singer[-\s]*instrumentalist/.test(target) ||
-    (wantsLeadVocalist(target) && wantsGuitar(target))
-  );
+  const target = cleanRoleText(instrument);
+
+  const hasVocal =
+    /\bvocalist\b|\bvocals\b|\bvocal\b|\bsinger\b/.test(target);
+
+  const hasInstrumentWord =
+    /\binstrumentalist\b|\bguitar\b|\bguitarist\b|\bpiano\b|\bkeys\b|\bkeyboard\b|\bsax\b|\bsaxophone\b|\bviolin\b|\bpercussion\b/.test(target);
+
+  return hasVocal && hasInstrumentWord;
 };
 
 const isLeadVocalist = (musician) => {
@@ -520,11 +563,11 @@ const hasAllEssentialRoles = (musician, essentialRoles = []) => {
       ...getArrayValues(musician?.other_skills),
       ...getArrayValues(musician?.instrumentation),
       ...getVocalTypes(musician),
-    ]),
+    ].map(cleanRoleText)),
   );
 
   return essentialRoles.every((requiredRole) => {
-    const wanted = norm(requiredRole);
+    const wanted = cleanRoleText(requiredRole);
     if (!wanted) return true;
 
     if (/backing\s*voc|backing vocalist|bv/.test(wanted)) {
@@ -535,8 +578,16 @@ const hasAllEssentialRoles = (musician, essentialRoles = []) => {
       );
     }
 
+    if (roleLooksLikeVocalistInstrumentalist(wanted)) {
+      if (/guitar/.test(wanted) || /guitarist/.test(wanted)) {
+        return isVocalist(musician) && hasGuitar(musician);
+      }
+
+      return isVocalistInstrumentalistMusician(musician);
+    }
+
     return searchableRoles.some(
-      (existingRole) => roleSimilarity(existingRole, requiredRole) >= 0.6,
+      (existingRole) => roleSimilarity(existingRole, wanted) >= 0.6,
     );
   });
 };
@@ -628,11 +679,12 @@ export const findMatchingMusiciansForDeputyJob = async ({
 
   const resolvedCounty = county || countyFromPostcode(postcode);
   const neighbourCounties = neighboursForCounty(resolvedCounty);
-  const requestedGender = getRequestedVocalGender(instrument);
-  const femaleLeadOnly = wantsFemaleLeadVocalist(instrument);
-  const leadOnly = wantsLeadVocalist(instrument);
-  const vocalistInstrumentalistOnly = wantsVocalistInstrumentalist(instrument);
-  const requiredInstrumentForVocalist = wantsGuitar(instrument) ? "guitar" : "";
+const cleanedInstrument = cleanRoleText(instrument);
+const requestedGender = getRequestedVocalGender(cleanedInstrument);
+const femaleLeadOnly = wantsFemaleLeadVocalist(cleanedInstrument);
+const leadOnly = wantsLeadVocalist(cleanedInstrument);
+const vocalistInstrumentalistOnly = wantsVocalistInstrumentalist(cleanedInstrument);
+const requiredInstrumentForVocalist = wantsGuitar(cleanedInstrument) ? "guitar" : "";
 
   const filtered = pool
     .filter((musician) => {
