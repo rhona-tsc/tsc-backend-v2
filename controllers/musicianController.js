@@ -928,11 +928,10 @@ const createStripeConnectOnboardingLink = async (req, res) => {
       });
     }
 
-    const siteBase = (
-      process.env.PUBLIC_SITE_URL ||
-      process.env.FRONTEND_URL ||
-      "https://thesupremecollective.co.uk"
-    ).replace(/\/$/, "");
+    const adminBase = String(
+      process.env.ADMIN_FRONTEND_URL ||
+      "https://admin.thesupremecollective.co.uk"
+    ).replace(/\/+$/, "");
 
     let accountId = normaliseString(musician?.stripeConnect?.accountId || "");
 
@@ -962,10 +961,19 @@ const createStripeConnectOnboardingLink = async (req, res) => {
       await musician.save();
     }
 
+    const refreshUrl = `${adminBase}/deputy-form/${musician._id}?stripe=refresh`;
+    const returnUrl = `${adminBase}/deputy-form/${musician._id}?stripe=return`;
+
+    console.log("✅ Stripe onboarding URLs", {
+      adminBase,
+      refreshUrl,
+      returnUrl,
+    });
+
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
-      refresh_url: `${siteBase}/account/payout-settings?refresh=1`,
-      return_url: `${siteBase}/account/payout-settings?return=1`,
+      refresh_url: refreshUrl,
+      return_url: returnUrl,
       type: "account_onboarding",
     });
 
