@@ -10,9 +10,9 @@
       font-size: 14px;
       color: #111;
     }
-    h1,h2,h3 { margin: 0.6rem 0; }
+    h1, h2, h3 { margin: 0.6rem 0; }
     .title { font-size: 28px; font-weight: 800; letter-spacing: .02em; }
-    .subtitle { font-size: 14px; color:#555; }
+    .subtitle { font-size: 14px; color: #555; }
     .contract-section p {
       margin-bottom: 0.75rem;
       line-height: 1.6;
@@ -27,7 +27,8 @@
       border-collapse: collapse;
       margin: 1rem 0;
     }
-    .contract-section th, .contract-section td {
+    .contract-section th,
+    .contract-section td {
       border: 1px solid #ccc;
       padding: 8px;
       text-align: left;
@@ -47,457 +48,504 @@
       width: 200px;
       height: auto;
     }
-    .contract-section { line-height:1.5; }
-    ul { margin:0.5rem 1rem; }
+    .contract-section { line-height: 1.5; }
+    ul { margin: 0.5rem 1rem; }
     table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
-    th, td { border: 1px solid #ccc; padding: 6px 8px; text-align:left; }
-
-    .subtitle strong{
-  display: inline;
-  margin-top: 0;
-  font-size: inherit;
-}
+    th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+    .subtitle strong {
+      display: inline;
+      margin-top: 0;
+      font-size: inherit;
+    }
   </style>
 </head>
 <body>
   <img src="https://res.cloudinary.com/dvcgr3fyd/image/upload/v1762950219/4_tt3cay.png" alt="The Supreme Collective Logo" class="header-logo" />
-<div class="title">THE <span style="color:#ff6667">CONTRACT</span></div>
-<%
-  const t = totals || {};
-  const fullAmount = Number(t.fullAmount ?? total ?? 0);
-  const chargedAmount = Number(t.chargedAmount ?? deposit ?? 0);
+  <div class="title">THE <span style="color:#ff6667">CONTRACT</span></div>
 
-  const bookingTotalDisplay = fullAmount;
-  const depositDisplay = `£${chargedAmount.toFixed(2)}`;
-  const outstanding = Math.max(0, fullAmount - chargedAmount);
-%>
-    <div class="contract-section" aria-label="Booking contract terms">
-      <p class="subtitle">
-        Booking ID: <strong><%= bookingId %></strong><br/>
-        Contract Issued On: <strong><%= new Date().toLocaleDateString("en-GB") %></strong><br/>
-Client: <%= [userAddress?.firstName, userAddress?.lastName].filter(Boolean).join(" ") || "—" %><br/>
-        Client Address: <%= userAddress
-  ? [
-      userAddress.street,
-      userAddress.city,
-      userAddress.county,
-      userAddress.postcode,
-      userAddress.country,
-    ]
-      .map(v => String(v || "").trim())
-      .filter(Boolean)
-      .join(", ")
-  : "—" %><br/>
-Venue: <%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "TBC") %><br/>
-<% if (eventDate) { %>
-  Event Date: <%= new Date(eventDate).toLocaleDateString("en-GB") %><br/>
-<% } %>
-<% if (eventType) { %>
-  Event Type: <%= eventType %><br/>
-<% } %>
-        Act(/s): <%= (actsSummary || [])
-  .map(a => a?.tscName || a?.actName || a?.name || "—")
-  .join(", ")
-%>
-<%
-  const eventDateDisplay = eventDate
-    ? new Date(eventDate).toLocaleDateString("en-GB")
-    : "TBC";
-%>
- </p>
+  <%
+    const t = totals || {};
+    const fullAmount = Number(t.fullAmount ?? total ?? 0);
+    const chargedAmount = Number(t.chargedAmount ?? deposit ?? 0);
+    const outstanding = Math.max(0, fullAmount - chargedAmount);
 
-      <hr style="margin:24px 0"/>
+    const bookingTotalDisplay = fullAmount;
+    const depositDisplay = `£${chargedAmount.toFixed(2)}`;
+    const outstandingDisplay = `£${outstanding.toFixed(2)}`;
+    const balanceDueDateDisplay = outstanding > 0 && eventDate
+      ? new Date(new Date(eventDate).getTime() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString("en-GB")
+      : "N/A";
 
-<h2>Booking Details</h2>
+    const clientFullName =
+      [userAddress?.firstName, userAddress?.lastName].filter(Boolean).join(" ") ||
+      clientName ||
+      "—";
 
-<% if (!actsSummary || actsSummary.length === 0) { %>
-  <div>—</div>
-<% } else { %>
-  <% actsSummary.forEach(function(it){ %>
-    <div style="display:flex; gap:12px; align-items:flex-start; margin:10px 0;">
-      <div style="flex:1; min-width:0;">
-        <div>
-<strong><%= it.tscName || it.actName || it.name || "—" %></strong>
-<%
-  const norm = (s = "") => String(s || "").trim();
-  const lower = (s = "") => norm(s).toLowerCase();
+    const clientAddressDisplay = userAddress
+      ? [
+          userAddress.street,
+          userAddress.city,
+          userAddress.county,
+          userAddress.postcode,
+          userAddress.country,
+        ]
+          .map((v) => String(v || "").trim())
+          .filter(Boolean)
+          .join(", ")
+      : "—";
 
-  const members = Array.isArray(it?.bandMembers) ? it.bandMembers : [];
+    const clientEmailDisplay = userAddress?.email || clientEmail || "—";
+    const clientPhoneDisplay = userAddress?.phone || clientPhone || "—";
 
-  const isNonPerformerLikeInstrument = (instrument = "") => {
-    const v = lower(instrument);
-    return (
-      v === "manager" ||
-      v === "admin" ||
-      v.includes("band manager") ||
-      v.includes("management") ||
-      v.includes("sound engineer") ||
-      v.includes("sound tech") ||
-      v.includes("sound technician") ||
-      v.includes("audio engineer") ||
-      v.includes("audio tech") ||
-      v.includes("audio technician") ||
-      v.includes("foh") ||
-      v.includes("front of house")
-    );
-  };
+    const eventDateDisplay = eventDate
+      ? new Date(eventDate).toLocaleDateString("en-GB")
+      : "TBC";
 
-  const performerMembers = members.filter((m) => {
-    if (!m?.isEssential) return false;
-    const inst = norm(m?.instrument);
-    if (!inst) return false;
-    if (m?.isManager === true || m?.isNonPerformer === true) return false;
-    if (isNonPerformerLikeInstrument(inst)) return false;
-    return true;
-  });
+    const contractIssuedOn = createdAt
+      ? new Date(createdAt).toLocaleDateString("en-GB")
+      : new Date().toLocaleDateString("en-GB");
 
-  const actSizeLabel = norm(it?.actSize);
-  const countLabel = actSizeLabel ? actSizeLabel : `${performerMembers.length}-Piece`;
+    const actsListDisplay = (actsSummary || [])
+      .map((a) => a?.tscName || a?.actName || a?.name || "—")
+      .join(", ");
 
-  let instruments = performerMembers
-    .map((m) => norm(m?.instrument))
-    .filter(Boolean);
+    const norm = (s = "") => String(s || "").trim();
+    const lower = (s = "") => norm(s).toLowerCase();
+  %>
 
-  instruments.sort((a, b) => {
-    const aLower = a.toLowerCase();
-    const bLower = b.toLowerCase();
-    const isVocal = (str) => str.includes("vocal");
-    const isDrums = (str) => str === "drums";
+  <div class="contract-section" aria-label="Booking contract terms">
+    <p class="subtitle">
+      Booking ID: <strong><%= bookingId || "—" %></strong><br/>
+      Contract Issued On: <strong><%= contractIssuedOn %></strong><br/>
+      Client: <strong><%= clientFullName %></strong><br/>
+      Client Address: <strong><%= clientAddressDisplay %></strong><br/>
+      Client Email: <strong><%= clientEmailDisplay %></strong><br/>
+      Client Telephone: <strong><%= clientPhoneDisplay %></strong><br/>
+      Venue: <strong><%= (typeof venue !== "undefined" && venue) ? venue : (venueAddress || "TBC") %></strong><br/>
+      <% if (eventDate) { %>
+        Event Date: <strong><%= eventDateDisplay %></strong><br/>
+      <% } %>
+      <% if (eventType) { %>
+        Event Type: <strong><%= eventType %></strong><br/>
+      <% } %>
+      Act(/s): <strong><%= actsListDisplay || "—" %></strong>
+    </p>
 
-    if (isVocal(aLower) && !isVocal(bLower)) return -1;
-    if (!isVocal(aLower) && isVocal(bLower)) return 1;
-    if (isDrums(aLower)) return 1;
-    if (isDrums(bLower)) return -1;
-    return 0;
-  });
+    <hr style="margin:24px 0"/>
 
-  const withCountsInOrder = (arr) => {
-    const out = [];
-    const counts = new Map();
-    for (const item of arr) {
-      counts.set(item, (counts.get(item) || 0) + 1);
-      if (!out.includes(item)) out.push(item);
-    }
-    return out.map((item) => {
-      const n = counts.get(item) || 1;
-      return n > 1 ? `${item} x ${n}` : item;
-    });
-  };
+    <h2>Booking Details</h2>
 
-  const instrumentsDisplayArr = withCountsInOrder(instruments);
+    <% if (!actsSummary || actsSummary.length === 0) { %>
+      <div>—</div>
+    <% } else { %>
+      <% actsSummary.forEach(function(it){ %>
+        <div style="display:flex; gap:12px; align-items:flex-start; margin:10px 0;">
+          <div style="flex:1; min-width:0;">
+            <div>
+              <strong><%= it.tscName || it.actName || it.name || "—" %></strong>
 
-  const rolesRaw = members.flatMap((member) =>
-    (Array.isArray(member?.additionalRoles) ? member.additionalRoles : [])
-      .filter((r) => r?.isEssential)
-      .map((r) => norm(r?.role || "Unnamed Service"))
-      .filter(Boolean)
-  );
+              <%
+                const members = Array.isArray(it?.bandMembers) ? it.bandMembers : [];
 
-  const rolesNormalized = rolesRaw.map((r) => {
-    const rLower = lower(r);
+                const isNonPerformerLikeInstrument = (instrument = "") => {
+                  const v = lower(instrument);
+                  return (
+                    v === "manager" ||
+                    v === "admin" ||
+                    v.includes("band manager") ||
+                    v.includes("management") ||
+                    v.includes("sound engineer") ||
+                    v.includes("sound tech") ||
+                    v.includes("sound technician") ||
+                    v.includes("audio engineer") ||
+                    v.includes("audio tech") ||
+                    v.includes("audio technician") ||
+                    v.includes("foh") ||
+                    v.includes("front of house")
+                  );
+                };
 
-    if (rLower.includes("band manager")) return "Band Management";
-    if (
-      rLower.includes("sound engineer") ||
-      rLower.includes("sound tech") ||
-      rLower.includes("sound technician") ||
-      rLower.includes("audio engineer") ||
-      rLower.includes("audio tech") ||
-      rLower.includes("audio technician") ||
-      rLower.includes("foh") ||
-      rLower.includes("front of house")
-    ) {
-      return "Sound Engineering";
-    }
+                const performerMembers = members.filter((m) => {
+                  if (!m?.isEssential) return false;
+                  const inst = norm(m?.instrument);
+                  if (!inst) return false;
+                  if (m?.isManager === true || m?.isNonPerformer === true) return false;
+                  if (isNonPerformerLikeInstrument(inst)) return false;
+                  return true;
+                });
 
-    return r;
-  });
+                const actSizeLabel = norm(it?.actSize || it?.lineupLabel || it?.lineup?.actSize);
+                const countLabel = actSizeLabel ? actSizeLabel : `${performerMembers.length}-Piece`;
 
-  const rolesDisplayArr = withCountsInOrder(rolesNormalized);
+                let instruments = performerMembers
+                  .map((m) => norm(m?.instrument))
+                  .filter(Boolean);
 
-  const formatWithAnd = (arr) => {
-    const items = Array.isArray(arr) ? arr : [];
-    if (items.length === 0) return "";
-    if (items.length === 1) return items[0];
-    if (items.length === 2) return `${items[0]} & ${items[1]}`;
-    return `${items.slice(0, -1).join(", ")} & ${items[items.length - 1]}`;
-  };
+                instruments.sort((a, b) => {
+                  const aLower = a.toLowerCase();
+                  const bLower = b.toLowerCase();
+                  const isVocal = (str) => str.includes("vocal");
+                  const isDrums = (str) => str === "drums";
 
-  const instrumentsStr = formatWithAnd(instrumentsDisplayArr);
-  const rolesStr = rolesDisplayArr.length
-    ? ` (including ${formatWithAnd(rolesDisplayArr)} services)`
-    : "";
+                  if (isVocal(aLower) && !isVocal(bLower)) return -1;
+                  if (!isVocal(aLower) && isVocal(bLower)) return 1;
+                  if (isDrums(aLower)) return 1;
+                  if (isDrums(bLower)) return -1;
+                  return 0;
+                });
 
-  const description =
-    performerMembers.length === 0
-      ? "Add a Lineup"
-      : `${countLabel}: ${instrumentsStr}${rolesStr}`;
-%>
+                const withCountsInOrder = (arr) => {
+                  const out = [];
+                  const counts = new Map();
+                  for (const item of arr) {
+                    counts.set(item, (counts.get(item) || 0) + 1);
+                    if (!out.includes(item)) out.push(item);
+                  }
+                  return out.map((item) => {
+                    const n = counts.get(item) || 1;
+                    return n > 1 ? `${item} x ${n}` : item;
+                  });
+                };
 
-<div style="margin-top:4px; font-size:14px; color:#111;">
-  <%= description %>
-</div>
+                const instrumentsDisplayArr = withCountsInOrder(instruments);
 
-        <% 
-          const hasVocalists =
-            Array.isArray(it.bandMembers) &&
-            it.bandMembers.some(m => (m.instrument || "").toLowerCase().includes("vocal"));
+                const rolesRaw = members.flatMap((member) =>
+                  (Array.isArray(member?.additionalRoles) ? member.additionalRoles : [])
+                    .filter((r) => r?.isEssential)
+                    .map((r) => norm(r?.role || "Unnamed Service"))
+                    .filter(Boolean)
+                );
 
-          const sv = it.selectedVocalist;
-        %>
+                const rolesNormalized = rolesRaw.map((r) => {
+                  const rLower = lower(r);
 
-        <% if (sv && hasVocalists) { %>
-          <div style="margin-top:4px; font-size:13px; color:#444;">
-            Vocalist selected: <%= sv.firstName %> <%= sv.lastNameInitial %>.
-          </div>
-        <% } %>
-        </div>
+                  if (rLower.includes("band manager")) return "Band Management";
+                  if (
+                    rLower.includes("sound engineer") ||
+                    rLower.includes("sound tech") ||
+                    rLower.includes("sound technician") ||
+                    rLower.includes("audio engineer") ||
+                    rLower.includes("audio tech") ||
+                    rLower.includes("audio technician") ||
+                    rLower.includes("foh") ||
+                    rLower.includes("front of house")
+                  ) {
+                    return "Sound Engineering";
+                  }
 
-        <% if (Number(it.quantity||0) > 1) { %>
-          <div>Quantity: <%= Number(it.quantity) %></div>
-        <% } %>
+                  return r;
+                });
 
-        <% if (it.performance) { %>
-          <div style="margin-top:4px;">
-            <% if (it.performance.arrivalTime) { %>
-              <div>Arrival: <%= it.performance.arrivalTime %></div>
+                const rolesDisplayArr = withCountsInOrder(rolesNormalized);
+
+                const formatWithAnd = (arr) => {
+                  const items = Array.isArray(arr) ? arr : [];
+                  if (items.length === 0) return "";
+                  if (items.length === 1) return items[0];
+                  if (items.length === 2) return `${items[0]} & ${items[1]}`;
+                  return `${items.slice(0, -1).join(", ")} & ${items[items.length - 1]}`;
+                };
+
+                const instrumentsStr = formatWithAnd(instrumentsDisplayArr);
+                const rolesStr = rolesDisplayArr.length
+                  ? ` (including ${formatWithAnd(rolesDisplayArr)} services)`
+                  : "";
+
+                const description =
+                  performerMembers.length === 0
+                    ? "Add a Lineup"
+                    : `${countLabel}: ${instrumentsStr}${rolesStr}`;
+
+                const hasVocalists =
+                  Array.isArray(it.bandMembers) &&
+                  it.bandMembers.some((m) => (m.instrument || "").toLowerCase().includes("vocal"));
+
+                const sv = it.selectedVocalist;
+              %>
+
+              <div style="margin-top:4px; font-size:14px; color:#111;">
+                <%= description %>
+              </div>
+
+              <% if (sv && hasVocalists) { %>
+                <div style="margin-top:4px; font-size:13px; color:#444;">
+                  Vocalist selected: <%= sv.firstName %> <%= sv.lastNameInitial %>.
+                </div>
+              <% } %>
+            </div>
+
+            <% if (Number(it.quantity || 0) > 1) { %>
+              <div>Quantity: <%= Number(it.quantity) %></div>
             <% } %>
-            <% if (it.performance.setupAndSoundcheckedBy) { %>
-              <div>Soundcheck by: <%= it.performance.setupAndSoundcheckedBy %></div>
-            <% } %>
-            <% if (it.performance.startTime) { %>
-              <div>Start: <%= it.performance.startTime %></div>
-            <% } %>
-            <% if (it.performance.finishTime) { %>
-              <div>
-                Finish: <%= it.performance.finishTime %>
-                <% if (it.performance.finishDayOffset) { %>
-                  (+<%= it.performance.finishDayOffset %>d)
+
+            <% if (it.performance) { %>
+              <div style="margin-top:4px;">
+                <% if (it.performance.arrivalTime) { %>
+                  <div>Arrival time: <%= it.performance.arrivalTime %></div>
+                <% } %>
+                <% if (it.performance.setupAndSoundcheckedBy) { %>
+                  <div>Setup / soundcheck: <%= it.performance.setupAndSoundcheckedBy %></div>
+                <% } %>
+                <% if (it.performance.startTime || it.performance.finishTime) { %>
+                  <div>
+                    Performance schedule:
+                    <% if (it.performance.startTime && it.performance.finishTime) { %>
+                      <%= it.performance.startTime %> – <%= it.performance.finishTime %>
+                      <% if (it.performance.finishDayOffset) { %>
+                        (+<%= it.performance.finishDayOffset %>d)
+                      <% } %>
+                    <% } else if (it.performance.startTime) { %>
+                      from <%= it.performance.startTime %>
+                    <% } else { %>
+                      until <%= it.performance.finishTime %>
+                      <% if (it.performance.finishDayOffset) { %>
+                        (+<%= it.performance.finishDayOffset %>d)
+                      <% } %>
+                    <% } %>
+                  </div>
+                <% } else { %>
+                  <div>Performance schedule: TBC</div>
                 <% } %>
               </div>
             <% } %>
-          </div>
-        <% } %>
 
-        <% if (Array.isArray(it.afternoonSets) && it.afternoonSets.length) { %>
-          <div style="margin-top:4px;">
-            <div style="font-size:12px; color:#666;">Afternoon Sets:</div>
-            <ul style="margin:6px 0 0 18px;">
-              <% it.afternoonSets.forEach(function(set){ %>
-                <li>
-                  <%= set.name || set.label || "Set" %>
-                  <% if (Number(set.price)) { %>
-                    (£<%= Number(set.price).toFixed(2) %>)
-                  <% } %>
-                </li>
-              <% }) %>
-            </ul>
-          </div>
-        <% } %>
+            <% if (Array.isArray(it.afternoonSets) && it.afternoonSets.length) { %>
+              <div style="margin-top:4px;">
+                <div style="font-size:12px; color:#666;">Afternoon Sets:</div>
+                <ul style="margin:6px 0 0 18px;">
+                  <% it.afternoonSets.forEach(function(set){ %>
+                    <li>
+                      <%= set.name || set.label || "Set" %>
+                      <% if (Number(set.price)) { %>
+                        (£<%= Number(set.price).toFixed(2) %>)
+                      <% } %>
+                    </li>
+                  <% }) %>
+                </ul>
+              </div>
+            <% } %>
 
-        <% if (Array.isArray(it.selectedExtras) && it.selectedExtras.length) { %>
-          <div style="margin-top:4px;">
-            <div style="font-size:12px; color:#666;">Extras:</div>
-            <ul style="margin:6px 0 0 18px;">
-              <% it.selectedExtras.forEach(function(ex){ %>
-                <li>
-                  <%= ex.name || ex.key %>
-                  <% if (ex.quantity && Number(ex.quantity) > 1) { %> × <%= Number(ex.quantity) %><% } %>
-                </li>
-              <% }) %>
-            </ul>
+            <% if (Array.isArray(it.selectedExtras) && it.selectedExtras.length) { %>
+              <div style="margin-top:4px;">
+                <div style="font-size:12px; color:#666;">Extras / additional services:</div>
+                <ul style="margin:6px 0 0 18px;">
+                  <% it.selectedExtras.forEach(function(ex){ %>
+                    <li>
+                      <%= ex.name || ex.key %>
+                      <% if (ex.quantity && Number(ex.quantity) > 1) { %> × <%= Number(ex.quantity) %><% } %>
+                    </li>
+                  <% }) %>
+                </ul>
+              </div>
+            <% } else { %>
+              <div style="margin-top:4px;">Extras / additional services: N/A</div>
+            <% } %>
+
+            <% if (it.notes) { %>
+              <div style="margin-top:4px;">Additional contract notes: <%= it.notes %></div>
+            <% } else { %>
+              <div style="margin-top:4px;">Additional contract notes: N/A</div>
+            <% } %>
           </div>
-        <% } %>
+        </div>
+      <% }) %>
+
+      <hr style="margin:12px 0"/>
+
+      <h2>Payment Summary</h2>
+      <div style="font-size:14px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span>Booking total</span>
+          <span>£<%= bookingTotalDisplay.toFixed(2) %></span>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+          <span>Deposit / amount paid on booking</span>
+          <span><%= depositDisplay %></span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-weight:700; margin-top:8px;">
+          <span>Outstanding balance</span>
+          <span><%= outstandingDisplay %></span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:8px;">
+          <span>Balance due date</span>
+          <span><%= balanceDueDateDisplay %></span>
+        </div>
       </div>
-    </div>
-  <% }) %>
+    <% } %>
 
-  <hr style="margin:12px 0"/>
+    <p><strong>Key Points</strong></p>
+    <ul>
+      <li>This Contract is subject to The Supreme Collective Booking Contract Terms and Conditions set out below.</li>
+      <li>The Client must ensure the venue and event arrangements are suitable for the Artist to perform safely and lawfully.</li>
+      <li>The Client and Artist must notify The Supreme Collective promptly of any proposed changes to the booking.</li>
+      <li>Unless expressly stated otherwise in this Contract, all times, services, extras and fees listed in this document form part of the agreed booking.</li>
+    </ul>
 
-  <div style="font-size:14px;">
-  <div style="display:flex; justify-content:space-between;">
-  <span>Booking total</span>
-  <span>£<%= bookingTotalDisplay.toFixed(2) %></span>
-</div>
-<div style="display:flex; justify-content:space-between;">
-  <span>Deposit paid</span>
-  <span><%= depositDisplay %></span>
-</div>
-<div style="display:flex; justify-content:space-between; font-weight:700; margin-top:8px;">
-  <span>Outstanding Balance</span>
-  <span>£<%= outstanding.toFixed(2) %></span>
-</div>
+    <p><strong>Client Authorisation</strong></p>
+    <p>
+      By signing this Contract, the Client confirms that they are authorised to enter into this booking and agree to be bound by these Terms and Conditions.
+    </p>
+
+    <p><strong>Agent Authorisation</strong></p>
+    <p>
+      This Contract is issued by The Supreme Collective Ltd as booking agent and administrator for the booking described above.
+    </p>
+
+    <p><strong>The Supreme Collective Booking Contract Terms and Conditions</strong></p>
+    <p>These terms are intended to provide fuller detail for both the Client and the Artist.</p>
+
+    <p><strong>1 | Definitions</strong></p>
+    <p>1.1 In this Contract, “Agent” means The Supreme Collective Ltd.</p>
+    <p>1.2 “Client” means the person or organisation booking the Artist or other Supplier services.</p>
+    <p>1.3 “Artist” or “Supplier” means the performer, act, band or other supplier providing the contracted services.</p>
+    <p>1.4 “Contract” means the booking summary together with these Terms and Conditions, read as one document.</p>
+    <p>1.5 “Deposit” means any booking payment payable on confirmation of the booking.</p>
+    <p>1.6 “Balance” means the remaining amount payable after the Deposit or first payment has been received.</p>
+
+    <p><strong>2 | Introduction and agency position</strong></p>
+    <p>2.1 The Agent introduces, negotiates, coordinates and administers the booking.</p>
+    <p>2.2 The Contract is issued by the Agent in connection with the booking and the Agent may collect monies where this is part of the agreed payment process.</p>
+    <p>2.3 The Artist remains responsible for the performance itself, for attending the event and for delivering the agreed services professionally and competently.</p>
+
+    <p><strong>3 | Booking confirmation and changes</strong></p>
+    <p>3.1 A booking is treated as confirmed once the Contract has been accepted by the Client and the required booking payment has been received.</p>
+    <p>3.2 The parties should sign and return the Contract promptly, and in any event within the timeframe requested by the Agent.</p>
+    <p>3.3 Any proposed change to the event date, venue, timings, line-up, services, fee, technical requirements or other material term must be notified to the Agent as soon as possible.</p>
+    <p>3.4 No variation is binding unless agreed by the relevant parties. Where required, the Agent may issue an updated Contract or written booking amendment.</p>
+
+    <p><strong>4 | Fees and payment</strong></p>
+    <p>4.1 The total booking fee, payment schedule and due dates are shown in the booking summary.</p>
+    <p>4.2 Unless otherwise agreed in writing, all payments must be made in cleared funds by the due date stated in this Contract or on the relevant invoice or payment link.</p>
+    <p>4.3 Where Stripe, bank transfer or another payment method is offered, the Client must use the payment method authorised by the Agent.</p>
+    <p>4.4 Unless specifically included in the booking summary, additional costs such as extended performance time, extra production, extra services, parking reimbursement or client-requested upgrades are not included in the original booking fee.</p>
+
+    <p><strong>5 | Late payment and failure to pay</strong></p>
+    <p>5.1 If the Deposit is not paid by the required date, the Agent may treat the booking as unconfirmed and may release the date without liability.</p>
+    <p>5.2 If the Balance is not paid by the due date, the Artist and/or Agent may suspend further performance preparation and may treat the Contract as cancelled by the Client.</p>
+    <p>5.3 Late payment may incur reasonable administration charges, interest and debt recovery costs where legally recoverable.</p>
+    <p>5.4 The Artist is not obliged to perform until any overdue sums due before the event have been paid in full.</p>
+
+    <p><strong>6 | Cancellation and postponement</strong></p>
+    <p>6.1 Any request to cancel or postpone must be made in writing.</p>
+    <p>6.2 If the Client cancels other than because of an agreed force majeure event, cancellation charges apply.</p>
+    <p>6.3 Unless the Agent confirms otherwise in writing, the Deposit is non-refundable once the booking is confirmed.</p>
+    <p>6.4 If the Client wishes to postpone, the Agent and Artist will use reasonable efforts to transfer the booking to a new agreed date, but cannot guarantee availability.</p>
+
+    <p><strong>7 | Client cancellation charges</strong></p>
+    <p>7.1 The following cancellation charges apply unless a different schedule is expressly stated in the booking summary:</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Cancellation timescale</th>
+          <th>Cancellation charge</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>More than 365 days before the event</td><td>No Artist fee</td></tr>
+        <tr><td>181 to 365 days before the event</td><td>25% of the full booking fee</td></tr>
+        <tr><td>91 to 180 days before the event</td><td>40% of the full booking fee</td></tr>
+        <tr><td>31 to 90 days before the event</td><td>80% of the full booking fee</td></tr>
+        <tr><td>30 days or less before the event</td><td>100% of the full booking fee</td></tr>
+        <tr><td>Less than 48 hours after confirmation, where the event is more than 7 days away</td><td>No Artist fee</td></tr>
+      </tbody>
+    </table>
+
+    <p><strong>8 | Rebooking and waiver approach</strong></p>
+    <p>8.1 If the Client cancels, the Agent may, at its discretion, attempt to rebook the Artist for the cancelled date.</p>
+    <p>8.2 If the cancelled date is successfully rebooked on materially comparable terms, the Agent and/or Artist may waive or reduce the cancellation charge.</p>
+    <p>8.3 Any waiver or reduction must be confirmed in writing and is not automatic.</p>
+
+    <p><strong>9 | Artist cancellation and substitute performers</strong></p>
+    <p>9.1 The Artist must not cancel except where genuinely unavoidable circumstances arise.</p>
+    <p>9.2 If a member of the act becomes unavailable, the Artist may use suitably qualified deputies or substitute performers of comparable standard without prior notice.</p>
+    <p>9.3 A change of individual line-up member does not of itself entitle the Client to a fee reduction, provided the contracted service is still delivered to a proper standard.</p>
+    <p>9.4 If the Artist cannot fulfil the booking, the Agent will use reasonable efforts to source a suitable replacement, but cannot guarantee one will be available.</p>
+
+    <p><strong>10 | Complaints</strong></p>
+    <p>10.1 Any complaint should be raised in writing as soon as reasonably possible and in any event within 30 days of the event.</p>
+    <p>10.2 Payment obligations continue notwithstanding any complaint, unless the parties agree otherwise in writing or a court determines otherwise.</p>
+    <p>10.3 The Agent may assist the parties in seeking a practical resolution but is not obliged to adjudicate the dispute.</p>
+
+    <p><strong>11 | Client responsibilities</strong></p>
+    <p>11.1 The Client must ensure the venue can lawfully host the performance and holds any necessary permissions for amplified music and other relevant licences.</p>
+    <p>11.2 The Client must provide a safe, level, weather-appropriate and adequately sized performance area, together with a safe and suitable electrical supply where required.</p>
+    <p>11.3 The Client must tell the Agent in advance about any sound limiter, access restriction, loading difficulty, curfew, stairs, parking issue, decibel cap, restricted setup window or other operational limitation.</p>
+    <p>11.4 Free parking should be provided where possible. If paid parking is unavoidable the Client must pay expected parking costs in advance.</p>
+    <p>11.5 The Client must provide reasonable refreshments and, where the Artist is on site for a period of more than 3 hours, a hot meal or buffet unless the booking summary states otherwise.</p>
+    <p>11.6 The Client must provide a secure and appropriate changing area if required by the Artist.</p>
+    <p>11.7 The Client is responsible for the conduct of guests and other persons under its control and must ensure the Artist and their equipment are not exposed to unsafe, abusive or aggressive behaviour.</p>
+    <p>11.8 The Client is responsible for filling in their Event Sheet thoroughly.</p>
+
+    <p><strong>12 | Artist responsibilities</strong></p>
+    <p>12.1 The Artist must attend punctually and perform to a professional standard consistent with the description and promotional materials supplied for the booking.</p>
+    <p>12.2 The Artist must provide and maintain the equipment reasonably necessary for the contracted performance, unless the booking summary states that equipment is being supplied by someone else.</p>
+    <p>12.3 The Artist must hold appropriate insurance and safety certification where required, including public liability insurance and PAT documentation where relevant.</p>
+    <p>12.4 The Artist must behave professionally and must not perform while materially impaired by alcohol or drugs.</p>
+    <p>12.5 The Artist must ensure they have thoroughly read the Event Sheet provided by the Client before the event to be able to flag any questions in advance and come prepared for the brief.</p>
+
+    <p><strong>13 | Performance schedule and overruns</strong></p>
+    <p>13.1 The agreed schedule is the schedule shown in the booking summary or later agreed in writing.</p>
+    <p>13.2 If the Client requests a later finish, extra set, additional service or other extension, the Artist may agree a further fee or may decline the request.</p>
+    <p>13.3 If the event overruns due to reasons outside the Artist’s control, the Artist remains entitled to finish at the agreed finish time and to receive the agreed fee.</p>
+
+    <p><strong>14 | Expenses and equipment damage</strong></p>
+    <p>14.1 The Client is not liable for any additional Artist expense unless it has been expressly agreed in advance in writing.</p>
+    <p>14.2 Artist equipment may not be used by guests, venue staff, other suppliers or any third party unless the Artist has given written permission.</p>
+    <p>14.3 The Client is liable for loss or damage caused to Artist equipment by the Client, guests or other persons under the Client’s control, to the extent permitted by law.</p>
+
+    <p><strong>15 | DJ / playlist service</strong></p>
+    <p>15.1 Where a playlist, DJ-style service or recorded music service is included, the exact type of service included is the one stated in the booking summary.</p>
+    <p>15.2 Unless expressly stated otherwise, a playlist service is not the same as a full professional DJ performance.</p>
+
+    <p><strong>16 | Photography, video and promotion</strong></p>
+    <p>16.1 If the Client does not want event photographs or short video clips to be used by the Artist or Agent for future promotional purposes, the Client should notify the Agent in writing before the event.</p>
+    <p>16.2 Where the Client supplies, shares, or makes available any photographs, videos, or other media featuring the Artist, whether directly (including by email, message, or file transfer) or indirectly (including by posting on social media), the Client agrees that the Artist and The Supreme Collective may use such media for promotional, advertising, portfolio, website, and social media purposes.</p>
+
+    <p><strong>17 | Force majeure</strong></p>
+    <p>17.1 Force majeure means an event outside a party’s reasonable control which prevents or materially delays performance, including severe illness, accident, extreme weather, natural disaster, war, terrorism, epidemic, government restriction or venue closure.</p>
+    <p>17.2 The affected party must notify the others as soon as reasonably possible and provide supporting information where available.</p>
+    <p>17.3 Where force majeure applies, the parties will use reasonable efforts to rearrange the booking. If rearrangement is not possible, liability will be limited as set out by law and any expressly agreed contract terms.</p>
+
+    <p><strong>18 | Breach and termination</strong></p>
+    <p>18.1 A serious breach of these Terms and Conditions may entitle the non-breaching party to terminate the Contract or seek damages or other relief available at law.</p>
+
+    <p><strong>19 | Jurisdiction</strong></p>
+    <p>19.1 This Contract is governed by the law of England and Wales.</p>
+    <p>19.2 The courts of England and Wales shall have exclusive jurisdiction unless the parties agree another dispute process in writing.</p>
+
+    <p><strong>20 | Signatures and acceptance</strong></p>
+    <p>20.1 The parties may sign electronically and agree that electronic signature, email confirmation or approved digital acceptance can be relied upon as evidence of agreement.</p>
+    <p>20.2 By signing or otherwise accepting this Contract, the parties confirm that they have read and understood these Terms and Conditions.</p>
   </div>
-<% } %>
 
-      <p><strong>Key Points</strong></p>
-      <ul>
-        <li>This Contract is subject to The Supreme Collective's Terms and Conditions.</li>
-        <li>The Client must complete the Event Sheet four weeks prior to the event to ensure the finer details of the performance can be processed in a timely fashion.</li>
-        <li>Point of contact numbers should be provided on the Event Sheet.</li>
-        <li>The Client must provide the Artist with a reasonable free supply of soft drinks, hot meal or hot buffet (for bookings when artist is on site for 3 hours or more), free parking for all vehicles, a secure changing area, and a safe, level, dry, covered performance area, unless otherwise noted.</li>
-      </ul>
+  <%
+    const signedDate = (createdAt ? new Date(createdAt) : new Date()).toLocaleDateString("en-GB");
+  %>
 
-      <p><strong>Client Authorisation</strong></p>
-      <p>
-       <p>
-  By signing below, you confirm that you are the authorised signatory for contract <%= bookingId || 'TBC' %>
-  (<%= (actsSummary || [])
-    .map(a => a?.tscName || a?.actName || a?.name || "—")
-    .join(", ")
-  %>, <%= eventDateDisplay %>) and agree to be bound by The Supreme Collective’s Terms and Conditions of booking.
-</p>
-      </p>
+  <div style="margin-top:18px;">
+    <div style="font-weight:700; margin-bottom:6px;">Client Signature</div>
 
-      <p><strong>Agent Authorisation</strong></p>
-      <p>
-        Company Name: The Supreme Collective<br/>
-        Artist Name(/s): <%= (actsSummary||[]).map(a => a?.tscName || a?.actName || a?.name || "—").join(", ") %>
-      </p>
+    <% if (signatureUrl) { %>
+      <div style="border:1px solid #ccc; padding:10px; display:inline-block;">
+        <img src="<%= signatureUrl %>" alt="Client signature" style="width:220px; height:auto; display:block;" />
+      </div>
+    <% } else { %>
+      <div style="border:1px solid #ccc; padding:18px; width:260px; color:#666;">
+        Signature not provided
+      </div>
+    <% } %>
 
-      <p><strong>The Supreme Collective - Terms and Conditions of Booking</strong></p>
-      <p>If you do not understand any part of these Terms and Conditions, please check in with The Supreme Collective or seek legal advice before agreeing to them and confirming a booking.</p>
-
-      <p><strong>Definition</strong></p>
-      <p>The following definitions refer to the 'Contract' (The Supreme Collective Booking Contract) and these 'Terms and Conditions'. The Supreme Collective, Company No. 16883956, is the 'Agent', the proposed entertainment booker is the 'Client' and the proposed entertainment act is the 'Artist'.</p>
-
-      <p><strong>1 | Introduction</strong></p>
-      <p>This booking contract is provided by the Agent and is made between the Client and Agent on behalf of the Artist. In issuing this Contract, the Agent is acting as an employment agency for the Artist, and is responsible for ensuring all band members are allocated, and fully briefed in a timely manner in the run-up to the event, and the Artist is responsible for all preparation for the event, and performance on the day. Artist, Client, and Agent responsibilities are detailed within this contract. Any breach of contract can fall upon the Artist, or Client depending upon the item being breached.</p>
-
-      <p><strong>2 | Booking</strong></p>
-      <ul>
-        <li>All bookings are confirmed immediately upon signing of this contract and with complete payment of the deposit. The booking is then confirmed.</li>
-        <li>A copy of the contract will be shared with the Client. The Agent will file completed contracts and will store until 4 years after the contract completion date.</li>
-        <li>The Contract may be modified/changed upon agreement from both parties in advance of the event date.</li>
-        <li>Changes must be notified to the Agent who will re-issue the contract if necessary.</li>
-        <li>The agreed total cost and Deposit amount may change with any alterations agreed by both the Client and Artist.</li>
-        <li>The Agent will act as negotiator until the date of the event and completion of the contract.</li>
-      </ul>
-
-      <p><strong>3 | Payment of Booking Fees</strong></p>
-      <ul>
-        <li>The Deposit payment is due upon booking.</li>
-        <li>The Balance (remaining fee owed) is due one week before the event day and must also be paid to the Agent.</li>
-      </ul>
-
-      <p><strong>4 | Late/Failure Payment of Balance</strong></p>
-      <ul>
-        <li>The Client must pay the Balance within the specified time.</li>
-        <li>If the Client fails to do so, the Agent has the right to terminate the Contract without penalty. The Client would still be subject to the cancellation fee specified in Clause 6.1.1.</li>
-        <li>The Agent has the right to claim interest of 20% on the balance of any late payments.</li>
-        <li>Late payments will incur a £50 administration fee, payable by the Client to the Agent within 14 days.</li>
-        <li>If full payment is not made within 14 days the debt may be passed to a Debt Recovery Firm by the Artist, possibly incurring additional costs.</li>
-      </ul>
-
-      <p><strong>5 | Cancellation</strong></p>
-      <ul>
-        <li>Termination of the Contract is only allowed in cases of 'Force Majeure' or if all parties mutually agree.</li>
-        <li>In the event of mutual cancellation, the Deposit will not be refunded.</li>
-      </ul>
-
-      <p><strong>6 | Client Cancellation</strong></p>
-      <ul>
-        <li>If the Client cancels for any reason other than Force Majeure, cancellation fees apply.</li>
-      </ul>
-
-      <table>
-        <thead><tr><th>Cancellation Timescale</th><th>Cancellation Fee</th></tr></thead>
-        <tbody>
-          <tr><td>More than 365 days before event</td><td>Nil</td></tr>
-          <tr><td>Less than 24 hours after confirmation (8+ days before event)</td><td>Nil</td></tr>
-          <tr><td>Less than 24 hours after confirmation within 7 days of event</td><td>Full Fee</td></tr>
-          <tr><td>More than 90 days before event</td><td>60% of Full Fee</td></tr>
-          <tr><td>Between 61-90 days before event</td><td>80% of Full Fee</td></tr>
-          <tr><td>60 days or less before event</td><td>Full Fee</td></tr>
-        </tbody>
-      </table>
-
-      <p><strong>7 | Artist Cancellation</strong></p>
-      <ul>
-        <li>The Agent cannot cancel on behalf of the Artist unless for Force Majeure.</li>
-        <li>If Force Majeure applies, the Agent must present a replacement if possible, and refund 50% of the Deposit if not possible.</li>
-        <li>If the Artist cancels improperly, the Client may seek legal recourse against the Artist.</li>
-        <li>If a replacement Artist is secured and accepted, the Deposit is not refunded but transferred to the new act.</li>
-      </ul>
-
-      <p><strong>8 | Complaints</strong></p>
-      <ul>
-        <li>Complaints must be made in writing within 30 days of the incident.</li>
-        <li>Payment obligations remain despite complaints.</li>
-        <li>Any unnotified changes agreed between Client and Artist are to be dealt with directly between them.</li>
-      </ul>
-
-      <p><strong>9 | Responsibilities of the Client</strong></p>
-      <ul>
-        <li>Ensuring the venue provides safe, dry, and licensed conditions.</li>
-        <li>Provide refreshments and hot meals for the Artist if required, as well as the appropriate number of chairs for the Artist.</li>
-        <li>Free parking, which must be available, or parking expenses reimbursed.</li>
-        <li>Changing area, which must be secure and adequate.</li>
-        <li>Electrical sockets, as per the Artist's requirements.</li>
-        <li>Ensure the Artist's equipment is safe from spillages and from guests.</li>
-        <li>Ensure the Artist's is able to perform in a safe environment with no agression or violence towards them.</li>
-      </ul>
-
-      <p><strong>10 | Responsibilities of the Agent</strong></p>
-      <ul>
-        <li>Provide a service for Clients to find an Artist that is not double-booked through the company.</li>
-        <li>Ensure Artist quality, professionalism, and safety compliance.</li>
-        <li>Provide the Event Sheet and reminders to ensure both parties have all of the information they need so that the artist can carry out a successful performance.</li>
-      </ul>
-
-      <p><strong>11 | Expenses</strong></p>
-      <p>Client is only liable for additional expenses if agreed in advance.</p>
-
-      <p><strong>12 | Artist Equipment</strong></p>
-      <p>Artist equipment must not be used by guests. Client is liable for any damage caused.</p>
-
-      <p><strong>13 | Changes to Performance Schedule</strong></p>
-      <ul>
-        <li>Changes can be made on the Event Sheet up to one month before the performance date.</li>
-        <li>Overruns by the Client do not extend Artist time unless agreed and paid for additionally.</li>
-      </ul>
-
-      <p><strong>14 | Deputies</strong></p>
-      <p>The Agent may substitute musicians of similar ability without notice.</p>
-
-      <p><strong>15 | Force Majeure</strong></p>
-      <ul>
-        <li>Force Majeure includes natural disasters, illness, war, terrorism, etc.</li>
-        <li>Evidence must be provided to justify Force Majeure claims.</li>
-      </ul>
-
-      <p><strong>16 | Terms Acceptance</strong></p>
-      <p>By signing the contract, you agree to all Terms and Conditions listed above.</p>
+    <div style="margin-top:10px; font-size:13px;">
+      <div><strong>Signed by:</strong> <%= clientFullName %></div>
+      <div><strong>Date:</strong> <%= signedDate %></div>
     </div>
-    <%
-  const clientFullName =
-    [userAddress?.firstName, userAddress?.lastName].filter(Boolean).join(" ") || "—";
-
-  // You can change this to booking.createdAt if you'd rather:
-const signedDate = (createdAt ? new Date(createdAt) : new Date()).toLocaleDateString("en-GB");%>
-
-<div style="margin-top:18px;">
-  <div style="font-weight:700; margin-bottom:6px;">Client Signature</div>
-
-  <% if (signatureUrl) { %>
-    <div style="border:1px solid #ccc; padding:10px; display:inline-block;">
-      <img src="<%= signatureUrl %>" alt="Client signature" style="width:220px; height:auto; display:block;" />
-    </div>
-  <% } else { %>
-    <div style="border:1px solid #ccc; padding:18px; width:260px; color:#666;">
-      Signature not provided
-    </div>
-  <% } %>
-
-  <div style="margin-top:10px; font-size:13px;">
-    <div><strong>Signed by:</strong> <%= clientFullName %></div>
-    <div><strong>Date:</strong> <%= signedDate %></div>
   </div>
-</div>
-    <footer style="margin-top: 60px; font-size: 12px; color: #666; text-align: center; border-top: 1px solid #ccc; padding-top: 10px;">
-  <p>The Supreme Collective Ltd</p>
-  <p>Tel: +44 7594 223200 | Email: hello@thesupremecollective.co.uk</p>
-  <p>Address: Cramond, Reeves Lane, Roydon, CM19 5LE</p>
-  <p>Company Number: 16883956</p>
-</footer>
-  </body>
+
+  <footer style="margin-top: 60px; font-size: 12px; color: #666; text-align: center; border-top: 1px solid #ccc; padding-top: 10px;">
+    <p>The Supreme Collective Ltd</p>
+    <p>Tel: +44 7594 223200 | Email: hello@thesupremecollective.co.uk</p>
+    <p>Address: 71–75 Shelton Street, Covent Garden, London, WC2H 9JQ</p>
+    <p>Company Number: 16883956</p>
+  </footer>
+</body>
+</html>

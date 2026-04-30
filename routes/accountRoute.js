@@ -1,5 +1,11 @@
 import express from "express";
-import { changePhone, changeEmail, changePassword } from "../controllers/account.js";
+import {
+  changePhone,
+  changeEmail,
+  changePassword,
+  createStripeConnectOnboardingLink,
+} from "../controllers/account.js";
+
 console.log("🔍 Using auth middleware from:", new URL("../middleware/auth.js", import.meta.url).pathname);
 import auth from "../middleware/auth.js";
 
@@ -32,6 +38,20 @@ router.post(
   auth,
   (req, _res, next) => { console.log(`✅ [${req._rid || 'no-rid'}] passed auth for change-password`); next(); },
   changePassword
+);
+
+router.post(
+  "/stripe-connect/onboarding-link",
+  (req, _res, next) => {
+    console.log(`➡️  [${req._rid || "no-rid"}] entering auth for stripe-connect/onboarding-link`);
+    next();
+  },
+  auth,
+  (req, _res, next) => {
+    console.log(`✅ [${req._rid || "no-rid"}] passed auth for stripe-connect/onboarding-link`);
+    next();
+  },
+  createStripeConnectOnboardingLink
 );
 
 export default router;
