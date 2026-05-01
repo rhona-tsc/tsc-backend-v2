@@ -2045,22 +2045,7 @@ const upsertPresentedApplicationForEnquiry = ({ job, musician, now }) => {
       "",
     postcode: musician?.address?.postcode || musician?.postcode || "",
     status: "presented",
-    notes: "",
-    deputyMatchScore: 0,
-    matchSummary: {
-      instrument: job?.instrument || "",
-      roleFit: 0,
-      genreFit: 0,
-      locationFit: 0,
-      songFit: 0,
-    },
-    appliedAt: now,
-    shortlistedAt: null,
     presentedAt: now,
-    allocatedAt: null,
-    bookedAt: null,
-    declinedAt: null,
-    withdrawnAt: null,
     phoneNormalized: toE164(
       musician?.phone ||
         musician?.phoneNumber ||
@@ -2070,15 +2055,54 @@ const upsertPresentedApplicationForEnquiry = ({ job, musician, now }) => {
   };
 
   if (existingIndex === -1) {
-    job.applications = [...existingApplications, baseApplication];
+    job.applications = [
+      ...existingApplications,
+      {
+        ...baseApplication,
+        notes: "",
+        deputyMatchScore: 0,
+        matchSummary: {
+          instrument: job?.instrument || "",
+          roleFit: 0,
+          genreFit: 0,
+          locationFit: 0,
+          songFit: 0,
+        },
+        appliedAt: now,
+        shortlistedAt: null,
+        allocatedAt: null,
+        bookedAt: null,
+        declinedAt: null,
+        withdrawnAt: null,
+      },
+    ];
   } else {
     job.applications = existingApplications.map((application, index) => {
       if (index !== existingIndex) return application;
 
+      const plain =
+        typeof application?.toObject === "function"
+          ? application.toObject()
+          : application;
+
       return {
-        ...application,
+        ...plain,
         ...baseApplication,
-        appliedAt: application?.appliedAt || now,
+        notes: plain?.notes ?? "",
+        deputyMatchScore: plain?.deputyMatchScore ?? 0,
+        matchSummary: plain?.matchSummary || {
+          instrument: job?.instrument || "",
+          roleFit: 0,
+          genreFit: 0,
+          locationFit: 0,
+          songFit: 0,
+        },
+        appliedAt: plain?.appliedAt || now,
+        shortlistedAt: plain?.shortlistedAt || null,
+        allocatedAt: plain?.allocatedAt || null,
+        bookedAt: plain?.bookedAt || null,
+        declinedAt: plain?.declinedAt || null,
+        withdrawnAt: plain?.withdrawnAt || null,
       };
     });
   }
@@ -2086,6 +2110,8 @@ const upsertPresentedApplicationForEnquiry = ({ job, musician, now }) => {
   job.applicationCount = Array.isArray(job.applications)
     ? job.applications.length
     : 0;
+
+  job.markModified("applications");
 };
 
 const buildDeputyReplyCode = (jobId, musicianId, action) => {
@@ -3487,46 +3513,46 @@ export const confirmDeputyAllocation = async (req, res) => {
       job.paymentStatus = "not_required";
     }
 
-    let whatsappResult = null;
+   let whatsappResult = null;
+let whatsappErrorMessage = "";
 
-    const rawTargetPhone =
-      musician?.phone ||
-      musician?.phoneNumber ||
-      application?.phoneNormalized ||
-      application?.phone ||
-      "";
+const rawTargetPhone =
+  musician?.phone ||
+  musician?.phoneNumber ||
+  application?.phoneNormalized ||
+  application?.phone ||
+  "";
 
-    const targetPhone = toE164(rawTargetPhone);
+const targetPhone = toE164(rawTargetPhone);
 
-    console.log("📲 Allocation WhatsApp target", {
+console.log("📲 Allocation WhatsApp target", {
+  jobId: String(job._id),
+  musicianId: String(musician._id),
+  targetPhone,
+  rawPhone: rawTargetPhone,
+  isEnquiryJob,
+});
+
+if (!isEnquiryJob && targetPhone) {
+  try {
+    whatsappResult = await sendDeputyAllocationWhatsApp({
+      to: targetPhone,
+      job,
+      musician,
+    });
+  } catch (whatsappError) {
+    whatsappErrorMessage =
+      whatsappError?.message || "WhatsApp allocation send failed";
+
+    console.error("❌ sendDeputyAllocationWhatsApp error:", {
       jobId: String(job._id),
       musicianId: String(musician._id),
       targetPhone,
-      rawPhone: rawTargetPhone,
+      message: whatsappErrorMessage,
+      stack: whatsappError?.stack,
     });
-
-    let whatsappErrorMessage = "";
-
-    if (targetPhone) {
-      try {
-        whatsappResult = await sendDeputyAllocationWhatsApp({
-          to: targetPhone,
-          job,
-          musician,
-        });
-      } catch (whatsappError) {
-        whatsappErrorMessage =
-          whatsappError?.message || "WhatsApp allocation send failed";
-
-        console.error("❌ sendDeputyAllocationWhatsApp error:", {
-          jobId: String(job._id),
-          musicianId: String(musician._id),
-          targetPhone,
-          message: whatsappErrorMessage,
-          stack: whatsappError?.stack,
-        });
-      }
-    }
+  }
+}
 
     job.notifications = [
       ...(job.notifications || []),
@@ -3534,23 +3560,31 @@ export const confirmDeputyAllocation = async (req, res) => {
         musicianId: musician._id,
         email: musician.email || application?.email || "",
         phone: targetPhone || "",
-        channel: targetPhone ? "whatsapp" : "email",
-        type: "allocation_request",
-        subject: `Deputy allocation request: ${normaliseString(
-          job.title || job.instrument || "Deputy opportunity",
-        )}`,
-        previewHtml: "",
-        previewText: `Allocation request sent via ${
-          targetPhone ? "WhatsApp" : "fallback"
-        } to ${[musician.firstName, musician.lastName].filter(Boolean).join(" ").trim()}`,
-        providerMessageId: whatsappResult?.sid || "",
-        status: whatsappResult?.sid ? "sent" : "failed",
-        sentAt: new Date(),
-        error: whatsappResult?.sid
-          ? ""
-          : targetPhone
-            ? whatsappErrorMessage || "WhatsApp allocation send failed"
-            : "No phone number available for allocation message",
+       channel: !isEnquiryJob && targetPhone ? "whatsapp" : "system",
+type: "allocation_request",
+subject: `Deputy allocation request: ${normaliseString(
+  job.title || job.instrument || "Deputy opportunity",
+)}`,
+previewHtml: "",
+previewText: isEnquiryJob
+  ? `Enquiry allocation updated with no WhatsApp sent for ${[musician.firstName, musician.lastName].filter(Boolean).join(" ").trim()}`
+  : `Allocation request sent via ${
+      targetPhone ? "WhatsApp" : "fallback"
+    } to ${[musician.firstName, musician.lastName].filter(Boolean).join(" ").trim()}`,
+providerMessageId: !isEnquiryJob ? whatsappResult?.sid || "" : "",
+status: isEnquiryJob
+  ? "skipped"
+  : whatsappResult?.sid
+    ? "sent"
+    : "failed",
+sentAt: new Date(),
+error: isEnquiryJob
+  ? ""
+  : whatsappResult?.sid
+    ? ""
+    : targetPhone
+      ? whatsappErrorMessage || "WhatsApp allocation send failed"
+      : "No phone number available for allocation message",
       },
     ];
 
@@ -3559,12 +3593,13 @@ export const confirmDeputyAllocation = async (req, res) => {
     const formattedJob = withDeputyJobAliases(job);
 
     return res.json({
-      success: true,
-      message: chargeResult?.success
-        ? "Deputy allocated, WhatsApp sent and client charged"
-        : whatsappResult?.sid
-          ? "Deputy allocated and WhatsApp sent"
-          : "Deputy allocated",
+     message: chargeResult?.success
+  ? "Deputy allocated, WhatsApp sent and client charged"
+  : !isEnquiryJob
+    ? whatsappResult?.sid
+      ? "Deputy allocated and WhatsApp sent"
+      : "Deputy allocated"
+    : "Deputy allocated",
       job: formattedJob,
       allocatedMusician: musician,
       chargeResult,
@@ -5667,16 +5702,22 @@ export const presentDeputyApplicant = async (req, res) => {
     }
 
     const now = new Date();
+
+    // 1) Update applicant status first
     upsertPresentedApplicationForEnquiry({ job, musician, now });
 
+    // save immediately so presented tag persists even if email fails
+    await job.save();
+
     const email = normaliseEmail(
-      musician?.email || musician?.basicInfo?.email || "",
+      musician?.email || musician?.basicInfo?.email || ""
     );
+
     const phone = toE164(
       musician?.phone ||
-        musician?.phoneNumber ||
-        musician?.basicInfo?.phone ||
-        "",
+      musician?.phoneNumber ||
+      musician?.basicInfo?.phone ||
+      ""
     );
 
     const notificationPreview = buildApplicantPresentedEmailPreview({
@@ -5684,7 +5725,8 @@ export const presentDeputyApplicant = async (req, res) => {
       musician,
     });
 
-
+    let emailSent = false;
+    let emailErrorMessage = "";
 
     if (email) {
       try {
@@ -5697,33 +5739,35 @@ export const presentDeputyApplicant = async (req, res) => {
         });
         emailSent = true;
       } catch (emailError) {
+        emailErrorMessage = emailError?.message || "Email send failed";
+
         console.error("❌ presentDeputyApplicant email error:", {
           jobId: String(job._id),
           musicianId: String(musician._id),
           email,
-          message: emailError?.message || "Email send failed",
+          message: emailErrorMessage,
         });
       }
+    } else {
+      emailErrorMessage = "No email address available";
     }
 
+    // 2) Record notification separately
     job.notifications = [
       ...(Array.isArray(job.notifications) ? job.notifications : []),
       {
         musicianId: musician._id,
         email,
         phone,
-        channel: whatsappSid ? "whatsapp" : "email",
+        channel: "email",
         type: "applicant_presented",
         subject: notificationPreview.subject,
         previewHtml: notificationPreview.html,
         previewText: notificationPreview.text,
-        providerMessageId: whatsappSid,
-        status: whatsappSid || emailSent ? "sent" : "failed",
+        providerMessageId: "",
+        status: emailSent ? "sent" : "failed",
         sentAt: new Date(),
-        error:
-          whatsappSid || emailSent
-            ? ""
-            : whatsappErrorMessage || "No contact details available",
+        error: emailSent ? "" : emailErrorMessage,
       },
     ];
 
@@ -5731,7 +5775,9 @@ export const presentDeputyApplicant = async (req, res) => {
 
     return res.json({
       success: true,
-      message: "Applicant presented to client",
+      message: emailSent
+        ? "Applicant presented to client"
+        : "Applicant marked as presented, but email failed",
       job: withDeputyJobAliases(job),
       musician: {
         _id: musician._id,
@@ -5742,12 +5788,20 @@ export const presentDeputyApplicant = async (req, res) => {
         musicianSlug: musician.musicianSlug || "",
       },
       notification: {
-        whatsappSid,
         email,
+        sent: emailSent,
+        error: emailSent ? "" : emailErrorMessage,
       },
     });
   } catch (error) {
     console.error("❌ presentDeputyApplicant error:", error);
+    console.error("❌ presentDeputyApplicant validation details:", {
+      message: error?.message,
+      name: error?.name,
+      errors: error?.errors,
+      stack: error?.stack,
+    });
+
     return res.status(500).json({
       success: false,
       message: "Failed to present applicant",
@@ -5879,31 +5933,31 @@ export const manualAllocateDeputyJob = async (req, res) => {
     );
 
     let whatsappResult = null;
-    let whatsappErrorMessage = "";
+let whatsappErrorMessage = "";
 
-    if (targetPhone) {
-      try {
-        whatsappResult = await sendDeputyAllocationWhatsApp({
-          to: targetPhone,
-          job,
-          musician,
-        });
-      } catch (whatsappError) {
-        whatsappErrorMessage =
-          whatsappError?.message || "WhatsApp allocation send failed";
+if (!isEnquiryJob && targetPhone) {
+  try {
+    whatsappResult = await sendDeputyAllocationWhatsApp({
+      to: targetPhone,
+      job,
+      musician,
+    });
+  } catch (whatsappError) {
+    whatsappErrorMessage =
+      whatsappError?.message || "WhatsApp allocation send failed";
 
-        console.error(
-          "❌ manualAllocateDeputyJob sendDeputyAllocationWhatsApp error:",
-          {
-            jobId: String(job._id),
-            musicianId: String(musician._id),
-            targetPhone,
-            message: whatsappErrorMessage,
-            stack: whatsappError?.stack,
-          },
-        );
-      }
-    }
+    console.error(
+      "❌ manualAllocateDeputyJob sendDeputyAllocationWhatsApp error:",
+      {
+        jobId: String(job._id),
+        musicianId: String(musician._id),
+        targetPhone,
+        message: whatsappErrorMessage,
+        stack: whatsappError?.stack,
+      },
+    );
+  }
+}
 
     job.notifications = [
       ...(job.notifications || []),
@@ -5911,37 +5965,45 @@ export const manualAllocateDeputyJob = async (req, res) => {
         musicianId: musician._id,
         email: musician.email || application?.email || "",
         phone: targetPhone || "",
-        channel: targetPhone ? "whatsapp" : "email",
-        type: "allocation_request",
-        subject: `Deputy allocation request: ${normaliseString(
-          job.title || job.instrument || "Deputy opportunity",
-        )}`,
-        previewHtml: "",
-        previewText: `Manual allocation request sent via ${
-          targetPhone ? "WhatsApp" : "fallback"
-        } to ${[musician.firstName, musician.lastName].filter(Boolean).join(" ").trim()}`,
-        providerMessageId: whatsappResult?.sid || "",
-        status: whatsappResult?.sid ? "sent" : "failed",
-        sentAt: new Date(),
-        error: whatsappResult?.sid
-          ? ""
-          : targetPhone
-            ? whatsappErrorMessage || "WhatsApp allocation send failed"
-            : "No phone number available for allocation message",
+       channel: !isEnquiryJob && targetPhone ? "whatsapp" : "system",
+type: "allocation_request",
+subject: `Deputy allocation request: ${normaliseString(
+  job.title || job.instrument || "Deputy opportunity",
+)}`,
+previewHtml: "",
+previewText: isEnquiryJob
+  ? `Manual enquiry allocation updated with no WhatsApp sent for ${[musician.firstName, musician.lastName].filter(Boolean).join(" ").trim()}`
+  : `Manual allocation request sent via ${
+      targetPhone ? "WhatsApp" : "fallback"
+    } to ${[musician.firstName, musician.lastName].filter(Boolean).join(" ").trim()}`,
+providerMessageId: !isEnquiryJob ? whatsappResult?.sid || "" : "",
+status: isEnquiryJob
+  ? "skipped"
+  : whatsappResult?.sid
+    ? "sent"
+    : "failed",
+sentAt: new Date(),
+error: isEnquiryJob
+  ? ""
+  : whatsappResult?.sid
+    ? ""
+    : targetPhone
+      ? whatsappErrorMessage || "WhatsApp allocation send failed"
+      : "No phone number available for allocation message",
       },
     ];
 
     await job.save();
 
-    const responseMessage = chargeResult?.skipped
-      ? whatsappResult?.sid
-        ? "Deputy manually allocated and WhatsApp resent. Existing successful payment was reused"
-        : "Deputy manually allocated. Existing successful payment was reused"
-      : chargeResult?.success
-        ? "Deputy manually allocated, WhatsApp sent and client charged"
-        : whatsappResult?.sid
-          ? "Deputy manually allocated and WhatsApp sent"
-          : "Deputy manually allocated";
+  const responseMessage = chargeResult?.skipped
+  ? !isEnquiryJob && whatsappResult?.sid
+    ? "Deputy manually allocated and WhatsApp resent. Existing successful payment was reused"
+    : "Deputy manually allocated. Existing successful payment was reused"
+  : chargeResult?.success
+    ? "Deputy manually allocated, WhatsApp sent and client charged"
+    : !isEnquiryJob && whatsappResult?.sid
+      ? "Deputy manually allocated and WhatsApp sent"
+      : "Deputy manually allocated";
 
     return res.json({
       success: true,

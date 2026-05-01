@@ -369,6 +369,14 @@ export const sendDeputyAllocationWhatsApp = async ({
   job,
   musician,
 }) => {
+  const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+
+  if (isEnquiryJob) {
+    throw new Error(
+      "sendDeputyAllocationWhatsApp should not be used for enquiry jobs"
+    );
+  }
+
   const formattedDate = job?.eventDate
     ? formatNiceDate(job.eventDate)
     : "TBC";
@@ -385,69 +393,40 @@ export const sendDeputyAllocationWhatsApp = async ({
     ? Array.from(new Set(locationParts)).join(", ")
     : job?.location || "Location TBC";
 
-const grossFee = Number(job?.fee || job?.grossAmount || 0);
-const storedNetFee = Number(job?.deputyNetAmount || 0);
-const stripeFee = Number(job?.stripeFeeAmount || 0);
+  const grossFee = Number(job?.fee || job?.grossAmount || 0);
+  const storedNetFee = Number(job?.deputyNetAmount || 0);
+  const stripeFee = Number(job?.stripeFeeAmount || 0);
 
-const netFeeValue =
-  storedNetFee > 0
-    ? storedNetFee
-    : grossFee > 0 && stripeFee > 0
-      ? grossFee - stripeFee
-      : grossFee;
+  const netFeeValue =
+    storedNetFee > 0
+      ? storedNetFee
+      : grossFee > 0 && stripeFee > 0
+        ? grossFee - stripeFee
+        : grossFee;
 
-const fee = netFeeValue > 0 ? String(Math.round(netFeeValue)) : "";
+  const fee = netFeeValue > 0 ? String(Math.round(netFeeValue)) : "";
 
-const firstName =
+  const firstName =
     musician?.firstName ||
     musician?.firstname ||
     musician?.basicInfo?.firstName ||
     musician?.name ||
     "there";
-    
-  const profileUrl = buildProfileUrl(musician);
 
-  const roleLabel =
-    job?.instrument ||
-    "Deputy";
+  const roleLabel = job?.instrument || "Deputy";
+  const actName = job?.title || job?.instrument || "Deputy opportunity";
 
-  const actName =
-    job?.title ||
-    job?.instrument ||
-    "Deputy opportunity";
+  const bookingIntroLine = `You've been selected for a booking on ${formattedDate} at ${location} for the role of ${roleLabel}, at a fee of £${fee || "TBC"}.`;
 
-const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+  const bookingFollowUpLine =
+    "As you applied for this gig, please confirm whether you'd like to accept the booking.";
 
-const enquiryIntroLine = `You've been presented as a deputy for an enquiry on ${formattedDate} at ${location} for the role of ${roleLabel}, at a fee of £${fee || "TBC"}.`;
-
-const bookingIntroLine = `You've been selected for a booking on ${formattedDate} at ${location} for the role of ${roleLabel}, at a fee of £${fee || "TBC"}.`;
-
-const enquiryFollowUpLine =
-  "Please make sure your profile is up to date, as the client will review it when considering you for the booking.";
-
-const bookingFollowUpLine =
-  "As you applied for this gig, please confirm whether you'd like to accept the booking.";
-
-const enquirySmsBody = [
-  `Hi ${firstName},`,
-  enquiryIntroLine,
-  enquiryFollowUpLine,
-  profileUrl ? `Check your profile here: ${profileUrl}` : "",
-  "🤍 TSC",
-]
-  .filter(Boolean)
-  .join("\n");
-
-const bookingSmsBody = [
-  `Hi ${firstName},`,
-  bookingIntroLine,
-  bookingFollowUpLine,
-  "🤍 TSC",
-].join("\n");
-
-  if (isEnquiryJob) {
-    return sendWhatsAppText(to, enquirySmsBody);
-  }
+  const bookingSmsBody = [
+    `Hi ${firstName},`,
+    bookingIntroLine,
+    bookingFollowUpLine,
+    "🤍 TSC",
+  ].join("\n");
 
   const allocationContentSid = String(
     process.env.TWILIO_JOB_ALLOCATION_REQUEST_SID || ""
