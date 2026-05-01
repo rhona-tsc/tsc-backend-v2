@@ -5684,29 +5684,7 @@ export const presentDeputyApplicant = async (req, res) => {
       musician,
     });
 
-    let whatsappSid = "";
-    let whatsappErrorMessage = "";
-    let emailSent = false;
 
-    if (phone) {
-      try {
-        const whatsappResult = await sendDeputyAllocationWhatsApp({
-          to: phone,
-          job,
-          musician,
-        });
-        whatsappSid = whatsappResult?.sid || "";
-      } catch (whatsappError) {
-        whatsappErrorMessage =
-          whatsappError?.message || "WhatsApp presentation send failed";
-        console.error("❌ presentDeputyApplicant WhatsApp error:", {
-          jobId: String(job._id),
-          musicianId: String(musician._id),
-          phone,
-          message: whatsappErrorMessage,
-        });
-      }
-    }
 
     if (email) {
       try {
