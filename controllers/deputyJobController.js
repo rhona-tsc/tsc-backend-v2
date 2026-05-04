@@ -82,12 +82,15 @@ const asObjectIdString = (value) => {
   return String(value);
 };
 
-const stripeSecretKey =
-  process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY || "";
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
 
 const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
   : null;
+
+if (!stripeSecretKey) {
+  console.warn("⚠️ STRIPE_SECRET_KEY missing — deputy job payments will be disabled.");
+}
 
 const normaliseEmail = (value) => normaliseString(value).toLowerCase();
 
@@ -437,7 +440,7 @@ const pushPaymentEvent = (job, event = {}) => {
       type: event.type || "manual_adjustment",
       status: normaliseString(event.status || ""),
       amount: Number(event.amount || 0),
-      currency: normaliseCurrency(event.currency || job.currency || "£"),
+currency: normaliseCurrency(event.currency || job.currency || "GBP"),
       stripeCustomerId: normaliseString(
         event.stripeCustomerId || job.stripeCustomerId || "",
       ),

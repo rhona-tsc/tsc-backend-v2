@@ -6,12 +6,15 @@ import musicianModel from "../models/musicianModel.js";
 
 const PAYOUT_READY_STATUSES = ["scheduled", "pending"];
 
-const stripeSecretKey =
-  process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY || "";
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
 
 const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
   : null;
+
+  if (!stripeSecretKey) {
+  console.warn("⚠️ STRIPE_SECRET_KEY missing — deputy payout release will HOLD payouts.");
+}
 
 const normaliseString = (value) => String(value || "").trim();
 const normaliseEmail = (value) => normaliseString(value).toLowerCase();

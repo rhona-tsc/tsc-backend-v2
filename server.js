@@ -2,14 +2,16 @@
 import express from "express";
 import cors from "cors";
 import "dotenv/config";
-import bodyParser from "body-parser";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import cron from "node-cron";
 import listEndpoints from "express-list-endpoints";
+import Stripe from "stripe";
+
 import connectDB from "./config/mongodb.js";
 import connectCloudinary from "./config/connectCloudinary.js";
 import cloudinary from "./config/cloudinary.js";
+
 import feedbackRoutes from "./routes/feedbackRoutes.js";
 import noticeRoutes from "./routes/noticeRoutes.js";
 import actPreSubmissionRoutes from "./routes/actPreSubmissionRoutes.js";
@@ -38,44 +40,50 @@ import v2Routes from "./routes/v2.js";
 import agentDashboardRoutes from "./routes/agentDashboardRoutes.js";
 import sitemapRoutes from "./routes/sitemapRoutes.js";
 import enquiryBoardRoutes from "./routes/enquiryBoardRoutes.js";
-import { runOnboardingChase } from "./cron/onboardingChase.js";
 import adminRoutes from "./routes/admin.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import deputyOpportunityRoutes from "./routes/deputyOpportunityRoutes.js";
+import deputyJobRouter from "./routes/deputyJobRoute.js";
+
 import {
   watchCalendar,
   handleGoogleWebhook,
 } from "./controllers/googleController.js";
+
 import {
   twilioInbound,
   twilioStatus,
   buildAvailabilityBadgeFromRows,
   processDueDeputyEscalations,
 } from "./controllers/availabilityController.js";
+
 import { getAvailableActIds } from "./controllers/actAvailabilityController.js";
 import { startRemindersPoller } from "./services/remindersQueue.js";
 import { runChaseAndEscalation } from "./cron/chaseAndEscalate.js";
+import { runOnboardingChase } from "./cron/onboardingChase.js";
 import actModel from "./models/actModel.js";
-import deputyJobRouter from "./routes/deputyJobRoute.js";
-
 import { runDeputyPayoutRelease } from "./services/deputyPayoutService.js";
 
+/* -------------------------------------------------------------------------- */
+/*                               Boot + env log                               */
+/* -------------------------------------------------------------------------- */
 
-// Simple env debug
 console.log("ENV CHECK:", {
   INTERNAL_BASE_URL: process.env.INTERNAL_BASE_URL,
   BACKEND_PUBLIC_URL: process.env.BACKEND_PUBLIC_URL,
   BACKEND_URL: process.env.BACKEND_URL,
+  STRIPE_CONFIGURED: Boolean(process.env.STRIPE_SECRET_KEY),
+  STRIPE_WEBHOOK_CONFIGURED: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
 });
 
 const app = express();
 const port = process.env.PORT || 4000;
 
-/* -------------------------------------------------------------------------- */
-/*                               CORS (VERY TOP)                              */
-/* -------------------------------------------------------------------------- */
-
 app.set("trust proxy", 1); // Render/Cloudflare
+
+/* -------------------------------------------------------------------------- */
+/*                                    CORS                                    */
+/* -------------------------------------------------------------------------- */
 
 // Host-based allowlist
 const ALLOWED_HOSTS = new Set([
@@ -113,56 +121,23 @@ function isAllowedOrigin(origin) {
   }
 }
 
-// Main CORS middleware
 app.use(
   cors({
     origin(origin, cb) {
-      if (!origin || isAllowedOrigin(origin)) {
-        cb(null, true);
-      } else {
-        cb(new Error("CORS blocked"), false);
-      }
+      if (!origin || isAllowedOrigin(origin)) return cb(null, true);
+      return cb(new Error("CORS blocked"), false);
     },
+    credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ALLOW_HEADERS.split(",").map((h) => h.trim()),
-    credentials: true,
-    optionsSuccessStatus: 204,
   })
 );
 
-// Force headers on all responses (helps behind Cloudflare / proxies)
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin && isAllowedOrigin(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Access-Control-Allow-Headers", ALLOW_HEADERS);
-  res.setHeader("Vary", "Origin");
-  next();
-});
-
-// Global preflight handler
-app.use((req, res, next) => {
-  if (req.method === "OPTIONS") {
-    const origin = req.headers.origin;
-    if (origin && isAllowedOrigin(origin)) {
-      res.header("Access-Control-Allow-Origin", origin);
-    }
-    res.header(
-      "Access-Control-Allow-Methods",
-      "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-    );
-    res.header("Access-Control-Allow-Headers", ALLOW_HEADERS);
-    res.header("Access-Control-Allow-Credentials", "true");
-    return res.sendStatus(204);
-  }
-  next();
-});
-
+// Let cors handle preflights globally
+app.options("*", cors());
 
 /* -------------------------------------------------------------------------- */
-/*                          Standard app middleware                            */
+/*                             Standard middleware                              */
 /* -------------------------------------------------------------------------- */
 
 if (process.env.NODE_ENV !== "production") {
@@ -170,8 +145,69 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 app.use(cookieParser());
+
+/* -------------------------------------------------------------------------- */
+/*                               Stripe (shared)                               */
+/* -------------------------------------------------------------------------- */
+
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
+
+if (!stripeSecretKey) {
+  console.warn(
+    "⚠️ STRIPE_SECRET_KEY missing — Stripe routes + webhooks will fail."
+  );
+}
+
+const stripe = stripeSecretKey
+  ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
+  : null;
+
+/**
+ * IMPORTANT:
+ * This webhook MUST be defined BEFORE express.json(), because it needs req.body as raw bytes.
+ * Stripe dashboard webhook URL should be:
+ *   https://<backend>/api/payments/stripe-webhook
+ */
+app.post(
+  "/api/payments/stripe-webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    if (!stripe) {
+      console.error("⚠️ Stripe webhook hit but STRIPE_SECRET_KEY is missing.");
+      return res.status(500).send("Stripe not configured");
+    }
+
+    const sig = req.headers["stripe-signature"];
+    let event;
+
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+    } catch (err) {
+      console.error(
+        "⚠️ Stripe webhook signature verification failed:",
+        err.message
+      );
+      return res.sendStatus(400);
+    }
+
+    // TODO: Handle the event types you care about
+    // switch (event.type) {
+    //   case "checkout.session.completed":
+    //     break;
+    //   default:
+    //     break;
+    // }
+
+    return res.status(200).json({ received: true });
+  }
+);
+
+// JSON/body parsing (after webhook)
 app.use(express.json({ limit: "100mb" }));
-app.use(bodyParser.urlencoded({ extended: true, limit: "100mb" }));
 app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
 /* -------------------------------------------------------------------------- */
@@ -180,6 +216,7 @@ app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
 connectDB();
 connectCloudinary();
+
 cloudinary.config({
   cloud_name: process.env.REACT_APP_CLOUDINARY_NAME,
   api_key: process.env.REACT_APP_CLOUDINARY_API_KEY,
@@ -187,7 +224,7 @@ cloudinary.config({
 });
 
 /* -------------------------------------------------------------------------- */
-/*                 🌍 Global color-coded route logging middleware              */
+/*                 🌍 Global (optional) request timing middleware              */
 /* -------------------------------------------------------------------------- */
 
 app.use((req, res, next) => {
@@ -200,27 +237,16 @@ app.use((req, res, next) => {
   }
 
   const start = Date.now();
-  const color = {
-    reset: "\x1b[0m",
-    green: "\x1b[32m",
-    yellow: "\x1b[33m",
-    red: "\x1b[31m",
-  };
 
   res.on("finish", () => {
     const duration = Date.now() - start;
-    const method = req.method.padEnd(6);
     const status = res.statusCode;
 
+    // skip 304
     if (status === 304) return;
 
-    let statusColor =
-      status >= 500 ? color.red : status >= 400 ? color.yellow : color.green;
-
-    // Uncomment if you want visible logs again:
-    // console.log(
-    //   `${statusColor}[${method}]${status}${color.reset} ${req.originalUrl} (${duration}ms)`
-    // );
+    // uncomment to log every request
+    // console.log(`[${req.method}] ${status} ${req.originalUrl} (${duration}ms)`);
   });
 
   next();
@@ -239,12 +265,15 @@ app.get("/debug/base", (_req, res) => {
   });
 });
 
+app.get("/debug/routes", (_req, res) => {
+  res.json(listEndpoints(app));
+});
 
 /* -------------------------------------------------------------------------- */
 /*                                   Routes                                   */
 /* -------------------------------------------------------------------------- */
 
-// Login API (with extra logging)
+// Extra logging around musician-login (only once)
 app.use(
   "/api/musician-login",
   (req, _res, next) => {
@@ -259,61 +288,6 @@ app.use(
   musicianLoginRouter
 );
 
-app.use("/api/sitemap", sitemapRoutes);
-
-
-
-app.use("/api/agent-dashboard", agentDashboardRoutes);
-
-// Twilio webhook test endpoint
-app.post(
-  "/api/shortlist/wh",
-  express.urlencoded({ extended: false }),
-  (req, res) => {
-    console.log("✅ Twilio inbound webhook hit /wh", {
-      keys: Object.keys(req.body || {}),
-      from: req.body?.From,
-      to: req.body?.To,
-      bodyPreview: String(req.body?.Body || "").slice(0, 160),
-    });
-    res.sendStatus(200);
-  }
-);
-
-app.post("/api/google/webhook", handleGoogleWebhook);
-app.post("/api/google/notifications", handleGoogleWebhook);
-
-// Legacy alias for old Twilio webhook
-app.post(
-  "/api/shortlist/twilio/inbound",
-  express.urlencoded({ extended: false }),
-  (req, res) => {
-    console.log(
-      "🟡 Legacy alias hit — forwarding to /api/availability/twilio/inbound"
-    );
-    req.url = "/api/availability/twilio/inbound";
-    app.handle(req, res);
-  }
-);
-
-// Twilio status/inbound
-app.post(
-  "/api/twilio/inbound",
-  express.urlencoded({ extended: false }),
-  twilioInbound
-);
-app.post(
-  "/api/twilio/status",
-  express.urlencoded({ extended: false }),
-  twilioStatus
-);
-
-// Start reminders queue
-startRemindersPoller({ intervalMs: 30000 });
-
-/* -------------------------- Main API mounts (clean) ------------------------- */
-
-app.use("/api/musician-login", musicianLoginRouter);
 app.use("/api/sitemap", sitemapRoutes);
 app.use("/api/v2", v2Routes);
 app.use("/api/agent-dashboard", agentDashboardRoutes);
@@ -356,18 +330,59 @@ app.use("/api/debug", debugRoutes);
 app.use("/api/allocations", allocationRoutes);
 app.use("/api", adminRoutes);
 
+// Google webhooks (keep as-is)
+app.post("/api/google/webhook", handleGoogleWebhook);
+app.post("/api/google/notifications", handleGoogleWebhook);
+
+// Twilio test endpoint
+app.post(
+  "/api/shortlist/wh",
+  express.urlencoded({ extended: false }),
+  (req, res) => {
+    console.log("✅ Twilio inbound webhook hit /wh", {
+      keys: Object.keys(req.body || {}),
+      from: req.body?.From,
+      to: req.body?.To,
+      bodyPreview: String(req.body?.Body || "").slice(0, 160),
+    });
+    res.sendStatus(200);
+  }
+);
+
+// Legacy alias for old Twilio webhook → forwards to availability inbound
+app.post(
+  "/api/shortlist/twilio/inbound",
+  express.urlencoded({ extended: false }),
+  (req, res) => {
+    console.log(
+      "🟡 Legacy alias hit — forwarding to /api/availability/twilio/inbound"
+    );
+    req.url = "/api/availability/twilio/inbound";
+    app.handle(req, res);
+  }
+);
+
+// Twilio status/inbound
+app.post(
+  "/api/twilio/inbound",
+  express.urlencoded({ extended: false }),
+  twilioInbound
+);
+app.post(
+  "/api/twilio/status",
+  express.urlencoded({ extended: false }),
+  twilioStatus
+);
+
 // Availability direct mount
 app.get("/api/availability/acts-available", async (req, res) => {
   const date = String(req.query?.date || "").slice(0, 10);
   console.log("🗓️  GET /api/availability/acts-available", { date });
   try {
-    const result = await getAvailableActIds(req, res);
-    return result;
+    return await getAvailableActIds(req, res);
   } catch (err) {
     console.error("❌ acts-available failed:", err?.message || err);
-    return res
-      .status(500)
-      .json({ success: false, message: "Server error" });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
@@ -375,33 +390,26 @@ app.get("/api/availability/acts-available", async (req, res) => {
 app.get("/", (_req, res) => {
   res.send("✅ API Working");
 });
-app.use("/api/debug", debugRoutes);
 
-app.get("/debug/routes", (_req, res) => {
-  res.json(listEndpoints(app));
-});
-app.use("/api/allocations", allocationRoutes);
-app.use("/api/payments", paymentsRouter);
-
-
-// Upload & musician routes (duplicate kept for compatibility)
-app.use("/api/upload", uploadRoutes);
-app.use("/api", adminRoutes);
 /* -------------------------------------------------------------------------- */
-/*                            Global error handler                            */
+/*                            Global error handler                             */
 /* -------------------------------------------------------------------------- */
 
 app.use((err, req, res, next) => {
   console.error("🔥 Unhandled error:", err?.stack || err);
   if (res.headersSent) return;
-  res
-    .status(err.status || 500)
-    .json({ success: false, message: err.message || "Server error" });
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Server error",
+  });
 });
 
 /* -------------------------------------------------------------------------- */
-/*                          Cron & background jobs                            */
+/*                          Cron & background jobs                             */
 /* -------------------------------------------------------------------------- */
+
+// Start reminders queue
+startRemindersPoller({ intervalMs: 30000 });
 
 // kick off a light poller every 2 minutes (no-op if nothing is due)
 if (process.env.ENABLE_DEFERRED_AVAILABILITY !== "0") {
@@ -420,8 +428,8 @@ cron.schedule(
       const report = await runOnboardingChase({
         limit: 200,
         dryRun: false,
-        includePending: false,   // only approved by default
-        onlyVocalists: false,    // set true if you want just vocalists
+        includePending: false,
+        onlyVocalists: false,
       });
 
       console.log("✅ [CRON] Onboarding chase done:", {
@@ -439,8 +447,8 @@ cron.schedule(
   { timezone: "Europe/London" }
 );
 
-// routes
-app.get("/api/availability/process-deferred", async (req, res) => {
+// Manual route to process deferred availability
+app.get("/api/availability/process-deferred", async (_req, res) => {
   try {
     const out = await processDueDeputyEscalations({ maxBatch: 50 });
     res.json({ ok: true, ...out });
@@ -448,7 +456,6 @@ app.get("/api/availability/process-deferred", async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
-
 
 // Run chase & escalation every hour
 cron.schedule("0 * * * *", async () => {
@@ -469,7 +476,10 @@ cron.schedule(
         financeEmailSent: Boolean(result.financeEmailResult?.success),
       });
     } catch (err) {
-      console.error("❌ [CRON] Deputy payout release failed:", err?.message || err);
+      console.error(
+        "❌ [CRON] Deputy payout release failed:",
+        err?.message || err
+      );
     }
   },
   { timezone: "Europe/London" }
@@ -540,15 +550,15 @@ cron.schedule("0 3 * * *", async () => {
 console.log(
   "🕒 Cron job scheduled: Google Calendar webhook will refresh daily at 03:00 UTC"
 );
-console.log("🕒 Cron job scheduled: Deputy payouts will release daily at 06:00 Europe/London");
+console.log(
+  "🕒 Cron job scheduled: Deputy payouts will release daily at 06:00 Europe/London"
+);
 
 /* -------------------------------------------------------------------------- */
 /*                                   Server                                   */
 /* -------------------------------------------------------------------------- */
 
-app.listen(port, () =>
-  console.log(`🚀 Server started on PORT: ${port}`)
-);
+app.listen(port, () => console.log(`🚀 Server started on PORT: ${port}`));
 
 // Auto-register Google Calendar watch channel at startup
 (async () => {

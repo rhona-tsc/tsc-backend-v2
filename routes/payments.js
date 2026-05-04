@@ -77,55 +77,6 @@ router.post("/parking-checkout", async (req, res) => {
   }
 });
 
-router.post(
-  "/stripe-webhook",
-  bodyParser.raw({ type: "application/json" }), // raw body for signature check
-  async (req, res) => {
-    const sig = req.headers["stripe-signature"];
-    let event;
-    try {
-      const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET; // from Stripe dashboard
-      event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
-    } catch (err) {
-      console.error("⚠️ Webhook signature verification failed", err.message);
-      return res.sendStatus(400);
-    }
 
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-      const { bookingId, category, amount_pence } = session.metadata || {};
-      try {
-        if (category === "parking" && bookingId) {
-          await Booking.updateOne(
-            { bookingId },
-            {
-              $push: {
-                payments: {
-                  // you can create a dedicated "parkingPayments" if you prefer
-                  performanceFee: 0,
-                  travelFee: 0,
-                  isPaid: true,
-                  paidAt: new Date(),
-                },
-              },
-              $set: {
-                "eventSheet.answers.parking": {
-                  ...(session?.amount_total ? { amountPence: session.amount_total } : {}),
-                  ...(amount_pence ? { amountPence: Number(amount_pence) } : {}),
-                  status: "paid",
-                  sessionId: session.id,
-                },
-                updatedAt: new Date(),
-              },
-            }
-          );
-        }
-      } catch (e) {
-        console.error("❌ Failed to update booking from webhook:", e.message);
-      }
-    }
-    res.sendStatus(200);
-  }
-);
 
 export default router;

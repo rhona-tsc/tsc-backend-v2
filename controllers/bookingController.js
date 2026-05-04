@@ -315,8 +315,13 @@ async function triggerBookingRequestsInternal({ actId, lineupId, dateISO, addres
 }
 
 
-const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY_V2);
+const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: "2024-06-20",
+});
 
+if (!process.env.STRIPE_SECRET_KEY) {
+  console.warn("⚠️ STRIPE_SECRET_KEY missing — booking checkout + session retrieval will fail.");
+}
 
 // ---------------- helpers ----------------
 
@@ -997,21 +1002,7 @@ export async function uploadAndEmailContract(pdfBuffer, booking) {
   try {
     console.log("☁️ [Contract] Uploading contract to Cloudinary...");
 
-    const upload = await cloudinary.uploader.upload_stream(
-      {
-        folder: "contracts",
-        public_id: `contract_${bookingRef}`,
-        resource_type: "raw",
-        format: "pdf",
-      },
-      (err, result) => {
-        if (err) {
-          console.error("❌ [Contract] Cloudinary upload err:", err);
-          throw err;
-        }
-        return result;
-      }
-    );
+
 
     // We must pipe the buffer into the upload_stream
     const stream = cloudinary.uploader.upload_stream(
@@ -2580,15 +2571,13 @@ export const completeBookingV2 = async (req, res) => {
 
   try {
     // 0️⃣ Load Stripe Session (support both env keys)
-    const stripeSecret = process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY;
-    if (!stripeSecret) {
-      throw new Error("Missing STRIPE secret key (STRIPE_SECRET_KEY_V2 or STRIPE_SECRET_KEY)");
-    }
-    const stripe = await import("stripe").then((m) => new m.default(stripeSecret));
+  if (!process.env.STRIPE_SECRET_KEY) {
+  throw new Error("Missing STRIPE_SECRET_KEY");
+}
 
-    const session = await stripe.checkout.sessions.retrieve(session_id, {
-      expand: ["payment_intent"],
-    });
+const session = await stripeInstance.checkout.sessions.retrieve(session_id, {
+  expand: ["payment_intent"],
+});
 
     const bookingRef = session?.metadata?.booking_ref;
     if (!bookingRef) throw new Error("Stripe session missing booking_ref metadata");

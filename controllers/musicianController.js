@@ -16,12 +16,15 @@ import { postcodes as POSTCODE_MAP_ARR } from "../utils/postcodes.js";
 const POSTCODE_MAP =
   (Array.isArray(POSTCODE_MAP_ARR) && POSTCODE_MAP_ARR[0]) || {};
 
-const stripeSecretKey =
-  process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY || "";
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
 
 const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
   : null;
+
+if (!stripeSecretKey) {
+  console.warn("⚠️ STRIPE_SECRET_KEY missing — Stripe Connect onboarding will be disabled.");
+}
 
 const normaliseString = (value) => String(value || "").trim();
 const normaliseEmail = (value) => normaliseString(value).toLowerCase();

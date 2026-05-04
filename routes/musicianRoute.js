@@ -26,12 +26,15 @@ import { getStripeConnectPayoutStatus } from "../controllers/deputyJobController
 
 const router = express.Router();
 
-const stripeSecretKey =
-  process.env.STRIPE_SECRET_KEY_V2 || process.env.STRIPE_SECRET_KEY || "";
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
 
 const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
   : null;
+
+if (!stripeSecretKey) {
+  console.warn("⚠️ STRIPE_SECRET_KEY missing — Stripe routes will be limited/disabled.");
+}
 
 const isObjectIdLike = (value = "") => mongoose.Types.ObjectId.isValid(String(value || ""));
 
