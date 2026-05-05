@@ -127,6 +127,23 @@ const estimateDeputyStripeFee = ({
   return roundMoney(percentageFee + fixedFee);
 };
 
+export function formatNiceDate(dateISO) {
+  const dateObj = new Date(dateISO);
+  const day = dateObj.getDate();
+  const suffix =
+    day % 10 === 1 && day !== 11
+      ? "st"
+      : day % 10 === 2 && day !== 12
+        ? "nd"
+        : day % 10 === 3 && day !== 13
+          ? "rd"
+          : "th";
+  const weekday = dateObj.toLocaleString("en-GB", { weekday: "long" });
+  const month = dateObj.toLocaleString("en-GB", { month: "long" });
+  const year = dateObj.getFullYear();
+  return `${weekday}, ${day}${suffix} ${month} ${year}`;
+}
+
 const normaliseBoolean = (value) => {
   if (value === true || value === "true" || value === 1 || value === "1")
     return true;
@@ -2519,59 +2536,86 @@ export const createDeputyJob = async (req, res) => {
 
 export const listDeputyJobs = async (req, res) => {
   try {
-    const jobs = await deputyJobModel
-      .find({})
-      .sort({ createdAt: -1 })
-      .select([
-        "title",
-        "date",
-        "eventDate",
-        "callTime",
-        "startTime",
-        "finishTime",
-        "endTime",
-        "venue",
-        "locationName",
-        "location",
-        "county",
-        "postcode",
-        "requiredInstruments",
-        "requiredSkills",
-        "tags",
-        "fee",
-        "currency",
-        "grossAmount",
-        "commissionAmount",
-        "deputyNetAmount",
-        "paymentStatus",
-        "payoutStatus",
-        "releaseOn",
-        "chargedAt",
-        "defaultPaymentMethodId",
-        "stripeCustomerId",
-        "status",
-        "jobType",
-        "createdBy",
-        "createdByEmail",
-        "createdByName",
-        "allocatedMusicianId",
-        "allocatedMusicianName",
-        "bookedMusicianId",
-        "bookedMusicianName",
-        "applicationCount",
-        "matchedCount",
-        "updatedAt",
-        "createdAt",
-        // optionally: "applications" ONLY if you truly need it in the list panel
-      ].join(" "))
-      .populate("allocatedMusicianId", "firstName lastName email musicianSlug profilePhoto profilePicture")
-      .populate("bookedMusicianId", "firstName lastName email musicianSlug profilePhoto profilePicture")
-      .lean();
+    const jobs = await deputyJobModel.aggregate([
+      { $sort: { createdAt: -1 } },
+      {
+        $addFields: {
+          applicationCount: {
+            $size: { $ifNull: ["$applications", []] },
+          },
+          matchedCount: {
+            $size: { $ifNull: ["$matchedMusicians", []] },
+          },
+        },
+      },
+      {
+        $project: {
+          title: 1,
+          date: 1,
+          eventDate: 1,
+          callTime: 1,
+          startTime: 1,
+          finishTime: 1,
+          endTime: 1,
+          venue: 1,
+          locationName: 1,
+          location: 1,
+          county: 1,
+          postcode: 1,
+          requiredInstruments: 1,
+          requiredSkills: 1,
+          tags: 1,
+          fee: 1,
+          currency: 1,
+          grossAmount: 1,
+          commissionAmount: 1,
+          deputyNetAmount: 1,
+          paymentStatus: 1,
+          payoutStatus: 1,
+          releaseOn: 1,
+          chargedAt: 1,
+          defaultPaymentMethodId: 1,
+          stripeCustomerId: 1,
+          status: 1,
+          jobType: 1,
+          createdBy: 1,
+          createdByEmail: 1,
+          createdByName: 1,
+          allocatedMusicianId: 1,
+          allocatedMusicianName: 1,
+          allocatedMusicianSlug: 1,
+          bookedMusicianId: 1,
+          bookedMusicianName: 1,
+          bookedMusicianSlug: 1,
+          applicationCount: 1,
+          matchedCount: 1,
+          updatedAt: 1,
+          createdAt: 1,
+        },
+      },
+    ]);
 
-    res.json({ success: true, jobs: jobs.map(withDeputyJobAliases) });
+    await deputyJobModel.populate(jobs, [
+      {
+        path: "allocatedMusicianId",
+        select: "firstName lastName email musicianSlug profilePhoto profilePicture",
+      },
+      {
+        path: "bookedMusicianId",
+        select: "firstName lastName email musicianSlug profilePhoto profilePicture",
+      },
+    ]);
+
+    res.json({
+      success: true,
+      jobs: jobs.map(withDeputyJobAliases),
+    });
   } catch (error) {
     console.error("❌ listDeputyJobs error:", error);
-    res.status(500).json({ success: false, message: "Failed to fetch deputy jobs" });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch deputy jobs",
+    });
   }
 };
 
@@ -2942,6 +2986,58 @@ export const applyToDeputyJob = async (req, res) => {
     }
 
     await job.save();
+
+        const applicantEmail =
+      musician?.email ||
+      musician?.basicInfo?.email ||
+      req.user?.email ||
+      "";
+
+    if (applicantEmail) {
+      try {
+        await sendEmail({
+          to: applicantEmail,
+          bcc: DEPUTY_JOB_BCC_EMAIL,
+          subject: `Application received: ${job.title || job.instrument || "Deputy opportunity"}`,
+          html: `
+            <p>Hi ${
+              musician?.firstName ||
+              musician?.basicInfo?.firstName ||
+              req.user?.firstName ||
+              "there"
+            },</p>
+            <p>We’ve received your application for:</p>
+            <p><strong>${job.title || job.instrument || "Deputy opportunity"}</strong></p>
+            <p><strong>Date:</strong> ${job.eventDate ? formatNiceDate(job.eventDate) : "TBC"}</p>
+            <p><strong>Location:</strong> ${job.location || job.venue || job.locationName || "TBC"}</p>
+            <p>We’ll be in touch if you’re shortlisted, presented, or allocated.</p>
+            <p>🤍<br/>The Supreme Collective</p>
+          `,
+          text: `Hi ${
+            musician?.firstName ||
+            musician?.basicInfo?.firstName ||
+            req.user?.firstName ||
+            "there"
+          },
+
+We’ve received your application for ${job.title || job.instrument || "Deputy opportunity"}.
+
+Date: ${job.eventDate ? formatNiceDate(job.eventDate) : "TBC"}
+Location: ${job.location || job.venue || job.locationName || "TBC"}
+
+We’ll be in touch if you’re shortlisted, presented, or allocated.
+
+The Supreme Collective`,
+        });
+      } catch (emailError) {
+        console.error("❌ applyToDeputyJob confirmation email error:", {
+          jobId: String(job._id),
+          musicianId: String(authenticatedMusicianId),
+          email: applicantEmail,
+          message: emailError?.message || "Email send failed",
+        });
+      }
+    }
 
     return res.json({
       success: true,
@@ -6351,6 +6447,58 @@ export const manualApplyDeputyJob = async (req, res) => {
     }
 
     await job.save();
+
+        const applicantEmail =
+      musician?.email ||
+      musician?.basicInfo?.email ||
+      req.user?.email ||
+      "";
+
+    if (applicantEmail) {
+      try {
+        await sendEmail({
+          to: applicantEmail,
+          bcc: DEPUTY_JOB_BCC_EMAIL,
+          subject: `Application received: ${job.title || job.instrument || "Deputy opportunity"}`,
+          html: `
+            <p>Hi ${
+              musician?.firstName ||
+              musician?.basicInfo?.firstName ||
+              req.user?.firstName ||
+              "there"
+            },</p>
+            <p>We’ve received your application for:</p>
+            <p><strong>${job.title || job.instrument || "Deputy opportunity"}</strong></p>
+            <p><strong>Date:</strong> ${job.eventDate ? formatNiceDate(job.eventDate) : "TBC"}</p>
+            <p><strong>Location:</strong> ${job.location || job.venue || job.locationName || "TBC"}</p>
+            <p>We’ll be in touch if you’re shortlisted, presented, or allocated.</p>
+            <p>🤍<br/>The Supreme Collective</p>
+          `,
+          text: `Hi ${
+            musician?.firstName ||
+            musician?.basicInfo?.firstName ||
+            req.user?.firstName ||
+            "there"
+          },
+
+We’ve received your application for ${job.title || job.instrument || "Deputy opportunity"}.
+
+Date: ${job.eventDate ? formatNiceDate(job.eventDate) : "TBC"}
+Location: ${job.location || job.venue || job.locationName || "TBC"}
+
+We’ll be in touch if you’re shortlisted, presented, or allocated.
+
+The Supreme Collective`,
+        });
+      } catch (emailError) {
+        console.error("❌ manualApplyDeputyJob confirmation email error:", {
+  jobId: String(job._id),
+  musicianId: String(musician._id || musicianId),
+  email: applicantEmail,
+  message: emailError?.message || "Email send failed",
+});
+      }
+    }
 
     return res.json({
       success: true,
