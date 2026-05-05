@@ -3437,12 +3437,13 @@ export const confirmDeputyAllocation = async (req, res) => {
 
     const now = new Date();
 
-    job.allocatedMusicianId = musician._id;
-    job.allocatedMusicianName = [musician.firstName, musician.lastName]
-      .filter(Boolean)
-      .join(" ")
-      .trim();
-    job.allocatedAt = now;
+   job.allocatedMusicianId = musician._id;
+job.allocatedMusicianSlug = musician?.musicianSlug || "";
+job.allocatedMusicianName = [musician.firstName, musician.lastName]
+  .filter(Boolean)
+  .join(" ")
+  .trim();
+job.allocatedAt = now;
     job.status = "allocated";
     job.workflowStage = "allocated";
     job.releaseOn = job.releaseOn || buildDefaultReleaseOn(job.eventDate);
@@ -5879,12 +5880,13 @@ export const manualAllocateDeputyJob = async (req, res) => {
 
     upsertManualApplicationForAllocation({ job, musician, now });
 
-    job.allocatedMusicianId = musician._id;
-    job.allocatedMusicianName = [musician.firstName, musician.lastName]
-      .filter(Boolean)
-      .join(" ")
-      .trim();
-    job.allocatedAt = now;
+   job.allocatedMusicianId = musician._id;
+job.allocatedMusicianSlug = musician?.musicianSlug || "";
+job.allocatedMusicianName = [musician.firstName, musician.lastName]
+  .filter(Boolean)
+  .join(" ")
+  .trim();
+job.allocatedAt = now;
     job.status = "allocated";
     job.workflowStage = "allocated";
     job.releaseOn = job.releaseOn || buildDefaultReleaseOn(job.eventDate);

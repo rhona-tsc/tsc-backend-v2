@@ -317,6 +317,7 @@ const deputyJobSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    allocatedMusicianSlug: { type: String, default: "" },
     allocatedMusicianName: { type: String, default: "" },
     allocatedAt: { type: Date, default: null },
 
