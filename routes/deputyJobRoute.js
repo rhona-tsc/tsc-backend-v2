@@ -32,6 +32,7 @@ import {
   retryFailedDeputyJobNotifications,
   manualApplyDeputyJob,
   manualApplyAndPresentDeputyJob,
+  trackDeputyPresentationView,
 } from "../controllers/deputyJobController.js";
 import authUser from "../middleware/auth.js";
 
@@ -52,6 +53,13 @@ deputyJobRouter.post(
   express.urlencoded({ extended: false }),
   twilioInboundDeputyAllocation
 );
+
+deputyJobRouter.post(
+  "/track-presentation-view",
+  express.json(),
+  trackDeputyPresentationView
+);
+
 
 /**
  * Preview / test / resend notifications for an existing job
@@ -91,7 +99,7 @@ deputyJobRouter.post(
  */
 deputyJobRouter.post("/preview", authUser, previewDeputyJob);
 deputyJobRouter.post("/", authUser, createDeputyJob);
-deputyJobRouter.get("/", authUser, (req, res, next) => {
+deputyJobRouter.get("/", (req, res, next) => {
 
   res.set("Cache-Control", "no-store");
 

@@ -12,9 +12,18 @@ import {
 } from "../utils/twilioClient.js";
 import { sendWhatsAppText } from "../utils/twilioClient.js";
 import { sendEmail } from "../utils/sendEmail.js";
+import mongoose from "mongoose";
+import deputyPresentationModel from "../models/deputyPresentationModel.js";
+import crypto from "crypto";
 
 const DEPUTY_JOB_BCC_EMAIL =
   process.env.DEPUTY_JOB_BCC_EMAIL || "hello@thesupremecollective.co.uk";
+
+  const hashIp = (ip = "") => {
+  const raw = String(ip || "").trim();
+  if (!raw) return "";
+  return crypto.createHash("sha256").update(raw).digest("hex");
+};
 
 const normaliseArray = (value) => {
   if (Array.isArray(value)) {
@@ -1303,144 +1312,59 @@ const buildAllocationEmailPreview = ({ job, musician }) => {
   return { subject, html, text };
 };
 
-const buildApplicantPresentedEmailPreview = ({ job, musician }) => {
-  const firstName = normaliseString(musician?.firstName || "there");
-  const fullName =
-    [musician?.firstName, musician?.lastName]
-      .filter(Boolean)
-      .join(" ")
-      .trim() || "Deputy";
+const buildApplicantPresentedEmailPreview = ({ job, musician, profileUrl = "" }) => {
+  const firstName =
+    musician?.firstName ||
+    musician?.basicInfo?.firstName ||
+    "there";
 
-  const jobTitle = normaliseString(
-    job?.title || job?.instrument || "Deputy opportunity",
-  );
-  const dateText = normaliseString(job?.eventDate || job?.date || "TBC");
-  const location = normaliseString(
-    job?.location || job?.venue || job?.locationName || "Location TBC",
-  );
-  const feeText = getDeputyNetFeeText(job);
-
-  const profileUrl = musician?.musicianSlug
-    ? `https://thesupremecollective.co.uk/musician/${musician.musicianSlug}`
-    : musician?._id
-      ? `https://thesupremecollective.co.uk/musician/${musician._id}`
-      : "";
-
-  const adminLoginUrl = "https://admin.thesupremecollective.co.uk/login";
-  const dashboardUrl = "https://admin.thesupremecollective.co.uk";
-
-  const html = `
-    <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
-      <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
-        <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
-          <p style="margin:0; font-size:12px; letter-spacing:2px; text-transform:uppercase; color:#ff6667; font-weight:700;">
-            The Supreme Collective
-          </p>
-          <h1 style="margin:12px 0 0; font-size:28px; line-height:1.2; color:#fff;">
-            You’ve Been Presented for an Enquiry
-          </h1>
-          <p style="margin:12px 0 0; font-size:15px; line-height:1.6; color:#f3f3f3;">
-            A client is considering you as a possible fit for an upcoming opportunity.
-          </p>
-        </div>
-
-        <div style="background:#ffffff; border:1px solid #e8e8e8; border-top:0; border-radius:0 0 20px 20px; padding:32px;">
-          <p style="margin:0 0 18px; font-size:16px; line-height:1.7; color:#333;">
-            Hi ${escapeHtml(firstName)},
-          </p>
-
-          <p style="margin:0 0 18px; font-size:15px; line-height:1.7; color:#444;">
-            You’ve been presented to a client as a possible fit for
-            <strong>${escapeHtml(jobTitle)}</strong>.
-          </p>
-
-          <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#444;">
-            At this stage, this is an enquiry rather than a confirmed booking. Please make sure your profile is fully up to date, as the client may review it when considering their options.
-          </p>
-
-          <div style="margin-bottom:24px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:18px;">
-            <h3 style="margin:0 0 14px; font-size:16px; color:#111;">Enquiry details</h3>
-            <ul style="margin:0; padding-left:20px; font-size:14px; line-height:1.8; color:#333;">
-              ${renderDetailRow("Date", dateText)}
-              ${renderDetailRow("Location", location)}
-              ${renderDetailRow("Fee", feeText)}
-            </ul>
-          </div>
-
-          <div style="margin:0 0 24px; display:flex; flex-wrap:wrap; gap:12px;">
-            <a
-              href="${escapeHtml(adminLoginUrl)}"
-              style="display:inline-block; background:#ff6667; color:#fff; text-decoration:none; padding:14px 22px; border-radius:999px; font-size:14px; font-weight:700;"
-            >
-              Sign in to update profile
-            </a>
-</div>
-          
-          <div style="margin:0 0 24px; display:flex; flex-wrap:wrap; gap:12px;">
-
-            ${
-              profileUrl
-                ? `<a
-                    href="${escapeHtml(profileUrl)}"
-                    style="display:inline-block; background:#fff; color:#111; text-decoration:none; padding:14px 22px; border-radius:999px; font-size:14px; font-weight:700; border:1px solid #dcdcdc;"
-                  >
-                    View public profile
-                  </a>`
-                : ""
-            }
-          </div>
-
-          <div style="padding:18px 20px; background:#fff7f7; border:1px solid #f1d0d1; border-radius:16px; margin-bottom:20px;">
-            <p style="margin:0 0 8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#ff6667;">
-              Top tip
-            </p>
-            <p style="margin:0; font-size:14px; line-height:1.7; color:#444;">
-              Sign in to your dashboard and check that your photos, bio, genres, instruments, videos, rates, travel details, and recent performance material are all fully up to date.
-            </p>
-          </div>
-
-          <p style="margin:0 0 14px; font-size:14px; line-height:1.7; color:#555;">
-            We’ll be in touch if the client would like to proceed.
-          </p>
-
-          <p style="margin:0; font-size:14px; line-height:1.7; color:#555;">
-            Best,<br/>The Supreme Collective
-          </p>
-        </div>
-      </div>
-    </div>
-  `;
-
-  const text = [
-    `Hi ${firstName},`,
-    "",
-    `You’ve been presented to a client as a possible fit for ${jobTitle}.`,
-    "This is currently an enquiry rather than a confirmed booking.",
-    "Please make sure your profile is fully up to date, as the client may review it when considering their options.",
-    "",
-    `Date: ${dateText}`,
-    `Location: ${location}`,
-    `Fee: ${feeText}`,
-    "",
-    `Sign in to update your profile: ${adminLoginUrl}`,
-    `Dashboard: ${dashboardUrl}`,
-    profileUrl ? `Public profile: ${profileUrl}` : "",
-    "",
-    "We’ll be in touch if the client would like to proceed.",
-    "",
-    "Best,",
-    "The Supreme Collective",
+  const musicianName = [
+    musician?.firstName || musician?.basicInfo?.firstName || "",
+    musician?.lastName || musician?.basicInfo?.lastName || "",
   ]
     .filter(Boolean)
-    .join("\n");
+    .join(" ")
+    .trim() || "this musician";
 
-  return {
-    subject: `Enquiry presentation: ${jobTitle}`,
-    html,
-    text,
-    musicianName: fullName,
-    profileUrl,
-  };
+  const finalProfileUrl =
+    profileUrl ||
+    (musician?.musicianSlug
+      ? `${FRONTEND_URL}/musician/${encodeURIComponent(musician.musicianSlug)}`
+      : musician?._id
+        ? `${FRONTEND_URL}/musician/${encodeURIComponent(String(musician._id))}`
+        : "");
+
+  const subject = `You've been presented for ${job?.title || job?.instrument || "a deputy opportunity"}`;
+
+  const html = `
+    <p>Hi ${firstName},</p>
+    <p>You've been presented to the client for:</p>
+    <p><strong>${job?.title || job?.instrument || "Deputy opportunity"}</strong></p>
+    <p><strong>Date:</strong> ${job?.eventDate ? formatNiceDate(job.eventDate) : "TBC"}</p>
+    <p><strong>Location:</strong> ${job?.location || job?.venue || job?.locationName || "TBC"}</p>
+    ${
+      finalProfileUrl
+        ? `<p>The client may review your profile here: <a href="${finalProfileUrl}">${finalProfileUrl}</a></p>`
+        : ""
+    }
+    <p>We’ll keep you updated if the client would like to proceed.</p>
+    <p>🤍<br/>The Supreme Collective</p>
+  `;
+
+  const text = `Hi ${firstName},
+
+You've been presented to the client for:
+${job?.title || job?.instrument || "Deputy opportunity"}
+
+Date: ${job?.eventDate ? formatNiceDate(job.eventDate) : "TBC"}
+Location: ${job?.location || job?.venue || job?.locationName || "TBC"}
+${finalProfileUrl ? `Profile: ${finalProfileUrl}` : ""}
+
+We’ll keep you updated if the client would like to proceed.
+
+The Supreme Collective`;
+
+  return { subject, html, text };
 };
 
 const buildBookingConfirmationPreview = ({ job, musician }) => {
@@ -1984,7 +1908,10 @@ const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
     postcode: musician?.address?.postcode || musician?.postcode || "",
     status: "allocated",
     notes: "",
-    deputyMatchScore: 0,
+    deputyMatchScore:
+  typeof existingApplications?.[existingIndex]?.deputyMatchScore === "number"
+    ? existingApplications[existingIndex].deputyMatchScore
+    : 0,
     matchSummary: {
       instrument: job?.instrument || "",
       roleFit: 0,
@@ -2025,7 +1952,12 @@ const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
     : 0;
 };
 
-const upsertPresentedApplicationForEnquiry = ({ job, musician, now }) => {
+const upsertPresentedApplicationForEnquiry = ({
+  job,
+  musician,
+  now,
+  presentationId,
+}) => {
   const targetId = asObjectIdString(musician?._id);
   if (!targetId) return;
 
@@ -2034,7 +1966,7 @@ const upsertPresentedApplicationForEnquiry = ({ job, musician, now }) => {
     : [];
 
   const existingIndex = existingApplications.findIndex(
-    (application) => asObjectIdString(application?.musicianId) === targetId,
+    (application) => asObjectIdString(application?.musicianId) === targetId
   );
 
   const baseApplication = {
@@ -2065,64 +1997,49 @@ const upsertPresentedApplicationForEnquiry = ({ job, musician, now }) => {
       "",
     postcode: musician?.address?.postcode || musician?.postcode || "",
     status: "presented",
+    notes: "",
+    deputyMatchScore:
+  typeof existingApplications?.[existingIndex]?.deputyMatchScore === "number"
+    ? existingApplications[existingIndex].deputyMatchScore
+    : 0,
+    matchSummary: {
+      instrument: job?.instrument || "",
+      roleFit: 0,
+      genreFit: 0,
+      locationFit: 0,
+      songFit: 0,
+    },
+    appliedAt: now,
+    shortlistedAt: null,
     presentedAt: now,
+    allocatedAt: null,
+    bookedAt: null,
+    declinedAt: null,
+    withdrawnAt: null,
     phoneNormalized: toE164(
       musician?.phone ||
         musician?.phoneNumber ||
         musician?.basicInfo?.phone ||
-        "",
+        ""
     ),
+
+    // tracking fields
+    presentationId: presentationId || "",
+    profileViewCount: 0,
+    uniqueProfileViewCount: 0,
+    lastProfileViewedAt: null,
   };
 
   if (existingIndex === -1) {
-    job.applications = [
-      ...existingApplications,
-      {
-        ...baseApplication,
-        notes: "",
-        deputyMatchScore: 0,
-        matchSummary: {
-          instrument: job?.instrument || "",
-          roleFit: 0,
-          genreFit: 0,
-          locationFit: 0,
-          songFit: 0,
-        },
-        appliedAt: now,
-        shortlistedAt: null,
-        allocatedAt: null,
-        bookedAt: null,
-        declinedAt: null,
-        withdrawnAt: null,
-      },
-    ];
+    job.applications = [...existingApplications, baseApplication];
   } else {
     job.applications = existingApplications.map((application, index) => {
       if (index !== existingIndex) return application;
 
-      const plain =
-        typeof application?.toObject === "function"
-          ? application.toObject()
-          : application;
-
       return {
-        ...plain,
+        ...application,
         ...baseApplication,
-        notes: plain?.notes ?? "",
-        deputyMatchScore: plain?.deputyMatchScore ?? 0,
-        matchSummary: plain?.matchSummary || {
-          instrument: job?.instrument || "",
-          roleFit: 0,
-          genreFit: 0,
-          locationFit: 0,
-          songFit: 0,
-        },
-        appliedAt: plain?.appliedAt || now,
-        shortlistedAt: plain?.shortlistedAt || null,
-        allocatedAt: plain?.allocatedAt || null,
-        bookedAt: plain?.bookedAt || null,
-        declinedAt: plain?.declinedAt || null,
-        withdrawnAt: plain?.withdrawnAt || null,
+        appliedAt: application?.appliedAt || now,
       };
     });
   }
@@ -2130,8 +2047,6 @@ const upsertPresentedApplicationForEnquiry = ({ job, musician, now }) => {
   job.applicationCount = Array.isArray(job.applications)
     ? job.applications.length
     : 0;
-
-  job.markModified("applications");
 };
 
 const buildDeputyReplyCode = (jobId, musicianId, action) => {
@@ -2275,6 +2190,34 @@ const findDeputyJobFromInboundReply = async ({
   }
 
   return null;
+};
+
+const FRONTEND_URL = String(
+  process.env.FRONTEND_URL || "https://thesupremecollective.co.uk"
+).replace(/\/+$/, "");
+
+const buildTrackedMusicianProfileUrl = ({
+  musician,
+  jobId,
+  presentationId,
+}) => {
+  const slug = String(musician?.musicianSlug || "").trim();
+  const musicianId = String(musician?._id || "").trim();
+
+  const baseUrl = slug
+    ? `${FRONTEND_URL}/musician/${encodeURIComponent(slug)}`
+    : musicianId
+      ? `${FRONTEND_URL}/musician/${encodeURIComponent(musicianId)}`
+      : "";
+
+  if (!baseUrl) return "";
+
+  const params = new URLSearchParams();
+  if (jobId) params.set("jobId", String(jobId));
+  if (presentationId) params.set("presentationId", String(presentationId));
+
+  const query = params.toString();
+  return query ? `${baseUrl}?${query}` : baseUrl;
 };
 
 export const previewDeputyJob = async (req, res) => {
@@ -2536,7 +2479,21 @@ export const createDeputyJob = async (req, res) => {
 
 export const listDeputyJobs = async (req, res) => {
   try {
-    const jobs = await deputyJobModel.aggregate([
+    const appliedBy = String(req.query?.appliedBy || "").trim();
+
+    const matchStage = {};
+
+    if (appliedBy) {
+      matchStage["applications.musicianId"] = appliedBy;
+    }
+
+    const pipeline = [];
+
+    if (Object.keys(matchStage).length) {
+      pipeline.push({ $match: matchStage });
+    }
+
+    pipeline.push(
       { $sort: { createdAt: -1 } },
       {
         $addFields: {
@@ -2592,8 +2549,10 @@ export const listDeputyJobs = async (req, res) => {
           updatedAt: 1,
           createdAt: 1,
         },
-      },
-    ]);
+      }
+    );
+
+    const jobs = await deputyJobModel.aggregate(pipeline);
 
     await deputyJobModel.populate(jobs, [
       {
@@ -5759,6 +5718,121 @@ export const closeDeputyJob = async (req, res) => {
   }
 };
 
+export const trackDeputyPresentationView = async (req, res) => {
+  try {
+    const { presentationId, jobId, slug } = req.body || {};
+
+    const safePresentationId = String(presentationId || "").trim();
+    const safeJobId = asObjectIdString(jobId);
+
+    if (!safePresentationId || !safeJobId) {
+      return res.status(400).json({
+        success: false,
+        message: "presentationId and jobId are required",
+      });
+    }
+
+    const presentation = await deputyPresentationModel.findOne({
+      presentationId: safePresentationId,
+      jobId: safeJobId,
+    });
+
+    if (!presentation) {
+      return res.status(404).json({
+        success: false,
+        message: "Presentation record not found",
+      });
+    }
+
+    if (
+      slug &&
+      presentation.musicianSlug &&
+      String(slug).trim() !== String(presentation.musicianSlug).trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Presentation does not match musician slug",
+      });
+    }
+
+    const now = new Date();
+
+    const ip =
+      req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
+      req.ip ||
+      "";
+
+    const ipHash = hashIp(ip);
+    const userAgent = String(req.headers["user-agent"] || "").trim();
+    const referrer = String(req.headers.referer || req.headers.referrer || "").trim();
+
+    const alreadySeenRecently = Array.isArray(presentation.viewEvents)
+      ? presentation.viewEvents.some((event) => {
+          if (!event?.ipHash || !ipHash) return false;
+          if (event.ipHash !== ipHash) return false;
+
+          const eventTime = new Date(event.viewedAt).getTime();
+          return now.getTime() - eventTime < 1000 * 60 * 60 * 12;
+        })
+      : false;
+
+    await deputyPresentationModel.updateOne(
+      { _id: presentation._id },
+      {
+        $inc: {
+          viewCount: 1,
+          uniqueViewCount: alreadySeenRecently ? 0 : 1,
+        },
+        $set: {
+          lastViewedAt: now,
+        },
+        $push: {
+          viewEvents: {
+            $each: [
+              {
+                viewedAt: now,
+                ipHash,
+                userAgent,
+                referrer,
+              },
+            ],
+            $slice: -200,
+          },
+        },
+      }
+    );
+
+    // mirror counts onto the matching application row for fast UI access
+    const updatedPresentation = await deputyPresentationModel.findById(
+      presentation._id
+    ).lean();
+
+    if (updatedPresentation) {
+      await deputyJobModel.updateOne(
+        {
+          _id: safeJobId,
+          "applications.presentationId": safePresentationId,
+        },
+        {
+          $set: {
+            "applications.$.profileViewCount": Number(updatedPresentation.viewCount || 0),
+            "applications.$.uniqueProfileViewCount": Number(updatedPresentation.uniqueViewCount || 0),
+            "applications.$.lastProfileViewedAt": updatedPresentation.lastViewedAt || now,
+          },
+        }
+      );
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("❌ trackDeputyPresentationView error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to track presentation view",
+    });
+  }
+};
+
 export const presentDeputyApplicant = async (req, res) => {
   try {
     if (!canManuallyAllocateDeputyJob(req)) {
@@ -5802,11 +5876,39 @@ export const presentDeputyApplicant = async (req, res) => {
     }
 
     const now = new Date();
+    const presentationId = new mongoose.Types.ObjectId().toString();
 
-    // 1) Update applicant status first
-    upsertPresentedApplicationForEnquiry({ job, musician, now });
+    // 1) Update applicant status first, including presentation tracking fields
+    upsertPresentedApplicationForEnquiry({
+      job,
+      musician,
+      now,
+      presentationId,
+    });
 
-    // save immediately so presented tag persists even if email fails
+    // 2) Create presentation tracking record
+    const presentationRecord = await deputyPresentationModel.create({
+      presentationId,
+      jobId: job._id,
+      musicianId: musician._id,
+      musicianSlug: String(musician?.musicianSlug || "").trim(),
+      presentedByUserId: req.user?._id || req.user?.id || null,
+      presentedByEmail: String(req.user?.email || "").trim().toLowerCase(),
+      presentedAt: now,
+      emailSent: false,
+      viewCount: 0,
+      uniqueViewCount: 0,
+      lastViewedAt: null,
+      viewEvents: [],
+    });
+
+    const trackedProfileUrl = buildTrackedMusicianProfileUrl({
+      musician,
+      jobId: job._id,
+      presentationId,
+    });
+
+    // Save immediately so presented status persists even if email fails
     await job.save();
 
     const email = normaliseEmail(
@@ -5815,14 +5917,15 @@ export const presentDeputyApplicant = async (req, res) => {
 
     const phone = toE164(
       musician?.phone ||
-      musician?.phoneNumber ||
-      musician?.basicInfo?.phone ||
-      ""
+        musician?.phoneNumber ||
+        musician?.basicInfo?.phone ||
+        ""
     );
 
     const notificationPreview = buildApplicantPresentedEmailPreview({
       job,
       musician,
+      profileUrl: trackedProfileUrl,
     });
 
     let emailSent = false;
@@ -5837,7 +5940,17 @@ export const presentDeputyApplicant = async (req, res) => {
           html: notificationPreview.html,
           text: notificationPreview.text,
         });
+
         emailSent = true;
+
+        await deputyPresentationModel.updateOne(
+          { _id: presentationRecord._id },
+          {
+            $set: {
+              emailSent: true,
+            },
+          }
+        );
       } catch (emailError) {
         emailErrorMessage = emailError?.message || "Email send failed";
 
@@ -5852,7 +5965,7 @@ export const presentDeputyApplicant = async (req, res) => {
       emailErrorMessage = "No email address available";
     }
 
-    // 2) Record notification separately
+    // 3) Record notification separately
     job.notifications = [
       ...(Array.isArray(job.notifications) ? job.notifications : []),
       {
@@ -5891,6 +6004,10 @@ export const presentDeputyApplicant = async (req, res) => {
         email,
         sent: emailSent,
         error: emailSent ? "" : emailErrorMessage,
+      },
+      presentation: {
+        presentationId,
+        trackedProfileUrl,
       },
     });
   } catch (error) {

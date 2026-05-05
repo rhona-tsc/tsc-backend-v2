@@ -12,6 +12,12 @@ const deputyJobApplicationSchema = new mongoose.Schema(
     lastName: { type: String, default: "", trim: true },
     email: { type: String, default: "", trim: true, lowercase: true },
     phone: { type: String, default: "", trim: true },
+
+    musicianSlug: { type: String, default: "", trim: true },
+    profileImage: { type: String, default: "", trim: true },
+    postcode: { type: String, default: "", trim: true },
+    phoneNormalized: { type: String, default: "", trim: true },
+
     appliedAt: { type: Date, default: Date.now },
     status: {
       type: String,
@@ -25,7 +31,6 @@ const deputyJobApplicationSchema = new mongoose.Schema(
         "presented",
       ],
       default: "applied",
-      
     },
     notes: { type: String, default: "", trim: true },
 
@@ -44,6 +49,11 @@ const deputyJobApplicationSchema = new mongoose.Schema(
     bookedAt: { type: Date, default: null },
     declinedAt: { type: Date, default: null },
     withdrawnAt: { type: Date, default: null },
+
+    presentationId: { type: String, default: "", trim: true, index: true },
+    profileViewCount: { type: Number, default: 0 },
+    uniqueProfileViewCount: { type: Number, default: 0 },
+    lastProfileViewedAt: { type: Date, default: null },
   },
   { _id: false },
 );
@@ -58,11 +68,11 @@ const deputyJobNotificationSchema = new mongoose.Schema(
     },
     email: { type: String, default: "", trim: true, lowercase: true },
     phone: { type: String, default: "", trim: true },
-    channel: {
-      type: String,
-      enum: ["email", "whatsapp"],
-      default: "email",
-    },
+  channel: {
+  type: String,
+  enum: ["email", "whatsapp", "system"],
+  default: "email",
+},
     type: {
       type: String,
       enum: [
@@ -230,7 +240,12 @@ const deputyJobSchema = new mongoose.Schema(
     grossAmount: { type: Number, default: 0 },
     commissionAmount: { type: Number, default: 0 },
     deputyNetAmount: { type: Number, default: 0 },
-
+payoutStatus: {
+  type: String,
+  enum: ["not_ready", "scheduled", "pending", "paid", "held", "cancelled"],
+  default: "not_ready",
+  index: true,
+},
    paymentStatus: {
   type: String,
   enum: [
@@ -318,6 +333,7 @@ const deputyJobSchema = new mongoose.Schema(
       index: true,
     },
     allocatedMusicianSlug: { type: String, default: "" },
+    bookedMusicianSlug: { type: String, default: "" },
     allocatedMusicianName: { type: String, default: "" },
     allocatedAt: { type: Date, default: null },
 
