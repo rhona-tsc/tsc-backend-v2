@@ -104,8 +104,7 @@ deputyJobRouter.get("/", authUser, (req, res, next) => {
  * Keep /:id/matches before /:id
  */
 deputyJobRouter.get("/:id/matches", authUser, listDeputyJobMatches);
-deputyJobRouter.get("/:id", authUser, getDeputyJobById);
-
+deputyJobRouter.get("/:id", getDeputyJobById);
 deputyJobRouter.get("/:id/applications", authUser, getDeputyJobApplications);
 
 /**
