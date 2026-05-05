@@ -616,8 +616,7 @@ const createOrRefreshDeputyJobSetupIntentInternal = async ({
     clientSecret: setupIntent.client_secret || "",
     setupIntentId: setupIntent.id || "",
     stripeCustomerId,
-    paymentStatus: job.paymentStatus,
-  };
+paymentStatus: "setup_pending",  };
 };
 
 const canSkipCardRequirementForJob = ({ job = null, userEmail = "", userRole = "" }) => {
@@ -2377,72 +2376,78 @@ export const createDeputyJob = async (req, res) => {
       mode: built.mode,
     });
 
-    job.matchedMusicianIds = matcherResult.matchedMusicianIds;
-    job.matchedMusicians = matcherResult.matchedMusicians;
-    job.matchedCount = matcherResult.matches.length;
-    job.notifications = [];
+    const updatePayload = {
+  matchedMusicianIds: matcherResult.matchedMusicianIds,
+  matchedMusicians: matcherResult.matchedMusicians,
+  matchedCount: matcherResult.matches.length,
+  notifications: [],
+};
 
-    const isEnquiryJob = built.jobType === "enquiry";
+const isEnquiryJob = built.jobType === "enquiry";
 
-    const canSendWithoutCard =
-      isEnquiryJob ||
-      allowManualPayment ||
-      normaliseString(job.paymentStatus).toLowerCase() === "not_required";
+const canSendWithoutCard =
+  isEnquiryJob ||
+  allowManualPayment ||
+  normaliseString(job.paymentStatus).toLowerCase() === "not_required";
 
-    const hasSavedCardDetails =
-      canSendWithoutCard ||
-      (Boolean(normaliseString(job?.stripeCustomerId)) &&
-        Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
-        job?.paymentStatus === "ready_to_charge");
+const hasSavedCardDetails =
+  canSendWithoutCard ||
+  (Boolean(normaliseString(job?.stripeCustomerId)) &&
+    Boolean(normaliseString(job?.defaultPaymentMethodId)) &&
+    job?.paymentStatus === "ready_to_charge");
 
-    if (built.mode === "send" && hasSavedCardDetails) {
-      const notificationResults = await notifyMusiciansAboutDeputyJob({
-        job,
-        musicians: matcherResult.matches,
-      });
+if (built.mode === "send" && hasSavedCardDetails) {
+  const notificationResults = await notifyMusiciansAboutDeputyJob({
+    job,
+    musicians: matcherResult.matches,
+  });
 
-      const sentIds = notificationResults
-        .filter((r) => r.status === "sent" && r.musicianId)
-        .map((r) => r.musicianId);
+  const sentIds = notificationResults
+    .filter((r) => r.status === "sent" && r.musicianId)
+    .map((r) => r.musicianId);
 
-      job.notifiedMusicianIds = sentIds;
-      job.notifications = notificationResults;
-      job.notifiedCount = notificationResults.filter(
-        (r) => r.status === "sent",
-      ).length;
-      job.status = "open";
-      job.previewMode = false;
-      job.workflowStage = "sent_to_matches";
-      job.matchedMusicians = job.matchedMusicians.map((m) => ({
-        ...m,
-        notified: sentIds.some(
-          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
-        ),
-        notifiedAt: sentIds.some(
-          (id) => asObjectIdString(id) === asObjectIdString(m.musicianId),
-        )
-          ? new Date()
-          : null,
-      }));
-    } else if (built.mode === "send") {
-      job.notifiedMusicianIds = [];
-      job.notifiedCount = 0;
-      job.status = "open";
-      job.previewMode = false;
-      job.workflowStage = "created";
-      job.notifications = [];
-    } else {
-      job.notifiedMusicianIds = [];
-      job.notifiedCount = 0;
-      job.status = "preview";
-      job.previewMode = true;
-      job.workflowStage = "preview_ready";
-      job.notifications = [];
-    }
+  updatePayload.notifiedMusicianIds = sentIds;
+  updatePayload.notifications = notificationResults;
+  updatePayload.notifiedCount = notificationResults.filter(
+    (r) => r.status === "sent"
+  ).length;
+  updatePayload.status = "open";
+  updatePayload.previewMode = false;
+  updatePayload.workflowStage = "sent_to_matches";
+  updatePayload.matchedMusicians = matcherResult.matchedMusicians.map((m) => {
+    const wasSent = sentIds.some(
+      (id) => asObjectIdString(id) === asObjectIdString(m.musicianId)
+    );
 
-    await job.save();
+    return {
+      ...m,
+      notified: wasSent,
+      notifiedAt: wasSent ? new Date() : null,
+    };
+  });
+} else if (built.mode === "send") {
+  updatePayload.notifiedMusicianIds = [];
+  updatePayload.notifiedCount = 0;
+  updatePayload.status = "open";
+  updatePayload.previewMode = false;
+  updatePayload.workflowStage = "created";
+  updatePayload.notifications = [];
+} else {
+  updatePayload.notifiedMusicianIds = [];
+  updatePayload.notifiedCount = 0;
+  updatePayload.status = "preview";
+  updatePayload.previewMode = true;
+  updatePayload.workflowStage = "preview_ready";
+  updatePayload.notifications = [];
+}
 
-    const formattedJob = withDeputyJobAliases(job);
+const updatedJob = await deputyJobModel.findByIdAndUpdate(
+  job._id,
+  { $set: updatePayload },
+  { new: true }
+);
+
+const formattedJob = withDeputyJobAliases(updatedJob);
 
     return res.status(201).json({
       success: true,
