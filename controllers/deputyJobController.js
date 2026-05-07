@@ -1342,10 +1342,33 @@ const buildApplicantPresentedEmailPreview = ({ job, musician, profileUrl = "" })
     <p><strong>Date:</strong> ${job?.eventDate ? formatNiceDate(job.eventDate) : "TBC"}</p>
     <p><strong>Location:</strong> ${job?.location || job?.venue || job?.locationName || "TBC"}</p>
     ${
-      finalProfileUrl
-        ? `<p>The client may review your profile here: <a href="${finalProfileUrl}">${finalProfileUrl}</a></p>`
-        : ""
-    }
+  finalProfileUrl
+    ? `
+      <p>
+        The client may review your profile here:
+      </p>
+
+      <p style="margin:16px 0;">
+        <a
+          href="${finalProfileUrl}"
+          target="_blank"
+          rel="noopener noreferrer"
+          style="
+            display:inline-block;
+            background:#ff6667;
+            color:#ffffff;
+            text-decoration:none;
+            padding:12px 18px;
+            border-radius:8px;
+            font-weight:600;
+          "
+        >
+          View Profile
+        </a>
+      </p>
+    `
+    : ""
+}
     <p>We’ll keep you updated if the client would like to proceed.</p>
     <p>🤍<br/>The Supreme Collective</p>
   `;
