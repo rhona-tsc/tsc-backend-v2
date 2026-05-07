@@ -6,69 +6,313 @@ const POSTCODE_MAP =
   (Array.isArray(POSTCODE_MAP_ARR) && POSTCODE_MAP_ARR[0]) || {};
 
 const COUNTY_NEIGHBORS = {
-  bedfordshire: ["buckinghamshire", "hertfordshire", "cambridgeshire", "northamptonshire"],
-  berkshire: ["oxfordshire", "hampshire", "surrey", "greater london", "buckinghamshire", "wiltshire"],
+  bedfordshire: [
+    "buckinghamshire",
+    "hertfordshire",
+    "cambridgeshire",
+    "northamptonshire",
+  ],
+  berkshire: [
+    "oxfordshire",
+    "hampshire",
+    "surrey",
+    "greater london",
+    "buckinghamshire",
+    "wiltshire",
+  ],
   bristol: ["gloucestershire", "somerset", "wilts", "wiltshire"],
-  buckinghamshire: ["oxfordshire", "northamptonshire", "bedfordshire", "hertfordshire", "greater london", "berkshire"],
-  cambridgeshire: ["lincolnshire", "norfolk", "suffolk", "essex", "hertfordshire", "bedfordshire", "northamptonshire", "peterborough"],
-  cheshire: ["merseyside", "greater manchester", "derbyshire", "staffordshire", "shropshire", "flintshire"],
+  buckinghamshire: [
+    "oxfordshire",
+    "northamptonshire",
+    "bedfordshire",
+    "hertfordshire",
+    "greater london",
+    "berkshire",
+  ],
+  cambridgeshire: [
+    "lincolnshire",
+    "norfolk",
+    "suffolk",
+    "essex",
+    "hertfordshire",
+    "bedfordshire",
+    "northamptonshire",
+    "peterborough",
+  ],
+  cheshire: [
+    "merseyside",
+    "greater manchester",
+    "derbyshire",
+    "staffordshire",
+    "shropshire",
+    "flintshire",
+  ],
   "city of london": ["greater london"],
   cornwall: ["devon", "isles of scilly"],
-  cumbria: ["northumberland", "durham", "north yorkshire", "lancashire", "dumfries and galloway", "scottish borders"],
-  derbyshire: ["greater manchester", "west yorkshire", "south yorkshire", "nottinghamshire", "leicestershire", "staffordshire", "cheshire"],
+  cumbria: [
+    "northumberland",
+    "durham",
+    "north yorkshire",
+    "lancashire",
+    "dumfries and galloway",
+    "scottish borders",
+  ],
+  derbyshire: [
+    "greater manchester",
+    "west yorkshire",
+    "south yorkshire",
+    "nottinghamshire",
+    "leicestershire",
+    "staffordshire",
+    "cheshire",
+  ],
   devon: ["cornwall", "somerset", "dorset"],
   dorset: ["devon", "somerset", "wiltshire", "hampshire"],
   durham: ["northumberland", "tyne and wear", "north yorkshire", "cumbria"],
-  "east riding of yorkshire": ["north yorkshire", "south yorkshire", "lincolnshire", "north lincolnshire"],
+  "east riding of yorkshire": [
+    "north yorkshire",
+    "south yorkshire",
+    "lincolnshire",
+    "north lincolnshire",
+  ],
   "east sussex": ["kent", "surrey", "west sussex"],
-  essex: ["greater london", "hertfordshire", "cambridgeshire", "suffolk", "kent", "thurrock"],
-  gloucestershire: ["worcestershire", "warwickshire", "oxfordshire", "wiltshire", "bristol", "south gloucestershire", "somerset", "herefordshire"],
-  "greater london": ["kent", "surrey", "berkshire", "buckinghamshire", "hertfordshire", "essex", "city of london"],
-  "greater manchester": ["merseyside", "lancashire", "west yorkshire", "derbyshire", "cheshire"],
-  hampshire: ["dorset", "wiltshire", "berkshire", "surrey", "west sussex", "isle of wight"],
-  herefordshire: ["gloucestershire", "worcestershire", "shropshire", "powys", "monmouthshire"],
-  hertfordshire: ["bedfordshire", "buckinghamshire", "greater london", "essex", "cambridgeshire"],
+  essex: [
+    "greater london",
+    "hertfordshire",
+    "cambridgeshire",
+    "suffolk",
+    "kent",
+    "thurrock",
+  ],
+  gloucestershire: [
+    "worcestershire",
+    "warwickshire",
+    "oxfordshire",
+    "wiltshire",
+    "bristol",
+    "south gloucestershire",
+    "somerset",
+    "herefordshire",
+  ],
+  "greater london": [
+    "kent",
+    "surrey",
+    "berkshire",
+    "buckinghamshire",
+    "hertfordshire",
+    "essex",
+    "city of london",
+  ],
+  "greater manchester": [
+    "merseyside",
+    "lancashire",
+    "west yorkshire",
+    "derbyshire",
+    "cheshire",
+  ],
+  hampshire: [
+    "dorset",
+    "wiltshire",
+    "berkshire",
+    "surrey",
+    "west sussex",
+    "isle of wight",
+  ],
+  herefordshire: [
+    "gloucestershire",
+    "worcestershire",
+    "shropshire",
+    "powys",
+    "monmouthshire",
+  ],
+  hertfordshire: [
+    "bedfordshire",
+    "buckinghamshire",
+    "greater london",
+    "essex",
+    "cambridgeshire",
+  ],
   "isle of wight": ["hampshire"],
   kent: ["greater london", "surrey", "east sussex", "essex", "medway"],
-  lancashire: ["cumbria", "north yorkshire", "west yorkshire", "greater manchester", "merseyside"],
-  leicestershire: ["nottinghamshire", "derbyshire", "staffordshire", "warwickshire", "northamptonshire", "rutland", "lincolnshire"],
-  lincolnshire: ["nottinghamshire", "south yorkshire", "east riding of yorkshire", "north lincolnshire", "cambridgeshire", "rutland", "leicestershire", "northamptonshire", "norfolk"],
+  lancashire: [
+    "cumbria",
+    "north yorkshire",
+    "west yorkshire",
+    "greater manchester",
+    "merseyside",
+  ],
+  leicestershire: [
+    "nottinghamshire",
+    "derbyshire",
+    "staffordshire",
+    "warwickshire",
+    "northamptonshire",
+    "rutland",
+    "lincolnshire",
+  ],
+  lincolnshire: [
+    "nottinghamshire",
+    "south yorkshire",
+    "east riding of yorkshire",
+    "north lincolnshire",
+    "cambridgeshire",
+    "rutland",
+    "leicestershire",
+    "northamptonshire",
+    "norfolk",
+  ],
   merseyside: ["lancashire", "greater manchester", "cheshire", "flintshire"],
   norfolk: ["lincolnshire", "cambridgeshire", "suffolk"],
-  "north yorkshire": ["cumbria", "durham", "west yorkshire", "south yorkshire", "east riding of yorkshire", "lancashire"],
-  northamptonshire: ["leicestershire", "rutland", "cambridgeshire", "bedfordshire", "buckinghamshire", "oxfordshire", "warwickshire", "lincolnshire"],
+  "north yorkshire": [
+    "cumbria",
+    "durham",
+    "west yorkshire",
+    "south yorkshire",
+    "east riding of yorkshire",
+    "lancashire",
+  ],
+  northamptonshire: [
+    "leicestershire",
+    "rutland",
+    "cambridgeshire",
+    "bedfordshire",
+    "buckinghamshire",
+    "oxfordshire",
+    "warwickshire",
+    "lincolnshire",
+  ],
   northumberland: ["cumbria", "durham", "tyne and wear", "scottish borders"],
-  nottinghamshire: ["lincolnshire", "south yorkshire", "derbyshire", "leicestershire"],
-  oxfordshire: ["warwickshire", "northamptonshire", "buckinghamshire", "berkshire", "wiltshire", "gloucestershire"],
+  nottinghamshire: [
+    "lincolnshire",
+    "south yorkshire",
+    "derbyshire",
+    "leicestershire",
+  ],
+  oxfordshire: [
+    "warwickshire",
+    "northamptonshire",
+    "buckinghamshire",
+    "berkshire",
+    "wiltshire",
+    "gloucestershire",
+  ],
   rutland: ["lincolnshire", "leicestershire", "northamptonshire"],
-  shropshire: ["cheshire", "staffordshire", "worcestershire", "herefordshire", "powys", "wrexham"],
+  shropshire: [
+    "cheshire",
+    "staffordshire",
+    "worcestershire",
+    "herefordshire",
+    "powys",
+    "wrexham",
+  ],
   somerset: ["devon", "dorset", "wiltshire", "gloucestershire", "bristol"],
-  "south yorkshire": ["west yorkshire", "north yorkshire", "east riding of yorkshire", "lincolnshire", "nottinghamshire", "derbyshire"],
-  staffordshire: ["cheshire", "derbyshire", "leicestershire", "warwickshire", "west midlands", "worcestershire", "shropshire"],
+  "south yorkshire": [
+    "west yorkshire",
+    "north yorkshire",
+    "east riding of yorkshire",
+    "lincolnshire",
+    "nottinghamshire",
+    "derbyshire",
+  ],
+  staffordshire: [
+    "cheshire",
+    "derbyshire",
+    "leicestershire",
+    "warwickshire",
+    "west midlands",
+    "worcestershire",
+    "shropshire",
+  ],
   suffolk: ["norfolk", "cambridgeshire", "essex"],
-  surrey: ["greater london", "kent", "east sussex", "west sussex", "hampshire", "berkshire"],
+  surrey: [
+    "greater london",
+    "kent",
+    "east sussex",
+    "west sussex",
+    "hampshire",
+    "berkshire",
+  ],
   "tyne and wear": ["northumberland", "durham"],
-  warwickshire: ["west midlands", "worcestershire", "gloucestershire", "oxfordshire", "northamptonshire", "leicestershire", "staffordshire"],
-  "west midlands": ["staffordshire", "warwickshire", "worcestershire", "shropshire"],
+  warwickshire: [
+    "west midlands",
+    "worcestershire",
+    "gloucestershire",
+    "oxfordshire",
+    "northamptonshire",
+    "leicestershire",
+    "staffordshire",
+  ],
+  "west midlands": [
+    "staffordshire",
+    "warwickshire",
+    "worcestershire",
+    "shropshire",
+  ],
   "west sussex": ["surrey", "east sussex", "hampshire"],
-  "west yorkshire": ["lancashire", "north yorkshire", "south yorkshire", "greater manchester"],
-  wiltshire: ["gloucestershire", "oxfordshire", "berkshire", "hampshire", "dorset", "somerset"],
-  worcestershire: ["shropshire", "staffordshire", "west midlands", "warwickshire", "gloucestershire", "herefordshire"],
+  "west yorkshire": [
+    "lancashire",
+    "north yorkshire",
+    "south yorkshire",
+    "greater manchester",
+  ],
+  wiltshire: [
+    "gloucestershire",
+    "oxfordshire",
+    "berkshire",
+    "hampshire",
+    "dorset",
+    "somerset",
+  ],
+  worcestershire: [
+    "shropshire",
+    "staffordshire",
+    "west midlands",
+    "warwickshire",
+    "gloucestershire",
+    "herefordshire",
+  ],
   "isles of scilly": ["cornwall"],
-  peterborough: ["cambridgeshire", "lincolnshire", "northamptonshire", "rutland"],
+  peterborough: [
+    "cambridgeshire",
+    "lincolnshire",
+    "northamptonshire",
+    "rutland",
+  ],
   "south gloucestershire": ["bristol", "gloucestershire"],
-  "north lincolnshire": ["lincolnshire", "east riding of yorkshire", "south yorkshire", "nottinghamshire"],
+  "north lincolnshire": [
+    "lincolnshire",
+    "east riding of yorkshire",
+    "south yorkshire",
+    "nottinghamshire",
+  ],
   thurrock: ["essex"],
   medway: ["kent"],
-  wilts: ["gloucestershire", "oxfordshire", "berkshire", "hampshire", "dorset", "somerset", "bristol"],
+  wilts: [
+    "gloucestershire",
+    "oxfordshire",
+    "berkshire",
+    "hampshire",
+    "dorset",
+    "somerset",
+    "bristol",
+  ],
 };
 
-const norm = (s = "") => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+const norm = (s = "") =>
+  String(s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 
 const ROLE_ALIASES = {
   "band leader": ["musical director", "md"],
   "musical director": ["band leader", "md"],
-  "dj with decks": ["dj", "dj with mixing console", "dj with console", "dj with controller"],
+  "dj with decks": [
+    "dj",
+    "dj with mixing console",
+    "dj with console",
+    "dj with controller",
+  ],
   "dj with mixing console": ["dj", "dj with decks", "dj with controller"],
   "client liaison": ["client liason", "client-facing", "client facing"],
   "backing vocalist": ["backing vocals", "bv", "bv singer", "backing singer"],
@@ -142,7 +386,10 @@ const INSTRUMENT_ALIASES = {
 };
 
 const aliasSet = new Map(
-  Object.entries(ROLE_ALIASES).map(([k, arr]) => [norm(k), new Set(arr.map(norm))]),
+  Object.entries(ROLE_ALIASES).map(([k, arr]) => [
+    norm(k),
+    new Set(arr.map(norm)),
+  ]),
 );
 
 const instrumentAliasSet = new Map(
@@ -259,10 +506,14 @@ const roleSimilarity = (a, b) => {
   return jaccard >= 0.5 ? 0.6 : 0;
 };
 
-const countyKey = (name = "") => String(name).toLowerCase().replace(/\s+/g, "_");
+const countyKey = (name = "") =>
+  String(name).toLowerCase().replace(/\s+/g, "_");
 
 const outwardCode = (postcode = "") =>
-  String(postcode || "").toUpperCase().replace(/\s+/g, "").slice(0, 3);
+  String(postcode || "")
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .slice(0, 3);
 
 const countyFromPostcode = (postcode = "") => {
   const outward = outwardCode(postcode);
@@ -288,7 +539,9 @@ const neighboursForCounty = (countyName = "") => {
   if (direct.length) return direct;
 
   const mine = new Set(
-    (POSTCODE_MAP[key] || []).map((value) => String(value).toUpperCase().trim()),
+    (POSTCODE_MAP[key] || []).map((value) =>
+      String(value).toUpperCase().trim(),
+    ),
   );
 
   if (!mine.size) return [];
@@ -318,8 +571,12 @@ const scoreLocation = ({
   if (tc && mc && tc === mc) return 1;
   if (neighbourCounties.some((county) => norm(county) === mc)) return 0.8;
 
-  const tp = String(targetPostcode || "").toUpperCase().replace(/\s+/g, "");
-  const mp = String(musicianPostcode || "").toUpperCase().replace(/\s+/g, "");
+  const tp = String(targetPostcode || "")
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  const mp = String(musicianPostcode || "")
+    .toUpperCase()
+    .replace(/\s+/g, "");
 
   if (tp && mp && tp.slice(0, 2) === mp.slice(0, 2)) return 0.6;
 
@@ -355,7 +612,9 @@ const getMusicianSearchableText = (musician = {}) => {
     musician?.vocals?.gender,
     ...(Array.isArray(musician?.genres) ? musician.genres : []),
     ...(Array.isArray(musician?.other_skills) ? musician.other_skills : []),
-    ...(Array.isArray(musician?.instrumentation) ? musician.instrumentation : []),
+    ...(Array.isArray(musician?.instrumentation)
+      ? musician.instrumentation
+      : []),
     ...(Array.isArray(musician?.vocals?.type) ? musician.vocals.type : []),
   ]
     .flatMap((item) => {
@@ -389,11 +648,12 @@ const getVocalTypes = (musician) => {
   const instruments = getArrayValues(musician?.instrumentation);
   const skills = getArrayValues(musician?.other_skills);
 
-  return Array.from(new Set([...explicitTypes, ...instruments, ...skills])).filter(
-    (value) =>
-      /\bvocalist\b|\bvocals\b|\bvocal\b|\bsinger\b|\blead vocalist\b|\blead vocal\b|\blead singer\b|\bbacking vocalist\b|\bbacking vocals\b|\bbacking vocal\b|\bbacking singer\b|\bbv\b|\brapper\b|\brap\b|\bmc\b|\bemcee\b/.test(
-        value,
-      ),
+  return Array.from(
+    new Set([...explicitTypes, ...instruments, ...skills]),
+  ).filter((value) =>
+    /\bvocalist\b|\bvocals\b|\bvocal\b|\bsinger\b|\blead vocalist\b|\blead vocal\b|\blead singer\b|\bbacking vocalist\b|\bbacking vocals\b|\bbacking vocal\b|\bbacking singer\b|\bbv\b|\brapper\b|\brap\b|\bmc\b|\bemcee\b/.test(
+      value,
+    ),
   );
 };
 
@@ -481,8 +741,7 @@ const wantsGuitar = (instrument = "") => norm(instrument).includes("guitar");
 const wantsVocalistInstrumentalist = (instrument = "") => {
   const target = cleanRoleText(instrument);
 
-  const hasVocal =
-    /\bvocalist\b|\bvocals\b|\bvocal\b|\bsinger\b/.test(target);
+  const hasVocal = /\bvocalist\b|\bvocals\b|\bvocal\b|\bsinger\b/.test(target);
 
   const hasInstrumentWord =
     /\binstrumentalist\b|\bguitar\b|\bguitarist\b|\bpiano\b|\bkeys\b|\bkeyboard\b|\bsax\b|\bsaxophone\b|\bviolin\b|\bpercussion\b/.test(
@@ -534,8 +793,7 @@ const hasBackingVocalSignal = (musician) => {
 
   return vocalTypes.some(
     (type) =>
-      type.includes("backing vocalist") ||
-      type.includes("backing vocals"),
+      type.includes("backing vocalist") || type.includes("backing vocals"),
   );
 };
 
@@ -580,7 +838,10 @@ const isLeadFemaleVocalist = (musician) =>
 const wantsFemaleLeadVocalist = (instrument = "") =>
   wantsFemaleJob(instrument) && wantsLeadVocalist(instrument);
 
-const isVocalistInstrumentalistMusician = (musician, requiredInstrument = "") => {
+const isVocalistInstrumentalistMusician = (
+  musician,
+  requiredInstrument = "",
+) => {
   if (!isVocalist(musician)) return false;
 
   if (!requiredInstrument) {
@@ -608,11 +869,13 @@ const hasAllEssentialRoles = (musician, essentialRoles = []) => {
   if (!essentialRoles.length) return true;
 
   const searchableRoles = Array.from(
-    new Set([
-      ...getArrayValues(musician?.other_skills),
-      ...getArrayValues(musician?.instrumentation),
-      ...getVocalTypes(musician),
-    ].map(cleanRoleText)),
+    new Set(
+      [
+        ...getArrayValues(musician?.other_skills),
+        ...getArrayValues(musician?.instrumentation),
+        ...getVocalTypes(musician),
+      ].map(cleanRoleText),
+    ),
   );
 
   return essentialRoles.every((requiredRole) => {
@@ -645,11 +908,13 @@ const desiredRoleScore = (musician, desiredRoles = []) => {
   if (!desiredRoles.length) return 0;
 
   const skills = Array.from(
-    new Set([
-      ...getArrayValues(musician?.other_skills),
-      ...getArrayValues(musician?.instrumentation),
-      ...getVocalTypes(musician),
-    ].map(cleanRoleText)),
+    new Set(
+      [
+        ...getArrayValues(musician?.other_skills),
+        ...getArrayValues(musician?.instrumentation),
+        ...getVocalTypes(musician),
+      ].map(cleanRoleText),
+    ),
   );
 
   let total = 0;
@@ -678,8 +943,11 @@ const desiredRoleScore = (musician, desiredRoles = []) => {
     if (/backing/.test(wanted)) {
       const vocalTypes = getNormalisedVocalTypes(musician);
 
-      if (vocalTypes.some((type) => /backing/.test(type))) best = Math.max(best, 1);
-      else if (vocalTypes.some((type) => /lead/.test(type) || type === "vocalist")) {
+      if (vocalTypes.some((type) => /backing/.test(type)))
+        best = Math.max(best, 1);
+      else if (
+        vocalTypes.some((type) => /lead/.test(type) || type === "vocalist")
+      ) {
         best = Math.max(best, 0.8);
       }
     }
@@ -716,8 +984,74 @@ const genreScore = (musician, wantedGenres = []) => {
 
   if (!wanted.length) return 0;
 
-  const overlap = wanted.filter((genre) => musicianGenres.includes(genre)).length;
+  const overlap = wanted.filter((genre) =>
+    musicianGenres.includes(genre),
+  ).length;
   return overlap / wanted.length;
+};
+
+const isBassLike = (value = "") => {
+  const v = cleanRoleText(value);
+  return /\bbass\b|\bbassist\b|\bbass guitar\b/.test(v);
+};
+
+const isGuitarLike = (value = "") => {
+  const v = cleanRoleText(value);
+  return /\bguitar\b|\bguitarist\b|\bacoustic guitar\b|\belectric guitar\b/.test(
+    v,
+  );
+};
+
+const getRequiredAccompanyingInstruments = (
+  primaryInstrument = "",
+  secondaryInstruments = [],
+) => {
+  const candidates = [primaryInstrument, ...(secondaryInstruments || [])]
+    .map(cleanRoleText)
+    .filter(Boolean);
+
+  const out = new Set();
+
+  for (const candidate of candidates) {
+    if (isGuitarLike(candidate)) out.add("guitar");
+    if (isBassLike(candidate)) out.add("bass");
+    if (
+      /\bkeys\b|\bkeyboard\b|\bpiano\b|\bkeyboardist\b|\bpianist\b/.test(
+        candidate,
+      )
+    ) {
+      out.add("keys");
+    }
+    if (/\bsax\b|\bsaxophone\b|\bsaxophonist\b/.test(candidate)) {
+      out.add("sax");
+    }
+    if (/\bviolin\b|\bviolinist\b/.test(candidate)) {
+      out.add("violin");
+    }
+    if (/\bpercussion\b|\bpercussionist\b/.test(candidate)) {
+      out.add("percussion");
+    }
+  }
+
+  return Array.from(out);
+};
+
+const isLeadVocalistWithAnyInstrument = (
+  musician,
+  requiredInstruments = [],
+) => {
+  if (!isLeadVocalist(musician)) return false;
+
+  if (!requiredInstruments.length) {
+    const instruments = getArrayValues(musician?.instrumentation);
+    return instruments.some(
+      (item) => !/\bvocalist\b|\bvocals\b|\bvocal\b|\bsinger\b/.test(item),
+    );
+  }
+
+  return requiredInstruments.some((requiredInstrument) =>
+    hasInstrument(musician, requiredInstrument),
+  );
 };
 
 export const findMatchingMusiciansForDeputyJob = async ({
@@ -743,14 +1077,22 @@ export const findMatchingMusiciansForDeputyJob = async ({
   const neighbourCounties = neighboursForCounty(resolvedCounty);
 
   const cleanedInstrument = cleanRoleText(instrument);
-  const cleanedEssentialRoles = (essentialRoles || []).map(cleanRoleText).filter(Boolean);
-  const cleanedDesiredRoles = (desiredRoles || []).map(cleanRoleText).filter(Boolean);
+  const cleanedEssentialRoles = (essentialRoles || [])
+    .map(cleanRoleText)
+    .filter(Boolean);
+  const cleanedDesiredRoles = (desiredRoles || [])
+    .map(cleanRoleText)
+    .filter(Boolean);
 
   const requestedGender = getRequestedVocalGender(cleanedInstrument);
   const femaleLeadOnly = wantsFemaleLeadVocalist(cleanedInstrument);
   const leadOnly = wantsLeadVocalist(cleanedInstrument);
-  const vocalistInstrumentalistOnly = wantsVocalistInstrumentalist(cleanedInstrument);
-  const requiredInstrumentForVocalist = wantsGuitar(cleanedInstrument) ? "guitar" : "";
+  const vocalistInstrumentalistOnly =
+    wantsVocalistInstrumentalist(cleanedInstrument);
+  const requiredInstrumentsForVocalist = getRequiredAccompanyingInstruments(
+    cleanedInstrument,
+    secondaryInstruments,
+  );
 
   const filtered = pool
     .filter((musician) => {
@@ -763,9 +1105,9 @@ export const findMatchingMusiciansForDeputyJob = async ({
           if (!isLeadFemaleVocalist(musician)) return false;
         } else if (vocalistInstrumentalistOnly) {
           if (
-            !isLeadVocalistInstrumentalist(
+            !isLeadVocalistWithAnyInstrument(
               musician,
-              requiredInstrumentForVocalist,
+              requiredInstrumentsForVocalist,
             )
           ) {
             return false;
@@ -780,8 +1122,9 @@ export const findMatchingMusiciansForDeputyJob = async ({
         if (!hasInstrument(musician, cleanedInstrument)) return false;
       }
 
-      if (!hasAnySecondary(musician, secondaryInstruments)) return false;
-
+if (!vocalistInstrumentalistOnly && !hasAnySecondary(musician, secondaryInstruments)) {
+  return false;
+}
       return true;
     })
     .map((musician) => {
@@ -792,10 +1135,13 @@ export const findMatchingMusiciansForDeputyJob = async ({
           ? isLeadFemaleVocalist(musician)
             ? 1
             : 0
-          : vocalistInstrumentalistOnly
-            ? isLeadVocalistInstrumentalist(musician, requiredInstrumentForVocalist)
-              ? 1
-              : 0
+         : vocalistInstrumentalistOnly
+  ? isLeadVocalistWithAnyInstrument(
+      musician,
+      requiredInstrumentsForVocalist,
+    )
+    ? 1
+    : 0
             : leadOnly
               ? isLeadVocalist(musician)
                 ? 1
@@ -821,8 +1167,7 @@ export const findMatchingMusiciansForDeputyJob = async ({
       let weightRoles = cleanedDesiredRoles.length ? 0.1 : 0;
       let weightGenres = genres.length ? 0.15 : 0;
       let weightLocation = 0.4;
-      let weightFemaleLeadBoost =
-        femaleLeadOnly || requestedGender ? 0.2 : 0;
+      let weightFemaleLeadBoost = femaleLeadOnly || requestedGender ? 0.2 : 0;
 
       const femaleLeadFit = femaleLeadOnly
         ? isLeadFemaleVocalist(musician)
