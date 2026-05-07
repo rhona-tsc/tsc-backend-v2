@@ -2750,18 +2750,24 @@ export const getDeputyJobApplications = async (req, res) => {
     const requesterRole = normaliseString(
       req?.user?.role || req?.user?.userrole || "",
     ).toLowerCase();
+    const requesterId = asObjectIdString(
+      req?.user?._id || req?.user?.id || req?.user?.userId || "",
+    );
 
     const isPrivilegedViewer =
       requesterEmail === "hello@thesupremecollective.co.uk" ||
       requesterRole === "admin" ||
       requesterRole === "agent";
 
+    const createdById = asObjectIdString(job?.createdBy || "");
+
     const isJobManager = Boolean(
-      requesterEmail &&
+      (requesterEmail &&
         [
           normaliseEmail(job?.createdByEmail || ""),
           normaliseEmail(job?.managerEmail || ""),
-        ].includes(requesterEmail),
+        ].includes(requesterEmail)) ||
+        (requesterId && createdById && requesterId === createdById),
     );
 
     if (!isPrivilegedViewer && !isJobManager) {
@@ -2773,43 +2779,101 @@ export const getDeputyJobApplications = async (req, res) => {
 
     const applications = Array.isArray(job?.applications) ? job.applications : [];
 
-    const sanitizedApplications = applications.map((application) => {
-      const firstName = normaliseString(application?.firstName || "");
-      const lastName = normaliseString(application?.lastName || "");
-      const lastInitial = lastName ? `${lastName.charAt(0).toUpperCase()}.` : "";
+    const sanitizedApplications = applications
+      .map((application) => {
+        const firstName = normaliseString(application?.firstName || "");
+        const lastName = normaliseString(application?.lastName || "");
+        const lastInitial = lastName
+          ? `${lastName.charAt(0).toUpperCase()}.`
+          : "";
+        const deputyMatchScore = Number(application?.deputyMatchScore || 0);
 
-      return {
-        musicianId: application?.musicianId || null,
-        firstName,
-        lastName: isPrivilegedViewer ? lastName : lastInitial,
-        fullName: isPrivilegedViewer
-          ? [firstName, lastName].filter(Boolean).join(" ")
-          : [firstName, lastInitial].filter(Boolean).join(" "),
-        email: isPrivilegedViewer
-          ? normaliseString(application?.email || "")
-          : maskEmailForManageView(application?.email || ""),
-        phone: isPrivilegedViewer ? normaliseString(application?.phone || "") : "",
-        musicianSlug: normaliseString(application?.musicianSlug || ""),
-        profileImage: normaliseString(application?.profileImage || ""),
-        postcode: normaliseString(application?.postcode || ""),
-        status: normaliseString(application?.status || "applied"),
-        appliedAt: application?.appliedAt || null,
-        shortlistedAt: application?.shortlistedAt || null,
-        presentedAt: application?.presentedAt || null,
-        allocatedAt: application?.allocatedAt || null,
-        bookedAt: application?.bookedAt || null,
-        declinedAt: application?.declinedAt || null,
-        withdrawnAt: application?.withdrawnAt || null,
-        notes: normaliseString(application?.notes || ""),
-        deputyMatchScore: Number(application?.deputyMatchScore || 0),
-        matchSummary: {
-          instrument: normaliseString(application?.matchSummary?.instrument || ""),
-          roleFit: Number(application?.matchSummary?.roleFit || 0),
-          genreFit: Number(application?.matchSummary?.genreFit || 0),
-          locationFit: Number(application?.matchSummary?.locationFit || 0),
-          songFit: Number(application?.matchSummary?.songFit || 0),
-        },
-      };
+        return {
+          musicianId: application?.musicianId || null,
+          firstName,
+          lastName: isPrivilegedViewer ? lastName : lastInitial,
+          fullName: isPrivilegedViewer
+            ? [firstName, lastName].filter(Boolean).join(" ")
+            : [firstName, lastInitial].filter(Boolean).join(" "),
+          email: isPrivilegedViewer
+            ? normaliseString(application?.email || "")
+            : maskEmailForManageView(application?.email || ""),
+          phone: isPrivilegedViewer ? normaliseString(application?.phone || "") : "",
+          musicianSlug: normaliseString(application?.musicianSlug || ""),
+          profileImage: normaliseString(application?.profileImage || ""),
+          postcode: normaliseString(application?.postcode || ""),
+          status: normaliseString(application?.status || "applied"),
+          appliedAt: application?.appliedAt || null,
+          shortlistedAt: application?.shortlistedAt || null,
+          presentedAt: application?.presentedAt || null,
+          allocatedAt: application?.allocatedAt || null,
+          bookedAt: application?.bookedAt || null,
+          declinedAt: application?.declinedAt || null,
+          withdrawnAt: application?.withdrawnAt || null,
+          notes: normaliseString(application?.notes || ""),
+          deputyMatchScore,
+          deputyMatchPercent: Math.round(
+            Math.max(0, Math.min(1, deputyMatchScore)) * 100,
+          ),
+          matchSummary: {
+            instrument: normaliseString(application?.matchSummary?.instrument || ""),
+            roleFit: Number(application?.matchSummary?.roleFit || 0),
+            genreFit: Number(application?.matchSummary?.genreFit || 0),
+            locationFit: Number(application?.matchSummary?.locationFit || 0),
+            songFit: Number(application?.matchSummary?.songFit || 0),
+          },
+          presentationId: normaliseString(application?.presentationId || ""),
+          profileViewCount: Number(application?.profileViewCount || 0),
+          uniqueProfileViewCount: Number(application?.uniqueProfileViewCount || 0),
+          lastProfileViewedAt: application?.lastProfileViewedAt || null,
+        };
+      })
+      .sort((a, b) => {
+        const statusOrder = {
+          allocated: 0,
+          booked: 1,
+          presented: 2,
+          shortlisted: 3,
+          applied: 4,
+          declined: 5,
+          withdrawn: 6,
+        };
+
+        const aStatus = String(a?.status || "applied").toLowerCase();
+        const bStatus = String(b?.status || "applied").toLowerCase();
+
+        const aRank = Object.prototype.hasOwnProperty.call(statusOrder, aStatus)
+          ? statusOrder[aStatus]
+          : 99;
+        const bRank = Object.prototype.hasOwnProperty.call(statusOrder, bStatus)
+          ? statusOrder[bStatus]
+          : 99;
+
+        if (aRank !== bRank) return aRank - bRank;
+        if (b.deputyMatchScore !== a.deputyMatchScore) {
+          return b.deputyMatchScore - a.deputyMatchScore;
+        }
+
+        return (
+          new Date(b.appliedAt || 0).getTime() -
+          new Date(a.appliedAt || 0).getTime()
+        );
+      });
+
+    console.log("📋 getDeputyJobApplications result", {
+      jobId: String(job._id),
+      requesterEmail,
+      requesterRole,
+      isPrivilegedViewer,
+      isJobManager,
+      rawApplicationCount: applications.length,
+      returnedApplicationCount: sanitizedApplications.length,
+      applicants: sanitizedApplications.map((application) => ({
+        musicianId: String(application?.musicianId || ""),
+        fullName: application?.fullName || "",
+        status: application?.status || "",
+        deputyMatchScore: application?.deputyMatchScore || 0,
+      })),
     });
 
     return res.json({
@@ -2830,7 +2894,7 @@ export const getDeputyJobApplications = async (req, res) => {
             .map((item) => normaliseString(item))
             .filter(Boolean)
             .join(", "),
-        applicationCount: Number(job?.applicationCount || sanitizedApplications.length || 0),
+        applicationCount: sanitizedApplications.length,
         allocatedMusicianId: job?.allocatedMusicianId || null,
         allocatedMusicianName: normaliseString(job?.allocatedMusicianName || ""),
         allocatedAt: job?.allocatedAt || null,
@@ -2901,9 +2965,13 @@ export const applyToDeputyJob = async (req, res) => {
       });
     }
 
-    const alreadyApplied = job.applications.some(
+    const existingApplications = Array.isArray(job.applications)
+      ? job.applications
+      : [];
+
+    const alreadyApplied = existingApplications.some(
       (a) =>
-        asObjectIdString(a.musicianId) ===
+        asObjectIdString(a?.musicianId) ===
         asObjectIdString(authenticatedMusicianId),
     );
 
@@ -2925,6 +2993,18 @@ export const applyToDeputyJob = async (req, res) => {
             asObjectIdString(authenticatedMusicianId),
         )
       : null;
+
+    console.log("📝 applyToDeputyJob request", {
+      jobId: String(job._id),
+      musicianId: String(authenticatedMusicianId),
+      existingApplicationCount: existingApplications.length,
+      matchedMusicianCount: Array.isArray(job?.matchedMusicians)
+        ? job.matchedMusicians.length
+        : 0,
+      matchedSnapshotFound: Boolean(matchedSnapshot),
+      matchedSnapshotScore: Number(matchedSnapshot?.deputyMatchScore || 0),
+      matchedSnapshotSummary: matchedSnapshot?.matchSummary || null,
+    });
 
     job.applications.push({
       musicianId: authenticatedMusicianId,
@@ -2973,6 +3053,28 @@ export const applyToDeputyJob = async (req, res) => {
     }
 
     await job.save();
+
+    console.log("✅ applyToDeputyJob saved", {
+      jobId: String(job._id),
+      musicianId: String(authenticatedMusicianId),
+      applicationCount: Array.isArray(job?.applications) ? job.applications.length : 0,
+      latestApplicant: (() => {
+        const latest = Array.isArray(job?.applications)
+          ? job.applications[job.applications.length - 1]
+          : null;
+
+        return latest
+          ? {
+              musicianId: String(latest.musicianId || ""),
+              firstName: latest.firstName || "",
+              lastName: latest.lastName || "",
+              email: latest.email || "",
+              status: latest.status || "",
+              deputyMatchScore: Number(latest.deputyMatchScore || 0),
+            }
+          : null;
+      })(),
+    });
 
         const applicantEmail =
       musician?.email ||
