@@ -56,6 +56,8 @@ const loginMusician = async (req, res) => {
         userId: "agent",
         mustChangePassword: false,
         message: "Logged in via agent override",
+        tokenType: "musician",
+        expiresIn: "30d",
       });
     }
 
@@ -106,6 +108,8 @@ const loginMusician = async (req, res) => {
       phone: user.phone || "",
       userId: user._id,
       mustChangePassword: !!user.mustChangePassword, // ✅ ADD THIS
+      tokenType: "musician",
+      expiresIn: "30d",
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -170,6 +174,8 @@ const registerMusician = async (req, res) => {
       userId: user._id,
       mustChangePassword: !!user.mustChangePassword,
       message: "Registration successful",
+      tokenType: "musician",
+      expiresIn: "30d",
     });
   } catch (error) {
     console.error(error);

@@ -1667,7 +1667,7 @@ const createToken = (user) =>
     { id: user._id, email: user.email, role: user.role },
     process.env.JWT_SECRET,
     {
-      expiresIn: "7d",
+      expiresIn: "60d",
     },
   );
 
@@ -1795,14 +1795,14 @@ const loginMusician = async (req, res) => {
         phone: user.phone,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "15m" },
+      { expiresIn: "30d" },
     );
 
     // 🔥 5) Create refresh token
     const refreshToken = jwt.sign(
       { id: user._id },
       process.env.JWT_REFRESH_SECRET,
-      { expiresIn: "7d" },
+      { expiresIn: "60d" },
     );
 
     // 🔥 6) Set refresh token cookie
@@ -1810,7 +1810,7 @@ const loginMusician = async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "None",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: 60 * 24 * 60 * 60 * 1000,
     });
 
     console.log("✅ Login successful for:", user.email);
@@ -2452,7 +2452,7 @@ const refreshAccessToken = async (req, res) => {
         const newAccessToken = jwt.sign(
           { id: user._id, email: user.email, role: user.role },
           process.env.JWT_SECRET,
-          { expiresIn: "15m" },
+          { expiresIn: "30d" },
         );
 
         return res.json({ success: true, token: newAccessToken });
