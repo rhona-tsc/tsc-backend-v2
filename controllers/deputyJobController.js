@@ -619,19 +619,6 @@ const createOrRefreshDeputyJobSetupIntentInternal = async ({
 paymentStatus: "setup_pending",  };
 };
 
-const canSkipCardRequirementForJob = ({ job = null, userEmail = "", userRole = "" }) => {
-  const safeEmail = normaliseEmail(userEmail || job?.createdByEmail || "");
-  const safeRole = normaliseString(userRole || "").toLowerCase();
-  const paymentStatus = normaliseString(job?.paymentStatus || "").toLowerCase();
-
-  return (
-    safeEmail === "hello@thesupremecollective.co.uk" ||
-    safeRole === "admin" ||
-    safeRole === "agent" ||
-    paymentStatus === "not_required"
-  );
-};
-
 const attemptDeputyJobCharge = async ({ job, createdBy = null }) => {
   if (!stripe) {
     return {
@@ -2071,32 +2058,6 @@ const upsertPresentedApplicationForEnquiry = ({
     : 0;
 };
 
-const buildDeputyReplyCode = (jobId, musicianId, action) => {
-  const safeJobId = normaliseString(jobId);
-  const safeMusicianId = normaliseString(musicianId);
-  const safeAction = normaliseString(action).toUpperCase();
-  return `${safeAction}_DEPUTY_${safeJobId}_${safeMusicianId}`;
-};
-
-const parseDeputyReplyCode = (raw = "") => {
-  const value = normaliseString(raw);
-  const match = value.match(/^(ACCEPT|DECLINE)_DEPUTY_([^_]+)_(.+)$/i);
-
-  if (!match) {
-    return {
-      action: "",
-      jobId: "",
-      musicianId: "",
-    };
-  }
-
-  return {
-    action: normaliseString(match[1]).toLowerCase(),
-    jobId: normaliseString(match[2]),
-    musicianId: normaliseString(match[3]),
-  };
-};
-
 const findApplicationByAnyIdentity = (
   job,
   { musicianId = "", phone = "", email = "" } = {},
@@ -2153,6 +2114,24 @@ const applyBookedStateToJob = (job, musician) => {
   });
 
   return now;
+};
+
+const markPaidDeputyJobReadyForPayout = ({ job, musician }) => {
+  if (!job || !musician) return;
+
+  const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+  const isPaid = String(job?.paymentStatus || "").toLowerCase() === "paid";
+
+  if (isEnquiryJob || !isPaid) return;
+
+  applyBookedStateToJob(job, musician);
+
+  job.releaseOn = job.releaseOn || buildDefaultReleaseOn(job.eventDate);
+
+  if (job.releaseOn && String(job.payoutStatus || "").toLowerCase() !== "paid") {
+    job.payoutStatus = "scheduled";
+    job.payoutScheduledAt = job.payoutScheduledAt || new Date();
+  }
 };
 
 const findDeputyApplicationByPhone = (job, phone = "") => {
@@ -3701,6 +3680,9 @@ job.allocatedAt = now;
     } else {
       job.paymentStatus = "not_required";
     }
+     if (!isEnquiryJob && chargeResult?.success) {
+  markPaidDeputyJobReadyForPayout({ job, musician });
+}
 
    let whatsappResult = null;
 let whatsappErrorMessage = "";
@@ -5066,56 +5048,7 @@ export const updateDeputyJobApplicationStatus = async (req, res) => {
     });
   }
 };
-
-export const getStripeConnectPayoutStatus = async (req, res) => {
-  try {
-    const musicianId = req.user?._id || req.user?.id;
-    if (!musicianId) {
-      return res.status(401).json({
-        success: false,
-        message: "You must be logged in",
-      });
-    }
-
-    const musician = await musicianModel.findById(musicianId).lean();
-    if (!musician) {
-      return res.status(404).json({
-        success: false,
-        message: "Musician not found",
-      });
-    }
-
-    const stripeConnect = musician?.stripeConnect || {};
-
-    const accountId = normaliseString(stripeConnect.accountId || "");
-    const detailsSubmitted = Boolean(stripeConnect.detailsSubmitted);
-    const chargesEnabled = Boolean(stripeConnect.chargesEnabled);
-    const payoutsEnabled = Boolean(stripeConnect.payoutsEnabled);
-
-    let status = "not_connected";
-    if (accountId) status = "incomplete";
-    if (accountId && detailsSubmitted && payoutsEnabled) status = "ready";
-
-    return res.json({
-      success: true,
-      payoutStatus: {
-        status,
-        accountId,
-        detailsSubmitted,
-        chargesEnabled,
-        payoutsEnabled,
-      },
-    });
-  } catch (error) {
-    console.error("❌ getStripeConnectPayoutStatus error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch payout status",
-      error: error.message,
-    });
-  }
-};
-
+ 
 export const previewDeputyJobNotification = async (req, res) => {
   try {
     console.log("🟣 previewDeputyJobNotification hit", {
@@ -6270,6 +6203,16 @@ job.allocatedAt = now;
     } else {
       job.paymentStatus = "not_required";
     }
+    if (!isEnquiryJob && (chargeResult?.success || chargeResult?.skipped)) {
+  if (
+    String(job.paymentStatus || "").toLowerCase() !== "paid" &&
+    chargeResult?.skipped
+  ) {
+    job.paymentStatus = "paid";
+  }
+
+  markPaidDeputyJobReadyForPayout({ job, musician });
+}
 
     const application = findApplicationFromJob(job, musician._id);
     const targetPhone = toE164(

@@ -319,3 +319,60 @@ export const createStripeConnectOnboardingLink = async (req, res) => {
     });
   }
 };
+
+export const syncStripeConnectAccount = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "User not authenticated.",
+      });
+    }
+
+    const musician = await Musician.findById(userId);
+
+    if (!musician) {
+      return res.status(404).json({
+        success: false,
+        message: "Musician not found.",
+      });
+    }
+
+    const accountId = musician?.stripeConnect?.accountId;
+
+    if (!accountId) {
+      return res.status(400).json({
+        success: false,
+        message: "No Stripe account connected.",
+      });
+    }
+
+    const account = await stripe.accounts.retrieve(accountId);
+
+    musician.stripeConnect = {
+      ...(musician.stripeConnect || {}),
+      accountId,
+      detailsSubmitted: account.details_submitted === true,
+      chargesEnabled: account.charges_enabled === true,
+      payoutsEnabled: account.payouts_enabled === true,
+      onboardingComplete:
+        account.details_submitted === true &&
+        account.payouts_enabled === true,
+    };
+
+    await musician.save();
+
+    return res.json({
+      success: true,
+      stripeConnect: musician.stripeConnect,
+    });
+  } catch (error) {
+    console.error("❌ syncStripeConnectAccount error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to sync Stripe account.",
+    });
+  }
+};

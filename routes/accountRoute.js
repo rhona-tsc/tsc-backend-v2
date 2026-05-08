@@ -4,6 +4,7 @@ import {
   changeEmail,
   changePassword,
   createStripeConnectOnboardingLink,
+  syncStripeConnectAccount,
 } from "../controllers/account.js";
 
 console.log("🔍 Using auth middleware from:", new URL("../middleware/auth.js", import.meta.url).pathname);
@@ -52,6 +53,12 @@ router.post(
     next();
   },
   createStripeConnectOnboardingLink
+);
+
+router.post(
+  "/stripe-connect/sync",
+  auth,
+  syncStripeConnectAccount
 );
 
 export default router;
