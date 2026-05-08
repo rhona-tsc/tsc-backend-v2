@@ -14,7 +14,7 @@ const createToken = (user) => {
       phone: user.phone || "",
     },
     process.env.JWT_SECRET,
-    { expiresIn: "7d" }
+    { expiresIn: "30d" }
   );
 };
 

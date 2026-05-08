@@ -230,6 +230,20 @@ async function sendBulkInvitePreviewEmail({
 musicianLoginRouter.post("/register", registerMusician);
 
 // Wrap /login so we can stamp lastLoginAt when the controller succeeds.
+// NOTE ABOUT SESSION LENGTH:
+// The login lifetime is NOT controlled in this route file.
+// It is controlled where the JWT is CREATED inside `loginMusician`
+// in `controllers/musicianLoginController.js`.
+// Look for `jwt.sign(...)` and change the `expiresIn` value there,
+// for example from something short to `"30d"` if you want roughly
+// one-month sessions.
+//
+// Also check any other login/token issuers used by the app, such as:
+// - user/auth login controllers
+// - admin login controllers
+//
+// Frontend expiry checks like `isTokenExpired()` only read the token's `exp`,
+// so they will automatically respect the new JWT lifetime once the issuer is updated.
 musicianLoginRouter.post("/login", async (req, res, next) => {
   try {
     const originalJson = res.json.bind(res);
