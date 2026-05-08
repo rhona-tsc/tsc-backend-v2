@@ -3845,6 +3845,55 @@ export const previewDeputyBookingEmail = async (req, res) => {
   }
 };
 
+export const getStripeConnectPayoutStatus = async (req, res) => {
+  try {
+    const musicianId = req.user?._id || req.user?.id;
+    if (!musicianId) {
+      return res.status(401).json({
+        success: false,
+        message: "You must be logged in",
+      });
+    }
+
+    const musician = await musicianModel.findById(musicianId).lean();
+    if (!musician) {
+      return res.status(404).json({
+        success: false,
+        message: "Musician not found",
+      });
+    }
+
+    const stripeConnect = musician?.stripeConnect || {};
+
+    const accountId = normaliseString(stripeConnect.accountId || "");
+    const detailsSubmitted = Boolean(stripeConnect.detailsSubmitted);
+    const chargesEnabled = Boolean(stripeConnect.chargesEnabled);
+    const payoutsEnabled = Boolean(stripeConnect.payoutsEnabled);
+
+    let status = "not_connected";
+    if (accountId) status = "incomplete";
+    if (accountId && detailsSubmitted && payoutsEnabled) status = "ready";
+
+    return res.json({
+      success: true,
+      payoutStatus: {
+        status,
+        accountId,
+        detailsSubmitted,
+        chargesEnabled,
+        payoutsEnabled,
+      },
+    });
+  } catch (error) {
+    console.error("❌ getStripeConnectPayoutStatus error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch payout status",
+      error: error.message,
+    });
+  }
+};
+
 export const rematchAndSendDeputyJobNotifications = async (req, res) => {
   try {
     const job = await deputyJobModel.findById(req.params.id);
