@@ -109,6 +109,32 @@ const sanitizeBookingPatch = (body = {}) => {
     patch.actsSummary = patch.actsSummary.map((act) => ({ ...act }));
   }
 
+  if (patch.accounting && isPlainObject(patch.accounting)) {
+
+    patch.accounting = {
+
+      ...patch.accounting,
+
+      vatRate: Number(patch.accounting.vatRate ?? 0.2) || 0.2,
+
+      commissionGross: Number(patch.accounting.commissionGross || 0) || 0,
+
+      commissionVat: Number(patch.accounting.commissionVat || 0) || 0,
+
+      commissionNet: Number(patch.accounting.commissionNet || 0) || 0,
+
+      passThroughGross: Number(patch.accounting.passThroughGross || 0) || 0,
+
+      currency: String(patch.accounting.currency || "GBP"),
+
+      paymentStage: String(patch.accounting.paymentStage || ""),
+
+    };
+
+  }
+
+
+
   return patch;
 };
 
@@ -173,6 +199,9 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
     chargedAmount: charged,
   };
 
+  if (patch.accounting && isPlainObject(patch.accounting)) {
+  bookingDoc.accounting = mergeDeep(bookingDoc.accounting || {}, patch.accounting);
+}
   bookingDoc.balanceAmountPence = Math.round(computedBalance * 100);
 
   if (computedBalance > 0) {
@@ -457,6 +486,7 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     finishTime: doc?.finishTime || doc?.performanceTimes?.finishTime || actSummary?.performance?.finishTime || "",
     bookingDetails: doc?.bookingDetails || { djServicesBooked: false },
     payments: rawPayments.length ? rawPayments : paymentsMeta,
+    accounting: doc?.accounting || null,
     balancePaid: Boolean(doc?.balancePaid),
     bandPaymentsSent: Boolean(doc?.bandPaymentsSent),
     allocation: doc?.allocation || { status: "in_progress" },
@@ -789,6 +819,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       delete body.actsSummary;
       delete body.performanceTimes;
       delete body.bookingDetails;
+      delete body.accounting;
     }
 
     // First try: treat :id as a real Booking _id
@@ -850,6 +881,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
               savedBooking?.fee ||
               0
           ) || 0,
+          accounting: savedBooking?.accounting || {},
         bookingDetails:
           normalized?.bookingDetails || savedBooking?.bookingDetails || {},
         actsSummary: Array.isArray(savedBooking?.actsSummary)
