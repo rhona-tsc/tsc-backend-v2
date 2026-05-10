@@ -1,6 +1,10 @@
 // models/bookingModel.js
 import mongoose from "mongoose";
 
+/* -------------------------------------------------------------------------- */
+/*                                   Extras                                   */
+/* -------------------------------------------------------------------------- */
+
 const ExtraPayoutAllocationSchema = new mongoose.Schema(
   {
     musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "musician" },
@@ -48,9 +52,7 @@ const ExtraSchema = new mongoose.Schema(
 
     // Convenience metadata
     payoutRoleFilter: [String], // e.g. ["Sound Engineering", "PA / Lights"]
-    payoutMemberIds: [
-      { type: mongoose.Schema.Types.ObjectId, ref: "musician" },
-    ],
+    payoutMemberIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "musician" }],
     payoutMemberNames: [String],
 
     // Specific support for PA/lights staying later than the band
@@ -66,6 +68,10 @@ const ExtraSchema = new mongoose.Schema(
   },
   { _id: false },
 );
+
+/* -------------------------------------------------------------------------- */
+/*                                Performance                                 */
+/* -------------------------------------------------------------------------- */
 
 const PerformanceSchema = new mongoose.Schema(
   {
@@ -89,7 +95,10 @@ const PerformanceSchema = new mongoose.Schema(
   { _id: false },
 );
 
-// ---- Call forwarding / proxy contact schemas ----
+/* -------------------------------------------------------------------------- */
+/*                         Call forwarding / proxy contact                     */
+/* -------------------------------------------------------------------------- */
+
 const ForwardTargetSchema = new mongoose.Schema(
   {
     musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "musician" },
@@ -157,6 +166,10 @@ const ProxyContactSchema = new mongoose.Schema(
   { _id: false },
 );
 
+/* -------------------------------------------------------------------------- */
+/*                                Act summary                                 */
+/* -------------------------------------------------------------------------- */
+
 const ActSummarySchema = new mongoose.Schema(
   {
     actId: { type: String, required: true },
@@ -199,6 +212,10 @@ const ActSummarySchema = new mongoose.Schema(
   { _id: false },
 );
 
+/* -------------------------------------------------------------------------- */
+/*                                 Event sheet                                */
+/* -------------------------------------------------------------------------- */
+
 const EventSheetSchema = new mongoose.Schema(
   {
     answers: { type: mongoose.Schema.Types.Mixed, default: {} },
@@ -219,6 +236,10 @@ const EventSheetSchema = new mongoose.Schema(
   { _id: false },
 );
 
+/* -------------------------------------------------------------------------- */
+/*                              Payout breakdown                               */
+/* -------------------------------------------------------------------------- */
+
 const PaymentExtraBreakdownSchema = new mongoose.Schema(
   {
     key: String,
@@ -235,6 +256,51 @@ const PaymentExtraBreakdownSchema = new mongoose.Schema(
   { _id: false },
 );
 
+/* -------------------------------------------------------------------------- */
+/*                           Add-on payments (NEW)                             */
+/* -------------------------------------------------------------------------- */
+
+const AddonPaymentSchema = new mongoose.Schema(
+  {
+    // What kind of add-on this was (deposit or full add-on payment)
+    stage: {
+      type: String,
+      enum: ["addon_deposit", "addon_full"],
+      required: true,
+    },
+
+    // Amount charged (in minor units)
+    amountPence: { type: Number, default: 0 },
+    currency: { type: String, default: "GBP" },
+
+    // Optional label to show in admin / for audit
+    label: { type: String, default: "" },
+
+    // Stripe references
+    checkoutSessionId: { type: String, default: "" },
+    checkoutUrl: { type: String, default: "" },
+    paymentIntentId: { type: String, default: "" },
+    chargeId: { type: String, default: "" },
+
+    status: {
+      type: String,
+      enum: ["draft", "sent", "paid", "cancelled", "refunded"],
+      default: "draft",
+    },
+
+    paidAt: { type: Date },
+    createdAt: { type: Date, default: Date.now },
+
+    // Extra audit payload (safe to store arbitrary metadata)
+    metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+  },
+  { _id: true }, // keep _id so you can target/update a specific add-on later
+);
+
+/* -------------------------------------------------------------------------- */
+/*                                  Booking                                   */
+/* -------------------------------------------------------------------------- */
+
 const BookingSchema = new mongoose.Schema(
   {
     bookingId: { type: String, required: true },
@@ -243,11 +309,10 @@ const BookingSchema = new mongoose.Schema(
     userId: { type: String, index: true },
     userEmail: { type: String, index: true },
 
-
     // Stripe
-    sessionId: { type: String, index: true },
-    paymentIntentId: { type: String },
-    chargeId: { type: String },
+    sessionId: { type: String, index: true }, // initial checkout session (deposit/full)
+    paymentIntentId: { type: String }, // initial payment intent
+    chargeId: { type: String }, // initial charge id
     amount: { type: Number, default: 0 }, // last Stripe charge (major £)
     pdfUrl: { type: String },
 
@@ -260,7 +325,7 @@ const BookingSchema = new mongoose.Schema(
     accounting: {
       paymentStage: {
         type: String,
-        enum: ["deposit", "balance", "full", "addon_deposit", ""],
+        enum: ["deposit", "balance", "full", "addon_deposit", "addon_full", ""],
         default: "",
       },
       vatRate: { type: Number, default: 0.2 },
@@ -292,8 +357,11 @@ const BookingSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Admin/board balance status
+    /* ---------------------------- Balance handling ---------------------------- */
+
     balanceInvoiceUrl: { type: String },
+    balanceInvoiceId: { type: String },
+    stripeInvoiceId: { type: String }, // (if you ever use Stripe Invoices API)
     balancePaid: { type: Boolean, default: false },
     status: { type: String, required: true, default: "pending" },
     balanceDueAt: { type: Date },
@@ -303,10 +371,13 @@ const BookingSchema = new mongoose.Schema(
       enum: ["scheduled", "sent", "paid", "overdue", "cancelled"],
       default: undefined,
     },
-    stripeInvoiceId: { type: String },
-    balanceInvoiceId: { type: String },
 
-    // Per-musician payouts
+    /* ------------------------- Multiple add-on payments ------------------------ */
+
+    addonPayments: { type: [AddonPaymentSchema], default: [] },
+
+    /* ---------------------------- Per-musician payouts ------------------------- */
+
     payments: [
       {
         musician: { type: mongoose.Schema.Types.ObjectId, ref: "musician" },
@@ -351,6 +422,10 @@ const BookingSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+/* -------------------------------------------------------------------------- */
+/*                                   Indexes                                  */
+/* -------------------------------------------------------------------------- */
+
 // One-and-only one bookingId, but ignore docs that don't have a string bookingId yet.
 BookingSchema.index(
   { bookingId: 1 },
@@ -366,9 +441,7 @@ BookingSchema.pre("validate", function (next) {
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const dd = String(d.getDate()).padStart(2, "0");
     const rand = Math.floor(10000 + Math.random() * 90000);
-    const safeLast = String(last)
-      .toUpperCase()
-      .replace(/[^A-Z]/g, "");
+    const safeLast = String(last).toUpperCase().replace(/[^A-Z]/g, "");
     this.bookingId = `${yy}${mm}${dd}-${safeLast}-${rand}`;
   }
   next();
@@ -391,6 +464,10 @@ BookingSchema.index({ act: 1 });
 // Bookings by Stripe IDs
 BookingSchema.index({ sessionId: 1 });
 BookingSchema.index({ paymentIntentId: 1 }, { sparse: true });
+
+// NEW: helpful lookups for add-on payments
+BookingSchema.index({ "addonPayments.checkoutSessionId": 1 }, { sparse: true });
+BookingSchema.index({ "addonPayments.paymentIntentId": 1 }, { sparse: true });
 
 const Booking =
   mongoose.models.Booking || mongoose.model("Booking", BookingSchema);

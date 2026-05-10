@@ -1998,9 +1998,7 @@ const updateStatus = async (req, res) => {
 // ---------------- manual creates & API create ----------------
 
 const manualCreateBooking = async (req, res) => {
-  console.log(`🐣 manualCreateBooking called`, {
-    body: req.body,
-  });
+  console.log(`🐣 manualCreateBooking called`, { body: req.body });
 
   try {
     const {
@@ -2009,7 +2007,9 @@ const manualCreateBooking = async (req, res) => {
       lineup,
       lineupId,
       eventDate,
+      date, // allow FE to send `date`
       venue,
+      venueAddress,
       clientName,
       clientEmail,
       clientPhone,
@@ -2018,24 +2018,28 @@ const manualCreateBooking = async (req, res) => {
       contactRouting,
       performanceTimes,
       actsSummary,
+
+      // ✅ NEW: choose deposit/full
+      paymentMode, // "deposit" | "full"
+
+      // ✅ NEW: for bespoke pricing
+      grossTotal, // number (major £)
+      depositAmount, // optional override (major £)
+      currency = "GBP",
+
+      // ✅ optional: client asked for invoice paperwork
+      invoiceRequested,
     } = req.body;
 
     // ------------------------------
     // 1️⃣ Resolve act + lineup ID
     // ------------------------------
-    const resolvedActId =
-      act || actId || req.body?.actsSummary?.[0]?.actId || null;
+    const resolvedActId = act || actId || req.body?.actsSummary?.[0]?.actId || null;
+    const resolvedLineupId = lineupId || req.body?.actsSummary?.[0]?.lineupId || null;
 
-    const resolvedLineupId =
-      lineupId || req.body?.actsSummary?.[0]?.lineupId || null;
-
-    // Load act AFTER determining the correct actId
     const actDoc = await Act.findById(resolvedActId).lean();
     if (!actDoc) {
-      return res.status(404).json({
-        success: false,
-        message: "Act not found",
-      });
+      return res.status(404).json({ success: false, message: "Act not found" });
     }
 
     // ------------------------------
@@ -2045,14 +2049,12 @@ const manualCreateBooking = async (req, res) => {
       performanceTimes && typeof performanceTimes === "object"
         ? {
             arrivalTime: performanceTimes.arrivalTime || "",
-            setupAndSoundcheckedBy:
-              performanceTimes.setupAndSoundcheckedBy || "",
+            setupAndSoundcheckedBy: performanceTimes.setupAndSoundcheckedBy || "",
             startTime: performanceTimes.startTime || "",
             finishTime: performanceTimes.finishTime || "",
             finishDayOffset: Number(performanceTimes.finishDayOffset || 0) || 0,
             paLightsFinishTime: performanceTimes.paLightsFinishTime || "",
-            paLightsFinishDayOffset:
-              Number(performanceTimes.paLightsFinishDayOffset || 0) || 0,
+            paLightsFinishDayOffset: Number(performanceTimes.paLightsFinishDayOffset || 0) || 0,
           }
         : null;
 
@@ -2064,13 +2066,61 @@ const manualCreateBooking = async (req, res) => {
       : [];
 
     // ------------------------------
-    // 3️⃣ Create booking doc
+    // 3️⃣ Totals + accounting (IMPORTANT)
     // ------------------------------
+    const VAT_RATE = Number(process.env.TSC_VAT_RATE ?? 0.2);
+    const DEPOSIT_RATE = Number(process.env.TSC_DEPOSIT_RATE ?? 0.33);
+
+    const safeGross = Number(grossTotal || feeDetails?.grossTotal || feeDetails?.total || 0) || 0;
+    if (!safeGross) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing grossTotal (or feeDetails.total). Manual booking needs a total amount.",
+      });
+    }
+
+    const mode = paymentMode === "full" ? "full" : "deposit";
+
+    // deposit calculation (major £)
+    const calcDeposit = () => {
+      // if you already use a different deposit rule elsewhere, swap this out
+      const raw = Number(depositAmount || 0);
+      if (raw > 0) return raw;
+      return Math.round(safeGross * DEPOSIT_RATE * 100) / 100;
+    };
+
+    const deposit = mode === "full" ? 0 : calcDeposit();
+    const charged = mode === "full" ? safeGross : deposit;
+
+    // commission rules (match your checkout logic)
+    const commissionGrossThisPayment = mode === "full" ? calcDeposit() : charged;
+    const passThroughGrossThisPayment = mode === "full"
+      ? Math.max(0, Math.round((charged - calcDeposit()) * 100) / 100)
+      : 0;
+
+    const commissionVatThisPayment = Math.round(
+      commissionGrossThisPayment * (VAT_RATE / (1 + VAT_RATE)) * 100
+    ) / 100;
+
+    const commissionNetThisPayment = Math.round(
+      (commissionGrossThisPayment - commissionVatThisPayment) * 100
+    ) / 100;
+
+    // ------------------------------
+    // 4️⃣ Create booking doc
+    // ------------------------------
+    const effectiveDate = eventDate || date; // accept either
     const newBooking = new Booking({
       act: resolvedActId,
       lineupId: resolvedLineupId,
-      eventDate,
-      venue,
+
+      // ✅ use `date` consistently (your codebase expects this a lot)
+      date: effectiveDate ? new Date(effectiveDate) : undefined,
+      eventDate: effectiveDate ? new Date(effectiveDate) : undefined,
+
+      venue: venue || "",
+      venueAddress: venueAddress || venue || "",
+
       clientName,
       clientEmail,
       clientPhone,
@@ -2081,18 +2131,41 @@ const manualCreateBooking = async (req, res) => {
 
       performanceTimes: normalizedPerf || undefined,
       actsSummary: actsSummaryPatched.length ? actsSummaryPatched : undefined,
+
+      // ✅ this matters for Option 2
+      invoiceRequested: invoiceRequested === true,
+
+      // ✅ totals for balance + invoicing
+      totals: {
+        fullAmount: safeGross,
+        depositAmount: deposit,
+        chargedAmount: charged,
+        chargeMode: mode,
+        currency,
+      },
+
+      // ✅ accounting split
+      accounting: {
+        paymentStage: mode, // deposit | full
+        vatRate: VAT_RATE,
+        commissionGross: commissionGrossThisPayment,
+        commissionVat: commissionVatThisPayment,
+        commissionNet: commissionNetThisPayment,
+        passThroughGross: passThroughGrossThisPayment,
+        currency,
+      },
     });
 
     newBooking.bookingId =
       newBooking.bookingId ||
       makeBookingRef({
-        date: eventDate,
+        date: effectiveDate,
         clientName,
         userAddress: newBooking.userAddress,
       });
 
     // ------------------------------
-    // 4️⃣ Contact routing mirror
+    // 5️⃣ Contact routing mirror
     // ------------------------------
     if (contactRouting) {
       const cr = normalizeContactRouting(contactRouting);
@@ -2106,7 +2179,7 @@ const manualCreateBooking = async (req, res) => {
     await newBooking.save();
 
     // ------------------------------
-    // 5️⃣ Board + calendar sync
+    // 6️⃣ Board + calendar sync
     // ------------------------------
     try {
       await upsertBoardRowFromBooking(newBooking);
@@ -2133,10 +2206,7 @@ const manualCreateBooking = async (req, res) => {
     });
   } catch (err) {
     console.error("Manual booking error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
