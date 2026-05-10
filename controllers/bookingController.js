@@ -1,14 +1,14 @@
 import mongoose from "mongoose";
 // controllers/bookingController.js
-import Stripe from 'stripe';
-import Order from '../models/bookingModel.js';
-import ejs from 'ejs';
-import puppeteer from 'puppeteer';
-import nodemailer from 'nodemailer';
-import { v2 as cloudinary } from 'cloudinary';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import Stripe from "stripe";
+import Order from "../models/bookingModel.js";
+import ejs from "ejs";
+import puppeteer from "puppeteer";
+import nodemailer from "nodemailer";
+import { v2 as cloudinary } from "cloudinary";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 import Act from "../models/actModel.js";
@@ -16,20 +16,23 @@ import bookingModel from "../models/bookingModel.js";
 import Booking from "../models/bookingModel.js";
 import Musician from "../models/musicianModel.js";
 import BookingNotifications from "../utils/BookingNotifications.js";
-import crypto from 'crypto';
+import crypto from "crypto";
 import EnquiryBoardItem from "../models/enquiryBoardItem.js";
 // 🔹 NEW: to find the existing enquiry event (if any)
-import AvailabilityModel from '../models/availabilityModel.js';
+import AvailabilityModel from "../models/availabilityModel.js";
 // 🔹 NEW: update or create calendar events
-import { updateCalendarEvent, createCalendarInvite } from '../controllers/googleController.js';
+import {
+  updateCalendarEvent,
+  createCalendarInvite,
+} from "../controllers/googleController.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import axios from "axios";
 import { differenceInCalendarDays, startOfDay, subDays } from "date-fns";
 import { logStart } from "../utils/logger.js";
 import { setSharedIVR } from "../utils/proxySetup.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
-import userModel from '../models/userModel.js';
-import { updateOrCreateBookingEvent } from '../utils/updateOrCreateBookingEvent.js';
+import userModel from "../models/userModel.js";
+import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
 import { normalize } from "../utils/phoneUtils.js";
 import chromium from "@sparticuz/chromium";
 import { sendContractEmail } from "./helpers/sendContractEmail.js";
@@ -55,41 +58,61 @@ export async function lookupMusicianName(musicianId) {
 }
 
 // bookingController.js (top-level, near other consts)
-const GOOGLE_REVIEW_URL = process.env.GOOGLE_REVIEW_URL || "https://g.page/r/CUYlq-https://www.google.com/search?q=the+supreme+collective&oq=the+supreme&gs_lcrp=EgZjaHJvbWUqBggAEEUYOzIGCAAQRRg7MgYIARBFGDkyBggCEEUYOzIGCAMQRRg7MgYIBBBFGEEyBggFEEUYQTIGCAYQRRhBMgYIBxBFGD3SAQgxMjU5ajBqMagCALACAA&sourceid=chrome&ie=UTF-8&sei=3c_baMnlI4_vhbIPiOS9yQE#lrd=0x751df2ff4f2e30d:0xb1f44d25caa515eb,1,,,,"; // <- put your real review link
+const GOOGLE_REVIEW_URL =
+  process.env.GOOGLE_REVIEW_URL ||
+  "https://g.page/r/CUYlq-https://www.google.com/search?q=the+supreme+collective&oq=the+supreme&gs_lcrp=EgZjaHJvbWUqBggAEEUYOzIGCAAQRRg7MgYIARBFGDkyBggCEEUYOzIGCAMQRRg7MgYIBBBFGEEyBggFEEUYQTIGCAYQRRhBMgYIBxBFGD3SAQgxMjU5ajBqMagCALACAA&sourceid=chrome&ie=UTF-8&sei=3c_baMnlI4_vhbIPiOS9yQE#lrd=0x751df2ff4f2e30d:0xb1f44d25caa515eb,1,,,,"; // <- put your real review link
 const SITE_URL = process.env.SITE_URL || "https://thesupremecollective.co.uk";
-const WHATSAPP_URL = process.env.WHATSAPP_URL || "https://api.whatsapp.com/send/?phone=7594223200&text&type=phone_number&app_absent=0";
+const WHATSAPP_URL =
+  process.env.WHATSAPP_URL ||
+  "https://api.whatsapp.com/send/?phone=7594223200&text&type=phone_number&app_absent=0";
 
 // --- small helpers reused from availability controller ---
 const firstNameOf = (p = {}) => {
-  const direct = p.firstName || p.first_name || p.firstname || p.givenName || "";
+  const direct =
+    p.firstName || p.first_name || p.firstname || p.givenName || "";
   if (direct && String(direct).trim()) return String(direct).trim();
   const full = p.name || p.fullName || "";
   if (full && String(full).trim()) return String(full).trim().split(/\s+/)[0];
   return "";
 };
 
-
 export async function launchBrowser() {
   return await puppeteer.launch({
     args: chromium.args,
     defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),  // <-- note: this IS async
-    headless: chromium.headless
+    executablePath: await chromium.executablePath(), // <-- note: this IS async
+    headless: chromium.headless,
   });
 }
 
 // (optional) tiny helper to mirror contactRouting -> eventSheet.emergencyContact
 function mirrorEmergencyContact(contactRouting = {}) {
-  console.log(`🐣 (controllers/bookingController.js) mirrorEmergencyContact called at`, new Date().toISOString(), { contactRouting });
+  console.log(
+    `🐣 (controllers/bookingController.js) mirrorEmergencyContact called at`,
+    new Date().toISOString(),
+    { contactRouting },
+  );
   const number = contactRouting?.proxyNumber || "";
   const ivrCode = contactRouting?.ivrCode || "";
   let activeWindowSummary = "";
   try {
-    const from = contactRouting?.activeFrom ? new Date(contactRouting.activeFrom) : null;
-    const until = contactRouting?.activeUntil ? new Date(contactRouting.activeUntil) : null;
+    const from = contactRouting?.activeFrom
+      ? new Date(contactRouting.activeFrom)
+      : null;
+    const until = contactRouting?.activeUntil
+      ? new Date(contactRouting.activeUntil)
+      : null;
     if (from && until && !isNaN(from) && !isNaN(until)) {
-      const left = from.toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit" });
-      const right = until.toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit" });
+      const left = from.toLocaleString("en-GB", {
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const right = until.toLocaleString("en-GB", {
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
       activeWindowSummary = `${left} → ${right}`;
     }
   } catch {}
@@ -97,8 +120,7 @@ function mirrorEmergencyContact(contactRouting = {}) {
   return {
     number,
     ivrCode,
-    note:
-      "Emergency contact active from 5pm the day before and on the event day.",
+    note: "Emergency contact active from 5pm the day before and on the event day.",
     activeWindowSummary,
   };
 }
@@ -113,26 +135,38 @@ export const transporter = nodemailer.createTransport({
   },
 });
 
-
-
 // Resolve the signature GIF on disk (frontend during dev; allow override via env)
 export function resolveSignatureGifPath() {
-    console.log(`🐣 (controllers/bookingController.js) resolveSignatureGifPath called at`, new Date().toISOString());
+  console.log(
+    `🐣 (controllers/bookingController.js) resolveSignatureGifPath called at`,
+    new Date().toISOString(),
+  );
   // 1) explicit override (e.g. when deployed and assets live elsewhere)
-  if (process.env.SIGNATURE_GIF_PATH && fs.existsSync(process.env.SIGNATURE_GIF_PATH)) {
+  if (
+    process.env.SIGNATURE_GIF_PATH &&
+    fs.existsSync(process.env.SIGNATURE_GIF_PATH)
+  ) {
     return process.env.SIGNATURE_GIF_PATH;
   }
   // 2) dev convenience: use the file in frontend/assets
-  const devGuess = path.join(__dirname, "..", "..", "frontend", "assets", "TSC_Signature.gif");
+  const devGuess = path.join(
+    __dirname,
+    "..",
+    "..",
+    "frontend",
+    "assets",
+    "TSC_Signature.gif",
+  );
   if (fs.existsSync(devGuess)) return devGuess;
 
   // 3) final fallback: return empty → we’ll skip attaching if not found
   return "";
 }
 
-
 // default signature HTML (can be overridden by EMAIL_SIGNATURE_HTML)
-const signature = process.env.EMAIL_SIGNATURE_HTML || `
+const signature =
+  process.env.EMAIL_SIGNATURE_HTML ||
+  `
   <hr style="border:none;border-top:1px solid #eee;margin:20px 0" />
   <table cellpadding="0" cellspacing="0" role="presentation" style="font-family:Arial,Helvetica,sans-serif;color:#333">
     <tr>
@@ -164,15 +198,25 @@ const formatWithOrdinal = (dateLike) => {
   const d = new Date(dateLike);
   if (isNaN(d)) return String(dateLike);
   const day = d.getDate();
-  const j = day % 10, k = day % 100;
-  const suffix = j === 1 && k !== 11 ? "st" : j === 2 && k !== 12 ? "nd" : j === 3 && k !== 13 ? "rd" : "th";
+  const j = day % 10,
+    k = day % 100;
+  const suffix =
+    j === 1 && k !== 11
+      ? "st"
+      : j === 2 && k !== 12
+        ? "nd"
+        : j === 3 && k !== 13
+          ? "rd"
+          : "th";
   const weekday = d.toLocaleDateString("en-GB", { weekday: "long" });
   const month = d.toLocaleDateString("en-GB", { month: "short" });
   const year = d.getFullYear();
   return `${weekday}, ${day}${suffix} ${month} ${year}`;
 };
 const normalizePhone = (raw = "") => {
-  let v = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
+  let v = String(raw || "")
+    .replace(/^whatsapp:/i, "")
+    .replace(/\s+/g, "");
   if (!v) return "";
   if (v.startsWith("+")) return v;
   if (v.startsWith("07")) return v.replace(/^0/, "+44");
@@ -182,28 +226,41 @@ const normalizePhone = (raw = "") => {
 
 // ---- Fee helpers (mirror availability logic) ----
 function countPerformers(lineup) {
-    console.log(`🐣 (controllers/bookingController.js) countPerformers called at`, new Date().toISOString(), { lineupId: lineup?._id });
-    logStart("countPerformers", );
+  console.log(
+    `🐣 (controllers/bookingController.js) countPerformers called at`,
+    new Date().toISOString(),
+    { lineupId: lineup?._id },
+  );
+  logStart("countPerformers");
 
   const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
-  return members.filter(m => {
-    const role = String(m?.instrument || "").trim().toLowerCase();
+  return members.filter((m) => {
+    const role = String(m?.instrument || "")
+      .trim()
+      .toLowerCase();
     return role && role !== "manager" && role !== "admin";
   }).length;
 }
 
 function computePerMemberFee({ lineup, booking }, debugLabel = "") {
-    console.log(`🐣 (controllers/bookingController.js) computePerMemberFee called at`, new Date().toISOString(), { lineupId: lineup?._id, bookingId: booking?.bookingId, debugLabel });
-    logStart("computePerMemberFee", );
-
+  console.log(
+    `🐣 (controllers/bookingController.js) computePerMemberFee called at`,
+    new Date().toISOString(),
+    { lineupId: lineup?._id, bookingId: booking?.bookingId, debugLabel },
+  );
+  logStart("computePerMemberFee");
 
   const lineupTotal = Number(lineup?.base_fee?.[0]?.total_fee ?? 0);
-  const bookingGross = Number(booking?.totals?.fullAmount ?? booking?.amount ?? 0);
+  const bookingGross = Number(
+    booking?.totals?.fullAmount ?? booking?.amount ?? 0,
+  );
   const gross = lineupTotal > 0 ? lineupTotal : bookingGross;
   const performers = countPerformers(lineup);
 
   if (process.env.DEBUG_FEE_LOGS === "1") {
-    const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+    const members = Array.isArray(lineup?.bandMembers)
+      ? lineup.bandMembers
+      : [];
     console.log("[fee] inputs", {
       tag: debugLabel,
       bookingId: booking?.bookingId,
@@ -212,12 +269,12 @@ function computePerMemberFee({ lineup, booking }, debugLabel = "") {
       bookingGross,
       chosenGross: gross,
       performers,
-      membersRoles: members.map(m => m?.instrument || "").filter(Boolean),
+      membersRoles: members.map((m) => m?.instrument || "").filter(Boolean),
       baseFeeRaw: lineup?.base_fee,
     });
   }
 
-  const fee = (!gross || !performers) ? 0 : Math.ceil(gross / performers);
+  const fee = !gross || !performers ? 0 : Math.ceil(gross / performers);
 
   if (process.env.DEBUG_FEE_LOGS === "1") {
     console.log("[fee] result", { tag: debugLabel, perMember: fee });
@@ -227,25 +284,34 @@ function computePerMemberFee({ lineup, booking }, debugLabel = "") {
 
 // --- messaging helpers ---
 async function sendClientBookingConfirmation({ booking, actName }) {
-  console.log(`🐣 (controllers/bookingController.js) sendClientBookingConfirmation called at`, new Date().toISOString(), { bookingId: booking?.bookingId, actName });
+  console.log(
+    `🐣 (controllers/bookingController.js) sendClientBookingConfirmation called at`,
+    new Date().toISOString(),
+    { bookingId: booking?.bookingId, actName },
+  );
   try {
     const user = booking?.userAddress || {};
     const to = normalizePhone(
-      user?.phone ||
-      user?.mobile ||
-      booking?.clientPhone ||
-      ""
+      user?.phone || user?.mobile || booking?.clientPhone || "",
     );
     if (!to) return; // no phone – skip silently
 
     // Names
     const clientFirstName = firstNameOf(user);
     const firstName = clientFirstName; // matches your SMS template var
-    const act = actName || booking?.actTscName || booking?.actName || "the band";
+    const act =
+      actName || booking?.actTscName || booking?.actName || "the band";
 
     // Date / venue
-    const eventDateText = formatWithOrdinal(booking?.date || booking?.eventDate || new Date());
-    const venueName = (booking?.venueAddress || booking?.venue || booking?.address || "")
+    const eventDateText = formatWithOrdinal(
+      booking?.date || booking?.eventDate || new Date(),
+    );
+    const venueName = (
+      booking?.venueAddress ||
+      booking?.venue ||
+      booking?.address ||
+      ""
+    )
       .split(",")
       .slice(-2)
       .join(",")
@@ -253,15 +319,11 @@ async function sendClientBookingConfirmation({ booking, actName }) {
       .trim();
 
     // Fee (prefer totals.fullAmount, fall back to fee)
-    const fullAmount =
-      Number(booking?.totals?.fullAmount ?? booking?.fee ?? 0);
+    const fullAmount = Number(booking?.totals?.fullAmount ?? booking?.fee ?? 0);
     const feeText = fullAmount > 0 ? `£${fullAmount.toFixed(2)}` : "TBC";
 
     // Duties (no clear source on booking for client SMS; set a sensible default)
-    const duties =
-      booking?.primaryDuty ||
-      booking?.duty ||
-      "performance";
+    const duties = booking?.primaryDuty || booking?.duty || "performance";
 
     // Build the exact SMS copy you asked for, wiring in the derived vars
     const smsBody =
@@ -286,7 +348,15 @@ async function sendClientBookingConfirmation({ booking, actName }) {
   }
 }
 
-async function triggerBookingRequestsInternal({ actId, lineupId, dateISO, address, perMemberFee, bookingId, dryRun = false }) {
+async function triggerBookingRequestsInternal({
+  actId,
+  lineupId,
+  dateISO,
+  address,
+  perMemberFee,
+  bookingId,
+  dryRun = false,
+}) {
   const fakeRes = {
     status(code) {
       this.statusCode = code;
@@ -310,31 +380,38 @@ async function triggerBookingRequestsInternal({ actId, lineupId, dateISO, addres
         dryRun,
       },
     },
-    fakeRes
+    fakeRes,
   );
 }
-
 
 const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2024-06-20",
 });
 
 if (!process.env.STRIPE_SECRET_KEY) {
-  console.warn("⚠️ STRIPE_SECRET_KEY missing — booking checkout + session retrieval will fail.");
+  console.warn(
+    "⚠️ STRIPE_SECRET_KEY missing — booking checkout + session retrieval will fail.",
+  );
 }
 
 // ---------------- helpers ----------------
 
 // Normalise and validate contact routing payloads for IVR/call forwarding
 function normalizeContactRouting(src = {}) {
-  console.log(`🐣 (controllers/bookingController.js) normalizeContactRouting called at`, new Date().toISOString());
+  console.log(
+    `🐣 (controllers/bookingController.js) normalizeContactRouting called at`,
+    new Date().toISOString(),
+  );
   if (!src || typeof src !== "object") return null;
   const cleanPhone = (v) => (typeof v === "string" ? v.trim() : "");
   const cleanDigits = (v) => String(v || "").replace(/\D+/g, "");
 
   const out = {
     provider: src.provider || "twilio",
-    mode: src.mode && ["pooled", "dedicated", "shared_ivr"].includes(src.mode) ? src.mode : undefined,
+    mode:
+      src.mode && ["pooled", "dedicated", "shared_ivr"].includes(src.mode)
+        ? src.mode
+        : undefined,
     proxyNumber: cleanPhone(src.proxyNumber || src.number || ""),
     ivrCode: cleanDigits(src.ivrCode || src.code || ""),
     ivrPin: src.ivrPin ? cleanDigits(src.ivrPin) : undefined,
@@ -345,20 +422,26 @@ function normalizeContactRouting(src = {}) {
       ? {
           enabled: !!src.voicemail.enabled,
           emailForwardTo: src.voicemail.emailForwardTo || undefined,
-          transcription: src.voicemail.transcription != null ? !!src.voicemail.transcription : true,
+          transcription:
+            src.voicemail.transcription != null
+              ? !!src.voicemail.transcription
+              : true,
         }
       : undefined,
-    ringStrategy: src.ringStrategy && ["simul", "hunt"].includes(src.ringStrategy) ? src.ringStrategy : "hunt",
+    ringStrategy:
+      src.ringStrategy && ["simul", "hunt"].includes(src.ringStrategy)
+        ? src.ringStrategy
+        : "hunt",
     targets: Array.isArray(src.targets)
-      ? src.targets
-          .filter(Boolean)
-          .map((t) => ({
-            musicianId: t.musicianId || undefined,
-            name: t.name || "",
-            role: t.role || "",
-            phone: cleanPhone(t.phone || t.number || ""),
-            priority: Number.isFinite(Number(t.priority)) ? Number(t.priority) : 1,
-          }))
+      ? src.targets.filter(Boolean).map((t) => ({
+          musicianId: t.musicianId || undefined,
+          name: t.name || "",
+          role: t.role || "",
+          phone: cleanPhone(t.phone || t.number || ""),
+          priority: Number.isFinite(Number(t.priority))
+            ? Number(t.priority)
+            : 1,
+        }))
       : undefined,
     webhookToken: src.webhookToken || undefined,
     active: src.active != null ? !!src.active : undefined,
@@ -366,60 +449,86 @@ function normalizeContactRouting(src = {}) {
   };
 
   // Strip unset keys so mongoose doesn't create empty subdocs
-  Object.keys(out).forEach((k) => (out[k] === undefined || out[k] === "" ? delete out[k] : null));
+  Object.keys(out).forEach((k) =>
+    out[k] === undefined || out[k] === "" ? delete out[k] : null,
+  );
   return Object.keys(out).length ? out : null;
 }
 
 // Human-friendly booking reference e.g. 250917-DOWNIE-19435
 function makeBookingRef({ date, eventDate, clientName, userAddress } = {}) {
-  console.log(`🐣 (controllers/bookingController.js) makeBookingRef called at`, new Date().toISOString(), { clientName });
+  console.log(
+    `🐣 (controllers/bookingController.js) makeBookingRef called at`,
+    new Date().toISOString(),
+    { clientName },
+  );
   const d = new Date(date || eventDate || Date.now());
   const yy = String(d.getFullYear()).slice(-2);
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
-  const last =
-    (clientName?.split(" ").pop() ||
-      userAddress?.lastName ||
-      "CLIENT")
-      .toUpperCase()
-      .replace(/[^A-Z]/g, "");
+  const last = (
+    clientName?.split(" ").pop() ||
+    userAddress?.lastName ||
+    "CLIENT"
+  )
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "");
   const rand = Math.floor(10000 + Math.random() * 90000);
   return `${yy}${mm}${dd}-${last}-${rand}`;
 }
 
 function buildEmergencyMirror(contactRouting) {
-  console.log(`🐣 (controllers/bookingController.js) buildEmergencyMirror called at`, new Date().toISOString());
+  console.log(
+    `🐣 (controllers/bookingController.js) buildEmergencyMirror called at`,
+    new Date().toISOString(),
+  );
   if (!contactRouting) return null;
   const number = contactRouting.proxyNumber || "";
   const ivrCode = contactRouting.ivrCode || "";
   let activeWindowSummary = "";
   try {
-    const from = contactRouting.activeFrom ? new Date(contactRouting.activeFrom) : null;
-    const until = contactRouting.activeUntil ? new Date(contactRouting.activeUntil) : null;
+    const from = contactRouting.activeFrom
+      ? new Date(contactRouting.activeFrom)
+      : null;
+    const until = contactRouting.activeUntil
+      ? new Date(contactRouting.activeUntil)
+      : null;
     if (from && until && !isNaN(from) && !isNaN(until)) {
-      const left = from.toLocaleString("en-GB", { weekday: "short", hour: "numeric", minute: "2-digit" });
-      const right = until.toLocaleString("en-GB", { weekday: "short", hour: "numeric", minute: "2-digit" });
+      const left = from.toLocaleString("en-GB", {
+        weekday: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+      const right = until.toLocaleString("en-GB", {
+        weekday: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      });
       activeWindowSummary = `${left} → ${right}`;
     }
   } catch {}
   return {
     number,
     ivrCode,
-    note:
-      "This number will put you in direct contact with the band on the day. It will cycle through band member phones until someone answers. Please take note of the code to enter upon calling.",
+    note: "This number will put you in direct contact with the band on the day. It will cycle through band member phones until someone answers. Please take note of the code to enter upon calling.",
     activeWindowSummary,
   };
 }
 
-
-
-const makeBookingId = (dateStr = new Date().toISOString(), lastName = 'TSC') => {
-  console.log(`🐣 (controllers/bookingController.js) makeBookingId called at`, new Date().toISOString(), { dateStr, lastName });
+const makeBookingId = (
+  dateStr = new Date().toISOString(),
+  lastName = "TSC",
+) => {
+  console.log(
+    `🐣 (controllers/bookingController.js) makeBookingId called at`,
+    new Date().toISOString(),
+    { dateStr, lastName },
+  );
   try {
     const d = new Date(dateStr);
-    const yymmdd = d.toISOString().slice(2,10).replace(/-/g,'');
+    const yymmdd = d.toISOString().slice(2, 10).replace(/-/g, "");
     const rand = crypto.randomInt(10000, 99999);
-    return `${yymmdd}-${String(lastName || 'TSC').toUpperCase()}-${rand}`;
+    return `${yymmdd}-${String(lastName || "TSC").toUpperCase()}-${rand}`;
   } catch {
     const rand = crypto.randomInt(10000, 99999);
     return `TSC-${rand}`;
@@ -428,18 +537,26 @@ const makeBookingId = (dateStr = new Date().toISOString(), lastName = 'TSC') => 
 
 // keep controller self-contained
 function ensureHasScheme(urlLike) {
-  console.log(`🐣 (controllers/bookingController.js) ensureHasScheme called at`, new Date().toISOString(), { urlLike });
-  if (!urlLike) return '';
+  console.log(
+    `🐣 (controllers/bookingController.js) ensureHasScheme called at`,
+    new Date().toISOString(),
+    { urlLike },
+  );
+  if (!urlLike) return "";
   if (/^https?:\/\//i.test(urlLike)) return urlLike;
-  return `http://${urlLike.replace(/^\/+/, '')}`;
+  return `http://${urlLike.replace(/^\/+/, "")}`;
 }
 function getFrontendOrigin(req) {
-  console.log(`🐣 (controllers/bookingController.js) getFrontendOrigin called at`, new Date().toISOString(), { originHeader: req.headers?.origin });
+  console.log(
+    `🐣 (controllers/bookingController.js) getFrontendOrigin called at`,
+    new Date().toISOString(),
+    { originHeader: req.headers?.origin },
+  );
   const fromEnv = process.env.FRONTEND_URL;
   const envNormalized = fromEnv ? ensureHasScheme(fromEnv) : null;
   const fromHeader = req.headers?.origin;
   const headerNormalized = fromHeader ? ensureHasScheme(fromHeader) : null;
-  const fallback = 'http://localhost:5174';
+  const fallback = "http://localhost:5174";
   try {
     const chosen = envNormalized || headerNormalized || fallback;
     const u = new URL(chosen);
@@ -449,7 +566,11 @@ function getFrontendOrigin(req) {
   }
 }
 function requireAbsoluteUrl(u) {
-  console.log(`🐣 (controllers/bookingController.js) requireAbsoluteUrl called at`, new Date().toISOString(), { u });
+  console.log(
+    `🐣 (controllers/bookingController.js) requireAbsoluteUrl called at`,
+    new Date().toISOString(),
+    { u },
+  );
   const parsed = new URL(u);
   if (!/^https?:$/.test(parsed.protocol)) {
     throw new Error(`Unsupported protocol: ${parsed.protocol}`);
@@ -460,7 +581,11 @@ function requireAbsoluteUrl(u) {
 // ---------------- Enquiry Board helpers ----------------
 
 async function upsertEnquiryRowFromShortlist(src = {}) {
-  console.log(`🐣 (controllers/bookingController.js) upsertEnquiryRowFromShortlist called at`, new Date().toISOString(), { actName: src.actName, actTscName: src.actTscName });
+  console.log(
+    `🐣 (controllers/bookingController.js) upsertEnquiryRowFromShortlist called at`,
+    new Date().toISOString(),
+    { actName: src.actName, actTscName: src.actTscName },
+  );
   try {
     const {
       actId,
@@ -484,10 +609,14 @@ async function upsertEnquiryRowFromShortlist(src = {}) {
 
     // derive band size
     const bandSize = Array.isArray(lineup?.bandMembers)
-      ? lineup.bandMembers.filter(m => String(m.instrument || "").toLowerCase() !== "manager").length
+      ? lineup.bandMembers.filter(
+          (m) => String(m.instrument || "").toLowerCase() !== "manager",
+        ).length
       : 0;
 
-    const filter = { enquiryRef: enquiryRef || `${actTscName || actName}-${todayISO}` };
+    const filter = {
+      enquiryRef: enquiryRef || `${actTscName || actName}-${todayISO}`,
+    };
 
     const update = {
       $setOnInsert: { createdAt: new Date() },
@@ -508,14 +637,25 @@ async function upsertEnquiryRowFromShortlist(src = {}) {
       },
     };
 
-    await EnquiryBoardItem.findOneAndUpdate(filter, update, { upsert: true, new: true });
-    console.log("✅ upsertEnquiryRowFromShortlist OK", { actTscName, grossValue, netCommission });
+    await EnquiryBoardItem.findOneAndUpdate(filter, update, {
+      upsert: true,
+      new: true,
+    });
+    console.log("✅ upsertEnquiryRowFromShortlist OK", {
+      actTscName,
+      grossValue,
+      netCommission,
+    });
   } catch (e) {
     console.error("❌ upsertEnquiryRowFromShortlist failed:", e);
   }
 }
 export const listEnquiryBoardRows = async (req, res) => {
-  console.log(`🐣 (controllers/bookingController.js) listEnquiryBoardRows called at`, new Date().toISOString(), { query: req.query });
+  console.log(
+    `🐣 (controllers/bookingController.js) listEnquiryBoardRows called at`,
+    new Date().toISOString(),
+    { query: req.query },
+  );
   try {
     const { q, sortBy = "enquiryDateISO", sortDir = "asc" } = req.query;
     const query = {};
@@ -548,20 +688,26 @@ export const listEnquiryBoardRows = async (req, res) => {
  * Returns [{email}, ...].
  */
 async function buildAttendees({ actId, lineupId, bandLineup }) {
-  console.log(`🐣 (controllers/bookingController.js) buildAttendees called at`, new Date().toISOString(), { actId, lineupId, bandLineupCount: bandLineup?.length });
+  console.log(
+    `🐣 (controllers/bookingController.js) buildAttendees called at`,
+    new Date().toISOString(),
+    { actId, lineupId, bandLineupCount: bandLineup?.length },
+  );
   const act = await Act.findById(actId).lean();
   if (!act) return [];
 
   // Prefer emails from the chosen lineup (band members)
   if (lineupId) {
     const lineup = (act.lineups || []).find(
-      l => String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId)
+      (l) =>
+        String(l._id) === String(lineupId) ||
+        String(l.lineupId) === String(lineupId),
     );
     if (lineup) {
       return (lineup.bandMembers || [])
-        .map(m => m.email || m.emailAddress)
+        .map((m) => m.email || m.emailAddress)
         .filter(Boolean)
-        .map(email => ({ email }));
+        .map((email) => ({ email }));
     }
   }
 
@@ -571,66 +717,71 @@ async function buildAttendees({ actId, lineupId, bandLineup }) {
       .select({ email: 1 })
       .lean();
     return docs
-      .map(d => d?.email)
+      .map((d) => d?.email)
       .filter(Boolean)
-      .map(email => ({ email }));
+      .map((email) => ({ email }));
   }
 
   return [];
 }
 
 async function upsertCalendarForConfirmedBooking({
-  
-  booking,                // Booking document (lean or doc)
-  actId,                  // string
-  lineupId,               // string | null
-  bandLineup,             // array of musicianIds (fallback)
-  venue,                  // string
+  booking, // Booking document (lean or doc)
+  actId, // string
+  lineupId, // string | null
+  bandLineup, // array of musicianIds (fallback)
+  venue, // string
 }) {
-  console.log(`🐣 (controllers/bookingController.js) upsertCalendarForConfirmedBooking called at`, new Date().toISOString(), { actId, lineupId, venue });
-  const dateISO = new Date(booking.date).toISOString().slice(0,10);
+  console.log(
+    `🐣 (controllers/bookingController.js) upsertCalendarForConfirmedBooking called at`,
+    new Date().toISOString(),
+    { actId, lineupId, venue },
+  );
+  const dateISO = new Date(booking.date).toISOString().slice(0, 10);
 
   // find an existing availability YES event if any
   const avail = await AvailabilityModel.findOne({
     actId,
     dateISO,
-    reply: 'yes',
-    calendarEventId: { $ne: null }
-  }).sort({ updatedAt: -1 }).lean();
+    reply: "yes",
+    calendarEventId: { $ne: null },
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
 
   const attendees = await buildAttendees({ actId, lineupId, bandLineup });
 
   if (avail?.calendarEventId) {
     await updateCalendarEvent({
       eventId: avail.calendarEventId,
-      addAttendees: attendees
+      addAttendees: attendees,
     });
     // also mirror the eventId onto the booking for convenience
     await Booking.updateOne(
       { _id: booking._id },
-      { $set: { calendarEventId: avail.calendarEventId } }
+      { $set: { calendarEventId: avail.calendarEventId } },
     );
     return { updatedEventId: avail.calendarEventId, createdEventId: null };
   }
 
   // Create fresh event if none exists
   const start = new Date(`${dateISO}T17:00:00Z`);
-  const end   = new Date(`${dateISO}T22:59:00Z`);
+  const end = new Date(`${dateISO}T22:59:00Z`);
 
   const act = await Act.findById(actId).lean();
   const created = await createCalendarInvite({
     enquiryId: booking._id?.toString?.() || `BOOK_${Date.now()}`,
     email: attendees[0]?.email || undefined, // seed with at least one
-    summary: `TSC: Booking — ${act?.tscName || act?.name || 'Act'}`,
-    description: `Confirmed booking: ${venue || ''}`,
+    summary: `TSC: Booking — ${act?.tscName || act?.name || "Act"}`,
+    description: `Confirmed booking: ${venue || ""}`,
     startTime: start.toISOString(),
     endTime: end.toISOString(),
-    attendees
+    attendees,
   });
 
   await Booking.updateOne(
     { _id: booking._id },
-    { $set: { calendarEventId: created?.id || null } }
+    { $set: { calendarEventId: created?.id || null } },
   );
 
   return { updatedEventId: null, createdEventId: created?.id || null };
@@ -642,7 +793,7 @@ export const createCheckoutSession = async (req, res) => {
   console.log(
     `🐣 (controllers/bookingController.js) createCheckoutSession called at`,
     new Date().toISOString(),
-    { bodyKeys: Object.keys(req.body || {}) }
+    { bodyKeys: Object.keys(req.body || {}) },
   );
 
   // ----------------------------
@@ -661,7 +812,10 @@ export const createCheckoutSession = async (req, res) => {
   };
 
   const pretty = (n) =>
-    Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    Number(n).toLocaleString("en-GB", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
 
   // Detect test acts
   const isTestActName = (name = "") => {
@@ -676,7 +830,10 @@ export const createCheckoutSession = async (req, res) => {
   // Detect test act lineup in Stripe-friendly item name
   const extractActName = (fullName = "") => {
     // Example: "Booking: Test Dancefloor Magic - 4-Piece"
-    return String(fullName || "").replace("Booking:", "").split("-")[0].trim();
+    return String(fullName || "")
+      .replace("Booking:", "")
+      .split("-")[0]
+      .trim();
   };
 
   try {
@@ -728,7 +885,9 @@ export const createCheckoutSession = async (req, res) => {
     const depositRate = Number(process.env.TSC_DEPOSIT_RATE ?? 0.33);
 
     // Markup is now optional because FE can send a final UI total
-    const markupRate = Number(process.env.TSC_MARKUP_RATE ?? process.env.TSC_MARGIN_RATE ?? 0.33);
+    const markupRate = Number(
+      process.env.TSC_MARKUP_RATE ?? process.env.TSC_MARGIN_RATE ?? 0.33,
+    );
     const markupFactor = 1 + markupRate;
 
     // ----------------------------
@@ -746,11 +905,13 @@ export const createCheckoutSession = async (req, res) => {
           Number.isFinite(it.price) &&
           it.price > 0 &&
           Number.isFinite(it.quantity) &&
-          it.quantity > 0
+          it.quantity > 0,
       );
 
     if (safeItems.length === 0) {
-      return res.status(400).json({ error: "No payable items found in cartDetails." });
+      return res
+        .status(400)
+        .json({ error: "No payable items found in cartDetails." });
     }
 
     // 🔧 Force minimum 50p for test acts (prevents Stripe <50p)
@@ -770,10 +931,15 @@ export const createCheckoutSession = async (req, res) => {
     // - We round UP to whole pounds to match your cart behaviour.
     // ----------------------------
     const netTotal = roundToPennies(
-      safeItems.reduce((sum, it) => sum + Number(it.price || 0) * Number(it.quantity || 1), 0)
+      safeItems.reduce(
+        (sum, it) => sum + Number(it.price || 0) * Number(it.quantity || 1),
+        0,
+      ),
     );
 
-    const isTestBooking = safeItems.some((it) => isTestActName(extractActName(it.name)));
+    const isTestBooking = safeItems.some((it) =>
+      isTestActName(extractActName(it.name)),
+    );
 
     // Only apply markup if:
     // - not a test booking, AND
@@ -796,7 +962,8 @@ export const createCheckoutSession = async (req, res) => {
     // ----------------------------
     const dte = daysUntil(date);
     const requiresFull = dte != null && dte <= 28;
-    const clientHint = paymentMode === "full" || paymentMode === "deposit" ? paymentMode : null;
+    const clientHint =
+      paymentMode === "full" || paymentMode === "deposit" ? paymentMode : null;
 
     let finalMode = requiresFull ? "full" : clientHint || "deposit";
 
@@ -805,9 +972,31 @@ export const createCheckoutSession = async (req, res) => {
 
     const chargeGross = finalMode === "full" ? grossTotal : depositGross;
 
+    const VAT_RATE = Number(process.env.TSC_VAT_RATE ?? 0.2);
+
+    // Commission that should be recognised as your revenue bucket for THIS charge
+    // - deposit mode: the whole charge is commission
+    // - full mode: commission is the deposit amount, remainder is pass-through
+    const commissionGrossThisPayment =
+      finalMode === "full" ? depositGross : chargeGross;
+
+    const passThroughGrossThisPayment =
+      finalMode === "full" ? roundToPennies(chargeGross - depositGross) : 0;
+
+    // VAT split from a gross VAT-inclusive amount (20% VAT => VAT is 1/6 of gross)
+    const commissionVatThisPayment = roundToPennies(
+      commissionGrossThisPayment * (VAT_RATE / (1 + VAT_RATE)),
+    );
+
+    const commissionNetThisPayment = roundToPennies(
+      commissionGrossThisPayment - commissionVatThisPayment,
+    );
+
     // Stripe hard safety rule:
     if (!Number.isFinite(chargeGross) || chargeGross < 0.5) {
-      return res.status(400).json({ error: "Calculated charge amount is invalid." });
+      return res
+        .status(400)
+        .json({ error: "Calculated charge amount is invalid." });
     }
 
     // ----------------------------
@@ -828,7 +1017,7 @@ export const createCheckoutSession = async (req, res) => {
 
     const origin = getFrontendOrigin(req);
     const success_url = requireAbsoluteUrl(
-      `${origin}/booking-success?session_id={CHECKOUT_SESSION_ID}`
+      `${origin}/booking-success?session_id={CHECKOUT_SESSION_ID}`,
     );
     const cancel_url = requireAbsoluteUrl(`${origin}/cart`);
 
@@ -854,22 +1043,70 @@ export const createCheckoutSession = async (req, res) => {
 
     const bookingId = makeBookingId(date, customer?.lastName || "TSC");
 
+    const lineItems = [
+      {
+        quantity: 1,
+        price_data: {
+          currency: "gbp",
+          product_data: {
+            name:
+              finalMode === "full"
+                ? `Booking fee / commission (includes VAT)${suffix}`
+                : `Booking deposit / commission (includes VAT)${suffix}`,
+            metadata: {
+              bucket: "commission",
+              booking_ref: bookingId,
+              payment_stage: finalMode === "full" ? "full" : "deposit",
+            },
+          },
+          unit_amount: Math.round(commissionGrossThisPayment * 100),
+        },
+      },
+    ];
+
+    if (passThroughGrossThisPayment > 0) {
+      lineItems.push({
+        quantity: 1,
+        price_data: {
+          currency: "gbp",
+          product_data: {
+            name: `Live music balance (funds held for musicians)${suffix}`,
+            metadata: {
+              bucket: "pass_through",
+              booking_ref: bookingId,
+              payment_stage: "full",
+            },
+          },
+          unit_amount: Math.round(passThroughGrossThisPayment * 100),
+        },
+      });
+    }
+
     const session = await stripeInstance.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
       success_url,
       cancel_url,
       allow_promotion_codes: true,
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: "gbp",
-            product_data: { name: lineItemName },
-            unit_amount: unitAmountMinor,
-          },
+      line_items: lineItems,
+      payment_intent_data: {
+        metadata: {
+          booking_ref: bookingId,
+          booking_mode: finalMode,
+          payment_stage: finalMode === "full" ? "full" : "deposit",
+          commission_gross: String(commissionGrossThisPayment),
+          commission_vat: String(commissionVatThisPayment),
+          commission_net: String(commissionNetThisPayment),
+          pass_through_gross: String(passThroughGrossThisPayment),
+          gross_total_major: String(grossTotal),
+          deposit_major: String(depositGross),
+          charge_gross_major: String(chargeGross),
+          event_type: eventType || "",
+          event_date: date || "",
+          venue: venue || "",
+          customer_email: userEmail || "",
         },
-      ],
+      },
       metadata: {
         booking_ref: bookingId,
         booking_mode: finalMode,
@@ -906,7 +1143,7 @@ export const createCheckoutSession = async (req, res) => {
     const performanceTimes = normalizePerf(
       req.body.performanceTimes && typeof req.body.performanceTimes === "object"
         ? req.body.performanceTimes
-        : {}
+        : {},
     );
 
     const actsSummaryWithPerf = Array.isArray(actsSummary)
@@ -916,13 +1153,14 @@ export const createCheckoutSession = async (req, res) => {
 
             let selectedVocalistName = null;
             if (selectedVocalist?.musicianId) {
-              selectedVocalistName = await lookupMusicianName(selectedVocalist.musicianId);
+              selectedVocalistName = await lookupMusicianName(
+                selectedVocalist.musicianId,
+              );
             }
 
-            const bandMembersFlat =
-              Array.isArray(it.bandMembers)
-                ? it.bandMembers
-                : Array.isArray(it.lineup?.bandMembers)
+            const bandMembersFlat = Array.isArray(it.bandMembers)
+              ? it.bandMembers
+              : Array.isArray(it.lineup?.bandMembers)
                 ? it.lineup.bandMembers
                 : [];
 
@@ -937,7 +1175,7 @@ export const createCheckoutSession = async (req, res) => {
               selectedVocalist,
               selectedVocalistName,
             };
-          })
+          }),
         )
       : [];
 
@@ -953,12 +1191,32 @@ export const createCheckoutSession = async (req, res) => {
       venue,
       date,
       status: "pending",
+
+      // Stripe IDs
       sessionId: session.id,
+      paymentIntentId: session.payment_intent || undefined,
+      chargeId: undefined, // populated later (e.g. webhook) if needed
+
       userAddress: customer,
       signatureUrl: signature,
       amount: chargeGross,
       userId,
       userEmail,
+
+      // Client-requested paperwork flag
+      invoiceRequested: req.body.invoiceRequested === true,
+
+      // Accounting split for Stripe-first revenue model
+      accounting: {
+        paymentStage: finalMode,
+        vatRate: VAT_RATE,
+        commissionGross: commissionGrossThisPayment,
+        commissionVat: commissionVatThisPayment,
+        commissionNet: commissionNetThisPayment,
+        passThroughGross: passThroughGrossThisPayment,
+        currency: "GBP",
+      },
+
       totals: {
         fullAmount: grossTotal,
         depositAmount: fixedDeposit,
@@ -985,14 +1243,13 @@ cloudinary.config({
   api_secret: process.env.REACT_APP_CLOUDINARY_API_SECRET,
 });
 
-
-
 export async function uploadAndEmailContract(pdfBuffer, booking) {
   console.log("📤 [Contract] Starting uploadAndEmailContract...");
 
   const bookingRef = booking.bookingId || booking.bookingRef;
   const clientEmail = booking.customer?.email || booking.userEmail;
-  const clientName = booking.customer?.name || booking.userAddress.userFirstName || "Client";
+  const clientName =
+    booking.customer?.name || booking.userAddress.userFirstName || "Client";
 
   if (!clientEmail) {
     console.warn("⚠️ [Contract] No client email found — aborting email send.");
@@ -1001,8 +1258,6 @@ export async function uploadAndEmailContract(pdfBuffer, booking) {
 
   try {
     console.log("☁️ [Contract] Uploading contract to Cloudinary...");
-
-
 
     // We must pipe the buffer into the upload_stream
     const stream = cloudinary.uploader.upload_stream(
@@ -1027,7 +1282,7 @@ export async function uploadAndEmailContract(pdfBuffer, booking) {
           clientEmail,
           clientName,
         });
-      }
+      },
     );
 
     stream.end(pdfBuffer);
@@ -1038,7 +1293,6 @@ export async function uploadAndEmailContract(pdfBuffer, booking) {
     return { uploaded: false, emailed: false, error: err.message };
   }
 }
-
 
 export async function emailContractToClient({
   pdfUrl,
@@ -1060,16 +1314,18 @@ export async function emailContractToClient({
 
     // ✅ hard guard: prevent placeholder config
     if (!host) {
-      throw new Error(`SMTP_HOST is missing (empty). Set real SMTP credentials in env.`);
+      throw new Error(
+        `SMTP_HOST is missing (empty). Set real SMTP credentials in env.`,
+      );
     }
     if (host.toLowerCase().includes("example.com")) {
       throw new Error(
-        `SMTP_HOST is still a placeholder ("${host}"). Set a real SMTP host in env.`
+        `SMTP_HOST is still a placeholder ("${host}"). Set a real SMTP host in env.`,
       );
     }
     if (!user || !pass) {
       throw new Error(
-        `SMTP_USER/SMTP_PASS missing. Current user: "${user || "empty"}" (pass hidden).`
+        `SMTP_USER/SMTP_PASS missing. Current user: "${user || "empty"}" (pass hidden).`,
       );
     }
 
@@ -1118,13 +1374,15 @@ export async function emailContractToClient({
   }
 }
 
-
-
 const completeBooking = async (req, res) => {
- console.log(`🐣 (controllers/bookingController.js) completeBooking called at`, new Date().toISOString(), {
-    query: req.query,
-    body: req.body,
-  });
+  console.log(
+    `🐣 (controllers/bookingController.js) completeBooking called at`,
+    new Date().toISOString(),
+    {
+      query: req.query,
+      body: req.body,
+    },
+  );
   // Deep, step-by-step logging to trace failures in PDF + email + board mirror
   const t0 = Date.now();
   try {
@@ -1134,7 +1392,7 @@ const completeBooking = async (req, res) => {
     const order = await Order.findOne({ sessionId: session_id });
     if (!order) {
       console.error("[completeBooking] ✖ no order for session", { session_id });
-      return res.status(404).json({ message: 'Booking not found.' });
+      return res.status(404).json({ message: "Booking not found." });
     }
     console.log("[completeBooking] ✓ order loaded", {
       bookingId: order.bookingId,
@@ -1145,8 +1403,8 @@ const completeBooking = async (req, res) => {
     });
 
     // ✅ mark confirmed (idempotent) + upsert board row
-    if (order.status !== 'confirmed') {
-      order.status = 'confirmed';
+    if (order.status !== "confirmed") {
+      order.status = "confirmed";
       await order.save();
       console.log("[completeBooking] ✓ order marked confirmed");
     } else {
@@ -1157,47 +1415,66 @@ const completeBooking = async (req, res) => {
       await upsertBoardRowFromBooking(order);
       console.log("[completeBooking] ✓ upsertBoardRowFromBooking done");
     } catch (e) {
-      console.warn('⚠️ upsertBoardRowFromBooking failed in completeBooking:', e?.message || e);
+      console.warn(
+        "⚠️ upsertBoardRowFromBooking failed in completeBooking:",
+        e?.message || e,
+      );
     }
 
     // --- Messaging: confirm to client and ping lineup for allocation
-  try {
-  await confirmLeadVocalistForBooking(order);
-  console.log("[completeBooking] ✓ confirmLeadVocalistForBooking done");
-} catch (e) {
-  console.warn("⚠️ confirmLeadVocalistForBooking failed in completeBooking:", e?.message || e);
-}
+    try {
+      await confirmLeadVocalistForBooking(order);
+      console.log("[completeBooking] ✓ confirmLeadVocalistForBooking done");
+    } catch (e) {
+      console.warn(
+        "⚠️ confirmLeadVocalistForBooking failed in completeBooking:",
+        e?.message || e,
+      );
+    }
 
     // ---- NEW: compute per-member fee and notify confirmed performers ----
     try {
       // 1) Load the act + lineup to count performer members (exclude manager/admin)
       const actIdForCalc = order?.actsSummary?.[0]?.actId || order?.act;
-      const lineupIdForCalc = order?.actsSummary?.[0]?.lineupId || order?.lineupId;
-      const dateISOForCalc = new Date(order?.date || order?.eventDate).toISOString().slice(0,10);
-      const shortAddrForCalc = (order?.venueAddress || order?.venue || "").split(',').slice(-2).join(',').replace(/,\s*UK$/i, '').trim();
-     
-     
-     
+      const lineupIdForCalc =
+        order?.actsSummary?.[0]?.lineupId || order?.lineupId;
+      const dateISOForCalc = new Date(order?.date || order?.eventDate)
+        .toISOString()
+        .slice(0, 10);
+      const shortAddrForCalc = (order?.venueAddress || order?.venue || "")
+        .split(",")
+        .slice(-2)
+        .join(",")
+        .replace(/,\s*UK$/i, "")
+        .trim();
+
       let performerCount = 0;
       let actNameForCalc = "";
       let dutiesLookup = {};
-      let actDoc;              // ← hoisted
+      let actDoc; // ← hoisted
       let lineupDoc;
 
       if (actIdForCalc && lineupIdForCalc) {
         actDoc = await Act.findById(actIdForCalc).lean();
         actNameForCalc = actDoc?.tscName || actDoc?.name || "";
         const allLineups = Array.isArray(actDoc?.lineups) ? actDoc.lineups : [];
-        lineupDoc = allLineups.find(l =>
-          String(l._id) === String(lineupIdForCalc) || String(l.lineupId) === String(lineupIdForCalc)
-        ) || allLineups[0];
-
+        lineupDoc =
+          allLineups.find(
+            (l) =>
+              String(l._id) === String(lineupIdForCalc) ||
+              String(l.lineupId) === String(lineupIdForCalc),
+          ) || allLineups[0];
       }
-      const perMemberFeeComputed = computePerMemberFee({ lineup: lineupDoc, booking: order }, "completeBooking");
+      const perMemberFeeComputed = computePerMemberFee(
+        { lineup: lineupDoc, booking: order },
+        "completeBooking",
+      );
 
       // Log breakdown so we can see where 225 vs 370 might be coming from
       const lineupTotal = Number(lineupDoc?.base_fee?.[0]?.total_fee ?? 0);
-      const bookingGross = Number(order?.totals?.fullAmount ?? order?.amount ?? 0);
+      const bookingGross = Number(
+        order?.totals?.fullAmount ?? order?.amount ?? 0,
+      );
       const performersCount = countPerformers(lineupDoc);
       console.log("[fee] breakdown", {
         bookingId: order?.bookingId,
@@ -1212,35 +1489,50 @@ const completeBooking = async (req, res) => {
       // 2) Compute per-member fee (availability-logic)
       const perMemberFee = perMemberFeeComputed;
 
-   try {
-  const actId = actIdForCalc;
-  const resolvedLineupId = lineupIdForCalc;
+      try {
+        const actId = actIdForCalc;
+        const resolvedLineupId = lineupIdForCalc;
 
-  await upsertCalendarForConfirmedBooking({
-    booking: order,
-    actId,
-    lineupId: resolvedLineupId || null,
-    bandLineup: [],
-    venue: order?.venue || order?.venueAddress || "",
-  });
-  console.log("[completeBooking] ✓ calendar upsert for confirmed booking");
+        await upsertCalendarForConfirmedBooking({
+          booking: order,
+          actId,
+          lineupId: resolvedLineupId || null,
+          bandLineup: [],
+          venue: order?.venue || order?.venueAddress || "",
+        });
+        console.log(
+          "[completeBooking] ✓ calendar upsert for confirmed booking",
+        );
 
-  await triggerBookingRequestsInternal({
-    actId,
-    lineupId: resolvedLineupId,
-    dateISO: dateISOForCalc,
-    address: shortAddrForCalc,
-    perMemberFee,
-    bookingId: order.bookingId,
-  });
-  console.log("[completeBooking] ✓ lineup allocation requests triggered");
-} catch (e) {
-  console.warn("[completeBooking] ⚠️ calendar/allocation step failed:", e?.message || e);
-}
-    } catch (e) { console.warn("⚠️ lineup allocation ping (completeBooking) failed:", e?.message || e); }
+        await triggerBookingRequestsInternal({
+          actId,
+          lineupId: resolvedLineupId,
+          dateISO: dateISOForCalc,
+          address: shortAddrForCalc,
+          perMemberFee,
+          bookingId: order.bookingId,
+        });
+        console.log("[completeBooking] ✓ lineup allocation requests triggered");
+      } catch (e) {
+        console.warn(
+          "[completeBooking] ⚠️ calendar/allocation step failed:",
+          e?.message || e,
+        );
+      }
+    } catch (e) {
+      console.warn(
+        "⚠️ lineup allocation ping (completeBooking) failed:",
+        e?.message || e,
+      );
+    }
 
     // ---------------- Render contract HTML ----------------
-    const templatePath = path.join(__dirname, '..', 'views', 'contractTemplate.ejs');
+    const templatePath = path.join(
+      __dirname,
+      "..",
+      "views",
+      "contractTemplate.ejs",
+    );
     console.log("[completeBooking] ▶ render EJS", { templatePath });
     let html;
     try {
@@ -1257,45 +1549,57 @@ const completeBooking = async (req, res) => {
         signatureUrl: order.signatureUrl,
         logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
       });
-      console.log("[completeBooking] ✓ EJS rendered", { htmlLen: html?.length || 0 });
+      console.log("[completeBooking] ✓ EJS rendered", {
+        htmlLen: html?.length || 0,
+      });
     } catch (e) {
-      console.error('[completeBooking] ✖ EJS render failed:', e?.message || e);
-      return res.status(500).json({ message: 'Failed to render contract.' });
+      console.error("[completeBooking] ✖ EJS render failed:", e?.message || e);
+      return res.status(500).json({ message: "Failed to render contract." });
     }
 
     // ---------------- Generate PDF via Puppeteer ----------------
     let pdfBuffer;
     try {
       console.log("[completeBooking] ▶ puppeteer launch");
-      const browser = await launchBrowser({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+      const browser = await launchBrowser({
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      });
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'load' });
-      pdfBuffer = await page.pdf({ format: 'A4' });
+      await page.setContent(html, { waitUntil: "load" });
+      pdfBuffer = await page.pdf({ format: "A4" });
       await browser.close();
-      console.log("[completeBooking] ✓ PDF generated", { bytes: pdfBuffer?.length || 0 });
+      console.log("[completeBooking] ✓ PDF generated", {
+        bytes: pdfBuffer?.length || 0,
+      });
     } catch (e) {
-      console.error('[completeBooking] ✖ PDF generation failed:', e?.message || e);
-      return res.status(500).json({ message: 'Failed to create contract PDF.' });
+      console.error(
+        "[completeBooking] ✖ PDF generation failed:",
+        e?.message || e,
+      );
+      return res
+        .status(500)
+        .json({ message: "Failed to create contract PDF." });
     }
 
     // ✅ ESM-safe stream import (no require in ESM)
-    const { PassThrough } = await import('stream');
+    const { PassThrough } = await import("stream");
     const bufferStream = new PassThrough();
     bufferStream.end(pdfBuffer);
 
     // Log Cloudinary configuration presence (not secrets)
-    console.log('[completeBooking] cloudinary config present?', {
+    console.log("[completeBooking] cloudinary config present?", {
       cloud: !!process.env.REACT_APP_CLOUDINARY_CLOUD_NAME,
       key: !!process.env.REACT_APP_CLOUDINARY_API_KEY,
       sec: !!process.env.REACT_APP_CLOUDINARY_API_SECRET,
     });
 
-    console.log('[completeBooking] ▶ upload to cloudinary');
+    console.log("[completeBooking] ▶ upload to cloudinary");
     const cloudStream = cloudinary.uploader.upload_stream(
-      { resource_type: 'raw', public_id: `contracts/${order.bookingId}` },
+      { resource_type: "raw", public_id: `contracts/${order.bookingId}` },
       async (error, result) => {
         if (error) {
-          console.error('[completeBooking] ✖ Cloudinary upload failed:', error);
+          console.error("[completeBooking] ✖ Cloudinary upload failed:", error);
           // Even if upload fails, still try emailing PDF directly.
         }
 
@@ -1303,9 +1607,14 @@ const completeBooking = async (req, res) => {
           order.pdfUrl = result.secure_url;
           try {
             await order.save();
-            console.log('[completeBooking] ✓ order.pdfUrl saved', { pdfUrl: order.pdfUrl });
+            console.log("[completeBooking] ✓ order.pdfUrl saved", {
+              pdfUrl: order.pdfUrl,
+            });
           } catch (e) {
-            console.warn('[completeBooking] ⚠️ failed saving order with pdfUrl:', e?.message || e);
+            console.warn(
+              "[completeBooking] ⚠️ failed saving order with pdfUrl:",
+              e?.message || e,
+            );
           }
 
           // Mirror onto booking board (use upsert true in case row was not created yet)
@@ -1313,43 +1622,54 @@ const completeBooking = async (req, res) => {
             const mirrorRes = await BookingBoardItem.updateOne(
               { bookingRef: order.bookingId },
               { $set: { contractUrl: order.pdfUrl, pdfUrl: order.pdfUrl } },
-              { upsert: true }
+              { upsert: true },
             );
-            console.log('[completeBooking] ✓ mirrored pdf to board', { matched: mirrorRes?.matchedCount, modified: mirrorRes?.modifiedCount, upserted: mirrorRes?.upsertedId });
+            console.log("[completeBooking] ✓ mirrored pdf to board", {
+              matched: mirrorRes?.matchedCount,
+              modified: mirrorRes?.modifiedCount,
+              upserted: mirrorRes?.upsertedId,
+            });
           } catch (e) {
-            console.warn('[completeBooking] ⚠️ Failed to mirror contractUrl to board:', e?.message || e);
+            console.warn(
+              "[completeBooking] ⚠️ Failed to mirror contractUrl to board:",
+              e?.message || e,
+            );
           }
         } else {
-          console.warn('[completeBooking] ⚠️ No secure_url from cloudinary result');
+          console.warn(
+            "[completeBooking] ⚠️ No secure_url from cloudinary result",
+          );
         }
 
         // ---------------- Send email with PDF attached ----------------
-   // ---------------- Send email with PDF + inline signature ----------------
-try {
-  const tscName =
-    (order?.actsSummary?.[0]?.tscName) ||
-    (order?.actsSummary?.[0]?.actName) ||
-    "the band";
+        // ---------------- Send email with PDF + inline signature ----------------
+        try {
+          const tscName =
+            order?.actsSummary?.[0]?.tscName ||
+            order?.actsSummary?.[0]?.actName ||
+            "the band";
 
-  const eventDate = new Date(order?.date || order?.eventDate || Date.now());
-  const fmt = (d) =>
-    d.toLocaleDateString("en-GB", {
-      weekday: "long",
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
-  const fourWeeksBefore = new Date(eventDate.getTime());
-  fourWeeksBefore.setDate(fourWeeksBefore.getDate() - 28);
-  const twoWeeksBefore = new Date(eventDate.getTime());
-  twoWeeksBefore.setDate(twoWeeksBefore.getDate() - 14);
+          const eventDate = new Date(
+            order?.date || order?.eventDate || Date.now(),
+          );
+          const fmt = (d) =>
+            d.toLocaleDateString("en-GB", {
+              weekday: "long",
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            });
+          const fourWeeksBefore = new Date(eventDate.getTime());
+          fourWeeksBefore.setDate(fourWeeksBefore.getDate() - 28);
+          const twoWeeksBefore = new Date(eventDate.getTime());
+          twoWeeksBefore.setDate(twoWeeksBefore.getDate() - 14);
 
-  const eventSheetUrl = `${
-    process.env.FRONTEND_URL || "http://thesupremecollective.co.uk"
-  }/event-sheet/${order.bookingId}`;
+          const eventSheetUrl = `${
+            process.env.FRONTEND_URL || "http://thesupremecollective.co.uk"
+          }/event-sheet/${order.bookingId}`;
 
-  // Your main body (unchanged), with signature appended
-  const bodyHtml = `
+          // Your main body (unchanged), with signature appended
+          const bodyHtml = `
     <p>Hi ${order?.userAddress?.firstName || ""},</p>
 
     <p>Thank you for booking <strong>${tscName}</strong>! They’re very much looking forward to performing for you and your guests, and we’re excited to make sure we’ve got all the fine details so ${tscName} can put on a stellar show for you.</p>
@@ -1365,10 +1685,10 @@ try {
     <p><strong>Key dates for your diary</strong>:</p>
     <ul>
       <li>Song suggestions and First Dance (if Wedding) / Off-repertoire request (if not a wedding) due by <strong>${fmt(
-        fourWeeksBefore
+        fourWeeksBefore,
       )}</strong></li>
       <li>Completed Event Sheet (including playlists) and balance due by <strong>${fmt(
-        twoWeeksBefore
+        twoWeeksBefore,
       )}</strong></li>
     </ul>
 
@@ -1381,96 +1701,119 @@ try {
         ${signature}
   `;
 
-  // Inline GIF via cid
-  const sigPath = resolveSignatureGifPath();
-  const signatureAttachment = sigPath
-    ? [
-        {
-          filename: "signature.gif",
-          path: sigPath,
-          cid: "signature.gif", // MUST match the HTML: cid:signature.gif
-          contentDisposition: "inline",
-        },
-      ]
-    : []; // skip if not found (prevents crash)
+          // Inline GIF via cid
+          const sigPath = resolveSignatureGifPath();
+          const signatureAttachment = sigPath
+            ? [
+                {
+                  filename: "signature.gif",
+                  path: sigPath,
+                  cid: "signature.gif", // MUST match the HTML: cid:signature.gif
+                  contentDisposition: "inline",
+                },
+              ]
+            : []; // skip if not found (prevents crash)
 
-  // Build recipients
-  const toList = [order?.userAddress?.email].filter(Boolean).join(", ");
+          // Build recipients
+          const toList = [order?.userAddress?.email].filter(Boolean).join(", ");
 
-  const mailOptions = {
-    from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
-    to: toList,
-    bcc: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
-    subject: `Booking Confirmation – ${order.bookingId}`,
-    html: bodyHtml,
-    attachments: [
-      // PDF contract
-      { filename: `Booking_${order.bookingId}.pdf`, content: pdfBuffer },
-      // Inline signature GIF
-      ...signatureAttachment,
-    ],
-  };
+          const mailOptions = {
+            from: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
+            to: toList,
+            bcc: '"The Supreme Collective" <hello@thesupremecollective.co.uk>',
+            subject: `Booking Confirmation – ${order.bookingId}`,
+            html: bodyHtml,
+            attachments: [
+              // PDF contract
+              {
+                filename: `Booking_${order.bookingId}.pdf`,
+                content: pdfBuffer,
+              },
+              // Inline signature GIF
+              ...signatureAttachment,
+            ],
+          };
 
-  const info = await transporter.sendMail(mailOptions);
-  console.log("[completeBooking] ✓ email sent", {
-    messageId: info?.messageId,
-    accepted: info?.accepted,
-    rejected: info?.rejected,
-  });
-} catch (mailErr) {
-  console.error("[completeBooking] ✖ Email send failed:", mailErr?.message || mailErr);
-  // still continue (page success already shown)
-}
+          const info = await transporter.sendMail(mailOptions);
+          console.log("[completeBooking] ✓ email sent", {
+            messageId: info?.messageId,
+            accepted: info?.accepted,
+            rejected: info?.rejected,
+          });
+        } catch (mailErr) {
+          console.error(
+            "[completeBooking] ✖ Email send failed:",
+            mailErr?.message || mailErr,
+          );
+          // still continue (page success already shown)
+        }
         const ms = Date.now() - t0;
         console.log(`[completeBooking] ✓ done in ${ms}ms`);
-        return res.send('<h2>Thank you! Your booking has been confirmed and a copy of the contract emailed to you.</h2>');
-      }
+        return res.send(
+          "<h2>Thank you! Your booking has been confirmed and a copy of the contract emailed to you.</h2>",
+        );
+      },
     );
 
     bufferStream.pipe(cloudStream);
   } catch (err) {
-    console.error('[completeBooking] FATAL:', err);
-    res.status(500).json({ message: 'Failed to complete booking.' });
+    console.error("[completeBooking] FATAL:", err);
+    res.status(500).json({ message: "Failed to complete booking." });
   }
 };
 
 // ---------------- admin/listing endpoints ----------------
 
-const allBookings = async (req,res) => {
-  console.log(`🐣 (controllers/bookingController.js) allBookings called at`, new Date().toISOString());
+const allBookings = async (req, res) => {
+  console.log(
+    `🐣 (controllers/bookingController.js) allBookings called at`,
+    new Date().toISOString(),
+  );
   try {
     const bookings = await bookingModel.find({});
-    res.json({success:true,bookings});
+    res.json({ success: true, bookings });
   } catch (error) {
     console.log(error);
-    res.json({success:false,message:error.message});
+    res.json({ success: false, message: error.message });
   }
 };
 
 const userBookings = async (req, res) => {
-  console.log(`🐣 (controllers/bookingController.js) userBookings called at`, new Date().toISOString(), {
-    params: req.params,
-  });
+  console.log(
+    `🐣 (controllers/bookingController.js) userBookings called at`,
+    new Date().toISOString(),
+    {
+      params: req.params,
+    },
+  );
   try {
     const userId = req.params.userId || req.body.userId;
-    if (!userId) return res.status(400).json({ success:false, message:"Missing userId" });
+    if (!userId)
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing userId" });
 
     const bookings = await Booking.find({ userId }).sort({ createdAt: -1 });
-    res.json({ success:true, bookings });
+    res.json({ success: true, bookings });
   } catch (error) {
     console.error(error);
-    res.json({ success:false, message:error.message });
+    res.json({ success: false, message: error.message });
   }
 };
 
 export const getBookingByRef = async (req, res) => {
-  console.log(`🐣 (controllers/bookingController.js) getBookingByRef called at`, 
-    new Date().toISOString(), { params: req.params }
+  console.log(
+    `🐣 (controllers/bookingController.js) getBookingByRef called at`,
+    new Date().toISOString(),
+    { params: req.params },
   );
 
   try {
     const { bookingId } = req.params;
-    if (!bookingId) return res.status(400).json({ success: false, message: "Missing bookingId" });
+    if (!bookingId)
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing bookingId" });
 
     // First try by bookingId string
     let booking = await Booking.findOne({ bookingId }).lean();
@@ -1481,7 +1824,9 @@ export const getBookingByRef = async (req, res) => {
     }
 
     if (!booking) {
-      return res.status(404).json({ success: false, message: "Booking not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
     }
 
     return res.json({ success: true, booking });
@@ -1490,7 +1835,6 @@ export const getBookingByRef = async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
-
 
 export const previewContractHtml = async (req, res) => {
   try {
@@ -1592,7 +1936,9 @@ export const generateContractPdf = async (req, res) => {
     res.end(pdfBuffer);
   } catch (err) {
     if (browser) {
-      try { await browser.close(); } catch {}
+      try {
+        await browser.close();
+      } catch {}
     }
     console.error("generateContractPdf error:", err);
     return res.status(500).json({ message: "Failed to generate contract PDF" });
@@ -1600,46 +1946,56 @@ export const generateContractPdf = async (req, res) => {
 };
 // ---------------- status update (admin) ----------------
 
-const updateStatus = async (req,res) => {
-  console.log(`🐣 (controllers/bookingController.js) updateStatus called at`, new Date().toISOString(), {
-    body: req.body,
-  });
+const updateStatus = async (req, res) => {
+  console.log(
+    `🐣 (controllers/bookingController.js) updateStatus called at`,
+    new Date().toISOString(),
+    {
+      body: req.body,
+    },
+  );
   try {
     const { bookingId, status, lineupId, bandLineup } = req.body;
     const updated = await bookingModel.findByIdAndUpdate(
       bookingId,
       { status },
-      { new: true }
+      { new: true },
     );
 
     if (!updated) {
-      return res.json({success:false,message:'Booking not found'});
+      return res.json({ success: false, message: "Booking not found" });
     }
 
     // 🔹 If an admin flips to confirmed, sync calendar now
-    if (String(status).toLowerCase() === 'confirmed') {
+    if (String(status).toLowerCase() === "confirmed") {
       try {
         await upsertCalendarForConfirmedBooking({
           booking: updated,
           actId: updated.act || updated.actsSummary?.[0]?.actId, // try both shapes
-          lineupId: lineupId || updated.lineupId || updated.actsSummary?.[0]?.lineupId || null,
+          lineupId:
+            lineupId ||
+            updated.lineupId ||
+            updated.actsSummary?.[0]?.lineupId ||
+            null,
           bandLineup: bandLineup || updated.bandLineup || [],
-          venue: updated.venue || updated.venueAddress || ''
+          venue: updated.venue || updated.venueAddress || "",
         });
       } catch (e) {
-        console.warn('⚠️ Calendar sync on status change failed:', e?.message || e);
+        console.warn(
+          "⚠️ Calendar sync on status change failed:",
+          e?.message || e,
+        );
       }
     }
 
-    res.json({success:true,message:'Status Updated', booking: updated});
+    res.json({ success: true, message: "Status Updated", booking: updated });
   } catch (error) {
     console.log(error);
-    res.json({success:false,message:error.message});
+    res.json({ success: false, message: error.message });
   }
 };
 
 // ---------------- manual creates & API create ----------------
-
 
 const manualCreateBooking = async (req, res) => {
   console.log(`🐣 manualCreateBooking called`, {
@@ -1668,15 +2024,10 @@ const manualCreateBooking = async (req, res) => {
     // 1️⃣ Resolve act + lineup ID
     // ------------------------------
     const resolvedActId =
-      act ||
-      actId ||
-      req.body?.actsSummary?.[0]?.actId ||
-      null;
+      act || actId || req.body?.actsSummary?.[0]?.actId || null;
 
     const resolvedLineupId =
-      lineupId ||
-      req.body?.actsSummary?.[0]?.lineupId ||
-      null;
+      lineupId || req.body?.actsSummary?.[0]?.lineupId || null;
 
     // Load act AFTER determining the correct actId
     const actDoc = await Act.findById(resolvedActId).lean();
@@ -1698,10 +2049,8 @@ const manualCreateBooking = async (req, res) => {
               performanceTimes.setupAndSoundcheckedBy || "",
             startTime: performanceTimes.startTime || "",
             finishTime: performanceTimes.finishTime || "",
-            finishDayOffset:
-              Number(performanceTimes.finishDayOffset || 0) || 0,
-            paLightsFinishTime:
-              performanceTimes.paLightsFinishTime || "",
+            finishDayOffset: Number(performanceTimes.finishDayOffset || 0) || 0,
+            paLightsFinishTime: performanceTimes.paLightsFinishTime || "",
             paLightsFinishDayOffset:
               Number(performanceTimes.paLightsFinishDayOffset || 0) || 0,
           }
@@ -1791,111 +2140,125 @@ const manualCreateBooking = async (req, res) => {
   }
 };
 
-
 export const createBooking = async (req, res) => {
-  console.log(`🐣 (controllers/bookingController.js) createBooking called at`, new Date().toISOString(), {
-    bodyKeys: Object.keys(req.body || {}),
-  });
+  console.log(
+    `🐣 (controllers/bookingController.js) createBooking called at`,
+    new Date().toISOString(),
+    {
+      bodyKeys: Object.keys(req.body || {}),
+    },
+  );
   try {
     const {
-      act,            // actId
-      date,           // event date (ISO)
+      act, // actId
+      date, // event date (ISO)
       venue,
-      fee,            // gross £ for the act (what client owes in total)
-      bandLineup,     // array of musician IDs who said Yes
+      fee, // gross £ for the act (what client owes in total)
+      bandLineup, // array of musician IDs who said Yes
       notes,
       clientName,
       clientEmail,
       clientPhone,
       performanceTimes,
-      lineupId,       // preferred for attendee build
-      totals,         // OPTIONAL: if front-end sends fullAmount/deposit/charged/etc
-      sessionId,      // OPTIONAL: Stripe session id from checkout
-      amount,         // OPTIONAL: last Stripe charge major £ (deposit or full)
-      paymentMethod,  // OPTIONAL
+      lineupId, // preferred for attendee build
+      totals, // OPTIONAL: if front-end sends fullAmount/deposit/charged/etc
+      sessionId, // OPTIONAL: Stripe session id from checkout
+      amount, // OPTIONAL: last Stripe charge major £ (deposit or full)
+      paymentMethod, // OPTIONAL
       contactRouting,
     } = req.body;
 
     if (!act || !date || !venue || !fee || !bandLineup?.length) {
-      return res.status(400).json({ success: false, message: "Missing required fields." });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing required fields." });
     }
 
     // ── Compute if this is a full payment case (≤ 28 days) ─────────────────────
     const eventDate = new Date(date);
-    const daysOut = differenceInCalendarDays(startOfDay(eventDate), startOfDay(new Date()));
+    const daysOut = differenceInCalendarDays(
+      startOfDay(eventDate),
+      startOfDay(new Date()),
+    );
     const requiresFullPayment = Number.isFinite(daysOut) && daysOut <= 28;
 
     // What was charged now?
-    const chargedAmountMajor = typeof amount === "number"
-      ? amount
-      : (requiresFullPayment ? fee : Math.round(fee * 0.33 * 100) / 100); // fallback: 33% deposit if caller didn’t send totals
+    const chargedAmountMajor =
+      typeof amount === "number"
+        ? amount
+        : requiresFullPayment
+          ? fee
+          : Math.round(fee * 0.33 * 100) / 100; // fallback: 33% deposit if caller didn’t send totals
 
     const safeTotals = {
       fullAmount: Number(totals?.fullAmount ?? fee) || 0,
-      depositAmount: Number(totals?.depositAmount ?? (Math.round(fee * 0.33 * 100) / 100)) || 0,
+      depositAmount:
+        Number(totals?.depositAmount ?? Math.round(fee * 0.33 * 100) / 100) ||
+        0,
       chargedAmount: Number(totals?.chargedAmount ?? chargedAmountMajor) || 0,
       chargeMode: requiresFullPayment ? "full" : "deposit",
       isLessThanFourWeeks: requiresFullPayment,
       currency: totals?.currency || "GBP",
     };
 
-         
-    const normalizedPerf = (performanceTimes && typeof performanceTimes === 'object')
-  ? {
-      arrivalTime: performanceTimes.arrivalTime || '',
-      setupAndSoundcheckedBy: performanceTimes.setupAndSoundcheckedBy || '',
-      startTime: performanceTimes.startTime || '',
-      finishTime: performanceTimes.finishTime || '',
-      finishDayOffset: Number(performanceTimes.finishDayOffset || 0) || 0,
-      paLightsFinishTime: performanceTimes.paLightsFinishTime || '',
-      paLightsFinishDayOffset: Number(performanceTimes.paLightsFinishDayOffset || 0) || 0,
-    }
-  : null;
+    const normalizedPerf =
+      performanceTimes && typeof performanceTimes === "object"
+        ? {
+            arrivalTime: performanceTimes.arrivalTime || "",
+            setupAndSoundcheckedBy:
+              performanceTimes.setupAndSoundcheckedBy || "",
+            startTime: performanceTimes.startTime || "",
+            finishTime: performanceTimes.finishTime || "",
+            finishDayOffset: Number(performanceTimes.finishDayOffset || 0) || 0,
+            paLightsFinishTime: performanceTimes.paLightsFinishTime || "",
+            paLightsFinishDayOffset:
+              Number(performanceTimes.paLightsFinishDayOffset || 0) || 0,
+          }
+        : null;
 
-// ensure every item has a performance block
-const actsSummaryPatched = Array.isArray(req.body.actsSummary)
-  ? req.body.actsSummary.map(it => ({
-      ...it,
-      performance: it.performance || normalizedPerf || undefined,
-    }))
-  : [];
-
-
+    // ensure every item has a performance block
+    const actsSummaryPatched = Array.isArray(req.body.actsSummary)
+      ? req.body.actsSummary.map((it) => ({
+          ...it,
+          performance: it.performance || normalizedPerf || undefined,
+        }))
+      : [];
 
     // ── Create and save booking ────────────────────────────────────────────────
-const newBooking = new Booking({
-  act,
-  date: eventDate,
-  venue,
-  fee,
-  bandLineup,
-  notes,
-  clientName,
-  clientEmail,
-  clientPhone,
-chosenVocalists: [],
-  // ✅ use normalized block, not the raw input
-  performanceTimes: normalizedPerf || undefined,
+    const newBooking = new Booking({
+      act,
+      date: eventDate,
+      venue,
+      fee,
+      bandLineup,
+      notes,
+      clientName,
+      clientEmail,
+      clientPhone,
+      chosenVocalists: [],
+      // ✅ use normalized block, not the raw input
+      performanceTimes: normalizedPerf || undefined,
 
-  // ✅ if caller sent actsSummary, persist the patched one
-  actsSummary: actsSummaryPatched.length ? actsSummaryPatched : undefined,
+      // ✅ if caller sent actsSummary, persist the patched one
+      actsSummary: actsSummaryPatched.length ? actsSummaryPatched : undefined,
 
-  lineupId: lineupId || null,
-  sessionId: sessionId || undefined,
-  amount: chargedAmountMajor || 0,
-  paymentMethod: paymentMethod || undefined,
-  totals: safeTotals,
-  status: "confirmed",
-});
+      lineupId: lineupId || null,
+      sessionId: sessionId || undefined,
+      amount: chargedAmountMajor || 0,
+      paymentMethod: paymentMethod || undefined,
+      totals: safeTotals,
+      status: "confirmed",
+    });
 
-
-    newBooking.bookingId = newBooking.bookingId || makeBookingRef({
-  date: eventDate,
-  clientName,
-  userAddress: newBooking.userAddress,
-  performanceTimes: normalizedPerf || undefined,     // ← top-level mirror
-  actsSummary: actsSummaryPatched,                   // ← items now carry performance
-   });
+    newBooking.bookingId =
+      newBooking.bookingId ||
+      makeBookingRef({
+        date: eventDate,
+        clientName,
+        userAddress: newBooking.userAddress,
+        performanceTimes: normalizedPerf || undefined, // ← top-level mirror
+        actsSummary: actsSummaryPatched, // ← items now carry performance
+      });
 
     // Optional: wire in IVR/call forwarding data if provided
     if (contactRouting) {
@@ -1911,11 +2274,13 @@ chosenVocalists: [],
     // If deposit flow, compute balance fields now (stored on booking for boards/ops)
     if (!requiresFullPayment) {
       const balanceDueAt = startOfDay(subDays(eventDate, 14)); // 00:00 local day 14 days before
-      const balanceAmountPence =
-        Math.max(0, Math.round((safeTotals.fullAmount - safeTotals.chargedAmount) * 100));
+      const balanceAmountPence = Math.max(
+        0,
+        Math.round((safeTotals.fullAmount - safeTotals.chargedAmount) * 100),
+      );
 
-      newBooking.balanceStatus = "scheduled";         // add to schema (see below)
-      newBooking.balanceDueAt = balanceDueAt;         // add to schema (see below)
+      newBooking.balanceStatus = "scheduled"; // add to schema (see below)
+      newBooking.balanceDueAt = balanceDueAt; // add to schema (see below)
       newBooking.balanceAmountPence = balanceAmountPence; // add to schema (see below)
     }
 
@@ -1925,7 +2290,10 @@ chosenVocalists: [],
     try {
       await upsertBoardRowFromBooking(newBooking);
     } catch (e) {
-      console.warn("⚠️ upsertBoardRowFromBooking failed (createBooking):", e?.message || e);
+      console.warn(
+        "⚠️ upsertBoardRowFromBooking failed (createBooking):",
+        e?.message || e,
+      );
     }
 
     // 🔔 optional: notify booked musicians
@@ -1937,39 +2305,59 @@ chosenVocalists: [],
 
     // --- Messaging: confirm to client and ping lineup for allocation
     try {
-      await sendClientBookingConfirmation({ booking: newBooking, actName: undefined });
-    } catch (e) { console.warn("⚠️ client confirm (createBooking) failed:", e?.message || e); }
+      await sendClientBookingConfirmation({
+        booking: newBooking,
+        actName: undefined,
+      });
+    } catch (e) {
+      console.warn(
+        "⚠️ client confirm (createBooking) failed:",
+        e?.message || e,
+      );
+    }
 
-try {
-  const actId = newBooking?.act;
-  const resolvedLineupId = lineupId || newBooking?.lineupId || newBooking?.actsSummary?.[0]?.lineupId || null;
-  const dateISO = new Date(newBooking?.date).toISOString().slice(0, 10);
-  const shortAddress = (newBooking?.venueAddress || newBooking?.venue || "")
-    .split(",")
-    .slice(-2)
-    .join(",")
-    .replace(/,\s*UK$/i, "")
-    .trim();
+    try {
+      const actId = newBooking?.act;
+      const resolvedLineupId =
+        lineupId ||
+        newBooking?.lineupId ||
+        newBooking?.actsSummary?.[0]?.lineupId ||
+        null;
+      const dateISO = new Date(newBooking?.date).toISOString().slice(0, 10);
+      const shortAddress = (newBooking?.venueAddress || newBooking?.venue || "")
+        .split(",")
+        .slice(-2)
+        .join(",")
+        .replace(/,\s*UK$/i, "")
+        .trim();
 
-  const actDoc = await Act.findById(actId).lean();
-  const lineupDoc =
-    actDoc?.lineups?.find(
-      (l) => String(l._id) === String(resolvedLineupId) || String(l.lineupId) === String(resolvedLineupId)
-    ) || actDoc?.lineups?.[0];
+      const actDoc = await Act.findById(actId).lean();
+      const lineupDoc =
+        actDoc?.lineups?.find(
+          (l) =>
+            String(l._id) === String(resolvedLineupId) ||
+            String(l.lineupId) === String(resolvedLineupId),
+        ) || actDoc?.lineups?.[0];
 
-  const perMemberFee = computePerMemberFee({ lineup: lineupDoc, booking: newBooking }, "createBooking");
+      const perMemberFee = computePerMemberFee(
+        { lineup: lineupDoc, booking: newBooking },
+        "createBooking",
+      );
 
-  await triggerBookingRequestsInternal({
-    actId,
-    lineupId: resolvedLineupId,
-    dateISO,
-    address: shortAddress,
-    perMemberFee,
-    bookingId: newBooking.bookingId,
-  });
-} catch (e) {
-  console.warn("⚠️ lineup allocation ping (createBooking) failed:", e?.message || e);
-}
+      await triggerBookingRequestsInternal({
+        actId,
+        lineupId: resolvedLineupId,
+        dateISO,
+        address: shortAddress,
+        perMemberFee,
+        bookingId: newBooking.bookingId,
+      });
+    } catch (e) {
+      console.warn(
+        "⚠️ lineup allocation ping (createBooking) failed:",
+        e?.message || e,
+      );
+    }
 
     // Ensures Google event exists and adds all lineup emails as attendees (calendar invites to band)
     try {
@@ -1989,7 +2377,7 @@ try {
       try {
         // Prefer your internal route so everything is standardized in one place:
         await axios.post(
-`${process.env.BACKEND_URL || ""}/api/invoices/schedule-balance`,
+          `${process.env.BACKEND_URL || ""}/api/invoices/schedule-balance`,
           {
             bookingId: newBooking.bookingId || String(newBooking._id),
             actId: act,
@@ -2003,54 +2391,73 @@ try {
               bookingMongoId: String(newBooking._id),
             },
           },
-          { timeout: 10_000 }
+          { timeout: 10_000 },
         );
       } catch (e) {
-        console.warn("⚠️ schedule-balance failed (non-fatal):", e?.response?.data || e?.message || e);
+        console.warn(
+          "⚠️ schedule-balance failed (non-fatal):",
+          e?.response?.data || e?.message || e,
+        );
       }
     }
 
     return res.status(201).json({
       success: true,
-      message: "Booking created, musicians notified, calendar updated, and balance scheduled when applicable.",
+      message:
+        "Booking created, musicians notified, calendar updated, and balance scheduled when applicable.",
       booking: newBooking,
     });
   } catch (err) {
     console.error("Create booking error:", err);
-    return res.status(500).json({ success: false, message: "Server error while creating booking." });
+    return res.status(500).json({
+      success: false,
+      message: "Server error while creating booking.",
+    });
   }
 };
 
 // ---------------- musician payout flag ----------------
 
 const markMusicianAsPaid = async (req, res) => {
-  console.log(`🐣 (controllers/bookingController.js) markMusicianAsPaid called at`, new Date().toISOString(), {
-    body: req.body,
-  });
+  console.log(
+    `🐣 (controllers/bookingController.js) markMusicianAsPaid called at`,
+    new Date().toISOString(),
+    {
+      body: req.body,
+    },
+  );
   try {
     const { bookingId, musicianId } = req.body;
 
     if (!bookingId || !musicianId) {
-      return res.status(400).json({ success: false, message: "Missing bookingId or musicianId" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing bookingId or musicianId" });
     }
 
-const booking = await Booking.findOne({ bookingId });
+    const booking = await Booking.findOne({ bookingId });
     if (!booking) {
-      return res.status(404).json({ success: false, message: "Booking not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
     }
 
     const musician = booking.musicians?.find?.(
-      (m) => String(m.musicianId) === String(musicianId)
+      (m) => String(m.musicianId) === String(musicianId),
     );
 
     if (!musician) {
-      return res.status(404).json({ success: false, message: "Musician not found in booking" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Musician not found in booking" });
     }
 
     musician.paid = true;
     await booking.save();
 
-    return res.status(200).json({ success: true, message: "Musician marked as paid", booking });
+    return res
+      .status(200)
+      .json({ success: true, message: "Musician marked as paid", booking });
   } catch (error) {
     console.error("Error marking musician as paid:", error);
     res.status(500).json({ success: false, message: "Server error" });
@@ -2060,13 +2467,19 @@ const booking = await Booking.findOne({ bookingId });
 // ---------------- event sheet ----------------
 
 export const updateEventSheet = async (req, res) => {
-  console.log(`🐣 (controllers/bookingController.js) updateEventSheet called at`, new Date().toISOString(), {
-    body: req.body,
-  });
+  console.log(
+    `🐣 (controllers/bookingController.js) updateEventSheet called at`,
+    new Date().toISOString(),
+    {
+      body: req.body,
+    },
+  );
   try {
     const { _id, bookingId, eventSheet } = req.body;
     if (!_id && !bookingId) {
-      return res.status(400).json({ success: false, message: "Missing _id or bookingId" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing _id or bookingId" });
     }
 
     const update = { $set: { eventSheet, "eventSheet.updatedAt": new Date() } };
@@ -2075,10 +2488,15 @@ export const updateEventSheet = async (req, res) => {
     if (_id && /^[0-9a-fA-F]{24}$/.test(String(_id))) {
       booking = await Booking.findByIdAndUpdate(_id, update, { new: true });
     } else if (bookingId) {
-      booking = await Booking.findOneAndUpdate({ bookingId }, update, { new: true });
+      booking = await Booking.findOneAndUpdate({ bookingId }, update, {
+        new: true,
+      });
     }
 
-    if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
+    if (!booking)
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
     return res.json({ success: true, booking });
   } catch (err) {
     console.error("updateEventSheet error", err);
@@ -2087,66 +2505,92 @@ export const updateEventSheet = async (req, res) => {
 };
 
 async function upsertBoardRowFromBooking(booking) {
-  console.log(`🐣 (controllers/bookingController.js) upsertBoardRowFromBooking called at`, new Date().toISOString(), {
-    bookingId: booking?.bookingId,
-    actName: booking?.actName,
-  });
+  console.log(
+    `🐣 (controllers/bookingController.js) upsertBoardRowFromBooking called at`,
+    new Date().toISOString(),
+    {
+      bookingId: booking?.bookingId,
+      actName: booking?.actName,
+    },
+  );
   if (!booking) return;
 
   // --- identifiers (use human ref) ---
   const bookingRef =
-    booking.bookingId ||                  // e.g. 251101-DOWNIE-19435
+    booking.bookingId || // e.g. 251101-DOWNIE-19435
     booking.bookingRef ||
     (booking._id ? String(booking._id).slice(-6) : "");
 
   // --- act + lineup ---
   const actFromSummary = Array.isArray(booking?.actsSummary)
-    ? (booking.actsSummary[0] || {})
+    ? booking.actsSummary[0] || {}
     : {};
-  const actId    = actFromSummary?.actId || booking?.act || null;
-  const lineup   = booking?.selectedLineup || booking?.lineup || actFromSummary?.lineup || {};
-  const members  = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
-  const bandSize = members.filter(m => String(m.instrument || "").toLowerCase() !== "manager").length;
+  const actId = actFromSummary?.actId || booking?.act || null;
+  const lineup =
+    booking?.selectedLineup || booking?.lineup || actFromSummary?.lineup || {};
+  const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+  const bandSize = members.filter(
+    (m) => String(m.instrument || "").toLowerCase() !== "manager",
+  ).length;
 
   // --- lineup composition ---
   const composition = Array.isArray(lineup?.bandMembers)
     ? lineup.bandMembers
-        .filter(m => m.isEssential)
-        .map(m => m.instrument)
+        .filter((m) => m.isEssential)
+        .map((m) => m.instrument)
         .filter(Boolean)
     : [];
 
   // --- dates ---
-  const rawDate      = booking?.eventDate || booking?.date || booking?.eventDateISO;
-  const eventDateISO = rawDate ? new Date(rawDate).toISOString().slice(0, 10) : null;
+  const rawDate = booking?.eventDate || booking?.date || booking?.eventDateISO;
+  const eventDateISO = rawDate
+    ? new Date(rawDate).toISOString().slice(0, 10)
+    : null;
 
   const enquiryDateISO =
     booking?.enquiryDateISO ||
-    (booking?.createdAt ? new Date(booking.createdAt).toISOString().slice(0,10) : null);
+    (booking?.createdAt
+      ? new Date(booking.createdAt).toISOString().slice(0, 10)
+      : null);
 
   const bookingDateISO =
     booking?.bookingDateISO ||
-    (booking?.confirmedAt ? new Date(booking.confirmedAt).toISOString().slice(0,10)
-     : booking?.updatedAt ? new Date(booking.updatedAt).toISOString().slice(0,10)
-     : null);
+    (booking?.confirmedAt
+      ? new Date(booking.confirmedAt).toISOString().slice(0, 10)
+      : booking?.updatedAt
+        ? new Date(booking.updatedAt).toISOString().slice(0, 10)
+        : null);
 
   // --- act/text fields ---
-  const actName    = booking?.actName || actFromSummary?.actName || actFromSummary?.name || "";
-  const actTscName = booking?.act?.tscName || booking?.actTscName || actFromSummary?.tscName || "";
-  const agent      = booking?.agent || "TSC Direct";
-  const address    = booking?.addressFormatted || booking?.venueAddress || booking?.address || booking?.venue || "";
-  const county     = booking?.county || booking?.userAddress?.county || "";
+  const actName =
+    booking?.actName || actFromSummary?.actName || actFromSummary?.name || "";
+  const actTscName =
+    booking?.act?.tscName ||
+    booking?.actTscName ||
+    actFromSummary?.tscName ||
+    "";
+  const agent = booking?.agent || "TSC Direct";
+  const address =
+    booking?.addressFormatted ||
+    booking?.venueAddress ||
+    booking?.address ||
+    booking?.venue ||
+    "";
+  const county = booking?.county || booking?.userAddress?.county || "";
 
   // --- client ---
   const clientFirstNames =
     booking?.clientFirstNames ||
     booking?.clientName ||
-    [booking?.userAddress?.firstName, booking?.userAddress?.lastName].filter(Boolean).join(" ") ||
+    [booking?.userAddress?.firstName, booking?.userAddress?.lastName]
+      .filter(Boolean)
+      .join(" ") ||
     "";
 
   const clientEmails = [];
   if (Array.isArray(booking?.clientEmails)) {
-    for (const e of booking.clientEmails) if (e) clientEmails.push({ email: e });
+    for (const e of booking.clientEmails)
+      if (e) clientEmails.push({ email: e });
   } else if (booking?.userAddress?.email) {
     clientEmails.push({ email: booking.userAddress.email });
   } else if (booking?.userEmail) {
@@ -2161,15 +2605,13 @@ async function upsertBoardRowFromBooking(booking) {
     0;
 
   const netCommission =
-    Number(booking?.commission) ||
-    Number(booking?.agencyCommission) ||
-    0;
+    Number(booking?.commission) || Number(booking?.agencyCommission) || 0;
 
   // --- payments ---
   const payments = {
     balanceInvoiceUrl: booking?.balanceInvoiceUrl || "",
     balancePaymentReceived: !!booking?.balancePaid,
-    bandPaymentsSent: !!booking?.bandPaymentsSent,  // ✅ top-level now
+    bandPaymentsSent: !!booking?.bandPaymentsSent, // ✅ top-level now
     depositAmount: Number(booking?.totals?.depositAmount || 0) || undefined,
   };
 
@@ -2209,10 +2651,12 @@ async function upsertBoardRowFromBooking(booking) {
         pdfUrl: booking?.pdfUrl || "",
 
         bandSize,
-        lineupSelected: lineup?.label || lineup?.name || actFromSummary?.lineupLabel || "",
+        lineupSelected:
+          lineup?.label || lineup?.name || actFromSummary?.lineupLabel || "",
         lineupComposition: composition,
 
-arrivalTime: (booking?.performanceTimes?.arrivalTime || booking.arrivalTime || ""),
+        arrivalTime:
+          booking?.performanceTimes?.arrivalTime || booking.arrivalTime || "",
         bookingDetails: {
           eventType: booking.eventType || "",
           ceremony: booking.ceremony || {},
@@ -2225,21 +2669,27 @@ arrivalTime: (booking?.performanceTimes?.arrivalTime || booking.arrivalTime || "
 
         allocation: { status: "in_progress" },
         review: { requestedCount: 0, received: false },
-        actOwnerMusicianId: booking.actOwnerMusicianId || booking.musicianOwnerId || null,
+        actOwnerMusicianId:
+          booking.actOwnerMusicianId || booking.musicianOwnerId || null,
         "visibility.grossAndCommissionVisibleToAdminOnly": true,
         updatedAt: new Date(),
       },
     },
-    { upsert: true, new: true }
+    { upsert: true, new: true },
   );
 
-  console.log("📋 upsertBoardRowFromBooking OK", { bookingRef, actId, eventDateISO });
+  console.log("📋 upsertBoardRowFromBooking OK", {
+    bookingRef,
+    actId,
+    eventDateISO,
+  });
 }
 
 export const ensureEmergencyContact = async (req, res) => {
-  console.log(`🐣 (controllers/bookingController.js) ensureEmergencyContact called at`,
+  console.log(
+    `🐣 (controllers/bookingController.js) ensureEmergencyContact called at`,
     new Date().toISOString(),
-    { params: req.params }
+    { params: req.params },
   );
 
   try {
@@ -2254,19 +2704,21 @@ export const ensureEmergencyContact = async (req, res) => {
       String(new mongoose.Types.ObjectId(rawId)) === rawId;
 
     // Select the correct query
-    const query = looksLikeObjectId
-      ? { _id: rawId }
-      : { bookingId: rawId };
+    const query = looksLikeObjectId ? { _id: rawId } : { bookingId: rawId };
 
     const book = await Booking.findOne(query);
     if (!book) {
-      return res.status(404).json({ success: false, message: "Booking not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
     }
 
     // If already present, just mirror to eventSheet
     if (book?.contactRouting?.ivrCode && book?.contactRouting?.proxyNumber) {
       book.eventSheet = book.eventSheet || {};
-      book.eventSheet.emergencyContact = mirrorEmergencyContact(book.contactRouting);
+      book.eventSheet.emergencyContact = mirrorEmergencyContact(
+        book.contactRouting,
+      );
       await book.save();
       return res.json({ success: true, booking: book });
     }
@@ -2291,7 +2743,6 @@ export const ensureEmergencyContact = async (req, res) => {
 
 // helpers inside bookingController.js
 
-
 // Small date helper
 function toDateISO(d) {
   return new Date(d).toISOString().slice(0, 10);
@@ -2308,29 +2759,30 @@ async function confirmLeadVocalistForBooking(booking) {
     : null;
 
   const chosen =
-    actSummary?.chosenVocalists?.[0] ||
-    actSummary?.selectedVocalist ||
-    null;
+    actSummary?.chosenVocalists?.[0] || actSummary?.selectedVocalist || null;
 
-  const chosenMusicianId =
-    chosen?.musicianId ||
-    chosen?._id ||
-    null;
+  const chosenMusicianId = chosen?.musicianId || chosen?._id || null;
 
   if (!chosenMusicianId) {
-    console.warn("🎤 No chosen lead vocalist on booking", { bookingId: booking.bookingId });
+    console.warn("🎤 No chosen lead vocalist on booking", {
+      bookingId: booking.bookingId,
+    });
     return;
   }
 
   const musician = await Musician.findById(chosenMusicianId).lean();
   if (!musician) {
-    console.warn("🎤 Lead vocalist musician not found", { musicianId: chosenMusicianId });
+    console.warn("🎤 Lead vocalist musician not found", {
+      musicianId: chosenMusicianId,
+    });
     return;
   }
 
   const phone = normalize(musician.phone || musician.phoneNumber);
   if (!phone) {
-    console.warn("🎤 Lead vocalist has no valid phone", { musicianId: chosenMusicianId });
+    console.warn("🎤 Lead vocalist has no valid phone", {
+      musicianId: chosenMusicianId,
+    });
   }
 
   const actName =
@@ -2340,13 +2792,14 @@ async function confirmLeadVocalistForBooking(booking) {
     booking?.actsSummary?.[0]?.actName ||
     "Your Act";
 
-  const venueAddress =
-    booking.venueAddress ||
-    booking.venue ||
-    "Venue";
+  const venueAddress = booking.venueAddress || booking.venue || "Venue";
 
-  const eventDateISO = toDateISO(booking.date || booking.eventDate || booking.eventDateISO);
-  const formattedDate = new Date(booking.date || booking.eventDate || booking.eventDateISO).toLocaleDateString("en-GB", {
+  const eventDateISO = toDateISO(
+    booking.date || booking.eventDate || booking.eventDateISO,
+  );
+  const formattedDate = new Date(
+    booking.date || booking.eventDate || booking.eventDateISO,
+  ).toLocaleDateString("en-GB", {
     weekday: "long",
     day: "numeric",
     month: "short",
@@ -2387,7 +2840,8 @@ async function confirmLeadVocalistForBooking(booking) {
       actSummary?.lineup?._id ||
       null;
 
-    const bookingRef = booking.bookingId || booking.bookingRef || String(booking._id || "");
+    const bookingRef =
+      booking.bookingId || booking.bookingRef || String(booking._id || "");
 
     const updateResult = await AvailabilityModel.updateMany(
       {
@@ -2405,7 +2859,7 @@ async function confirmLeadVocalistForBooking(booking) {
           bookedOnDate: eventDateISO,
           isBooked: true,
         },
-      }
+      },
     );
 
     console.log("✅ Lead vocalist availability rows marked booked/yes", {
@@ -2417,7 +2871,10 @@ async function confirmLeadVocalistForBooking(booking) {
       lineupId,
     });
   } catch (err) {
-    console.warn("⚠️ Failed to mark vocalist unavailable in AvailabilityModel:", err.message);
+    console.warn(
+      "⚠️ Failed to mark vocalist unavailable in AvailabilityModel:",
+      err.message,
+    );
   }
 
   try {
@@ -2444,12 +2901,14 @@ async function confirmLeadVocalistForBooking(booking) {
         v2: true,
         slotIndex: 0,
         musicianId: musician._id,
-        musicianName: `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
+        musicianName:
+          `${musician.firstName || ""} ${musician.lastName || ""}`.trim(),
         musicianEmail: musician.email || "",
         reply: "yes",
         status: "booked",
         isBooked: true,
-        bookingId: booking.bookingId || booking.bookingRef || String(booking._id || ""),
+        bookingId:
+          booking.bookingId || booking.bookingRef || String(booking._id || ""),
         bookedOnDate: eventDateISO,
         isDeputy: false,
         actName,
@@ -2459,13 +2918,19 @@ async function confirmLeadVocalistForBooking(booking) {
         duties: "Lead Vocalist",
       });
 
-      console.log("🧱 Created date-level booking blocker row for lead vocalist", {
-        vocalistId: musician._id,
-        eventDateISO,
-      });
+      console.log(
+        "🧱 Created date-level booking blocker row for lead vocalist",
+        {
+          vocalistId: musician._id,
+          eventDateISO,
+        },
+      );
     }
   } catch (err) {
-    console.warn("⚠️ Failed to create date-level booking blocker row:", err.message);
+    console.warn(
+      "⚠️ Failed to create date-level booking blocker row:",
+      err.message,
+    );
   }
 
   try {
@@ -2483,7 +2948,7 @@ async function confirmLeadVocalistForBooking(booking) {
           "availabilityBadges.address": "",
           "availabilityBadges.setAt": "",
         },
-      }
+      },
     );
     console.log("🧼 Cleared availability badges for vocalist", {
       vocalistId: musician._id,
@@ -2519,12 +2984,14 @@ async function sendBookingRequestsToLineupFromBooking(booking) {
   const actDoc = await Act.findById(booking.act).lean();
   const lineupDoc =
     actDoc?.lineups?.find(
-      (l) => String(l._id) === String(booking.lineupId) || String(l.lineupId) === String(booking.lineupId)
+      (l) =>
+        String(l._id) === String(booking.lineupId) ||
+        String(l.lineupId) === String(booking.lineupId),
     ) || actDoc?.lineups?.[0];
 
   const perMemberFee = computePerMemberFee(
     { lineup: lineupDoc, booking },
-    "sendBookingRequestsToLineupFromBooking"
+    "sendBookingRequestsToLineupFromBooking",
   );
 
   await triggerBookingRequestsInternal({
@@ -2564,72 +3031,90 @@ export const completeBookingV2 = async (req, res) => {
   });
 
   if (!session_id) {
-    return res.status(400).json({ success: false, message: "Missing session_id" });
+    return res
+      .status(400)
+      .json({ success: false, message: "Missing session_id" });
   }
 
   const t0 = Date.now();
 
   try {
     // 0️⃣ Load Stripe Session (support both env keys)
-  if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error("Missing STRIPE_SECRET_KEY");
-}
+    if (!process.env.STRIPE_SECRET_KEY) {
+      throw new Error("Missing STRIPE_SECRET_KEY");
+    }
 
-const session = await stripeInstance.checkout.sessions.retrieve(session_id, {
-  expand: ["payment_intent"],
-});
+    const session = await stripeInstance.checkout.sessions.retrieve(
+      session_id,
+      {
+        expand: ["payment_intent"],
+      },
+    );
 
     const bookingRef = session?.metadata?.booking_ref;
-    if (!bookingRef) throw new Error("Stripe session missing booking_ref metadata");
+    if (!bookingRef)
+      throw new Error("Stripe session missing booking_ref metadata");
 
     // 1️⃣ FETCH BOOKING
     const booking = await Booking.findOne({ bookingId: bookingRef });
-    if (!booking) throw new Error(`Booking not found for bookingId ${bookingRef}`);
+    if (!booking)
+      throw new Error(`Booking not found for bookingId ${bookingRef}`);
 
     // Patch booking
     booking.act = booking.act || booking?.actsSummary?.[0]?.actId || null;
-    booking.lineupId = booking.lineupId || booking?.actsSummary?.[0]?.lineupId || null;
+    booking.lineupId =
+      booking.lineupId || booking?.actsSummary?.[0]?.lineupId || null;
 
-    booking.date = booking.date || booking.eventDate || booking?.actsSummary?.[0]?.date || null;
+    booking.date =
+      booking.date ||
+      booking.eventDate ||
+      booking?.actsSummary?.[0]?.date ||
+      null;
     if (booking.date) booking.eventDateISO = toDateISO(booking.date);
 
     // 2️⃣ Resolve identifiers
     const actId = booking.act || booking?.actsSummary?.[0]?.actId || null;
-    const lineupId = booking.lineupId || booking?.actsSummary?.[0]?.lineupId || null;
+    const lineupId =
+      booking.lineupId || booking?.actsSummary?.[0]?.lineupId || null;
 
     console.log("Resolved actId/lineupId:", { actId, lineupId });
 
     try {
-  await upsertBoardRowFromBooking(booking);
-  console.log("[completeBookingV2] ✓ upsertBoardRowFromBooking done");
-} catch (e) {
-  console.warn("⚠️ upsertBoardRowFromBooking failed in completeBookingV2:", e?.message || e);
-}
+      await upsertBoardRowFromBooking(booking);
+      console.log("[completeBookingV2] ✓ upsertBoardRowFromBooking done");
+    } catch (e) {
+      console.warn(
+        "⚠️ upsertBoardRowFromBooking failed in completeBookingV2:",
+        e?.message || e,
+      );
+    }
     // 3️⃣ Idempotency
     if (booking.checkoutCompleted) {
       return res.json({ success: true, bookingRef });
     }
 
     // 4️⃣ Mark paid
-   await Booking.updateOne(
-  { bookingId: bookingRef },
-  {
-    $set: {
-      checkoutCompleted: true,
-      payment: true,
-      sessionId: session_id,
-      status: "confirmed",
-    },
-  }
-);
+    await Booking.updateOne(
+      { bookingId: bookingRef },
+      {
+        $set: {
+          checkoutCompleted: true,
+          payment: true,
+          sessionId: session_id,
+          status: "confirmed",
+        },
+      },
+    );
 
-booking.status = "confirmed";
-booking.checkoutCompleted = true;
-booking.payment = true;
-booking.sessionId = session_id;
+    booking.status = "confirmed";
+    booking.checkoutCompleted = true;
+    booking.payment = true;
+    booking.sessionId = session_id;
 
     const calendarBooking = {
-      ...(typeof booking.toObject === "function" ? booking.toObject() : booking),
+      ...(typeof booking.toObject === "function"
+        ? booking.toObject()
+        : booking),
       act: booking.act,
       lineupId: booking.lineupId,
       date: booking.date,
@@ -2638,24 +3123,29 @@ booking.sessionId = session_id;
 
     // 5️⃣ Calendar event
     try {
-      const eventId = await updateOrCreateBookingEvent({ booking: calendarBooking });
+      const eventId = await updateOrCreateBookingEvent({
+        booking: calendarBooking,
+      });
       console.log("📅 Booking calendar event updated:", eventId);
     } catch (e) {
       console.warn("⚠️ Calendar event failed:", e?.message);
     }
 
     try {
-  await upsertCalendarForConfirmedBooking({
-    booking,
-    actId,
-    lineupId: lineupId || null,
-    bandLineup: booking?.bandLineup || [],
-    venue: booking?.venue || booking?.venueAddress || "",
-  });
-  console.log("[completeBookingV2] ✓ calendar attendee sync done");
-} catch (e) {
-  console.warn("⚠️ upsertCalendarForConfirmedBooking failed in completeBookingV2:", e?.message || e);
-}
+      await upsertCalendarForConfirmedBooking({
+        booking,
+        actId,
+        lineupId: lineupId || null,
+        bandLineup: booking?.bandLineup || [],
+        venue: booking?.venue || booking?.venueAddress || "",
+      });
+      console.log("[completeBookingV2] ✓ calendar attendee sync done");
+    } catch (e) {
+      console.warn(
+        "⚠️ upsertCalendarForConfirmedBooking failed in completeBookingV2:",
+        e?.message || e,
+      );
+    }
 
     // 6️⃣ Lead vocalist confirmation
     try {
@@ -2664,58 +3154,75 @@ booking.sessionId = session_id;
       console.warn("⚠️ confirmLeadVocalistForBooking failed:", e?.message);
     }
 
-  // 7️⃣ Send lineup requests
-try {
-  const actDoc = actId ? await Act.findById(actId).lean() : null;
-  const lineupDoc =
-    actDoc?.lineups?.find(
-      (l) => String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId)
-    ) || actDoc?.lineups?.[0];
+    // 7️⃣ Send lineup requests
+    try {
+      const actDoc = actId ? await Act.findById(actId).lean() : null;
+      const lineupDoc =
+        actDoc?.lineups?.find(
+          (l) =>
+            String(l._id) === String(lineupId) ||
+            String(l.lineupId) === String(lineupId),
+        ) || actDoc?.lineups?.[0];
 
-  const perMemberFee = computePerMemberFee({ lineup: lineupDoc, booking }, "completeBookingV2");
-  const shortAddress = (booking?.venueAddress || booking?.venue || "")
-    .split(",")
-    .slice(-2)
-    .join(",")
-    .replace(/,\s*UK$/i, "")
-    .trim();
+      const perMemberFee = computePerMemberFee(
+        { lineup: lineupDoc, booking },
+        "completeBookingV2",
+      );
+      const shortAddress = (booking?.venueAddress || booking?.venue || "")
+        .split(",")
+        .slice(-2)
+        .join(",")
+        .replace(/,\s*UK$/i, "")
+        .trim();
 
-  await triggerBookingRequestsInternal({
-    actId,
-    lineupId,
-    dateISO: booking.eventDateISO,
-    address: shortAddress,
-    perMemberFee,
-    bookingId: booking.bookingId,
-  });
-  console.log("[completeBookingV2] ✓ lineup allocation requests triggered");
-} catch (e) {
-  console.warn("⚠️ triggerBookingRequestsInternal failed in completeBookingV2:", e?.message || e);
-}
+      await triggerBookingRequestsInternal({
+        actId,
+        lineupId,
+        dateISO: booking.eventDateISO,
+        address: shortAddress,
+        perMemberFee,
+        bookingId: booking.bookingId,
+      });
+      console.log("[completeBookingV2] ✓ lineup allocation requests triggered");
+    } catch (e) {
+      console.warn(
+        "⚠️ triggerBookingRequestsInternal failed in completeBookingV2:",
+        e?.message || e,
+      );
+    }
 
     // ------------------------------------------------
     // 8️⃣ CONTRACT GENERATION – EJS
     // ------------------------------------------------
-    const templatePath = path.join(process.cwd(), "views", "contractTemplate.ejs");
+    const templatePath = path.join(
+      process.cwd(),
+      "views",
+      "contractTemplate.ejs",
+    );
 
     // ✅ Debug: what the contract renderer is receiving
     const actsSummaryToRender = booking?.actsSummary || [];
     console.log(
       "🧾 [Contract] actsSummary count:",
-      Array.isArray(actsSummaryToRender) ? actsSummaryToRender.length : 0
+      Array.isArray(actsSummaryToRender) ? actsSummaryToRender.length : 0,
     );
 
     if (Array.isArray(actsSummaryToRender) && actsSummaryToRender.length) {
       const it = actsSummaryToRender[0];
       const itObj = typeof it?.toObject === "function" ? it.toObject() : it;
 
-      console.log("🧾 [Contract] actsSummary[0] keys:", Object.keys(itObj || {}));
+      console.log(
+        "🧾 [Contract] actsSummary[0] keys:",
+        Object.keys(itObj || {}),
+      );
 
       console.log("🧾 [Contract] actsSummary[0] shape:", {
         actName: itObj?.actName || itObj?.tscName || itObj?.name,
         lineupLabel: itObj?.lineupLabel,
         hasTopLevelBandMembers: Array.isArray(itObj?.bandMembers),
-        topLevelBandMembersLen: Array.isArray(itObj?.bandMembers) ? itObj.bandMembers.length : 0,
+        topLevelBandMembersLen: Array.isArray(itObj?.bandMembers)
+          ? itObj.bandMembers.length
+          : 0,
         hasNestedLineup: !!itObj?.lineup,
         nestedLineupKeys: itObj?.lineup ? Object.keys(itObj.lineup) : [],
         hasNestedBandMembers: Array.isArray(itObj?.lineup?.bandMembers),
@@ -2730,33 +3237,35 @@ try {
 
     let html;
     try {
-     html = await ejs.renderFile(templatePath, {
-  bookingId: booking.bookingId,
-  userAddress: booking.userAddress,
-  
-  actsSummary: booking.actsSummary,
+      html = await ejs.renderFile(templatePath, {
+        bookingId: booking.bookingId,
+        userAddress: booking.userAddress,
 
-  // ✅ ADD THESE
-  venue: booking.venue || booking.venueAddress || "",
-  venueAddress: booking.venueAddress || booking.venue || "",
+        actsSummary: booking.actsSummary,
 
-  // ✅ also: your EJS is checking `eventDate` but you pass `eventDateISO`
-  eventDate: booking.date || booking.eventDateISO || null,
-  eventType: booking.eventType || "",
+        // ✅ ADD THESE
+        venue: booking.venue || booking.venueAddress || "",
+        venueAddress: booking.venueAddress || booking.venue || "",
 
-  performanceTimes: booking.performanceTimes || {},
-  notes: booking.notes || "",
-  createdAt: booking.createdAt,
+        // ✅ also: your EJS is checking `eventDate` but you pass `eventDateISO`
+        eventDate: booking.date || booking.eventDateISO || null,
+        eventType: booking.eventType || "",
 
-  totals: booking.totals || {},
-  total: Number(totals.fullAmount ?? 0),
-  deposit: Number(totals.chargedAmount ?? 0),
+        performanceTimes: booking.performanceTimes || {},
+        notes: booking.notes || "",
+        createdAt: booking.createdAt,
 
-  signatureUrl: booking.signatureUrl,
-  logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
-});
+        totals: booking.totals || {},
+        total: Number(totals.fullAmount ?? 0),
+        deposit: Number(totals.chargedAmount ?? 0),
 
-      console.log("[completeBookingV2] ✓ EJS rendered", { htmlLen: html?.length || 0 });
+        signatureUrl: booking.signatureUrl,
+        logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
+      });
+
+      console.log("[completeBookingV2] ✓ EJS rendered", {
+        htmlLen: html?.length || 0,
+      });
     } catch (e) {
       console.error("✖ EJS render failed:", e?.message);
       return res.status(500).json({ message: "Failed to render contract." });
@@ -2808,20 +3317,25 @@ try {
 
         // SEND EMAIL (primary helper + fallback)
         try {
-          const targetEmail = booking?.userAddress?.email || booking?.userEmail || "";
+          const targetEmail =
+            booking?.userAddress?.email || booking?.userEmail || "";
           if (!targetEmail) {
-            console.error("❌ No client email on booking — cannot send contract email");
+            console.error(
+              "❌ No client email on booking — cannot send contract email",
+            );
           } else {
             try {
               await sendContractEmail({
                 booking,
                 pdfBuffer: generatedPdf,
               });
-              console.log("📧 Contract email sent via helper", { to: targetEmail });
+              console.log("📧 Contract email sent via helper", {
+                to: targetEmail,
+              });
             } catch (helperErr) {
               console.warn(
                 "⚠️ sendContractEmail failed, falling back to local SMTP:",
-                helperErr?.message || helperErr
+                helperErr?.message || helperErr,
               );
 
               await emailContractToClient({
@@ -2830,7 +3344,9 @@ try {
                 clientEmail: targetEmail,
                 clientName: booking?.userAddress?.firstName || "Client",
               });
-              console.log("📧 Fallback contract email sent (link-only)", { to: targetEmail });
+              console.log("📧 Fallback contract email sent (link-only)", {
+                to: targetEmail,
+              });
             }
           }
         } catch (e) {
@@ -2838,8 +3354,10 @@ try {
         }
 
         console.log(`🎉 completeBookingV2 DONE in ${Date.now() - t0}ms`);
-        return res.send("<h2>Your booking has been confirmed and the contract emailed to you.</h2>");
-      }
+        return res.send(
+          "<h2>Your booking has been confirmed and the contract emailed to you.</h2>",
+        );
+      },
     );
 
     bufferStream.pipe(cloudStream);
@@ -2847,7 +3365,10 @@ try {
     // 1️⃣1️⃣ Clear cart
     try {
       if (booking.userId) {
-        await userModel.updateOne({ _id: booking.userId }, { $set: { cartData: {} } });
+        await userModel.updateOne(
+          { _id: booking.userId },
+          { $set: { cartData: {} } },
+        );
       }
     } catch (e) {
       console.warn("⚠ Failed to clear cart:", e?.message);
@@ -2857,8 +3378,6 @@ try {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
-
-
 
 // ---------------- exports ----------------
 

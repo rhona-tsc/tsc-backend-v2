@@ -2235,6 +2235,43 @@ export const previewDeputyJob = async (req, res) => {
   }
 };
 
+const getDeputyJobIdempotencyKey = (req) =>
+  normaliseString(
+    req.get("x-idempotency-key") ||
+      req.get("x-request-id") ||
+      req.body?.submissionId ||
+      "",
+  );
+
+const findRecentDuplicateDeputyJob = async ({
+  built,
+  createdBy,
+  createdByEmail,
+}) => {
+  const duplicateCutoff = new Date(Date.now() - 2 * 60 * 1000);
+
+  const duplicateQuery = {
+    createdAt: { $gte: duplicateCutoff },
+    jobType: built.jobType,
+    title: built.title,
+    instrument: built.primaryInstrument,
+    eventDate: built.resolvedEventDate,
+    startTime: built.resolvedStartTime,
+    endTime: built.resolvedEndTime,
+    location: built.resolvedLocation,
+    fee: built.fee,
+    clientEmail: built.clientEmail,
+  };
+
+  if (createdBy) {
+    duplicateQuery.createdBy = createdBy;
+  } else if (createdByEmail) {
+    duplicateQuery.createdByEmail = createdByEmail;
+  }
+
+  return deputyJobModel.findOne(duplicateQuery).sort({ createdAt: -1 });
+};
+
 export const createDeputyJob = async (req, res) => {
   try {
     const built = buildJobPayloadFromRequest(req);
@@ -2271,6 +2308,40 @@ export const createDeputyJob = async (req, res) => {
     const createdByEmail = req.user?.email || "";
     const createdByPhone = req.user?.phone || req.user?.phoneNumber || "";
 
+    const idempotencyKey = getDeputyJobIdempotencyKey(req);
+
+    if (idempotencyKey) {
+      const existingDuplicate = await findRecentDuplicateDeputyJob({
+        built,
+        createdBy,
+        createdByEmail,
+      });
+
+      if (existingDuplicate) {
+        console.warn("⚠️ Duplicate deputy job create prevented", {
+          idempotencyKey,
+          existingJobId: String(existingDuplicate._id),
+          createdBy: createdBy ? String(createdBy) : null,
+          title: built.title,
+          instrument: built.primaryInstrument,
+          eventDate: built.resolvedEventDate,
+        });
+
+        return res.status(200).json({
+          success: true,
+          duplicatePrevented: true,
+          message: "Duplicate submission ignored",
+          mode: built.mode,
+          job: withDeputyJobAliases(existingDuplicate),
+          matchedCount: Number(existingDuplicate.matchedCount || 0),
+          notifiedCount: Number(existingDuplicate.notifiedCount || 0),
+          previewNotification: null,
+          matchedMusicians: [],
+          payment: null,
+        });
+      }
+    }
+
     const allowManualPayment =
       userEmail === "hello@thesupremecollective.co.uk" ||
       userRole === "admin" ||
@@ -2284,6 +2355,21 @@ export const createDeputyJob = async (req, res) => {
           : built.saveClientCard && built.clientEmail
             ? "setup_required"
             : "not_started";
+
+    console.log("🆕 createDeputyJob start", {
+      idempotencyKey: idempotencyKey || null,
+      createdBy: createdBy ? String(createdBy) : null,
+      createdByEmail,
+      title: built.title,
+      instrument: built.primaryInstrument,
+      eventDate: built.resolvedEventDate,
+      startTime: built.resolvedStartTime,
+      endTime: built.resolvedEndTime,
+      location: built.resolvedLocation,
+      fee: built.fee,
+      jobType: built.jobType,
+      mode: built.mode,
+    });
 
     const job = await deputyJobModel.create({
       title: built.title,
@@ -2443,13 +2529,23 @@ if (built.mode === "send" && hasSavedCardDetails) {
   updatePayload.notifications = [];
 }
 
-const updatedJob = await deputyJobModel.findByIdAndUpdate(
-  job._id,
-  { $set: updatePayload },
-  { new: true }
-);
+    const updatedJob = await deputyJobModel.findByIdAndUpdate(
+      job._id,
+      { $set: updatePayload },
+      { new: true }
+    );
 
-const formattedJob = withDeputyJobAliases(updatedJob);
+    console.log("✅ createDeputyJob saved", {
+      jobId: String(updatedJob?._id || ""),
+      idempotencyKey: idempotencyKey || null,
+      matchedCount: Number(updatedJob?.matchedCount || 0),
+      notifiedCount: Number(updatedJob?.notifiedCount || 0),
+      paymentStatus: updatedJob?.paymentStatus || "",
+      workflowStage: updatedJob?.workflowStage || "",
+      status: updatedJob?.status || "",
+    });
+
+    const formattedJob = withDeputyJobAliases(updatedJob);
 
     return res.status(201).json({
       success: true,
@@ -2461,8 +2557,8 @@ const formattedJob = withDeputyJobAliases(updatedJob);
           : "Deputy job created in preview mode",
       mode: built.mode,
       job: formattedJob,
-      matchedCount: job.matchedCount,
-      notifiedCount: job.notifiedCount,
+      matchedCount: Number(formattedJob?.matchedCount || 0),
+      notifiedCount: Number(formattedJob?.notifiedCount || 0),
       previewNotification: matcherResult.previewNotification,
       matchedMusicians: matcherResult.matches,
       payment: setupIntentResult

@@ -13,7 +13,7 @@ const ExtraPayoutAllocationSchema = new mongoose.Schema(
     isPaHireMember: { type: Boolean, default: false },
     notes: String,
   },
-  { _id: false }
+  { _id: false },
 );
 
 const ExtraSchema = new mongoose.Schema(
@@ -36,9 +36,9 @@ const ExtraSchema = new mongoose.Schema(
     },
 
     // Store underlying calculation inputs for audit / recomputation
-    unitNetPrice: { type: Number, default: 0 },   // e.g. £50 per member per 60 mins
+    unitNetPrice: { type: Number, default: 0 }, // e.g. £50 per member per 60 mins
     unitGrossPrice: { type: Number, default: 0 },
-    unitMinutes: { type: Number, default: 0 },    // e.g. 60
+    unitMinutes: { type: Number, default: 0 }, // e.g. 60
     appliedMinutes: { type: Number, default: 0 }, // e.g. 90
     billableMemberCount: { type: Number, default: 0 },
     marginMultiplier: { type: Number, default: 1 }, // e.g. 1.33
@@ -48,7 +48,9 @@ const ExtraSchema = new mongoose.Schema(
 
     // Convenience metadata
     payoutRoleFilter: [String], // e.g. ["Sound Engineering", "PA / Lights"]
-    payoutMemberIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "musician" }],
+    payoutMemberIds: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "musician" },
+    ],
     payoutMemberNames: [String],
 
     // Specific support for PA/lights staying later than the band
@@ -62,7 +64,7 @@ const ExtraSchema = new mongoose.Schema(
       basedOnExtraKey: String, // e.g. "late_stay_60min_per_band_member"
     },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const PerformanceSchema = new mongoose.Schema(
@@ -84,7 +86,7 @@ const PerformanceSchema = new mongoose.Schema(
     paLightsFinishTime: String,
     paLightsFinishDayOffset: { type: Number, default: 0 },
   },
-  { _id: false }
+  { _id: false },
 );
 
 // ---- Call forwarding / proxy contact schemas ----
@@ -96,7 +98,7 @@ const ForwardTargetSchema = new mongoose.Schema(
     phone: String, // E.164 (+44...)
     priority: { type: Number, default: 1 },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const ProxyContactSchema = new mongoose.Schema(
@@ -152,7 +154,7 @@ const ProxyContactSchema = new mongoose.Schema(
     active: { type: Boolean, default: false },
     note: String,
   },
-  { _id: false }
+  { _id: false },
 );
 
 const ActSummarySchema = new mongoose.Schema(
@@ -194,7 +196,7 @@ const ActSummarySchema = new mongoose.Schema(
     },
     contactProxy: ProxyContactSchema,
   },
-  { _id: false }
+  { _id: false },
 );
 
 const EventSheetSchema = new mongoose.Schema(
@@ -214,7 +216,7 @@ const EventSheetSchema = new mongoose.Schema(
       activeWindowSummary: String,
     },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const PaymentExtraBreakdownSchema = new mongoose.Schema(
@@ -230,7 +232,7 @@ const PaymentExtraBreakdownSchema = new mongoose.Schema(
     isPaLateStay: { type: Boolean, default: false },
     isPaHire: { type: Boolean, default: false },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const BookingSchema = new mongoose.Schema(
@@ -241,52 +243,54 @@ const BookingSchema = new mongoose.Schema(
     userId: { type: String, index: true },
     userEmail: { type: String, index: true },
 
+
     // Stripe
-    sessionId: { type: String },
+    sessionId: { type: String, index: true },
+    paymentIntentId: { type: String },
+    chargeId: { type: String },
     amount: { type: Number, default: 0 }, // last Stripe charge (major £)
     pdfUrl: { type: String },
 
-    // Google Calendar mirror
-    calendarEventId: { type: String },
+    // Client-requested paperwork flag (mainly corporates)
+    invoiceRequested: { type: Boolean, default: false },
 
-    // Core details
-    act: { type: String },
-    lineupId: { type: String },
-    bandLineup: [{ type: mongoose.Schema.Types.ObjectId, ref: "musician" }],
-    venue: { type: String },
-    venueAddress: { type: String },
-    eventType: { type: String },
-    date: { type: Date, default: Date.now },
-    fee: { type: Number, default: 0 },
-    agent: { type: String },
-
-    actsSummary: [ActSummarySchema],
-    performanceTimes: PerformanceSchema,
-
-    // Customer
-    userAddress: mongoose.Schema.Types.Mixed,
-    signatureUrl: { type: String },
-
-    // Totals
-    totals: {
-      fullAmount: { type: Number, default: 0 }, // gross £
-      depositAmount: { type: Number, default: 0 },
-      chargedAmount: { type: Number, default: 0 },
-      chargeMode: { type: String, enum: ["deposit", "full", ""], default: "" },
-      isLessThanFourWeeks: { type: Boolean, default: false },
-      currency: { type: String, default: "GBP" },
-    },
-
-    // Cart metadata
-    cartMeta: {
-      selectedAddress: String,
-      selectedDate: String,
+    // Accounting split for Stripe-first revenue model
+    // - commission* is your revenue (VAT-able)
+    // - passThrough* is client money held to pay musicians
+    accounting: {
+      paymentStage: {
+        type: String,
+        enum: ["deposit", "balance", "full", "addon_deposit", ""],
+        default: "",
+      },
+      vatRate: { type: Number, default: 0.2 },
+      commissionGross: { type: Number, default: 0 },
+      commissionVat: { type: Number, default: 0 },
+      commissionNet: { type: Number, default: 0 },
+      passThroughGross: { type: Number, default: 0 },
       currency: { type: String, default: "GBP" },
     },
 
     // Payment method/status
     paymentMethod: { type: String },
+
+    // Legacy boolean (keep for backwards compatibility)
     payment: { type: Boolean, default: false },
+
+    // Preferred payment status flag
+    paymentStatus: {
+      type: String,
+      enum: [
+        "unpaid",
+        "paid",
+        "refunded",
+        "partially_refunded",
+        "disputed",
+        "failed",
+      ],
+      default: "unpaid",
+      index: true,
+    },
 
     // Admin/board balance status
     balanceInvoiceUrl: { type: String },
@@ -344,13 +348,13 @@ const BookingSchema = new mongoose.Schema(
 
     notifiedAt: { type: Date },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // One-and-only one bookingId, but ignore docs that don't have a string bookingId yet.
 BookingSchema.index(
   { bookingId: 1 },
-  { unique: true, partialFilterExpression: { bookingId: { $type: "string" } } }
+  { unique: true, partialFilterExpression: { bookingId: { $type: "string" } } },
 );
 
 // in bookingModel.js, after schema definition
@@ -383,6 +387,10 @@ BookingSchema.index({ status: 1 });
 
 // Bookings by act
 BookingSchema.index({ act: 1 });
+
+// Bookings by Stripe IDs
+BookingSchema.index({ sessionId: 1 });
+BookingSchema.index({ paymentIntentId: 1 }, { sparse: true });
 
 const Booking =
   mongoose.models.Booking || mongoose.model("Booking", BookingSchema);
