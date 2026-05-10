@@ -371,30 +371,37 @@ const getOrCreateStripeCustomer = async ({ email, name }) => {
 
 export const createInvoicePayLink = async (req, res) => {
   try {
+    const roundInt = (n) => Math.round(Number(n || 0));
+    const toLower = (s) => String(s || "").toLowerCase();
+    const clampPence = (n) => Math.max(0, roundInt(n));
+
+    const DEPOSIT_RATE = Number(process.env.TSC_DEPOSIT_RATE ?? 0.33);
+    const VAT_RATE = Number(process.env.TSC_VAT_RATE ?? 0.2);
+
     const {
       bookingIdOrRef,
-
       stage, // deposit | full | balance | addon_deposit | addon_full
-
-      amountPence,
-
+      amountPence, // total amount this invoice should charge (in pence)
       currency = "GBP",
-
       description,
-
       customerEmail,
-
       customerName,
-
       daysUntilDue = 7,
-
       metadata = {},
     } = req.body || {};
 
-    if (!bookingIdOrRef || !stage || !amountPence || amountPence <= 0) {
+    const stageNorm = String(stage || "").trim().toLowerCase();
+
+    if (!bookingIdOrRef || !stageNorm || !amountPence || Number(amountPence) <= 0) {
       return res
         .status(400)
         .json({ success: false, message: "Missing required fields." });
+    }
+
+    if (!customerEmail) {
+      return res
+        .status(400)
+        .json({ success: false, message: "customerEmail is required." });
     }
 
     const booking = await Booking.findOne(
@@ -409,125 +416,207 @@ export const createInvoicePayLink = async (req, res) => {
         .json({ success: false, message: "Booking not found." });
     }
 
+    // ---- Determine commission vs pass-through for THIS invoice ----
+    const totalPence = clampPence(amountPence);
+    let commissionPence = 0;
+    let passThroughPence = 0;
+
+    if (stageNorm === "deposit" || stageNorm === "addon_deposit") {
+      // deposit invoice = commission only
+      commissionPence = totalPence;
+      passThroughPence = 0;
+    } else if (stageNorm === "balance") {
+      // balance invoice = pass-through only
+      commissionPence = 0;
+      passThroughPence = totalPence;
+    } else if (stageNorm === "full" || stageNorm === "addon_full") {
+      // full upfront invoice = split
+      commissionPence = clampPence(totalPence * DEPOSIT_RATE);
+      // Safety so we never exceed total
+      if (commissionPence > totalPence) commissionPence = totalPence;
+      passThroughPence = totalPence - commissionPence;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid stage. Use deposit | full | balance | addon_deposit | addon_full.",
+      });
+    }
+
+    // VAT breakdown is only relevant on commission bucket
+    const commissionGross = commissionPence / 100;
+    const commissionVat = commissionGross * (VAT_RATE / (1 + VAT_RATE)); // VAT portion of VAT-inclusive gross
+    const commissionNet = commissionGross - commissionVat;
+
+    const passThroughGross = passThroughPence / 100;
+
     const customer = await getOrCreateStripeCustomer({
       email: customerEmail,
       name: customerName,
     });
 
-    // 1) create invoice item
-
-    await stripe.invoiceItems.create({
-      customer: customer.id,
-
-      amount: Number(amountPence),
-
-      currency: String(currency).toLowerCase(),
-
-      description:
-        description || `Payment for booking ${booking.bookingId} (${stage})`,
-
-      metadata: {
-        bookingId: booking.bookingId,
-
-        stage,
-
-        ...metadata,
-      },
-    });
-
-    // 2) create invoice (send_invoice = hosted link with pay button)
-
+    // ---- Create a DRAFT invoice first, then attach items directly to it ----
     const invoice = await stripe.invoices.create({
       customer: customer.id,
-
       collection_method: "send_invoice",
-
       days_until_due: Number(daysUntilDue) || 7,
-
-      auto_advance: true, // finalize automatically
-
+      auto_advance: false, // we finalize explicitly
+      currency: toLower(currency),
       metadata: {
         bookingId: booking.bookingId,
+        stage: stageNorm,
 
-        stage,
+        // Store split in invoice metadata (super handy for debugging)
+        total_pence: String(totalPence),
+        commission_pence: String(commissionPence),
+        pass_through_pence: String(passThroughPence),
 
         ...metadata,
       },
     });
 
-    // 3) finalize (so hosted url + pdf exists)
+    const suffix = booking?.bookingId ? ` (${booking.bookingId})` : "";
 
-    const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
+    // 1) Commission item (if any)
+    if (commissionPence > 0) {
+      await stripe.invoiceItems.create({
+        customer: customer.id,
+        invoice: invoice.id,
+        amount: commissionPence,
+        currency: toLower(currency),
+        description:
+          description ||
+          `${stageNorm.startsWith("addon") ? "Add-on" : "Booking"} commission (includes VAT)${suffix}`,
+        metadata: {
+          bookingId: booking.bookingId,
+          stage: stageNorm,
+          bucket: "commission",
+          commission_gross: String(commissionGross.toFixed(2)),
+          commission_vat: String(commissionVat.toFixed(2)),
+          commission_net: String(commissionNet.toFixed(2)),
+          ...metadata,
+        },
+      });
+    }
 
-    // 4) store on booking (stage-specific)
+    // 2) Pass-through item (if any)
+    if (passThroughPence > 0) {
+      await stripe.invoiceItems.create({
+        customer: customer.id,
+        invoice: invoice.id,
+        amount: passThroughPence,
+        currency: toLower(currency),
+        description:
+          description ||
+          `${stageNorm.startsWith("addon") ? "Add-on" : "Booking"} live music funds (held for musicians)${suffix}`,
+        metadata: {
+          bookingId: booking.bookingId,
+          stage: stageNorm,
+          bucket: "pass_through",
+          pass_through_gross: String(passThroughGross.toFixed(2)),
+          ...metadata,
+        },
+      });
+    }
 
-    if (stage === "balance") {
-      booking.stripeInvoiceId = finalized.id;
+    // Finalize so hosted url + pdf exist
+    const finalized = await stripe.invoices.finalizeInvoice(invoice.id, {
+      auto_advance: true,
+    });
 
+    // ---- Store on booking ----
+    const currencyUpper = String(currency || "GBP").toUpperCase();
+
+    // Keep a snapshot of the split on the booking.accounting for admin visibility
+    // (For add-ons we also store a per-add-on record)
+    const accountingPatch = {
+      paymentStage: stageNorm,
+      vatRate: VAT_RATE,
+      commissionGross: Number(commissionGross.toFixed(2)),
+      commissionVat: Number(commissionVat.toFixed(2)),
+      commissionNet: Number(commissionNet.toFixed(2)),
+      passThroughGross: Number(passThroughGross.toFixed(2)),
+      currency: currencyUpper,
+    };
+
+    if (stageNorm === "balance") {
       booking.balanceInvoiceId = finalized.id;
-
       booking.balanceInvoiceUrl = finalized.hosted_invoice_url || "";
-
       booking.balanceStatus = "sent";
-
       booking.balancePaid = false;
-    } else if (stage === "addon_deposit" || stage === "addon_full") {
+
+      // Balance invoices = pass-through
+      booking.accounting = accountingPatch;
+    } else if (stageNorm === "addon_deposit" || stageNorm === "addon_full") {
       booking.addonPayments = Array.isArray(booking.addonPayments)
         ? booking.addonPayments
         : [];
 
       booking.addonPayments.push({
-        stage,
-
-        amountPence: Number(amountPence),
-
-        currency,
-
+        stage: stageNorm,
+        amountPence: totalPence,
+        currency: currencyUpper,
         label: description || "",
-
-        checkoutSessionId: "", // invoice-based, not checkout
-
+        checkoutSessionId: "", // invoice-based
         checkoutUrl: finalized.hosted_invoice_url || "",
-
         paymentIntentId: finalized.payment_intent || "",
-
         chargeId: "",
-
         status: "sent",
-
-        metadata: { stripeInvoiceId: finalized.id },
+        metadata: {
+          stripeInvoiceId: finalized.id,
+          totalPence,
+          commissionPence,
+          passThroughPence,
+          commissionGross: Number(commissionGross.toFixed(2)),
+          commissionVat: Number(commissionVat.toFixed(2)),
+          commissionNet: Number(commissionNet.toFixed(2)),
+          passThroughGross: Number(passThroughGross.toFixed(2)),
+        },
       });
+
+      // optional: keep "latest" accounting snapshot on the booking
+      booking.accounting = accountingPatch;
     } else {
-      // deposit/full (invoice path)
-
+      // deposit/full invoice
       booking.stripeInvoiceId = finalized.id;
-
       booking.invoiceRequested = true;
+
+      booking.accounting = accountingPatch;
+
+      // Optional: if this invoice represents the FULL booking total, ensure totals.fullAmount reflects it.
+      // (Don’t mark chargedAmount here; your webhook/payment reconciliation should do that.)
+      if (stageNorm === "full") {
+        booking.totals = booking.totals || {};
+        booking.totals.fullAmount = Number((totalPence / 100).toFixed(2));
+        booking.totals.depositAmount = 0; // full paid path uses 0 "deposit due"
+      }
+      if (stageNorm === "deposit") {
+        // If you want: totals.depositAmount = deposit due (the invoice amount)
+        booking.totals = booking.totals || {};
+        booking.totals.depositAmount = Number((totalPence / 100).toFixed(2));
+      }
     }
 
     await booking.save();
 
     return res.json({
       success: true,
-
       bookingId: booking.bookingId,
+      stage: stageNorm,
+
+      totalPence,
+      commissionPence,
+      passThroughPence,
 
       stripeInvoiceId: finalized.id,
-
       hosted_invoice_url: finalized.hosted_invoice_url,
-
       invoice_pdf: finalized.invoice_pdf,
-
       status: finalized.status,
     });
   } catch (err) {
     console.error("createInvoicePayLink error:", err);
-
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: err?.message || "Failed to create invoice.",
-      });
+    return res.status(500).json({
+      success: false,
+      message: err?.message || "Failed to create invoice.",
+    });
   }
 };

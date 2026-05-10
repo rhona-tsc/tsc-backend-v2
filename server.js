@@ -193,14 +193,334 @@ app.post(
       );
       return res.sendStatus(400);
     }
+// ------------------------------------------------------------------
+// Stripe webhook handlers
+// ------------------------------------------------------------------
 
-    // TODO: Handle the event types you care about
-    // switch (event.type) {
-    //   case "checkout.session.completed":
-    //     break;
-    //   default:
-    //     break;
-    // }
+const safeNum = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const toMajor = (amountMinor) => safeNum(amountMinor) / 100;
+
+const normaliseStage = (v) => String(v || "").trim().toLowerCase();
+
+const getVatSplitFromGross = (grossMajor, vatRate) => {
+  const rate = Number.isFinite(vatRate) ? vatRate : 0.2;
+  const vat = Math.round(grossMajor * (rate / (1 + rate)) * 100) / 100;
+  const net = Math.round((grossMajor - vat) * 100) / 100;
+  return { vat, net };
+};
+
+const looksLikeObjectId = (v) =>
+  typeof v === "string" && /^[0-9a-f]{24}$/i.test(v);
+
+const findBookingByMeta = async (meta = {}) => {
+  // You sometimes store bookingId as booking_ref in Stripe metadata
+  const bookingRef = String(
+    meta.bookingId || meta.booking_ref || meta.booking_id || ""
+  ).trim();
+
+  const bookingMongoId = String(
+    meta.bookingMongoId || meta.booking_mongo_id || ""
+  ).trim();
+
+  // 1) Try mongo id first (most precise)
+  if (bookingMongoId && looksLikeObjectId(bookingMongoId)) {
+    const byId = await Booking.findById(bookingMongoId);
+    if (byId) return byId;
+  }
+
+  // 2) Try bookingId / bookingRef
+  if (bookingRef) {
+    const byRef = await Booking.findOne({
+      $or: [{ bookingId: bookingRef }, { bookingRef }],
+    });
+    if (byRef) return byRef;
+  }
+
+  return null;
+};
+
+const markAddonPaidIfMatching = (
+  bookingDoc,
+  { stage, invoiceId, hostedUrl, paymentIntentId }
+) => {
+  if (!bookingDoc || !Array.isArray(bookingDoc.addonPayments)) return;
+
+  const normStage = normaliseStage(stage);
+
+  // Prefer precise match by stored invoice id in metadata
+  let idx = bookingDoc.addonPayments.findIndex((p) => {
+    const metaInvoiceId = String(p?.metadata?.stripeInvoiceId || "").trim();
+    if (invoiceId && metaInvoiceId && metaInvoiceId === invoiceId) return true;
+    if (
+      paymentIntentId &&
+      String(p?.paymentIntentId || "").trim() === paymentIntentId
+    )
+      return true;
+    if (hostedUrl && String(p?.checkoutUrl || "").trim() === hostedUrl)
+      return true;
+    return false;
+  });
+
+  // Fallback: match by stage (first unpaid)
+  if (idx === -1 && normStage) {
+    idx = bookingDoc.addonPayments.findIndex((p) => {
+      const pStage = normaliseStage(p?.stage);
+      const status = String(p?.status || "").toLowerCase();
+      return pStage === normStage && status !== "paid";
+    });
+  }
+
+  if (idx >= 0) {
+    bookingDoc.addonPayments[idx] = {
+      ...(bookingDoc.addonPayments[idx]?.toObject
+        ? bookingDoc.addonPayments[idx].toObject()
+        : bookingDoc.addonPayments[idx]),
+      status: "paid",
+      paidAt: new Date(),
+      paymentIntentId:
+        paymentIntentId ||
+        bookingDoc.addonPayments[idx]?.paymentIntentId ||
+        "",
+      metadata: {
+        ...(bookingDoc.addonPayments[idx]?.metadata || {}),
+        stripeInvoiceId:
+          invoiceId || bookingDoc.addonPayments[idx]?.metadata?.stripeInvoiceId,
+      },
+    };
+  }
+};
+
+const applyPaidAmountToBooking = (
+  bookingDoc,
+  { amountPaidMajor, stage }
+) => {
+  if (!bookingDoc) return;
+
+  const totals = bookingDoc.totals?.toObject
+    ? bookingDoc.totals.toObject()
+    : bookingDoc.totals || {};
+
+  const fullAmount = safeNum(totals.fullAmount || bookingDoc.fee || 0);
+  const prevCharged = safeNum(totals.chargedAmount ?? 0);
+
+  // Charged is cumulative. Clamp to fullAmount when known.
+  const nextChargedRaw = prevCharged + safeNum(amountPaidMajor);
+  const nextCharged =
+    fullAmount > 0 ? Math.min(fullAmount, nextChargedRaw) : nextChargedRaw;
+
+  bookingDoc.totals = {
+    ...totals,
+    fullAmount,
+    chargedAmount: nextCharged,
+  };
+
+  const remaining =
+    fullAmount > 0 ? Math.max(0, fullAmount - nextCharged) : 0;
+
+  bookingDoc.balanceAmountPence = Math.round(remaining * 100);
+  bookingDoc.balancePaid = remaining <= 0;
+
+  if (normaliseStage(stage) === "balance") {
+    bookingDoc.balanceStatus = "paid";
+  }
+
+  bookingDoc.paymentStatus = bookingDoc.balancePaid ? "paid" : "unpaid";
+};
+
+const upsertAccountingForPayment = (
+  bookingDoc,
+  { paymentStage, commissionGross, commissionVat, commissionNet, passThroughGross, vatRate }
+) => {
+  if (!bookingDoc) return;
+
+  const current = bookingDoc.accounting?.toObject
+    ? bookingDoc.accounting.toObject()
+    : bookingDoc.accounting || {};
+
+  bookingDoc.accounting = {
+    ...current,
+    paymentStage: paymentStage || current.paymentStage || "",
+    vatRate: Number.isFinite(vatRate) ? vatRate : (Number.isFinite(current.vatRate) ? current.vatRate : 0.2),
+    commissionGross: safeNum(commissionGross ?? current.commissionGross),
+    commissionVat: safeNum(commissionVat ?? current.commissionVat),
+    commissionNet: safeNum(commissionNet ?? current.commissionNet),
+    passThroughGross: safeNum(passThroughGross ?? current.passThroughGross),
+    currency: current.currency || "GBP",
+  };
+};
+
+try {
+  switch (event.type) {
+    // ----------------------------------------------------
+    // Main cart checkout (deposit OR full)
+    // ----------------------------------------------------
+    case "checkout.session.completed": {
+      const session = event.data.object;
+
+      // Prefer PaymentIntent metadata (you set booking_ref etc there)
+      const piId = String(session.payment_intent || "");
+      const pi = piId ? await stripe.paymentIntents.retrieve(piId) : null;
+
+      const meta =
+        pi?.metadata && Object.keys(pi.metadata).length
+          ? pi.metadata
+          : session.metadata || {};
+
+      const booking = await findBookingByMeta(meta);
+      if (!booking) break;
+
+      const paidMajor = toMajor(session.amount_total ?? pi?.amount_received ?? 0);
+
+      const stage = normaliseStage(
+        meta.payment_stage || meta.booking_mode || session.metadata?.booking_mode || ""
+      ); // "deposit" or "full" in your metadata
+
+      const VAT_RATE = Number(process.env.TSC_VAT_RATE ?? 0.2);
+
+      // These exist for your cart checkout because you set them in createCheckoutSession
+      const commissionGross = safeNum(meta.commission_gross);
+      const commissionVat = safeNum(meta.commission_vat);
+      const commissionNet = safeNum(meta.commission_net);
+      const passThroughGross = safeNum(meta.pass_through_gross);
+
+      // Fallback if for some reason metadata is missing: treat as commission
+      const computed =
+        commissionGross > 0 || passThroughGross > 0
+          ? { commissionGross, commissionVat, commissionNet, passThroughGross }
+          : (() => {
+              const { vat, net } = getVatSplitFromGross(paidMajor, VAT_RATE);
+              return {
+                commissionGross: paidMajor,
+                commissionVat: vat,
+                commissionNet: net,
+                passThroughGross: 0,
+              };
+            })();
+
+      booking.sessionId = booking.sessionId || String(session.id || "");
+      booking.paymentIntentId = booking.paymentIntentId || piId || "";
+
+      applyPaidAmountToBooking(booking, {
+        amountPaidMajor: paidMajor,
+        stage: stage === "full" ? "full" : "deposit",
+      });
+
+      upsertAccountingForPayment(booking, {
+        paymentStage: stage === "full" ? "full" : "deposit",
+        ...computed,
+        vatRate: VAT_RATE,
+      });
+
+      // If they paid full at checkout, make sure balance shows paid
+      if (stage === "full") {
+        booking.balancePaid = true;
+        booking.balanceStatus = "paid";
+      }
+
+      await booking.save();
+      break;
+    }
+
+    // ----------------------------------------------------
+    // Stripe Invoice flow (balance + invoice-based addons)
+    // ----------------------------------------------------
+    case "invoice.paid": {
+      const invoice = event.data.object;
+      const meta = invoice.metadata || {};
+
+      const stage = normaliseStage(
+        meta.stage || meta.paymentStage || meta.payment_stage || ""
+      ); // "balance" | "addon_deposit" | "addon_full" | "deposit" | "full"
+
+      const booking = await findBookingByMeta({
+        bookingId: meta.bookingId || meta.booking_id || meta.booking_ref,
+        booking_ref: meta.booking_ref,
+        bookingMongoId: meta.bookingMongoId,
+      });
+      if (!booking) break;
+
+      const paidMajor = toMajor(invoice.amount_paid ?? invoice.total ?? 0);
+      const VAT_RATE = Number(process.env.TSC_VAT_RATE ?? 0.2);
+
+      // Default rule for invoice-based payments:
+      // - balance + addons are PASS-THROUGH by default
+      // - if you later add commission metadata to invoices, it will honour it
+      const explicitCommissionGross = safeNum(meta.commission_gross);
+      const explicitPassThroughGross = safeNum(meta.pass_through_gross);
+
+      const computed =
+        explicitCommissionGross > 0 || explicitPassThroughGross > 0
+          ? (() => {
+              const { vat, net } = getVatSplitFromGross(explicitCommissionGross, VAT_RATE);
+              return {
+                commissionGross: explicitCommissionGross,
+                commissionVat: vat,
+                commissionNet: net,
+                passThroughGross: explicitPassThroughGross,
+              };
+            })()
+          : {
+              commissionGross: 0,
+              commissionVat: 0,
+              commissionNet: 0,
+              passThroughGross: paidMajor,
+            };
+
+      // Mark add-on entry as paid if relevant
+      if (stage === "addon_deposit" || stage === "addon_full") {
+        markAddonPaidIfMatching(booking, {
+          stage,
+          invoiceId: String(invoice.id || ""),
+          hostedUrl: String(invoice.hosted_invoice_url || ""),
+          paymentIntentId: String(invoice.payment_intent || ""),
+        });
+      }
+
+      applyPaidAmountToBooking(booking, {
+        amountPaidMajor: paidMajor,
+        stage: stage === "balance" ? "balance" : stage,
+      });
+
+      if (stage === "balance") {
+        booking.balancePaid = true;
+        booking.balanceStatus = "paid";
+        booking.balanceInvoiceId = booking.balanceInvoiceId || String(invoice.id || "");
+        booking.balanceInvoiceUrl =
+          booking.balanceInvoiceUrl || String(invoice.hosted_invoice_url || "");
+      }
+
+      upsertAccountingForPayment(booking, {
+        paymentStage: stage || booking.accounting?.paymentStage || "",
+        ...computed,
+        vatRate: VAT_RATE,
+      });
+
+      await booking.save();
+      break;
+    }
+
+    // Optional failure logging
+    case "invoice.payment_failed":
+    case "invoice.finalization_failed":
+    case "checkout.session.async_payment_failed": {
+      console.warn("⚠️ Stripe payment failure event:", {
+        type: event.type,
+        id: event?.data?.object?.id,
+      });
+      break;
+    }
+
+    default:
+      break;
+  }
+} catch (handlerErr) {
+  console.error("🔥 Stripe webhook handler error:", handlerErr?.message || handlerErr);
+  // Still 200 so Stripe doesn't hammer retries while you debug.
+}
 
     return res.status(200).json({ received: true });
   }
