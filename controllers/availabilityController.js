@@ -2726,7 +2726,7 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
 
       if (e) {
         const byEmail = await Musician.findOne({ email: e })
-          .select("_id email phoneNumber phone musicianSlug")
+          .select("_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl skipAvailabilityChecks skipAvailabilityForActs skipAvailabilityReason")
           .lean();
         if (byEmail?._id) return byEmail;
       }
@@ -2735,7 +2735,7 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
         const byPhone = await Musician.findOne({
           $or: [{ phoneNormalized: p }, { phoneNumber: p }, { phone: p }],
         })
-          .select("_id email phoneNumber phone phoneNormalized musicianSlug")
+         .select("_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl skipAvailabilityChecks skipAvailabilityForActs skipAvailabilityReason")
           .lean();
         if (byPhone?._id) return byPhone;
       }
@@ -3501,6 +3501,48 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
         realMusicianId = musicianDoc?._id || null;
 
+        const shouldAlwaysSkip =
+  Boolean(musicianDoc?.skipAvailabilityChecks) &&
+  (
+    !Array.isArray(musicianDoc?.skipAvailabilityForActs) ||
+    musicianDoc.skipAvailabilityForActs.length === 0 ||
+    musicianDoc.skipAvailabilityForActs.some(
+      (id) => String(id) === String(actId)
+    )
+  );
+
+if (shouldAlwaysSkip) {
+  console.log("🚫 Permanent availability skip flag found (multi) — skipping lead WA, escalating deputies", {
+    slotIndex: slotIndexForThis,
+    actId,
+    dateISO,
+    realMusicianId: String(realMusicianId || ""),
+    musicianName: `${vMember.firstName || ""} ${vMember.lastName || ""}`.trim(),
+  });
+
+  await notifyDeputies({
+    actId,
+    lineupId: lineupKey,
+    dateISO,
+    formattedAddress: fullFormattedAddress,
+    clientName: resolvedClientName || "",
+    clientEmail: resolvedClientEmail || "",
+    slotIndex: slotIndexForThis,
+    skipDuplicateCheck: true,
+    skipIfUnavailable: false,
+  });
+
+  results.push({
+    name: vMember.firstName,
+    slotIndex: slotIndexForThis,
+    phone,
+    reusedExisting: true,
+    existingReply: "always-unavailable",
+  });
+
+  continue;
+}
+
         const confirmedBooking = await findConfirmedBookingForMusician({
           musicianId: realMusicianId,
           phone,
@@ -3965,6 +4007,53 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
     // ✅ Resolve a real musicianId (never fall back to bandMemberId)
     const realMusicianId = canonical?._id || targetMember?.musicianId || null;
+
+    const shouldAlwaysSkip =
+  Boolean(canonical?.skipAvailabilityChecks) &&
+  (
+    !Array.isArray(canonical?.skipAvailabilityForActs) ||
+    canonical.skipAvailabilityForActs.length === 0 ||
+    canonical.skipAvailabilityForActs.some(
+      (id) => String(id) === String(actId)
+    )
+  );
+
+if (!isDeputy && shouldAlwaysSkip) {
+  console.log(
+    "🚫 Permanent availability skip flag found — skipping lead WhatsApp, escalating to deputies",
+    {
+      actId,
+      dateISO,
+      phone,
+      realMusicianId: String(realMusicianId || ""),
+    },
+  );
+
+  await notifyDeputies({
+    actId,
+    lineupId: lineupKey,
+    dateISO,
+    formattedAddress: fullFormattedAddress,
+    clientName: resolvedClientName || "",
+    clientEmail: resolvedClientEmail || "",
+    slotIndex: singleSlotIndex,
+    skipDuplicateCheck: true,
+    skipIfUnavailable: false,
+  });
+
+  if (res)
+    return res.json({
+      success: true,
+      sent: 0,
+      skipped: "always-unavailable",
+    });
+
+  return {
+    success: true,
+    sent: 0,
+    skipped: "always-unavailable",
+  };
+}
 
     const confirmedBooking = !isDeputy
       ? await findConfirmedBookingForMusician({
