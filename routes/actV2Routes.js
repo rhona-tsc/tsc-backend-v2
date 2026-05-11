@@ -507,8 +507,40 @@ router.post("/cards/backfill", async (req, res) => {
   }
 });
 
+// --- Legacy list endpoint used by admin UI (e.g. /api/act/list?q=Soul...)
+router.get("/list", wrap("GET /list", getAllActsV2));
 
+// Keep id route
 router.get("/:id([0-9a-fA-F]{24})", requireAnyAuth, wrap("GET /:id", getActByIdV2));
-router.get("/:slug", wrap("GET /:slug", getActBySlugV2));
+
+// Guard slug so it doesn't swallow /list, /cards, etc
+const RESERVED_SLUGS = new Set([
+  "list",
+  "cards",
+  "search",
+  "filter-data",
+  "acts",
+  "v2",
+  "save-draft",
+  "create",
+  "update",
+  "trash",
+  "trashed",
+  "restore",
+  "delete-permanent",
+  "moderation-count",
+  "my-drafts",
+  "update-status",
+  "security-update",
+  "cards",
+  "cards/backfill",
+]);
+
+router.get("/:slug", (req, res, next) => {
+  const slug = String(req.params.slug || "").trim().toLowerCase();
+  if (RESERVED_SLUGS.has(slug)) return next();
+  return wrap("GET /:slug", getActBySlugV2)(req, res, next);
+});
+
 
 export default router;
