@@ -60,7 +60,6 @@ import {
 import { getAvailableActIds } from "./controllers/actAvailabilityController.js";
 import { startRemindersPoller } from "./services/remindersQueue.js";
 import { runChaseAndEscalation } from "./cron/chaseAndEscalate.js";
-import { runOnboardingChase } from "./cron/onboardingChase.js";
 import actModel from "./models/actModel.js";
 import { runDeputyPayoutRelease } from "./services/deputyPayoutService.js";
 
@@ -740,32 +739,7 @@ if (process.env.ENABLE_DEFERRED_AVAILABILITY !== "0") {
   }, 2 * 60 * 1000);
 }
 
-// Weekly onboarding chase: Mondays 10:00 London time
-cron.schedule(
-  "0 10 * * 1",
-  async () => {
-    try {
-      const report = await runOnboardingChase({
-        limit: 200,
-        dryRun: false,
-        includePending: false,
-        onlyVocalists: false,
-      });
 
-      console.log("✅ [CRON] Onboarding chase done:", {
-        matched: report.matched,
-        emailed: report.emailed,
-        remindedSetPassword: report.remindedSetPassword,
-        remindedLogin: report.remindedLogin,
-        skippedComplete: report.skippedComplete,
-        errors: report.errors,
-      });
-    } catch (e) {
-      console.error("❌ [CRON] Onboarding chase failed:", e?.message || e);
-    }
-  },
-  { timezone: "Europe/London" }
-);
 
 // Manual route to process deferred availability
 app.get("/api/availability/process-deferred", async (_req, res) => {
