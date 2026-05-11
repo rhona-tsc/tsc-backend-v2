@@ -61,6 +61,7 @@ import { startRemindersPoller } from "./services/remindersQueue.js";
 import { runChaseAndEscalation } from "./cron/chaseAndEscalate.js";
 import actModel from "./models/actModel.js";
 import { runDeputyPayoutRelease } from "./services/deputyPayoutService.js";
+import Booking from "./models/bookingModel.js";
 
 /* -------------------------------------------------------------------------- */
 /*                               Boot + env log                               */
