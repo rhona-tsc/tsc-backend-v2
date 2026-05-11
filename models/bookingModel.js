@@ -52,7 +52,9 @@ const ExtraSchema = new mongoose.Schema(
 
     // Convenience metadata
     payoutRoleFilter: [String], // e.g. ["Sound Engineering", "PA / Lights"]
-    payoutMemberIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "musician" }],
+    payoutMemberIds: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "musician" },
+    ],
     payoutMemberNames: [String],
 
     // Specific support for PA/lights staying later than the band
@@ -372,6 +374,11 @@ const BookingSchema = new mongoose.Schema(
       default: undefined,
     },
 
+    // Stripe invoice / paylink mirrors (so admin board can always show Pay + Invoice)
+    paymentLink: { type: String, default: "" }, // hosted_invoice_url
+    invoicePdfUrl: { type: String, default: "" }, // invoice_pdf
+    balanceInvoicePdfUrl: { type: String, default: "" }, // balance invoice_pdf
+
     /* ------------------------- Multiple add-on payments ------------------------ */
 
     addonPayments: { type: [AddonPaymentSchema], default: [] },
@@ -441,7 +448,9 @@ BookingSchema.pre("validate", function (next) {
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const dd = String(d.getDate()).padStart(2, "0");
     const rand = Math.floor(10000 + Math.random() * 90000);
-    const safeLast = String(last).toUpperCase().replace(/[^A-Z]/g, "");
+    const safeLast = String(last)
+      .toUpperCase()
+      .replace(/[^A-Z]/g, "");
     this.bookingId = `${yy}${mm}${dd}-${safeLast}-${rand}`;
   }
   next();

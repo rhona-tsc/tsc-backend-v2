@@ -538,63 +538,69 @@ export const createInvoicePayLink = async (req, res) => {
       currency: currencyUpper,
     };
 
-    if (stageNorm === "balance") {
-      booking.balanceInvoiceId = finalized.id;
-      booking.balanceInvoiceUrl = finalized.hosted_invoice_url || "";
-      booking.balanceStatus = "sent";
-      booking.balancePaid = false;
+  if (stageNorm === "balance") {
+booking.paymentLink = finalized.hosted_invoice_url || "";
+booking.invoicePdfUrl = finalized.invoice_pdf || "";
+booking.stripeInvoiceId = finalized.id;
+  booking.balanceStatus = "sent";
+  booking.balancePaid = false;
 
-      // Balance invoices = pass-through
-      booking.accounting = accountingPatch;
+  // Optional generic mirrors (handy for the admin board)
+  booking.paymentLink = finalized.hosted_invoice_url || "";
+  booking.invoicePdfUrl = finalized.invoice_pdf || "";
+
+  booking.accounting = accountingPatch;
     } else if (stageNorm === "addon_deposit" || stageNorm === "addon_full") {
-      booking.addonPayments = Array.isArray(booking.addonPayments)
-        ? booking.addonPayments
-        : [];
+  booking.addonPayments = Array.isArray(booking.addonPayments)
+    ? booking.addonPayments
+    : [];
 
-      booking.addonPayments.push({
-        stage: stageNorm,
-        amountPence: totalPence,
-        currency: currencyUpper,
-        label: description || "",
-        checkoutSessionId: "", // invoice-based
-        checkoutUrl: finalized.hosted_invoice_url || "",
-        paymentIntentId: finalized.payment_intent || "",
-        chargeId: "",
-        status: "sent",
-        metadata: {
-          stripeInvoiceId: finalized.id,
-          totalPence,
-          commissionPence,
-          passThroughPence,
-          commissionGross: Number(commissionGross.toFixed(2)),
-          commissionVat: Number(commissionVat.toFixed(2)),
-          commissionNet: Number(commissionNet.toFixed(2)),
-          passThroughGross: Number(passThroughGross.toFixed(2)),
-        },
-      });
+  booking.addonPayments.push({
+    stage: stageNorm,
+    amountPence: totalPence,
+    currency: currencyUpper,
+    label: description || "",
+    checkoutSessionId: "",
+    checkoutUrl: finalized.hosted_invoice_url || "",
+    paymentIntentId: finalized.payment_intent || "",
+    chargeId: "",
+    status: "sent",
+    metadata: {
+      stripeInvoiceId: finalized.id,
+      totalPence,
+      commissionPence,
+      passThroughPence,
+      commissionGross: Number(commissionGross.toFixed(2)),
+      commissionVat: Number(commissionVat.toFixed(2)),
+      commissionNet: Number(commissionNet.toFixed(2)),
+      passThroughGross: Number(passThroughGross.toFixed(2)),
+    },
+  });
 
-      // optional: keep "latest" accounting snapshot on the booking
-      booking.accounting = accountingPatch;
-    } else {
-      // deposit/full invoice
-      booking.stripeInvoiceId = finalized.id;
-      booking.invoiceRequested = true;
+  // Optional "latest" mirrors
+  booking.paymentLink = finalized.hosted_invoice_url || "";
+  booking.invoicePdfUrl = finalized.invoice_pdf || "";
 
-      booking.accounting = accountingPatch;
+  booking.accounting = accountingPatch;
+} else {
+  booking.stripeInvoiceId = finalized.id;
+  booking.invoiceRequested = true;
 
-      // Optional: if this invoice represents the FULL booking total, ensure totals.fullAmount reflects it.
-      // (Don’t mark chargedAmount here; your webhook/payment reconciliation should do that.)
-      if (stageNorm === "full") {
-        booking.totals = booking.totals || {};
-        booking.totals.fullAmount = Number((totalPence / 100).toFixed(2));
-        booking.totals.depositAmount = 0; // full paid path uses 0 "deposit due"
-      }
-      if (stageNorm === "deposit") {
-        // If you want: totals.depositAmount = deposit due (the invoice amount)
-        booking.totals = booking.totals || {};
-        booking.totals.depositAmount = Number((totalPence / 100).toFixed(2));
-      }
-    }
+  booking.paymentLink = finalized.hosted_invoice_url || "";
+  booking.invoicePdfUrl = finalized.invoice_pdf || "";
+
+  booking.accounting = accountingPatch;
+
+  if (stageNorm === "full") {
+    booking.totals = booking.totals || {};
+    booking.totals.fullAmount = Number((totalPence / 100).toFixed(2));
+    booking.totals.depositAmount = 0;
+  }
+  if (stageNorm === "deposit") {
+    booking.totals = booking.totals || {};
+    booking.totals.depositAmount = Number((totalPence / 100).toFixed(2));
+  }
+}
 
     await booking.save();
 

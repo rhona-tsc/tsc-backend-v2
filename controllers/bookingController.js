@@ -2660,9 +2660,11 @@ async function upsertBoardRowFromBooking(booking) {
 
   const clientEmails = [];
   if (Array.isArray(booking?.clientEmails)) {
-    for (const e of booking.clientEmails)
-      if (e) clientEmails.push({ email: e });
-  } else if (booking?.userAddress?.email) {
+  for (const e of booking.clientEmails) {
+    const email = typeof e === "string" ? e : e?.email;
+    if (email) clientEmails.push({ email });
+  }
+} else if (booking?.userAddress?.email) {
     clientEmails.push({ email: booking.userAddress.email });
   } else if (booking?.userEmail) {
     clientEmails.push({ email: booking.userEmail });
@@ -2679,10 +2681,37 @@ async function upsertBoardRowFromBooking(booking) {
     Number(booking?.commission) || Number(booking?.agencyCommission) || 0;
 
   // --- payments ---
+  // --- payments ---
   const payments = {
-    balanceInvoiceUrl: booking?.balanceInvoiceUrl || "",
-    balancePaymentReceived: !!booking?.balancePaid,
-    bandPaymentsSent: !!booking?.bandPaymentsSent, // ✅ top-level now
+    // Balance invoice (Stripe hosted invoice URL)
+    balanceInvoiceUrl:
+      booking?.payments?.balanceInvoiceUrl ||
+      booking?.balanceInvoiceUrl ||
+      booking?.balanceInvoiceId ? booking?.balanceInvoiceUrl : "" ||
+      "",
+
+    // Balance PDF (if you add/store it on booking)
+    balanceInvoicePdfUrl:
+      booking?.payments?.balanceInvoicePdfUrl ||
+      booking?.balanceInvoicePdfUrl ||
+      "",
+
+    // Generic “latest invoice” mirrors (deposit/full/balance)
+    hosted_invoice_url:
+      booking?.payments?.hosted_invoice_url ||
+      booking?.paymentLink || // if you set this in createInvoicePayLink
+      booking?.balanceInvoiceUrl || // fallback
+      "",
+
+    invoice_pdf:
+      booking?.payments?.invoice_pdf ||
+      booking?.invoicePdfUrl || // if you set this in createInvoicePayLink
+      booking?.balanceInvoicePdfUrl || // fallback
+      "",
+
+    balancePaymentReceived: !!(booking?.payments?.balancePaymentReceived ?? booking?.balancePaid),
+    bandPaymentsSent: !!(booking?.payments?.bandPaymentsSent ?? booking?.bandPaymentsSent),
+
     depositAmount: Number(booking?.totals?.depositAmount || 0) || undefined,
   };
 
@@ -2720,7 +2749,17 @@ async function upsertBoardRowFromBooking(booking) {
         payments,
         contractUrl,
         pdfUrl: booking?.pdfUrl || "",
+        paymentLink:
+          booking?.paymentLink ||
+          booking?.balanceInvoiceUrl ||
+          booking?.payments?.hosted_invoice_url ||
+          "",
 
+        invoicePdfUrl:
+          booking?.invoicePdfUrl ||
+          booking?.balanceInvoicePdfUrl ||
+          booking?.payments?.invoice_pdf ||
+          "",
         bandSize,
         lineupSelected:
           lineup?.label || lineup?.name || actFromSummary?.lineupLabel || "",
