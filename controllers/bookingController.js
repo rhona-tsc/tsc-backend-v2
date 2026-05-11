@@ -2068,7 +2068,8 @@ const manualCreateBooking = async (req, res) => {
     // ------------------------------
     // 3️⃣ Totals + accounting (IMPORTANT)
     // ------------------------------
-    const VAT_RATE = Number(process.env.TSC_VAT_RATE ?? 0.2);
+    const vatRateRaw = Number(process.env.TSC_VAT_RATE ?? 0.2);
+    const VAT_RATE = Number.isFinite(vatRateRaw) ? vatRateRaw : 0.2;
     const DEPOSIT_RATE = Number(process.env.TSC_DEPOSIT_RATE ?? 0.33);
 
     const safeGross = Number(grossTotal || feeDetails?.grossTotal || feeDetails?.total || 0) || 0;
