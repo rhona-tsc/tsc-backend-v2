@@ -381,72 +381,76 @@ export const createInvoicePayLink = async (req, res) => {
     const {
       bookingIdOrRef,
       stage, // deposit | full | balance | addon_deposit | addon_full
-      amountPence, // total amount this invoice should charge (in pence)
+      amountPence,
       currency = "GBP",
       description,
       customerEmail,
       customerName,
       daysUntilDue = 7,
       metadata = {},
+      replaceExistingInvoice = true, // default true
     } = req.body || {};
 
     const stageNorm = String(stage || "").trim().toLowerCase();
 
     if (!bookingIdOrRef || !stageNorm || !amountPence || Number(amountPence) <= 0) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing required fields." });
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields.",
+      });
     }
 
     if (!customerEmail) {
-      return res
-        .status(400)
-        .json({ success: false, message: "customerEmail is required." });
+      return res.status(400).json({
+        success: false,
+        message: "customerEmail is required.",
+      });
     }
 
     const booking = await Booking.findOne(
       looksLikeObjectId(bookingIdOrRef)
         ? { _id: bookingIdOrRef }
-        : { bookingId: bookingIdOrRef },
+        : { bookingId: bookingIdOrRef }
     );
 
     if (!booking) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Booking not found." });
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found.",
+      });
     }
 
-    // ---- Determine commission vs pass-through for THIS invoice ----
+    // Void old invoice first, if requested
+    let voidedInvoice = null;
+    if (replaceExistingInvoice) {
+      voidedInvoice = await voidExistingStripeInvoiceIfAny(booking);
+    }
+
     const totalPence = clampPence(amountPence);
     let commissionPence = 0;
     let passThroughPence = 0;
 
     if (stageNorm === "deposit" || stageNorm === "addon_deposit") {
-      // deposit invoice = commission only
       commissionPence = totalPence;
       passThroughPence = 0;
     } else if (stageNorm === "balance") {
-      // balance invoice = pass-through only
       commissionPence = 0;
       passThroughPence = totalPence;
     } else if (stageNorm === "full" || stageNorm === "addon_full") {
-      // full upfront invoice = split
       commissionPence = clampPence(totalPence * DEPOSIT_RATE);
-      // Safety so we never exceed total
       if (commissionPence > totalPence) commissionPence = totalPence;
       passThroughPence = totalPence - commissionPence;
     } else {
       return res.status(400).json({
         success: false,
-        message: "Invalid stage. Use deposit | full | balance | addon_deposit | addon_full.",
+        message:
+          "Invalid stage. Use deposit | full | balance | addon_deposit | addon_full.",
       });
     }
 
-    // VAT breakdown is only relevant on commission bucket
     const commissionGross = commissionPence / 100;
-    const commissionVat = commissionGross * (VAT_RATE / (1 + VAT_RATE)); // VAT portion of VAT-inclusive gross
+    const commissionVat = commissionGross * (VAT_RATE / (1 + VAT_RATE));
     const commissionNet = commissionGross - commissionVat;
-
     const passThroughGross = passThroughPence / 100;
 
     const customer = await getOrCreateStripeCustomer({
@@ -454,29 +458,27 @@ export const createInvoicePayLink = async (req, res) => {
       name: customerName,
     });
 
-    // ---- Create a DRAFT invoice first, then attach items directly to it ----
     const invoice = await stripe.invoices.create({
       customer: customer.id,
       collection_method: "send_invoice",
       days_until_due: Number(daysUntilDue) || 7,
-      auto_advance: false, // we finalize explicitly
+      auto_advance: false,
       currency: toLower(currency),
       metadata: {
         bookingId: booking.bookingId,
+        bookingMongoId: String(booking._id),
         stage: stageNorm,
-
-        // Store split in invoice metadata (super handy for debugging)
         total_pence: String(totalPence),
         commission_pence: String(commissionPence),
         pass_through_pence: String(passThroughPence),
-
+        replaced_invoice_id: voidedInvoice?.id || "",
         ...metadata,
       },
     });
 
     const suffix = booking?.bookingId ? ` (${booking.bookingId})` : "";
 
-    // 1) Commission item (if any)
+    // 1) Agency fee line
     if (commissionPence > 0) {
       await stripe.invoiceItems.create({
         customer: customer.id,
@@ -485,9 +487,10 @@ export const createInvoicePayLink = async (req, res) => {
         currency: toLower(currency),
         description:
           description ||
-`${stageNorm.startsWith("addon") ? "Add-on" : "The Supreme Collective"} agency fee${suffix}`,
+          `${stageNorm.startsWith("addon") ? "Add-on" : "Booking"} The Supreme Collective agency fee${suffix}`,
         metadata: {
           bookingId: booking.bookingId,
+          bookingMongoId: String(booking._id),
           stage: stageNorm,
           bucket: "commission",
           commission_gross: String(commissionGross.toFixed(2)),
@@ -498,7 +501,7 @@ export const createInvoicePayLink = async (req, res) => {
       });
     }
 
-    // 2) Pass-through item (if any)
+    // 2) Artist fee line
     if (passThroughPence > 0) {
       await stripe.invoiceItems.create({
         customer: customer.id,
@@ -507,9 +510,10 @@ export const createInvoicePayLink = async (req, res) => {
         currency: toLower(currency),
         description:
           description ||
-         `${stageNorm.startsWith("addon") ? "Add-on" : "Artist"} fee${suffix}`,
+          `${stageNorm.startsWith("addon") ? "Add-on" : "Booking"} artist fee${suffix}`,
         metadata: {
           bookingId: booking.bookingId,
+          bookingMongoId: String(booking._id),
           stage: stageNorm,
           bucket: "pass_through",
           pass_through_gross: String(passThroughGross.toFixed(2)),
@@ -518,16 +522,12 @@ export const createInvoicePayLink = async (req, res) => {
       });
     }
 
-    // Finalize so hosted url + pdf exist
     const finalized = await stripe.invoices.finalizeInvoice(invoice.id, {
       auto_advance: true,
     });
 
-    // ---- Store on booking ----
     const currencyUpper = String(currency || "GBP").toUpperCase();
 
-    // Keep a snapshot of the split on the booking.accounting for admin visibility
-    // (For add-ons we also store a per-add-on record)
     const accountingPatch = {
       paymentStage: stageNorm,
       vatRate: VAT_RATE,
@@ -538,69 +538,65 @@ export const createInvoicePayLink = async (req, res) => {
       currency: currencyUpper,
     };
 
-  if (stageNorm === "balance") {
-booking.paymentLink = finalized.hosted_invoice_url || "";
-booking.invoicePdfUrl = finalized.invoice_pdf || "";
-booking.stripeInvoiceId = finalized.id;
-  booking.balanceStatus = "sent";
-  booking.balancePaid = false;
-
-  // Optional generic mirrors (handy for the admin board)
-  booking.paymentLink = finalized.hosted_invoice_url || "";
-  booking.invoicePdfUrl = finalized.invoice_pdf || "";
-
-  booking.accounting = accountingPatch;
+    if (stageNorm === "balance") {
+      booking.paymentLink = finalized.hosted_invoice_url || "";
+      booking.invoicePdfUrl = finalized.invoice_pdf || "";
+      booking.stripeInvoiceId = finalized.id;
+      booking.balanceInvoiceId = finalized.id;
+      booking.balanceInvoiceUrl = finalized.hosted_invoice_url || "";
+      booking.balanceInvoicePdfUrl = finalized.invoice_pdf || "";
+      booking.balanceStatus = "sent";
+      booking.balancePaid = false;
+      booking.accounting = accountingPatch;
     } else if (stageNorm === "addon_deposit" || stageNorm === "addon_full") {
-  booking.addonPayments = Array.isArray(booking.addonPayments)
-    ? booking.addonPayments
-    : [];
+      booking.addonPayments = Array.isArray(booking.addonPayments)
+        ? booking.addonPayments
+        : [];
 
-  booking.addonPayments.push({
-    stage: stageNorm,
-    amountPence: totalPence,
-    currency: currencyUpper,
-    label: description || "",
-    checkoutSessionId: "",
-    checkoutUrl: finalized.hosted_invoice_url || "",
-    paymentIntentId: finalized.payment_intent || "",
-    chargeId: "",
-    status: "sent",
-    metadata: {
-      stripeInvoiceId: finalized.id,
-      totalPence,
-      commissionPence,
-      passThroughPence,
-      commissionGross: Number(commissionGross.toFixed(2)),
-      commissionVat: Number(commissionVat.toFixed(2)),
-      commissionNet: Number(commissionNet.toFixed(2)),
-      passThroughGross: Number(passThroughGross.toFixed(2)),
-    },
-  });
+      booking.addonPayments.push({
+        stage: stageNorm,
+        amountPence: totalPence,
+        currency: currencyUpper,
+        label: description || "",
+        checkoutSessionId: "",
+        checkoutUrl: finalized.hosted_invoice_url || "",
+        paymentIntentId: finalized.payment_intent || "",
+        chargeId: "",
+        status: "sent",
+        metadata: {
+          stripeInvoiceId: finalized.id,
+          totalPence,
+          commissionPence,
+          passThroughPence,
+          commissionGross: Number(commissionGross.toFixed(2)),
+          commissionVat: Number(commissionVat.toFixed(2)),
+          commissionNet: Number(commissionNet.toFixed(2)),
+          passThroughGross: Number(passThroughGross.toFixed(2)),
+        },
+      });
 
-  // Optional "latest" mirrors
-  booking.paymentLink = finalized.hosted_invoice_url || "";
-  booking.invoicePdfUrl = finalized.invoice_pdf || "";
+      booking.paymentLink = finalized.hosted_invoice_url || "";
+      booking.invoicePdfUrl = finalized.invoice_pdf || "";
+      booking.stripeInvoiceId = finalized.id;
+      booking.accounting = accountingPatch;
+    } else {
+      booking.stripeInvoiceId = finalized.id;
+      booking.invoiceRequested = true;
+      booking.paymentLink = finalized.hosted_invoice_url || "";
+      booking.invoicePdfUrl = finalized.invoice_pdf || "";
+      booking.accounting = accountingPatch;
 
-  booking.accounting = accountingPatch;
-} else {
-  booking.stripeInvoiceId = finalized.id;
-  booking.invoiceRequested = true;
+      if (stageNorm === "full") {
+        booking.totals = booking.totals || {};
+        booking.totals.fullAmount = Number((totalPence / 100).toFixed(2));
+        booking.totals.depositAmount = 0;
+      }
 
-  booking.paymentLink = finalized.hosted_invoice_url || "";
-  booking.invoicePdfUrl = finalized.invoice_pdf || "";
-
-  booking.accounting = accountingPatch;
-
-  if (stageNorm === "full") {
-    booking.totals = booking.totals || {};
-    booking.totals.fullAmount = Number((totalPence / 100).toFixed(2));
-    booking.totals.depositAmount = 0;
-  }
-  if (stageNorm === "deposit") {
-    booking.totals = booking.totals || {};
-    booking.totals.depositAmount = Number((totalPence / 100).toFixed(2));
-  }
-}
+      if (stageNorm === "deposit") {
+        booking.totals = booking.totals || {};
+        booking.totals.depositAmount = Number((totalPence / 100).toFixed(2));
+      }
+    }
 
     await booking.save();
 
@@ -608,15 +604,14 @@ booking.stripeInvoiceId = finalized.id;
       success: true,
       bookingId: booking.bookingId,
       stage: stageNorm,
-
       totalPence,
       commissionPence,
       passThroughPence,
-
       stripeInvoiceId: finalized.id,
       hosted_invoice_url: finalized.hosted_invoice_url,
       invoice_pdf: finalized.invoice_pdf,
       status: finalized.status,
+      voidedPreviousInvoiceId: voidedInvoice?.id || null,
     });
   } catch (err) {
     console.error("createInvoicePayLink error:", err);
@@ -625,4 +620,50 @@ booking.stripeInvoiceId = finalized.id;
       message: err?.message || "Failed to create invoice.",
     });
   }
+};
+
+const voidExistingStripeInvoiceIfAny = async (booking) => {
+  if (!stripe || !booking) return null;
+
+  const candidateIds = [
+    booking.stripeInvoiceId,
+    booking.balanceInvoiceId,
+    ...(Array.isArray(booking.addonPayments)
+      ? booking.addonPayments
+          .map((p) => p?.metadata?.stripeInvoiceId || p?.stripeInvoiceId || "")
+          .filter(Boolean)
+      : []),
+  ].filter(Boolean);
+
+  const uniqueIds = [...new Set(candidateIds)];
+
+  for (const invoiceId of uniqueIds) {
+    try {
+      const existing = await stripe.invoices.retrieve(invoiceId);
+
+      // Only void invoices that are still open/draft/uncollectible.
+      // Do not attempt to void paid or already void invoices.
+      if (
+        existing &&
+        ["draft", "open", "uncollectible"].includes(String(existing.status || ""))
+      ) {
+        const voided = await stripe.invoices.voidInvoice(invoiceId);
+        console.log("🧾 Voided existing Stripe invoice:", {
+          bookingId: booking.bookingId,
+          invoiceId,
+          statusBefore: existing.status,
+          statusAfter: voided?.status,
+        });
+        return voided;
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed to inspect/void old invoice:", {
+        bookingId: booking.bookingId,
+        invoiceId,
+        error: err?.message || err,
+      });
+    }
+  }
+
+  return null;
 };
