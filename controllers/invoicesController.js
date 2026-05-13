@@ -257,12 +257,10 @@ export const getOrCreateBalanceLink = async (req, res) => {
     return res.json({ success: true, url: session.url });
   } catch (err) {
     console.error("getOrCreateBalanceLink error:", err);
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to create or fetch balance link.",
-      });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create or fetch balance link.",
+    });
   }
 };
 
@@ -346,12 +344,10 @@ export const getOrCreateAddonLink = async (req, res) => {
     return res.json({ success: true, url: session.url });
   } catch (err) {
     console.error("getOrCreateAddonLink error:", err);
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to create or fetch add-on link.",
-      });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create or fetch add-on link.",
+    });
   }
 };
 
@@ -391,9 +387,16 @@ export const createInvoicePayLink = async (req, res) => {
       replaceExistingInvoice = true, // default true
     } = req.body || {};
 
-    const stageNorm = String(stage || "").trim().toLowerCase();
+    const stageNorm = String(stage || "")
+      .trim()
+      .toLowerCase();
 
-    if (!bookingIdOrRef || !stageNorm || !amountPence || Number(amountPence) <= 0) {
+    if (
+      !bookingIdOrRef ||
+      !stageNorm ||
+      !amountPence ||
+      Number(amountPence) <= 0
+    ) {
       return res.status(400).json({
         success: false,
         message: "Missing required fields.",
@@ -410,7 +413,7 @@ export const createInvoicePayLink = async (req, res) => {
     const booking = await Booking.findOne(
       looksLikeObjectId(bookingIdOrRef)
         ? { _id: bookingIdOrRef }
-        : { bookingId: bookingIdOrRef }
+        : { bookingId: bookingIdOrRef },
     );
 
     if (!booking) {
@@ -464,6 +467,23 @@ export const createInvoicePayLink = async (req, res) => {
       days_until_due: Number(daysUntilDue) || 7,
       auto_advance: false,
       currency: toLower(currency),
+      footer: [
+        "Bank transfer details:",
+
+        "Account name: The Supreme Collective Limited",
+
+        "Sort code: 608371",
+
+        "Account number: 00973473",
+
+        `Reference: ${booking.bookingId}`,
+      ].join("\n"),
+
+      custom_fields: [
+        { name: "Payment reference", value: booking.bookingId },
+
+        { name: "Payment method", value: "Bank transfer accepted" },
+      ],
       metadata: {
         bookingId: booking.bookingId,
         bookingMongoId: String(booking._id),
@@ -487,7 +507,7 @@ export const createInvoicePayLink = async (req, res) => {
         currency: toLower(currency),
         description:
           description ||
-          `${stageNorm.startsWith("addon") ? "Add-on" : "Booking"} The Supreme Collective agency fee${suffix}`,
+          `${stageNorm.startsWith("addon") ? "Add-on" : ""} The Supreme Collective agency fee${suffix}`,
         metadata: {
           bookingId: booking.bookingId,
           bookingMongoId: String(booking._id),
@@ -645,7 +665,9 @@ const voidExistingStripeInvoiceIfAny = async (booking) => {
       // Do not attempt to void paid or already void invoices.
       if (
         existing &&
-        ["draft", "open", "uncollectible"].includes(String(existing.status || ""))
+        ["draft", "open", "uncollectible"].includes(
+          String(existing.status || ""),
+        )
       ) {
         const voided = await stripe.invoices.voidInvoice(invoiceId);
         console.log("🧾 Voided existing Stripe invoice:", {
