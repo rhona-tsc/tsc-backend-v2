@@ -485,7 +485,7 @@ export const createInvoicePayLink = async (req, res) => {
         currency: toLower(currency),
         description:
           description ||
-          `${stageNorm.startsWith("addon") ? "Add-on" : "Booking"} commission (includes VAT)${suffix}`,
+`${stageNorm.startsWith("addon") ? "Add-on" : "The Supreme Collective"} agency fee${suffix}`,
         metadata: {
           bookingId: booking.bookingId,
           stage: stageNorm,
@@ -507,7 +507,7 @@ export const createInvoicePayLink = async (req, res) => {
         currency: toLower(currency),
         description:
           description ||
-          `${stageNorm.startsWith("addon") ? "Add-on" : "Booking"} live music funds (held for musicians)${suffix}`,
+         `${stageNorm.startsWith("addon") ? "Add-on" : "Artist"} fee${suffix}`,
         metadata: {
           bookingId: booking.bookingId,
           stage: stageNorm,
