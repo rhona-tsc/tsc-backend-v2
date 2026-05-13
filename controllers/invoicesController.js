@@ -530,7 +530,7 @@ export const createInvoicePayLink = async (req, res) => {
         currency: toLower(currency),
         description:
           description ||
-          `${stageNorm.startsWith("addon") ? "Add-on" : "Booking"} artist fee${suffix}`,
+          `${stageNorm.startsWith("addon") ? "Add-on" : ""} artist fee${suffix}`,
         metadata: {
           bookingId: booking.bookingId,
           bookingMongoId: String(booking._id),
