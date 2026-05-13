@@ -570,215 +570,125 @@ const buildSearchClause = (q) => {
 };
 
 // LIST with filters (date range, text search, act, agent)
-router.get("/", musicianAuth, async (req, res) => {
+
+router.post("/", musicianAuth, async (req, res) => {
   try {
-    const {
-      q,
-      from,
-      to,
-      agent,
-      act,
-      sortBy = "eventDateISO",
-      sortDir = "asc",
-      limit = 500,
-    } = req.query;
-
-    const user = req.user || {};
-    const email = String(user?.email || "").toLowerCase();
-    const role = String(user?.role || "").toLowerCase();
-    const isAgent = role === "agent" || email === "hello@thesupremecollective.co.uk";
-    const isAdmin = isTSCAdmin(user) || isAgent;
-    const proj = isAdmin ? adminProjection : actOwnerProjection;
-    const musicianId = toObjectIdString(user?.musicianId || user?._id || user?.id);
-
-    const boardQuery = {};
-    const bookingQuery = {};
-
-    if (from || to) {
-      boardQuery.eventDateISO = {};
-      bookingQuery.date = {};
-      if (from) {
-        boardQuery.eventDateISO.$gte = from;
-        bookingQuery.date.$gte = new Date(`${from}T00:00:00.000Z`);
-      }
-      if (to) {
-        boardQuery.eventDateISO.$lte = to;
-        bookingQuery.date.$lte = new Date(`${to}T23:59:59.999Z`);
-      }
+    if (!isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin only." });
     }
 
-    if (agent) {
-      boardQuery.agent = agent;
-      bookingQuery.agent = agent;
+    const payload = req.body || {};
+    const bookingRef = String(payload.bookingRef || payload.bookingId || "").trim();
+
+    if (!bookingRef) {
+      return res.status(400).json({ success: false, message: "bookingRef is required" });
     }
 
-    if (act) {
-      boardQuery.$or = [
-        { actTscName: act },
-        { actName: act },
-      ];
-      bookingQuery.$or = [
-        { "actsSummary.tscName": act },
-        { "actsSummary.name": act },
-        { "actsSummary.actName": act },
-      ];
-    }
+    const eventDateISO = String(payload.eventDateISO || "").slice(0, 10);
+    const eventDate =
+      /^\d{4}-\d{2}-\d{2}$/.test(eventDateISO) ? new Date(`${eventDateISO}T00:00:00.000Z`) : null;
 
-    const searchClause = buildSearchClause(q);
-    if (searchClause) {
-      if (boardQuery.$or) {
-        boardQuery.$and = [{ $or: boardQuery.$or }, searchClause];
-        delete boardQuery.$or;
-      } else {
-        Object.assign(boardQuery, searchClause);
-      }
+    const clientEmail =
+      String(
+        payload.clientEmail ||
+          (Array.isArray(payload.clientEmails) ? payload.clientEmails[0]?.email : "") ||
+          ""
+      )
+        .trim()
+        .toLowerCase();
 
-      const bookingSearchClause = {
-        $or: [
-          { bookingId: new RegExp(escapeRegex(q), "i") },
-          { venue: new RegExp(escapeRegex(q), "i") },
-          { venueAddress: new RegExp(escapeRegex(q), "i") },
-          { eventType: new RegExp(escapeRegex(q), "i") },
-          { userEmail: new RegExp(escapeRegex(q), "i") },
-          { clientEmail: new RegExp(escapeRegex(q), "i") },
-          { clientName: new RegExp(escapeRegex(q), "i") },
-          { "userAddress.firstName": new RegExp(escapeRegex(q), "i") },
-          { "userAddress.lastName": new RegExp(escapeRegex(q), "i") },
-          { "userAddress.email": new RegExp(escapeRegex(q), "i") },
-          { "actsSummary.actName": new RegExp(escapeRegex(q), "i") },
-          { "actsSummary.name": new RegExp(escapeRegex(q), "i") },
-          { "actsSummary.tscName": new RegExp(escapeRegex(q), "i") },
-          { "actsSummary.lineupLabel": new RegExp(escapeRegex(q), "i") },
-          { "actsSummary.selectedExtras.name": new RegExp(escapeRegex(q), "i") },
-          { "eventSheet.answers.venue_name": new RegExp(escapeRegex(q), "i") },
-          { "eventSheet.answers.client_names": new RegExp(escapeRegex(q), "i") },
-          { "eventSheet.complete.client_names": new RegExp(escapeRegex(q), "i") },
-        ],
-      };
+    // --------- 1) Upsert Booking (source of truth) ----------
+    const bookingPatch = {
+      bookingId: bookingRef,
+      createdManually: true,
 
-      if (bookingQuery.$or) {
-        bookingQuery.$and = [{ $or: bookingQuery.$or }, bookingSearchClause];
-        delete bookingQuery.$or;
-      } else {
-        Object.assign(bookingQuery, bookingSearchClause);
-      }
-    }
+      // keep both; lots of older code still queries booking.date
+      eventDate: eventDate || undefined,
+      date: eventDate || undefined,
 
-    if (!isAdmin) {
-      if (musicianId) {
-        boardQuery.actOwnerMusicianId = musicianId;
-        bookingQuery.$or = [
-          { actOwnerMusicianId: musicianId },
-          { "actsSummary.bandMembers.musicianId": musicianId },
-          { "actsSummary.chosenVocalists.musicianId": musicianId },
-          { "payments.musician": musicianId },
-          { userId: musicianId },
-        ];
-      } else if (email) {
-        boardQuery.$or = [
-          ...(boardQuery.$or || []),
-          { userEmail: email },
-          { "clientEmails.email": email },
-        ];
-        bookingQuery.$or = [
-          ...(bookingQuery.$or || []),
-          { userEmail: email },
-          { clientEmail: email },
-          { "userAddress.email": email },
-        ];
-      }
-    }
+      clientName: String(payload.bookerName || payload.clientFirstNames || payload.clientName || "").trim(),
+      clientEmail: clientEmail || undefined,
+      userEmail: clientEmail || undefined,
 
-    const boardRowsRaw = await BookingBoardItem.find(boardQuery, proj).limit(Number(limit));
-    const bookingDocs = await Booking.find(bookingQuery).limit(Number(limit));
+      // money
+      amount: Number(payload.grossValue || 0) || 0,
+      fee: Number(payload.grossValue || 0) || 0,
 
-    const actIdsFromBookings = [...new Set(
-      bookingDocs
-        .map((booking) => {
-          const doc = booking?.toObject ? booking.toObject() : booking;
-          const firstAct = Array.isArray(doc?.actsSummary) && doc.actsSummary.length ? doc.actsSummary[0] : null;
-          return String(firstAct?.actId || doc?.act || "").trim();
-        })
-        .filter(Boolean)
-    )];
+      accounting: payload.accounting || undefined,
 
-    const acts = actIdsFromBookings.length
-      ? await actModel
-          .find({ _id: { $in: actIdsFromBookings } })
-          .select("_id name tscName extras paSystem lightingSystem")
-          .lean()
-      : [];
+      // invoice/link mirrors
+      paymentLink: String(payload.paymentLink || "").trim(),
+      invoicePdfUrl: String(payload.invoiceUrl || payload.invoicePdfUrl || "").trim(),
 
-    const actLookup = new Map(
-      acts.map((act) => [String(act?._id || ""), act])
+      // balance fields (optional)
+      balanceInvoiceUrl: String(payload.balanceInvoiceUrl || "").trim(),
+      balanceInvoicePdfUrl: String(payload.balanceInvoicePdfUrl || "").trim(),
+    };
+
+    // remove undefined so we don’t stomp fields
+    Object.keys(bookingPatch).forEach((k) => bookingPatch[k] === undefined && delete bookingPatch[k]);
+
+    const booking = await Booking.findOneAndUpdate(
+      { bookingId: bookingRef },
+      { $set: bookingPatch },
+      { new: true, upsert: true }
     );
 
-    const dedupeMap = new Map();
+    // --------- 2) Upsert BookingBoardItem (UI row) ----------
+    const boardPatch = {
+      bookingId: booking._id, // ObjectId ref to Booking
 
-    for (const row of boardRowsRaw) {
-      const plainRow = row?.toObject ? row.toObject() : row;
-      const key = getCanonicalBookingKey(plainRow);
-      const existing = dedupeMap.get(key);
-      dedupeMap.set(key, choosePreferredRow(existing, plainRow));
-    }
+      bookerName: String(payload.bookerName || "").trim(),
+      clientFirstNames: String(payload.clientFirstNames || payload.bookerName || "").trim(),
+      bookingRef,
 
-    for (const booking of bookingDocs) {
-      const normalized = normalizeBookingToBoardRow(booking, actLookup);
-      if (!normalized) continue;
-      const key = getCanonicalBookingKey(normalized);
-      const existing = dedupeMap.get(key);
-      dedupeMap.set(key, choosePreferredRow(existing, normalized));
-    }
+      eventDateISO: eventDateISO || "",
+      enquiryDateISO: String(payload.enquiryDateISO || "").slice(0, 10),
+      bookingDateISO: String(payload.bookingDateISO || "").slice(0, 10),
 
-    const rows = [...dedupeMap.values()];
+      grossValue: Number(payload.grossValue || 0) || 0,
+      netCommission: Number(payload.netCommission || 0) || 0,
 
-    const dir = String(sortDir).toLowerCase() === "desc" ? -1 : 1;
-    rows.sort((a, b) => {
-      if (sortBy === "clientFirstNames") {
-        return String(a?.clientFirstNames || "").localeCompare(String(b?.clientFirstNames || "")) * dir;
-      }
-      if (sortBy === "createdAt") {
-        const aTime = new Date(a?.createdAt || a?.bookingDateISO || 0).getTime() || 0;
-        const bTime = new Date(b?.createdAt || b?.bookingDateISO || 0).getTime() || 0;
-        return (aTime - bTime) * dir;
-      }
-      const aDate = new Date(a?.eventDateISO || 0).getTime() || 0;
-      const bDate = new Date(b?.eventDateISO || 0).getTime() || 0;
-      return (aDate - bDate) * dir;
-    });
+      agent: String(payload.agent || "Direct").trim(),
 
-    const totalDeduped = rows.length;
+      clientEmails: clientEmail ? [{ email: clientEmail }] : [],
 
-    const scopeLabel = isAdmin
-      ? `Showing ${totalDeduped} deduplicated booking${totalDeduped === 1 ? "" : "s"} across The Supreme Collective`
-      : `Showing ${totalDeduped} deduplicated booking${totalDeduped === 1 ? "" : "s"} visible to your account only`;
+      eventType: String(payload.eventType || "").trim(),
+      actName: String(payload.actName || "").trim(),
+      actTscName: String(payload.actTscName || payload.actName || "").trim(),
+      address: String(payload.address || "").trim(),
+      county: String(payload.county || "").trim(),
 
-    res.json({
+      bandSize: Number(payload.bandSize || 0) || 0,
+      lineupSelected: String(payload.lineupSelected || "").trim(),
+      lineupComposition: Array.isArray(payload.lineupComposition) ? payload.lineupComposition : [],
+
+      arrivalTime: String(payload.arrivalTime || "").trim(),
+      finishTime: String(payload.finishTime || "").trim(),
+
+      bookingDetails: payload.bookingDetails || { djServicesBooked: false },
+      allocation: payload.allocation || { status: "in_progress" },
+      review: payload.review || { requestedCount: 0, received: false },
+
+      updatedAt: new Date(),
+    };
+
+    const boardRow = await BookingBoardItem.findOneAndUpdate(
+      { bookingRef },
+      { $set: boardPatch, $setOnInsert: { createdAt: new Date() } },
+      { new: true, upsert: true }
+    );
+
+    return res.json({
       success: true,
-      rows: rows.slice(0, Number(limit)).map((row) => {
-  const rowId = row?._id?.toString ? row._id.toString() : row?._id;
-  const sourceBookingId = row?.sourceBookingId?.toString
-    ? row.sourceBookingId.toString()
-    : row?.sourceBookingId;
-
-  return {
-    ...row,
-    _id: sourceBookingId || rowId,
-    boardRowId: sourceBookingId ? rowId : null,
-    sourceBookingId: sourceBookingId || null,
-  };
-}),
-      scopeLabel,
-      debug: {
-        isAdmin,
-        isAgent,
-        filteredByOwner: !isAdmin,
-        musicianId: musicianId || null,
-        email: email || null,
+      row: {
+        ...(boardRow?.toObject ? boardRow.toObject() : boardRow),
+        sourceBookingId: booking._id, // handy for the frontend
       },
     });
   } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
+    console.error("❌ POST /board/bookings failed:", e);
+    return res.status(400).json({ success: false, message: e.message });
   }
 });
 
@@ -795,7 +705,7 @@ router.post("/", musicianAuth, async (req, res) => {
       ).length;
       delete payload.lineupMembers;
     }
-    const row = await BookingBoardItem.create(payload);
+    const row = await Booking.create(payload);
     res.json({ success: true, row });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
