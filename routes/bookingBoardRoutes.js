@@ -569,7 +569,95 @@ const buildSearchClause = (q) => {
   };
 };
 
-// LIST with filters (date range, text search, act, agent)
+
+// LIST bookings for booking board
+router.get("/", musicianAuth, async (req, res) => {
+  try {
+    const {
+      q = "",
+      sortBy = "eventDateISO",
+      sortDir = "asc",
+      limit = 500,
+    } = req.query;
+
+    const user = req.user || {};
+    const email = String(user?.email || "").toLowerCase();
+    const isAdmin = isTSCAdmin(user);
+
+    // Basic search on board items
+    const boardQuery = {};
+    const searchClause = buildSearchClause(String(q || "").trim());
+    if (searchClause) Object.assign(boardQuery, searchClause);
+
+    // Non-admins only see rows tied to them (best-effort)
+    if (!isAdmin && email) {
+      boardQuery.$or = [
+        { userEmail: email },
+        { clientEmail: email },
+        { "clientEmails.email": email },
+      ];
+    }
+
+    const boardRowsRaw = await BookingBoardItem.find(boardQuery, isAdmin ? adminProjection : actOwnerProjection)
+      .limit(Number(limit) || 500)
+      .lean();
+
+    // Also pull Bookings collection so manual + stripe bookings show up.
+    const bookingQuery = {};
+    if (!isAdmin && email) {
+      bookingQuery.$or = [
+        { userEmail: email },
+        { clientEmail: email },
+        { "userAddress.email": email },
+      ];
+    }
+
+    const bookingDocs = await Booking.find(bookingQuery)
+      .limit(Number(limit) || 500)
+      .lean();
+
+    // Dedupe/merge rows across both sources
+    const dedupeMap = new Map();
+
+    for (const row of boardRowsRaw) {
+      const key = getCanonicalBookingKey(row);
+      const existing = dedupeMap.get(key);
+      dedupeMap.set(key, choosePreferredRow(existing, row));
+    }
+
+    for (const booking of bookingDocs) {
+      const normalized = normalizeBookingToBoardRow(booking);
+      if (!normalized) continue;
+      const key = getCanonicalBookingKey(normalized);
+      const existing = dedupeMap.get(key);
+      dedupeMap.set(key, choosePreferredRow(existing, normalized));
+    }
+
+    const rows = [...dedupeMap.values()];
+
+    // Sort
+    const dir = String(sortDir).toLowerCase() === "desc" ? -1 : 1;
+    rows.sort((a, b) => {
+      if (sortBy === "createdAt") {
+        const aTime = new Date(a?.createdAt || a?.bookingDateISO || 0).getTime() || 0;
+        const bTime = new Date(b?.createdAt || b?.bookingDateISO || 0).getTime() || 0;
+        return (aTime - bTime) * dir;
+      }
+      // default: eventDateISO
+      const aDate = new Date(a?.eventDateISO || 0).getTime() || 0;
+      const bDate = new Date(b?.eventDateISO || 0).getTime() || 0;
+      return (aDate - bDate) * dir;
+    });
+
+    return res.json({
+      success: true,
+      rows: rows.slice(0, Number(limit) || 500),
+    });
+  } catch (e) {
+    console.error("❌ GET /board/bookings failed:", e);
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
 
 router.post("/", musicianAuth, async (req, res) => {
   try {
@@ -692,25 +780,6 @@ router.post("/", musicianAuth, async (req, res) => {
   }
 });
 
-// CREATE manual row
-router.post("/", musicianAuth, async (req, res) => {
-  try {
-    const payload = req.body || {};
-    if (!isTSCAdmin(req.user)) {
-      return res.status(403).json({ success: false, message: "Only admins can create manual booking board rows." });
-    }
-    if (Array.isArray(payload?.lineupMembers)) {
-      payload.bandSize = payload.lineupMembers.filter(m =>
-        String(m.instrument || "").toLowerCase() !== "manager"
-      ).length;
-      delete payload.lineupMembers;
-    }
-    const row = await Booking.create(payload);
-    res.json({ success: true, row });
-  } catch (e) {
-    res.status(400).json({ success: false, message: e.message });
-  }
-});
 
 router.patch("/:id", musicianAuth, async (req, res) => {
   try {
