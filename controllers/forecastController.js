@@ -5,9 +5,9 @@ export const getForecastTimeline = async (req, res) => {
   try {
     const { entity, startDate, endDate, startingBalance } = req.query;
 
-    const query = {
-      status: { $ne: "cancelled" },
-    };
+   const query = {
+  status: { $in: ["forecast", "confirmed"] },
+};
 
     if (entity) query.entity = entity;
 
