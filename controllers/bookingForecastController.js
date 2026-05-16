@@ -200,6 +200,16 @@ const buildHeaderMap = (row) => {
   return map;
 };
 
+const isGigForecastHeaderRow = (row) => {
+  const headers = row.map((cell) => normaliseHeader(cell));
+
+  return (
+    headers.includes("booking made") &&
+    headers.includes("event date") &&
+    headers.includes("source")
+  );
+};
+
 const isHeaderRow = (row) =>
   row.some((cell) => normaliseHeader(cell) === "name") &&
   row.some((cell) => normaliseHeader(cell) === "owner") &&
@@ -370,15 +380,10 @@ export const importMondayBookingForecasts = async (req, res) => {
         continue;
       }
 
-      if (
-  row.some((cell) => normaliseHeader(cell) === "booking made") &&
-  row.some((cell) => normaliseHeader(cell) === "event date") &&
-  row.some((cell) => normaliseHeader(cell) === "first names")
-) {
+if (isHeaderRow(row)) {
   headerMap = buildHeaderMap(row);
   continue;
 }
-     
 
       if (!headerMap) {
         skipped += 1;
@@ -554,10 +559,11 @@ export const importGigForecastBookings = async (req, res) => {
     for (const row of rows) {
       if (!row || !row.length) continue;
 
-      if (isHeaderRow(row)) {
-        headerMap = buildHeaderMap(row);
-        continue;
-      }
+   if (isGigForecastHeaderRow(row)) {
+  headerMap = buildHeaderMap(row);
+  console.log("Gig forecast headerMap:", headerMap);
+  continue;
+}
 
       if (!headerMap) {
         skipped += 1;
