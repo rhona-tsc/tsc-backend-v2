@@ -54,6 +54,10 @@ const forecastEventSchema = new mongoose.Schema(
       enum: ["forecast", "confirmed", "paid", "cancelled", "ignored"],
       default: "forecast",
     },
+    actualTransactionId: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "FinanceTransaction",
+},
 
     source: String,
     clientNames: String,
