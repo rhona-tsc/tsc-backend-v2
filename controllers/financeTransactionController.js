@@ -1,9 +1,18 @@
+import FinanceAccount from "../models/financeAccountModel.js";
 import FinanceTransaction from "../models/financeTransactionModel.js";
 
 export const createFinanceTransaction = async (req, res) => {
   try {
     const transaction = await FinanceTransaction.create(req.body);
+const signedAmount =
+  transaction.direction === "in"
+    ? Math.abs(Number(transaction.amount || 0))
+    : -Math.abs(Number(transaction.amount || 0));
 
+await FinanceAccount.findByIdAndUpdate(transaction.accountId, {
+  $inc: { currentBalance: signedAmount },
+  balanceAsOf: transaction.date,
+});
     res.status(201).json({
       success: true,
       transaction,
