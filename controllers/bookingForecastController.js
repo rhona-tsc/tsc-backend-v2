@@ -370,10 +370,15 @@ export const importMondayBookingForecasts = async (req, res) => {
         continue;
       }
 
-      if (isHeaderRow(row)) {
-        headerMap = buildHeaderMap(row);
-        continue;
-      }
+      if (
+  row.some((cell) => normaliseHeader(cell) === "booking made") &&
+  row.some((cell) => normaliseHeader(cell) === "event date") &&
+  row.some((cell) => normaliseHeader(cell) === "first names")
+) {
+  headerMap = buildHeaderMap(row);
+  continue;
+}
+     
 
       if (!headerMap) {
         skipped += 1;
@@ -560,6 +565,16 @@ export const importGigForecastBookings = async (req, res) => {
       }
 
       const booking = buildBookingFromGigForecastRow(row, headerMap);
+
+      console.log("Gig import row debug:", {
+  bookingRef: booking.bookingRef,
+  eventDate: booking.eventDate,
+  eventYear: booking.eventDate
+    ? new Date(booking.eventDate).getFullYear()
+    : null,
+  clientNames: booking.clientNames,
+  actName: booking.actName,
+});
 
       const eventYear = booking.eventDate
         ? new Date(booking.eventDate).getFullYear()
