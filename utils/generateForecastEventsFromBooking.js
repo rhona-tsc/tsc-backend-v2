@@ -1,3 +1,5 @@
+import getExpectedBalanceDateForSource from "./paymentRules.js";
+
 const toNumber = (value) => {
   const num = Number(value);
   return Number.isFinite(num) ? num : 0;
@@ -85,9 +87,14 @@ export const generateForecastEventsFromBooking = (booking = {}) => {
   }
 
   if (fallbackBalance > 0 && !booking.balancePaid) {
-    const expectedDate =
-      booking.expectedBalanceDate ||
-      booking.eventDate;
+  const expectedDate =
+  booking.expectedBalanceDate ||
+  getExpectedBalanceDateForSource({
+    source: booking.source || booking.agent,
+    eventDate: booking.eventDate,
+    bookingMadeDate: booking.bookingMadeDate || booking.createdAt,
+  }) ||
+  booking.eventDate;
 
     if (hasDate(expectedDate)) {
       events.push(

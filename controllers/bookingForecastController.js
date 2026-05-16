@@ -2,6 +2,8 @@ import BookingForecast from "../models/bookingForecastModel.js";
 import ForecastEvent from "../models/forecastEventModel.js";
 import generateForecastEventsFromBooking from "../utils/generateForecastEventsFromBooking.js";
 import XLSX from "xlsx";
+import getExpectedBalanceDateForSource from "../utils/paymentRules.js";
+
 
 export const createBookingForecast = async (req, res) => {
   try {
@@ -515,7 +517,14 @@ export const buildBookingFromGigForecastRow = (row, headerMap) => {
     balanceAmount,
 
     expectedDepositDate: bookingMadeDate,
-    expectedBalanceDate: transactionDate || eventDate,
+    expectedBalanceDate:
+  transactionDate ||
+  getExpectedBalanceDateForSource({
+    source: clean(get(row, headerMap, "Source")) || "Other",
+    eventDate,
+    bookingMadeDate,
+  }) ||
+  eventDate,
     actualBalanceDate: toBool(get(row, headerMap, "Balance Paid"))
       ? transactionDate || eventDate
       : undefined,
@@ -600,13 +609,23 @@ export const importGigForecastBookings = async (req, res) => {
       }
 
       try {
-        const query = booking.bookingRef
-          ? { bookingRef: booking.bookingRef }
-          : {
-              clientNames: booking.clientNames,
-              actName: booking.actName,
-              eventDate: booking.eventDate,
-            };
+       const query =
+  booking.bookingRef
+    ? {
+        $or: [
+          { bookingRef: booking.bookingRef },
+          {
+            clientNames: booking.clientNames,
+            actName: booking.actName,
+            eventDate: booking.eventDate,
+          },
+        ],
+      }
+    : {
+        clientNames: booking.clientNames,
+        actName: booking.actName,
+        eventDate: booking.eventDate,
+      };
 
         const existing = await BookingForecast.findOne(query);
 
