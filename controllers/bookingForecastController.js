@@ -3,7 +3,6 @@ import ForecastEvent from "../models/forecastEventModel.js";
 import generateForecastEventsFromBooking from "../utils/generateForecastEventsFromBooking.js";
 import XLSX from "xlsx";
 
-
 export const createBookingForecast = async (req, res) => {
   try {
     const booking = await BookingForecast.create(req.body);
@@ -74,9 +73,7 @@ export const updateBookingForecast = async (req, res) => {
 
 export const getBookingForecasts = async (req, res) => {
   try {
-    const bookings = await BookingForecast.find()
-      .sort({ eventDate: 1 })
-      .lean();
+    const bookings = await BookingForecast.find().sort({ eventDate: 1 }).lean();
 
     res.json({
       success: true,
@@ -153,7 +150,6 @@ export const deleteBookingForecast = async (req, res) => {
   }
 };
 
-
 const clean = (value) => String(value || "").trim();
 
 const toNumber = (value) => {
@@ -225,7 +221,9 @@ const buildBookingFromMondayRow = (row, headerMap, mondayGroup) => {
   const bookingRef = clean(get(row, headerMap, "Ref"));
 
   const dealValue = toNumber(get(row, headerMap, "Deal Value"));
-  const grossBookingValue = toNumber(get(row, headerMap, "Gross Booking Value"));
+  const grossBookingValue = toNumber(
+    get(row, headerMap, "Gross Booking Value"),
+  );
   const ewanFee = toNumber(get(row, headerMap, "Ewan's Fee"));
 
   return {
@@ -380,10 +378,10 @@ export const importMondayBookingForecasts = async (req, res) => {
         continue;
       }
 
-if (isHeaderRow(row)) {
-  headerMap = buildHeaderMap(row);
-  continue;
-}
+      if (isHeaderRow(row)) {
+        headerMap = buildHeaderMap(row);
+        continue;
+      }
 
       if (!headerMap) {
         skipped += 1;
@@ -392,7 +390,11 @@ if (isHeaderRow(row)) {
 
       const booking = buildBookingFromMondayRow(row, headerMap, currentGroup);
 
-      if (!booking.mondayItemName && !booking.clientEmail && !booking.bookingRef) {
+      if (
+        !booking.mondayItemName &&
+        !booking.clientEmail &&
+        !booking.bookingRef
+      ) {
         skipped += 1;
         continue;
       }
@@ -425,17 +427,21 @@ if (isHeaderRow(row)) {
           status: { $in: ["forecast", "confirmed"] },
         });
 
-  const today = new Date();
-today.setHours(0, 0, 0, 0);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
 
-if (savedBooking.eventDate && new Date(savedBooking.eventDate) >= today) {
-  const generatedEvents = generateForecastEventsFromBooking(savedBooking);
+        if (
+          savedBooking.eventDate &&
+          new Date(savedBooking.eventDate) >= today
+        ) {
+          const generatedEvents =
+            generateForecastEventsFromBooking(savedBooking);
 
-  if (generatedEvents.length) {
-    await ForecastEvent.insertMany(generatedEvents);
-    forecastEventsCreated += generatedEvents.length;
-  }
-}
+          if (generatedEvents.length) {
+            await ForecastEvent.insertMany(generatedEvents);
+            forecastEventsCreated += generatedEvents.length;
+          }
+        }
       } catch (rowError) {
         errors.push({
           rowName: booking.mondayItemName,
@@ -559,28 +565,25 @@ export const importGigForecastBookings = async (req, res) => {
     for (const row of rows) {
       if (!row || !row.length) continue;
 
-   if (isGigForecastHeaderRow(row)) {
-  headerMap = buildHeaderMap(row);
-  console.log("Gig forecast headerMap:", headerMap);
-  continue;
-}
+      if (isGigForecastHeaderRow(row)) {
+        headerMap = buildHeaderMap(row);
+        console.log("Gig forecast headerMap:", headerMap);
+        continue;
+      }
 
       if (!headerMap) {
         skipped += 1;
         continue;
       }
 
-      const booking = buildBookingFromGigForecastRow(row, headerMap);
+      const hasUsefulRowData = row.some((cell) => clean(cell));
 
-      console.log("Gig import row debug:", {
-  bookingRef: booking.bookingRef,
-  eventDate: booking.eventDate,
-  eventYear: booking.eventDate
-    ? new Date(booking.eventDate).getFullYear()
-    : null,
-  clientNames: booking.clientNames,
-  actName: booking.actName,
-});
+      if (!hasUsefulRowData) {
+        skipped += 1;
+        continue;
+      }
+
+      const booking = buildBookingFromGigForecastRow(row, headerMap);
 
       const eventYear = booking.eventDate
         ? new Date(booking.eventDate).getFullYear()
