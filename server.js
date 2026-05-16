@@ -43,7 +43,7 @@ import adminRoutes from "./routes/admin.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import deputyOpportunityRoutes from "./routes/deputyOpportunityRoutes.js";
 import deputyJobRouter from "./routes/deputyJobRoute.js";
-
+import forecastRouter from "./routes/forecastRoute.js";
 import {
   watchCalendar,
   handleGoogleWebhook,
@@ -642,7 +642,10 @@ app.use("/api/calendar", calendarWebhook);
 
 app.use("/api/act-pre-submissions", actPreSubmissionRoutes);
 app.use("/api/moderation", moderationRoutes);
+
 app.use("/api/finance/bookings", bookingForecastRouter);
+app.use("/api/finance/forecast", forecastRouter);
+
 app.use("/api/debug", debugRoutes);
 app.use("/api/allocations", allocationRoutes);
 app.use("/api", adminRoutes);
