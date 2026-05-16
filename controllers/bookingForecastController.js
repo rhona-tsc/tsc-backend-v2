@@ -1,6 +1,8 @@
 import BookingForecast from "../models/bookingForecastModel.js";
 import ForecastEvent from "../models/forecastEventModel.js";
 import generateForecastEventsFromBooking from "../utils/generateForecastEventsFromBooking.js";
+import XLSX from "xlsx";
+
 
 export const createBookingForecast = async (req, res) => {
   try {
@@ -151,10 +153,6 @@ export const deleteBookingForecast = async (req, res) => {
   }
 };
 
-import XLSX from "xlsx";
-import BookingForecast from "../models/bookingForecastModel.js";
-import ForecastEvent from "../models/forecastEventModel.js";
-import generateForecastEventsFromBooking from "../utils/generateForecastEventsFromBooking.js";
 
 const clean = (value) => String(value || "").trim();
 

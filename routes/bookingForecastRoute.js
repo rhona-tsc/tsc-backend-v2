@@ -1,13 +1,20 @@
 import express from "express";
+import multer from "multer";
+
 import {
   createBookingForecast,
-  updateBookingForecast,
   getBookingForecasts,
   getBookingForecastById,
+  updateBookingForecast,
   deleteBookingForecast,
+  importMondayBookingForecasts,
 } from "../controllers/bookingForecastController.js";
 
+const upload = multer({ storage: multer.memoryStorage() });
+
 const bookingForecastRouter = express.Router();
+
+bookingForecastRouter.post("/import/monday", upload.single("file"), importMondayBookingForecasts);
 
 bookingForecastRouter.post("/", createBookingForecast);
 bookingForecastRouter.get("/", getBookingForecasts);
