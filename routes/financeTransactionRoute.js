@@ -5,9 +5,19 @@ import {
   getFinanceTransactionById,
   updateFinanceTransaction,
   deleteFinanceTransaction,
+    importFinanceTransactionsCsv,
 } from "../controllers/financeTransactionController.js";
+import multer from "multer";
 
 const financeTransactionRouter = express.Router();
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+financeTransactionRouter.post(
+  "/import/csv",
+  upload.single("file"),
+  importFinanceTransactionsCsv,
+);
 
 financeTransactionRouter.post("/", createFinanceTransaction);
 financeTransactionRouter.get("/", getFinanceTransactions);

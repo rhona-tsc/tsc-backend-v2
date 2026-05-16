@@ -22,7 +22,7 @@ const financeTransactionSchema = new mongoose.Schema(
     date: { type: Date, required: true },
     description: { type: String, trim: true },
     merchant: { type: String, trim: true },
-
+transactionHash: { type: String, trim: true, index: true },
     amount: { type: Number, required: true }, // positive or negative
     direction: {
       type: String,
@@ -75,7 +75,10 @@ const financeTransactionSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-financeTransactionSchema.index({ accountId: 1, date: -1 });
+financeTransactionSchema.index(
+  { accountId: 1, transactionHash: 1 },
+  { unique: true, sparse: true },
+);
 financeTransactionSchema.index({ entity: 1, date: -1 });
 financeTransactionSchema.index({ bookingForecastId: 1 });
 financeTransactionSchema.index({ externalId: 1, source: 1 });
