@@ -150,3 +150,301 @@ export const deleteBookingForecast = async (req, res) => {
     });
   }
 };
+
+import XLSX from "xlsx";
+import BookingForecast from "../models/bookingForecastModel.js";
+import ForecastEvent from "../models/forecastEventModel.js";
+import generateForecastEventsFromBooking from "../utils/generateForecastEventsFromBooking.js";
+
+const clean = (value) => String(value || "").trim();
+
+const toNumber = (value) => {
+  if (value === undefined || value === null || value === "") return 0;
+  const cleaned = String(value).replace(/[£,]/g, "").trim();
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : 0;
+};
+
+const toBool = (value) => {
+  const v = clean(value).toLowerCase();
+  return ["yes", "true", "paid", "done", "checked", "complete"].includes(v);
+};
+
+const toDate = (value) => {
+  if (!value) return undefined;
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (!parsed) return undefined;
+    return new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+  }
+
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+};
+
+const normaliseHeader = (header) =>
+  clean(header).toLowerCase().replace(/\s+/g, " ");
+
+const get = (row, headerMap, name) => {
+  const index = headerMap[normaliseHeader(name)];
+  return index === undefined ? undefined : row[index];
+};
+
+const buildHeaderMap = (row) => {
+  const map = {};
+  row.forEach((cell, index) => {
+    const key = normaliseHeader(cell);
+    if (key) map[key] = index;
+  });
+  return map;
+};
+
+const isHeaderRow = (row) =>
+  row.some((cell) => normaliseHeader(cell) === "name") &&
+  row.some((cell) => normaliseHeader(cell) === "owner") &&
+  row.some((cell) => normaliseHeader(cell) === "event date");
+
+const isGroupRow = (row) => {
+  const filled = row.filter((cell) => clean(cell)).length;
+  return filled === 1 && clean(row[0]) && !isHeaderRow(row);
+};
+
+const buildBookingFromMondayRow = (row, headerMap, mondayGroup) => {
+  const eventDate = toDate(get(row, headerMap, "Event Date"));
+  const bookingRef = clean(get(row, headerMap, "Ref"));
+
+  const dealValue = toNumber(get(row, headerMap, "Deal Value"));
+  const grossBookingValue = toNumber(get(row, headerMap, "Gross Booking Value"));
+  const ewanFee = toNumber(get(row, headerMap, "Ewan's Fee"));
+
+  return {
+    // Core identifiers
+    bookingRef,
+    mondayItemName: clean(get(row, headerMap, "Name")),
+    mondayGroup,
+    bookingReferral: clean(get(row, headerMap, "Booking Referral")),
+
+    // CRM ownership + status
+    owner: clean(get(row, headerMap, "Owner")),
+    stage: clean(get(row, headerMap, "Stage")),
+    status: clean(get(row, headerMap, "Status")) || "forecast",
+
+    // Client details
+    clientNames:
+      clean(get(row, headerMap, "First Names")) ||
+      clean(get(row, headerMap, "Name")),
+    firstName: clean(get(row, headerMap, "First Name")),
+    lastName: clean(get(row, headerMap, "Last Name")),
+    clientEmail:
+      clean(get(row, headerMap, "Client Email Address")) ||
+      clean(get(row, headerMap, "Ref")),
+    clientPhone: clean(get(row, headerMap, "Phone Number")),
+    postcode: clean(get(row, headerMap, "Zip")),
+
+    // Event details
+    eventDate,
+    eventDateForEmail: clean(get(row, headerMap, "Event Date for email")),
+    eventType: clean(get(row, headerMap, "Event Type")),
+    weddingStatus: clean(get(row, headerMap, "Wedding/Non-Wedding")),
+    birthdayOrYourName: clean(
+      get(row, headerMap, "Birthday Boy/Girl Name or 'your'"),
+    ),
+    guestsLabel: clean(get(row, headerMap, "Guests")),
+    fullAddress: clean(get(row, headerMap, "Address")),
+
+    // Band details
+    tscBandName: clean(get(row, headerMap, "TSC Band Name")),
+    bookedBandName: clean(get(row, headerMap, "Booked Band Name")),
+    actName:
+      clean(get(row, headerMap, "TSC Band Name")) ||
+      clean(get(row, headerMap, "Booked Band Name")),
+    vocalistName: clean(get(row, headerMap, "Vocalist Name")),
+    vocalistEmail: clean(get(row, headerMap, "Vocalist Email")),
+    bandMembers: clean(get(row, headerMap, "Band Members")),
+    bandSize: clean(get(row, headerMap, "Band Size")),
+    allocated: clean(get(row, headerMap, "Allocated")),
+
+    // Add-ons / planning
+    firstDanceOrOffRepRequest: clean(
+      get(row, headerMap, "First Dance / Off-Repertoire Request"),
+    ),
+    bookedMannedPlaylist: toBool(get(row, headerMap, "Booked Manned Playlist")),
+    bookedDj: toBool(get(row, headerMap, "Booked DJ")),
+
+    // Links
+    eventSheetLink: clean(get(row, headerMap, "Event Sheet")),
+    invoiceLink: clean(get(row, headerMap, "Invoice")),
+    whatsappGroupLink: clean(get(row, headerMap, "WhatsApp Group")),
+
+    // Workflow dates
+    songSuggestionsDueDate: toDate(
+      get(row, headerMap, "Song Suggestions Due Date"),
+    ),
+    songSuggestionsDueDateForEmail: clean(
+      get(row, headerMap, "Song Suggestion due date for email"),
+    ),
+    eventSheetCompleteDate: toDate(
+      get(row, headerMap, "Event Sheet Complete Date"),
+    ),
+    eventSheetCompleteDateForEmail: clean(
+      get(row, headerMap, "Event Sheet complete date for email"),
+    ),
+    sendDate: toDate(get(row, headerMap, "Send date")),
+
+    // Workflow statuses
+    eventSheetStatus: clean(get(row, headerMap, "Event Sheet Status")),
+    whatsappGroupSetUp: clean(get(row, headerMap, "WhatsApp Group Set Up")),
+    sendIntroEmail: toBool(get(row, headerMap, "Send Intro Email")),
+    paid: toBool(get(row, headerMap, "Paid")),
+    removeUnsubDoesntWork: toBool(
+      get(row, headerMap, "Remove / Unsub / Doesn't Work"),
+    ),
+
+    // Reviews / post-event
+    dontRequestReview: toBool(get(row, headerMap, "Don't Request Review")),
+    review: clean(get(row, headerMap, "Review")),
+    givenNonGoogleReview: toBool(
+      get(row, headerMap, "Given Non Google Review"),
+    ),
+    givenGoogleReview: toBool(get(row, headerMap, "Given Google Review")),
+    givenPhotosVideos: toBool(get(row, headerMap, "Given Photos/Videos")),
+    socialMediaContent: toBool(get(row, headerMap, "Social Media Content")),
+    manualReviewRequestSent: toBool(
+      get(row, headerMap, "Manual Review Request Sent"),
+    ),
+
+    // Finance
+    source: clean(get(row, headerMap, "Agent")) || "Other",
+    agent: clean(get(row, headerMap, "Agent")),
+    dealValue,
+    grossBookingValue,
+    totalBookingValue: grossBookingValue || dealValue,
+    balanceAmount: grossBookingValue || dealValue,
+    ewanFee,
+
+    // Notes
+    mondayText: clean(get(row, headerMap, "Text")),
+    checkbox: toBool(get(row, headerMap, "Checkbox")),
+  };
+};
+
+export const importMondayBookingForecasts = async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: "No XLSX file uploaded",
+      });
+    }
+
+    const workbook = XLSX.read(req.file.buffer, {
+      type: "buffer",
+      cellDates: true,
+    });
+
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    const rows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: "",
+      raw: true,
+    });
+
+    let currentGroup = "";
+    let headerMap = null;
+
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+    let forecastEventsCreated = 0;
+
+    const errors = [];
+
+    for (const row of rows) {
+      if (!row || !row.length) continue;
+
+      if (isGroupRow(row)) {
+        currentGroup = clean(row[0]);
+        continue;
+      }
+
+      if (isHeaderRow(row)) {
+        headerMap = buildHeaderMap(row);
+        continue;
+      }
+
+      if (!headerMap) {
+        skipped += 1;
+        continue;
+      }
+
+      const booking = buildBookingFromMondayRow(row, headerMap, currentGroup);
+
+      if (!booking.mondayItemName && !booking.clientEmail && !booking.bookingRef) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const query = booking.bookingRef
+          ? { bookingRef: booking.bookingRef }
+          : {
+              mondayItemName: booking.mondayItemName,
+              clientEmail: booking.clientEmail,
+              eventDate: booking.eventDate,
+            };
+
+        const existing = await BookingForecast.findOne(query);
+
+        const savedBooking = existing
+          ? await BookingForecast.findByIdAndUpdate(existing._id, booking, {
+              new: true,
+              runValidators: true,
+            })
+          : await BookingForecast.create(booking);
+
+        if (existing) updated += 1;
+        else imported += 1;
+
+        await ForecastEvent.deleteMany({
+          bookingForecastId: savedBooking._id,
+          isAutoGenerated: true,
+          source: { $ne: "recurring_rule" },
+          status: { $in: ["forecast", "confirmed"] },
+        });
+
+        const generatedEvents = generateForecastEventsFromBooking(savedBooking);
+
+        if (generatedEvents.length) {
+          await ForecastEvent.insertMany(generatedEvents);
+          forecastEventsCreated += generatedEvents.length;
+        }
+      } catch (rowError) {
+        errors.push({
+          rowName: booking.mondayItemName,
+          message: rowError.message,
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      sheetName,
+      imported,
+      updated,
+      skipped,
+      forecastEventsCreated,
+      errors,
+    });
+  } catch (error) {
+    console.error("importMondayBookingForecasts error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
