@@ -7,11 +7,11 @@ import morgan from "morgan";
 import cron from "node-cron";
 import listEndpoints from "express-list-endpoints";
 import Stripe from "stripe";
-
+import { startDedupeSelectedSongsCron } from "./cron/dedupeSelectedSongsCron.js";
 import connectDB from "./config/mongodb.js";
 import connectCloudinary from "./config/connectCloudinary.js";
 import cloudinary from "./config/cloudinary.js";
-
+import bookingForecastRouter from "./routes/bookingForecastRoute.js";
 import feedbackRoutes from "./routes/feedbackRoutes.js";
 import noticeRoutes from "./routes/noticeRoutes.js";
 import actPreSubmissionRoutes from "./routes/actPreSubmissionRoutes.js";
@@ -642,7 +642,7 @@ app.use("/api/calendar", calendarWebhook);
 
 app.use("/api/act-pre-submissions", actPreSubmissionRoutes);
 app.use("/api/moderation", moderationRoutes);
-
+app.use("/api/finance/bookings", bookingForecastRouter);
 app.use("/api/debug", debugRoutes);
 app.use("/api/allocations", allocationRoutes);
 app.use("/api", adminRoutes);
@@ -727,6 +727,8 @@ app.use((err, req, res, next) => {
 
 // Start reminders queue
 startRemindersPoller({ intervalMs: 30000 });
+
+startDedupeSelectedSongsCron();
 
 // kick off a light poller every 2 minutes (no-op if nothing is due)
 if (process.env.ENABLE_DEFERRED_AVAILABILITY !== "0") {
