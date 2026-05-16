@@ -478,23 +478,29 @@ export const buildBookingFromGigForecastRow = (row, headerMap) => {
   const bookingMadeDate = toDate(get(row, headerMap, "Booking Made"));
   const eventDate = toDate(get(row, headerMap, "Event Date"));
 
+  const source = clean(get(row, headerMap, "Source")) || "Other";
+
   const depositAmount =
     toNumber(get(row, headerMap, "TSC Deposit")) ||
     toNumber(get(row, headerMap, "In BBM / Deposit In Barc"));
 
   const totalBookingValue = toNumber(get(row, headerMap, "Total"));
+
   const balanceAmount =
     toNumber(get(row, headerMap, "Subtotal (after deposit taken) / Balance")) ||
     Math.max(totalBookingValue - depositAmount, 0);
 
   const transactionDate = toDate(get(row, headerMap, "Date of transaction"));
 
+  const ewanFee = toNumber(get(row, headerMap, "Ewan's Fee"));
+  const bmmFee = toNumber(get(row, headerMap, "To BMM"));
+
   return {
     bookingMadeDate,
     bookingRef: clean(get(row, headerMap, "Ref")),
     eventDate,
 
-    source: clean(get(row, headerMap, "Source")) || "Other",
+    source,
     clientNames: clean(get(row, headerMap, "First Names")),
 
     allocated: clean(get(row, headerMap, "Allocated")),
@@ -522,20 +528,36 @@ export const buildBookingFromGigForecastRow = (row, headerMap) => {
 
     expectedDepositDate: bookingMadeDate,
     expectedBalanceDate:
-  transactionDate ||
-  getExpectedBalanceDateForSource({
-    source: clean(get(row, headerMap, "Source")) || "Other",
-    eventDate,
-    bookingMadeDate,
-  }) ||
-  eventDate,
+      transactionDate ||
+      getExpectedBalanceDateForSource({
+        source,
+        eventDate,
+        bookingMadeDate,
+      }) ||
+      eventDate,
+
     actualBalanceDate: toBool(get(row, headerMap, "Balance Paid"))
       ? transactionDate || eventDate
       : undefined,
 
-    ewanFee: toNumber(get(row, headerMap, "Ewan's Fee")),
-    bmmFee: toNumber(get(row, headerMap, "To BMM")),
+    ewanFee,
+    bmmFee,
     commissionAmount: toNumber(get(row, headerMap, "BBM Total")),
+
+    supplierPayments: [
+      bmmFee > 0 && {
+        name: "BMM",
+        role: "Management / supplier",
+        amount: bmmFee,
+        expectedPaymentDate: eventDate,
+      },
+      ewanFee > 0 && {
+        name: "Ewan",
+        role: "Musician / MD",
+        amount: ewanFee,
+        expectedPaymentDate: eventDate,
+      },
+    ].filter(Boolean),
 
     mondayText: clean(get(row, headerMap, "Mail Merge Status")),
     notes: clean(get(row, headerMap, "File Attachments")),
