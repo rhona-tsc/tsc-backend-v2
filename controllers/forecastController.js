@@ -1,13 +1,9 @@
 import ForecastEvent from "../models/forecastEventModel.js";
+import FinanceAccount from "../models/financeAccountModel.js";
 
 export const getForecastTimeline = async (req, res) => {
   try {
-    const {
-      entity,
-      startDate,
-      endDate,
-      startingBalance = 0,
-    } = req.query;
+    const { entity, startDate, endDate, startingBalance } = req.query;
 
     const query = {
       status: { $ne: "cancelled" },
@@ -21,11 +17,35 @@ export const getForecastTimeline = async (req, res) => {
       if (endDate) query.expectedDate.$lte = new Date(endDate);
     }
 
+    let calculatedStartingBalance = 0;
+
+    if (startingBalance !== undefined && startingBalance !== "") {
+      calculatedStartingBalance = Number(startingBalance || 0);
+    } else if (entity) {
+      const balanceResult = await FinanceAccount.aggregate([
+        {
+          $match: {
+            entity,
+            isActive: true,
+          },
+        },
+        {
+          $group: {
+            _id: "$entity",
+            totalCurrentBalance: { $sum: "$currentBalance" },
+          },
+        },
+      ]);
+
+      calculatedStartingBalance =
+        balanceResult?.[0]?.totalCurrentBalance || 0;
+    }
+
     const events = await ForecastEvent.find(query)
       .sort({ expectedDate: 1 })
       .lean();
 
-    let runningBalance = Number(startingBalance || 0);
+    let runningBalance = calculatedStartingBalance;
 
     let totalIn = 0;
     let totalOut = 0;
@@ -34,18 +54,14 @@ export const getForecastTimeline = async (req, res) => {
 
     const timeline = events.map((event) => {
       const rawAmount = Number(event.amount || 0);
-
-      const signedAmount =
-        event.direction === "in" ? rawAmount : -rawAmount;
+      const signedAmount = event.direction === "in" ? rawAmount : -rawAmount;
 
       if (signedAmount >= 0) totalIn += signedAmount;
       else totalOut += Math.abs(signedAmount);
 
       runningBalance += signedAmount;
 
-      if (runningBalance < lowestBalance) {
-        lowestBalance = runningBalance;
-      }
+      if (runningBalance < lowestBalance) lowestBalance = runningBalance;
 
       if (runningBalance < 0 && !firstNegativeDate) {
         firstNegativeDate = event.expectedDate;
@@ -64,7 +80,7 @@ export const getForecastTimeline = async (req, res) => {
         entity: entity || "ALL",
         startDate: startDate || null,
         endDate: endDate || null,
-        startingBalance: Number(startingBalance || 0),
+        startingBalance: calculatedStartingBalance,
       },
       summary: {
         totalIn,
