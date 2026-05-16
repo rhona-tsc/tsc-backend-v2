@@ -620,6 +620,21 @@ export const importGigForecastBookings = async (req, res) => {
 
       const booking = buildBookingFromGigForecastRow(row, headerMap);
 
+      booking.supplierPayments = [
+  Number(booking.bmmFee || 0) > 0 && {
+    name: "BMM",
+    role: "Management / supplier",
+    amount: Number(booking.bmmFee || 0),
+    expectedPaymentDate: booking.eventDate,
+  },
+  Number(booking.ewanFee || 0) > 0 && {
+    name: "Ewan",
+    role: "Musician / MD",
+    amount: Number(booking.ewanFee || 0),
+    expectedPaymentDate: booking.eventDate,
+  },
+].filter(Boolean);
+
       const eventYear = booking.eventDate
         ? new Date(booking.eventDate).getFullYear()
         : null;

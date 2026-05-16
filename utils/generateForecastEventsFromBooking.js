@@ -141,4 +141,3 @@ export const generateForecastEventsFromBooking = (booking = {}) => {
   return events;
 };
 
-export default generateForecastEventsFromBooking;
