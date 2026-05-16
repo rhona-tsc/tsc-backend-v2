@@ -11,11 +11,16 @@ export const getForecastTimeline = async (req, res) => {
 
     if (entity) query.entity = entity;
 
-    if (startDate || endDate) {
-      query.expectedDate = {};
-      if (startDate) query.expectedDate.$gte = new Date(startDate);
-      if (endDate) query.expectedDate.$lte = new Date(endDate);
-    }
+const today = new Date();
+today.setHours(0, 0, 0, 0);
+
+if (startDate || endDate) {
+  query.expectedDate = {};
+  if (startDate) query.expectedDate.$gte = new Date(startDate);
+  if (endDate) query.expectedDate.$lte = new Date(endDate);
+} else {
+  query.expectedDate = { $gte: today };
+}
 
     let calculatedStartingBalance = 0;
 

@@ -415,12 +415,17 @@ export const importMondayBookingForecasts = async (req, res) => {
           status: { $in: ["forecast", "confirmed"] },
         });
 
-        const generatedEvents = generateForecastEventsFromBooking(savedBooking);
+  const today = new Date();
+today.setHours(0, 0, 0, 0);
 
-        if (generatedEvents.length) {
-          await ForecastEvent.insertMany(generatedEvents);
-          forecastEventsCreated += generatedEvents.length;
-        }
+if (savedBooking.eventDate && new Date(savedBooking.eventDate) >= today) {
+  const generatedEvents = generateForecastEventsFromBooking(savedBooking);
+
+  if (generatedEvents.length) {
+    await ForecastEvent.insertMany(generatedEvents);
+    forecastEventsCreated += generatedEvents.length;
+  }
+}
       } catch (rowError) {
         errors.push({
           rowName: booking.mondayItemName,
@@ -440,6 +445,190 @@ export const importMondayBookingForecasts = async (req, res) => {
     });
   } catch (error) {
     console.error("importMondayBookingForecasts error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+export const buildBookingFromGigForecastRow = (row, headerMap) => {
+  const bookingMadeDate = toDate(get(row, headerMap, "Booking Made"));
+  const eventDate = toDate(get(row, headerMap, "Event Date"));
+
+  const depositAmount =
+    toNumber(get(row, headerMap, "TSC Deposit")) ||
+    toNumber(get(row, headerMap, "In BBM / Deposit In Barc"));
+
+  const totalBookingValue = toNumber(get(row, headerMap, "Total"));
+  const balanceAmount =
+    toNumber(get(row, headerMap, "Subtotal (after deposit taken) / Balance")) ||
+    Math.max(totalBookingValue - depositAmount, 0);
+
+  const transactionDate = toDate(get(row, headerMap, "Date of transaction"));
+
+  return {
+    bookingMadeDate,
+    bookingRef: clean(get(row, headerMap, "Ref")),
+    eventDate,
+
+    source: clean(get(row, headerMap, "Source")) || "Other",
+    clientNames: clean(get(row, headerMap, "First Names")),
+
+    allocated: clean(get(row, headerMap, "Allocated")),
+    groupChatSetUp: toBool(get(row, headerMap, "Group Chat Set up?")),
+    setlistSharedOnGroupChat: toBool(
+      get(row, headerMap, "Setlist shared on group chat"),
+    ),
+    balancePaid: toBool(get(row, headerMap, "Balance Paid")),
+
+    outstandingPoints: clean(get(row, headerMap, "Outstanding points")),
+    eventSheetLink: clean(get(row, headerMap, "Event Sheet Link")),
+
+    eventType: clean(get(row, headerMap, "Event Type")),
+    tscBandName: clean(get(row, headerMap, "TSC Band Name")),
+    actName: clean(get(row, headerMap, "TSC Band Name")),
+    county: clean(get(row, headerMap, "County")),
+    teamStatus: clean(get(row, headerMap, "Team")),
+    fullAddress: clean(get(row, headerMap, "Full Address")),
+    lineup: clean(get(row, headerMap, "Lineup")),
+    leadSingers: clean(get(row, headerMap, "Lead singer(s)")),
+
+    depositAmount,
+    totalBookingValue,
+    balanceAmount,
+
+    expectedDepositDate: bookingMadeDate,
+    expectedBalanceDate: transactionDate || eventDate,
+    actualBalanceDate: toBool(get(row, headerMap, "Balance Paid"))
+      ? transactionDate || eventDate
+      : undefined,
+
+    ewanFee: toNumber(get(row, headerMap, "Ewan's Fee")),
+    bmmFee: toNumber(get(row, headerMap, "To BMM")),
+    commissionAmount: toNumber(get(row, headerMap, "BBM Total")),
+
+    mondayText: clean(get(row, headerMap, "Mail Merge Status")),
+    notes: clean(get(row, headerMap, "File Attachments")),
+    status: "confirmed",
+  };
+};
+
+export const importGigForecastBookings = async (req, res) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: "No XLSX file uploaded",
+      });
+    }
+
+    const workbook = XLSX.read(req.file.buffer, {
+      type: "buffer",
+      cellDates: true,
+    });
+
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    const rows = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: "",
+      raw: true,
+    });
+
+    let headerMap = null;
+
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+    let forecastEventsCreated = 0;
+
+    const errors = [];
+
+    for (const row of rows) {
+      if (!row || !row.length) continue;
+
+      if (isHeaderRow(row)) {
+        headerMap = buildHeaderMap(row);
+        continue;
+      }
+
+      if (!headerMap) {
+        skipped += 1;
+        continue;
+      }
+
+      const booking = buildBookingFromGigForecastRow(row, headerMap);
+
+      const eventYear = booking.eventDate
+        ? new Date(booking.eventDate).getFullYear()
+        : null;
+
+      if (![2026, 2027].includes(eventYear)) {
+        skipped += 1;
+        continue;
+      }
+
+      if (!booking.eventDate || !booking.clientNames || !booking.actName) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const query = booking.bookingRef
+          ? { bookingRef: booking.bookingRef }
+          : {
+              clientNames: booking.clientNames,
+              actName: booking.actName,
+              eventDate: booking.eventDate,
+            };
+
+        const existing = await BookingForecast.findOne(query);
+
+        const savedBooking = existing
+          ? await BookingForecast.findByIdAndUpdate(existing._id, booking, {
+              new: true,
+              runValidators: true,
+            })
+          : await BookingForecast.create(booking);
+
+        if (existing) updated += 1;
+        else imported += 1;
+
+        await ForecastEvent.deleteMany({
+          bookingForecastId: savedBooking._id,
+          isAutoGenerated: true,
+          source: { $ne: "recurring_rule" },
+          status: { $in: ["forecast", "confirmed"] },
+        });
+
+        const generatedEvents = generateForecastEventsFromBooking(savedBooking);
+
+        if (generatedEvents.length) {
+          await ForecastEvent.insertMany(generatedEvents);
+          forecastEventsCreated += generatedEvents.length;
+        }
+      } catch (rowError) {
+        errors.push({
+          rowName: booking.clientNames,
+          ref: booking.bookingRef,
+          message: rowError.message,
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      sheetName,
+      imported,
+      updated,
+      skipped,
+      forecastEventsCreated,
+      errors,
+    });
+  } catch (error) {
+    console.error("importGigForecastBookings error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
