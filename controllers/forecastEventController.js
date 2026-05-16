@@ -95,3 +95,38 @@ export const unreconcileForecastEvent = async (req, res) => {
     });
   }
 };
+
+export const getForecastEvents = async (req, res) => {
+  try {
+    const { entity, status, type, startDate, endDate } = req.query;
+
+    const query = {};
+
+    if (entity) query.entity = entity;
+    if (status) query.status = status;
+    if (type) query.type = type;
+
+    if (startDate || endDate) {
+      query.expectedDate = {};
+      if (startDate) query.expectedDate.$gte = new Date(startDate);
+      if (endDate) query.expectedDate.$lte = new Date(endDate);
+    }
+
+    const forecastEvents = await ForecastEvent.find(query)
+      .populate("bookingForecastId", "bookingRef clientNames actName eventDate")
+      .populate("actualTransactionId", "date description amount direction")
+      .sort({ expectedDate: 1 })
+      .lean();
+
+    res.json({
+      success: true,
+      forecastEvents,
+    });
+  } catch (error) {
+    console.error("getForecastEvents error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
