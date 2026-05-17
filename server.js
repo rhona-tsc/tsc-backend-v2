@@ -67,6 +67,7 @@ import actModel from "./models/actModel.js";
 import { runDeputyPayoutRelease } from "./services/deputyPayoutService.js";
 import Booking from "./models/bookingModel.js";
 import financeReconciliationRouter from "./routes/financeReconciliationRoute.js";
+import financeTaxRouter from "./routes/financeTaxRoute.js";
 
 /* -------------------------------------------------------------------------- */
 /*                               Boot + env log                               */
@@ -655,6 +656,7 @@ app.use("/api/finance/transactions", financeTransactionRouter);
 app.use("/api/finance/forecast-events", forecastEventRouter);
 app.use("/api/finance/recurring-rules", recurringForecastRuleRouter);
 app.use("/api/finance/reconcile", financeReconciliationRouter);
+app.use("/api/finance/tax", financeTaxRouter);
 
 app.use("/api/debug", debugRoutes);
 app.use("/api/allocations", allocationRoutes);
