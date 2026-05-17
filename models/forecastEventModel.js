@@ -14,7 +14,22 @@ const forecastEventSchema = new mongoose.Schema(
 
     entity: {
       type: String,
-      enum: ["TSC", "BMM", "HSBC", "Monzo Joint",  "Monzo Personal", "AMEX", "CBS", "HL Investment", "HSBC Investment","Bitcoin", "Solana","Ethereum", "True Potential Penson", "Aviva Pension"],
+      enum: [
+        "TSC",
+        "BMM",
+        "HSBC",
+        "Monzo Joint",
+        "Monzo Personal",
+        "AMEX",
+        "CBS",
+        "HL Investment",
+        "HSBC Investment",
+        "Bitcoin",
+        "Solana",
+        "Ethereum",
+        "True Potential Penson",
+        "Aviva Pension",
+      ],
       required: true,
     },
 
@@ -62,7 +77,19 @@ const forecastEventSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "RecurringForecastRule",
     },
-
+    vatTreatment: {
+      type: String,
+      default: "outside_scope",
+      enum: ["standard", "zero", "exempt", "outside_scope", "unknown"],
+    },
+    vatRate: {
+      type: Number,
+      default: 0,
+    },
+    taxTreatment: {
+      type: String,
+      default: "unknown",
+    },
     source: String,
     clientNames: String,
     actName: String,
