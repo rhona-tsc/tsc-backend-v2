@@ -67,7 +67,10 @@ transactionHash: { type: String, trim: true, index: true },
       enum: ["manual", "csv", "open_banking", "stripe", "freeagent"],
       default: "manual",
     },
-
+forecastEventId: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "ForecastEvent",
+},
     externalId: { type: String, trim: true },
     notes: String,
     reconciled: { type: Boolean, default: false },
