@@ -45,10 +45,18 @@ const createEvent = ({
   description,
   notes,
 }) => {
-  const appliesVat =
+  const isClientIncome =
     direction === "in" &&
-    isClientIncomeType(type) &&
-    isVatRegisteredOnDate(entity, expectedDate);
+    ["client_deposit_in", "client_balance_in"].includes(type);
+
+  const appliesVat =
+    isClientIncome && isVatRegisteredOnDate(entity, expectedDate);
+
+  const vatableAmount =
+    booking.commissionAmount ||
+    booking.bmmFee ||
+    booking.rhonaFee ||
+    0;
 
   return {
     bookingForecastId: booking._id,
@@ -69,6 +77,9 @@ const createEvent = ({
 
     vatTreatment: appliesVat ? "standard" : "outside_scope",
     vatRate: appliesVat ? 0.2 : 0,
+    vatBasis: appliesVat ? "commission" : "outside_scope",
+    vatableAmount: appliesVat ? Math.abs(toNumber(vatableAmount)) : 0,
+
     taxTreatment: direction === "in" ? "income" : "expense",
   };
 };

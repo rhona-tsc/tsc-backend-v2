@@ -90,6 +90,15 @@ const forecastEventSchema = new mongoose.Schema(
       type: String,
       default: "unknown",
     },
+    vatBasis: {
+      type: String,
+      default: "outside_scope",
+      enum: ["gross", "commission", "outside_scope", "unknown"],
+    },
+    vatableAmount: {
+      type: Number,
+      default: 0,
+    },
     source: String,
     clientNames: String,
     actName: String,

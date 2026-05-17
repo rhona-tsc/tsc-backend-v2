@@ -33,6 +33,25 @@ const getVatFromGross = (gross, vatRate = 0.2) => {
   return amount - amount / (1 + vatRate);
 };
 
+const getVatBaseAmount = (item) => {
+  const vatableAmount = toNumber(item.vatableAmount);
+
+  if (vatableAmount > 0) return vatableAmount;
+
+  return toNumber(item.amount);
+};
+
+const getVatAmount = (item) => {
+  const vatRate = toNumber(item.vatRate) || 0.2;
+  const vatBaseAmount = getVatBaseAmount(item);
+
+  if (item.vatBasis === "commission" || item.vatableAmount > 0) {
+    return vatBaseAmount * vatRate;
+  }
+
+  return getVatFromGross(vatBaseAmount, vatRate);
+};
+
 const shouldApplySalesVat = (item) => {
   return (
     item.direction === "in" &&
@@ -93,6 +112,7 @@ export const getVatForecast = async (req, res) => {
           transactionCount: 0,
           forecastEventCount: 0,
           paymentDueDate: getVatPaymentDueDate(key),
+          vatableSales: 0,
         });
       }
 
@@ -105,10 +125,13 @@ export const getVatForecast = async (req, res) => {
 
       row.transactionCount += 1;
 
-      if (shouldApplySalesVat(tx)) {
-        row.salesGross += amount;
-        row.vatOnSales += getVatFromGross(amount);
-      }
+  if (shouldApplySalesVat(tx)) {
+  const vatBaseAmount = getVatBaseAmount(tx);
+
+  row.salesGross += amount;
+  row.vatOnSales += getVatAmount(tx);
+  row.vatableSales += vatBaseAmount;
+}
 
       if (shouldApplyPurchaseVat(tx)) {
         row.purchasesGross += amount;
@@ -122,10 +145,13 @@ export const getVatForecast = async (req, res) => {
 
       row.forecastEventCount += 1;
 
-      if (shouldApplySalesVat(event)) {
-        row.salesGross += amount;
-        row.vatOnSales += getVatFromGross(amount);
-      }
+if (shouldApplySalesVat(event)) {
+  const vatBaseAmount = getVatBaseAmount(event);
+
+  row.salesGross += amount;
+  row.vatOnSales += getVatAmount(event);
+  row.vatableSales += vatBaseAmount;
+}
 
       if (shouldApplyPurchaseVat(event)) {
         row.purchasesGross += amount;
@@ -141,6 +167,8 @@ export const getVatForecast = async (req, res) => {
         netVatDue: Number((row.vatOnSales - row.vatReclaimable).toFixed(2)),
         salesGross: Number(row.salesGross.toFixed(2)),
         purchasesGross: Number(row.purchasesGross.toFixed(2)),
+        
+        vatableSales: Number(row.vatableSales.toFixed(2)),
       }))
       .sort((a, b) => a.quarter.localeCompare(b.quarter));
 
