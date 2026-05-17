@@ -148,32 +148,38 @@ export const generateForecastEventsFromBooking = (booking = {}) => {
     }
   }
 
-  if (Array.isArray(booking.supplierPayments)) {
-    booking.supplierPayments.forEach((payment) => {
-      const amount = toNumber(payment.amount);
-      if (amount <= 0 || payment.paid) return;
+if (Array.isArray(booking.supplierPayments)) {
+  booking.supplierPayments.forEach((payment) => {
+    const paymentName = String(payment.name || payment.role || "").trim();
+    const paymentNameLower = paymentName.toLowerCase();
 
-      const expectedDate =
-        payment.expectedPaymentDate ||
-        booking.eventDate;
+    // BMM is retained commission/management fee, not a supplier payout
+    if (["bmm", "bamboo music management"].includes(paymentNameLower)) {
+      return;
+    }
 
-      if (!hasDate(expectedDate)) return;
+    const amount = toNumber(payment.amount);
+    if (amount <= 0 || payment.paid) return;
 
-      events.push(
-        createEvent({
-          booking,
-          entity,
-          type: "supplier_payment_out",
-          title: `Supplier payment - ${payment.name || payment.role || "TBC"}`,
-          description: buildTitle("Supplier payout", booking),
-          expectedDate,
-          amount,
-          direction: "out",
-          notes: payment.notes,
-        }),
-      );
-    });
-  }
+    const expectedDate = payment.expectedPaymentDate || booking.eventDate;
+
+    if (!hasDate(expectedDate)) return;
+
+    events.push(
+      createEvent({
+        booking,
+        entity,
+        type: "supplier_payment_out",
+        title: `Supplier payment - ${payment.name || payment.role || "TBC"}`,
+        description: buildTitle("Supplier payout", booking),
+        expectedDate,
+        amount,
+        direction: "out",
+        notes: payment.notes,
+      }),
+    );
+  });
+}
 
   return events;
 };
