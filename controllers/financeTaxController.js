@@ -214,12 +214,12 @@ const getTaxYear = (date) => {
 };
 
 const getCorporationTaxPaymentDueDate = (taxYear) => {
-  const [startYearRaw, endYearRaw] = taxYear.split("/");
+  const [, endYearRaw] = taxYear.split("/");
   const endYear = Number(endYearRaw);
 
-  // Placeholder: usually 9 months + 1 day after accounting period end.
-  // This assumes 31 March year end => due 1 Jan.
-  return new Date(Date.UTC(endYear, 0, 1));
+  // Company year end: 30 November
+  // Corporation tax due: 9 months + 1 day later = 1 September following year
+  return new Date(Date.UTC(endYear, 8, 1));
 };
 
 const getProfitAmount = (item) => {
