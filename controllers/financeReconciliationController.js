@@ -147,3 +147,56 @@ export const autoMatchFinanceTransactions = async (req, res) => {
     });
   }
 };
+
+export const manualMatchFinanceTransaction = async (req, res) => {
+  try {
+    const { forecastEventId, transactionId } = req.body;
+
+    if (!forecastEventId || !transactionId) {
+      return res.status(400).json({
+        success: false,
+        message: "forecastEventId and transactionId are required",
+      });
+    }
+
+    const forecastEvent = await ForecastEvent.findById(forecastEventId);
+
+    if (!forecastEvent) {
+      return res.status(404).json({
+        success: false,
+        message: "Forecast event not found",
+      });
+    }
+
+    const transaction = await FinanceTransaction.findById(transactionId);
+
+    if (!transaction) {
+      return res.status(404).json({
+        success: false,
+        message: "Transaction not found",
+      });
+    }
+
+    forecastEvent.status = "paid";
+    forecastEvent.actualDate = transaction.date;
+    forecastEvent.actualTransactionId = transaction._id;
+
+    transaction.reconciled = true;
+    transaction.forecastEventId = forecastEvent._id;
+
+    await forecastEvent.save();
+    await transaction.save();
+
+    res.json({
+      success: true,
+      forecastEvent,
+      transaction,
+    });
+  } catch (error) {
+    console.error("manualMatchFinanceTransaction error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
