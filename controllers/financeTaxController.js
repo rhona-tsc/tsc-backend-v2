@@ -203,3 +203,166 @@ if (shouldApplySalesVat(event)) {
     });
   }
 };
+
+const getTaxYear = (date) => {
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = d.getMonth() + 1;
+
+  // UK company accounting year can differ, but this gives a useful first forecast.
+  return month >= 4 ? `${year}/${year + 1}` : `${year - 1}/${year}`;
+};
+
+const getCorporationTaxPaymentDueDate = (taxYear) => {
+  const [startYearRaw, endYearRaw] = taxYear.split("/");
+  const endYear = Number(endYearRaw);
+
+  // Placeholder: usually 9 months + 1 day after accounting period end.
+  // This assumes 31 March year end => due 1 Jan.
+  return new Date(Date.UTC(endYear, 0, 1));
+};
+
+const getProfitAmount = (item) => {
+  const amount = toNumber(item.amount);
+
+  if (item.direction === "in") {
+    return toNumber(item.vatableAmount) || amount;
+  }
+
+  return -amount;
+};
+
+export const getCorporationTaxForecast = async (req, res) => {
+  try {
+    const {
+      entity = "BMM",
+      startDate,
+      endDate,
+      includeForecast = true,
+      taxRate = 0.25,
+    } = req.query;
+
+    const dateQuery = {};
+    if (startDate) dateQuery.$gte = new Date(startDate);
+    if (endDate) dateQuery.$lte = new Date(endDate);
+
+    const transactionQuery = {
+      entity,
+      taxTreatment: { $in: ["income", "expense"] },
+    };
+
+    if (Object.keys(dateQuery).length) transactionQuery.date = dateQuery;
+
+    const transactions = await FinanceTransaction.find(transactionQuery).lean();
+
+    let forecastEvents = [];
+
+    if (String(includeForecast) !== "false") {
+      const forecastQuery = {
+        entity,
+        status: { $in: ["forecast", "confirmed"] },
+        taxTreatment: { $in: ["income", "expense"] },
+      };
+
+      if (Object.keys(dateQuery).length) forecastQuery.expectedDate = dateQuery;
+
+      forecastEvents = await ForecastEvent.find(forecastQuery).lean();
+    }
+
+    const years = new Map();
+
+    const ensureYear = (date) => {
+      const key = getTaxYear(date);
+
+      if (!years.has(key)) {
+        years.set(key, {
+          taxYear: key,
+          income: 0,
+          expenses: 0,
+          estimatedProfit: 0,
+          estimatedCorporationTax: 0,
+          taxRate: Number(taxRate),
+          paymentDueDate: getCorporationTaxPaymentDueDate(key),
+          transactionCount: 0,
+          forecastEventCount: 0,
+        });
+      }
+
+      return years.get(key);
+    };
+
+    transactions.forEach((tx) => {
+      const row = ensureYear(tx.date);
+      const amount = getProfitAmount(tx);
+
+      row.transactionCount += 1;
+
+      if (amount >= 0) row.income += amount;
+      else row.expenses += Math.abs(amount);
+    });
+
+    forecastEvents.forEach((event) => {
+      const row = ensureYear(event.expectedDate);
+      const amount = getProfitAmount(event);
+
+      row.forecastEventCount += 1;
+
+      if (amount >= 0) row.income += amount;
+      else row.expenses += Math.abs(amount);
+    });
+
+    const yearsArray = Array.from(years.values())
+      .map((row) => {
+        const estimatedProfit = row.income - row.expenses;
+        const estimatedCorporationTax =
+          estimatedProfit > 0 ? estimatedProfit * Number(taxRate) : 0;
+
+        return {
+          ...row,
+          income: Number(row.income.toFixed(2)),
+          expenses: Number(row.expenses.toFixed(2)),
+          estimatedProfit: Number(estimatedProfit.toFixed(2)),
+          estimatedCorporationTax: Number(
+            estimatedCorporationTax.toFixed(2),
+          ),
+        };
+      })
+      .sort((a, b) => a.taxYear.localeCompare(b.taxYear));
+
+    res.json({
+      success: true,
+      filters: {
+        entity,
+        startDate: startDate || null,
+        endDate: endDate || null,
+        includeForecast: String(includeForecast) !== "false",
+        taxRate: Number(taxRate),
+      },
+      years: yearsArray,
+      summary: {
+        totalIncome: Number(
+          yearsArray.reduce((sum, row) => sum + row.income, 0).toFixed(2),
+        ),
+        totalExpenses: Number(
+          yearsArray.reduce((sum, row) => sum + row.expenses, 0).toFixed(2),
+        ),
+        totalEstimatedProfit: Number(
+          yearsArray
+            .reduce((sum, row) => sum + row.estimatedProfit, 0)
+            .toFixed(2),
+        ),
+        totalEstimatedCorporationTax: Number(
+          yearsArray
+            .reduce((sum, row) => sum + row.estimatedCorporationTax, 0)
+            .toFixed(2),
+        ),
+      },
+    });
+  } catch (error) {
+    console.error("getCorporationTaxForecast error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
