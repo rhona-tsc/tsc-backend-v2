@@ -239,8 +239,14 @@ const parseBankCsvRow = ({ row, accountId, entity }) => {
     findValue(row, ["Money Out", "Paid Out", "Debit", "Out", "Amount Out"]),
   );
 
-  let amount = toNumber(findValue(row, ["Amount", "Value", "Transaction Amount"]));
-
+let amount = toNumber(
+  findValue(row, [
+    "Amount",
+    "Amount in GBP",
+    "Value",
+    "Transaction Amount",
+  ]),
+);
   let direction = "in";
 
   if (moneyIn > 0) {
