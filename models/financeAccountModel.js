@@ -6,7 +6,7 @@ const financeAccountSchema = new mongoose.Schema(
 
     entity: {
       type: String,
-      enum: ["TSC", "BMM", "Personal", "Savings", "Investment", "Crypto"],
+      enum: ["TSC", "BMM", "HSBC", "Monzo Joint",  "Monzo Personal", "AMEX", "CBS", "HL Investment", "HSBC Investment","Bitcoin", "Solana","Ethereum", "True Potential Penson", "Aviva Pension"],
       required: true,
     },
 
