@@ -1884,9 +1884,13 @@ const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
   const existingApplications = Array.isArray(job.applications)
     ? job.applications
     : [];
+
   const existingIndex = existingApplications.findIndex(
     (application) => asObjectIdString(application?.musicianId) === targetId,
   );
+
+  const existingApplication =
+    existingIndex >= 0 ? existingApplications[existingIndex] : null;
 
   const baseApplication = {
     musicianId: musician._id,
@@ -1894,42 +1898,57 @@ const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
       musician?.firstName ||
       musician?.firstname ||
       musician?.basicInfo?.firstName ||
+      existingApplication?.firstName ||
       "",
     lastName:
       musician?.lastName ||
       musician?.lastname ||
       musician?.basicInfo?.lastName ||
+      existingApplication?.lastName ||
       "",
-    email: musician?.email || musician?.basicInfo?.email || "",
+    email:
+      musician?.email ||
+      musician?.basicInfo?.email ||
+      existingApplication?.email ||
+      "",
     phone:
       musician?.phone ||
       musician?.phoneNumber ||
       musician?.basicInfo?.phone ||
+      musician?.basicInfo?.phoneNumber ||
+      existingApplication?.phone ||
+      existingApplication?.phoneNormalized ||
       "",
-    musicianSlug: musician?.musicianSlug || "",
+    musicianSlug: musician?.musicianSlug || existingApplication?.musicianSlug || "",
     profileImage:
       musician?.profilePhoto ||
       musician?.profilePicture ||
       musician?.profileImage ||
       musician?.profilePic ||
       musician?.profile_picture ||
+      existingApplication?.profileImage ||
       "",
-    postcode: musician?.address?.postcode || musician?.postcode || "",
+    postcode:
+      musician?.address?.postcode ||
+      musician?.postcode ||
+      existingApplication?.postcode ||
+      "",
     status: "allocated",
-    notes: "",
+    notes: existingApplication?.notes || "",
     deputyMatchScore:
-  typeof existingApplications?.[existingIndex]?.deputyMatchScore === "number"
-    ? existingApplications[existingIndex].deputyMatchScore
-    : 0,
-    matchSummary: {
+      typeof existingApplication?.deputyMatchScore === "number"
+        ? existingApplication.deputyMatchScore
+        : 0,
+    matchSummary: existingApplication?.matchSummary || {
       instrument: job?.instrument || "",
       roleFit: 0,
       genreFit: 0,
       locationFit: 0,
       songFit: 0,
     },
-    appliedAt: now,
-    shortlistedAt: null,
+    appliedAt: existingApplication?.appliedAt || now,
+    shortlistedAt: existingApplication?.shortlistedAt || null,
+    presentedAt: existingApplication?.presentedAt || null,
     allocatedAt: now,
     bookedAt: null,
     declinedAt: null,
@@ -1938,6 +1957,9 @@ const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
       musician?.phone ||
         musician?.phoneNumber ||
         musician?.basicInfo?.phone ||
+        musician?.basicInfo?.phoneNumber ||
+        existingApplication?.phoneNormalized ||
+        existingApplication?.phone ||
         "",
     ),
   };
@@ -1951,7 +1973,6 @@ const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
       return {
         ...application,
         ...baseApplication,
-        appliedAt: application?.appliedAt || now,
       };
     });
   }
