@@ -964,8 +964,8 @@ const createStripeConnectOnboardingLink = async (req, res) => {
       await musician.save();
     }
 
-  const refreshUrl = `${adminBase}/edit-deputy/${musician._id}?stripe=refresh`;
-const returnUrl = `${adminBase}/edit-deputy/${musician._id}?stripe=return`;
+const refreshUrl = `${adminBase}/stripe-connect-return?stripe=refresh`;
+const returnUrl = `${adminBase}/stripe-connect-return?stripe=return`;
 
     console.log("✅ Stripe onboarding URLs", {
       adminBase,
