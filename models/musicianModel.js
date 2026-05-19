@@ -385,7 +385,13 @@ lastLoginAt: { type: Date, default: null, index: true },
         default: "",
       },
     },
-
+resetTokens: [
+  {
+    hash: String,
+    expires: Date,
+    createdAt: Date,
+  },
+],
     stripeConnect: {
       accountId: { type: String, default: "" },
       onboardingComplete: { type: Boolean, default: false },

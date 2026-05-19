@@ -470,14 +470,22 @@ musicianLoginRouter.post("/set-password", async (req, res) => {
 musicianLoginRouter.post("/forgot-password", async (req, res) => {
   try {
     const email = (req.body?.email || "").trim().toLowerCase();
-    if (!email) return res.json({ success: true }); // silent
+    if (!email) return res.json({ success: true });
 
     const user = await musicianModel.findOne({ email });
-    if (!user) return res.json({ success: true }); // silent
+    if (!user) return res.json({ success: true });
 
     const rawToken = crypto.randomBytes(32).toString("hex");
-    user.resetTokenHash = sha256(rawToken);
-    user.resetTokenExpires = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days
+
+    user.resetTokens = [
+      ...(Array.isArray(user.resetTokens) ? user.resetTokens : []),
+      {
+        hash: sha256(rawToken),
+        expires: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+        createdAt: new Date(),
+      },
+    ].slice(-5);
+
     await user.save();
 
     const link = `${FRONTEND_URL}/reset-password?token=${rawToken}&email=${encodeURIComponent(
@@ -498,7 +506,6 @@ musicianLoginRouter.post("/forgot-password", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error("[forgot-password] error:", err);
-    // still return success true to avoid info leakage
     res.json({ success: true });
   }
 });
@@ -520,48 +527,59 @@ musicianLoginRouter.post("/reset-password", async (req, res) => {
         message: "Email, token and newPassword are required.",
       });
     }
+
     if (newPassword.length < 8) {
-      return res
-        .status(422)
-        .json({ success: false, message: "Password must be at least 8 characters." });
+      return res.status(422).json({
+        success: false,
+        message: "Password must be at least 8 characters.",
+      });
     }
 
     const user = await musicianModel.findOne({ email });
-    if (!user)
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
 
-    if (!user.resetTokenHash || !user.resetTokenExpires) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No active reset token." });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
     }
 
-    if (user.resetTokenExpires.getTime() < Date.now()) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Reset link expired." });
-    }
+    const validTokens = Array.isArray(user.resetTokens)
+      ? user.resetTokens
+      : [];
 
-    const ok = sha256(token) === user.resetTokenHash;
-    if (!ok)
-      return res
-        .status(401)
-        .json({ success: false, message: "Invalid token." });
+    const matchingToken = validTokens.find((t) => {
+      return (
+        t?.hash === sha256(token) &&
+        t?.expires &&
+        new Date(t.expires).getTime() > Date.now()
+      );
+    });
+
+    if (!matchingToken) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired reset link.",
+      });
+    }
 
     user.password = await hashPassword(newPassword);
+    user.resetTokens = [];
     user.resetTokenHash = null;
     user.resetTokenExpires = null;
     user.mustChangePassword = false;
     user.hasSetPassword = true;
     user.passwordLastChangedAt = new Date();
+
     await user.save();
 
     res.json({ success: true });
   } catch (err) {
     console.error("[reset-password] error:", err);
-    res.status(500).json({ success: false, message: "Reset password failed." });
+    res.status(500).json({
+      success: false,
+      message: "Reset password failed.",
+    });
   }
 });
 
@@ -1188,6 +1206,40 @@ musicianLoginRouter.post("/bulk-invite-cron", requireCronSecret, async (req, res
   } catch (err) {
     console.error("[bulk-invite-cron] error:", err);
     return res.status(500).json({ success: false, message: "Cron bulk invite failed." });
+  }
+});
+
+musicianLoginRouter.post("/admin-set-password", requireAdminAuth, async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const newPassword = String(req.body?.newPassword || "");
+
+    if (!email || newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password of at least 8 characters are required.",
+      });
+    }
+
+    const user = await musicianModel.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    user.password = await hashPassword(newPassword);
+    user.resetTokens = [];
+    user.resetTokenHash = null;
+    user.resetTokenExpires = null;
+    user.mustChangePassword = true;
+    user.hasSetPassword = true;
+    user.passwordLastChangedAt = new Date();
+
+    await user.save();
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[admin-set-password] error:", err);
+    res.status(500).json({ success: false, message: "Could not set password." });
   }
 });
 
