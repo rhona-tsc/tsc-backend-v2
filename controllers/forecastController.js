@@ -1,6 +1,10 @@
 import ForecastEvent from "../models/forecastEventModel.js";
 import FinanceAccount from "../models/financeAccountModel.js";
 import BookingBoardItem from "../models/bookingBoardItemModel.js";
+import BookingForecast from "../models/bookingForecastModel.js";
+import generateForecastEventsFromBooking from "../utils/generateForecastEventsFromBooking.js";
+import getExpectedBalanceDateForSource from "../utils/paymentRules.js";
+
 
 export const getForecastTimeline = async (req, res) => {
   try {
@@ -216,13 +220,7 @@ export const getForecastMonthlySummary = async (req, res) => {
   }
 };
 
-// controllers/financeBookingSyncController.js
 
-import BookingForecast from "../models/bookingForecastModel.js";
-import ForecastEvent from "../models/forecastEventModel.js";
-import BookingBoardItem from "../models/bookingBoardItemModel.js";
-import generateForecastEventsFromBooking from "../utils/generateForecastEventsFromBooking.js";
-import getExpectedBalanceDateForSource from "../utils/paymentRules.js";
 
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 
