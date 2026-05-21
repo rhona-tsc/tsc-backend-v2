@@ -1,6 +1,6 @@
 import ForecastEvent from "../models/forecastEventModel.js";
 import FinanceAccount from "../models/financeAccountModel.js";
-import BookingBoardItem from "../models/bookingBoardItemModel.js";
+import BookingBoardItem from "../models/bookingBoardItem.js";
 import BookingForecast from "../models/bookingForecastModel.js";
 import generateForecastEventsFromBooking from "../utils/generateForecastEventsFromBooking.js";
 import getExpectedBalanceDateForSource from "../utils/paymentRules.js";
