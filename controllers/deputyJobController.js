@@ -3821,6 +3821,17 @@ console.log("📲 Allocation WhatsApp target", {
   isEnquiryJob,
 });
 
+console.log("📲 manualAllocateDeputyJob target", {
+  jobId: String(job._id),
+  musicianId: String(musician._id),
+  musicianPhone: musician?.phone,
+  musicianPhoneNumber: musician?.phoneNumber,
+  basicInfoPhone: musician?.basicInfo?.phone,
+  applicationPhone: application?.phone,
+  applicationPhoneNormalized: application?.phoneNormalized,
+  targetPhone,
+});
+
 if (!isEnquiryJob && targetPhone) {
   try {
     whatsappResult = await sendDeputyAllocationWhatsApp({
@@ -6381,16 +6392,29 @@ job.allocatedAt = now;
 }
 
     const application = findApplicationFromJob(job, musician._id);
-    const targetPhone = toE164(
-      musician?.phone ||
-        musician?.phoneNumber ||
-        application?.phoneNormalized ||
-        application?.phone ||
-        "",
-    );
+   const targetPhone = toE164(
+  musician?.phone ||
+    musician?.phoneNumber ||
+    musician?.basicInfo?.phone ||
+    musician?.basicInfo?.phoneNumber ||
+    application?.phoneNormalized ||
+    application?.phone ||
+    "",
+);
 
     let whatsappResult = null;
 let whatsappErrorMessage = "";
+
+console.log("📲 manualAllocateDeputyJob target", {
+  jobId: String(job._id),
+  musicianId: String(musician._id),
+  musicianPhone: musician?.phone,
+  musicianPhoneNumber: musician?.phoneNumber,
+  basicInfoPhone: musician?.basicInfo?.phone,
+  applicationPhone: application?.phone,
+  applicationPhoneNormalized: application?.phoneNormalized,
+  targetPhone,
+});
 
 if (!isEnquiryJob && targetPhone) {
   try {
