@@ -754,11 +754,18 @@ const firstNonEmpty = (...values) =>
   values.find((value) => String(value || "").trim()) || "";
 
 const getInvoiceLogoPath = (invoiceCompany) => {
-  if (invoiceCompany?.brand === "BMM") {
-    return process.env.BMM_INVOICE_LOGO_PATH || "";
-  }
+  const logoPath =
+    invoiceCompany?.brand === "BMM"
+      ? process.env.BMM_INVOICE_LOGO_PATH || ""
+      : process.env.TSC_INVOICE_LOGO_PATH || "";
 
-  return process.env.TSC_INVOICE_LOGO_PATH || "";
+  console.log("🖼️ Invoice logo path:", {
+    brand: invoiceCompany?.brand,
+    logoPath,
+    exists: logoPath ? fs.existsSync(logoPath) : false,
+  });
+
+  return logoPath;
 };
 
 const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>

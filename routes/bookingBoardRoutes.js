@@ -8,7 +8,8 @@ import musicianAuth from "../middleware/musicianAuth.js";
 
 const router = express.Router();
 
-const escapeRegex = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegex = (value = "") =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const toObjectIdString = (value) => {
   try {
@@ -27,7 +28,6 @@ const isoDateOnly = (value) => {
   if (Number.isNaN(d.getTime())) return "";
   return d.toISOString().slice(0, 10);
 };
-
 
 const calcDepositFromGross = (grossValue) => {
   const gross = Number(grossValue || 0);
@@ -82,7 +82,7 @@ const sanitizeBookingPatch = (body = {}) => {
           patch.totals.chargedAmount ??
             patch.amount ??
             patch.totals.depositAmount ??
-            0
+            0,
         ) || 0,
     };
   }
@@ -112,9 +112,7 @@ const sanitizeBookingPatch = (body = {}) => {
   }
 
   if (patch.accounting && isPlainObject(patch.accounting)) {
-
     patch.accounting = {
-
       ...patch.accounting,
 
       vatRate: Number(patch.accounting.vatRate ?? 0.2) || 0.2,
@@ -130,12 +128,8 @@ const sanitizeBookingPatch = (body = {}) => {
       currency: String(patch.accounting.currency || "GBP"),
 
       paymentStage: String(patch.accounting.paymentStage || ""),
-
     };
-
   }
-
-
 
   return patch;
 };
@@ -145,8 +139,10 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
 
   if (patch.totals && isPlainObject(patch.totals)) {
     bookingDoc.totals = mergeDeep(
-      bookingDoc.totals?.toObject ? bookingDoc.totals.toObject() : (bookingDoc.totals || {}),
-      patch.totals
+      bookingDoc.totals?.toObject
+        ? bookingDoc.totals.toObject()
+        : bookingDoc.totals || {},
+      patch.totals,
     );
   }
 
@@ -154,13 +150,16 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
     bookingDoc.performanceTimes = mergeDeep(
       bookingDoc.performanceTimes?.toObject
         ? bookingDoc.performanceTimes.toObject()
-        : (bookingDoc.performanceTimes || {}),
-      patch.performanceTimes
+        : bookingDoc.performanceTimes || {},
+      patch.performanceTimes,
     );
   }
 
   if (patch.bookingDetails && isPlainObject(patch.bookingDetails)) {
-    bookingDoc.bookingDetails = mergeDeep(bookingDoc.bookingDetails || {}, patch.bookingDetails);
+    bookingDoc.bookingDetails = mergeDeep(
+      bookingDoc.bookingDetails || {},
+      patch.bookingDetails,
+    );
   }
 
   if (Array.isArray(patch.actsSummary)) {
@@ -184,26 +183,37 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
   }
 
   const gross =
-    Number(bookingDoc?.totals?.fullAmount ?? bookingDoc?.amount ?? bookingDoc?.fee ?? 0) || 0;
+    Number(
+      bookingDoc?.totals?.fullAmount ??
+        bookingDoc?.amount ??
+        bookingDoc?.fee ??
+        0,
+    ) || 0;
 
-  const deposit =
-    Number(bookingDoc?.totals?.depositAmount || 0) || 0;
+  const deposit = Number(bookingDoc?.totals?.depositAmount || 0) || 0;
 
   const charged =
-    Number(bookingDoc?.totals?.chargedAmount ?? bookingDoc?.amount ?? deposit ?? 0) || 0;
+    Number(
+      bookingDoc?.totals?.chargedAmount ?? bookingDoc?.amount ?? deposit ?? 0,
+    ) || 0;
 
   const computedBalance = Math.max(0, gross - charged);
 
   bookingDoc.totals = {
-    ...(bookingDoc.totals?.toObject ? bookingDoc.totals.toObject() : (bookingDoc.totals || {})),
+    ...(bookingDoc.totals?.toObject
+      ? bookingDoc.totals.toObject()
+      : bookingDoc.totals || {}),
     fullAmount: gross,
     depositAmount: deposit,
     chargedAmount: charged,
   };
 
   if (patch.accounting && isPlainObject(patch.accounting)) {
-  bookingDoc.accounting = mergeDeep(bookingDoc.accounting || {}, patch.accounting);
-}
+    bookingDoc.accounting = mergeDeep(
+      bookingDoc.accounting || {},
+      patch.accounting,
+    );
+  }
   bookingDoc.balanceAmountPence = Math.round(computedBalance * 100);
 
   if (computedBalance > 0) {
@@ -217,7 +227,12 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
 };
 
 const hasContractLink = (row) => {
-  const url = row?.contractUrl || row?.pdfUrl || row?.contract?.url || row?.contract?.href || "";
+  const url =
+    row?.contractUrl ||
+    row?.pdfUrl ||
+    row?.contract?.url ||
+    row?.contract?.href ||
+    "";
   return Boolean(String(url || "").trim());
 };
 
@@ -225,49 +240,69 @@ const hasEventSheetContent = (row) => {
   return Boolean(
     row?.eventSheet?.submitted ||
     (row?.eventSheet?.answers && Object.keys(row.eventSheet.answers).length) ||
-    (row?.eventSheet?.complete && Object.keys(row.eventSheet.complete).length)
+    (row?.eventSheet?.complete && Object.keys(row.eventSheet.complete).length),
   );
 };
 
 const getRowClientEmail = (row) => {
   if (Array.isArray(row?.clientEmails) && row.clientEmails.length) {
-    return String(row.clientEmails.find((e) => e?.email)?.email || "").trim().toLowerCase();
+    return String(row.clientEmails.find((e) => e?.email)?.email || "")
+      .trim()
+      .toLowerCase();
   }
-  return String(row?.clientEmail || row?.userAddress?.email || row?.userEmail || "").trim().toLowerCase();
+  return String(
+    row?.clientEmail || row?.userAddress?.email || row?.userEmail || "",
+  )
+    .trim()
+    .toLowerCase();
 };
 
 const getRowClientName = (row) => {
   return String(
     row?.clientFirstNames ||
-    row?.clientName ||
-    row?.bookerName ||
-    [row?.userAddress?.firstName, row?.userAddress?.lastName].filter(Boolean).join(" ") ||
-    ""
-  ).trim().toLowerCase();
+      row?.clientName ||
+      row?.bookerName ||
+      [row?.userAddress?.firstName, row?.userAddress?.lastName]
+        .filter(Boolean)
+        .join(" ") ||
+      "",
+  )
+    .trim()
+    .toLowerCase();
 };
 
 const getRowActKey = (row) => {
   return String(
     row?.actTscName ||
-    row?.actName ||
-    row?.actsSummary?.[0]?.tscName ||
-    row?.actsSummary?.[0]?.actName ||
-    row?.actsSummary?.[0]?.name ||
-    row?.actId ||
-    row?.act ||
-    ""
-  ).trim().toLowerCase();
+      row?.actName ||
+      row?.actsSummary?.[0]?.tscName ||
+      row?.actsSummary?.[0]?.actName ||
+      row?.actsSummary?.[0]?.name ||
+      row?.actId ||
+      row?.act ||
+      "",
+  )
+    .trim()
+    .toLowerCase();
 };
 
 const getRowEventDateKey = (row) => {
-  return String(row?.eventDateISO || isoDateOnly(row?.date || row?.eventDate || row?.bookingDate) || "").slice(0, 10);
+  return String(
+    row?.eventDateISO ||
+      isoDateOnly(row?.date || row?.eventDate || row?.bookingDate) ||
+      "",
+  ).slice(0, 10);
 };
 
 const getCanonicalBookingKey = (row) => {
-  const sessionId = String(row?.sessionId || "").trim().toLowerCase();
+  const sessionId = String(row?.sessionId || "")
+    .trim()
+    .toLowerCase();
   if (sessionId) return `session:${sessionId}`;
 
-  const bookingId = String(row?.bookingId || row?.bookingRef || "").trim().toLowerCase();
+  const bookingId = String(row?.bookingId || row?.bookingRef || "")
+    .trim()
+    .toLowerCase();
   if (bookingId) return `booking:${bookingId}`;
 
   const email = getRowClientEmail(row);
@@ -278,14 +313,22 @@ const getCanonicalBookingKey = (row) => {
 };
 
 const scoreRowCompleteness = (row) => {
-  const gross = Number(row?.grossValue || row?.totals?.fullAmount || row?.amount || row?.fee || 0) || 0;
-  const deposit = Number(
-    row?.payments?.depositChargedAmount ??
-    row?.payments?.depositAmount ??
-    row?.totals?.depositAmount ??
-    row?.depositAmount ??
-    0
-  ) || 0;
+  const gross =
+    Number(
+      row?.grossValue ||
+        row?.totals?.fullAmount ||
+        row?.amount ||
+        row?.fee ||
+        0,
+    ) || 0;
+  const deposit =
+    Number(
+      row?.payments?.depositChargedAmount ??
+        row?.payments?.depositAmount ??
+        row?.totals?.depositAmount ??
+        row?.depositAmount ??
+        0,
+    ) || 0;
 
   return [
     hasContractLink(row),
@@ -299,7 +342,11 @@ const scoreRowCompleteness = (row) => {
     Boolean(row?.eventType),
     Boolean(row?.address || row?.venueAddress || row?.venue),
     Boolean(row?.lineupSelected || row?.actsSummary?.[0]?.lineupLabel),
-    Boolean(row?.performanceTimes?.startTime || row?.performanceTimes?.arrivalTime || row?.arrivalTime),
+    Boolean(
+      row?.performanceTimes?.startTime ||
+      row?.performanceTimes?.arrivalTime ||
+      row?.arrivalTime,
+    ),
   ].filter(Boolean).length;
 };
 
@@ -315,19 +362,27 @@ const mergeRowData = (preferred, secondary) => {
     bookingRef: preferred?.bookingRef || secondary?.bookingRef,
     bookingId: preferred?.bookingId || secondary?.bookingId,
     sessionId: preferred?.sessionId || secondary?.sessionId,
-    clientFirstNames: preferred?.clientFirstNames || secondary?.clientFirstNames,
+    clientFirstNames:
+      preferred?.clientFirstNames || secondary?.clientFirstNames,
     clientName: preferred?.clientName || secondary?.clientName,
-    clientEmails: Array.isArray(preferred?.clientEmails) && preferred.clientEmails.length
-      ? preferred.clientEmails
-      : secondary?.clientEmails,
+    clientEmails:
+      Array.isArray(preferred?.clientEmails) && preferred.clientEmails.length
+        ? preferred.clientEmails
+        : secondary?.clientEmails,
     clientEmail: preferred?.clientEmail || secondary?.clientEmail,
     clientAddress: preferred?.clientAddress || secondary?.clientAddress,
     userEmail: preferred?.userEmail || secondary?.userEmail,
     eventDateISO: preferred?.eventDateISO || secondary?.eventDateISO,
     enquiryDateISO: preferred?.enquiryDateISO || secondary?.enquiryDateISO,
     bookingDateISO: preferred?.bookingDateISO || secondary?.bookingDateISO,
-    grossValue: Number(preferred?.grossValue || 0) || Number(secondary?.grossValue || 0) || 0,
-    netCommission: Number(preferred?.netCommission || 0) || Number(secondary?.netCommission || 0) || 0,
+    grossValue:
+      Number(preferred?.grossValue || 0) ||
+      Number(secondary?.grossValue || 0) ||
+      0,
+    netCommission:
+      Number(preferred?.netCommission || 0) ||
+      Number(secondary?.netCommission || 0) ||
+      0,
     eventType: preferred?.eventType || secondary?.eventType,
     actName: preferred?.actName || secondary?.actName,
     actTscName: preferred?.actTscName || secondary?.actTscName,
@@ -336,33 +391,53 @@ const mergeRowData = (preferred, secondary) => {
     venue: preferred?.venue || secondary?.venue,
     venueAddress: preferred?.venueAddress || secondary?.venueAddress,
     lineupSelected: preferred?.lineupSelected || secondary?.lineupSelected,
-    lineupComposition: Array.isArray(preferred?.lineupComposition) && preferred.lineupComposition.length
-      ? preferred.lineupComposition
-      : secondary?.lineupComposition,
+    lineupComposition:
+      Array.isArray(preferred?.lineupComposition) &&
+      preferred.lineupComposition.length
+        ? preferred.lineupComposition
+        : secondary?.lineupComposition,
     arrivalTime: preferred?.arrivalTime || secondary?.arrivalTime,
     finishTime: preferred?.finishTime || secondary?.finishTime,
     bookingDetails: preferred?.bookingDetails || secondary?.bookingDetails,
-    payments: Array.isArray(preferred?.payments) && preferred.payments.length
-      ? preferred.payments
-      : secondary?.payments,
+    payments:
+      Array.isArray(preferred?.payments) && preferred.payments.length
+        ? preferred.payments
+        : secondary?.payments,
     balancePaid: Boolean(preferred?.balancePaid ?? secondary?.balancePaid),
-    bandPaymentsSent: Boolean(preferred?.bandPaymentsSent ?? secondary?.bandPaymentsSent),
+    bandPaymentsSent: Boolean(
+      preferred?.bandPaymentsSent ?? secondary?.bandPaymentsSent,
+    ),
 
-    paymentLink: preferred?.paymentLink || secondary?.paymentLink || preferred?.balanceInvoiceUrl || secondary?.balanceInvoiceUrl || "",
-    invoicePdfUrl: preferred?.invoicePdfUrl || secondary?.invoicePdfUrl || preferred?.balanceInvoicePdfUrl || secondary?.balanceInvoicePdfUrl || "",
-    balanceInvoiceUrl: preferred?.balanceInvoiceUrl || secondary?.balanceInvoiceUrl || "",
-    balanceInvoicePdfUrl: preferred?.balanceInvoicePdfUrl || secondary?.balanceInvoicePdfUrl || "",
+    paymentLink:
+      preferred?.paymentLink ||
+      secondary?.paymentLink ||
+      preferred?.balanceInvoiceUrl ||
+      secondary?.balanceInvoiceUrl ||
+      "",
+    invoicePdfUrl:
+      preferred?.invoicePdfUrl ||
+      secondary?.invoicePdfUrl ||
+      preferred?.balanceInvoicePdfUrl ||
+      secondary?.balanceInvoicePdfUrl ||
+      "",
+    balanceInvoiceUrl:
+      preferred?.balanceInvoiceUrl || secondary?.balanceInvoiceUrl || "",
+    balanceInvoicePdfUrl:
+      preferred?.balanceInvoicePdfUrl || secondary?.balanceInvoicePdfUrl || "",
 
     allocation: preferred?.allocation || secondary?.allocation,
     review: preferred?.review || secondary?.review,
     eventSheet: preferred?.eventSheet || secondary?.eventSheet,
     userAddress: preferred?.userAddress || secondary?.userAddress,
-    actOwnerMusicianId: preferred?.actOwnerMusicianId || secondary?.actOwnerMusicianId,
+    actOwnerMusicianId:
+      preferred?.actOwnerMusicianId || secondary?.actOwnerMusicianId,
     actId: preferred?.actId || secondary?.actId,
-    actsSummary: Array.isArray(preferred?.actsSummary) && preferred.actsSummary.length
-      ? preferred.actsSummary
-      : secondary?.actsSummary,
-    performanceTimes: preferred?.performanceTimes || secondary?.performanceTimes,
+    actsSummary:
+      Array.isArray(preferred?.actsSummary) && preferred.actsSummary.length
+        ? preferred.actsSummary
+        : secondary?.actsSummary,
+    performanceTimes:
+      preferred?.performanceTimes || secondary?.performanceTimes,
     contractUrl: preferred?.contractUrl || secondary?.contractUrl,
     pdfUrl: preferred?.pdfUrl || secondary?.pdfUrl,
     contract: preferred?.contract || secondary?.contract,
@@ -378,8 +453,10 @@ const choosePreferredRow = (current, incoming) => {
   const currentHasContract = hasContractLink(current);
   const incomingHasContract = hasContractLink(incoming);
 
-  if (incomingHasContract && !currentHasContract) return mergeRowData(incoming, current);
-  if (currentHasContract && !incomingHasContract) return mergeRowData(current, incoming);
+  if (incomingHasContract && !currentHasContract)
+    return mergeRowData(incoming, current);
+  if (currentHasContract && !incomingHasContract)
+    return mergeRowData(current, incoming);
 
   const currentScore = scoreRowCompleteness(current);
   const incomingScore = scoreRowCompleteness(incoming);
@@ -387,8 +464,10 @@ const choosePreferredRow = (current, incoming) => {
   if (incomingScore > currentScore) return mergeRowData(incoming, current);
   if (currentScore > incomingScore) return mergeRowData(current, incoming);
 
-  const currentUpdated = new Date(current?.updatedAt || current?.createdAt || 0).getTime() || 0;
-  const incomingUpdated = new Date(incoming?.updatedAt || incoming?.createdAt || 0).getTime() || 0;
+  const currentUpdated =
+    new Date(current?.updatedAt || current?.createdAt || 0).getTime() || 0;
+  const incomingUpdated =
+    new Date(incoming?.updatedAt || incoming?.createdAt || 0).getTime() || 0;
 
   if (incomingUpdated >= currentUpdated) return mergeRowData(incoming, current);
   return mergeRowData(current, incoming);
@@ -398,42 +477,51 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
   const doc = booking?.toObject ? booking.toObject() : booking;
   if (!doc) return null;
 
-  const eventDateISO = isoDateOnly(doc.eventDate || doc.date || doc.bookingDate);
-  const grossValue = Number(
-    doc?.grossValue ??
-    doc?.totals?.fullAmount ??
-    doc?.quote?.total ??
-    doc?.pricing?.total ??
-    doc?.amount ??
-    doc?.fee ??
-    0
-  ) || 0;
+  const eventDateISO = isoDateOnly(
+    doc.eventDate || doc.date || doc.bookingDate,
+  );
+  const grossValue =
+    Number(
+      doc?.grossValue ??
+        doc?.totals?.fullAmount ??
+        doc?.quote?.total ??
+        doc?.pricing?.total ??
+        doc?.amount ??
+        doc?.fee ??
+        0,
+    ) || 0;
 
-  const depositValue = Number(
-    doc?.payments?.depositChargedAmount ??
-    doc?.payments?.depositAmount ??
-    doc?.totals?.depositAmount ??
-    doc?.quote?.deposit ??
-    doc?.pricing?.deposit ??
-    doc?.depositAmount ??
-    0
-  ) || 0;
+  const depositValue =
+    Number(
+      doc?.payments?.depositChargedAmount ??
+        doc?.payments?.depositAmount ??
+        doc?.totals?.depositAmount ??
+        doc?.quote?.deposit ??
+        doc?.pricing?.deposit ??
+        doc?.depositAmount ??
+        0,
+    ) || 0;
 
-  const safeDeposit = depositValue > 0 ? depositValue : calcDepositFromGross(grossValue);
-  const actSummary = Array.isArray(doc?.actsSummary) && doc.actsSummary.length ? doc.actsSummary[0] : null;
+  const safeDeposit =
+    depositValue > 0 ? depositValue : calcDepositFromGross(grossValue);
+  const actSummary =
+    Array.isArray(doc?.actsSummary) && doc.actsSummary.length
+      ? doc.actsSummary[0]
+      : null;
   const actId = actSummary?.actId || doc?.act || "";
   const actLookupKey = String(actId || "");
   const linkedAct = actLookup.get(actLookupKey) || null;
-  const clientFirstNames = [doc?.userAddress?.firstName, doc?.userAddress?.lastName]
-    .filter(Boolean)
-    .join(" ")
-    .trim() || doc?.clientName || doc?.bookerName || "";
+  const clientFirstNames =
+    [doc?.userAddress?.firstName, doc?.userAddress?.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim() ||
+    doc?.clientName ||
+    doc?.bookerName ||
+    "";
 
   const clientEmail =
-    doc?.clientEmail ||
-    doc?.userAddress?.email ||
-    doc?.userEmail ||
-    "";
+    doc?.clientEmail || doc?.userAddress?.email || doc?.userEmail || "";
 
   const clientEmails = clientEmail ? [{ email: clientEmail }] : [];
 
@@ -448,12 +536,35 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
       doc?.userAddress?.city,
       doc?.userAddress?.county,
       doc?.userAddress?.postcode,
-    ].filter(Boolean).join(", ") || "";
+    ]
+      .filter(Boolean)
+      .join(", ") ||
+    "";
 
-  const county = doc?.county || doc?.userAddress?.county || doc?.eventSheet?.answers?.venue_county || "";
-  const actName = actSummary?.actName || actSummary?.name || doc?.actName || doc?.selectedAct?.name || "";
-  const actTscName = actSummary?.tscName || actSummary?.name || doc?.actTscName || doc?.tscName || doc?.selectedAct?.tscName || actName || "";
-  const lineupSelected = actSummary?.lineupLabel || actSummary?.lineup?.actSize || doc?.lineupSelected || "";
+  const county =
+    doc?.county ||
+    doc?.userAddress?.county ||
+    doc?.eventSheet?.answers?.venue_county ||
+    "";
+  const actName =
+    actSummary?.actName ||
+    actSummary?.name ||
+    doc?.actName ||
+    doc?.selectedAct?.name ||
+    "";
+  const actTscName =
+    actSummary?.tscName ||
+    actSummary?.name ||
+    doc?.actTscName ||
+    doc?.tscName ||
+    doc?.selectedAct?.tscName ||
+    actName ||
+    "";
+  const lineupSelected =
+    actSummary?.lineupLabel ||
+    actSummary?.lineup?.actSize ||
+    doc?.lineupSelected ||
+    "";
   const lineupComposition = Array.isArray(doc?.lineupComposition)
     ? doc.lineupComposition
     : Array.isArray(actSummary?.lineup?.bandMembers)
@@ -470,67 +581,79 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     bandPaymentsSent: Boolean(doc?.bandPaymentsSent),
   };
 
-const row = {
-  _id: doc?._id,
-  sourceBookingId: doc?._id,
-  bookingRef: doc?.bookingRef || doc?.bookingId || "",
-  bookingId: doc?.bookingId || doc?.bookingRef || "",
-  sessionId: doc?.sessionId || "",
-  clientFirstNames,
-  clientEmails,
-  eventDateISO,
-  enquiryDateISO: isoDateOnly(doc?.createdAt || doc?.updatedAt),
-  bookingDateISO: isoDateOnly(doc?.createdAt || doc?.updatedAt),
-  grossValue,
-  netCommission: Number(doc?.netCommission || 0) || 0,
-  agent: doc?.agent || "Direct",
-  eventType: doc?.eventType || doc?.eventSheet?.answers?.event_type || doc?.eventSheet?.complete?.event_type || "",
-  actName,
-  actTscName,
-  address,
-  county,
-  lineupSelected,
-  lineupComposition,
-  arrivalTime: doc?.arrivalTime || doc?.performanceTimes?.arrivalTime || actSummary?.performance?.arrivalTime || "",
-  finishTime: doc?.finishTime || doc?.performanceTimes?.finishTime || actSummary?.performance?.finishTime || "",
-  bookingDetails: doc?.bookingDetails || { djServicesBooked: false },
-  payments: rawPayments.length ? rawPayments : paymentsMeta,
-  accounting: doc?.accounting || null,
-  balancePaid: Boolean(doc?.balancePaid),
-  bandPaymentsSent: Boolean(doc?.bandPaymentsSent),
+  const row = {
+    _id: doc?._id,
+    sourceBookingId: doc?._id,
+    bookingRef: doc?.bookingRef || doc?.bookingId || "",
+    bookingId: doc?.bookingId || doc?.bookingRef || "",
+    sessionId: doc?.sessionId || "",
+    clientFirstNames,
+    clientEmails,
+    eventDateISO,
+    enquiryDateISO: isoDateOnly(doc?.createdAt || doc?.updatedAt),
+    bookingDateISO: isoDateOnly(doc?.createdAt || doc?.updatedAt),
+    grossValue,
+    netCommission: Number(doc?.netCommission || 0) || 0,
+    agent: doc?.agent || "Direct",
+    eventType:
+      doc?.eventType ||
+      doc?.eventSheet?.answers?.event_type ||
+      doc?.eventSheet?.complete?.event_type ||
+      "",
+    actName,
+    actTscName,
+    address,
+    county,
+    lineupSelected,
+    lineupComposition,
+    arrivalTime:
+      doc?.arrivalTime ||
+      doc?.performanceTimes?.arrivalTime ||
+      actSummary?.performance?.arrivalTime ||
+      "",
+    finishTime:
+      doc?.finishTime ||
+      doc?.performanceTimes?.finishTime ||
+      actSummary?.performance?.finishTime ||
+      "",
+    bookingDetails: doc?.bookingDetails || { djServicesBooked: false },
+    payments: rawPayments.length ? rawPayments : paymentsMeta,
+    accounting: doc?.accounting || null,
+    balancePaid: Boolean(doc?.balancePaid),
+    bandPaymentsSent: Boolean(doc?.bandPaymentsSent),
 
-  paymentLink: doc?.paymentLink || doc?.balanceInvoiceUrl || "",
-  invoicePdfUrl: doc?.invoicePdfUrl || doc?.balanceInvoicePdfUrl || "",
-  balanceInvoiceUrl: doc?.balanceInvoiceUrl || "",
-  balanceInvoicePdfUrl: doc?.balanceInvoicePdfUrl || "",
+    paymentLink: doc?.paymentLink || doc?.balanceInvoiceUrl || "",
+    invoicePdfUrl: doc?.invoicePdfUrl || doc?.balanceInvoicePdfUrl || "",
+    balanceInvoiceUrl: doc?.balanceInvoiceUrl || "",
+    balanceInvoicePdfUrl: doc?.balanceInvoicePdfUrl || "",
 
-  allocation: doc?.allocation || { status: "in_progress" },
-  review: doc?.review || { requestedCount: 0, received: false },
-  eventSheet: doc?.eventSheet || {},
-  userEmail: doc?.userEmail || "",
-  userAddress: doc?.userAddress || {},
-  venue: doc?.venue || "",
-  venueAddress: doc?.venueAddress || "",
-  actOwnerMusicianId: doc?.actOwnerMusicianId || "",
-  actId,
-  actsSummary: Array.isArray(doc?.actsSummary) ? doc.actsSummary : [],
-  performanceTimes: doc?.performanceTimes || actSummary?.performance || {},
-  contractUrl: doc?.contractUrl || "",
-  pdfUrl: doc?.pdfUrl || "",
-  contract: doc?.contract || null,
-  actData: linkedAct
-    ? {
-        _id: linkedAct?._id,
-        name: linkedAct?.name || "",
-        tscName: linkedAct?.tscName || "",
-        extras: linkedAct?.extras || {},
-        paSystem: linkedAct?.paSystem || null,
-        lightingSystem: linkedAct?.lightingSystem || null,
-      }
-    : null,
-  createdAt: doc?.createdAt,
-  updatedAt: doc?.updatedAt,
-};
+    allocation: doc?.allocation || { status: "in_progress" },
+    review: doc?.review || { requestedCount: 0, received: false },
+    eventSheet: doc?.eventSheet || {},
+    userEmail: doc?.userEmail || "",
+    userAddress: doc?.userAddress || {},
+    venue: doc?.venue || "",
+    venueAddress: doc?.venueAddress || "",
+    actOwnerMusicianId: doc?.actOwnerMusicianId || "",
+    actId,
+    actsSummary: Array.isArray(doc?.actsSummary) ? doc.actsSummary : [],
+    performanceTimes: doc?.performanceTimes || actSummary?.performance || {},
+    contractUrl: doc?.contractUrl || "",
+    pdfUrl: doc?.pdfUrl || "",
+    contract: doc?.contract || null,
+    actData: linkedAct
+      ? {
+          _id: linkedAct?._id,
+          name: linkedAct?.name || "",
+          tscName: linkedAct?.tscName || "",
+          extras: linkedAct?.extras || {},
+          paSystem: linkedAct?.paSystem || null,
+          lightingSystem: linkedAct?.lightingSystem || null,
+        }
+      : null,
+    createdAt: doc?.createdAt,
+    updatedAt: doc?.updatedAt,
+  };
 
   return row;
 };
@@ -538,8 +661,10 @@ const row = {
 const isTSCAdmin = (user) => {
   const role = String(user?.role || "").toLowerCase();
   const email = String(user?.email || "").toLowerCase();
-  return ["admin", "superadmin", "tsc_admin"].includes(role) ||
-         email === "hello@thesupremecollective.co.uk";
+  return (
+    ["admin", "superadmin", "tsc_admin"].includes(role) ||
+    email === "hello@thesupremecollective.co.uk"
+  );
 };
 
 // field-level projection by role
@@ -584,7 +709,6 @@ const buildSearchClause = (q) => {
   };
 };
 
-
 // LIST bookings for booking board
 router.get("/", musicianAuth, async (req, res) => {
   try {
@@ -613,7 +737,10 @@ router.get("/", musicianAuth, async (req, res) => {
       ];
     }
 
-    const boardRowsRaw = await BookingBoardItem.find(boardQuery, isAdmin ? adminProjection : actOwnerProjection)
+    const boardRowsRaw = await BookingBoardItem.find(
+      boardQuery,
+      isAdmin ? adminProjection : actOwnerProjection,
+    )
       .limit(Number(limit) || 500)
       .lean();
 
@@ -654,8 +781,10 @@ router.get("/", musicianAuth, async (req, res) => {
     const dir = String(sortDir).toLowerCase() === "desc" ? -1 : 1;
     rows.sort((a, b) => {
       if (sortBy === "createdAt") {
-        const aTime = new Date(a?.createdAt || a?.bookingDateISO || 0).getTime() || 0;
-        const bTime = new Date(b?.createdAt || b?.bookingDateISO || 0).getTime() || 0;
+        const aTime =
+          new Date(a?.createdAt || a?.bookingDateISO || 0).getTime() || 0;
+        const bTime =
+          new Date(b?.createdAt || b?.bookingDateISO || 0).getTime() || 0;
         return (aTime - bTime) * dir;
       }
       // default: eventDateISO
@@ -681,24 +810,30 @@ router.post("/", musicianAuth, async (req, res) => {
     }
 
     const payload = req.body || {};
-    const bookingRef = String(payload.bookingRef || payload.bookingId || "").trim();
+    const bookingRef = String(
+      payload.bookingRef || payload.bookingId || "",
+    ).trim();
 
     if (!bookingRef) {
-      return res.status(400).json({ success: false, message: "bookingRef is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "bookingRef is required" });
     }
 
     const eventDateISO = String(payload.eventDateISO || "").slice(0, 10);
-    const eventDate =
-      /^\d{4}-\d{2}-\d{2}$/.test(eventDateISO) ? new Date(`${eventDateISO}T00:00:00.000Z`) : null;
+    const eventDate = /^\d{4}-\d{2}-\d{2}$/.test(eventDateISO)
+      ? new Date(`${eventDateISO}T00:00:00.000Z`)
+      : null;
 
-    const clientEmail =
-      String(
-        payload.clientEmail ||
-          (Array.isArray(payload.clientEmails) ? payload.clientEmails[0]?.email : "") ||
-          ""
-      )
-        .trim()
-        .toLowerCase();
+    const clientEmail = String(
+      payload.clientEmail ||
+        (Array.isArray(payload.clientEmails)
+          ? payload.clientEmails[0]?.email
+          : "") ||
+        "",
+    )
+      .trim()
+      .toLowerCase();
 
     // --------- 1) Upsert Booking (source of truth) ----------
     const bookingPatch = {
@@ -709,7 +844,12 @@ router.post("/", musicianAuth, async (req, res) => {
       eventDate: eventDate || undefined,
       date: eventDate || undefined,
 
-      clientName: String(payload.bookerName || payload.clientFirstNames || payload.clientName || "").trim(),
+      clientName: String(
+        payload.bookerName ||
+          payload.clientFirstNames ||
+          payload.clientName ||
+          "",
+      ).trim(),
       clientEmail: clientEmail || undefined,
       userEmail: clientEmail || undefined,
 
@@ -721,7 +861,9 @@ router.post("/", musicianAuth, async (req, res) => {
 
       // invoice/link mirrors
       paymentLink: String(payload.paymentLink || "").trim(),
-      invoicePdfUrl: String(payload.invoiceUrl || payload.invoicePdfUrl || "").trim(),
+      invoicePdfUrl: String(
+        payload.invoiceUrl || payload.invoicePdfUrl || "",
+      ).trim(),
 
       // balance fields (optional)
       balanceInvoiceUrl: String(payload.balanceInvoiceUrl || "").trim(),
@@ -729,12 +871,14 @@ router.post("/", musicianAuth, async (req, res) => {
     };
 
     // remove undefined so we don’t stomp fields
-    Object.keys(bookingPatch).forEach((k) => bookingPatch[k] === undefined && delete bookingPatch[k]);
+    Object.keys(bookingPatch).forEach(
+      (k) => bookingPatch[k] === undefined && delete bookingPatch[k],
+    );
 
     const booking = await Booking.findOneAndUpdate(
       { bookingId: bookingRef },
       { $set: bookingPatch },
-      { new: true, upsert: true }
+      { new: true, upsert: true },
     );
 
     // --------- 2) Upsert BookingBoardItem (UI row) ----------
@@ -742,7 +886,9 @@ router.post("/", musicianAuth, async (req, res) => {
       bookingId: booking._id, // ObjectId ref to Booking
 
       bookerName: String(payload.bookerName || "").trim(),
-      clientFirstNames: String(payload.clientFirstNames || payload.bookerName || "").trim(),
+      clientFirstNames: String(
+        payload.clientFirstNames || payload.bookerName || "",
+      ).trim(),
       bookingRef,
 
       eventDateISO: eventDateISO || "",
@@ -755,7 +901,9 @@ router.post("/", musicianAuth, async (req, res) => {
       agent: String(payload.agent || "Direct").trim(),
 
       clientEmails: clientEmail ? [{ email: clientEmail }] : [],
-clientAddress: String(payload.clientAddress || "").trim(),
+      clientEmail,
+      clientAddress: String(payload.clientAddress || "").trim(),
+      accounting: payload.accounting || undefined,
       eventType: String(payload.eventType || "").trim(),
       actName: String(payload.actName || "").trim(),
       actTscName: String(payload.actTscName || payload.actName || "").trim(),
@@ -764,7 +912,9 @@ clientAddress: String(payload.clientAddress || "").trim(),
 
       bandSize: Number(payload.bandSize || 0) || 0,
       lineupSelected: String(payload.lineupSelected || "").trim(),
-      lineupComposition: Array.isArray(payload.lineupComposition) ? payload.lineupComposition : [],
+      lineupComposition: Array.isArray(payload.lineupComposition)
+        ? payload.lineupComposition
+        : [],
 
       arrivalTime: String(payload.arrivalTime || "").trim(),
       finishTime: String(payload.finishTime || "").trim(),
@@ -779,7 +929,7 @@ clientAddress: String(payload.clientAddress || "").trim(),
     const boardRow = await BookingBoardItem.findOneAndUpdate(
       { bookingRef },
       { $set: boardPatch, $setOnInsert: { createdAt: new Date() } },
-      { new: true, upsert: true }
+      { new: true, upsert: true },
     );
 
     return res.json({
@@ -795,8 +945,11 @@ clientAddress: String(payload.clientAddress || "").trim(),
   }
 });
 
-
 router.patch("/:id", musicianAuth, async (req, res) => {
+  console.log("🟡 PATCH /board/bookings/:id", {
+    id: req.params.id,
+    body: req.body,
+  });
   try {
     const rawBody = { ...req.body };
     const body = { ...rawBody, updatedAt: new Date() };
@@ -818,11 +971,14 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
     // First try: treat :id as a real Booking _id
     const bookingDoc = await Booking.findById(req.params.id);
-
+    console.log("🟡 PATCH target:", {
+      foundBooking: Boolean(bookingDoc),
+      id: req.params.id,
+    });
     if (bookingDoc) {
       if (!isAdmin) {
         const reqMusicianId = toObjectIdString(
-          req.user?.musicianId || req.user?._id || req.user?.id
+          req.user?.musicianId || req.user?._id || req.user?.id,
         );
         const reqEmail = String(req.user?.email || "").toLowerCase();
 
@@ -850,11 +1006,17 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       }
 
       const savedBooking = await applyBookingPatch(bookingDoc, body);
-      const savedBookingDoc = savedBooking?.toObject ? savedBooking.toObject() : savedBooking;
-      const firstAct = Array.isArray(savedBookingDoc?.actsSummary) && savedBookingDoc.actsSummary.length
-        ? savedBookingDoc.actsSummary[0]
-        : null;
-      const savedActId = String(firstAct?.actId || savedBookingDoc?.act || "").trim();
+      const savedBookingDoc = savedBooking?.toObject
+        ? savedBooking.toObject()
+        : savedBooking;
+      const firstAct =
+        Array.isArray(savedBookingDoc?.actsSummary) &&
+        savedBookingDoc.actsSummary.length
+          ? savedBookingDoc.actsSummary[0]
+          : null;
+      const savedActId = String(
+        firstAct?.actId || savedBookingDoc?.act || "",
+      ).trim();
       const savedAct = savedActId
         ? await actModel
             .findById(savedActId)
@@ -863,7 +1025,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         : null;
       const normalized = normalizeBookingToBoardRow(
         savedBooking,
-        new Map(savedAct ? [[String(savedAct._id), savedAct]] : [])
+        new Map(savedAct ? [[String(savedAct._id), savedAct]] : []),
       );
 
       const mirrorPatch = {
@@ -873,9 +1035,14 @@ router.patch("/:id", musicianAuth, async (req, res) => {
             savedBooking?.totals?.fullAmount ||
               savedBooking?.amount ||
               savedBooking?.fee ||
-              0
+              0,
           ) || 0,
-          accounting: savedBooking?.accounting || {},
+
+        clientAddress: body.clientAddress || savedBooking?.clientAddress || "",
+        clientEmail: body.clientEmail || savedBooking?.clientEmail || "",
+        clientEmails: body.clientEmails || [],
+        accounting: savedBooking?.accounting || body.accounting || {},
+
         bookingDetails:
           normalized?.bookingDetails || savedBooking?.bookingDetails || {},
         actsSummary: Array.isArray(savedBooking?.actsSummary)
@@ -890,19 +1057,33 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         contractUrl: savedBooking?.contractUrl || "",
       };
 
-    await BookingBoardItem.updateMany(
+      await BookingBoardItem.updateMany(
+        
+        {
+          $or: [
+            { sourceBookingId: savedBooking._id },
+            { bookingRef: savedBooking.bookingId },
+            ...(savedBooking.sessionId
+              ? [{ sessionId: savedBooking.sessionId }]
+              : []),
+          ],
+        },
+        { $set: mirrorPatch },
+      );
+
+      const mirrorResult = await BookingBoardItem.updateMany(
   {
     $or: [
       { sourceBookingId: savedBooking._id },
       { bookingRef: savedBooking.bookingId },
-      ...(savedBooking.sessionId
-        ? [{ sessionId: savedBooking.sessionId }]
-        : []),
+      ...(savedBooking.sessionId ? [{ sessionId: savedBooking.sessionId }] : []),
     ],
   },
   { $set: mirrorPatch }
 );
 
+console.log("🟢 Board mirror update result:", mirrorResult);
+      
       return res.json({
         success: true,
         row: normalized,
@@ -917,17 +1098,17 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         .lean();
 
       const reqMusicianId = toObjectIdString(
-        req.user?.musicianId || req.user?._id || req.user?.id
+        req.user?.musicianId || req.user?._id || req.user?.id,
       );
       const reqEmail = String(req.user?.email || "").toLowerCase();
       const rowOwnerId = toObjectIdString(existingRow?.actOwnerMusicianId);
 
       const rowEmails = [
         String(existingRow?.userEmail || "").toLowerCase(),
-        ...((Array.isArray(existingRow?.clientEmails)
+        ...(Array.isArray(existingRow?.clientEmails)
           ? existingRow.clientEmails
           : []
-        ).map((e) => String(e?.email || "").toLowerCase())),
+        ).map((e) => String(e?.email || "").toLowerCase()),
       ].filter(Boolean);
 
       const canEditOwnRow =
@@ -937,7 +1118,8 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       if (!canEditOwnRow) {
         return res.status(403).json({
           success: false,
-          message: "You can only edit booking board rows visible to your own account.",
+          message:
+            "You can only edit booking board rows visible to your own account.",
         });
       }
     }
@@ -945,7 +1127,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
     const row = await BookingBoardItem.findByIdAndUpdate(
       req.params.id,
       { $set: body },
-      { new: true }
+      { new: true },
     );
 
     if (!row) {
@@ -967,7 +1149,5 @@ router.patch("/:id", musicianAuth, async (req, res) => {
     });
   }
 });
-
-
 
 export default router;
