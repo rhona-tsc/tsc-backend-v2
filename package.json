@@ -45,6 +45,7 @@
     "nodemon": "^3.1.9",
     "open": "^9.1.0",
     "openai": "^4.96.2",
+    "pdfkit": "^0.18.0",
     "puppeteer": "^24.7.2",
     "puppeteer-core": "^24.30.0",
     "react-easy-crop": "^5.4.1",

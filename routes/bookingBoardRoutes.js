@@ -1,3 +1,5 @@
+// routes/bookingBoardRoutes.js
+
 import express from "express";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import Booking from "../models/bookingModel.js";
@@ -319,6 +321,7 @@ const mergeRowData = (preferred, secondary) => {
       ? preferred.clientEmails
       : secondary?.clientEmails,
     clientEmail: preferred?.clientEmail || secondary?.clientEmail,
+    clientAddress: preferred?.clientAddress || secondary?.clientAddress,
     userEmail: preferred?.userEmail || secondary?.userEmail,
     eventDateISO: preferred?.eventDateISO || secondary?.eventDateISO,
     enquiryDateISO: preferred?.enquiryDateISO || secondary?.enquiryDateISO,
@@ -752,7 +755,7 @@ router.post("/", musicianAuth, async (req, res) => {
       agent: String(payload.agent || "Direct").trim(),
 
       clientEmails: clientEmail ? [{ email: clientEmail }] : [],
-
+clientAddress: String(payload.clientAddress || "").trim(),
       eventType: String(payload.eventType || "").trim(),
       actName: String(payload.actName || "").trim(),
       actTscName: String(payload.actTscName || payload.actName || "").trim(),

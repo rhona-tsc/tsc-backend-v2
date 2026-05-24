@@ -3,6 +3,12 @@ import { startOfDay, subDays, subHours, isValid, parseISO } from "date-fns";
 import Booking from "../models/bookingModel.js";
 import { enqueueReminder } from "../services/remindersQueue.js"; // BullMQ / Agenda / node-cron wrapper
 import Stripe from "stripe";
+import BookingBoardItem from "../models/bookingBoardItem.js";
+import PDFDocument from "pdfkit";
+import cloudinary from "../config/cloudinary.js";
+
+import fs from "fs";
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_V2, {
   apiVersion: "2024-06-20",
 });
@@ -688,4 +694,503 @@ const voidExistingStripeInvoiceIfAny = async (booking) => {
   }
 
   return null;
+};
+
+const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+
+const vatFromGross = (gross, vatRate = 0.2) => {
+  const vat = round2(gross * (vatRate / (1 + vatRate)));
+  return { vat, net: round2(gross - vat) };
+};
+
+const getPrimaryEmail = (row) =>
+  row?.clientEmails?.find?.((e) => e?.email)?.email ||
+  row?.clientEmail ||
+  row?.userEmail ||
+  row?.userAddress?.email ||
+  "";
+
+const getInvoiceCompany = (row) => {
+  const agent = String(row?.agent || row?.source || "")
+    .trim()
+    .toLowerCase();
+
+  const isSupremeCollective =
+    agent === "direct" ||
+    agent === "bmm" ||
+    agent === "tsc" ||
+    agent === "the supreme collective" ||
+    agent === "weddingjam" ||
+    agent === "wedding jam" ||
+    agent === "staar productions" ||
+    agent === "encore";
+
+  if (isSupremeCollective) {
+    return {
+      name: "The Supreme Collective Ltd",
+      address: "Cramond, Reeves Lane, Roydon, CM19 5LE",
+      email: "hello@thesupremecollective.co.uk",
+      companyNumber: "",
+      vatNumber: "",
+      brand: "TSC",
+      accent: "#ff6667",
+    };
+  }
+
+  return {
+    name: "Bamboo Music Management Ltd",
+    address: "Cramond, Reeves Lane, Roydon, CM19 5LE",
+    email: "bamboomusicmgmt@gmail.com",
+    companyNumber: "09318270",
+    vatNumber: "517 6408 85",
+    brand: "BMM",
+    accent: "#43d8e8",
+  };
+};
+
+const formatMoney = (value) => `£${Number(value || 0).toFixed(2)}`;
+
+const firstNonEmpty = (...values) =>
+  values.find((value) => String(value || "").trim()) || "";
+
+const getInvoiceLogoPath = (invoiceCompany) => {
+  if (invoiceCompany?.brand === "BMM") {
+    return process.env.BMM_INVOICE_LOGO_PATH || "";
+  }
+
+  return process.env.TSC_INVOICE_LOGO_PATH || "";
+};
+
+const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
+  new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: "A4",
+      margin: 0,
+      bufferPages: true,
+    });
+    const chunks = [];
+
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    const pageWidth = doc.page.width;
+    const pageHeight = doc.page.height;
+    const navy = "#071827";
+    const card = "#ffffff";
+    const text = "#1f2937";
+    const muted = "#6b7280";
+    const line = "#d1d5db";
+    const accent = invoiceCompany?.accent || "#43d8e8";
+
+    const invoiceRef = row.bookingRef || row.bookingId || String(row._id);
+    const clientName = firstNonEmpty(
+      row.clientFirstNames,
+      row.clientName,
+      row.bookerName,
+      "Client",
+    );
+    const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
+    const actName = firstNonEmpty(row.actTscName, row.actName, row.tscName);
+    const clientAddress = firstNonEmpty(
+      row.clientAddress,
+      row.billingAddress,
+      row.userAddress?.billingAddress,
+      row.userAddress?.address1 &&
+        [
+          row.userAddress?.address1,
+          row.userAddress?.address2,
+          row.userAddress?.city,
+          row.userAddress?.county,
+          row.userAddress?.postcode,
+        ]
+          .filter(Boolean)
+          .join(", "),
+    );
+
+    // Dark navy full-page background.
+    doc.rect(0, 0, pageWidth, pageHeight).fill(navy);
+
+    // Top banner.
+    doc.rect(0, 0, pageWidth, 132).fill(navy);
+    const logoPath = getInvoiceLogoPath(invoiceCompany);
+    if (logoPath && fs.existsSync(logoPath)) {
+      doc.image(logoPath, 50, 28, { fit: [240, 72] });
+    } else {
+      doc
+        .fillColor(accent)
+        .font("Helvetica-Bold")
+        .fontSize(32)
+        .text(
+          invoiceCompany?.brand === "BMM" ? "BAMBOO" : "THE SUPREME",
+          50,
+          36,
+        );
+      doc
+        .font("Helvetica")
+        .fontSize(11)
+        .text(
+          invoiceCompany?.brand === "BMM" ? "MUSIC MANAGEMENT" : "COLLECTIVE",
+          52,
+          76,
+          {
+            characterSpacing: 4,
+          },
+        );
+    }
+
+    doc
+      .strokeColor(accent)
+      .lineWidth(1.5)
+      .moveTo(50, 108)
+      .lineTo(pageWidth - 50, 108)
+      .stroke();
+
+    doc
+      .fillColor("#ffffff")
+      .font("Helvetica-Bold")
+      .fontSize(26)
+      .text("INVOICE", pageWidth - 220, 42, { width: 170, align: "right" });
+
+    // Main white invoice card.
+    const cardX = 42;
+    const cardY = 150;
+    const cardW = pageWidth - 84;
+    const cardH = pageHeight - 205;
+    doc.roundedRect(cardX, cardY, cardW, cardH, 12).fill(card);
+
+    // Company and invoice details.
+    doc.fillColor(text).font("Helvetica-Bold").fontSize(12);
+    doc.text("From", cardX + 26, cardY + 26);
+    doc.font("Helvetica").fontSize(10).fillColor(text);
+    doc.text(invoiceCompany.name, cardX + 26, cardY + 46);
+    doc.text(invoiceCompany.address, cardX + 26, cardY + 61);
+    doc.text(invoiceCompany.email, cardX + 26, cardY + 76);
+    if (invoiceCompany.companyNumber) {
+      doc.text(
+        `Company number: ${invoiceCompany.companyNumber}`,
+        cardX + 26,
+        cardY + 91,
+      );
+    }
+    if (invoiceCompany.vatNumber) {
+      doc.text(
+        `VAT registration number: ${invoiceCompany.vatNumber}`,
+        cardX + 26,
+        cardY + 106,
+      );
+    }
+
+    doc.fillColor(text).font("Helvetica-Bold").fontSize(12);
+    doc.text("Invoice details", cardX + cardW - 210, cardY + 26, {
+      width: 170,
+      align: "right",
+    });
+    doc.font("Helvetica").fontSize(10).fillColor(text);
+    doc.text(`Invoice ref: ${invoiceRef}`, cardX + cardW - 230, cardY + 46, {
+      width: 190,
+      align: "right",
+    });
+    doc.text(
+      `Issue date: ${new Date().toLocaleDateString("en-GB")}`,
+      cardX + cardW - 230,
+      cardY + 61,
+      {
+        width: 190,
+        align: "right",
+      },
+    );
+
+    // Client/event block.
+    const detailY = cardY + 145;
+    doc
+      .strokeColor(line)
+      .lineWidth(1)
+      .moveTo(cardX + 26, detailY - 18)
+      .lineTo(cardX + cardW - 26, detailY - 18)
+      .stroke();
+
+    doc
+      .fillColor(text)
+      .font("Helvetica-Bold")
+      .fontSize(12)
+      .text("Bill to", cardX + 26, detailY);
+    doc.font("Helvetica").fontSize(10).fillColor(text);
+    doc.text(clientName, cardX + 26, detailY + 20);
+    doc.text(getPrimaryEmail(row), cardX + 26, detailY + 35);
+    if (clientAddress) {
+      doc.text(clientAddress, cardX + 26, detailY + 50, { width: 230 });
+    }
+
+    doc
+      .fillColor(text)
+      .font("Helvetica-Bold")
+      .fontSize(12)
+      .text("Event", cardX + 300, detailY);
+    doc.font("Helvetica").fontSize(10).fillColor(text);
+    doc.text(`Date: ${eventDate || "TBC"}`, cardX + 300, detailY + 20);
+    doc.text(`Act: ${actName || "TBC"}`, cardX + 300, detailY + 35, {
+      width: 220,
+    });
+    if (row.lineupSelected) {
+      doc.text(`Lineup: ${row.lineupSelected}`, cardX + 300, detailY + 50, {
+        width: 220,
+      });
+    }
+
+    // Invoice table.
+    const tableX = cardX + 26;
+    const tableY = detailY + 105;
+    const tableW = cardW - 52;
+    const descW = 300;
+    const qtyW = 55;
+    const amountW = tableW - descW - qtyW;
+
+    doc.roundedRect(tableX, tableY, tableW, 30, 4).fill(navy);
+    doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(10);
+    doc.text("Description", tableX + 12, tableY + 10, { width: descW - 20 });
+    doc.text("Qty", tableX + descW + 8, tableY + 10, {
+      width: qtyW - 12,
+      align: "right",
+    });
+    doc.text("Amount", tableX + descW + qtyW + 8, tableY + 10, {
+      width: amountW - 20,
+      align: "right",
+    });
+
+    const rows = [
+      {
+        description: "Band fee / artist performance fee",
+        qty: "1",
+        amount: split.passThroughGross,
+      },
+      {
+        description: "Music management commission (VAT inclusive)",
+        qty: "1",
+        amount: split.commissionGross,
+      },
+      {
+        description: "VAT included within commission",
+        qty: "",
+        amount: split.commissionVat,
+        muted: true,
+      },
+    ];
+
+    let y = tableY + 30;
+    rows.forEach((item, index) => {
+      const rowH = 34;
+      doc
+        .rect(tableX, y, tableW, rowH)
+        .fill(index % 2 === 0 ? "#f9fafb" : "#ffffff");
+      doc
+        .fillColor(item.muted ? muted : text)
+        .font(item.muted ? "Helvetica" : "Helvetica-Bold")
+        .fontSize(10);
+      doc.text(item.description, tableX + 12, y + 11, { width: descW - 20 });
+      doc.text(item.qty, tableX + descW + 8, y + 11, {
+        width: qtyW - 12,
+        align: "right",
+      });
+      doc.text(formatMoney(item.amount), tableX + descW + qtyW + 8, y + 11, {
+        width: amountW - 20,
+        align: "right",
+      });
+      doc
+        .strokeColor(line)
+        .moveTo(tableX, y + rowH)
+        .lineTo(tableX + tableW, y + rowH)
+        .stroke();
+      y += rowH;
+    });
+
+    // Totals.
+    const totalsX = cardX + cardW - 245;
+    const totalsY = y + 24;
+    doc.fillColor(text).font("Helvetica").fontSize(10);
+    doc.text("Band fee / pass-through", totalsX, totalsY, { width: 125 });
+    doc.text(formatMoney(split.passThroughGross), totalsX + 125, totalsY, {
+      width: 90,
+      align: "right",
+    });
+    doc.text("Commission VAT-inc", totalsX, totalsY + 18, { width: 125 });
+    doc.text(formatMoney(split.commissionGross), totalsX + 125, totalsY + 18, {
+      width: 90,
+      align: "right",
+    });
+    doc.text("VAT on commission", totalsX, totalsY + 36, { width: 125 });
+    doc.text(formatMoney(split.commissionVat), totalsX + 125, totalsY + 36, {
+      width: 90,
+      align: "right",
+    });
+    doc
+      .strokeColor(accent)
+      .lineWidth(1.5)
+      .moveTo(totalsX, totalsY + 62)
+      .lineTo(totalsX + 215, totalsY + 62)
+      .stroke();
+    doc.fillColor(text).font("Helvetica-Bold").fontSize(13);
+    doc.text("Total due", totalsX, totalsY + 74, { width: 125 });
+    doc.text(formatMoney(split.gross), totalsX + 125, totalsY + 74, {
+      width: 90,
+      align: "right",
+    });
+
+    // VAT note.
+    doc
+      .fillColor(muted)
+      .font("Helvetica")
+      .fontSize(9)
+      .text(
+        "VAT is charged only on the music management / commission element. The band fee is shown separately as a pass-through artist fee.",
+        cardX + 26,
+        cardY + cardH - 64,
+        { width: cardW - 52 },
+      );
+
+    doc
+      .fillColor("#ffffff")
+      .font("Helvetica")
+      .fontSize(8)
+      .text(
+        `${invoiceCompany.name} • ${invoiceCompany.email}`,
+        50,
+        pageHeight - 34,
+        {
+          width: pageWidth - 100,
+          align: "center",
+        },
+      );
+
+    doc.end();
+  });
+
+export const createBoardInvoice = async (req, res) => {
+  try {
+    const { bookingId } = req.body;
+
+    if (!bookingId) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingId is required",
+      });
+    }
+
+    const row = await BookingBoardItem.findById(bookingId).lean();
+
+    if (!row) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking board row not found",
+      });
+    }
+
+    const invoiceCompany = getInvoiceCompany(row);
+
+    const gross = round2(
+      row.grossValue || row.totals?.fullAmount || row.amount || row.fee || 0,
+    );
+
+    const accounting = row.accounting || {};
+    const vatRate = Number(accounting.vatRate ?? 0.2);
+
+    const commissionGross = round2(accounting.commissionGross || 0);
+    const passThroughGross = round2(
+      accounting.passThroughGross || Math.max(gross - commissionGross, 0),
+    );
+
+    const commissionSplit = vatFromGross(commissionGross, vatRate);
+
+    const split = {
+      gross,
+      vatRate,
+      commissionGross,
+      commissionNet: commissionSplit.net,
+      commissionVat: commissionSplit.vat,
+      passThroughGross,
+    };
+
+    const pdfBuffer = await makeInvoicePdfBuffer(row, split, invoiceCompany);
+
+    if (!pdfBuffer?.length || !pdfBuffer.slice(0, 4).toString().includes("%PDF")) {
+  throw new Error("Generated invoice buffer is not a valid PDF.");
+}
+
+   console.log("🧾 PDF buffer debug:", {
+  length: pdfBuffer?.length,
+  firstBytes: pdfBuffer?.slice(0, 20).toString(),
+  isPdf: pdfBuffer?.slice(0, 4).toString() === "%PDF",
+});
+
+const uploadResult = await new Promise((resolve, reject) => {
+  const stream = cloudinary.uploader.upload_stream(
+    {
+      folder: "booking-board-invoices",
+      resource_type: "raw",
+      public_id: `invoice-${row.bookingRef || row._id}.pdf`,
+      overwrite: true,
+      invalidate: true,
+    },
+    (error, result) => {
+      console.log("☁️ Cloudinary invoice upload result:", result);
+      if (error) {
+        console.error("❌ Cloudinary invoice upload error:", error);
+        reject(error);
+      } else {
+        resolve(result);
+      }
+    },
+  );
+
+  stream.end(pdfBuffer);
+});
+
+    const invoiceUrl = uploadResult.secure_url;
+
+    const updated = await BookingBoardItem.findByIdAndUpdate(
+      row._id,
+      {
+        $set: {
+          invoiceUrl,
+          invoicePdfUrl: invoiceUrl,
+          "payments.boardInvoicePdfUrl": invoiceUrl,
+          "payments.boardInvoiceCreatedAt": new Date(),
+          accounting: split,
+        },
+      },
+      { new: true },
+    );
+
+    await Booking.findOneAndUpdate(
+      {
+        $or: [
+          { _id: row.sourceBookingId },
+          { _id: row.bookingId },
+          { bookingId: row.bookingRef },
+          { bookingRef: row.bookingRef },
+        ].filter((x) => Object.values(x)[0]),
+      },
+      {
+        $set: {
+          invoiceUrl,
+          invoicePdfUrl: invoiceUrl,
+          "payments.boardInvoicePdfUrl": invoiceUrl,
+          "payments.boardInvoiceCreatedAt": new Date(),
+          accounting: split,
+        },
+      },
+    );
+
+    return res.json({
+      success: true,
+      invoiceUrl,
+      row: updated,
+    });
+  } catch (error) {
+    console.error("createBoardInvoice error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Could not create invoice",
+    });
+  }
 };
