@@ -1094,10 +1094,20 @@ export const createBoardInvoice = async (req, res) => {
     const accounting = row.accounting || {};
     const vatRate = Number(accounting.vatRate ?? 0.2);
 
-    const commissionGross = round2(accounting.commissionGross || 0);
-    const passThroughGross = round2(
-      accounting.passThroughGross || Math.max(gross - commissionGross, 0),
-    );
+  const commissionGross = round2(
+  accounting.commissionGross ||
+    row.netCommission ||
+    row.commissionGross ||
+    row.commission ||
+    row.estimatedCommission ||
+    0,
+);
+
+const passThroughGross = round2(
+  accounting.passThroughGross ||
+    row.passThroughGross ||
+    Math.max(gross - commissionGross, 0),
+);
 
     const commissionSplit = vatFromGross(commissionGross, vatRate);
 
@@ -1126,10 +1136,11 @@ const uploadResult = await new Promise((resolve, reject) => {
   const stream = cloudinary.uploader.upload_stream(
     {
       folder: "booking-board-invoices",
-      resource_type: "raw",
-      public_id: `invoice-${row.bookingRef || row._id}.pdf`,
-      overwrite: true,
-      invalidate: true,
+    resource_type: "raw",
+public_id: `invoice-${row.bookingRef || row._id}`,
+overwrite: true,
+invalidate: true,
+format: "pdf",
     },
     (error, result) => {
       console.log("☁️ Cloudinary invoice upload result:", result);
@@ -1145,18 +1156,26 @@ const uploadResult = await new Promise((resolve, reject) => {
   stream.end(pdfBuffer);
 });
 
-    const invoiceUrl = uploadResult.secure_url;
+const invoiceUrl = uploadResult.secure_url;
+
+console.log("🧾 Invoice delivery URLs:", {
+  secure_url: uploadResult.secure_url,
+  forced_download_url: invoiceUrl,
+});
 
     const updated = await BookingBoardItem.findByIdAndUpdate(
       row._id,
       {
-        $set: {
-          invoiceUrl,
-          invoicePdfUrl: invoiceUrl,
-          "payments.boardInvoicePdfUrl": invoiceUrl,
-          "payments.boardInvoiceCreatedAt": new Date(),
-          accounting: split,
-        },
+       $set: {
+  invoiceUrl,
+  invoicePdfUrl: invoiceUrl,
+  payments: {
+    ...(row.payments || {}),
+    boardInvoicePdfUrl: invoiceUrl,
+    boardInvoiceCreatedAt: new Date(),
+  },
+  accounting: split,
+}
       },
       { new: true },
     );
@@ -1171,13 +1190,16 @@ const uploadResult = await new Promise((resolve, reject) => {
         ].filter((x) => Object.values(x)[0]),
       },
       {
-        $set: {
-          invoiceUrl,
-          invoicePdfUrl: invoiceUrl,
-          "payments.boardInvoicePdfUrl": invoiceUrl,
-          "payments.boardInvoiceCreatedAt": new Date(),
-          accounting: split,
-        },
+       $set: {
+  invoiceUrl,
+  invoicePdfUrl: invoiceUrl,
+  payments: {
+    ...(row.payments || {}),
+    boardInvoicePdfUrl: invoiceUrl,
+    boardInvoiceCreatedAt: new Date(),
+  },
+  accounting: split,
+}
       },
     );
 

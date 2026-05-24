@@ -27,6 +27,8 @@ const PaymentsSchema = new mongoose.Schema({
   depositAmount: { type: Number },              // £ deposit expected (from Stripe/cart)
   depositChargedAmount: { type: Number },       // £ actually charged on Stripe
   bandPaymentsSent: { type: Boolean, default: false },
+    boardInvoicePdfUrl: { type: String, default: "" },
+  boardInvoiceCreatedAt: { type: Date },
   bandPayments: [{
     musicianId: mongoose.Types.ObjectId,
     amount: Number,
@@ -71,7 +73,8 @@ const BookingBoardItemSchema = new mongoose.Schema({
   address: { type: String },
   county: { type: String },
   payments: PaymentsSchema,
-
+invoiceUrl: { type: String, default: "" },
+invoicePdfUrl: { type: String, default: "" },
   bandSize: { type: Number, default: 0 },                        // excluding manager
   lineupSelected: { type: String },                              // human label e.g. "6-Piece (2xVoc, Sax, Gtr, Bass, Drums)"
   lineupComposition: [{ type: String }],           // e.g. ["Lead Vocal","Guitar","Bass","Drums"]
