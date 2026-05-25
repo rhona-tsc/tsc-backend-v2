@@ -750,6 +750,25 @@ const getInvoiceCompany = (row) => {
 
 const formatMoney = (value) => `£${Number(value || 0).toFixed(2)}`;
 
+const formatInvoiceDate = (value) => {
+  if (!value) return "TBC";
+
+  const date =
+    value instanceof Date
+      ? value
+      : /^\d{4}-\d{2}-\d{2}$/.test(String(value))
+        ? new Date(`${value}T12:00:00`)
+        : new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "TBC";
+
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+};
+
 const getDueDateThursdayWeekBefore = (eventDateValue) => {
   const eventDate = new Date(eventDateValue);
   if (Number.isNaN(eventDate.getTime())) return "";
@@ -762,11 +781,7 @@ const getDueDateThursdayWeekBefore = (eventDateValue) => {
   const diffToThursday = day - 4;
   due.setDate(due.getDate() - diffToThursday);
 
-  return due.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  return formatInvoiceDate(due);
 };
 
 const firstNonEmpty = (...values) =>
@@ -919,7 +934,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       align: "right",
     });
     doc.text(
-      `Issue date: ${new Date().toLocaleDateString("en-GB")}`,
+      `Issue date: ${formatInvoiceDate(new Date())}`,
       cardX + cardW - 230,
       cardY + 61,
       {
@@ -928,7 +943,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       },
     );
     doc.text(
-  `Due date: ${dueDate || "TBC"}`,
+  `Due date: ${formatInvoiceDate(dueDate) || "TBC"}`,
   cardX + cardW - 230,
   cardY + 76,
   {

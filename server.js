@@ -68,6 +68,7 @@ import { runDeputyPayoutRelease } from "./services/deputyPayoutService.js";
 import Booking from "./models/bookingModel.js";
 import financeReconciliationRouter from "./routes/financeReconciliationRoute.js";
 import financeTaxRouter from "./routes/financeTaxRoute.js";
+import financeForecastRoutes from "./routes/financeForecastRoutes.js";
 
 /* -------------------------------------------------------------------------- */
 /*                               Boot + env log                               */
@@ -657,6 +658,7 @@ app.use("/api/finance/forecast-events", forecastEventRouter);
 app.use("/api/finance/recurring-rules", recurringForecastRuleRouter);
 app.use("/api/finance/reconcile", financeReconciliationRouter);
 app.use("/api/finance/tax", financeTaxRouter);
+app.use("/api/finance/forecast", financeForecastRoutes);
 
 app.use("/api/debug", debugRoutes);
 app.use("/api/allocations", allocationRoutes);
