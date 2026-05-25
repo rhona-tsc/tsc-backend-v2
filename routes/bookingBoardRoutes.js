@@ -1594,24 +1594,111 @@ router.post(
       });
 
       const usableRecords = records.filter(looksLikeRealBookingRow);
+const results = [];
+const errors = [];
+let syncedToFinance = 0;
 
-      req.body.csv = [
-        Object.keys(records[0] || {}).join(","),
-        ...usableRecords.map((row) =>
-          Object.values(row)
-            .map((v) => `"${String(v || "").replace(/"/g, '""')}"`)
-            .join(",")
-        ),
-      ].join("\n");
+for (const [index, row] of usableRecords.entries()) {
+  try {
+    const bookingRef =
+      cleanString(row.bookingRef) ||
+      cleanString(row.Reference) ||
+      `IMPORT-${normaliseDate(row.eventDateISO)}-${cleanString(row.clientFirstNames)
+        .replace(/\s+/g, "-")
+        .toUpperCase()}`;
 
-      // easiest: reuse your existing bulk-import-csv logic by extracting it into a helper next
-      return res.json({
-        success: true,
-        totalRowsInCsv: records.length,
-        usableRows: usableRecords.length,
-        skippedRows: records.length - usableRecords.length,
-        preview: usableRecords.slice(0, 5),
-      });
+    const grossValue = toNumber(
+      row.grossValue || row["Subtotal (after deposit taken) / Balance"]
+    );
+
+    const commissionGross = toNumber(
+      row.commissionGross || row["Musican Fee on gig"]
+    );
+
+    const passThroughGross = toNumber(
+      row.passThroughGross || row.Travel || Math.max(grossValue - commissionGross, 0)
+    );
+
+    const vatRate = 0.2;
+    const { vat: commissionVat, net: commissionNet } =
+      calcVatFromVatInclusiveGross(commissionGross, vatRate);
+
+    const boardPatch = {
+      bookingRef,
+      clientFirstNames: cleanString(row.clientFirstNames),
+      eventDateISO: normaliseDate(row.eventDateISO),
+      bookingDateISO: normaliseDate(row.bookingDateISO),
+      enquiryDateISO: normaliseDate(row.enquiryDateISO),
+
+      agent: cleanString(row.agent || "Direct"),
+      eventType: cleanString(row.eventType),
+      actName: cleanString(row.actName),
+      county: cleanString(row.county),
+      address: cleanString(row.address),
+
+      grossValue,
+
+      accounting: {
+        paymentStage: "",
+        vatRate,
+        commissionGross: round2(commissionGross),
+        commissionVat,
+        commissionNet,
+        passThroughGross: round2(passThroughGross),
+        currency: "GBP",
+      },
+
+      payments: {
+        depositAmount: 0,
+        depositChargedAmount: 0,
+        balancePaymentReceived: false,
+        bandPaymentsSent: false,
+      },
+
+      bookingDetails: {
+        eventType: cleanString(row.eventType),
+        evening: { sets: [] },
+        djServicesBooked: false,
+      },
+
+      allocation: { status: "in_progress", gaps: [] },
+      review: { requestedCount: 0, received: false, source: "internal" },
+      updatedAt: new Date(),
+    };
+
+    const saved = await BookingBoardItem.findOneAndUpdate(
+      { bookingRef },
+      { $set: boardPatch, $setOnInsert: { createdAt: new Date() } },
+      { new: true, upsert: true }
+    );
+
+    const forecast = await syncBoardRowToFinance(
+      saved.toObject ? saved.toObject() : saved
+    );
+
+    results.push(saved);
+    syncedToFinance += forecast ? 1 : 0;
+  } catch (err) {
+    errors.push({
+      row: index + 2,
+      error: err.message,
+      raw: row,
+    });
+  }
+}
+
+return res.json({
+  success: errors.length === 0,
+  totalRowsInCsv: records.length,
+  usableRows: usableRecords.length,
+  skippedRows: records.length - usableRecords.length,
+  imported: results.length,
+  syncedToFinance,
+  failed: errors.length,
+  errors,
+  preview: results.slice(0, 5),
+});
+
     } catch (error) {
       console.error("❌ bulk-import-csv-file failed:", error);
       return res.status(500).json({
