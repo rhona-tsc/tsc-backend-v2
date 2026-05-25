@@ -167,13 +167,14 @@ router.post("/bookings/sync-from-board/:boardRowId", musicianAuth, async (req, r
 
 router.get("/bookings", musicianAuth, async (req, res) => {
   try {
-    const {
-      from,
-      to,
-      status,
-      q = "",
-      limit = 500,
-    } = req.query;
+   const {
+  from,
+  to,
+  status,
+  q = "",
+  limit = 500,
+  includeTests = "false",
+} = req.query;
 
     const query = {};
 
@@ -198,6 +199,15 @@ router.get("/bookings", musicianAuth, async (req, res) => {
         { agent: rx },
       ];
     }
+
+    if (includeTests !== "true") {
+  query.$and = [
+    ...(query.$and || []),
+    { actName: { $not: /test/i } },
+    { clientName: { $not: /downie/i } },
+    { bookingRef: { $not: /downie/i } },
+  ];
+}
 
     const bookings = await FinanceForecastBooking.find(query)
       .sort({ eventDateISO: 1, createdAt: -1 })
