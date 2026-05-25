@@ -30,25 +30,26 @@ const looksLikeRealBookingRow = (row = {}) => {
   const gross = toNumber(row.grossValue || row["Subtotal (after deposit taken) / Balance"]);
   const commission = toNumber(row.commissionGross || row["Musican Fee on gig"]);
 
-  // blank rows
+  const clientLower = client.toLowerCase();
+  const agentLower = agent.toLowerCase();
+  const eventTypeLower = eventType.toLowerCase();
+
   if (!client && !eventDate && !gross && !commission) return false;
 
-  // internal/header rows
   if (
-    client.toLowerCase() === "name" ||
-    agent.toLowerCase() === "source" ||
-    eventType.toLowerCase() === "type of event"
+    clientLower === "name" ||
+    agentLower === "source" ||
+    eventTypeLower === "type of event" ||
+    gross === 0 && commission === 0 && !eventDate
   ) {
     return false;
   }
 
-  // month/category divider rows
   if (/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|marketing)$/i.test(client)) {
     return false;
   }
 
-  // needs at least a client/date/money signal
-  return Boolean(client && (eventDate || gross || commission));
+  return Boolean(client && eventDate);
 };
 
 const normaliseDate = (value) => {
