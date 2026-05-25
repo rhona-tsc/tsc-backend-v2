@@ -66,13 +66,32 @@ const getDepositPaid = (row) =>
 const getAccountingSplit = (row, gross, depositPaid) => {
   const acc = row?.accounting || {};
 
-  const commissionGross = round2(acc.commissionGross || depositPaid || 0);
-  const commissionVat = round2(
-    acc.commissionVat || commissionGross * (0.2 / 1.2),
+  const hasUsefulAccounting =
+    Number(acc.commissionGross || 0) > 0 ||
+    Number(acc.passThroughGross || 0) > 0;
+
+  const commissionGross = round2(
+    hasUsefulAccounting
+      ? Number(acc.commissionGross || 0)
+      : Number(depositPaid || 0),
   );
-  const commissionNet = round2(acc.commissionNet || commissionGross - commissionVat);
+
+  const commissionVat = round2(
+    hasUsefulAccounting && Number(acc.commissionVat || 0) > 0
+      ? Number(acc.commissionVat || 0)
+      : commissionGross * (0.2 / 1.2),
+  );
+
+  const commissionNet = round2(
+    hasUsefulAccounting && Number(acc.commissionNet || 0) > 0
+      ? Number(acc.commissionNet || 0)
+      : commissionGross - commissionVat,
+  );
+
   const passThroughGross = round2(
-    acc.passThroughGross || Math.max(gross - commissionGross, 0),
+    hasUsefulAccounting && Number(acc.passThroughGross || 0) > 0
+      ? Number(acc.passThroughGross || 0)
+      : Math.max(gross - commissionGross, 0),
   );
 
   return {
