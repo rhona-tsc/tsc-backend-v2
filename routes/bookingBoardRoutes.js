@@ -1113,6 +1113,48 @@ router.post("/", musicianAuth, async (req, res) => {
   }
 });
 
+router.patch("/:id/mark-paid", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin only." });
+    }
+
+    const row = await BookingBoardItem.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          "payments.balancePaymentReceived": true,
+          updatedAt: new Date(),
+        },
+      },
+      { new: true },
+    );
+
+    if (!row) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking board row not found.",
+      });
+    }
+
+    const forecast = await syncBoardRowToFinance(
+      row.toObject ? row.toObject() : row,
+    );
+
+    return res.json({
+      success: true,
+      row,
+      forecast,
+    });
+  } catch (error) {
+    console.error("❌ mark-paid failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Could not mark booking paid.",
+    });
+  }
+});
+
 router.patch("/:id", musicianAuth, async (req, res) => {
   console.log("🟡 PATCH /board/bookings/:id", {
     id: req.params.id,
