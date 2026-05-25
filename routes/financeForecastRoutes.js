@@ -2,6 +2,7 @@ import express from "express";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import FinanceForecastBooking from "../models/financeForecastBookingModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
+import Booking from "../models/bookingModel.js";
 
 const router = express.Router();
 
@@ -246,7 +247,97 @@ router.post("/bookings/sync-all-from-board", musicianAuth, async (req, res) => {
     let synced = 0;
     const errors = [];
 
-    for (const row of rows) {
+    for (const originalRow of rows) {
+  let row = originalRow;
+
+  if (
+    row?.bookingId &&
+    (!row.eventDateISO || !row.grossValue || !row.clientFirstNames)
+  ) {
+    const booking = await Booking.findById(row.bookingId).lean();
+
+    if (booking) {
+      const bookingEmail =
+        booking.clientEmail ||
+        booking.userEmail ||
+        booking?.userAddress?.email ||
+        "";
+
+      row = {
+        ...row,
+
+        sourceBookingId: booking._id,
+
+        eventDateISO:
+          row.eventDateISO ||
+          isoDateOnly(booking.eventDate || booking.date || booking.bookingDate),
+
+        grossValue:
+          row.grossValue ||
+          booking?.totals?.fullAmount ||
+          booking?.amount ||
+          booking?.fee ||
+          0,
+
+        clientFirstNames:
+          row.clientFirstNames ||
+          booking.clientName ||
+          [booking?.userAddress?.firstName, booking?.userAddress?.lastName]
+            .filter(Boolean)
+            .join(" ")
+            .trim(),
+
+        clientEmail: row.clientEmail || bookingEmail,
+        userEmail: row.userEmail || bookingEmail,
+
+        clientEmails:
+          Array.isArray(row.clientEmails) && row.clientEmails.length
+            ? row.clientEmails
+            : bookingEmail
+              ? [{ email: bookingEmail }]
+              : [],
+
+        actName:
+          row.actName ||
+          booking?.actsSummary?.[0]?.actName ||
+          booking?.actsSummary?.[0]?.name ||
+          booking?.actName ||
+          "",
+
+        actTscName:
+          row.actTscName ||
+          booking?.actsSummary?.[0]?.tscName ||
+          booking?.actsSummary?.[0]?.name ||
+          booking?.actTscName ||
+          "",
+
+        agent: row.agent || booking.agent || "Direct",
+
+        payments: {
+          ...(row.payments || {}),
+          depositAmount:
+            row?.payments?.depositAmount ||
+            booking?.payments?.depositAmount ||
+            booking?.totals?.depositAmount ||
+            booking?.depositAmount ||
+            0,
+          depositChargedAmount:
+            row?.payments?.depositChargedAmount ||
+            booking?.payments?.depositChargedAmount ||
+            booking?.totals?.chargedAmount ||
+            booking?.totals?.depositAmount ||
+            booking?.depositAmount ||
+            0,
+          balancePaymentReceived:
+            row?.payments?.balancePaymentReceived || booking?.balancePaid || false,
+          bandPaymentsSent:
+            row?.payments?.bandPaymentsSent || booking?.bandPaymentsSent || false,
+        },
+
+        accounting: row.accounting || booking.accounting || null,
+      };
+    }
+  }
       try {
         const eventDateISO = String(row.eventDateISO || "").slice(0, 10);
         const eventMonth = eventDateISO ? eventDateISO.slice(0, 7) : "";
@@ -299,8 +390,8 @@ router.post("/bookings/sync-all-from-board", musicianAuth, async (req, res) => {
         synced += 1;
       } catch (err) {
         errors.push({
-          rowId: String(row._id),
-          bookingRef: row.bookingRef,
+          rowId: String(originalRow._id),
+bookingRef: originalRow.bookingRef,
           error: err.message,
         });
       }
