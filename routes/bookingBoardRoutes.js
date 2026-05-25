@@ -1776,7 +1776,7 @@ router.delete("/:id", musicianAuth, async (req, res) => {
       return res.status(403).json({ success: false, message: "Admin only." });
     }
 
-    const row = await BookingBoardItem.findByIdAndDelete(req.params.id);
+    const row = await BookingBoardItem.findByIdAndDelete(req.params.id).lean();
 
     if (!row) {
       return res.status(404).json({
@@ -1794,7 +1794,8 @@ router.delete("/:id", musicianAuth, async (req, res) => {
 
     return res.json({
       success: true,
-      deletedBookingRef: row.bookingRef,
+      deletedBoardRowId: row._id,
+      bookingRef: row.bookingRef,
     });
   } catch (error) {
     console.error("❌ DELETE /board/bookings/:id failed:", error);
