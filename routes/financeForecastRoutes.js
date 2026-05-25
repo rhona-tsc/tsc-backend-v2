@@ -239,4 +239,86 @@ router.get("/bookings", musicianAuth, async (req, res) => {
   }
 });
 
+router.post("/bookings/sync-all-from-board", musicianAuth, async (req, res) => {
+  try {
+    const rows = await BookingBoardItem.find({}).lean();
+
+    let synced = 0;
+    const errors = [];
+
+    for (const row of rows) {
+      try {
+        const eventDateISO = String(row.eventDateISO || "").slice(0, 10);
+        const eventMonth = eventDateISO ? eventDateISO.slice(0, 7) : "";
+
+        const grossValue = getGross(row);
+        const depositPaid = getDepositPaid(row);
+        const balanceDue = round2(Math.max(grossValue - depositPaid, 0));
+        const split = getAccountingSplit(row, grossValue, depositPaid);
+        const expectedBalanceDueDateISO = getThursdayWeekBefore(eventDateISO);
+
+        const status =
+          row?.payments?.balancePaymentReceived || row?.balancePaid
+            ? "paid"
+            : depositPaid > 0
+              ? "balance_due"
+              : "forecast";
+
+        const payload = {
+          boardRowId: row._id,
+          sourceBookingId: row.bookingId || row.sourceBookingId || null,
+          bookingRef: row.bookingRef || String(row._id),
+          clientName: getClientName(row),
+          clientEmail: getPrimaryEmail(row),
+          eventDateISO,
+          eventMonth,
+          agent: row.agent || "",
+          actName: row.actName || "",
+          actTscName: row.actTscName || "",
+          grossValue,
+          ...split,
+          depositPaid,
+          balanceDue,
+          expectedCashDateISO: expectedBalanceDueDateISO || eventDateISO,
+          expectedBalanceDueDateISO,
+          status,
+          rawSnapshot: row,
+        };
+
+        await FinanceForecastBooking.findOneAndUpdate(
+          {
+            $or: [
+              { boardRowId: row._id },
+              { bookingRef: payload.bookingRef },
+            ],
+          },
+          { $set: payload },
+          { new: true, upsert: true },
+        );
+
+        synced += 1;
+      } catch (err) {
+        errors.push({
+          rowId: String(row._id),
+          bookingRef: row.bookingRef,
+          error: err.message,
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      totalBoardRows: rows.length,
+      synced,
+      errors,
+    });
+  } catch (error) {
+    console.error("❌ sync-all-from-board failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Could not sync board bookings.",
+    });
+  }
+});
+
 export default router;
