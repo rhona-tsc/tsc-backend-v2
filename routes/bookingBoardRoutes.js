@@ -15,17 +15,52 @@ const router = express.Router();
 
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 
+const toNumber = (value) => {
+  if (value === null || value === undefined || value === "") return 0;
+  return Number(String(value).replace(/[£,]/g, "").trim()) || 0;
+};
+
+const cleanString = (value) => String(value || "").trim();
+
 const looksLikeRealBookingRow = (row = {}) => {
-  const ref = cleanString(row.bookingRef || row.Ref || row.Reference);
-  const client = cleanString(row.clientFirstNames || row["Client Name"]);
-  const date = cleanString(row.eventDateISO || row["Event Date"]);
-  const gross = toNumber(row.grossValue || row.Total);
+  const client = cleanString(row.clientFirstNames || row["Client Name"] || row.Name);
+  const agent = cleanString(row.agent || row.Source);
+  const eventType = cleanString(row.eventType || row["Type of Event"]);
+  const eventDate = cleanString(row.eventDateISO || row["Event Date"]);
+  const gross = toNumber(row.grossValue || row["Subtotal (after deposit taken) / Balance"]);
+  const commission = toNumber(row.commissionGross || row["Musican Fee on gig"]);
 
-  if (!date && !client && !gross) return false;
-  if (/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i.test(date)) return false;
-  if (/^column\s/i.test(client)) return false;
+  // blank rows
+  if (!client && !eventDate && !gross && !commission) return false;
 
-  return Boolean(client || ref || gross);
+  // internal/header rows
+  if (
+    client.toLowerCase() === "name" ||
+    agent.toLowerCase() === "source" ||
+    eventType.toLowerCase() === "type of event"
+  ) {
+    return false;
+  }
+
+  // month/category divider rows
+  if (/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|marketing)$/i.test(client)) {
+    return false;
+  }
+
+  // needs at least a client/date/money signal
+  return Boolean(client && (eventDate || gross || commission));
+};
+
+const normaliseDate = (value) => {
+  const raw = cleanString(value);
+  if (!raw) return "";
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return "";
+
+  return d.toISOString().slice(0, 10);
 };
 
 const calcVatFromVatInclusiveGross = (gross, vatRate = 0.2) => {
@@ -70,12 +105,6 @@ const getThursdayWeekBefore = (eventDateISO) => {
   return d.toISOString().slice(0, 10);
 };
 
-const toNumber = (value) => {
-  if (value === null || value === undefined || value === "") return 0;
-  return Number(String(value).replace(/[£,]/g, "").trim()) || 0;
-};
-
-const cleanString = (value) => String(value || "").trim();
 
 const normaliseImportRow = (item = {}) => {
   const grossValue = toNumber(
@@ -1195,19 +1224,6 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         contractUrl: savedBooking?.contractUrl || "",
       };
 
-      await BookingBoardItem.updateMany(
-        {
-          $or: [
-            { sourceBookingId: savedBooking._id },
-            { bookingRef: savedBooking.bookingId },
-            ...(savedBooking.sessionId
-              ? [{ sessionId: savedBooking.sessionId }]
-              : []),
-          ],
-        },
-        { $set: mirrorPatch },
-      );
-
       const mirrorResult = await BookingBoardItem.updateMany(
         {
           $or: [
@@ -1445,9 +1461,7 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
             row.clientAddress || row["Client Address"] || "",
           ).trim(),
 
-          eventDateISO: String(
-            row.eventDateISO || row["Event Date"] || "",
-          ).slice(0, 10),
+          eventDateISO: normaliseDate(row.eventDateISO || row["Event Date"]),
           enquiryDateISO: String(
             row.enquiryDateISO || row["Enquiry Date"] || "",
           ).slice(0, 10),

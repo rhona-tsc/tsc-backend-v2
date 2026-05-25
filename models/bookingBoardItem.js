@@ -125,6 +125,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
     arrivalTime: { type: String }, // “17:30”
     finishTime: { type: String }, // “23:30”
     sourceBookingId: { type: mongoose.Types.ObjectId, ref: "Booking" },
+    source: { type: String, default: "" },
     sessionId: { type: String },
     accounting: AccountingSchema,
     bookingDetails: BookingDetailsSchema,
@@ -137,9 +138,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
       grossAndCommissionVisibleToAdminOnly: { type: Boolean, default: true },
     },
 
-    // denorm for speed
-    createdAt: { type: Date, default: Date.now },
-    updatedAt: { type: Date, default: Date.now },
+
   },
   { timestamps: true },
 );
