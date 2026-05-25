@@ -41,6 +41,19 @@ const isoDateOnly = (value) => {
   return d.toISOString().slice(0, 10);
 };
 
+const getThursdayWeekBefore = (eventDateISO) => {
+  const d = new Date(`${eventDateISO}T00:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) return "";
+
+  d.setUTCDate(d.getUTCDate() - 7);
+
+  while (d.getUTCDay() !== 4) {
+    d.setUTCDate(d.getUTCDate() - 1);
+  }
+
+  return d.toISOString().slice(0, 10);
+};
+
 const toNumber = (value) => {
   if (value === null || value === undefined || value === "") return 0;
   return Number(String(value).replace(/[£,]/g, "").trim()) || 0;
