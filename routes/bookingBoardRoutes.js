@@ -29,6 +29,98 @@ const isoDateOnly = (value) => {
   return d.toISOString().slice(0, 10);
 };
 
+const toNumber = (value) => {
+  if (value === null || value === undefined || value === "") return 0;
+  return Number(String(value).replace(/[£,]/g, "").trim()) || 0;
+};
+
+const cleanString = (value) => String(value || "").trim();
+
+const normaliseImportRow = (item = {}) => {
+  const grossValue = toNumber(
+    item.grossValue ?? item.gross ?? item.total ?? item.bookingTotal
+  );
+
+  const commissionGross = toNumber(
+    item.commissionGross ?? item.commission ?? item.deposit ?? item.depositPaid
+  );
+
+  const passThroughGross = toNumber(
+    item.passThroughGross ?? item.bandFee ?? item.hold ?? item.balanceDue
+  );
+
+  const vatRate = Number(item.vatRate ?? 0.2);
+
+  const commissionVat = commissionGross
+    ? Math.round(commissionGross * (vatRate / (1 + vatRate)) * 100) / 100
+    : 0;
+
+  const commissionNet = commissionGross
+    ? Math.round((commissionGross - commissionVat) * 100) / 100
+    : 0;
+
+  const bookingRef = cleanString(
+    item.bookingRef || item.ref || item.reference || item.bookingId
+  );
+
+  return {
+    bookingRef,
+    bookerName: cleanString(item.bookerName || item.clientName),
+    clientFirstNames: cleanString(
+      item.clientFirstNames || item.clientName || item.bookerName
+    ),
+    eventDateISO: cleanString(item.eventDateISO || item.eventDate || item.date).slice(0, 10),
+    enquiryDateISO: cleanString(item.enquiryDateISO || item.enquiryDate).slice(0, 10),
+    bookingDateISO: cleanString(item.bookingDateISO || item.bookingDate).slice(0, 10),
+    agent: cleanString(item.agent || "Direct"),
+    clientEmails: item.clientEmail
+      ? [{ email: cleanString(item.clientEmail) }]
+      : Array.isArray(item.clientEmails)
+        ? item.clientEmails
+        : [],
+    clientAddress: cleanString(item.clientAddress),
+    eventType: cleanString(item.eventType),
+    actName: cleanString(item.actName),
+    actTscName: cleanString(item.actTscName || item.actName),
+    address: cleanString(item.address || item.venueAddress || item.venue),
+    county: cleanString(item.county),
+    grossValue,
+    netCommission: 0,
+    bandSize: toNumber(item.bandSize),
+    lineupSelected: cleanString(item.lineupSelected || item.lineup),
+    lineupComposition: Array.isArray(item.lineupComposition)
+      ? item.lineupComposition
+      : [],
+    arrivalTime: cleanString(item.arrivalTime),
+    finishTime: cleanString(item.finishTime),
+    payments: {
+      depositAmount: toNumber(item.depositAmount ?? item.depositPaid),
+      depositChargedAmount: toNumber(item.depositChargedAmount ?? item.depositPaid),
+      balancePaymentReceived: Boolean(item.balancePaymentReceived),
+      bandPaymentsSent: Boolean(item.bandPaymentsSent),
+    },
+    accounting: {
+      paymentStage: "",
+      vatRate,
+      commissionGross,
+      commissionVat,
+      commissionNet,
+      passThroughGross:
+        passThroughGross || Math.max(grossValue - commissionGross, 0),
+      currency: "GBP",
+    },
+    bookingDetails: {
+      eventType: cleanString(item.eventType),
+      evening: { sets: [] },
+      djServicesBooked: Boolean(item.djServicesBooked),
+    },
+    allocation: { status: "in_progress" },
+    review: { requestedCount: 0, received: false },
+    source: "bulk_import",
+    updatedAt: new Date(),
+  };
+};
+
 const calcDepositFromGross = (grossValue) => {
   const gross = Number(grossValue || 0);
   if (!gross) return 0;
@@ -1146,6 +1238,67 @@ console.log("🟢 Board mirror update result:", mirrorResult);
     return res.status(400).json({
       success: false,
       message: e.message,
+    });
+  }
+});
+
+router.post("/bulk-import", musicianAuth, async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.bookings)
+      ? req.body.bookings
+      : Array.isArray(req.body)
+        ? req.body
+        : [];
+
+    if (!items.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Send an array of bookings, or { bookings: [...] }.",
+      });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const [index, item] of items.entries()) {
+      try {
+        const row = normaliseImportRow(item);
+
+        if (!row.bookingRef) {
+          throw new Error("Missing bookingRef/ref/reference.");
+        }
+
+        const saved = await BookingBoardItem.findOneAndUpdate(
+          { bookingRef: row.bookingRef },
+          {
+            $set: row,
+            $setOnInsert: { createdAt: new Date() },
+          },
+          { new: true, upsert: true },
+        );
+
+        results.push(saved);
+      } catch (error) {
+        errors.push({
+          index,
+          bookingRef: item?.bookingRef || item?.ref || "",
+          error: error.message,
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      imported: results.length,
+      failed: errors.length,
+      errors,
+      rows: results,
+    });
+  } catch (error) {
+    console.error("❌ POST /board/bookings/bulk-import failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Bulk import failed.",
     });
   }
 });
