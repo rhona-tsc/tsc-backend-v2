@@ -5,6 +5,7 @@ import BookingBoardItem from "../models/bookingBoardItem.js";
 import Booking from "../models/bookingModel.js";
 import actModel from "../models/actModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
+import { parse } from "csv-parse/sync";
 
 const router = express.Router();
 
@@ -1299,6 +1300,187 @@ router.post("/bulk-import", musicianAuth, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Bulk import failed.",
+    });
+  }
+});
+
+router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin only." });
+    }
+
+    const { csv } = req.body || {};
+
+    if (!csv || typeof csv !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "CSV string is required in req.body.csv",
+      });
+    }
+
+    const records = parse(csv, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+      bom: true,
+    });
+
+    if (!records.length) {
+      return res.status(400).json({
+        success: false,
+        message: "CSV had no rows.",
+      });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const [index, row] of records.entries()) {
+      try {
+        const bookingRef = String(
+          row.bookingRef ||
+            row["Booking Ref"] ||
+            row["Reference"] ||
+            row.ref ||
+            "",
+        ).trim();
+
+        if (!bookingRef) {
+          throw new Error("Missing bookingRef / Booking Ref");
+        }
+
+        const grossValue = Number(
+          row.grossValue || row["Gross"] || row["Gross Value"] || 0,
+        ) || 0;
+
+        const commissionGross = Number(
+          row.commissionGross || row["Commission"] || 0,
+        ) || 0;
+
+        const passThroughGross = Number(
+          row.passThroughGross ||
+            row["Pass-through"] ||
+            row["Band Fee"] ||
+            Math.max(grossValue - commissionGross, 0),
+        ) || 0;
+
+        const vatRate = Number(row.vatRate || row["VAT Rate"] || 0.2) || 0.2;
+        const commissionVat = round2(commissionGross * (vatRate / (1 + vatRate)));
+        const commissionNet = round2(commissionGross - commissionVat);
+
+        const email = String(
+          row.clientEmail || row["Client Email"] || row.email || "",
+        ).trim();
+
+        const boardPatch = {
+          bookingRef,
+
+          bookerName: String(row.bookerName || row["Booker Name"] || "").trim(),
+          clientFirstNames: String(
+            row.clientFirstNames ||
+              row["Client Name"] ||
+              row["Client First Names"] ||
+              "",
+          ).trim(),
+
+          clientEmails: email ? [{ email }] : [],
+          clientAddress: String(
+            row.clientAddress || row["Client Address"] || "",
+          ).trim(),
+
+          eventDateISO: String(
+            row.eventDateISO || row["Event Date"] || "",
+          ).slice(0, 10),
+          enquiryDateISO: String(
+            row.enquiryDateISO || row["Enquiry Date"] || "",
+          ).slice(0, 10),
+          bookingDateISO: String(
+            row.bookingDateISO || row["Booking Date"] || "",
+          ).slice(0, 10),
+
+          grossValue,
+          agent: String(row.agent || row["Agent"] || "Direct").trim(),
+
+          eventType: String(row.eventType || row["Event Type"] || "").trim(),
+          actName: String(row.actName || row["Act"] || "").trim(),
+          actTscName: String(
+            row.actTscName || row["Act TSC Name"] || row["TSC Name"] || "",
+          ).trim(),
+
+          address: String(row.address || row["Venue Address"] || "").trim(),
+          county: String(row.county || row["County"] || "").trim(),
+
+          lineupSelected: String(
+            row.lineupSelected || row["Lineup"] || "",
+          ).trim(),
+          arrivalTime: String(row.arrivalTime || row["Arrival"] || "").trim(),
+          finishTime: String(row.finishTime || row["Finish"] || "").trim(),
+
+          paymentLink: String(row.paymentLink || row["Payment Link"] || "").trim(),
+          invoiceUrl: String(row.invoiceUrl || row["Invoice URL"] || "").trim(),
+          invoicePdfUrl: String(row.invoicePdfUrl || row["Invoice PDF URL"] || "").trim(),
+
+          accounting: {
+            paymentStage: "",
+            vatRate,
+            commissionGross: round2(commissionGross),
+            commissionVat,
+            commissionNet,
+            passThroughGross: round2(passThroughGross),
+            currency: "GBP",
+          },
+
+          payments: {
+            depositAmount: Number(row.depositPaid || row["Deposit Paid"] || 0) || 0,
+            depositChargedAmount:
+              Number(row.depositPaid || row["Deposit Paid"] || 0) || 0,
+            balancePaymentReceived: false,
+            bandPaymentsSent: false,
+          },
+
+          bookingDetails: {
+            eventType: String(row.eventType || row["Event Type"] || "").trim(),
+            evening: { sets: [] },
+            djServicesBooked:
+              String(row.djServicesBooked || row["DJ"] || "")
+                .trim()
+                .toLowerCase() === "yes",
+          },
+
+          allocation: { status: "in_progress", gaps: [] },
+          review: { requestedCount: 0, received: false, source: "internal" },
+          updatedAt: new Date(),
+        };
+
+        const saved = await BookingBoardItem.findOneAndUpdate(
+          { bookingRef },
+          { $set: boardPatch, $setOnInsert: { createdAt: new Date() } },
+          { new: true, upsert: true },
+        );
+
+        results.push(saved);
+      } catch (err) {
+        errors.push({
+          row: index + 2,
+          error: err.message,
+          raw: row,
+        });
+      }
+    }
+
+    return res.json({
+      success: errors.length === 0,
+      imported: results.length,
+      failed: errors.length,
+      errors,
+      rows: results,
+    });
+  } catch (error) {
+    console.error("❌ bulk-import-csv failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "CSV import failed.",
     });
   }
 });
