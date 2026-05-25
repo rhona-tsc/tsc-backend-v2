@@ -9,6 +9,16 @@ import { parse } from "csv-parse/sync";
 
 const router = express.Router();
 
+const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+
+const calcVatFromVatInclusiveGross = (gross, vatRate = 0.2) => {
+  const g = round2(gross);
+  const r = Number(vatRate ?? 0.2);
+  const vat = round2(g * (r / (1 + r)));
+  const net = round2(g - vat);
+  return { vat, net };
+};
+
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -52,13 +62,8 @@ const normaliseImportRow = (item = {}) => {
 
   const vatRate = Number(item.vatRate ?? 0.2);
 
-  const commissionVat = commissionGross
-    ? Math.round(commissionGross * (vatRate / (1 + vatRate)) * 100) / 100
-    : 0;
-
-  const commissionNet = commissionGross
-    ? Math.round((commissionGross - commissionVat) * 100) / 100
-    : 0;
+const { vat: commissionVat, net: commissionNet } =
+  calcVatFromVatInclusiveGross(commissionGross, vatRate);
 
   const bookingRef = cleanString(
     item.bookingRef || item.ref || item.reference || item.bookingId
@@ -1243,67 +1248,6 @@ console.log("🟢 Board mirror update result:", mirrorResult);
   }
 });
 
-router.post("/bulk-import", musicianAuth, async (req, res) => {
-  try {
-    const items = Array.isArray(req.body?.bookings)
-      ? req.body.bookings
-      : Array.isArray(req.body)
-        ? req.body
-        : [];
-
-    if (!items.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Send an array of bookings, or { bookings: [...] }.",
-      });
-    }
-
-    const results = [];
-    const errors = [];
-
-    for (const [index, item] of items.entries()) {
-      try {
-        const row = normaliseImportRow(item);
-
-        if (!row.bookingRef) {
-          throw new Error("Missing bookingRef/ref/reference.");
-        }
-
-        const saved = await BookingBoardItem.findOneAndUpdate(
-          { bookingRef: row.bookingRef },
-          {
-            $set: row,
-            $setOnInsert: { createdAt: new Date() },
-          },
-          { new: true, upsert: true },
-        );
-
-        results.push(saved);
-      } catch (error) {
-        errors.push({
-          index,
-          bookingRef: item?.bookingRef || item?.ref || "",
-          error: error.message,
-        });
-      }
-    }
-
-    return res.json({
-      success: true,
-      imported: results.length,
-      failed: errors.length,
-      errors,
-      rows: results,
-    });
-  } catch (error) {
-    console.error("❌ POST /board/bookings/bulk-import failed:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Bulk import failed.",
-    });
-  }
-});
-
 router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
   try {
     if (!isTSCAdmin(req.user)) {
@@ -1366,8 +1310,8 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
         ) || 0;
 
         const vatRate = Number(row.vatRate || row["VAT Rate"] || 0.2) || 0.2;
-        const commissionVat = round2(commissionGross * (vatRate / (1 + vatRate)));
-        const commissionNet = round2(commissionGross - commissionVat);
+        const { vat: commissionVat, net: commissionNet } =
+  calcVatFromVatInclusiveGross(commissionGross, vatRate);
 
         const email = String(
           row.clientEmail || row["Client Email"] || row.email || "",
@@ -1484,5 +1428,68 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
     });
   }
 });
+
+router.post("/bulk-import", musicianAuth, async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.bookings)
+      ? req.body.bookings
+      : Array.isArray(req.body)
+        ? req.body
+        : [];
+
+    if (!items.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Send an array of bookings, or { bookings: [...] }.",
+      });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const [index, item] of items.entries()) {
+      try {
+        const row = normaliseImportRow(item);
+
+        if (!row.bookingRef) {
+          throw new Error("Missing bookingRef/ref/reference.");
+        }
+
+        const saved = await BookingBoardItem.findOneAndUpdate(
+          { bookingRef: row.bookingRef },
+          {
+            $set: row,
+            $setOnInsert: { createdAt: new Date() },
+          },
+          { new: true, upsert: true },
+        );
+
+        results.push(saved);
+      } catch (error) {
+        errors.push({
+          index,
+          bookingRef: item?.bookingRef || item?.ref || "",
+          error: error.message,
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      imported: results.length,
+      failed: errors.length,
+      errors,
+      rows: results,
+    });
+  } catch (error) {
+    console.error("❌ POST /board/bookings/bulk-import failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Bulk import failed.",
+    });
+  }
+});
+
+
 
 export default router;
