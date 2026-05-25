@@ -49,7 +49,7 @@ const looksLikeRealBookingRow = (row = {}) => {
     return false;
   }
 
-  return Boolean(client && eventDate);
+return Boolean(client && eventDate && (gross || commission));
 };
 
 const normaliseDate = (value) => {
@@ -1766,6 +1766,42 @@ router.post("/bulk-import", musicianAuth, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Bulk import failed.",
+    });
+  }
+});
+
+router.delete("/:id", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin only." });
+    }
+
+    const row = await BookingBoardItem.findByIdAndDelete(req.params.id);
+
+    if (!row) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking board row not found.",
+      });
+    }
+
+    await financeForecastBookingModel.deleteMany({
+      $or: [
+        { boardRowId: row._id },
+        { bookingRef: row.bookingRef },
+      ],
+    });
+
+    return res.json({
+      success: true,
+      deletedId: row._id,
+      bookingRef: row.bookingRef,
+    });
+  } catch (error) {
+    console.error("❌ DELETE /board/bookings/:id failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Could not delete booking board row.",
     });
   }
 });
