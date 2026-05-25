@@ -6,6 +6,7 @@ import Booking from "../models/bookingModel.js";
 import actModel from "../models/actModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 import { parse } from "csv-parse/sync";
+import financeForecastBookingModel from "../models/financeForecastBookingModel.js";
 
 const router = express.Router();
 
@@ -49,35 +50,43 @@ const cleanString = (value) => String(value || "").trim();
 
 const normaliseImportRow = (item = {}) => {
   const grossValue = toNumber(
-    item.grossValue ?? item.gross ?? item.total ?? item.bookingTotal
+    item.grossValue ?? item.gross ?? item.total ?? item.bookingTotal,
   );
 
   const commissionGross = toNumber(
-    item.commissionGross ?? item.commission ?? item.deposit ?? item.depositPaid
+    item.commissionGross ?? item.commission ?? item.deposit ?? item.depositPaid,
   );
 
   const passThroughGross = toNumber(
-    item.passThroughGross ?? item.bandFee ?? item.hold ?? item.balanceDue
+    item.passThroughGross ?? item.bandFee ?? item.hold ?? item.balanceDue,
   );
 
   const vatRate = Number(item.vatRate ?? 0.2);
 
-const { vat: commissionVat, net: commissionNet } =
-  calcVatFromVatInclusiveGross(commissionGross, vatRate);
+  const { vat: commissionVat, net: commissionNet } =
+    calcVatFromVatInclusiveGross(commissionGross, vatRate);
 
   const bookingRef = cleanString(
-    item.bookingRef || item.ref || item.reference || item.bookingId
+    item.bookingRef || item.ref || item.reference || item.bookingId,
   );
 
   return {
     bookingRef,
     bookerName: cleanString(item.bookerName || item.clientName),
     clientFirstNames: cleanString(
-      item.clientFirstNames || item.clientName || item.bookerName
+      item.clientFirstNames || item.clientName || item.bookerName,
     ),
-    eventDateISO: cleanString(item.eventDateISO || item.eventDate || item.date).slice(0, 10),
-    enquiryDateISO: cleanString(item.enquiryDateISO || item.enquiryDate).slice(0, 10),
-    bookingDateISO: cleanString(item.bookingDateISO || item.bookingDate).slice(0, 10),
+    eventDateISO: cleanString(
+      item.eventDateISO || item.eventDate || item.date,
+    ).slice(0, 10),
+    enquiryDateISO: cleanString(item.enquiryDateISO || item.enquiryDate).slice(
+      0,
+      10,
+    ),
+    bookingDateISO: cleanString(item.bookingDateISO || item.bookingDate).slice(
+      0,
+      10,
+    ),
     agent: cleanString(item.agent || "Direct"),
     clientEmails: item.clientEmail
       ? [{ email: cleanString(item.clientEmail) }]
@@ -101,7 +110,9 @@ const { vat: commissionVat, net: commissionNet } =
     finishTime: cleanString(item.finishTime),
     payments: {
       depositAmount: toNumber(item.depositAmount ?? item.depositPaid),
-      depositChargedAmount: toNumber(item.depositChargedAmount ?? item.depositPaid),
+      depositChargedAmount: toNumber(
+        item.depositChargedAmount ?? item.depositPaid,
+      ),
       balancePaymentReceived: Boolean(item.balancePaymentReceived),
       bandPaymentsSent: Boolean(item.bandPaymentsSent),
     },
@@ -1156,7 +1167,6 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       };
 
       await BookingBoardItem.updateMany(
-        
         {
           $or: [
             { sourceBookingId: savedBooking._id },
@@ -1170,18 +1180,20 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       );
 
       const mirrorResult = await BookingBoardItem.updateMany(
-  {
-    $or: [
-      { sourceBookingId: savedBooking._id },
-      { bookingRef: savedBooking.bookingId },
-      ...(savedBooking.sessionId ? [{ sessionId: savedBooking.sessionId }] : []),
-    ],
-  },
-  { $set: mirrorPatch }
-);
+        {
+          $or: [
+            { sourceBookingId: savedBooking._id },
+            { bookingRef: savedBooking.bookingId },
+            ...(savedBooking.sessionId
+              ? [{ sessionId: savedBooking.sessionId }]
+              : []),
+          ],
+        },
+        { $set: mirrorPatch },
+      );
 
-console.log("🟢 Board mirror update result:", mirrorResult);
-      
+      console.log("🟢 Board mirror update result:", mirrorResult);
+
       return res.json({
         success: true,
         row: normalized,
@@ -1248,6 +1260,76 @@ console.log("🟢 Board mirror update result:", mirrorResult);
   }
 });
 
+const syncBoardRowToFinance = async (row) => {
+  const eventDateISO = String(row.eventDateISO || "").slice(0, 10);
+  const eventMonth = eventDateISO ? eventDateISO.slice(0, 7) : "";
+
+  const grossValue = round2(row.grossValue || 0);
+  const depositPaid = round2(
+    row?.payments?.depositChargedAmount ||
+      row?.payments?.depositAmount ||
+      row?.depositAmount ||
+      0,
+  );
+
+  const acc = row.accounting || {};
+  const commissionGross = round2(acc.commissionGross || depositPaid || 0);
+  const commissionVat = round2(
+    acc.commissionVat || commissionGross * (0.2 / 1.2),
+  );
+  const commissionNet = round2(
+    acc.commissionNet || commissionGross - commissionVat,
+  );
+  const passThroughGross = round2(
+    acc.passThroughGross || Math.max(grossValue - commissionGross, 0),
+  );
+
+  const balanceDue = round2(Math.max(grossValue - depositPaid, 0));
+  const expectedBalanceDueDateISO = getThursdayWeekBefore(eventDateISO);
+
+  const payload = {
+    boardRowId: row._id,
+    sourceBookingId: row.bookingId || row.sourceBookingId || null,
+    bookingRef: row.bookingRef || String(row._id),
+    clientName: row.clientFirstNames || row.clientName || row.bookerName || "",
+    clientEmail:
+      row?.clientEmails?.find?.((e) => e?.email)?.email ||
+      row.clientEmail ||
+      row.userEmail ||
+      "",
+    eventDateISO,
+    eventMonth,
+    agent: row.agent || "",
+    actName: row.actName || "",
+    actTscName: row.actTscName || "",
+    grossValue,
+    commissionGross,
+    commissionVat,
+    commissionNet,
+    passThroughGross,
+    depositPaid,
+    balanceDue,
+    expectedCashDateISO: expectedBalanceDueDateISO || eventDateISO,
+    expectedBalanceDueDateISO,
+    status:
+      row?.payments?.balancePaymentReceived || row?.balancePaid
+        ? "paid"
+        : depositPaid > 0
+          ? "balance_due"
+          : "forecast",
+    source: "booking_board",
+    rawSnapshot: row,
+  };
+
+  return financeForecastBookingModel.findOneAndUpdate(
+    {
+      $or: [{ boardRowId: row._id }, { bookingRef: payload.bookingRef }],
+    },
+    { $set: payload },
+    { new: true, upsert: true },
+  );
+};
+
 router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
   try {
     if (!isTSCAdmin(req.user)) {
@@ -1279,6 +1361,7 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
 
     const results = [];
     const errors = [];
+    let syncedToFinance = 0;
 
     for (const [index, row] of records.entries()) {
       try {
@@ -1294,24 +1377,24 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
           throw new Error("Missing bookingRef / Booking Ref");
         }
 
-        const grossValue = Number(
-          row.grossValue || row["Gross"] || row["Gross Value"] || 0,
-        ) || 0;
+        const grossValue =
+          Number(row.grossValue || row["Gross"] || row["Gross Value"] || 0) ||
+          0;
 
-        const commissionGross = Number(
-          row.commissionGross || row["Commission"] || 0,
-        ) || 0;
+        const commissionGross =
+          Number(row.commissionGross || row["Commission"] || 0) || 0;
 
-        const passThroughGross = Number(
-          row.passThroughGross ||
-            row["Pass-through"] ||
-            row["Band Fee"] ||
-            Math.max(grossValue - commissionGross, 0),
-        ) || 0;
+        const passThroughGross =
+          Number(
+            row.passThroughGross ||
+              row["Pass-through"] ||
+              row["Band Fee"] ||
+              Math.max(grossValue - commissionGross, 0),
+          ) || 0;
 
         const vatRate = Number(row.vatRate || row["VAT Rate"] || 0.2) || 0.2;
         const { vat: commissionVat, net: commissionNet } =
-  calcVatFromVatInclusiveGross(commissionGross, vatRate);
+          calcVatFromVatInclusiveGross(commissionGross, vatRate);
 
         const email = String(
           row.clientEmail || row["Client Email"] || row.email || "",
@@ -1361,9 +1444,13 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
           arrivalTime: String(row.arrivalTime || row["Arrival"] || "").trim(),
           finishTime: String(row.finishTime || row["Finish"] || "").trim(),
 
-          paymentLink: String(row.paymentLink || row["Payment Link"] || "").trim(),
+          paymentLink: String(
+            row.paymentLink || row["Payment Link"] || "",
+          ).trim(),
           invoiceUrl: String(row.invoiceUrl || row["Invoice URL"] || "").trim(),
-          invoicePdfUrl: String(row.invoicePdfUrl || row["Invoice PDF URL"] || "").trim(),
+          invoicePdfUrl: String(
+            row.invoicePdfUrl || row["Invoice PDF URL"] || "",
+          ).trim(),
 
           accounting: {
             paymentStage: "",
@@ -1376,7 +1463,8 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
           },
 
           payments: {
-            depositAmount: Number(row.depositPaid || row["Deposit Paid"] || 0) || 0,
+            depositAmount:
+              Number(row.depositPaid || row["Deposit Paid"] || 0) || 0,
             depositChargedAmount:
               Number(row.depositPaid || row["Deposit Paid"] || 0) || 0,
             balancePaymentReceived: false,
@@ -1403,7 +1491,12 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
           { new: true, upsert: true },
         );
 
+        const forecast = await syncBoardRowToFinance(
+          saved.toObject ? saved.toObject() : saved,
+        );
+
         results.push(saved);
+        syncedToFinance += forecast ? 1 : 0;
       } catch (err) {
         errors.push({
           row: index + 2,
@@ -1416,6 +1509,7 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
     return res.json({
       success: errors.length === 0,
       imported: results.length,
+      syncedToFinance,
       failed: errors.length,
       errors,
       rows: results,
@@ -1489,7 +1583,5 @@ router.post("/bulk-import", musicianAuth, async (req, res) => {
     });
   }
 });
-
-
 
 export default router;
