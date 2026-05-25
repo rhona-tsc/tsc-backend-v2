@@ -7,10 +7,26 @@ import actModel from "../models/actModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 import { parse } from "csv-parse/sync";
 import financeForecastBookingModel from "../models/financeForecastBookingModel.js";
+import multer from "multer";
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 const router = express.Router();
 
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+
+const looksLikeRealBookingRow = (row = {}) => {
+  const ref = cleanString(row.bookingRef || row.Ref || row.Reference);
+  const client = cleanString(row.clientFirstNames || row["Client Name"]);
+  const date = cleanString(row.eventDateISO || row["Event Date"]);
+  const gross = toNumber(row.grossValue || row.Total);
+
+  if (!date && !client && !gross) return false;
+  if (/^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i.test(date)) return false;
+  if (/^column\s/i.test(client)) return false;
+
+  return Boolean(client || ref || gross);
+};
 
 const calcVatFromVatInclusiveGross = (gross, vatRate = 0.2) => {
   const g = round2(gross);
@@ -1535,6 +1551,61 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
     });
   }
 });
+
+router.post(
+  "/bulk-import-csv-file",
+  musicianAuth,
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!isTSCAdmin(req.user)) {
+        return res.status(403).json({ success: false, message: "Admin only." });
+      }
+
+      if (!req.file?.buffer) {
+        return res.status(400).json({
+          success: false,
+          message: "Upload a CSV file using form field name: file",
+        });
+      }
+
+      const csv = req.file.buffer.toString("utf8");
+
+      const records = parse(csv, {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+        bom: true,
+      });
+
+      const usableRecords = records.filter(looksLikeRealBookingRow);
+
+      req.body.csv = [
+        Object.keys(records[0] || {}).join(","),
+        ...usableRecords.map((row) =>
+          Object.values(row)
+            .map((v) => `"${String(v || "").replace(/"/g, '""')}"`)
+            .join(",")
+        ),
+      ].join("\n");
+
+      // easiest: reuse your existing bulk-import-csv logic by extracting it into a helper next
+      return res.json({
+        success: true,
+        totalRowsInCsv: records.length,
+        usableRows: usableRecords.length,
+        skippedRows: records.length - usableRecords.length,
+        preview: usableRecords.slice(0, 5),
+      });
+    } catch (error) {
+      console.error("❌ bulk-import-csv-file failed:", error);
+      return res.status(500).json({
+        success: false,
+        message: error.message || "CSV file import failed.",
+      });
+    }
+  }
+);
 
 router.post("/bulk-import", musicianAuth, async (req, res) => {
   try {
