@@ -1794,14 +1794,13 @@ router.delete("/:id", musicianAuth, async (req, res) => {
 
     return res.json({
       success: true,
-      deletedId: row._id,
-      bookingRef: row.bookingRef,
+      deletedBookingRef: row.bookingRef,
     });
   } catch (error) {
     console.error("❌ DELETE /board/bookings/:id failed:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Could not delete booking board row.",
+      message: error.message || "Could not delete booking.",
     });
   }
 });
