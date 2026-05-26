@@ -314,7 +314,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td valign="top" width="50%" style="padding-right:10px;">
-                  <a href="${WEBSITE_URL}" style="text-decoration:none; display:block;">
+                  <a href="${ADMIN_URL}" style="text-decoration:none; display:block;">
                     <img
                       src="${POST_JOB_IMAGE_URL}"
                       alt="Post your own deputy jobs"
@@ -323,7 +323,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                   </a>
                 </td>
                 <td valign="top" width="50%" style="padding-left:10px;">
-                  <a href="${WEBSITE_URL}" style="text-decoration:none; display:block;">
+                  <a href="${ADMIN_URL}" style="text-decoration:none; display:block;">
                     <img
                       src="${LIST_ACT_IMAGE_URL}"
                       alt="Wanna list your act?"
