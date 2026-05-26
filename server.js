@@ -7,7 +7,7 @@ import morgan from "morgan";
 import cron from "node-cron";
 import listEndpoints from "express-list-endpoints";
 import Stripe from "stripe";
-import { startDedupeSelectedSongsCron } from "./cron/dedupeSelectedSongsCron.js";
+import { dedupeSelectedSongsForAllMusicians, startDedupeSelectedSongsCron } from "./cron/dedupeSelectedSongsCron.js";
 import connectDB from "./config/mongodb.js";
 import connectCloudinary from "./config/connectCloudinary.js";
 import cloudinary from "./config/cloudinary.js";
@@ -52,9 +52,7 @@ import {
   watchCalendar,
   handleGoogleWebhook,
 } from "./controllers/googleController.js";
-import {
-  startDedupeSelectedSongsCron,
-} from "./cron/dedupeSelectedSongsCron.js";
+
 import {
   twilioInbound,
   twilioStatus,
