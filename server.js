@@ -52,7 +52,9 @@ import {
   watchCalendar,
   handleGoogleWebhook,
 } from "./controllers/googleController.js";
-
+import {
+  startDedupeSelectedSongsCron,
+} from "./cron/dedupeSelectedSongsCron.js";
 import {
   twilioInbound,
   twilioStatus,
@@ -597,6 +599,26 @@ app.get("/debug/routes", (_req, res) => {
 /* -------------------------------------------------------------------------- */
 /*                                   Routes                                   */
 /* -------------------------------------------------------------------------- */
+
+
+app.post("/api/admin/dedupe-selected-songs/run", async (req, res) => {
+  try {
+    console.log("[dedupeSelectedSongs] Manual run started");
+
+    await dedupeSelectedSongsForAllMusicians();
+
+    res.json({
+      success: true,
+      message: "Dedupe selected songs completed",
+    });
+  } catch (error) {
+    console.error("[dedupeSelectedSongs] Manual run failed:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Dedupe failed",
+    });
+  }
+});
 
 // Extra logging around musician-login (only once)
 app.use(
