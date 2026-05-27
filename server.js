@@ -646,6 +646,21 @@ app.use("/api/act", actV2Routes);
 app.use("/api/musician/act-v2", actV2Routes);
 
 app.use("/api/availability", availabilityRoutes);
+
+app.post(
+  "/api/shortlist/twilio/inbound",
+  express.urlencoded({ extended: false }),
+  (req, res) => {
+    console.log("🟡 Legacy Twilio alias hit", {
+      from: req.body?.From,
+      to: req.body?.To,
+      body: req.body?.Body,
+    });
+
+    return twilioInbound(req, res);
+  }
+);
+
 app.use("/api/shortlist", shortlistRoutes);
 app.use("/api/board/enquiries", enquiryBoardRoutes);
 app.use("/api/messages", messageRoutes);
@@ -700,19 +715,6 @@ app.post(
       bodyPreview: String(req.body?.Body || "").slice(0, 160),
     });
     res.sendStatus(200);
-  }
-);
-
-// Legacy alias for old Twilio webhook → forwards to availability inbound
-app.post(
-  "/api/shortlist/twilio/inbound",
-  express.urlencoded({ extended: false }),
-  (req, res) => {
-    console.log(
-      "🟡 Legacy alias hit — forwarding to /api/availability/twilio/inbound"
-    );
-    req.url = "/api/availability/twilio/inbound";
-    app.handle(req, res);
   }
 );
 
