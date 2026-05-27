@@ -734,6 +734,12 @@ const getInvoiceCompany = (row) => {
       vatNumber: "",
       brand: "TSC",
       accent: "#ff6667",
+      bank: {
+        accountName: "The Supreme Collective Limited",
+        bankName: "",
+        sortCode: "608371",
+        accountNumber: "00973473",
+      },
     };
   }
 
@@ -745,6 +751,12 @@ const getInvoiceCompany = (row) => {
     vatNumber: "517 6408 85",
     brand: "BMM",
     accent: "#43d8e8",
+    bank: {
+      accountName: "Bamboo Music Management Ltd",
+      bankName: "Mettle (Prepay Technologies)",
+      sortCode: "040333",
+      accountNumber: "43875024",
+    },
   };
 };
 
@@ -832,7 +844,9 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       "Client",
     );
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
+    const eventDateFormatted = formatInvoiceDate(eventDate);
     const dueDate = getDueDateThursdayWeekBefore(eventDate);
+    const paymentReference = row.bookingRef || row.bookingId || String(row._id);
     const actName = firstNonEmpty(row.actTscName, row.actName, row.tscName);
     const clientAddress = firstNonEmpty(
       row.clientAddress,
@@ -979,7 +993,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .fontSize(12)
       .text("Event", cardX + 300, detailY);
     doc.font("Helvetica").fontSize(10).fillColor(text);
-    doc.text(`Date: ${eventDate || "TBC"}`, cardX + 300, detailY + 20);
+    doc.text(`Date: ${eventDateFormatted}`, cardX + 300, detailY + 20);
     doc.text(`Act: ${actName || "TBC"}`, cardX + 300, detailY + 35, {
       width: 220,
     });
@@ -1087,16 +1101,33 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       align: "right",
     });
 
-    // VAT note.
+    // Payment details and VAT note.
+    const paymentY = cardY + cardH - 112;
+
+    doc
+      .fillColor(text)
+      .font("Helvetica-Bold")
+      .fontSize(10)
+      .text("Bank transfer details", cardX + 26, paymentY);
+
+    doc.fillColor(text).font("Helvetica").fontSize(9);
+    doc.text(`Account name: ${invoiceCompany.bank?.accountName || invoiceCompany.name}`, cardX + 26, paymentY + 16);
+    if (invoiceCompany.bank?.bankName) {
+      doc.text(`Bank: ${invoiceCompany.bank.bankName}`, cardX + 26, paymentY + 30);
+    }
+    doc.text(`Sort code: ${invoiceCompany.bank?.sortCode || ""}`, cardX + 26, paymentY + 44);
+    doc.text(`Account number: ${invoiceCompany.bank?.accountNumber || ""}`, cardX + 26, paymentY + 58);
+    doc.text(`Payment reference: ${paymentReference}`, cardX + 26, paymentY + 72);
+
     doc
       .fillColor(muted)
       .font("Helvetica")
-      .fontSize(9)
+      .fontSize(8)
       .text(
-        "VAT is charged only on the music management / commission element. The band fee is shown separately as a pass-through artist fee.",
-        cardX + 26,
-        cardY + cardH - 64,
-        { width: cardW - 52 },
+        "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the music management / commission element. The band fee is shown separately as a pass-through artist fee.",
+        cardX + 270,
+        paymentY,
+        { width: cardW - 296 },
       );
 
     doc
