@@ -441,6 +441,105 @@ const splitLongText = (text = "") =>
     .map((line) => line.trim())
     .filter(Boolean);
 
+const noInfo = "No information provided.";
+
+const valueOrFallback = (value, fallback = noInfo) => {
+  const formatted = normalisePdfValue(value);
+  return formatted || fallback;
+};
+
+const yesNoNone = (value) => {
+  const formatted = normalisePdfValue(value);
+  if (!formatted) return noInfo;
+  return formatted.toLowerCase() === "no" ? "None" : formatted;
+};
+
+const getFirstActSummary = (booking) => {
+  if (Array.isArray(booking?.actsSummary) && booking.actsSummary[0]) return booking.actsSummary[0];
+  if (Array.isArray(booking?.items) && booking.items[0]) return booking.items[0];
+  return null;
+};
+
+const getLineupLabelForPdf = (booking) => {
+  const firstAct = getFirstActSummary(booking);
+  return (
+    firstAct?.lineupLabel ||
+    firstAct?.lineup?.actSize ||
+    firstAct?.actSize ||
+    booking?.lineupLabel ||
+    booking?.lineup?.actSize ||
+    "No information provided."
+  );
+};
+
+const getBookerPhoneForPdf = (answers, booking) =>
+  pickAnswer(answers, ["booker_phone", "bookerPhone", "phone", "client_phone", "clientPhone"]) ||
+  pickBookingValue(booking, ["userAddress.phone", "phone", "clientPhone", "customerPhone"]);
+
+const getBookerEmailForPdf = (answers, booking) =>
+  pickAnswer(answers, ["booker_email", "bookerEmail", "email", "client_email", "clientEmail"]) ||
+  pickBookingValue(booking, ["userAddress.email", "userEmail", "email", "clientEmail", "customerEmail"]);
+
+const getActImageUrlForPdf = (booking) => {
+  const firstAct = getFirstActSummary(booking);
+  const image = firstAct?.image || firstAct?.images?.[0] || booking?.act?.image || booking?.act?.images?.[0];
+  if (typeof image === "string") return image;
+  return image?.url || image?.secure_url || "";
+};
+
+const getHotMealsRequiredForPdf = (answers, booking) => {
+  const explicit = pickAnswer(answers, ["hot_meals_required", "hotMealsRequired"]);
+  if (explicit) return explicit;
+
+  const firstAct = getFirstActSummary(booking);
+  const candidates = [
+    firstAct?.lineup?.hotMeal,
+    firstAct?.hotMeal,
+    booking?.lineup?.hotMeal,
+    booking?.hotMeal,
+  ];
+
+  for (const value of candidates) {
+    const formatted = normalisePdfValue(value);
+    if (formatted) return formatted;
+  }
+
+  return noInfo;
+};
+
+const getPaidParkingSummaryForPdf = (answers) => {
+  const totalCarsRaw = pickAnswer(answers, ["parking_num_cars", "parkingNumCars"]);
+  const onsiteSpacesRaw = pickAnswer(answers, ["parking_spaces_on_site", "parkingSpacesOnSite"]);
+  const costPerCarRaw = pickAnswer(answers, ["parking_cost_per_car", "parkingCostPerCar"]);
+
+  const totalCars = Number.parseInt(totalCarsRaw, 10);
+  const onsiteSpaces = Number.parseInt(onsiteSpacesRaw, 10);
+  const paidSpaces = Number.isFinite(totalCars)
+    ? Math.max(totalCars - (Number.isFinite(onsiteSpaces) ? onsiteSpaces : 0), 0)
+    : null;
+
+  if (paidSpaces == null) return noInfo;
+
+  const costText = costPerCarRaw ? ` at £${costPerCarRaw} per car` : "";
+  return `${paidSpaces} paid parking space${paidSpaces === 1 ? "" : "s"}${costText}`;
+};
+
+const fetchImageBufferForPdf = async (url) => {
+  if (!url || typeof fetch !== "function") return null;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (error) {
+    console.warn("⚠️ Could not fetch event sheet image for PDF", {
+      url,
+      message: error?.message,
+    });
+    return null;
+  }
+};
+
 const buildEventSheetPdfBuffer = async (booking) => {
   const doc = new PDFDocument({ margin: 42, size: "A4" });
   const chunks = [];
@@ -455,9 +554,15 @@ const buildEventSheetPdfBuffer = async (booking) => {
   const answers = getEventSheetAnswers(booking);
   const bandName = getBookingDisplayName(booking);
   const coupleNames = getCoupleNamesForPdf(answers, booking);
+  const eventType = pickBookingValue(booking, ["eventType", "type", "eventDetails.type"]) || "Wedding";
   const eventDate = getEventDateForPdf(answers, booking);
   const venue = getVenueForPdf(answers, booking);
   const ref = booking?.bookingId || String(booking?._id || "");
+  const lineupLabel = getLineupLabelForPdf(booking);
+  const bookerPhone = getBookerPhoneForPdf(answers, booking);
+  const bookerEmail = getBookerEmailForPdf(answers, booking);
+  const actImageUrl = getActImageUrlForPdf(booking);
+  const actImageBuffer = await fetchImageBufferForPdf(actImageUrl);
 
   const pageWidth = doc.page.width;
   const left = doc.page.margins.left;
@@ -477,11 +582,7 @@ const buildEventSheetPdfBuffer = async (booking) => {
   const sectionTitle = (title) => {
     ensureSpace(45);
     doc.moveDown(0.7);
-    doc
-      .font("Helvetica-Bold")
-      .fontSize(14)
-      .fillColor(dark)
-      .text(String(title).toUpperCase(), left, doc.y);
+    doc.font("Helvetica-Bold").fontSize(14).fillColor(dark).text(String(title).toUpperCase(), left, doc.y);
     doc
       .moveTo(left, doc.y + 4)
       .lineTo(left + contentWidth, doc.y + 4)
@@ -492,31 +593,32 @@ const buildEventSheetPdfBuffer = async (booking) => {
   };
 
   const labelValue = (label, value, options = {}) => {
-    const formatted = normalisePdfValue(value);
-    if (!formatted) return;
+    const formatted = options.allowBlank ? valueOrFallback(value) : normalisePdfValue(value);
+    if (!formatted && !options.showFallback) return;
 
     ensureSpace(options.large ? 95 : 45);
     doc.font("Helvetica-Bold").fontSize(9).fillColor(grey).text(String(label).toUpperCase(), left, doc.y);
     doc.moveDown(0.15);
-    doc.font("Helvetica").fontSize(11).fillColor(dark).text(formatted, left, doc.y, {
+    doc.font("Helvetica").fontSize(11).fillColor(dark).text(formatted || noInfo, left, doc.y, {
       width: contentWidth,
       lineGap: 2,
     });
     doc.moveDown(0.55);
   };
 
-  const boxedNote = (title, value) => {
-    const formatted = normalisePdfValue(value);
-    if (!formatted) return;
+  const boxedNote = (title, value, options = {}) => {
+    const formatted = options.allowBlank ? valueOrFallback(value) : normalisePdfValue(value);
+    if (!formatted && !options.showFallback) return;
 
+    const text = formatted || noInfo;
     ensureSpace(90);
     const startY = doc.y;
-    const estimatedHeight = Math.max(48, doc.heightOfString(formatted, { width: contentWidth - 24 }) + 34);
+    const estimatedHeight = Math.max(48, doc.heightOfString(text, { width: contentWidth - 24 }) + 34);
     doc.roundedRect(left, startY, contentWidth, estimatedHeight, 6).fillAndStroke(pale, border);
     doc.fillColor(dark).font("Helvetica-Bold").fontSize(10).text(title, left + 12, startY + 10, {
       width: contentWidth - 24,
     });
-    doc.font("Helvetica").fontSize(10).text(formatted, left + 12, doc.y + 4, {
+    doc.font("Helvetica").fontSize(10).text(text, left + 12, doc.y + 4, {
       width: contentWidth - 24,
       lineGap: 2,
     });
@@ -566,72 +668,101 @@ const buildEventSheetPdfBuffer = async (booking) => {
   };
 
   // Header
-  doc.font("Helvetica-Bold").fontSize(22).fillColor(dark).text(`${coupleNames}'s ${pickBookingValue(booking, ["eventType", "type"]) || "Wedding"}`, {
+  doc.font("Helvetica-Bold").fontSize(22).fillColor(dark).text(`${coupleNames}'s ${eventType}`, {
     align: "center",
   });
   doc.moveDown(0.35);
-  doc.font("Helvetica").fontSize(10).fillColor(grey).text(`Event sheet generated for ${bandName}`, { align: "center" });
-  doc.moveDown(1.2);
+  doc.font("Helvetica-Bold").fontSize(12).fillColor(coral).text(bandName, { align: "center" });
+  doc.moveDown(1.1);
+
+  if (actImageBuffer) {
+    try {
+      ensureSpace(150);
+      const imageWidth = Math.min(contentWidth, 360);
+      const imageX = left + (contentWidth - imageWidth) / 2;
+      doc.image(actImageBuffer, imageX, doc.y, {
+        fit: [imageWidth, 135],
+        align: "center",
+        valign: "center",
+      });
+      doc.y += 150;
+    } catch (error) {
+      console.warn("⚠️ Could not add event sheet image to PDF", { message: error?.message });
+    }
+  }
 
   // At-a-glance summary
-  doc.roundedRect(left, doc.y, contentWidth, 86, 8).fillAndStroke(pale, border);
+  doc.roundedRect(left, doc.y, contentWidth, 108, 8).fillAndStroke(pale, border);
   const summaryY = doc.y + 14;
   const col = contentWidth / 3;
   const summaryItems = [
     ["Date", eventDate],
     ["Act", bandName],
+    ["Lineup", lineupLabel],
+    ["Bookers", coupleNames],
+    ["Phone", bookerPhone || noInfo],
     ["Booking ref", ref],
   ];
   summaryItems.forEach(([label, value], index) => {
-    const x = left + col * index + 12;
-    doc.font("Helvetica-Bold").fontSize(8).fillColor(grey).text(label.toUpperCase(), x, summaryY, { width: col - 24 });
-    doc.font("Helvetica-Bold").fontSize(12).fillColor(dark).text(value || "TBC", x, summaryY + 15, { width: col - 24 });
+    const row = Math.floor(index / 3);
+    const column = index % 3;
+    const x = left + col * column + 12;
+    const y = summaryY + row * 46;
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(grey).text(label.toUpperCase(), x, y, { width: col - 24 });
+    doc.font("Helvetica-Bold").fontSize(11).fillColor(dark).text(value || noInfo, x, y + 15, { width: col - 24 });
   });
-  doc.y += 104;
+  doc.y += 126;
 
   sectionTitle("Event overview");
-  labelValue("Venue", venue);
-  labelValue("Venue pin", pickAnswer(answers, ["venue_pin", "venuePin"]));
-  labelValue("Load-in pin", pickAnswer(answers, ["load_in_pin", "loadInPin"]));
+  labelValue("Event type", eventType, { showFallback: true });
+  labelValue("Band name", bandName, { showFallback: true });
+  labelValue("Lineup size", lineupLabel, { showFallback: true });
+  labelValue("Bookers", coupleNames, { showFallback: true });
+  labelValue("Booker phone", bookerPhone, { showFallback: true });
+  labelValue("Booker email", bookerEmail, { showFallback: true });
+  labelValue("Venue address", venue, { showFallback: true });
+  labelValue("Venue pin", pickAnswer(answers, ["venue_pin", "venuePin"]), { showFallback: true });
+  labelValue("Load-in pin", pickAnswer(answers, ["load_in_pin", "loadInPin"]), { showFallback: true });
   labelValue("Performance room / area", [
     pickAnswer(answers, ["performance_room", "performanceRoom"]),
     pickAnswer(answers, ["performance_area", "performanceArea"]),
-  ].filter(Boolean).join(" - "));
-  labelValue("Guest count", pickAnswer(answers, ["guest_count", "guestCount"]));
-  labelValue("Attire", pickAnswer(answers, ["attire_notes", "attireNotes", "attire"]));
+  ].filter(Boolean).join(" - "), { showFallback: true });
+  labelValue("Guest count", pickAnswer(answers, ["guest_count", "guestCount"]), { showFallback: true });
+  labelValue("Attire", pickAnswer(answers, ["attire_notes", "attireNotes", "attire"]), { showFallback: true });
 
   sectionTitle("Schedule");
-  drawTable(["Activity", "Time", "Notes"], getScheduleRowsForPdf(answers).map((row) => [row.activity, row.time, row.notes]), [220, 120, contentWidth - 340]);
+  drawTable(["Activity", "Time", "Notes"], getScheduleRowsForPdf(answers).map((row) => [row.activity, row.time, row.notes || noInfo]), [220, 120, contentWidth - 340]);
 
   sectionTitle("Parking & load-in");
-  labelValue("Parking availability", pickAnswer(answers, ["parking_available", "parkingAvailable"]));
-  labelValue("On-site spaces", pickAnswer(answers, ["parking_spaces_on_site", "parkingSpacesOnSite"]));
-  labelValue("Paid parking required", pickAnswer(answers, ["parking_num_cars", "parkingNumCars"]));
-  labelValue("Parking cost per car", pickAnswer(answers, ["parking_cost_per_car", "parkingCostPerCar"]));
-  labelValue("Parking payment status", pickAnswer(answers, ["parking_checkout_status", "parkingCheckoutStatus"]));
-  boxedNote("Load-in instructions", pickAnswer(answers, ["load_in_instructions", "loadInInstructions", "special_directions", "specialDirections"]));
+  labelValue("Parking availability", pickAnswer(answers, ["parking_available", "parkingAvailable"]), { showFallback: true });
+  labelValue("Total parking required", pickAnswer(answers, ["parking_num_cars", "parkingNumCars"]), { showFallback: true });
+  labelValue("On-site spaces", pickAnswer(answers, ["parking_spaces_on_site", "parkingSpacesOnSite"]), { showFallback: true });
+  labelValue("Paid parking required", getPaidParkingSummaryForPdf(answers), { showFallback: true });
+  labelValue("Parking location / address", pickAnswer(answers, ["parking_address", "parkingAddress", "parking_location", "parkingLocation"]), { showFallback: true });
+  labelValue("Parking cost per car", pickAnswer(answers, ["parking_cost_per_car", "parkingCostPerCar"]), { showFallback: true });
+  boxedNote("Load-in instructions", pickAnswer(answers, ["load_in_instructions", "loadInInstructions", "special_directions", "specialDirections"]), { showFallback: true });
 
   sectionTitle("Production notes");
-  labelValue("Outdoor performance", pickAnswer(answers, ["outdoor_performance", "outdoorPerformance"]));
-  labelValue("In-house PA", pickAnswer(answers, ["use_inhouse_pa", "useInhousePa"]));
-  labelValue("In-house lights", pickAnswer(answers, ["use_inhouse_lights", "useInhouseLights"]));
-  labelValue("Sound limits", pickAnswer(answers, ["sound_limits_present", "soundLimitsPresent"]));
-  labelValue("Hard close time", pickAnswer(answers, ["hard_close_time", "hardCloseTime"]));
-  boxedNote("Production / venue notes", pickAnswer(answers, ["production_notes", "pa_notes", "sound_limit_notes", "notes_for_band", "notesForBand"]));
+  labelValue("Outdoor performance", yesNoNone(pickAnswer(answers, ["outdoor_performance", "outdoorPerformance"])), { showFallback: true });
+  labelValue("In-house PA", yesNoNone(pickAnswer(answers, ["use_inhouse_pa", "useInhousePa"])), { showFallback: true });
+  labelValue("In-house lights", yesNoNone(pickAnswer(answers, ["use_inhouse_lights", "useInhouseLights"])), { showFallback: true });
+  labelValue("Sound limits", yesNoNone(pickAnswer(answers, ["sound_limits_present", "soundLimitsPresent"])), { showFallback: true });
+  labelValue("Hard close time", pickAnswer(answers, ["hard_close_time", "hardCloseTime"]), { showFallback: true });
+  boxedNote("Production / venue notes", pickAnswer(answers, ["production_notes", "pa_notes", "sound_limit_notes", "notes_for_band", "notesForBand"]), { showFallback: true });
 
   sectionTitle("Food & refreshments");
-  labelValue("Hot meals required", pickAnswer(answers, ["hot_meals_required", "hotMealsRequired"]) || pickBookingValue(booking, ["hotMeal"]));
-  labelValue("Meal timing / catering notes", pickAnswer(answers, ["meal_time", "mealTime", "food_notes", "foodNotes", "catering_notes", "cateringNotes"]));
-  labelValue("Changing room", pickAnswer(answers, ["changing_room", "changingRoom"]));
-  boxedNote("Changing room notes", pickAnswer(answers, ["changing_room_notes", "changingRoomNotes"]));
+  labelValue("Hot meals required", getHotMealsRequiredForPdf(answers, booking), { showFallback: true });
+  labelValue("Meal timing / catering notes", pickAnswer(answers, ["meal_time", "mealTime", "food_notes", "foodNotes", "catering_notes", "cateringNotes"]), { showFallback: true });
+  labelValue("Changing room", yesNoNone(pickAnswer(answers, ["changing_room", "changingRoom"])), { showFallback: true });
+  boxedNote("Changing room notes", pickAnswer(answers, ["changing_room_notes", "changingRoomNotes"]), { showFallback: true });
 
   sectionTitle("Contacts");
   const contacts = pickAnswer(answers, ["contacts_personal", "contactsPersonal", "contacts", "point_of_contact", "pointOfContact"]);
-  boxedNote("Point of contact", contacts);
+  boxedNote("Point of contact", contacts, { showFallback: true });
 
   sectionTitle("Music");
-  labelValue("First dance", pickAnswer(answers, ["first_dance_song", "firstDanceSong"]));
-  labelValue("First dance performed by", pickAnswer(answers, ["first_dance_performed_by", "firstDancePerformedBy"]));
+  labelValue("First dance", pickAnswer(answers, ["first_dance_song", "firstDanceSong"]), { showFallback: true });
+  labelValue("First dance performed by", pickAnswer(answers, ["first_dance_performed_by", "firstDancePerformedBy"]), { showFallback: true });
   const songSuggestions = pickAnswer(answers, ["song_suggestions", "songSuggestions"]);
   const songs = splitLongText(songSuggestions);
   if (songs.length) {
@@ -646,13 +777,15 @@ const buildEventSheetPdfBuffer = async (booking) => {
       });
     });
     doc.moveDown(0.8);
+  } else {
+    labelValue("Song suggestions", noInfo, { showFallback: true });
   }
-  boxedNote("Playlist / DJ notes", pickAnswer(answers, ["spotify_playlist", "spotifyPlaylist", "dj_requests", "djRequests", "playlist_notes", "playlistNotes"]));
+  boxedNote("Spotify playlist / DJ notes", pickAnswer(answers, ["spotify_playlist", "spotifyPlaylist", "spotify_playlist_url", "spotifyPlaylistUrl", "playlist_url", "playlistUrl", "dj_requests", "djRequests", "playlist_notes", "playlistNotes"]), { showFallback: true });
 
   sectionTitle("Socials, suppliers & notes");
-  boxedNote("Socials", pickAnswer(answers, ["socials", "social_handles", "socialHandles"]));
-  boxedNote("Other suppliers", pickAnswer(answers, ["other_suppliers", "otherSuppliers", "suppliers"]));
-  boxedNote("Additional notes", pickAnswer(answers, ["notes", "additional_notes", "additionalNotes"]));
+  boxedNote("Socials", pickAnswer(answers, ["socials", "social_handles", "socialHandles"]), { showFallback: true });
+  boxedNote("Other suppliers", pickAnswer(answers, ["other_suppliers", "otherSuppliers", "suppliers"]), { showFallback: true });
+  boxedNote("Additional notes", pickAnswer(answers, ["notes", "additional_notes", "additionalNotes"]), { showFallback: true });
 
   const excludedKeys = new Set([
     "parking_num_cars", "parkingNumCars", "schedule_simple_arrival", "scheduleSimpleArrival",
@@ -665,6 +798,7 @@ const buildEventSheetPdfBuffer = async (booking) => {
     "parking_available", "parkingAvailable", "load_in_instructions", "loadInInstructions",
     "parking_screenshot_name", "parkingScreenshotName", "parking_checkout_status", "parkingCheckoutStatus",
     "parking_cost_per_car", "parkingCostPerCar", "parking_spaces_on_site", "parkingSpacesOnSite",
+    "parking_address", "parkingAddress", "parking_location", "parkingLocation",
     "partner1_first", "partner1First", "partner1_last", "partner1Last", "partner2_first", "partner2First",
     "partner2_last", "partner2Last", "introduced_as", "introducedAs", "attire_notes", "attireNotes",
     "venue_pin", "venuePin", "load_in_pin", "loadInPin", "performance_room", "performanceRoom",
@@ -673,8 +807,10 @@ const buildEventSheetPdfBuffer = async (booking) => {
     "hard_close_time", "hardCloseTime", "first_dance_song", "firstDanceSong", "first_dance_performed_by", "firstDancePerformedBy",
     "changing_room", "changingRoom", "changing_room_notes", "changingRoomNotes", "contacts_personal", "contactsPersonal",
     "notes", "additional_notes", "additionalNotes", "socials", "social_handles", "socialHandles",
-    "other_suppliers", "otherSuppliers", "suppliers", "spotify_playlist", "spotifyPlaylist", "dj_requests", "djRequests",
-    "playlist_notes", "playlistNotes", "meal_time", "mealTime", "food_notes", "foodNotes", "catering_notes", "cateringNotes",
+    "other_suppliers", "otherSuppliers", "suppliers", "spotify_playlist", "spotifyPlaylist", "spotify_playlist_url", "spotifyPlaylistUrl",
+    "playlist_url", "playlistUrl", "dj_requests", "djRequests", "playlist_notes", "playlistNotes", "meal_time", "mealTime",
+    "food_notes", "foodNotes", "catering_notes", "cateringNotes", "hot_meals_required", "hotMealsRequired",
+    "booker_phone", "bookerPhone", "phone", "client_phone", "clientPhone", "booker_email", "bookerEmail", "email", "client_email", "clientEmail",
   ]);
 
   const otherEntries = Object.entries(answers).filter(([key, value]) => {
@@ -798,23 +934,23 @@ router.post("/notify-band", async (req, res) => {
     `;
 
     const pdfBuffer = await buildEventSheetPdfBuffer(booking);
-const safeRef = String(ref || "event-sheet").replace(/[^a-z0-9-_]+/gi, "-");
+    const safeRef = String(ref || "event-sheet").replace(/[^a-z0-9-_]+/gi, "-");
 
-const mailResult = await transporter.sendMail({
-  from: `${emailConfig.fromName} <${emailConfig.fromAddress}>`,
-  to: emailConfig.notifyTo,
-  replyTo: emailConfig.fromAddress || "hello@thesupremecollective.co.uk",
-  subject,
-  text,
-  html,
-  attachments: [
-    {
-      filename: `event-sheet-${safeRef}.pdf`,
-      content: pdfBuffer,
-      contentType: "application/pdf",
-    },
-  ],
-});
+    const mailResult = await transporter.sendMail({
+      from: `${emailConfig.fromName} <${emailConfig.fromAddress}>`,
+      to: emailConfig.notifyTo,
+      replyTo: emailConfig.fromAddress || "hello@thesupremecollective.co.uk",
+      subject,
+      text,
+      html,
+      attachments: [
+        {
+          filename: `event-sheet-${safeRef}.pdf`,
+          content: pdfBuffer,
+          contentType: "application/pdf",
+        },
+      ],
+    });
 
     await booking.save();
 
