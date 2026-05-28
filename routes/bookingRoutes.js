@@ -16,6 +16,7 @@ import {
 import Booking from "../models/bookingModel.js";
 import mongoose from "mongoose";
 import nodemailer from "nodemailer";
+import PDFDocument from "pdfkit";
 
 const router = express.Router();
 
@@ -292,6 +293,87 @@ const createNotifyBandTransporter = () => {
 /* -------------------------------------------------------------------------- */
 /*              POST /notify-band                                             */
 /* -------------------------------------------------------------------------- */
+
+const humaniseEventSheetKey = (key = "") =>
+  String(key || "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const formatEventSheetValueForPdf = (value) => {
+  if (value == null || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) =>
+        typeof item === "object"
+          ? Object.entries(item)
+              .map(([k, v]) => `${humaniseEventSheetKey(k)}: ${formatEventSheetValueForPdf(v)}`)
+              .join("; ")
+          : formatEventSheetValueForPdf(item)
+      )
+      .join("\n");
+  }
+
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([k, v]) => `${humaniseEventSheetKey(k)}: ${formatEventSheetValueForPdf(v)}`)
+      .join("\n");
+  }
+
+  return String(value);
+};
+
+const buildEventSheetPdfBuffer = async (booking) => {
+  const doc = new PDFDocument({ margin: 50, size: "A4" });
+  const chunks = [];
+
+  doc.on("data", (chunk) => chunks.push(chunk));
+
+  const done = new Promise((resolve, reject) => {
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
+
+  const bandName = getBookingDisplayName(booking);
+  const eventDate = getBookingEventDate(booking);
+  const ref = booking?.bookingId || String(booking?._id || "");
+  const answers = booking?.eventSheet?.answers || {};
+
+  doc.fontSize(22).text("Event Sheet", { align: "center" });
+  doc.moveDown();
+  doc.fontSize(12).text(`Booking ref: ${ref}`);
+  doc.text(`Act: ${bandName}`);
+  doc.text(`Event date: ${eventDate}`);
+  doc.text(`Venue: ${booking?.venue || booking?.venueAddress || "—"}`);
+  doc.moveDown();
+
+  doc.fontSize(16).text("Event Details", { underline: true });
+  doc.moveDown();
+
+  Object.entries(answers)
+    .filter(([key, value]) => {
+      if (!key || value == null || value === "") return false;
+      if (String(key).includes("screenshot_url")) return false;
+      if (String(key).includes("base64")) return false;
+      return true;
+    })
+    .forEach(([key, value]) => {
+      if (doc.y > 730) doc.addPage();
+
+      doc.fontSize(11).font("Helvetica-Bold").text(humaniseEventSheetKey(key));
+      doc.font("Helvetica").text(formatEventSheetValueForPdf(value), {
+        width: 500,
+      });
+      doc.moveDown(0.6);
+    });
+
+  doc.end();
+  return done;
+};
+
 router.post("/notify-band", async (req, res) => {
   console.log(`✅ (routes/bookingRoutes.js) POST /api/booking/notify-band called at`, new Date().toISOString(), {
     bodyKeys: Object.keys(req.body || {}),
@@ -388,26 +470,24 @@ router.post("/notify-band", async (req, res) => {
       </div>
     `;
 
-    const mailResult = await transporter.sendMail({
-      from: `${emailConfig.fromName} <${emailConfig.fromAddress}>`,
-      to: emailConfig.notifyTo,
-      replyTo: emailConfig.fromAddress || "hello@thesupremecollective.co.uk",
-      subject,
-      text,
-      html,
-    });
+    const pdfBuffer = await buildEventSheetPdfBuffer(booking);
+const safeRef = String(ref || "event-sheet").replace(/[^a-z0-9-_]+/gi, "-");
 
-    booking.notifiedAt = new Date();
-    booking.notificationLog = [
-      ...(Array.isArray(booking.notificationLog) ? booking.notificationLog : []),
-      {
-        type: "event_sheet_notify_band",
-        to: emailConfig.notifyTo,
-        subject,
-        messageId: mailResult?.messageId || "",
-        sentAt: new Date(),
-      },
-    ];
+const mailResult = await transporter.sendMail({
+  from: `${emailConfig.fromName} <${emailConfig.fromAddress}>`,
+  to: emailConfig.notifyTo,
+  replyTo: emailConfig.fromAddress || "hello@thesupremecollective.co.uk",
+  subject,
+  text,
+  html,
+  attachments: [
+    {
+      filename: `event-sheet-${safeRef}.pdf`,
+      content: pdfBuffer,
+      contentType: "application/pdf",
+    },
+  ],
+});
 
     await booking.save();
 
