@@ -185,9 +185,15 @@ const getBookingDisplayName = (booking) => {
 
   return (
     firstAct?.actName ||
+    firstAct?.tscName ||
     firstAct?.name ||
+    firstAct?.title ||
+    firstAct?.act?.tscName ||
+    firstAct?.act?.name ||
     booking?.actName ||
     booking?.artistName ||
+    booking?.act?.tscName ||
+    booking?.act?.name ||
     "Band"
   );
 };
@@ -297,37 +303,146 @@ const createNotifyBandTransporter = () => {
 const humaniseEventSheetKey = (key = "") =>
   String(key || "")
     .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
-const formatEventSheetValueForPdf = (value) => {
-  if (value == null || value === "") return "—";
+const normalisePdfValue = (value) => {
+  if (value == null || value === "") return "";
   if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return String(value);
 
   if (Array.isArray(value)) {
     return value
-      .map((item) =>
-        typeof item === "object"
-          ? Object.entries(item)
-              .map(([k, v]) => `${humaniseEventSheetKey(k)}: ${formatEventSheetValueForPdf(v)}`)
-              .join("; ")
-          : formatEventSheetValueForPdf(item)
-      )
+      .map((item) => normalisePdfValue(item))
+      .filter(Boolean)
       .join("\n");
   }
 
   if (typeof value === "object") {
     return Object.entries(value)
-      .map(([k, v]) => `${humaniseEventSheetKey(k)}: ${formatEventSheetValueForPdf(v)}`)
+      .filter(([, v]) => v != null && v !== "")
+      .map(([k, v]) => `${humaniseEventSheetKey(k)}: ${normalisePdfValue(v)}`)
+      .filter(Boolean)
       .join("\n");
   }
 
-  return String(value);
+  return String(value).trim();
 };
 
+const getEventSheetAnswers = (booking) => booking?.eventSheet?.answers || {};
+
+const pickAnswer = (answers, keys = []) => {
+  for (const key of keys) {
+    const value = answers?.[key];
+    const formatted = normalisePdfValue(value);
+    if (formatted) return formatted;
+  }
+  return "";
+};
+
+const pickBookingValue = (booking, keys = []) => {
+  for (const key of keys) {
+    const value = key.split(".").reduce((obj, part) => obj?.[part], booking);
+    const formatted = normalisePdfValue(value);
+    if (formatted) return formatted;
+  }
+  return "";
+};
+
+const getCoupleNamesForPdf = (answers, booking) => {
+  const introducedAs = pickAnswer(answers, ["introduced_as", "introducedAs"]);
+  if (introducedAs) return introducedAs;
+
+  const partner1 = [
+    pickAnswer(answers, ["partner1_first", "partner1First"]),
+    pickAnswer(answers, ["partner1_last", "partner1Last"]),
+  ].filter(Boolean).join(" ").trim();
+
+  const partner2 = [
+    pickAnswer(answers, ["partner2_first", "partner2First"]),
+    pickAnswer(answers, ["partner2_last", "partner2Last"]),
+  ].filter(Boolean).join(" ").trim();
+
+  if (partner1 && partner2) return `${partner1} & ${partner2}`;
+  if (partner1 || partner2) return partner1 || partner2;
+
+  return pickBookingValue(booking, ["clientName", "customerName", "name"]) || "Event Sheet";
+};
+
+const getVenueForPdf = (answers, booking) =>
+  pickAnswer(answers, ["venue", "venue_address", "venueAddress", "location", "event_location"]) ||
+  pickBookingValue(booking, ["venue", "venueAddress", "eventDetails.venue", "eventDetails.location"]) ||
+  "TBC";
+
+const getEventDateForPdf = (answers, booking) => {
+  const raw =
+    pickAnswer(answers, ["event_date", "eventDate", "date"]) ||
+    pickBookingValue(booking, ["eventDate", "date", "bookingDate", "eventDetails.date"]);
+
+  if (!raw) return "TBC";
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+
+  return date.toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+};
+
+const getScheduleRowsForPdf = (answers) => {
+  const rows = [];
+
+  const simpleRows = Array.isArray(answers?.schedule_simple_rows)
+    ? answers.schedule_simple_rows
+    : Array.isArray(answers?.scheduleSimpleRows)
+      ? answers.scheduleSimpleRows
+      : [];
+
+  const addRow = (activity, time, notes = "") => {
+    const cleanActivity = normalisePdfValue(activity);
+    const cleanTime = normalisePdfValue(time);
+    const cleanNotes = normalisePdfValue(notes);
+    if (cleanActivity || cleanTime || cleanNotes) {
+      rows.push({ activity: cleanActivity || "Schedule item", time: cleanTime || "TBC", notes: cleanNotes });
+    }
+  };
+
+  addRow("Band arrival / load-in", answers?.schedule_simple_arrival || answers?.scheduleSimpleArrival);
+  addRow("Setup", answers?.schedule_simple_setup || answers?.scheduleSimpleSetup);
+  addRow("Soundcheck", answers?.schedule_simple_soundcheck || answers?.scheduleSimpleSoundcheck);
+  addRow("Live set 1", answers?.schedule_simple_set1 || answers?.scheduleSimpleSet1);
+  addRow("Break / DJ / Playlist", answers?.schedule_simple_between1 || answers?.scheduleSimpleBetween1);
+  addRow("Live set 2", answers?.schedule_simple_set2 || answers?.scheduleSimpleSet2);
+  addRow("Band finish", answers?.schedule_simple_finish_time || answers?.scheduleSimpleFinishTime || answers?.schedule_time_finish || answers?.scheduleTimeFinish);
+
+  simpleRows.forEach((row) => {
+    const label = row?.label || row?.activity || row?.title;
+    const time = row?.time || row?.value;
+    const notes = row?.notes;
+    const duplicate = rows.some(
+      (existing) =>
+        String(existing.activity).toLowerCase() === String(label || "").toLowerCase() &&
+        String(existing.time).toLowerCase() === String(time || "").toLowerCase(),
+    );
+    if (!duplicate) addRow(label, time, notes);
+  });
+
+  return rows;
+};
+
+const splitLongText = (text = "") =>
+  String(text || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
 const buildEventSheetPdfBuffer = async (booking) => {
-  const doc = new PDFDocument({ margin: 50, size: "A4" });
+  const doc = new PDFDocument({ margin: 42, size: "A4" });
   const chunks = [];
 
   doc.on("data", (chunk) => chunks.push(chunk));
@@ -337,38 +452,250 @@ const buildEventSheetPdfBuffer = async (booking) => {
     doc.on("error", reject);
   });
 
+  const answers = getEventSheetAnswers(booking);
   const bandName = getBookingDisplayName(booking);
-  const eventDate = getBookingEventDate(booking);
+  const coupleNames = getCoupleNamesForPdf(answers, booking);
+  const eventDate = getEventDateForPdf(answers, booking);
+  const venue = getVenueForPdf(answers, booking);
   const ref = booking?.bookingId || String(booking?._id || "");
-  const answers = booking?.eventSheet?.answers || {};
 
-  doc.fontSize(22).text("Event Sheet", { align: "center" });
-  doc.moveDown();
-  doc.fontSize(12).text(`Booking ref: ${ref}`);
-  doc.text(`Act: ${bandName}`);
-  doc.text(`Event date: ${eventDate}`);
-  doc.text(`Venue: ${booking?.venue || booking?.venueAddress || "—"}`);
-  doc.moveDown();
+  const pageWidth = doc.page.width;
+  const left = doc.page.margins.left;
+  const contentWidth = pageWidth - doc.page.margins.left - doc.page.margins.right;
+  const coral = "#ff6667";
+  const dark = "#111827";
+  const grey = "#4b5563";
+  const pale = "#f6f7f9";
+  const border = "#d1d5db";
 
-  doc.fontSize(16).text("Event Details", { underline: true });
-  doc.moveDown();
+  const ensureSpace = (height = 80) => {
+    if (doc.y + height > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+    }
+  };
 
-  Object.entries(answers)
-    .filter(([key, value]) => {
-      if (!key || value == null || value === "") return false;
-      if (String(key).includes("screenshot_url")) return false;
-      if (String(key).includes("base64")) return false;
-      return true;
-    })
-    .forEach(([key, value]) => {
-      if (doc.y > 730) doc.addPage();
+  const sectionTitle = (title) => {
+    ensureSpace(45);
+    doc.moveDown(0.7);
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(14)
+      .fillColor(dark)
+      .text(String(title).toUpperCase(), left, doc.y);
+    doc
+      .moveTo(left, doc.y + 4)
+      .lineTo(left + contentWidth, doc.y + 4)
+      .strokeColor(coral)
+      .lineWidth(1)
+      .stroke();
+    doc.moveDown(0.8);
+  };
 
-      doc.fontSize(11).font("Helvetica-Bold").text(humaniseEventSheetKey(key));
-      doc.font("Helvetica").text(formatEventSheetValueForPdf(value), {
-        width: 500,
-      });
-      doc.moveDown(0.6);
+  const labelValue = (label, value, options = {}) => {
+    const formatted = normalisePdfValue(value);
+    if (!formatted) return;
+
+    ensureSpace(options.large ? 95 : 45);
+    doc.font("Helvetica-Bold").fontSize(9).fillColor(grey).text(String(label).toUpperCase(), left, doc.y);
+    doc.moveDown(0.15);
+    doc.font("Helvetica").fontSize(11).fillColor(dark).text(formatted, left, doc.y, {
+      width: contentWidth,
+      lineGap: 2,
     });
+    doc.moveDown(0.55);
+  };
+
+  const boxedNote = (title, value) => {
+    const formatted = normalisePdfValue(value);
+    if (!formatted) return;
+
+    ensureSpace(90);
+    const startY = doc.y;
+    const estimatedHeight = Math.max(48, doc.heightOfString(formatted, { width: contentWidth - 24 }) + 34);
+    doc.roundedRect(left, startY, contentWidth, estimatedHeight, 6).fillAndStroke(pale, border);
+    doc.fillColor(dark).font("Helvetica-Bold").fontSize(10).text(title, left + 12, startY + 10, {
+      width: contentWidth - 24,
+    });
+    doc.font("Helvetica").fontSize(10).text(formatted, left + 12, doc.y + 4, {
+      width: contentWidth - 24,
+      lineGap: 2,
+    });
+    doc.y = startY + estimatedHeight + 10;
+  };
+
+  const drawTable = (headers, rows, widths) => {
+    if (!rows.length) return;
+
+    ensureSpace(80);
+    const rowHeight = 24;
+    const headerY = doc.y;
+    let x = left;
+
+    doc.rect(left, headerY, contentWidth, rowHeight).fill("#111827");
+    headers.forEach((header, index) => {
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#ffffff").text(header, x + 6, headerY + 7, {
+        width: widths[index] - 12,
+      });
+      x += widths[index];
+    });
+    doc.y = headerY + rowHeight;
+
+    rows.forEach((row, rowIndex) => {
+      const values = Array.isArray(row) ? row : Object.values(row);
+      const heights = values.map((value, index) =>
+        doc.heightOfString(normalisePdfValue(value) || " ", { width: widths[index] - 12 }) + 14,
+      );
+      const height = Math.max(24, ...heights);
+      ensureSpace(height + 12);
+
+      const y = doc.y;
+      doc.rect(left, y, contentWidth, height).fill(rowIndex % 2 === 0 ? "#ffffff" : pale);
+      doc.rect(left, y, contentWidth, height).strokeColor(border).lineWidth(0.5).stroke();
+
+      x = left;
+      values.forEach((value, index) => {
+        doc.font("Helvetica").fontSize(9).fillColor(dark).text(normalisePdfValue(value) || "—", x + 6, y + 7, {
+          width: widths[index] - 12,
+          lineGap: 1,
+        });
+        x += widths[index];
+      });
+      doc.y = y + height;
+    });
+    doc.moveDown(0.7);
+  };
+
+  // Header
+  doc.font("Helvetica-Bold").fontSize(22).fillColor(dark).text(`${coupleNames}'s ${pickBookingValue(booking, ["eventType", "type"]) || "Wedding"}`, {
+    align: "center",
+  });
+  doc.moveDown(0.35);
+  doc.font("Helvetica").fontSize(10).fillColor(grey).text(`Event sheet generated for ${bandName}`, { align: "center" });
+  doc.moveDown(1.2);
+
+  // At-a-glance summary
+  doc.roundedRect(left, doc.y, contentWidth, 86, 8).fillAndStroke(pale, border);
+  const summaryY = doc.y + 14;
+  const col = contentWidth / 3;
+  const summaryItems = [
+    ["Date", eventDate],
+    ["Act", bandName],
+    ["Booking ref", ref],
+  ];
+  summaryItems.forEach(([label, value], index) => {
+    const x = left + col * index + 12;
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(grey).text(label.toUpperCase(), x, summaryY, { width: col - 24 });
+    doc.font("Helvetica-Bold").fontSize(12).fillColor(dark).text(value || "TBC", x, summaryY + 15, { width: col - 24 });
+  });
+  doc.y += 104;
+
+  sectionTitle("Event overview");
+  labelValue("Venue", venue);
+  labelValue("Venue pin", pickAnswer(answers, ["venue_pin", "venuePin"]));
+  labelValue("Load-in pin", pickAnswer(answers, ["load_in_pin", "loadInPin"]));
+  labelValue("Performance room / area", [
+    pickAnswer(answers, ["performance_room", "performanceRoom"]),
+    pickAnswer(answers, ["performance_area", "performanceArea"]),
+  ].filter(Boolean).join(" - "));
+  labelValue("Guest count", pickAnswer(answers, ["guest_count", "guestCount"]));
+  labelValue("Attire", pickAnswer(answers, ["attire_notes", "attireNotes", "attire"]));
+
+  sectionTitle("Schedule");
+  drawTable(["Activity", "Time", "Notes"], getScheduleRowsForPdf(answers).map((row) => [row.activity, row.time, row.notes]), [220, 120, contentWidth - 340]);
+
+  sectionTitle("Parking & load-in");
+  labelValue("Parking availability", pickAnswer(answers, ["parking_available", "parkingAvailable"]));
+  labelValue("On-site spaces", pickAnswer(answers, ["parking_spaces_on_site", "parkingSpacesOnSite"]));
+  labelValue("Paid parking required", pickAnswer(answers, ["parking_num_cars", "parkingNumCars"]));
+  labelValue("Parking cost per car", pickAnswer(answers, ["parking_cost_per_car", "parkingCostPerCar"]));
+  labelValue("Parking payment status", pickAnswer(answers, ["parking_checkout_status", "parkingCheckoutStatus"]));
+  boxedNote("Load-in instructions", pickAnswer(answers, ["load_in_instructions", "loadInInstructions", "special_directions", "specialDirections"]));
+
+  sectionTitle("Production notes");
+  labelValue("Outdoor performance", pickAnswer(answers, ["outdoor_performance", "outdoorPerformance"]));
+  labelValue("In-house PA", pickAnswer(answers, ["use_inhouse_pa", "useInhousePa"]));
+  labelValue("In-house lights", pickAnswer(answers, ["use_inhouse_lights", "useInhouseLights"]));
+  labelValue("Sound limits", pickAnswer(answers, ["sound_limits_present", "soundLimitsPresent"]));
+  labelValue("Hard close time", pickAnswer(answers, ["hard_close_time", "hardCloseTime"]));
+  boxedNote("Production / venue notes", pickAnswer(answers, ["production_notes", "pa_notes", "sound_limit_notes", "notes_for_band", "notesForBand"]));
+
+  sectionTitle("Food & refreshments");
+  labelValue("Hot meals required", pickAnswer(answers, ["hot_meals_required", "hotMealsRequired"]) || pickBookingValue(booking, ["hotMeal"]));
+  labelValue("Meal timing / catering notes", pickAnswer(answers, ["meal_time", "mealTime", "food_notes", "foodNotes", "catering_notes", "cateringNotes"]));
+  labelValue("Changing room", pickAnswer(answers, ["changing_room", "changingRoom"]));
+  boxedNote("Changing room notes", pickAnswer(answers, ["changing_room_notes", "changingRoomNotes"]));
+
+  sectionTitle("Contacts");
+  const contacts = pickAnswer(answers, ["contacts_personal", "contactsPersonal", "contacts", "point_of_contact", "pointOfContact"]);
+  boxedNote("Point of contact", contacts);
+
+  sectionTitle("Music");
+  labelValue("First dance", pickAnswer(answers, ["first_dance_song", "firstDanceSong"]));
+  labelValue("First dance performed by", pickAnswer(answers, ["first_dance_performed_by", "firstDancePerformedBy"]));
+  const songSuggestions = pickAnswer(answers, ["song_suggestions", "songSuggestions"]);
+  const songs = splitLongText(songSuggestions);
+  if (songs.length) {
+    ensureSpace(80);
+    doc.font("Helvetica-Bold").fontSize(10).fillColor(grey).text("SONG SUGGESTIONS", left, doc.y);
+    doc.moveDown(0.35);
+    songs.forEach((song) => {
+      ensureSpace(18);
+      doc.font("Helvetica").fontSize(9.5).fillColor(dark).text(`• ${song}`, left + 8, doc.y, {
+        width: contentWidth - 8,
+        lineGap: 1,
+      });
+    });
+    doc.moveDown(0.8);
+  }
+  boxedNote("Playlist / DJ notes", pickAnswer(answers, ["spotify_playlist", "spotifyPlaylist", "dj_requests", "djRequests", "playlist_notes", "playlistNotes"]));
+
+  sectionTitle("Socials, suppliers & notes");
+  boxedNote("Socials", pickAnswer(answers, ["socials", "social_handles", "socialHandles"]));
+  boxedNote("Other suppliers", pickAnswer(answers, ["other_suppliers", "otherSuppliers", "suppliers"]));
+  boxedNote("Additional notes", pickAnswer(answers, ["notes", "additional_notes", "additionalNotes"]));
+
+  const excludedKeys = new Set([
+    "parking_num_cars", "parkingNumCars", "schedule_simple_arrival", "scheduleSimpleArrival",
+    "schedule_simple_start", "scheduleSimpleStart", "schedule_simple_finish_time", "scheduleSimpleFinishTime",
+    "schedule_simple_finish_dayOffset", "scheduleSimpleFinishDayOffset", "schedule_simple_rows", "scheduleSimpleRows",
+    "schedule_time_finish", "scheduleTimeFinish", "schedule_dayOffset_finish", "scheduleDayOffsetFinish",
+    "schedule_simple_set1", "scheduleSimpleSet1", "schedule_simple_set2", "scheduleSimpleSet2",
+    "schedule_simple_between1", "scheduleSimpleBetween1", "schedule_simple_setup", "scheduleSimpleSetup",
+    "schedule_simple_soundcheck", "scheduleSimpleSoundcheck", "song_suggestions", "songSuggestions",
+    "parking_available", "parkingAvailable", "load_in_instructions", "loadInInstructions",
+    "parking_screenshot_name", "parkingScreenshotName", "parking_checkout_status", "parkingCheckoutStatus",
+    "parking_cost_per_car", "parkingCostPerCar", "parking_spaces_on_site", "parkingSpacesOnSite",
+    "partner1_first", "partner1First", "partner1_last", "partner1Last", "partner2_first", "partner2First",
+    "partner2_last", "partner2Last", "introduced_as", "introducedAs", "attire_notes", "attireNotes",
+    "venue_pin", "venuePin", "load_in_pin", "loadInPin", "performance_room", "performanceRoom",
+    "guest_count", "guestCount", "outdoor_performance", "outdoorPerformance", "performance_area", "performanceArea",
+    "use_inhouse_pa", "useInhousePa", "use_inhouse_lights", "useInhouseLights", "sound_limits_present", "soundLimitsPresent",
+    "hard_close_time", "hardCloseTime", "first_dance_song", "firstDanceSong", "first_dance_performed_by", "firstDancePerformedBy",
+    "changing_room", "changingRoom", "changing_room_notes", "changingRoomNotes", "contacts_personal", "contactsPersonal",
+    "notes", "additional_notes", "additionalNotes", "socials", "social_handles", "socialHandles",
+    "other_suppliers", "otherSuppliers", "suppliers", "spotify_playlist", "spotifyPlaylist", "dj_requests", "djRequests",
+    "playlist_notes", "playlistNotes", "meal_time", "mealTime", "food_notes", "foodNotes", "catering_notes", "cateringNotes",
+  ]);
+
+  const otherEntries = Object.entries(answers).filter(([key, value]) => {
+    if (!key || excludedKeys.has(key)) return false;
+    if (value == null || value === "") return false;
+    if (String(key).toLowerCase().includes("base64")) return false;
+    if (String(key).toLowerCase().includes("screenshot_url")) return false;
+    return true;
+  });
+
+  if (otherEntries.length) {
+    sectionTitle("Other submitted details");
+    otherEntries.forEach(([key, value]) => labelValue(humaniseEventSheetKey(key), value, { large: true }));
+  }
+
+  doc.moveDown(1);
+  ensureSpace(30);
+  doc.fontSize(8).fillColor(grey).text(
+    `Generated by The Supreme Collective on ${new Date().toLocaleString("en-GB")}`,
+    { align: "center" },
+  );
 
   doc.end();
   return done;
