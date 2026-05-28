@@ -184,15 +184,16 @@ const getBookingDisplayName = (booking) => {
       : null;
 
   return (
-    firstAct?.actName ||
     firstAct?.tscName ||
+    firstAct?.act?.tscName ||
+    booking?.act?.tscName ||
+    booking?.tscName ||
+    firstAct?.actName ||
     firstAct?.name ||
     firstAct?.title ||
-    firstAct?.act?.tscName ||
     firstAct?.act?.name ||
     booking?.actName ||
     booking?.artistName ||
-    booking?.act?.tscName ||
     booking?.act?.name ||
     "Band"
   );
@@ -407,28 +408,67 @@ const getScheduleRowsForPdf = (answers) => {
     const cleanActivity = normalisePdfValue(activity);
     const cleanTime = normalisePdfValue(time);
     const cleanNotes = normalisePdfValue(notes);
+
     if (cleanActivity || cleanTime || cleanNotes) {
-      rows.push({ activity: cleanActivity || "Schedule item", time: cleanTime || "TBC", notes: cleanNotes });
+      rows.push({
+        activity: cleanActivity || "Schedule item",
+        time: cleanTime || "TBC",
+        notes: cleanNotes,
+      });
     }
   };
+
+  const customBandFinishRow = simpleRows.find((row) =>
+    String(row?.label || row?.activity || row?.title || "")
+      .trim()
+      .toLowerCase() === "band finish"
+  );
 
   addRow("Band arrival / load-in", answers?.schedule_simple_arrival || answers?.scheduleSimpleArrival);
   addRow("Setup", answers?.schedule_simple_setup || answers?.scheduleSimpleSetup);
   addRow("Soundcheck", answers?.schedule_simple_soundcheck || answers?.scheduleSimpleSoundcheck);
   addRow("Live set 1", answers?.schedule_simple_set1 || answers?.scheduleSimpleSet1);
-  addRow("Break / DJ / Playlist", answers?.schedule_simple_between1 || answers?.scheduleSimpleBetween1);
+  addRow("Intermission", answers?.schedule_simple_between1 || answers?.scheduleSimpleBetween1);
   addRow("Live set 2", answers?.schedule_simple_set2 || answers?.scheduleSimpleSet2);
-  addRow("Band finish", answers?.schedule_simple_finish_time || answers?.scheduleSimpleFinishTime || answers?.schedule_time_finish || answers?.scheduleTimeFinish);
+
+  addRow(
+    "Band finish",
+    customBandFinishRow?.time ||
+      customBandFinishRow?.value ||
+      answers?.schedule_simple_band_finish ||
+      answers?.scheduleSimpleBandFinish ||
+      answers?.schedule_simple_finish_time ||
+      answers?.scheduleSimpleFinishTime ||
+      answers?.schedule_time_finish ||
+      answers?.scheduleTimeFinish,
+    customBandFinishRow?.notes || ""
+  );
 
   simpleRows.forEach((row) => {
-    const label = row?.label || row?.activity || row?.title;
+    const rawLabel = row?.label || row?.activity || row?.title;
+
+    if (
+      String(rawLabel || "").trim().toLowerCase() === "band finish"
+    ) {
+      return;
+    }
+
+    const label =
+      String(rawLabel || "").trim().toLowerCase() === "pa provision for external dj"
+        ? "PA provision finish"
+        : rawLabel;
+
     const time = row?.time || row?.value;
     const notes = row?.notes;
+
     const duplicate = rows.some(
       (existing) =>
-        String(existing.activity).toLowerCase() === String(label || "").toLowerCase() &&
-        String(existing.time).toLowerCase() === String(time || "").toLowerCase(),
+        String(existing.activity).trim().toLowerCase() ===
+          String(label || "").trim().toLowerCase() &&
+        String(existing.time).trim().toLowerCase() ===
+          String(time || "").trim().toLowerCase()
     );
+
     if (!duplicate) addRow(label, time, notes);
   });
 
@@ -460,16 +500,49 @@ const getFirstActSummary = (booking) => {
   return null;
 };
 
-const getLineupLabelForPdf = (booking) => {
+const getPromoLinksForPdf = (booking) => {
   const firstAct = getFirstActSummary(booking);
-  return (
-    firstAct?.lineupLabel ||
-    firstAct?.lineup?.actSize ||
-    firstAct?.actSize ||
-    booking?.lineupLabel ||
-    booking?.lineup?.actSize ||
-    "No information provided."
-  );
+
+  const candidates = [
+    firstAct?.videos,
+    firstAct?.videoUrls,
+    firstAct?.promoVideos,
+    firstAct?.act?.videos,
+    firstAct?.act?.videoUrls,
+    firstAct?.act?.promoVideos,
+    booking?.act?.videos,
+    booking?.act?.videoUrls,
+    booking?.act?.promoVideos,
+  ];
+
+  const urls = [];
+
+  candidates.forEach((candidate) => {
+    if (!candidate) return;
+    const items = Array.isArray(candidate) ? candidate : [candidate];
+
+    items.forEach((item) => {
+      const url =
+        typeof item === "string"
+          ? item
+          : item?.url || item?.link || item?.videoUrl;
+
+      if (url && !urls.includes(url)) urls.push(url);
+    });
+  });
+
+  return urls.join("\n");
+};
+
+const getChangingRoomForPdf = (answers) => {
+  const value = pickAnswer(answers, ["changing_room", "changingRoom"]);
+  const formatted = normalisePdfValue(value);
+
+  if (!formatted) return noInfo;
+
+  return formatted.toLowerCase() === "no"
+    ? "No exclusive changing room"
+    : formatted;
 };
 
 const getBookerPhoneForPdf = (answers, booking) =>
@@ -560,7 +633,6 @@ const buildEventSheetPdfBuffer = async (booking) => {
   const ref = booking?.bookingId || String(booking?._id || "");
   const lineupLabel = getLineupLabelForPdf(booking);
   const bookerPhone = getBookerPhoneForPdf(answers, booking);
-  const bookerEmail = getBookerEmailForPdf(answers, booking);
   const actImageUrl = getActImageUrlForPdf(booking);
   const actImageBuffer = await fetchImageBufferForPdf(actImageUrl);
 
@@ -719,7 +791,6 @@ const buildEventSheetPdfBuffer = async (booking) => {
   labelValue("Lineup size", lineupLabel, { showFallback: true });
   labelValue("Bookers", coupleNames, { showFallback: true });
   labelValue("Booker phone", bookerPhone, { showFallback: true });
-  labelValue("Booker email", bookerEmail, { showFallback: true });
   labelValue("Venue address", venue, { showFallback: true });
   labelValue("Venue pin", pickAnswer(answers, ["venue_pin", "venuePin"]), { showFallback: true });
   labelValue("Load-in pin", pickAnswer(answers, ["load_in_pin", "loadInPin"]), { showFallback: true });
@@ -729,7 +800,7 @@ const buildEventSheetPdfBuffer = async (booking) => {
   ].filter(Boolean).join(" - "), { showFallback: true });
   labelValue("Guest count", pickAnswer(answers, ["guest_count", "guestCount"]), { showFallback: true });
   labelValue("Attire", pickAnswer(answers, ["attire_notes", "attireNotes", "attire"]), { showFallback: true });
-
+labelValue("Promo video reference", getPromoLinksForPdf(booking), { showFallback: true });
   sectionTitle("Schedule");
   drawTable(["Activity", "Time", "Notes"], getScheduleRowsForPdf(answers).map((row) => [row.activity, row.time, row.notes || noInfo]), [220, 120, contentWidth - 340]);
 
@@ -753,7 +824,7 @@ const buildEventSheetPdfBuffer = async (booking) => {
   sectionTitle("Food & refreshments");
   labelValue("Hot meals required", getHotMealsRequiredForPdf(answers, booking), { showFallback: true });
   labelValue("Meal timing / catering notes", pickAnswer(answers, ["meal_time", "mealTime", "food_notes", "foodNotes", "catering_notes", "cateringNotes"]), { showFallback: true });
-  labelValue("Changing room", yesNoNone(pickAnswer(answers, ["changing_room", "changingRoom"])), { showFallback: true });
+labelValue("Changing room", getChangingRoomForPdf(answers), { showFallback: true });
   boxedNote("Changing room notes", pickAnswer(answers, ["changing_room_notes", "changingRoomNotes"]), { showFallback: true });
 
   sectionTitle("Contacts");
@@ -800,7 +871,7 @@ const buildEventSheetPdfBuffer = async (booking) => {
     "parking_cost_per_car", "parkingCostPerCar", "parking_spaces_on_site", "parkingSpacesOnSite",
     "parking_address", "parkingAddress", "parking_location", "parkingLocation",
     "partner1_first", "partner1First", "partner1_last", "partner1Last", "partner2_first", "partner2First",
-    "partner2_last", "partner2Last", "introduced_as", "introducedAs", "attire_notes", "attireNotes",
+"partner2_last", "partner2Last", "introduced_as", "introducedAs", "attire_notes", "attireNotes", "attire",
     "venue_pin", "venuePin", "load_in_pin", "loadInPin", "performance_room", "performanceRoom",
     "guest_count", "guestCount", "outdoor_performance", "outdoorPerformance", "performance_area", "performanceArea",
     "use_inhouse_pa", "useInhousePa", "use_inhouse_lights", "useInhouseLights", "sound_limits_present", "soundLimitsPresent",
@@ -810,8 +881,7 @@ const buildEventSheetPdfBuffer = async (booking) => {
     "other_suppliers", "otherSuppliers", "suppliers", "spotify_playlist", "spotifyPlaylist", "spotify_playlist_url", "spotifyPlaylistUrl",
     "playlist_url", "playlistUrl", "dj_requests", "djRequests", "playlist_notes", "playlistNotes", "meal_time", "mealTime",
     "food_notes", "foodNotes", "catering_notes", "cateringNotes", "hot_meals_required", "hotMealsRequired",
-    "booker_phone", "bookerPhone", "phone", "client_phone", "clientPhone", "booker_email", "bookerEmail", "email", "client_email", "clientEmail",
-  ]);
+"booker_phone", "bookerPhone", "phone", "client_phone", "clientPhone", "booker_email", "bookerEmail", "email", "client_email", "clientEmail", "userEmail",  ]);
 
   const otherEntries = Object.entries(answers).filter(([key, value]) => {
     if (!key || excludedKeys.has(key)) return false;
