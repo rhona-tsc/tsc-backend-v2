@@ -299,11 +299,10 @@ const markAddonPaidIfMatching = (
   }
 };
 
-const applyPaidAmountToBooking = (
-  bookingDoc,
-  { amountPaidMajor, stage }
-) => {
+const applyPaidAmountToBooking = (bookingDoc, { amountPaidMajor, stage }) => {
   if (!bookingDoc) return;
+
+  const stageNorm = normaliseStage(stage);
 
   const totals = bookingDoc.totals?.toObject
     ? bookingDoc.totals.toObject()
@@ -312,28 +311,32 @@ const applyPaidAmountToBooking = (
   const fullAmount = safeNum(totals.fullAmount || bookingDoc.fee || 0);
   const prevCharged = safeNum(totals.chargedAmount ?? 0);
 
-  // Charged is cumulative. Clamp to fullAmount when known.
   const nextChargedRaw = prevCharged + safeNum(amountPaidMajor);
   const nextCharged =
     fullAmount > 0 ? Math.min(fullAmount, nextChargedRaw) : nextChargedRaw;
 
-  bookingDoc.totals = {
-    ...totals,
-    fullAmount,
-    chargedAmount: nextCharged,
-  };
-
   const remaining =
     fullAmount > 0 ? Math.max(0, fullAmount - nextCharged) : 0;
 
-  bookingDoc.balanceAmountPence = Math.round(remaining * 100);
-  bookingDoc.balancePaid = remaining <= 0;
+  const isBalancePayment = stageNorm === "balance";
+  const isNowPaid = isBalancePayment || remaining <= 0.01;
 
-  if (normaliseStage(stage) === "balance") {
+  bookingDoc.totals = {
+    ...totals,
+    fullAmount,
+    chargedAmount: isNowPaid && fullAmount > 0 ? fullAmount : nextCharged,
+    remainingAmount: isNowPaid ? 0 : remaining,
+    outstandingBalance: isNowPaid ? 0 : remaining,
+    balancePaid: isNowPaid,
+  };
+
+  bookingDoc.balanceAmountPence = isNowPaid ? 0 : Math.round(remaining * 100);
+  bookingDoc.balancePaid = isNowPaid;
+  bookingDoc.paymentStatus = isNowPaid ? "paid" : "unpaid";
+
+  if (isNowPaid) {
     bookingDoc.balanceStatus = "paid";
   }
-
-  bookingDoc.paymentStatus = bookingDoc.balancePaid ? "paid" : "unpaid";
 };
 
 const upsertAccountingForPayment = (
@@ -381,8 +384,16 @@ try {
       const paidMajor = toMajor(session.amount_total ?? pi?.amount_received ?? 0);
 
       const stage = normaliseStage(
-        meta.payment_stage || meta.booking_mode || session.metadata?.booking_mode || ""
-      ); // "deposit" or "full" in your metadata
+  meta.payment_stage ||
+    meta.paymentStage ||
+    meta.booking_mode ||
+    session.metadata?.payment_stage ||
+    session.metadata?.paymentStage ||
+    session.metadata?.booking_mode ||
+    meta.category ||
+    session.metadata?.category ||
+    ""
+);
 
       const VAT_RATE = Number(process.env.TSC_VAT_RATE ?? 0.2);
 
@@ -485,24 +496,33 @@ try {
         });
       }
 
-      applyPaidAmountToBooking(booking, {
-        amountPaidMajor: paidMajor,
-        stage: stage === "balance" ? "balance" : stage,
-      });
+     const paymentStage =
+  stage === "balance" ? "balance" : stage === "full" ? "full" : "deposit";
 
-      if (stage === "balance") {
-        booking.balancePaid = true;
-        booking.balanceStatus = "paid";
-        booking.balanceInvoiceId = booking.balanceInvoiceId || String(invoice.id || "");
-        booking.balanceInvoiceUrl =
-          booking.balanceInvoiceUrl || String(invoice.hosted_invoice_url || "");
-      }
+applyPaidAmountToBooking(booking, {
+  amountPaidMajor: paidMajor,
+  stage: paymentStage,
+});
 
-      upsertAccountingForPayment(booking, {
-        paymentStage: stage || booking.accounting?.paymentStage || "",
-        ...computed,
-        vatRate: VAT_RATE,
-      });
+upsertAccountingForPayment(booking, {
+  paymentStage,
+  ...computed,
+  vatRate: VAT_RATE,
+});
+
+if (paymentStage === "full" || paymentStage === "balance") {
+  booking.balancePaid = true;
+  booking.balanceStatus = "paid";
+  booking.balanceAmountPence = 0;
+  booking.paymentStatus = "paid";
+
+  booking.totals = {
+    ...(booking.totals?.toObject ? booking.totals.toObject() : booking.totals || {}),
+    remainingAmount: 0,
+    outstandingBalance: 0,
+    balancePaid: true,
+  };
+}
 
       await booking.save();
       break;

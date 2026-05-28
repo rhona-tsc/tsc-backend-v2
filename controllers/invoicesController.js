@@ -164,11 +164,10 @@ export const getOrCreateBalanceLink = async (req, res) => {
         .json({ success: false, message: "Booking not found." });
     }
 
-    const full = Number(booking?.totals?.fullAmount || 0);
+    const full = Number(booking?.totals?.fullAmount || booking?.fee || 0);
     const charged = Number(booking?.totals?.chargedAmount || 0);
     const explicit = Number(booking?.balanceAmountPence ?? NaN);
 
-    // Always prefer the latest totals on the booking.
     const totalsBasedRemainingPence = Math.max(
       0,
       Math.round((full - charged) * 100),
@@ -181,8 +180,6 @@ export const getOrCreateBalanceLink = async (req, res) => {
           ? explicit
           : 0;
 
-    // If the frontend knows the current expected amount, trust that when it is
-    // present so the checkout always matches the UI.
     const remainingPence =
       expectedAmountPence > 0 ? expectedAmountPence : calculatedRemainingPence;
 
@@ -195,8 +192,6 @@ export const getOrCreateBalanceLink = async (req, res) => {
     const existingAmountMatches =
       Number(booking?.balanceAmountPence || 0) === remainingPence;
 
-    // If the booking still has money outstanding, stale paid flags should not
-    // block a new invoice from being created.
     if (
       remainingPence > 0 &&
       (booking.balancePaid === true || booking.balanceStatus === "paid")
@@ -205,9 +200,6 @@ export const getOrCreateBalanceLink = async (req, res) => {
       booking.balanceStatus = "sent";
     }
 
-    // Reuse the existing hosted checkout only when:
-    // 1) the caller did not explicitly request a refresh, and
-    // 2) the amount still matches.
     if (
       booking.balanceInvoiceUrl &&
       existingAmountMatches &&
@@ -216,8 +208,6 @@ export const getOrCreateBalanceLink = async (req, res) => {
       return res.json({ success: true, url: booking.balanceInvoiceUrl });
     }
 
-    // Clear stale checkout references whenever the amount changed or the client
-    // explicitly asked for a refresh.
     if (!existingAmountMatches || refreshRequested) {
       booking.balanceInvoiceUrl = "";
       booking.balanceInvoiceId = "";
@@ -225,6 +215,20 @@ export const getOrCreateBalanceLink = async (req, res) => {
 
     const origin = getOrigin(req);
     const ref = booking.bookingId || String(booking._id);
+
+    const balanceMetadata = {
+      category: "balance",
+      payment_stage: "balance",
+      paymentStage: "balance",
+      booking_mode: "balance",
+      bookingId: ref,
+      booking_ref: ref,
+      bookingMongoId: String(booking._id),
+      remainingPence: String(remainingPence),
+      amount_pence: String(remainingPence),
+      fullAmount: String(full),
+      chargedAmount: String(charged),
+    };
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -244,13 +248,13 @@ export const getOrCreateBalanceLink = async (req, res) => {
       success_url: `${origin}/event-sheet/${ref}?balancePaid=1&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/event-sheet/${ref}?balanceCanceled=1`,
       allow_promotion_codes: true,
-      metadata: {
-        category: "balance",
-        bookingId: ref,
-        bookingMongoId: String(booking._id),
-        remainingPence: String(remainingPence),
-        fullAmount: String(full),
-        chargedAmount: String(charged),
+
+      // Session metadata
+      metadata: balanceMetadata,
+
+      // PaymentIntent metadata — this is important because your webhook prefers PI metadata
+      payment_intent_data: {
+        metadata: balanceMetadata,
       },
     });
 
@@ -258,6 +262,8 @@ export const getOrCreateBalanceLink = async (req, res) => {
     booking.balanceInvoiceUrl = session.url;
     booking.balanceInvoiceId = session.id;
     booking.balanceStatus = "sent";
+    booking.balancePaid = false;
+
     await booking.save();
 
     return res.json({ success: true, url: session.url });
