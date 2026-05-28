@@ -15,6 +15,7 @@ import {
 } from "../controllers/bookingController.js";
 import Booking from "../models/bookingModel.js";
 import mongoose from "mongoose";
+import nodemailer from "nodemailer";
 
 const router = express.Router();
 
@@ -174,6 +175,92 @@ router.get("/by-ref/:ref", (req, res, next) => {
   next();
 }, getBookingByRef);
 
+const getBookingDisplayName = (booking) => {
+  const firstAct = Array.isArray(booking?.actsSummary)
+    ? booking.actsSummary[0]
+    : Array.isArray(booking?.items)
+      ? booking.items[0]
+      : null;
+
+  return (
+    firstAct?.actName ||
+    firstAct?.name ||
+    booking?.actName ||
+    booking?.artistName ||
+    "Band"
+  );
+};
+
+const getBookingEventDate = (booking) => {
+  const raw =
+    booking?.eventDate ||
+    booking?.date ||
+    booking?.bookingDate ||
+    booking?.eventDetails?.date ||
+    booking?.answers?.event_date ||
+    booking?.eventSheet?.answers?.event_date ||
+    "";
+
+  if (!raw) return "Date TBC";
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return String(raw);
+
+  return date.toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+};
+
+const getEventSheetUrl = (req, booking) => {
+  const base =
+    process.env.FRONTEND_URL ||
+    process.env.CLIENT_URL ||
+    process.env.PUBLIC_FRONTEND_URL ||
+    "https://thesupremecollective.co.uk";
+
+  const ref = booking?.bookingId || String(booking?._id || "");
+  return `${String(base).replace(/\/$/, "")}/event-sheet/${ref}`;
+};
+
+const createNotifyBandTransporter = () => {
+  const user =
+    process.env.EMAIL_USER ||
+    process.env.GMAIL_USER ||
+    process.env.MAIL_USER ||
+    process.env.SMTP_USER ||
+    "hello@thesupremecollective.co.uk";
+
+  const pass =
+    process.env.EMAIL_PASS ||
+    process.env.GMAIL_APP_PASSWORD ||
+    process.env.GMAIL_PASS ||
+    process.env.MAIL_PASS ||
+    process.env.SMTP_PASS;
+
+  if (process.env.SMTP_HOST) {
+    return nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: String(process.env.SMTP_SECURE || "false") === "true",
+      auth: user && pass ? { user, pass } : undefined,
+    });
+  }
+
+  if (!pass) {
+    throw new Error(
+      "Missing email password env var. Set EMAIL_PASS, GMAIL_APP_PASSWORD, GMAIL_PASS, MAIL_PASS, or SMTP_PASS."
+    );
+  }
+
+  return nodemailer.createTransport({
+    service: "gmail",
+    auth: { user, pass },
+  });
+};
+
 /* -------------------------------------------------------------------------- */
 /*              POST /notify-band                                             */
 /* -------------------------------------------------------------------------- */
@@ -183,35 +270,137 @@ router.post("/notify-band", async (req, res) => {
   });
 
   try {
-    const { bookingId, eventSheet } = req.body;
-    if (!bookingId) return res.status(400).json({ success: false, message: "bookingId is required" });
+    const { bookingId, bookingMongoId, bookingRef, eventSheet } = req.body || {};
+    const lookupId = bookingMongoId || bookingId || bookingRef;
 
-    const query = { $or: [{ bookingId }, { _id: bookingId }] };
-    const booking = await Booking.findOne(query);
-    if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
+    if (!lookupId) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingId, bookingMongoId or bookingRef is required",
+      });
+    }
+
+    const or = [];
+
+    if (typeof bookingId === "string" && bookingId.trim()) {
+      or.push({ bookingId: bookingId.trim() });
+    }
+
+    if (typeof bookingRef === "string" && bookingRef.trim()) {
+      or.push({ bookingId: bookingRef.trim() });
+    }
+
+    if (
+      typeof lookupId === "string" &&
+      mongoose.Types.ObjectId.isValid(lookupId) &&
+      String(new mongoose.Types.ObjectId(lookupId)) === lookupId
+    ) {
+      or.push({ _id: lookupId });
+    }
+
+    const booking = await Booking.findOne(or.length ? { $or: or } : { bookingId: lookupId });
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
 
     if (eventSheet && (eventSheet.answers || eventSheet.complete)) {
       booking.eventSheet = {
         ...(booking.eventSheet || {}),
-        answers: { ...(booking.eventSheet?.answers || {}), ...(eventSheet.answers || {}) },
-        complete: { ...(booking.eventSheet?.complete || {}), ...(eventSheet.complete || {}) },
+        answers: {
+          ...(booking.eventSheet?.answers || {}),
+          ...(eventSheet.answers || {}),
+        },
+        complete: {
+          ...(booking.eventSheet?.complete || {}),
+          ...(eventSheet.complete || {}),
+        },
         submitted: true,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(),
       };
     } else {
       booking.eventSheet = {
         ...(booking.eventSheet || {}),
         submitted: true,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date(),
       };
     }
 
+    const transporter = createNotifyBandTransporter();
+    const bandName = getBookingDisplayName(booking);
+    const eventDate = getBookingEventDate(booking);
+    const eventSheetUrl = getEventSheetUrl(req, booking);
+    const ref = booking.bookingId || String(booking._id);
+
+    const subject = `Event sheet ready: ${bandName} — ${eventDate}`;
+
+    const text = [
+      `The event sheet has been submitted/updated for ${bandName}.`,
+      ``,
+      `Booking ref: ${ref}`,
+      `Event date: ${eventDate}`,
+      ``,
+      `View the event sheet here:`,
+      eventSheetUrl,
+    ].join("\n");
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #222;">
+        <p>The event sheet has been submitted/updated for <strong>${bandName}</strong>.</p>
+        <p>
+          <strong>Booking ref:</strong> ${ref}<br />
+          <strong>Event date:</strong> ${eventDate}
+        </p>
+        <p>
+          <a href="${eventSheetUrl}" style="color: #ff6667; font-weight: bold;">
+            View the event sheet
+          </a>
+        </p>
+      </div>
+    `;
+
+    const mailResult = await transporter.sendMail({
+      from: `The Supreme Collective <hello@thesupremecollective.co.uk>`,
+      to: "hello@thesupremecollective.co.uk",
+      replyTo: "hello@thesupremecollective.co.uk",
+      subject,
+      text,
+      html,
+    });
+
     booking.notifiedAt = new Date();
+    booking.notificationLog = [
+      ...(Array.isArray(booking.notificationLog) ? booking.notificationLog : []),
+      {
+        type: "event_sheet_notify_band",
+        to: "hello@thesupremecollective.co.uk",
+        subject,
+        messageId: mailResult?.messageId || "",
+        sentAt: new Date(),
+      },
+    ];
+
     await booking.save();
-    return res.json({ success: true, booking });
+
+    console.log("✅ notify-band email sent", {
+      bookingId: ref,
+      to: "hello@thesupremecollective.co.uk",
+      messageId: mailResult?.messageId,
+    });
+
+    return res.json({
+      success: true,
+      message: "Band notification email sent",
+      sentTo: "hello@thesupremecollective.co.uk",
+      messageId: mailResult?.messageId || null,
+      booking,
+    });
   } catch (err) {
     console.error("❌ notify-band error:", err);
-    return res.status(500).json({ success: false, message: "Failed to notify band" });
+    return res.status(500).json({
+      success: false,
+      message: err?.message || "Failed to notify band",
+    });
   }
 });
 
