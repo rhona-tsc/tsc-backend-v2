@@ -225,39 +225,67 @@ const getEventSheetUrl = (req, booking) => {
   return `${String(base).replace(/\/$/, "")}/event-sheet/${ref}`;
 };
 
-const createNotifyBandTransporter = () => {
+const getEmailConfig = () => {
+  const host = process.env.SMTP_HOST || "smtp.gmail.com";
+  const port = Number(process.env.SMTP_PORT || 465);
+  const secure =
+    process.env.SMTP_SECURE != null
+      ? String(process.env.SMTP_SECURE).toLowerCase() === "true"
+      : port === 465;
+
   const user =
+    process.env.SMTP_USER ||
     process.env.EMAIL_USER ||
     process.env.GMAIL_USER ||
     process.env.MAIL_USER ||
-    process.env.SMTP_USER ||
-    "hello@thesupremecollective.co.uk";
+    process.env.AGENT_EMAIL;
 
   const pass =
+    process.env.SMTP_PASS ||
     process.env.EMAIL_PASS ||
     process.env.GMAIL_APP_PASSWORD ||
     process.env.GMAIL_PASS ||
     process.env.MAIL_PASS ||
-    process.env.SMTP_PASS;
+    process.env.AGENT_PASSWORD;
 
-  if (process.env.SMTP_HOST) {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: String(process.env.SMTP_SECURE || "false") === "true",
-      auth: user && pass ? { user, pass } : undefined,
-    });
-  }
+  const fromAddress =
+    process.env.SMTP_FROM_EMAIL ||
+    process.env.EMAIL_FROM_ADDRESS ||
+    process.env.EMAIL_USER ||
+    process.env.GMAIL_USER ||
+    user;
 
-  if (!pass) {
+  const fromName =
+    process.env.SMTP_FROM_NAME ||
+    process.env.EMAIL_FROM_NAME ||
+    "The Supreme Collective";
+
+  const notifyTo =
+    process.env.NOTIFY_BAND_EMAIL ||
+    process.env.SMTP_FROM_EMAIL ||
+    process.env.EMAIL_FROM_ADDRESS ||
+    "hello@thesupremecollective.co.uk";
+
+  if (!user || !pass) {
     throw new Error(
-      "Missing email password env var. Set EMAIL_PASS, GMAIL_APP_PASSWORD, GMAIL_PASS, MAIL_PASS, or SMTP_PASS."
+      "Missing email SMTP credentials. Set SMTP_USER and SMTP_PASS, or EMAIL_USER and EMAIL_PASS."
     );
   }
 
+  return { host, port, secure, user, pass, fromAddress, fromName, notifyTo };
+};
+
+const createNotifyBandTransporter = () => {
+  const { host, port, secure, user, pass } = getEmailConfig();
+
   return nodemailer.createTransport({
-    service: "gmail",
+    host,
+    port,
+    secure,
     auth: { user, pass },
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
   });
 };
 
@@ -326,6 +354,7 @@ router.post("/notify-band", async (req, res) => {
       };
     }
 
+    const emailConfig = getEmailConfig();
     const transporter = createNotifyBandTransporter();
     const bandName = getBookingDisplayName(booking);
     const eventDate = getBookingEventDate(booking);
@@ -360,9 +389,9 @@ router.post("/notify-band", async (req, res) => {
     `;
 
     const mailResult = await transporter.sendMail({
-      from: `The Supreme Collective <hello@thesupremecollective.co.uk>`,
-      to: "hello@thesupremecollective.co.uk",
-      replyTo: "hello@thesupremecollective.co.uk",
+      from: `${emailConfig.fromName} <${emailConfig.fromAddress}>`,
+      to: emailConfig.notifyTo,
+      replyTo: emailConfig.fromAddress || "hello@thesupremecollective.co.uk",
       subject,
       text,
       html,
@@ -373,7 +402,7 @@ router.post("/notify-band", async (req, res) => {
       ...(Array.isArray(booking.notificationLog) ? booking.notificationLog : []),
       {
         type: "event_sheet_notify_band",
-        to: "hello@thesupremecollective.co.uk",
+        to: emailConfig.notifyTo,
         subject,
         messageId: mailResult?.messageId || "",
         sentAt: new Date(),
@@ -384,14 +413,16 @@ router.post("/notify-band", async (req, res) => {
 
     console.log("✅ notify-band email sent", {
       bookingId: ref,
-      to: "hello@thesupremecollective.co.uk",
+      to: emailConfig.notifyTo,
+      from: emailConfig.fromAddress,
+      smtpUser: emailConfig.user,
       messageId: mailResult?.messageId,
     });
 
     return res.json({
       success: true,
       message: "Band notification email sent",
-      sentTo: "hello@thesupremecollective.co.uk",
+      sentTo: emailConfig.notifyTo,
       messageId: mailResult?.messageId || null,
       booking,
     });
