@@ -3,10 +3,39 @@ import ForecastEvent from "../models/forecastEventModel.js";
 
 const toNumber = (value) => Number(value || 0);
 
-const getVatQuarter = (date) => {
+const VAT_REGISTERED_FROM_BY_ENTITY = {
+  BMM: new Date(Date.UTC(2026, 1, 1)), // 1 Feb 2026
+};
+
+const VAT_REGISTERED_ENTITIES = new Set(Object.keys(VAT_REGISTERED_FROM_BY_ENTITY));
+
+const isVatRegisteredEntity = (entity) => VAT_REGISTERED_ENTITIES.has(String(entity || ""));
+
+const getVatRegistrationStartDate = (entity) =>
+  VAT_REGISTERED_FROM_BY_ENTITY[String(entity || "")] || null;
+
+const isOnOrAfterDate = (date, compareDate) => {
+  if (!compareDate) return true;
   const d = new Date(date);
-  const year = d.getFullYear();
-  const month = d.getMonth() + 1;
+  return !Number.isNaN(d.getTime()) && d >= compareDate;
+};
+
+const getVatQuarter = (date, entity = "BMM") => {
+  const d = new Date(date);
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth() + 1;
+  const vatStart = getVatRegistrationStartDate(entity);
+
+  // BMM VAT registration begins 1 Feb 2026. First return runs Feb-Mar 2026,
+  // then normal Mar/Jun/Sep/Dec stagger thereafter.
+  if (
+    entity === "BMM" &&
+    vatStart &&
+    d >= vatStart &&
+    d <= new Date(Date.UTC(2026, 2, 31, 23, 59, 59, 999))
+  ) {
+    return "2026-Q1";
+  }
 
   if ([1, 2, 3].includes(month)) return `${year}-Q1`;
   if ([4, 5, 6].includes(month)) return `${year}-Q2`;
@@ -72,11 +101,38 @@ const shouldApplyPurchaseVat = (item) => {
 
 export const getVatForecast = async (req, res) => {
   try {
-    const { entity = "TSC", startDate, endDate, includeForecast = true } = req.query;
+    const { entity = "BMM", startDate, endDate, includeForecast = true } = req.query;
+
+    if (!isVatRegisteredEntity(entity)) {
+      return res.json({
+        success: true,
+        filters: {
+          entity,
+          startDate: startDate || null,
+          endDate: endDate || null,
+          includeForecast: String(includeForecast) !== "false",
+          vatRegistered: false,
+        },
+        quarters: [],
+        summary: {
+          totalVatOnSales: 0,
+          totalVatReclaimable: 0,
+          totalNetVatDue: 0,
+        },
+      });
+    }
+
+    const vatRegistrationStartDate = getVatRegistrationStartDate(entity);
 
     const dateQuery = {};
     if (startDate) dateQuery.$gte = new Date(startDate);
     if (endDate) dateQuery.$lte = new Date(endDate);
+
+    if (vatRegistrationStartDate) {
+      dateQuery.$gte = dateQuery.$gte
+        ? new Date(Math.max(dateQuery.$gte.getTime(), vatRegistrationStartDate.getTime()))
+        : vatRegistrationStartDate;
+    }
 
     const transactionQuery = { entity };
     if (Object.keys(dateQuery).length) transactionQuery.date = dateQuery;
@@ -99,7 +155,7 @@ export const getVatForecast = async (req, res) => {
     const quarters = new Map();
 
     const ensureQuarter = (date) => {
-      const key = getVatQuarter(date);
+      const key = getVatQuarter(date, entity);
 
       if (!quarters.has(key)) {
         quarters.set(key, {
@@ -120,6 +176,9 @@ export const getVatForecast = async (req, res) => {
     };
 
     transactions.forEach((tx) => {
+      if (!isOnOrAfterDate(tx.date, vatRegistrationStartDate)) return;
+      if (String(tx.source || "") === TAX_EVENT_SOURCE) return;
+
       const row = ensureQuarter(tx.date);
       const amount = toNumber(tx.amount);
 
@@ -140,6 +199,9 @@ export const getVatForecast = async (req, res) => {
     });
 
     forecastEvents.forEach((event) => {
+      if (!isOnOrAfterDate(event.expectedDate, vatRegistrationStartDate)) return;
+      if (String(event.source || "") === TAX_EVENT_SOURCE) return;
+
       const row = ensureQuarter(event.expectedDate);
       const amount = toNumber(event.amount);
 
@@ -179,6 +241,9 @@ if (shouldApplySalesVat(event)) {
         startDate: startDate || null,
         endDate: endDate || null,
         includeForecast: String(includeForecast) !== "false",
+        vatRegistered: true,
+        vatRegistrationStartDate: vatRegistrationStartDate?.toISOString?.() || null,
+        vatStagger: "March, June, September, December",
       },
       quarters: quartersArray,
       summary: {
@@ -204,22 +269,22 @@ if (shouldApplySalesVat(event)) {
   }
 };
 
-const getTaxYear = (date) => {
+const getCompanyFinancialYear = (date) => {
   const d = new Date(date);
-  const year = d.getFullYear();
-  const month = d.getMonth() + 1;
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth() + 1;
 
-  // UK company accounting year can differ, but this gives a useful first forecast.
-  return month >= 4 ? `${year}/${year + 1}` : `${year - 1}/${year}`;
+  // Company year end is 30 November.
+  // Dates up to 30 Nov belong to that year end. December belongs to the next year end.
+  return month <= 11 ? String(year) : String(year + 1);
 };
 
-const getCorporationTaxPaymentDueDate = (taxYear) => {
-  const [, endYearRaw] = taxYear.split("/");
-  const endYear = Number(endYearRaw);
+const getCorporationTaxPaymentDueDate = (companyYearEnd) => {
+  const year = Number(companyYearEnd);
 
-  // Company year end: 30 November
-  // Corporation tax due: 9 months + 1 day later = 1 September following year
-  return new Date(Date.UTC(endYear, 8, 1));
+  // Company year end: 30 November.
+  // Corporation tax due: 9 months + 1 day later = 1 September following year.
+  return new Date(Date.UTC(year + 1, 8, 1));
 };
 
 const getProfitAmount = (item) => {
@@ -272,11 +337,11 @@ export const getCorporationTaxForecast = async (req, res) => {
     const years = new Map();
 
     const ensureYear = (date) => {
-      const key = getTaxYear(date);
+      const key = getCompanyFinancialYear(date);
 
       if (!years.has(key)) {
         years.set(key, {
-          taxYear: key,
+          companyYearEnd: key,
           income: 0,
           expenses: 0,
           estimatedProfit: 0,
@@ -292,6 +357,8 @@ export const getCorporationTaxForecast = async (req, res) => {
     };
 
     transactions.forEach((tx) => {
+      if (String(tx.source || "") === TAX_EVENT_SOURCE) return;
+
       const row = ensureYear(tx.date);
       const amount = getProfitAmount(tx);
 
@@ -302,6 +369,8 @@ export const getCorporationTaxForecast = async (req, res) => {
     });
 
     forecastEvents.forEach((event) => {
+      if (String(event.source || "") === TAX_EVENT_SOURCE) return;
+
       const row = ensureYear(event.expectedDate);
       const amount = getProfitAmount(event);
 
@@ -327,7 +396,7 @@ export const getCorporationTaxForecast = async (req, res) => {
           ),
         };
       })
-      .sort((a, b) => a.taxYear.localeCompare(b.taxYear));
+      .sort((a, b) => a.companyYearEnd.localeCompare(b.companyYearEnd));
 
     res.json({
       success: true,
@@ -356,6 +425,8 @@ export const getCorporationTaxForecast = async (req, res) => {
             .reduce((sum, row) => sum + row.estimatedCorporationTax, 0)
             .toFixed(2),
         ),
+        companyYearEndMonth: "November",
+        corporationTaxDueRule: "1 September following the 30 November year end",
       },
     });
   } catch (error) {
@@ -418,7 +489,7 @@ export const generateTaxForecastEvents = async (req, res) => {
         entity,
         type: "vat_out",
         title: `VAT payment due - ${quarter.quarter}`,
-        description: `Forecast VAT payment for ${quarter.quarter}`,
+        description: `Forecast VAT payment for ${quarter.quarter}. Due 1 month + 7 days after the VAT period ends.`,
         expectedDate: quarter.paymentDueDate,
         amount,
         direction: "out",
@@ -430,7 +501,7 @@ export const generateTaxForecastEvents = async (req, res) => {
         vatRate: 0,
         vatBasis: "outside_scope",
         vatableAmount: 0,
-        taxTreatment: "expense",
+        taxTreatment: "tax_payment",
       });
     });
 
@@ -441,8 +512,8 @@ export const generateTaxForecastEvents = async (req, res) => {
       eventsToCreate.push({
         entity,
         type: "corporation_tax_out",
-        title: `Corporation tax due - ${year.taxYear}`,
-        description: `Forecast corporation tax payment for ${year.taxYear}`,
+        title: `Corporation tax due - year ended 30 Nov ${year.companyYearEnd}`,
+        description: `Forecast corporation tax payment for company year ended 30 November ${year.companyYearEnd}`,
         expectedDate: year.paymentDueDate,
         amount,
         direction: "out",
@@ -454,7 +525,7 @@ export const generateTaxForecastEvents = async (req, res) => {
         vatRate: 0,
         vatBasis: "outside_scope",
         vatableAmount: 0,
-        taxTreatment: "expense",
+        taxTreatment: "tax_payment",
       });
     });
 
