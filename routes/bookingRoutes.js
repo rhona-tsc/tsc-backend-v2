@@ -500,6 +500,22 @@ const getFirstActSummary = (booking) => {
   return null;
 };
 
+const getLineupLabelForPdf = (booking) => {
+  const firstAct = getFirstActSummary(booking);
+
+  return (
+    firstAct?.lineupLabel ||
+    firstAct?.lineupName ||
+    firstAct?.lineup?.actSize ||
+    firstAct?.lineup?.lineupLabel ||
+    firstAct?.actSize ||
+    booking?.lineupLabel ||
+    booking?.lineupName ||
+    booking?.lineup?.actSize ||
+    noInfo
+  );
+};
+
 const getPromoLinksForPdf = (booking) => {
   const firstAct = getFirstActSummary(booking);
 
