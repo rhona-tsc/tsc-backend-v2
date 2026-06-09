@@ -6,7 +6,7 @@ import Stripe from "stripe";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import PDFDocument from "pdfkit";
 import cloudinary from "../config/cloudinary.js";
-
+import path from "path";
 import fs from "fs";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_V2, {
@@ -800,18 +800,17 @@ const firstNonEmpty = (...values) =>
   values.find((value) => String(value || "").trim()) || "";
 
 const getInvoiceLogoPath = (invoiceCompany) => {
-  const logoPath =
+  const envLogoPath =
     invoiceCompany?.brand === "BMM"
       ? process.env.BMM_INVOICE_LOGO_PATH || ""
       : process.env.TSC_INVOICE_LOGO_PATH || "";
 
-  console.log("🖼️ Invoice logo path:", {
-    brand: invoiceCompany?.brand,
-    logoPath,
-    exists: logoPath ? fs.existsSync(logoPath) : false,
-  });
+  const fallbackLogoPath =
+    invoiceCompany?.brand === "BMM"
+      ? path.resolve(process.cwd(), "BambooMusicManagementInvoiceLogo.png")
+      : "";
 
-  return logoPath;
+  return envLogoPath || fallbackLogoPath;
 };
 
 const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
@@ -921,7 +920,11 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     doc.font("Helvetica").fontSize(10).fillColor(text);
     doc.text(invoiceCompany.name, cardX + 26, cardY + 46);
     doc.text(invoiceCompany.address, cardX + 26, cardY + 61);
-    doc.text(invoiceCompany.email, cardX + 26, cardY + 76);
+    doc.text(
+  [invoiceCompany.phone, invoiceCompany.email].filter(Boolean).join(" | "),
+  cardX + 26,
+  cardY + 76,
+);
     if (invoiceCompany.companyNumber) {
       doc.text(
         `Company number: ${invoiceCompany.companyNumber}`,
