@@ -717,51 +717,45 @@ const getPrimaryEmail = (row) =>
   "";
 
 const getInvoiceCompany = (row) => {
-  const agent = String(row?.agent || row?.source || "")
+  const invoiceCompany = String(
+    row?.invoiceCompany || row?.accounting?.invoiceCompany || "TSC",
+  )
     .trim()
-    .toLowerCase();
+    .toUpperCase();
 
-  const isSupremeCollective =
-    agent === "direct" ||
-    agent === "bmm" ||
-    agent === "tsc" ||
-    agent === "the supreme collective" ||
-    agent === "weddingjam" ||
-    agent === "wedding jam" ||
-    agent === "staar productions" ||
-    agent === "encore";
-
-  if (isSupremeCollective) {
+  if (invoiceCompany === "BMM") {
     return {
-      name: "The Supreme Collective Ltd",
+      name: "Bamboo Music Management Ltd",
       address: "Cramond, Reeves Lane, Roydon, CM19 5LE",
-      email: "hello@thesupremecollective.co.uk",
-      companyNumber: "",
-      vatNumber: "",
-      brand: "TSC",
-      accent: "#ff6667",
+      email: "bamboomusicmgmt@gmail.com",
+      companyNumber: "09318270",
+      vatNumber: "517 6408 85",
+      brand: "BMM",
+      accent: "#43d8e8",
+      vatRate: 0.2,
       bank: {
-        accountName: "The Supreme Collective Limited",
-        bankName: "",
-        sortCode: "608371",
-        accountNumber: "00973473",
+        accountName: "Bamboo Music Management Ltd",
+        bankName: "Mettle (Prepay Technologies)",
+        sortCode: "040333",
+        accountNumber: "43875024",
       },
     };
   }
 
   return {
-    name: "Bamboo Music Management Ltd",
+    name: "The Supreme Collective Ltd",
     address: "Cramond, Reeves Lane, Roydon, CM19 5LE",
-    email: "bamboomusicmgmt@gmail.com",
-    companyNumber: "09318270",
-    vatNumber: "517 6408 85",
-    brand: "BMM",
-    accent: "#43d8e8",
+    email: "hello@thesupremecollective.co.uk",
+    companyNumber: "",
+    vatNumber: "",
+    brand: "TSC",
+    accent: "#ff6667",
+    vatRate: 0,
     bank: {
-      accountName: "Bamboo Music Management Ltd",
-      bankName: "Mettle (Prepay Technologies)",
-      sortCode: "040333",
-      accountNumber: "43875024",
+      accountName: "The Supreme Collective Limited",
+      bankName: "",
+      sortCode: "608371",
+      accountNumber: "00973473",
     },
   };
 };
@@ -1155,7 +1149,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
 
 export const createBoardInvoice = async (req, res) => {
   try {
-    const { bookingId } = req.body;
+    const { bookingId, invoiceCompany: invoiceCompanyFromRequest } = req.body;
 
     if (!bookingId) {
       return res.status(400).json({
@@ -1173,34 +1167,48 @@ export const createBoardInvoice = async (req, res) => {
       });
     }
 
-    const invoiceCompany = getInvoiceCompany(row);
+    const rowForInvoice = {
+      ...row,
+      invoiceCompany:
+        invoiceCompanyFromRequest ||
+        row.invoiceCompany ||
+        row?.accounting?.invoiceCompany ||
+        "TSC",
+    };
+
+    const invoiceCompany = getInvoiceCompany(rowForInvoice);
 
     const gross = round2(
-      row.grossValue || row.totals?.fullAmount || row.amount || row.fee || 0,
+      rowForInvoice.grossValue ||
+        rowForInvoice.totals?.fullAmount ||
+        rowForInvoice.amount ||
+        rowForInvoice.fee ||
+        0,
     );
 
-    const accounting = row.accounting || {};
-    const vatRate = Number(accounting.vatRate ?? 0.2);
+    const accounting = rowForInvoice.accounting || {};
+    const vatRate = Number(accounting.vatRate ?? invoiceCompany.vatRate ?? 0);
 
-  const commissionGross = round2(
-  accounting.commissionGross ||
-    row.netCommission ||
-    row.commissionGross ||
-    row.commission ||
-    row.estimatedCommission ||
-    0,
-);
+    const commissionGross = round2(
+      accounting.commissionGross ||
+        rowForInvoice.netCommission ||
+        rowForInvoice.commissionGross ||
+        rowForInvoice.commission ||
+        rowForInvoice.estimatedCommission ||
+        0,
+    );
 
-const passThroughGross = round2(
-  accounting.passThroughGross ||
-    row.passThroughGross ||
-    Math.max(gross - commissionGross, 0),
-);
+    const passThroughGross = round2(
+      accounting.passThroughGross ||
+        rowForInvoice.passThroughGross ||
+        Math.max(gross - commissionGross, 0),
+    );
 
     const commissionSplit = vatFromGross(commissionGross, vatRate);
 
     const split = {
       gross,
+      invoiceCompany: invoiceCompany.brand,
       vatRate,
       commissionGross,
       commissionNet: commissionSplit.net,
@@ -1208,62 +1216,72 @@ const passThroughGross = round2(
       passThroughGross,
     };
 
-    const pdfBuffer = await makeInvoicePdfBuffer(row, split, invoiceCompany);
+    const pdfBuffer = await makeInvoicePdfBuffer(
+      rowForInvoice,
+      split,
+      invoiceCompany,
+    );
 
-    if (!pdfBuffer?.length || !pdfBuffer.slice(0, 4).toString().includes("%PDF")) {
-  throw new Error("Generated invoice buffer is not a valid PDF.");
-}
+    if (
+      !pdfBuffer?.length ||
+      !pdfBuffer.slice(0, 4).toString().includes("%PDF")
+    ) {
+      throw new Error("Generated invoice buffer is not a valid PDF.");
+    }
 
-   console.log("🧾 PDF buffer debug:", {
-  length: pdfBuffer?.length,
-  firstBytes: pdfBuffer?.slice(0, 20).toString(),
-  isPdf: pdfBuffer?.slice(0, 4).toString() === "%PDF",
-});
+    console.log("🧾 PDF buffer debug:", {
+      length: pdfBuffer?.length,
+      firstBytes: pdfBuffer?.slice(0, 20).toString(),
+      isPdf: pdfBuffer?.slice(0, 4).toString() === "%PDF",
+    });
 
-const uploadResult = await new Promise((resolve, reject) => {
-  const stream = cloudinary.uploader.upload_stream(
-    {
-      folder: "booking-board-invoices",
-    resource_type: "raw",
-public_id: `invoice-${row.bookingRef || row._id}`,
-overwrite: true,
-invalidate: true,
-format: "pdf",
-    },
-    (error, result) => {
-      console.log("☁️ Cloudinary invoice upload result:", result);
-      if (error) {
-        console.error("❌ Cloudinary invoice upload error:", error);
-        reject(error);
-      } else {
-        resolve(result);
-      }
-    },
-  );
+    const uploadResult = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: "booking-board-invoices",
+          resource_type: "raw",
+          public_id: `invoice-${rowForInvoice.bookingRef || rowForInvoice._id}`,
+          overwrite: true,
+          invalidate: true,
+          format: "pdf",
+        },
+        (error, result) => {
+          console.log("☁️ Cloudinary invoice upload result:", result);
+          if (error) {
+            console.error("❌ Cloudinary invoice upload error:", error);
+            reject(error);
+          } else {
+            resolve(result);
+          }
+        },
+      );
 
-  stream.end(pdfBuffer);
-});
+      stream.end(pdfBuffer);
+    });
 
-const invoiceUrl = uploadResult.secure_url;
+    const invoiceUrl = uploadResult.secure_url;
 
-console.log("🧾 Invoice delivery URLs:", {
-  secure_url: uploadResult.secure_url,
-  forced_download_url: invoiceUrl,
-});
+    console.log("🧾 Invoice delivery URLs:", {
+      secure_url: uploadResult.secure_url,
+      forced_download_url: invoiceUrl,
+      invoiceCompany: invoiceCompany.brand,
+      vatRate,
+    });
 
     const updated = await BookingBoardItem.findByIdAndUpdate(
       row._id,
       {
-       $set: {
-  invoiceUrl,
-  invoicePdfUrl: invoiceUrl,
-  payments: {
-    ...(row.payments || {}),
-    boardInvoicePdfUrl: invoiceUrl,
-    boardInvoiceCreatedAt: new Date(),
-  },
-  accounting: split,
-}
+        $set: {
+          invoiceCompany: invoiceCompany.brand,
+          invoiceUrl,
+          invoicePdfUrl: invoiceUrl,
+          payments: {
+            ...(row.payments || {}),
+            boardInvoicePdfUrl: invoiceUrl,
+            boardInvoiceCreatedAt: new Date(),
+          },
+          accounting: split,
+        },
       },
       { new: true },
     );
@@ -1278,22 +1296,24 @@ console.log("🧾 Invoice delivery URLs:", {
         ].filter((x) => Object.values(x)[0]),
       },
       {
-       $set: {
-  invoiceUrl,
-  invoicePdfUrl: invoiceUrl,
-  payments: {
-    ...(row.payments || {}),
-    boardInvoicePdfUrl: invoiceUrl,
-    boardInvoiceCreatedAt: new Date(),
-  },
-  accounting: split,
-}
+        $set: {
+          invoiceCompany: invoiceCompany.brand,
+          invoiceUrl,
+          invoicePdfUrl: invoiceUrl,
+          payments: {
+            ...(row.payments || {}),
+            boardInvoicePdfUrl: invoiceUrl,
+            boardInvoiceCreatedAt: new Date(),
+          },
+          accounting: split,
+        },
       },
     );
 
     return res.json({
       success: true,
       invoiceUrl,
+      invoiceCompany: invoiceCompany.brand,
       row: updated,
     });
   } catch (error) {
