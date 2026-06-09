@@ -131,6 +131,7 @@ const normaliseImportRow = (item = {}) => {
 
   return {
     bookingRef,
+    invoiceCompany: cleanString(item.invoiceCompany || item.invoice_company || "TSC").toUpperCase() === "BMM" ? "BMM" : "TSC",
     bookerName: cleanString(item.bookerName || item.clientName),
     clientFirstNames: cleanString(
       item.clientFirstNames || item.clientName || item.bookerName,
@@ -176,6 +177,7 @@ const normaliseImportRow = (item = {}) => {
       bandPaymentsSent: Boolean(item.bandPaymentsSent),
     },
     accounting: {
+      invoiceCompany: cleanString(item.invoiceCompany || item.invoice_company || "TSC").toUpperCase() === "BMM" ? "BMM" : "TSC",
       paymentStage: "",
       vatRate,
       commissionGross,
@@ -282,7 +284,12 @@ const sanitizeBookingPatch = (body = {}) => {
   if (patch.accounting && isPlainObject(patch.accounting)) {
     patch.accounting = {
       ...patch.accounting,
-
+      invoiceCompany:
+        String(patch.accounting.invoiceCompany || patch.invoiceCompany || "TSC")
+          .trim()
+          .toUpperCase() === "BMM"
+          ? "BMM"
+          : "TSC",
       vatRate: Number(patch.accounting.vatRate ?? 0.2) || 0.2,
 
       commissionGross: Number(patch.accounting.commissionGross || 0) || 0,
@@ -381,6 +388,15 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
       bookingDoc.accounting || {},
       patch.accounting,
     );
+  }
+
+  if (patch.invoiceCompany || patch.accounting?.invoiceCompany) {
+    bookingDoc.invoiceCompany =
+      String(patch.invoiceCompany || patch.accounting?.invoiceCompany || "TSC")
+        .trim()
+        .toUpperCase() === "BMM"
+        ? "BMM"
+        : "TSC";
   }
   bookingDoc.balanceAmountPence = Math.round(computedBalance * 100);
 
@@ -529,6 +545,12 @@ const mergeRowData = (preferred, secondary) => {
     sourceBookingId: preferred?.sourceBookingId || secondary?.sourceBookingId,
     bookingRef: preferred?.bookingRef || secondary?.bookingRef,
     bookingId: preferred?.bookingId || secondary?.bookingId,
+    invoiceCompany:
+      preferred?.invoiceCompany ||
+      preferred?.accounting?.invoiceCompany ||
+      secondary?.invoiceCompany ||
+      secondary?.accounting?.invoiceCompany ||
+      "TSC",
     sessionId: preferred?.sessionId || secondary?.sessionId,
     clientFirstNames:
       preferred?.clientFirstNames || secondary?.clientFirstNames,
@@ -754,6 +776,7 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     sourceBookingId: doc?._id,
     bookingRef: doc?.bookingRef || doc?.bookingId || "",
     bookingId: doc?.bookingId || doc?.bookingRef || "",
+    invoiceCompany: doc?.invoiceCompany || doc?.accounting?.invoiceCompany || "TSC",
     sessionId: doc?.sessionId || "",
     clientFirstNames,
     clientEmails,
@@ -1017,6 +1040,12 @@ router.post("/", musicianAuth, async (req, res) => {
     // --------- 1) Upsert Booking (source of truth) ----------
     const bookingPatch = {
       bookingId: bookingRef,
+      invoiceCompany:
+        String(payload.invoiceCompany || payload.accounting?.invoiceCompany || "TSC")
+          .trim()
+          .toUpperCase() === "BMM"
+          ? "BMM"
+          : "TSC",
       createdManually: true,
 
       // keep both; lots of older code still queries booking.date
@@ -1063,6 +1092,12 @@ router.post("/", musicianAuth, async (req, res) => {
     // --------- 2) Upsert BookingBoardItem (UI row) ----------
     const boardPatch = {
       bookingId: booking._id, // ObjectId ref to Booking
+      invoiceCompany:
+        String(payload.invoiceCompany || payload.accounting?.invoiceCompany || "TSC")
+          .trim()
+          .toUpperCase() === "BMM"
+          ? "BMM"
+          : "TSC",
 
       bookerName: String(payload.bookerName || "").trim(),
       clientFirstNames: String(
@@ -1174,6 +1209,20 @@ router.patch("/:id", musicianAuth, async (req, res) => {
   try {
     const rawBody = { ...req.body };
     const body = { ...rawBody, updatedAt: new Date() };
+    if (body.invoiceCompany || body.accounting?.invoiceCompany) {
+      const invoiceCompany =
+        String(body.invoiceCompany || body.accounting?.invoiceCompany || "TSC")
+          .trim()
+          .toUpperCase() === "BMM"
+          ? "BMM"
+          : "TSC";
+
+      body.invoiceCompany = invoiceCompany;
+      body.accounting = {
+        ...(body.accounting || {}),
+        invoiceCompany,
+      };
+    }
     const isAdmin = isTSCAdmin(req.user);
 
     // Non-admins can only do lightweight row edits
@@ -1188,6 +1237,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       delete body.performanceTimes;
       delete body.bookingDetails;
       delete body.accounting;
+      delete body.invoiceCompany;
     }
 
     // First try: treat :id as a real Booking _id
@@ -1263,6 +1313,12 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         clientEmail: body.clientEmail || savedBooking?.clientEmail || "",
         clientEmails: body.clientEmails || [],
         accounting: savedBooking?.accounting || body.accounting || {},
+        invoiceCompany:
+          savedBooking?.invoiceCompany ||
+          savedBooking?.accounting?.invoiceCompany ||
+          body.invoiceCompany ||
+          body.accounting?.invoiceCompany ||
+          "TSC",
 
         bookingDetails:
           normalized?.bookingDetails || savedBooking?.bookingDetails || {},
@@ -1390,6 +1446,7 @@ const syncBoardRowToFinance = async (row) => {
     boardRowId: row._id,
     sourceBookingId: row.bookingId || row.sourceBookingId || null,
     bookingRef: row.bookingRef || String(row._id),
+    invoiceCompany: row.invoiceCompany || row.accounting?.invoiceCompany || "TSC",
     clientName: row.clientFirstNames || row.clientName || row.bookerName || "",
     clientEmail:
       row?.clientEmails?.find?.((e) => e?.email)?.email ||
@@ -1502,6 +1559,13 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
         const boardPatch = {
           bookingRef,
 
+          invoiceCompany:
+            String(row.invoiceCompany || row["Invoice Company"] || "TSC")
+              .trim()
+              .toUpperCase() === "BMM"
+              ? "BMM"
+              : "TSC",
+
           bookerName: String(row.bookerName || row["Booker Name"] || "").trim(),
           clientFirstNames: String(
             row.clientFirstNames ||
@@ -1550,6 +1614,12 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
           ).trim(),
 
           accounting: {
+            invoiceCompany:
+              String(row.invoiceCompany || row["Invoice Company"] || "TSC")
+                .trim()
+                .toUpperCase() === "BMM"
+                ? "BMM"
+                : "TSC",
             paymentStage: "",
             vatRate,
             commissionGross: round2(commissionGross),
@@ -1678,6 +1748,12 @@ for (const [index, row] of usableRecords.entries()) {
 
     const boardPatch = {
       bookingRef,
+      invoiceCompany:
+        String(row.invoiceCompany || row["Invoice Company"] || "TSC")
+          .trim()
+          .toUpperCase() === "BMM"
+          ? "BMM"
+          : "TSC",
       clientFirstNames: cleanString(row.clientFirstNames),
       eventDateISO: normaliseDate(row.eventDateISO),
       bookingDateISO: normaliseDate(row.bookingDateISO),
@@ -1692,6 +1768,12 @@ for (const [index, row] of usableRecords.entries()) {
       grossValue,
 
       accounting: {
+        invoiceCompany:
+          String(row.invoiceCompany || row["Invoice Company"] || "TSC")
+            .trim()
+            .toUpperCase() === "BMM"
+            ? "BMM"
+            : "TSC",
         paymentStage: "",
         vatRate,
         commissionGross: round2(commissionGross),

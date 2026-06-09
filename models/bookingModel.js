@@ -325,6 +325,11 @@ const BookingSchema = new mongoose.Schema(
     // - commission* is your revenue (VAT-able)
     // - passThrough* is client money held to pay musicians
     accounting: {
+      invoiceCompany: {
+        type: String,
+        enum: ["TSC", "BMM"],
+        default: "TSC",
+      },
       paymentStage: {
         type: String,
         enum: ["deposit", "balance", "full", "addon_deposit", "addon_full", ""],
@@ -361,6 +366,11 @@ const BookingSchema = new mongoose.Schema(
 
     /* ---------------------------- Balance handling ---------------------------- */
 
+    invoiceCompany: {
+      type: String,
+      enum: ["TSC", "BMM"],
+      default: "TSC",
+    },
     balanceInvoiceUrl: { type: String },
     balanceInvoiceId: { type: String },
     stripeInvoiceId: { type: String }, // (if you ever use Stripe Invoices API)

@@ -80,6 +80,11 @@ const BookingDetailsSchema = new mongoose.Schema(
 
 const AccountingSchema = new mongoose.Schema(
   {
+     invoiceCompany: {
+      type: String,
+      enum: ["TSC", "BMM"],
+      default: "TSC",
+    },
     paymentStage: { type: String, default: "" },
     vatRate: { type: Number, default: 0.2 },
     commissionGross: { type: Number, default: 0 },
@@ -118,6 +123,11 @@ const BookingBoardItemSchema = new mongoose.Schema(
     county: { type: String },
     payments: PaymentsSchema,
     invoiceUrl: { type: String, default: "" },
+     invoiceCompany: {
+      type: String,
+      enum: ["TSC", "BMM"],
+      default: "TSC",
+    },
     invoicePdfUrl: { type: String, default: "" },
     bandSize: { type: Number, default: 0 }, // excluding manager
     lineupSelected: { type: String }, // human label e.g. "6-Piece (2xVoc, Sax, Gtr, Bass, Drums)"
