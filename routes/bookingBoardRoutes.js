@@ -881,11 +881,14 @@ const buildSearchClause = (q) => {
 router.get("/", musicianAuth, async (req, res) => {
   try {
     const {
-      q = "",
-      sortBy = "eventDateISO",
-      sortDir = "asc",
-      limit = 500,
-    } = req.query;
+  q = "",
+  sortBy = "eventDateISO",
+  sortDir = "asc",
+} = req.query;
+
+const limit = Math.min(Number(req.query.limit || 100), 250);
+const page = Math.max(Number(req.query.page || 1), 1);
+const skip = (page - 1) * limit;
 
     const user = req.user || {};
     const email = String(user?.email || "").toLowerCase();
@@ -905,12 +908,14 @@ router.get("/", musicianAuth, async (req, res) => {
       ];
     }
 
-    const boardRowsRaw = await BookingBoardItem.find(
-      boardQuery,
-      isAdmin ? adminProjection : actOwnerProjection,
-    )
-      .limit(Number(limit) || 500)
-      .lean();
+   const boardRowsRaw = await BookingBoardItem.find(
+  boardQuery,
+  isAdmin ? adminProjection : actOwnerProjection,
+)
+  .sort({ eventDateISO: sortDir === "desc" ? -1 : 1 })
+  .skip(skip)
+  .limit(limit)
+  .lean();
 
     // Also pull Bookings collection so manual + stripe bookings show up.
     const bookingQuery = {};
@@ -922,9 +927,11 @@ router.get("/", musicianAuth, async (req, res) => {
       ];
     }
 
-    const bookingDocs = await Booking.find(bookingQuery)
-      .limit(Number(limit) || 500)
-      .lean();
+   const bookingDocs = await Booking.find(bookingQuery)
+  .sort({ eventDate: sortDir === "desc" ? -1 : 1 })
+  .skip(skip)
+  .limit(limit)
+  .lean();
 
     // Dedupe/merge rows across both sources
     const dedupeMap = new Map();
@@ -962,9 +969,13 @@ router.get("/", musicianAuth, async (req, res) => {
     });
 
     return res.json({
-      success: true,
-      rows: rows.slice(0, Number(limit) || 500),
-    });
+  success: true,
+  rows: rows.slice(0, limit),
+  page,
+  limit,
+  hasMore: rows.length >= limit,
+});
+
   } catch (e) {
     console.error("❌ GET /board/bookings failed:", e);
     return res.status(500).json({ success: false, message: e.message });
