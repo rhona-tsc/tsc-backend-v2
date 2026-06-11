@@ -3040,10 +3040,12 @@ export const listDeputyJobMatches = async (req, res) => {
 export const applyToDeputyJob = async (req, res) => {
   try {
     const job = await deputyJobModel.findById(req.params.id);
+
     if (!job) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Deputy job not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Deputy job not found",
+      });
     }
 
     const authenticatedMusicianId =
@@ -3052,6 +3054,23 @@ export const applyToDeputyJob = async (req, res) => {
       req.user?.userId ||
       req.user?.musicianId ||
       null;
+
+    console.log("🔐 applyToDeputyJob auth check", {
+      jobId: req.params.id,
+      reqUser: req.user
+        ? {
+            _id: req.user._id,
+            id: req.user.id,
+            userId: req.user.userId,
+            musicianId: req.user.musicianId,
+            email: req.user.email,
+            role: req.user.role,
+          }
+        : null,
+      authenticatedMusicianId: authenticatedMusicianId
+        ? String(authenticatedMusicianId)
+        : "",
+    });
 
     if (!authenticatedMusicianId) {
       return res.status(401).json({
@@ -3082,6 +3101,13 @@ export const applyToDeputyJob = async (req, res) => {
       .findById(authenticatedMusicianId)
       .lean();
 
+    console.log("🎵 applyToDeputyJob musician lookup", {
+      musicianId: String(authenticatedMusicianId),
+      musicianFound: Boolean(musician),
+      musicianEmail: musician?.email || "",
+      basicInfoEmail: musician?.basicInfo?.email || "",
+    });
+
     const matchedSnapshot = Array.isArray(job.matchedMusicians)
       ? job.matchedMusicians.find(
           (m) =>
@@ -3102,24 +3128,38 @@ export const applyToDeputyJob = async (req, res) => {
       matchedSnapshotSummary: matchedSnapshot?.matchSummary || null,
     });
 
+    const applicantFirstName =
+      musician?.firstName ||
+      musician?.firstname ||
+      musician?.basicInfo?.firstName ||
+      req.user?.firstName ||
+      "";
+
+    const applicantLastName =
+      musician?.lastName ||
+      musician?.lastname ||
+      musician?.basicInfo?.lastName ||
+      req.user?.lastName ||
+      "";
+
+    const applicantEmail =
+      musician?.email ||
+      musician?.basicInfo?.email ||
+      req.user?.email ||
+      "";
+
+    const applicantPhone =
+      musician?.phone ||
+      musician?.basicInfo?.phone ||
+      req.user?.phone ||
+      "";
+
     job.applications.push({
       musicianId: authenticatedMusicianId,
-      firstName:
-        musician?.firstName ||
-        musician?.firstname ||
-        musician?.basicInfo?.firstName ||
-        req.user?.firstName ||
-        "",
-      lastName:
-        musician?.lastName ||
-        musician?.lastname ||
-        musician?.basicInfo?.lastName ||
-        req.user?.lastName ||
-        "",
-      email:
-        musician?.email || musician?.basicInfo?.email || req.user?.email || "",
-      phone:
-        musician?.phone || musician?.basicInfo?.phone || req.user?.phone || "",
+      firstName: applicantFirstName,
+      lastName: applicantLastName,
+      email: applicantEmail,
+      phone: applicantPhone,
       musicianSlug: musician?.musicianSlug || "",
       profileImage:
         musician?.profilePhoto ||
@@ -3144,68 +3184,84 @@ export const applyToDeputyJob = async (req, res) => {
     job.applicationCount = Array.isArray(job.applications)
       ? job.applications.length
       : 0;
+
     if (job.workflowStage === "sent_to_matches") {
       job.workflowStage = "applications_open";
     }
 
     await job.save();
 
+    const latestApplicant = Array.isArray(job?.applications)
+      ? job.applications[job.applications.length - 1]
+      : null;
+
     console.log("✅ applyToDeputyJob saved", {
       jobId: String(job._id),
       musicianId: String(authenticatedMusicianId),
-      applicationCount: Array.isArray(job?.applications) ? job.applications.length : 0,
-      latestApplicant: (() => {
-        const latest = Array.isArray(job?.applications)
-          ? job.applications[job.applications.length - 1]
-          : null;
-
-        return latest
-          ? {
-              musicianId: String(latest.musicianId || ""),
-              firstName: latest.firstName || "",
-              lastName: latest.lastName || "",
-              email: latest.email || "",
-              status: latest.status || "",
-              deputyMatchScore: Number(latest.deputyMatchScore || 0),
-            }
-          : null;
-      })(),
+      applicationCount: Array.isArray(job?.applications)
+        ? job.applications.length
+        : 0,
+      latestApplicant: latestApplicant
+        ? {
+            musicianId: String(latestApplicant.musicianId || ""),
+            firstName: latestApplicant.firstName || "",
+            lastName: latestApplicant.lastName || "",
+            email: latestApplicant.email || "",
+            status: latestApplicant.status || "",
+            deputyMatchScore: Number(latestApplicant.deputyMatchScore || 0),
+          }
+        : null,
     });
 
-        const applicantEmail =
-      musician?.email ||
-      musician?.basicInfo?.email ||
-      req.user?.email ||
-      "";
+    console.log("📧 applyToDeputyJob email check", {
+      applicantEmail,
+      hasMusicianEmail: Boolean(musician?.email),
+      hasBasicInfoEmail: Boolean(musician?.basicInfo?.email),
+      hasReqUserEmail: Boolean(req.user?.email),
+      bcc: DEPUTY_JOB_BCC_EMAIL,
+      sendEmailType: typeof sendEmail,
+    });
 
     if (applicantEmail) {
       try {
+        console.log("📨 Sending deputy job application confirmation", {
+          to: applicantEmail,
+          bcc: DEPUTY_JOB_BCC_EMAIL,
+          jobId: String(job._id),
+        });
+
         await sendEmail({
           to: applicantEmail,
           bcc: DEPUTY_JOB_BCC_EMAIL,
-          subject: `Application received: ${job.title || job.instrument || "Deputy opportunity"}`,
+          subject: `Application received: ${
+            job.title || job.instrument || "Deputy opportunity"
+          }`,
           html: `
-            <p>Hi ${
-              musician?.firstName ||
-              musician?.basicInfo?.firstName ||
-              req.user?.firstName ||
-              "there"
-            },</p>
+            <p>Hi ${applicantFirstName || "there"},</p>
+
             <p>We’ve received your application for:</p>
-            <p><strong>${job.title || job.instrument || "Deputy opportunity"}</strong></p>
-            <p><strong>Date:</strong> ${job.eventDate ? formatNiceDate(job.eventDate) : "TBC"}</p>
-            <p><strong>Location:</strong> ${job.location || job.venue || job.locationName || "TBC"}</p>
+
+            <p><strong>${
+              job.title || job.instrument || "Deputy opportunity"
+            }</strong></p>
+
+            <p><strong>Date:</strong> ${
+              job.eventDate ? formatNiceDate(job.eventDate) : "TBC"
+            }</p>
+
+            <p><strong>Location:</strong> ${
+              job.location || job.venue || job.locationName || "TBC"
+            }</p>
+
             <p>We’ll be in touch if you’re shortlisted, presented, or allocated.</p>
+
             <p>🤍<br/>The Supreme Collective</p>
           `,
-          text: `Hi ${
-            musician?.firstName ||
-            musician?.basicInfo?.firstName ||
-            req.user?.firstName ||
-            "there"
-          },
+          text: `Hi ${applicantFirstName || "there"},
 
-We’ve received your application for ${job.title || job.instrument || "Deputy opportunity"}.
+We’ve received your application for ${
+            job.title || job.instrument || "Deputy opportunity"
+          }.
 
 Date: ${job.eventDate ? formatNiceDate(job.eventDate) : "TBC"}
 Location: ${job.location || job.venue || job.locationName || "TBC"}
@@ -3214,14 +3270,29 @@ We’ll be in touch if you’re shortlisted, presented, or allocated.
 
 The Supreme Collective`,
         });
+
+        console.log("✅ Deputy job application confirmation email sent", {
+          to: applicantEmail,
+          bcc: DEPUTY_JOB_BCC_EMAIL,
+          jobId: String(job._id),
+        });
       } catch (emailError) {
         console.error("❌ applyToDeputyJob confirmation email error:", {
           jobId: String(job._id),
           musicianId: String(authenticatedMusicianId),
           email: applicantEmail,
           message: emailError?.message || "Email send failed",
+          stack: emailError?.stack,
         });
       }
+    } else {
+      console.warn("⚠️ applyToDeputyJob skipped email: no applicant email found", {
+        jobId: String(job._id),
+        musicianId: String(authenticatedMusicianId),
+        musicianEmail: musician?.email || "",
+        basicInfoEmail: musician?.basicInfo?.email || "",
+        reqUserEmail: req.user?.email || "",
+      });
     }
 
     return res.json({
@@ -3230,8 +3301,15 @@ The Supreme Collective`,
       job: withDeputyJobAliases(job),
     });
   } catch (error) {
-    console.error("❌ applyToDeputyJob error:", error);
-    return res.status(500).json({ success: false, message: "Failed to apply" });
+    console.error("❌ applyToDeputyJob error:", {
+      message: error?.message || "Failed to apply",
+      stack: error?.stack,
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to apply",
+    });
   }
 };
 

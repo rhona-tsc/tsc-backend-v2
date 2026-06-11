@@ -9,12 +9,20 @@ const normUser = (v) => String(v || "").trim().toLowerCase();
 const normPass = (v) => String(v || "").replace(/\s+/g, ""); // remove ALL whitespace
 
 function getTransporter() {
-  const user = normUser(process.env.GMAIL_AVAIL_USER || process.env.EMAIL_USER);
-  const pass = normPass(
+const user = normUser(
+  process.env.SMTP_USER ||
+    process.env.GMAIL_AVAIL_USER ||
+    process.env.EMAIL_USER ||
+    process.env.GMAIL_USER
+);
+
+const pass = normPass(
+  process.env.SMTP_PASS ||
+    process.env.GMAIL_APP_PASSWORD ||
     process.env.GMAIL_AVAIL_PASS ||
-      process.env.EMAIL_PASS ||
-      process.env.GMAIL_APP_PASSWORD
-  );
+    process.env.EMAIL_PASS ||
+    process.env.GMAIL_PASS
+);
 
   const key = `${user}|${pass}`;
 
@@ -122,8 +130,7 @@ async function sendEmail({
     console.log("🧪 [sendEmail] testMode active", {
       fallbackTestTo,
       safeTo,
-      originalRecipients,
-    });
+originalRecipients: recipients,    });
 
     toArr.length = 0;
     toArr.push(safeTo);
@@ -132,8 +139,10 @@ async function sendEmail({
   const finalSubject = `${subjectPrefix ? String(subjectPrefix) : testMode ? "[TEST]" : ""}${(subjectPrefix || testMode) ? " " : ""}${subject || ""}`.trim();
 
   const mail = {
-    from: (from || process.env.DEFAULT_FROM || "hello@thesupremecollective.co.uk").trim(),
-    replyTo: replyTo ? String(replyTo).trim() : undefined,
+from:
+  from ||
+  process.env.EMAIL_FROM ||
+  `${process.env.SMTP_FROM_NAME || "The Supreme Collective"} <${process.env.SMTP_FROM_EMAIL || "hello@thesupremecollective.co.uk"}>`,    replyTo: replyTo ? String(replyTo).trim() : undefined,
     to: testMode ? toArr : recipients,
     cc: !testMode && ccArr.length ? [...new Set(ccArr.filter(isEmail))] : undefined,
     bcc: !testMode && bccRecipients.length ? bccRecipients : undefined,
