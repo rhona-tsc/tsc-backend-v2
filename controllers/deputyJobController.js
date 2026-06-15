@@ -323,7 +323,7 @@ const interpretDeputyReply = (raw = "") => {
     low.includes("cant do") ||
     low.includes("can't do") ||
     low.startsWith("djno_") ||
-    low.startsWith("deputyno_")
+    low.startsWith("not available now")
   ) {
     return "declined";
   }
@@ -5271,49 +5271,17 @@ export const twilioInboundDeputyJob = async (req, res) => {
       return res.status(200).send("<Response/>");
     }
 
-    job.status = "open";
-    job.workflowStage =
-      job.notifiedCount > 0 ? "sent_to_matches" : "applications_open";
-    job.bookedMusicianId = null;
-    job.bookedMusicianName = "";
-    job.bookingConfirmedAt = null;
-    job.allocatedMusicianId = null;
-    job.allocatedMusicianName = "";
-    job.allocatedAt = null;
+    reopenDeputyJobAfterDecline({
+      job,
 
-    job.applications = (job.applications || []).map((existingApplication) => {
-      const sameMusician =
-        asObjectIdString(existingApplication.musicianId) ===
-        asObjectIdString(musician._id);
+      musician,
 
-      return {
-        ...existingApplication,
-        status: sameMusician ? "declined" : existingApplication.status,
-        declinedAt: sameMusician ? now : existingApplication.declinedAt || null,
-      };
+      application: findApplicationFromJob(job, musician._id),
+
+      providerMessageId: repliedSid,
+
+      now,
     });
-
-    job.notifications = [
-      ...(job.notifications || []),
-      {
-        musicianId: musician._id,
-        email: musician.email || application?.email || "",
-        phone:
-          musician.phone || musician.phoneNumber || application?.phone || "",
-        channel: "whatsapp",
-        type: "manual",
-        subject: `Declined via WhatsApp: ${job.title || job.instrument || "Deputy job"}`,
-        previewText: `Declined by ${
-          [musician.firstName, musician.lastName]
-            .filter(Boolean)
-            .join(" ")
-            .trim() || "allocated deputy"
-        }`,
-        providerMessageId: repliedSid,
-        status: "sent",
-        sentAt: now,
-      },
-    ];
 
     await job.save();
 
@@ -6449,6 +6417,43 @@ export const presentDeputyApplicant = async (req, res) => {
       error: error.message,
     });
   }
+};
+
+const reopenDeputyJobAfterDecline = ({ job, musicianId, now = new Date() }) => {
+  const declinedId = String(musicianId || "");
+
+  job.status = "open";
+  job.workflowStage = "open";
+
+  job.allocatedMusicianId = null;
+  job.allocatedMusicianSlug = "";
+  job.allocatedMusicianName = "";
+  job.allocatedAt = null;
+
+  job.applications = (job.applications || []).map((app) => {
+    if (String(app.musicianId || "") !== declinedId) return app;
+
+    return {
+      ...app,
+      status: "declined",
+      declinedAt: now,
+    };
+  });
+
+  job.notifications = [
+    ...(job.notifications || []),
+    {
+      musicianId,
+      channel: "whatsapp",
+      type: "allocation_declined",
+      subject: `Allocation declined: ${job.title || job.instrument || "Deputy job"}`,
+      previewText:
+        "Musician declined the WhatsApp allocation request. Job reopened.",
+      status: "received",
+      sentAt: now,
+      error: "",
+    },
+  ];
 };
 
 export const manualAllocateDeputyJob = async (req, res) => {
