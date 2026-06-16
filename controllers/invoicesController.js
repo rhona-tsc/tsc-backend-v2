@@ -966,7 +966,13 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     );
     doc.text(
       isReceipt
-        ? `Payment date: ${formatInvoiceDate(row?.payments?.invoicePaidAt || row?.payments?.balancePaymentReceivedAt || new Date())}`
+        ? `Payment date: ${formatInvoiceDate(
+            row?.payments?.paidAt ||
+              row?.paidAt ||
+              row?.payments?.invoicePaidAt ||
+              row?.payments?.balancePaymentReceivedAt ||
+              new Date(),
+          )}`
         : `Due date: ${formatInvoiceDate(dueDate) || "TBC"}`,
       cardX + cardW - 230,
       cardY + 76,
@@ -1127,7 +1133,13 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       doc.text(`Received from: ${clientName}`, cardX + 26, paymentY + 16);
       doc.text(`Payment reference: ${paymentReference}`, cardX + 26, paymentY + 30);
       doc.text(
-        `Payment received: ${formatInvoiceDate(row?.payments?.invoicePaidAt || row?.payments?.balancePaymentReceivedAt || new Date())}`,
+        `Payment received: ${formatInvoiceDate(
+          row?.payments?.paidAt ||
+            row?.paidAt ||
+            row?.payments?.invoicePaidAt ||
+            row?.payments?.balancePaymentReceivedAt ||
+            new Date(),
+        )}`,
         cardX + 26,
         paymentY + 44,
       );
@@ -1313,6 +1325,7 @@ export const createBoardInvoice = async (req, res) => {
     });
 
     const documentUrl = uploadResult.secure_url;
+    const now = new Date();
 
     console.log("🧾 Invoice/receipt delivery URLs:", {
       secure_url: uploadResult.secure_url,
@@ -1327,22 +1340,24 @@ export const createBoardInvoice = async (req, res) => {
           invoiceCompany: invoiceCompany.brand,
           receiptUrl: documentUrl,
           receiptPdfUrl: documentUrl,
-          payments: {
-            ...(row.payments || {}),
-            boardReceiptPdfUrl: documentUrl,
-            boardReceiptCreatedAt: new Date(),
-          },
+          receiptCreatedAt: now,
+          balancePaid: true,
+          balanceStatus: "paid",
+          paidAt: now,
+          "payments.balancePaymentReceived": true,
+          "payments.invoicePaid": true,
+          "payments.boardReceiptPdfUrl": documentUrl,
+          "payments.receiptPdfUrl": documentUrl,
+          "payments.receiptCreatedAt": now,
+          "payments.paidAt": now,
           accounting: split,
         }
       : {
           invoiceCompany: invoiceCompany.brand,
           invoiceUrl: documentUrl,
           invoicePdfUrl: documentUrl,
-          payments: {
-            ...(row.payments || {}),
-            boardInvoicePdfUrl: documentUrl,
-            boardInvoiceCreatedAt: new Date(),
-          },
+          "payments.boardInvoicePdfUrl": documentUrl,
+          "payments.boardInvoiceCreatedAt": now,
           accounting: split,
         };
 
@@ -1357,22 +1372,24 @@ export const createBoardInvoice = async (req, res) => {
           invoiceCompany: invoiceCompany.brand,
           receiptUrl: documentUrl,
           receiptPdfUrl: documentUrl,
-          payments: {
-            ...(row.payments || {}),
-            boardReceiptPdfUrl: documentUrl,
-            boardReceiptCreatedAt: new Date(),
-          },
+          receiptCreatedAt: now,
+          balancePaid: true,
+          balanceStatus: "paid",
+          paidAt: now,
+          "payments.balancePaymentReceived": true,
+          "payments.invoicePaid": true,
+          "payments.boardReceiptPdfUrl": documentUrl,
+          "payments.receiptPdfUrl": documentUrl,
+          "payments.receiptCreatedAt": now,
+          "payments.paidAt": now,
           accounting: split,
         }
       : {
           invoiceCompany: invoiceCompany.brand,
           invoiceUrl: documentUrl,
           invoicePdfUrl: documentUrl,
-          payments: {
-            ...(row.payments || {}),
-            boardInvoicePdfUrl: documentUrl,
-            boardInvoiceCreatedAt: new Date(),
-          },
+          "payments.boardInvoicePdfUrl": documentUrl,
+          "payments.boardInvoiceCreatedAt": now,
           accounting: split,
         };
 

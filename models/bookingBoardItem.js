@@ -47,6 +47,11 @@ const PaymentsSchema = new mongoose.Schema(
     bandPaymentsSent: { type: Boolean, default: false },
     boardInvoicePdfUrl: { type: String, default: "" },
     boardInvoiceCreatedAt: { type: Date },
+    boardReceiptPdfUrl: { type: String, default: "" },
+    receiptPdfUrl: { type: String, default: "" },
+    receiptCreatedAt: { type: Date },
+    invoicePaid: { type: Boolean, default: false },
+    paidAt: { type: Date },
     bandPayments: [
       {
         musicianId: mongoose.Types.ObjectId,
@@ -129,6 +134,12 @@ const BookingBoardItemSchema = new mongoose.Schema(
       default: "TSC",
     },
     invoicePdfUrl: { type: String, default: "" },
+    receiptUrl: { type: String, default: "" },
+    receiptPdfUrl: { type: String, default: "" },
+    receiptCreatedAt: { type: Date },
+    balancePaid: { type: Boolean, default: false },
+    balanceStatus: { type: String, default: "" },
+    paidAt: { type: Date },
     bandSize: { type: Number, default: 0 }, // excluding manager
     lineupSelected: { type: String }, // human label e.g. "6-Piece (2xVoc, Sax, Gtr, Bass, Drums)"
     lineupComposition: [{ type: String }], // e.g. ["Lead Vocal","Guitar","Bass","Drums"]
