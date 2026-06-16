@@ -835,6 +835,8 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const line = "#d1d5db";
     const accent = invoiceCompany?.accent || "#43d8e8";
 
+    const documentType = String(row?.documentType || "invoice").toLowerCase();
+    const isReceipt = documentType === "receipt";
     const invoiceRef = row.bookingRef || row.bookingId || String(row._id);
     const clientName = firstNonEmpty(
       row.clientFirstNames,
@@ -905,7 +907,10 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .fillColor("#ffffff")
       .font("Helvetica-Bold")
       .fontSize(26)
-      .text("INVOICE", pageWidth - 220, 42, { width: 170, align: "right" });
+      .text(isReceipt ? "RECEIPT" : "INVOICE", pageWidth - 220, 42, {
+        width: 170,
+        align: "right",
+      });
 
     // Main white invoice card.
     const cardX = 42;
@@ -941,12 +946,12 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     }
 
     doc.fillColor(text).font("Helvetica-Bold").fontSize(12);
-    doc.text("Invoice details", cardX + cardW - 210, cardY + 26, {
+    doc.text(isReceipt ? "Receipt details" : "Invoice details", cardX + cardW - 210, cardY + 26, {
       width: 170,
       align: "right",
     });
     doc.font("Helvetica").fontSize(10).fillColor(text);
-    doc.text(`Invoice ref: ${invoiceRef}`, cardX + cardW - 230, cardY + 46, {
+    doc.text(`${isReceipt ? "Receipt" : "Invoice"} ref: ${invoiceRef}`, cardX + cardW - 230, cardY + 46, {
       width: 190,
       align: "right",
     });
@@ -960,14 +965,16 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       },
     );
     doc.text(
-  `Due date: ${formatInvoiceDate(dueDate) || "TBC"}`,
-  cardX + cardW - 230,
-  cardY + 76,
-  {
-    width: 190,
-    align: "right",
-  },
-);
+      isReceipt
+        ? `Payment date: ${formatInvoiceDate(row?.payments?.invoicePaidAt || row?.payments?.balancePaymentReceivedAt || new Date())}`
+        : `Due date: ${formatInvoiceDate(dueDate) || "TBC"}`,
+      cardX + cardW - 230,
+      cardY + 76,
+      {
+        width: 190,
+        align: "right",
+      },
+    );
 
     // Client/event block.
     const detailY = cardY + 145;
@@ -1098,7 +1105,9 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .lineTo(totalsX + 215, totalsY + 62)
       .stroke();
     doc.fillColor(text).font("Helvetica-Bold").fontSize(13);
-    doc.text("Total due", totalsX, totalsY + 74, { width: 125 });
+    doc.text(isReceipt ? "Total paid" : "Total due", totalsX, totalsY + 74, {
+      width: 125,
+    });
     doc.text(formatMoney(split.gross), totalsX + 125, totalsY + 74, {
       width: 90,
       align: "right",
@@ -1111,23 +1120,36 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .fillColor(text)
       .font("Helvetica-Bold")
       .fontSize(10)
-      .text("Bank transfer details", cardX + 26, paymentY);
+      .text(isReceipt ? "Payment received" : "Bank transfer details", cardX + 26, paymentY);
 
     doc.fillColor(text).font("Helvetica").fontSize(9);
-    doc.text(`Account name: ${invoiceCompany.bank?.accountName || invoiceCompany.name}`, cardX + 26, paymentY + 16);
-    if (invoiceCompany.bank?.bankName) {
-      doc.text(`Bank: ${invoiceCompany.bank.bankName}`, cardX + 26, paymentY + 30);
+    if (isReceipt) {
+      doc.text(`Received from: ${clientName}`, cardX + 26, paymentY + 16);
+      doc.text(`Payment reference: ${paymentReference}`, cardX + 26, paymentY + 30);
+      doc.text(
+        `Payment received: ${formatInvoiceDate(row?.payments?.invoicePaidAt || row?.payments?.balancePaymentReceivedAt || new Date())}`,
+        cardX + 26,
+        paymentY + 44,
+      );
+      doc.text(`Amount received: ${formatMoney(split.gross)}`, cardX + 26, paymentY + 58);
+    } else {
+      doc.text(`Account name: ${invoiceCompany.bank?.accountName || invoiceCompany.name}`, cardX + 26, paymentY + 16);
+      if (invoiceCompany.bank?.bankName) {
+        doc.text(`Bank: ${invoiceCompany.bank.bankName}`, cardX + 26, paymentY + 30);
+      }
+      doc.text(`Sort code: ${invoiceCompany.bank?.sortCode || ""}`, cardX + 26, paymentY + 44);
+      doc.text(`Account number: ${invoiceCompany.bank?.accountNumber || ""}`, cardX + 26, paymentY + 58);
+      doc.text(`Payment reference: ${paymentReference}`, cardX + 26, paymentY + 72);
     }
-    doc.text(`Sort code: ${invoiceCompany.bank?.sortCode || ""}`, cardX + 26, paymentY + 44);
-    doc.text(`Account number: ${invoiceCompany.bank?.accountNumber || ""}`, cardX + 26, paymentY + 58);
-    doc.text(`Payment reference: ${paymentReference}`, cardX + 26, paymentY + 72);
 
     doc
       .fillColor(muted)
       .font("Helvetica")
       .fontSize(8)
       .text(
-        "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the music management / commission element. The band fee is shown separately as a pass-through artist fee.",
+        isReceipt
+          ? "Thank you, payment has been received. VAT is charged only on the music management / commission element. The band fee is shown separately as a pass-through artist fee."
+          : "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the music management / commission element. The band fee is shown separately as a pass-through artist fee.",
         cardX + 270,
         paymentY,
         { width: cardW - 296 },
@@ -1152,7 +1174,14 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
 
 export const createBoardInvoice = async (req, res) => {
   try {
-    const { bookingId, invoiceCompany: invoiceCompanyFromRequest } = req.body;
+    const {
+      bookingId,
+      invoiceCompany: invoiceCompanyFromRequest,
+      documentType = "invoice",
+    } = req.body;
+
+    const documentTypeNorm = String(documentType || "invoice").toLowerCase();
+    const isReceipt = documentTypeNorm === "receipt";
 
     if (!bookingId) {
       return res.status(400).json({
@@ -1170,8 +1199,25 @@ export const createBoardInvoice = async (req, res) => {
       });
     }
 
+    if (isReceipt) {
+      const isPaid = Boolean(
+        row?.payments?.balancePaymentReceived ||
+          row?.payments?.invoicePaid ||
+          row?.balancePaid ||
+          row?.balanceStatus === "paid",
+      );
+
+      if (!isPaid) {
+        return res.status(400).json({
+          success: false,
+          message: "Invoice must be marked as paid before generating a receipt.",
+        });
+      }
+    }
+
     const rowForInvoice = {
       ...row,
+      documentType: documentTypeNorm,
       invoiceCompany:
         invoiceCompanyFromRequest ||
         row.invoiceCompany ||
@@ -1208,20 +1254,17 @@ export const createBoardInvoice = async (req, res) => {
     );
 
     const commissionSplit = vatFromGross(commissionGross, vatRate);
+    const calculatedGross = round2(commissionGross + passThroughGross || gross);
 
-    const calculatedGross = round2(
-  commissionGross + passThroughGross
-);
-
-   const split = {
-  gross: calculatedGross,
-  invoiceCompany: invoiceCompany.brand,
-  vatRate,
-  commissionGross,
-  commissionNet: commissionSplit.net,
-  commissionVat: commissionSplit.vat,
-  passThroughGross,
-};
+    const split = {
+      gross: calculatedGross,
+      invoiceCompany: invoiceCompany.brand,
+      vatRate,
+      commissionGross,
+      commissionNet: commissionSplit.net,
+      commissionVat: commissionSplit.vat,
+      passThroughGross,
+    };
 
     const pdfBuffer = await makeInvoicePdfBuffer(
       rowForInvoice,
@@ -1237,25 +1280,28 @@ export const createBoardInvoice = async (req, res) => {
     }
 
     console.log("🧾 PDF buffer debug:", {
+      documentType: documentTypeNorm,
       length: pdfBuffer?.length,
       firstBytes: pdfBuffer?.slice(0, 20).toString(),
       isPdf: pdfBuffer?.slice(0, 4).toString() === "%PDF",
     });
+
+    const publicIdPrefix = isReceipt ? "receipt" : "invoice";
 
     const uploadResult = await new Promise((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         {
           folder: "booking-board-invoices",
           resource_type: "raw",
-          public_id: `invoice-${rowForInvoice.bookingRef || rowForInvoice._id}`,
+          public_id: `${publicIdPrefix}-${rowForInvoice.bookingRef || rowForInvoice._id}`,
           overwrite: true,
           invalidate: true,
           format: "pdf",
         },
         (error, result) => {
-          console.log("☁️ Cloudinary invoice upload result:", result);
+          console.log("☁️ Cloudinary invoice/receipt upload result:", result);
           if (error) {
-            console.error("❌ Cloudinary invoice upload error:", error);
+            console.error("❌ Cloudinary invoice/receipt upload error:", error);
             reject(error);
           } else {
             resolve(result);
@@ -1266,32 +1312,69 @@ export const createBoardInvoice = async (req, res) => {
       stream.end(pdfBuffer);
     });
 
-    const invoiceUrl = uploadResult.secure_url;
+    const documentUrl = uploadResult.secure_url;
 
-    console.log("🧾 Invoice delivery URLs:", {
+    console.log("🧾 Invoice/receipt delivery URLs:", {
       secure_url: uploadResult.secure_url,
-      forced_download_url: invoiceUrl,
+      forced_download_url: documentUrl,
+      documentType: documentTypeNorm,
       invoiceCompany: invoiceCompany.brand,
       vatRate,
     });
 
-    const updated = await BookingBoardItem.findByIdAndUpdate(
-      row._id,
-      {
-        $set: {
+    const boardSetPatch = isReceipt
+      ? {
           invoiceCompany: invoiceCompany.brand,
-          invoiceUrl,
-          invoicePdfUrl: invoiceUrl,
+          receiptUrl: documentUrl,
+          receiptPdfUrl: documentUrl,
           payments: {
             ...(row.payments || {}),
-            boardInvoicePdfUrl: invoiceUrl,
+            boardReceiptPdfUrl: documentUrl,
+            boardReceiptCreatedAt: new Date(),
+          },
+          accounting: split,
+        }
+      : {
+          invoiceCompany: invoiceCompany.brand,
+          invoiceUrl: documentUrl,
+          invoicePdfUrl: documentUrl,
+          payments: {
+            ...(row.payments || {}),
+            boardInvoicePdfUrl: documentUrl,
             boardInvoiceCreatedAt: new Date(),
           },
           accounting: split,
-        },
-      },
+        };
+
+    const updated = await BookingBoardItem.findByIdAndUpdate(
+      row._id,
+      { $set: boardSetPatch },
       { new: true },
     );
+
+    const bookingSetPatch = isReceipt
+      ? {
+          invoiceCompany: invoiceCompany.brand,
+          receiptUrl: documentUrl,
+          receiptPdfUrl: documentUrl,
+          payments: {
+            ...(row.payments || {}),
+            boardReceiptPdfUrl: documentUrl,
+            boardReceiptCreatedAt: new Date(),
+          },
+          accounting: split,
+        }
+      : {
+          invoiceCompany: invoiceCompany.brand,
+          invoiceUrl: documentUrl,
+          invoicePdfUrl: documentUrl,
+          payments: {
+            ...(row.payments || {}),
+            boardInvoicePdfUrl: documentUrl,
+            boardInvoiceCreatedAt: new Date(),
+          },
+          accounting: split,
+        };
 
     await Booking.findOneAndUpdate(
       {
@@ -1302,24 +1385,14 @@ export const createBoardInvoice = async (req, res) => {
           { bookingRef: row.bookingRef },
         ].filter((x) => Object.values(x)[0]),
       },
-      {
-        $set: {
-          invoiceCompany: invoiceCompany.brand,
-          invoiceUrl,
-          invoicePdfUrl: invoiceUrl,
-          payments: {
-            ...(row.payments || {}),
-            boardInvoicePdfUrl: invoiceUrl,
-            boardInvoiceCreatedAt: new Date(),
-          },
-          accounting: split,
-        },
-      },
+      { $set: bookingSetPatch },
     );
 
     return res.json({
       success: true,
-      invoiceUrl,
+      documentType: documentTypeNorm,
+      invoiceUrl: isReceipt ? updated?.invoiceUrl : documentUrl,
+      receiptUrl: isReceipt ? documentUrl : updated?.receiptUrl,
       invoiceCompany: invoiceCompany.brand,
       row: updated,
     });
