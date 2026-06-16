@@ -1416,3 +1416,21 @@ export const createBoardInvoice = async (req, res) => {
     });
   }
 };
+
+export const serveBoardReceiptPdf = async (req, res) => {
+  req.body = {
+    bookingId: req.params.id,
+    documentType: "receipt",
+  };
+
+  return createBoardInvoice(req, res);
+};
+
+export const serveBoardInvoicePdf = async (req, res) => {
+  req.body = {
+    bookingId: req.params.id,
+    documentType: "invoice",
+  };
+
+  return createBoardInvoice(req, res);
+};

@@ -1,5 +1,5 @@
 import express from "express";
-import { getOrCreateBalanceLink, getOrCreateAddonLink, createInvoicePayLink, createBoardInvoice } from "../controllers/invoicesController.js";
+import { getOrCreateBalanceLink, getOrCreateAddonLink, createInvoicePayLink, createBoardInvoice, serveBoardReceiptPdf, serveBoardInvoicePdf } from "../controllers/invoicesController.js";
 import bookingBoardItem from "../models/bookingBoardItem.js";
 
 const router = express.Router();
@@ -8,6 +8,8 @@ router.get("/balance-link/:idOrRef", getOrCreateBalanceLink);
 router.get("/addon-link/:idOrRef", getOrCreateAddonLink);
 router.post("/create", createInvoicePayLink);
 router.post("/create-board-invoice", createBoardInvoice);
+router.get("/board-receipt/:id", serveBoardReceiptPdf);
+router.get("/board-invoice-pdf/:id", serveBoardInvoicePdf);
 router.get("/board-invoice/:bookingId", async (req, res) => {
   const row = await bookingBoardItem.findById(req.params.bookingId).lean();
 
