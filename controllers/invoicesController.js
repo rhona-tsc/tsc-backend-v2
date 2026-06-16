@@ -1367,6 +1367,9 @@ export const createBoardInvoice = async (req, res) => {
       { new: true },
     );
 
+    // Booking.payments can be an array in the main Booking model, so do not use
+    // dotted payments.* updates here. Keep receipt/invoice document URLs at the
+    // top level on Booking, and store nested payments.* fields only on BookingBoardItem.
     const bookingSetPatch = isReceipt
       ? {
           invoiceCompany: invoiceCompany.brand,
@@ -1376,20 +1379,12 @@ export const createBoardInvoice = async (req, res) => {
           balancePaid: true,
           balanceStatus: "paid",
           paidAt: now,
-          "payments.balancePaymentReceived": true,
-          "payments.invoicePaid": true,
-          "payments.boardReceiptPdfUrl": documentUrl,
-          "payments.receiptPdfUrl": documentUrl,
-          "payments.receiptCreatedAt": now,
-          "payments.paidAt": now,
           accounting: split,
         }
       : {
           invoiceCompany: invoiceCompany.brand,
           invoiceUrl: documentUrl,
           invoicePdfUrl: documentUrl,
-          "payments.boardInvoicePdfUrl": documentUrl,
-          "payments.boardInvoiceCreatedAt": now,
           accounting: split,
         };
 
