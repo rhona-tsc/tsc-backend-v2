@@ -1209,15 +1209,19 @@ export const createBoardInvoice = async (req, res) => {
 
     const commissionSplit = vatFromGross(commissionGross, vatRate);
 
-    const split = {
-      gross,
-      invoiceCompany: invoiceCompany.brand,
-      vatRate,
-      commissionGross,
-      commissionNet: commissionSplit.net,
-      commissionVat: commissionSplit.vat,
-      passThroughGross,
-    };
+    const calculatedGross = round2(
+  commissionGross + passThroughGross
+);
+
+   const split = {
+  gross: calculatedGross,
+  invoiceCompany: invoiceCompany.brand,
+  vatRate,
+  commissionGross,
+  commissionNet: commissionSplit.net,
+  commissionVat: commissionSplit.vat,
+  passThroughGross,
+};
 
     const pdfBuffer = await makeInvoicePdfBuffer(
       rowForInvoice,
