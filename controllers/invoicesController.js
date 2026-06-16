@@ -1418,12 +1418,48 @@ export const createBoardInvoice = async (req, res) => {
 };
 
 export const serveBoardReceiptPdf = async (req, res) => {
-  req.body = {
-    bookingId: req.params.id,
-    documentType: "receipt",
-  };
+  try {
+    const row = await BookingBoardItem.findById(req.params.id).lean();
 
-  return createBoardInvoice(req, res);
+    if (!row) return res.status(404).send("Receipt not found");
+
+    const rowForInvoice = {
+      ...row,
+      documentType: "receipt",
+      invoiceCompany: row.invoiceCompany || row?.accounting?.invoiceCompany || "TSC",
+    };
+
+    const invoiceCompany = getInvoiceCompany(rowForInvoice);
+    const accounting = rowForInvoice.accounting || {};
+    const vatRate = Number(accounting.vatRate ?? invoiceCompany.vatRate ?? 0);
+
+    const commissionGross = round2(accounting.commissionGross || 0);
+    const passThroughGross = round2(accounting.passThroughGross || 0);
+    const commissionSplit = vatFromGross(commissionGross, vatRate);
+
+    const split = {
+      gross: round2(commissionGross + passThroughGross),
+      invoiceCompany: invoiceCompany.brand,
+      vatRate,
+      commissionGross,
+      commissionNet: commissionSplit.net,
+      commissionVat: commissionSplit.vat,
+      passThroughGross,
+    };
+
+    const pdfBuffer = await makeInvoicePdfBuffer(rowForInvoice, split, invoiceCompany);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="receipt-${row.bookingRef || row._id}.pdf"`
+    );
+
+    return res.send(pdfBuffer);
+  } catch (error) {
+    console.error("serveBoardReceiptPdf error:", error);
+    return res.status(500).send("Could not load receipt");
+  }
 };
 
 export const serveBoardInvoicePdf = async (req, res) => {
