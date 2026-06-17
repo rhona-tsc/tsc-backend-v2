@@ -1046,12 +1046,12 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         amount: split.passThroughGross,
       },
       {
-        description: "Music management commission (VAT inclusive)",
+        description: "Music management (VAT inclusive)",
         qty: "1",
         amount: split.commissionGross,
       },
       {
-        description: "VAT included within commission",
+        description: "VAT included within management fee",
         qty: "",
         amount: split.commissionVat,
         muted: true,
@@ -1094,12 +1094,12 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       width: 90,
       align: "right",
     });
-    doc.text("Commission VAT-inc", totalsX, totalsY + 18, { width: 125 });
+    doc.text("Management fee VAT-inc", totalsX, totalsY + 18, { width: 125 });
     doc.text(formatMoney(split.commissionGross), totalsX + 125, totalsY + 18, {
       width: 90,
       align: "right",
     });
-    doc.text("VAT on commission", totalsX, totalsY + 36, { width: 125 });
+    doc.text("VAT on management fee", totalsX, totalsY + 36, { width: 125 });
     doc.text(formatMoney(split.commissionVat), totalsX + 125, totalsY + 36, {
       width: 90,
       align: "right",
@@ -1160,8 +1160,8 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .fontSize(8)
       .text(
         isReceipt
-          ? "Thank you, payment has been received. VAT is charged only on the music management / commission element. The band fee is shown separately as a pass-through artist fee."
-          : "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the music management / commission element. The band fee is shown separately as a pass-through artist fee.",
+          ? "Thank you, payment has been received. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee."
+          : "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee.",
         cardX + 270,
         paymentY,
         { width: cardW - 296 },

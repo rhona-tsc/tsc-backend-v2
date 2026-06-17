@@ -867,22 +867,34 @@ const actOwnerProjection = {
 };
 
 const buildSearchClause = (q) => {
-  if (!q) return null;
-  const rx = new RegExp(escapeRegex(q), "i");
+  const term = String(q || "").trim();
+  if (!term) return null;
+
+  const rx = new RegExp(escapeRegex(term), "i");
+
+  // Only apply regex to string fields. Do not regex ObjectId fields like
+  // BookingBoardItem.bookingId, because that can throw CastError and cause 500s.
   return {
     $or: [
       { clientFirstNames: rx },
+      { clientName: rx },
+      { bookerName: rx },
       { bookingRef: rx },
-      { bookingId: rx },
       { actName: rx },
       { actTscName: rx },
+      { agent: rx },
       { county: rx },
       { address: rx },
+      { clientAddress: rx },
       { eventType: rx },
       { venue: rx },
       { venueAddress: rx },
       { userEmail: rx },
       { clientEmail: rx },
+      { lineupSelected: rx },
+      { eventDateISO: rx },
+      { enquiryDateISO: rx },
+      { bookingDateISO: rx },
       { "clientEmails.email": rx },
       { "userAddress.firstName": rx },
       { "userAddress.lastName": rx },
@@ -900,6 +912,42 @@ const buildSearchClause = (q) => {
   };
 };
 
+const buildBookingSearchClause = (q) => {
+  const term = String(q || "").trim();
+  if (!term) return null;
+
+  const rx = new RegExp(escapeRegex(term), "i");
+
+  return {
+    $or: [
+      { bookingId: rx },
+      { bookingRef: rx },
+      { clientName: rx },
+      { bookerName: rx },
+      { clientEmail: rx },
+      { userEmail: rx },
+      { actName: rx },
+      { actTscName: rx },
+      { eventType: rx },
+      { address: rx },
+      { venue: rx },
+      { venueAddress: rx },
+      { county: rx },
+      { "userAddress.firstName": rx },
+      { "userAddress.lastName": rx },
+      { "userAddress.email": rx },
+      { "userAddress.county": rx },
+      { "eventSheet.answers.venue_name": rx },
+      { "eventSheet.answers.client_names": rx },
+      { "eventSheet.complete.client_names": rx },
+      { "actsSummary.actName": rx },
+      { "actsSummary.name": rx },
+      { "actsSummary.tscName": rx },
+      { "actsSummary.lineupLabel": rx },
+    ],
+  };
+};
+
 // LIST bookings for booking board
 router.get("/", musicianAuth, async (req, res) => {
   try {
@@ -909,7 +957,7 @@ router.get("/", musicianAuth, async (req, res) => {
   sortDir = "asc",
 } = req.query;
 
-const limit = Math.min(Number(req.query.limit || 100), 250);
+const limit = Math.min(Number(req.query.limit || 10000), 10000);
 const page = Math.max(Number(req.query.page || 1), 1);
 const skip = (page - 1) * limit;
 
@@ -924,11 +972,20 @@ const skip = (page - 1) * limit;
 
     // Non-admins only see rows tied to them (best-effort)
     if (!isAdmin && email) {
-      boardQuery.$or = [
-        { userEmail: email },
-        { clientEmail: email },
-        { "clientEmails.email": email },
-      ];
+      const boardVisibilityClause = {
+        $or: [
+          { userEmail: email },
+          { clientEmail: email },
+          { "clientEmails.email": email },
+        ],
+      };
+
+      if (boardQuery.$or) {
+        boardQuery.$and = [{ $or: boardQuery.$or }, boardVisibilityClause];
+        delete boardQuery.$or;
+      } else {
+        Object.assign(boardQuery, boardVisibilityClause);
+      }
     }
 
    const boardRowsRaw = await BookingBoardItem.find(
@@ -942,12 +999,24 @@ const skip = (page - 1) * limit;
 
     // Also pull Bookings collection so manual + stripe bookings show up.
     const bookingQuery = {};
+    const bookingSearchClause = buildBookingSearchClause(String(q || "").trim());
+    if (bookingSearchClause) Object.assign(bookingQuery, bookingSearchClause);
+
     if (!isAdmin && email) {
-      bookingQuery.$or = [
-        { userEmail: email },
-        { clientEmail: email },
-        { "userAddress.email": email },
-      ];
+      const bookingVisibilityClause = {
+        $or: [
+          { userEmail: email },
+          { clientEmail: email },
+          { "userAddress.email": email },
+        ],
+      };
+
+      if (bookingQuery.$or) {
+        bookingQuery.$and = [{ $or: bookingQuery.$or }, bookingVisibilityClause];
+        delete bookingQuery.$or;
+      } else {
+        Object.assign(bookingQuery, bookingVisibilityClause);
+      }
     }
 
    const bookingDocs = await Booking.find(bookingQuery)
@@ -993,10 +1062,10 @@ const skip = (page - 1) * limit;
 
     return res.json({
   success: true,
-  rows: rows.slice(0, limit),
+rows,
   page,
   limit,
-  hasMore: rows.length >= limit,
+  hasMore: false,
 });
 
   } catch (e) {
