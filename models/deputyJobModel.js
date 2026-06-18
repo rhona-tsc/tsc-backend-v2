@@ -68,11 +68,11 @@ const deputyJobNotificationSchema = new mongoose.Schema(
     },
     email: { type: String, default: "", trim: true, lowercase: true },
     phone: { type: String, default: "", trim: true },
-  channel: {
-  type: String,
-  enum: ["email", "whatsapp", "system"],
-  default: "email",
-},
+    channel: {
+      type: String,
+      enum: ["email", "whatsapp", "system"],
+      default: "email",
+    },
     type: {
       type: String,
       enum: [
@@ -84,12 +84,13 @@ const deputyJobNotificationSchema = new mongoose.Schema(
         "allocation_preview",
         "allocation",
         "allocation_request",
+        "allocation_accepted",
+        "allocation_declined",
         "booking_confirmation_preview",
         "booking_confirmation",
-        "allocation_request_manua",
+        "allocation_request_manual",
         "manual",
-"applicant_presented",
-        
+        "applicant_presented",
       ],
       default: "job_created",
     },
