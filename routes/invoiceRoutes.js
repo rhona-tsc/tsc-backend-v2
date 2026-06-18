@@ -1,5 +1,12 @@
 import express from "express";
-import { getOrCreateBalanceLink, getOrCreateAddonLink, createInvoicePayLink, createBoardInvoice, serveBoardReceiptPdf, serveBoardInvoicePdf } from "../controllers/invoicesController.js";
+import {
+  getOrCreateBalanceLink,
+  getOrCreateAddonLink,
+  createInvoicePayLink,
+  createBoardInvoice,
+  serveBoardReceiptPdf,
+  serveBoardInvoicePdf,
+} from "../controllers/invoicesController.js";
 
 const router = express.Router();
 
@@ -9,6 +16,8 @@ router.post("/create", createInvoicePayLink);
 router.post("/create-board-invoice", createBoardInvoice);
 router.get("/board-receipt/:id", serveBoardReceiptPdf);
 router.get("/board-invoice-pdf/:id", serveBoardInvoicePdf);
+
+router.get("/board-invoice/:id", serveBoardInvoicePdf);
 
 
 export default router;
