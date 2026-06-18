@@ -839,12 +839,12 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const isReceipt = documentType === "receipt";
     const invoiceRef = row.bookingRef || row.bookingId || String(row._id);
     const clientName = firstNonEmpty(
-  row.bookerName,
-  row.clientName,
-  row.booker,
-  row.clientFirstNames,
-  "Client",
-);
+      row.bookerName,
+      row.clientName,
+      row.booker,
+      row.clientFirstNames,
+      "Client",
+    );
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
     const eventDateFormatted = formatInvoiceDate(eventDate);
     const dueDate = firstNonEmpty(
@@ -933,10 +933,10 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     doc.text(invoiceCompany.name, cardX + 26, cardY + 46);
     doc.text(invoiceCompany.address, cardX + 26, cardY + 61);
     doc.text(
-  [invoiceCompany.phone, invoiceCompany.email].filter(Boolean).join(" | "),
-  cardX + 26,
-  cardY + 76,
-);
+      [invoiceCompany.phone, invoiceCompany.email].filter(Boolean).join(" | "),
+      cardX + 26,
+      cardY + 76,
+    );
     if (invoiceCompany.companyNumber) {
       doc.text(
         `Company number: ${invoiceCompany.companyNumber}`,
@@ -953,15 +953,25 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     }
 
     doc.fillColor(text).font("Helvetica-Bold").fontSize(12);
-    doc.text(isReceipt ? "Receipt details" : "Invoice details", cardX + cardW - 210, cardY + 26, {
-      width: 170,
-      align: "right",
-    });
+    doc.text(
+      isReceipt ? "Receipt details" : "Invoice details",
+      cardX + cardW - 210,
+      cardY + 26,
+      {
+        width: 170,
+        align: "right",
+      },
+    );
     doc.font("Helvetica").fontSize(10).fillColor(text);
-    doc.text(`${isReceipt ? "Receipt" : "Invoice"} ref: ${invoiceRef}`, cardX + cardW - 230, cardY + 46, {
-      width: 190,
-      align: "right",
-    });
+    doc.text(
+      `${isReceipt ? "Receipt" : "Invoice"} ref: ${invoiceRef}`,
+      cardX + cardW - 230,
+      cardY + 46,
+      {
+        width: 190,
+        align: "right",
+      },
+    );
     doc.text(
       `Issue date: ${formatInvoiceDate(new Date())}`,
       cardX + cardW - 230,
@@ -1133,12 +1143,20 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .fillColor(text)
       .font("Helvetica-Bold")
       .fontSize(10)
-      .text(isReceipt ? "Payment received" : "Bank transfer details", cardX + 26, paymentY);
+      .text(
+        isReceipt ? "Payment received" : "Bank transfer details",
+        cardX + 26,
+        paymentY,
+      );
 
     doc.fillColor(text).font("Helvetica").fontSize(9);
     if (isReceipt) {
       doc.text(`Received from: ${clientName}`, cardX + 26, paymentY + 16);
-      doc.text(`Payment reference: ${paymentReference}`, cardX + 26, paymentY + 30);
+      doc.text(
+        `Payment reference: ${paymentReference}`,
+        cardX + 26,
+        paymentY + 30,
+      );
       doc.text(
         `Payment received: ${formatInvoiceDate(
           row?.payments?.paidAt ||
@@ -1150,15 +1168,39 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         cardX + 26,
         paymentY + 44,
       );
-      doc.text(`Amount received: ${formatMoney(split.gross)}`, cardX + 26, paymentY + 58);
+      doc.text(
+        `Amount received: ${formatMoney(split.gross)}`,
+        cardX + 26,
+        paymentY + 58,
+      );
     } else {
-      doc.text(`Account name: ${invoiceCompany.bank?.accountName || invoiceCompany.name}`, cardX + 26, paymentY + 16);
+      doc.text(
+        `Account name: ${invoiceCompany.bank?.accountName || invoiceCompany.name}`,
+        cardX + 26,
+        paymentY + 16,
+      );
       if (invoiceCompany.bank?.bankName) {
-        doc.text(`Bank: ${invoiceCompany.bank.bankName}`, cardX + 26, paymentY + 30);
+        doc.text(
+          `Bank: ${invoiceCompany.bank.bankName}`,
+          cardX + 26,
+          paymentY + 30,
+        );
       }
-      doc.text(`Sort code: ${invoiceCompany.bank?.sortCode || ""}`, cardX + 26, paymentY + 44);
-      doc.text(`Account number: ${invoiceCompany.bank?.accountNumber || ""}`, cardX + 26, paymentY + 58);
-      doc.text(`Payment reference: ${paymentReference}`, cardX + 26, paymentY + 72);
+      doc.text(
+        `Sort code: ${invoiceCompany.bank?.sortCode || ""}`,
+        cardX + 26,
+        paymentY + 44,
+      );
+      doc.text(
+        `Account number: ${invoiceCompany.bank?.accountNumber || ""}`,
+        cardX + 26,
+        paymentY + 58,
+      );
+      doc.text(
+        `Payment reference: ${paymentReference}`,
+        cardX + 26,
+        paymentY + 72,
+      );
     }
 
     doc
@@ -1198,7 +1240,7 @@ export const createBoardInvoice = async (req, res) => {
       invoiceCompany: invoiceCompanyFromRequest,
       documentType = "invoice",
     } = req.body;
-
+    const documentStamp = `${Date.now()}`;
     const documentTypeNorm = String(documentType || "invoice").toLowerCase();
     const isReceipt = documentTypeNorm === "receipt";
 
@@ -1221,15 +1263,16 @@ export const createBoardInvoice = async (req, res) => {
     if (isReceipt) {
       const isPaid = Boolean(
         row?.payments?.balancePaymentReceived ||
-          row?.payments?.invoicePaid ||
-          row?.balancePaid ||
-          row?.balanceStatus === "paid",
+        row?.payments?.invoicePaid ||
+        row?.balancePaid ||
+        row?.balanceStatus === "paid",
       );
 
       if (!isPaid) {
         return res.status(400).json({
           success: false,
-          message: "Invoice must be marked as paid before generating a receipt.",
+          message:
+            "Invoice must be marked as paid before generating a receipt.",
         });
       }
     }
@@ -1286,10 +1329,10 @@ export const createBoardInvoice = async (req, res) => {
     };
 
     console.log("🧾 Invoice act name debug:", {
-  actTscName: rowForInvoice.actTscName,
-  actName: rowForInvoice.actName,
-  tscName: rowForInvoice.tscName,
-});
+      actTscName: rowForInvoice.actTscName,
+      actName: rowForInvoice.actName,
+      tscName: rowForInvoice.tscName,
+    });
 
     const pdfBuffer = await makeInvoicePdfBuffer(
       rowForInvoice,
@@ -1318,8 +1361,8 @@ export const createBoardInvoice = async (req, res) => {
         {
           folder: "booking-board-invoices",
           resource_type: "raw",
-          public_id: `${publicIdPrefix}-${rowForInvoice.bookingRef || rowForInvoice._id}`,
-          overwrite: true,
+          public_id: `${publicIdPrefix}-${rowForInvoice.bookingRef || rowForInvoice._id}-${documentStamp}`,
+          overwrite: false,
           invalidate: true,
           format: "pdf",
         },
@@ -1439,7 +1482,8 @@ export const serveBoardReceiptPdf = async (req, res) => {
     const rowForInvoice = {
       ...row,
       documentType: "receipt",
-      invoiceCompany: row.invoiceCompany || row?.accounting?.invoiceCompany || "TSC",
+      invoiceCompany:
+        row.invoiceCompany || row?.accounting?.invoiceCompany || "TSC",
     };
 
     const invoiceCompany = getInvoiceCompany(rowForInvoice);
@@ -1460,12 +1504,16 @@ export const serveBoardReceiptPdf = async (req, res) => {
       passThroughGross,
     };
 
-    const pdfBuffer = await makeInvoicePdfBuffer(rowForInvoice, split, invoiceCompany);
+    const pdfBuffer = await makeInvoicePdfBuffer(
+      rowForInvoice,
+      split,
+      invoiceCompany,
+    );
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
-      `inline; filename="receipt-${row.bookingRef || row._id}.pdf"`
+      `inline; filename="receipt-${row.bookingRef || row._id}.pdf"`,
     );
 
     return res.send(pdfBuffer);
