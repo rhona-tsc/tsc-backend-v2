@@ -1487,6 +1487,9 @@ export const createBoardInvoice = async (req, res) => {
       invoicePdfUrl: isReceipt ? updated?.invoicePdfUrl : documentUrl,
       receiptUrl: isReceipt ? documentUrl : updated?.receiptUrl,
       receiptPdfUrl: isReceipt ? documentUrl : updated?.receiptPdfUrl,
+      previewUrl: isReceipt
+        ? `/api/invoices/board-receipt/${row._id}`
+        : `/api/invoices/board-invoice/${row._id}`,
       invoiceCompany: invoiceCompany.brand,
       invoiceDateISO,
       invoiceDueDateISO: finalDueDate,
@@ -1552,10 +1555,91 @@ export const serveBoardReceiptPdf = async (req, res) => {
 };
 
 export const serveBoardInvoicePdf = async (req, res) => {
-  req.body = {
-    bookingId: req.params.id,
-    documentType: "invoice",
-  };
+  try {
+    const row = await BookingBoardItem.findById(req.params.id).lean();
 
-  return createBoardInvoice(req, res);
+    if (!row) return res.status(404).send("Invoice not found");
+
+    const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
+    const finalDueDate = firstNonEmpty(
+      row.invoiceDueDateISO,
+      row.invoiceDueDate,
+      row.dueDateISO,
+      row.dueDate,
+      getDueDateThursdayWeekBefore(eventDate),
+    );
+
+    const rowForInvoice = {
+      ...row,
+      documentType: "invoice",
+      invoiceDueDateISO: finalDueDate,
+      invoiceCompany:
+        row.invoiceCompany || row?.accounting?.invoiceCompany || "TSC",
+    };
+
+    const invoiceCompany = getInvoiceCompany(rowForInvoice);
+
+    const gross = round2(
+      rowForInvoice.grossValue ||
+        rowForInvoice.totals?.fullAmount ||
+        rowForInvoice.amount ||
+        rowForInvoice.fee ||
+        0,
+    );
+
+    const accounting = rowForInvoice.accounting || {};
+    const vatRate = Number(accounting.vatRate ?? invoiceCompany.vatRate ?? 0);
+
+    const commissionGross = round2(
+      accounting.commissionGross ||
+        rowForInvoice.netCommission ||
+        rowForInvoice.commissionGross ||
+        rowForInvoice.commission ||
+        rowForInvoice.estimatedCommission ||
+        0,
+    );
+
+    const passThroughGross = round2(
+      accounting.passThroughGross ||
+        rowForInvoice.passThroughGross ||
+        Math.max(gross - commissionGross, 0),
+    );
+
+    const commissionSplit = vatFromGross(commissionGross, vatRate);
+
+    const split = {
+      gross: round2(commissionGross + passThroughGross || gross),
+      invoiceCompany: invoiceCompany.brand,
+      vatRate,
+      commissionGross,
+      commissionNet: commissionSplit.net,
+      commissionVat: commissionSplit.vat,
+      passThroughGross,
+    };
+
+    const pdfBuffer = await makeInvoicePdfBuffer(
+      rowForInvoice,
+      split,
+      invoiceCompany,
+    );
+
+    if (
+      !pdfBuffer?.length ||
+      pdfBuffer.slice(0, 4).toString() !== "%PDF"
+    ) {
+      throw new Error("Generated invoice buffer is not a valid PDF.");
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="invoice-${row.bookingRef || row._id}.pdf"`,
+    );
+    res.setHeader("Cache-Control", "no-store");
+
+    return res.send(pdfBuffer);
+  } catch (error) {
+    console.error("serveBoardInvoicePdf error:", error);
+    return res.status(500).send("Could not load invoice");
+  }
 };
