@@ -14,6 +14,14 @@ router.get("/balance-link/:idOrRef", getOrCreateBalanceLink);
 router.get("/addon-link/:idOrRef", getOrCreateAddonLink);
 router.post("/create", createInvoicePayLink);
 router.post("/create-board-invoice", createBoardInvoice);
+router.post("/create-board-receipt", (req, res) => {
+  req.body = {
+    ...req.body,
+    documentType: "receipt",
+  };
+
+  return createBoardInvoice(req, res);
+});
 router.get("/board-receipt/:id", serveBoardReceiptPdf);
 router.get("/board-invoice-pdf/:id", serveBoardInvoicePdf);
 

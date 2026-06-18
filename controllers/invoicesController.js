@@ -855,7 +855,11 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       getDueDateThursdayWeekBefore(eventDate),
     );
     const paymentReference = row.bookingRef || row.bookingId || String(row._id);
-    const actDisplayName = firstNonEmpty(row.actName, row.actTscName, row.tscName);
+    const actDisplayName = firstNonEmpty(
+      row.actName,
+      row.actTscName,
+      row.tscName,
+    );
     const clientAddress = firstNonEmpty(
       row.clientAddress,
       row.billingAddress,
@@ -1027,12 +1031,17 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .text("Event", cardX + 300, detailY);
     doc.font("Helvetica").fontSize(10).fillColor(text);
     doc.text(`Date: ${eventDateFormatted}`, cardX + 300, detailY + 20);
-    doc.text(`Act: ${actDisplayName || "TBC"}`, cardX + 300, detailY + 35, {
-      width: 220,
+    const eventColumnX = cardX + 300;
+    const eventColumnWidth = 190; // was 220
+
+    doc.text(`Act: ${actDisplayName || "TBC"}`, eventColumnX, detailY + 35, {
+      width: eventColumnWidth,
     });
+
     if (row.lineupSelected) {
-      doc.text(`Lineup: ${row.lineupSelected}`, cardX + 300, detailY + 50, {
-        width: 220,
+      doc.text(`Lineup: ${row.lineupSelected}`, eventColumnX, detailY + 50, {
+        width: eventColumnWidth,
+        lineGap: 1,
       });
     }
 
@@ -1266,9 +1275,9 @@ export const createBoardInvoice = async (req, res) => {
     if (isReceipt) {
       const isPaid = Boolean(
         row?.payments?.balancePaymentReceived ||
-          row?.payments?.invoicePaid ||
-          row?.balancePaid ||
-          row?.balanceStatus === "paid",
+        row?.payments?.invoicePaid ||
+        row?.balancePaid ||
+        row?.balanceStatus === "paid",
       );
 
       if (!isPaid) {
@@ -1628,10 +1637,7 @@ export const serveBoardInvoicePdf = async (req, res) => {
       invoiceCompany,
     );
 
-    if (
-      !pdfBuffer?.length ||
-      pdfBuffer.slice(0, 4).toString() !== "%PDF"
-    ) {
+    if (!pdfBuffer?.length || pdfBuffer.slice(0, 4).toString() !== "%PDF") {
       throw new Error("Generated invoice buffer is not a valid PDF.");
     }
 
