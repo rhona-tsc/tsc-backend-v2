@@ -839,16 +839,23 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const isReceipt = documentType === "receipt";
     const invoiceRef = row.bookingRef || row.bookingId || String(row._id);
     const clientName = firstNonEmpty(
-      row.clientFirstNames,
-      row.clientName,
-      row.bookerName,
-      "Client",
-    );
+  row.bookerName,
+  row.clientName,
+  row.booker,
+  row.clientFirstNames,
+  "Client",
+);
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
     const eventDateFormatted = formatInvoiceDate(eventDate);
-    const dueDate = getDueDateThursdayWeekBefore(eventDate);
+    const dueDate = firstNonEmpty(
+      row.invoiceDueDateISO,
+      row.invoiceDueDate,
+      row.dueDateISO,
+      row.dueDate,
+      getDueDateThursdayWeekBefore(eventDate),
+    );
     const paymentReference = row.bookingRef || row.bookingId || String(row._id);
-    const actName = firstNonEmpty(row.actTscName, row.actName, row.tscName);
+    const tscActName = firstNonEmpty(row.actTscName, row.tscName, row.actName);
     const clientAddress = firstNonEmpty(
       row.clientAddress,
       row.billingAddress,
@@ -1010,7 +1017,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .text("Event", cardX + 300, detailY);
     doc.font("Helvetica").fontSize(10).fillColor(text);
     doc.text(`Date: ${eventDateFormatted}`, cardX + 300, detailY + 20);
-    doc.text(`Act: ${actName || "TBC"}`, cardX + 300, detailY + 35, {
+    doc.text(`Act: ${tscActName || "TBC"}`, cardX + 300, detailY + 35, {
       width: 220,
     });
     if (row.lineupSelected) {
@@ -1277,6 +1284,12 @@ export const createBoardInvoice = async (req, res) => {
       commissionVat: commissionSplit.vat,
       passThroughGross,
     };
+
+    console.log("🧾 Invoice act name debug:", {
+  actTscName: rowForInvoice.actTscName,
+  actName: rowForInvoice.actName,
+  tscName: rowForInvoice.tscName,
+});
 
     const pdfBuffer = await makeInvoicePdfBuffer(
       rowForInvoice,
