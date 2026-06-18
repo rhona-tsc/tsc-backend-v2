@@ -936,6 +936,29 @@ const createStripeConnectOnboardingLink = async (req, res) => {
       "https://admin.thesupremecollective.co.uk"
     ).replace(/\/+$/, "");
 
+    const isSafeFrontendUrl = (value = "") => {
+      const raw = normaliseString(value);
+      if (!raw) return false;
+
+      try {
+        const url = new URL(raw);
+        const allowedOrigins = [
+          adminBase,
+          process.env.FRONTEND_URL,
+          process.env.ADMIN_FRONTEND_URL,
+          "https://admin.thesupremecollective.co.uk",
+          "http://localhost:5173",
+          "http://localhost:5174",
+        ]
+          .filter(Boolean)
+          .map((item) => String(item).replace(/\/+$/, ""));
+
+        return allowedOrigins.includes(url.origin);
+      } catch {
+        return false;
+      }
+    };
+
     let accountId = normaliseString(musician?.stripeConnect?.accountId || "");
 
     if (!accountId) {
@@ -964,11 +987,21 @@ const createStripeConnectOnboardingLink = async (req, res) => {
       await musician.save();
     }
 
-const refreshUrl = `${adminBase}/stripe-connect-return?stripe=refresh`;
-const returnUrl = `${adminBase}/stripe-connect-return?stripe=return`;
+    const requestedReturnUrl = normaliseString(req.body?.returnUrl || "");
+    const requestedRefreshUrl = normaliseString(req.body?.refreshUrl || "");
+
+    const refreshUrl = isSafeFrontendUrl(requestedRefreshUrl)
+      ? requestedRefreshUrl
+      : `${adminBase}/stripe-connect-return?stripe=refresh`;
+
+    const returnUrl = isSafeFrontendUrl(requestedReturnUrl)
+      ? requestedReturnUrl
+      : `${adminBase}/stripe-connect-return?stripe=return`;
 
     console.log("✅ Stripe onboarding URLs", {
       adminBase,
+      requestedReturnUrl,
+      requestedRefreshUrl,
       refreshUrl,
       returnUrl,
     });
