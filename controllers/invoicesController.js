@@ -855,7 +855,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       getDueDateThursdayWeekBefore(eventDate),
     );
     const paymentReference = row.bookingRef || row.bookingId || String(row._id);
-    const tscActName = firstNonEmpty(row.actTscName, row.tscName, row.actName);
+    const actDisplayName = firstNonEmpty(row.actName, row.actTscName, row.tscName);
     const clientAddress = firstNonEmpty(
       row.clientAddress,
       row.billingAddress,
@@ -1027,7 +1027,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .text("Event", cardX + 300, detailY);
     doc.font("Helvetica").fontSize(10).fillColor(text);
     doc.text(`Date: ${eventDateFormatted}`, cardX + 300, detailY + 20);
-    doc.text(`Act: ${tscActName || "TBC"}`, cardX + 300, detailY + 35, {
+    doc.text(`Act: ${actDisplayName || "TBC"}`, cardX + 300, detailY + 35, {
       width: 220,
     });
     if (row.lineupSelected) {
@@ -1347,6 +1347,11 @@ export const createBoardInvoice = async (req, res) => {
       bookingRef: rowForInvoice.bookingRef,
       invoiceDateISO,
       finalDueDate,
+      actDisplayName: firstNonEmpty(
+        rowForInvoice.actName,
+        rowForInvoice.actTscName,
+        rowForInvoice.tscName,
+      ),
       actTscName: rowForInvoice.actTscName,
       actName: rowForInvoice.actName,
       tscName: rowForInvoice.tscName,
