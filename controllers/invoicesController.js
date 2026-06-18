@@ -1240,9 +1240,12 @@ export const createBoardInvoice = async (req, res) => {
       invoiceCompany: invoiceCompanyFromRequest,
       documentType = "invoice",
     } = req.body;
+
     const documentStamp = `${Date.now()}`;
     const documentTypeNorm = String(documentType || "invoice").toLowerCase();
     const isReceipt = documentTypeNorm === "receipt";
+    const now = new Date();
+    const invoiceDateISO = now.toISOString().slice(0, 10);
 
     if (!bookingId) {
       return res.status(400).json({
@@ -1263,9 +1266,9 @@ export const createBoardInvoice = async (req, res) => {
     if (isReceipt) {
       const isPaid = Boolean(
         row?.payments?.balancePaymentReceived ||
-        row?.payments?.invoicePaid ||
-        row?.balancePaid ||
-        row?.balanceStatus === "paid",
+          row?.payments?.invoicePaid ||
+          row?.balancePaid ||
+          row?.balanceStatus === "paid",
       );
 
       if (!isPaid) {
@@ -1277,9 +1280,20 @@ export const createBoardInvoice = async (req, res) => {
       }
     }
 
+    const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
+    const finalDueDate = firstNonEmpty(
+      row.invoiceDueDateISO,
+      row.invoiceDueDate,
+      row.dueDateISO,
+      row.dueDate,
+      getDueDateThursdayWeekBefore(eventDate),
+    );
+
     const rowForInvoice = {
       ...row,
       documentType: documentTypeNorm,
+      invoiceDateISO,
+      invoiceDueDateISO: finalDueDate,
       invoiceCompany:
         invoiceCompanyFromRequest ||
         row.invoiceCompany ||
@@ -1328,7 +1342,11 @@ export const createBoardInvoice = async (req, res) => {
       passThroughGross,
     };
 
-    console.log("🧾 Invoice act name debug:", {
+    console.log("🧾 Invoice debug:", {
+      documentType: documentTypeNorm,
+      bookingRef: rowForInvoice.bookingRef,
+      invoiceDateISO,
+      finalDueDate,
       actTscName: rowForInvoice.actTscName,
       actName: rowForInvoice.actName,
       tscName: rowForInvoice.tscName,
@@ -1381,12 +1399,14 @@ export const createBoardInvoice = async (req, res) => {
     });
 
     const documentUrl = uploadResult.secure_url;
-    const now = new Date();
 
     console.log("🧾 Invoice/receipt delivery URLs:", {
       secure_url: uploadResult.secure_url,
       forced_download_url: documentUrl,
       documentType: documentTypeNorm,
+      documentStamp,
+      invoiceDateISO,
+      finalDueDate,
       invoiceCompany: invoiceCompany.brand,
       vatRate,
     });
@@ -1410,6 +1430,8 @@ export const createBoardInvoice = async (req, res) => {
         }
       : {
           invoiceCompany: invoiceCompany.brand,
+          invoiceDateISO,
+          invoiceDueDateISO: finalDueDate,
           invoiceUrl: documentUrl,
           invoicePdfUrl: documentUrl,
           "payments.boardInvoicePdfUrl": documentUrl,
@@ -1439,6 +1461,8 @@ export const createBoardInvoice = async (req, res) => {
         }
       : {
           invoiceCompany: invoiceCompany.brand,
+          invoiceDateISO,
+          invoiceDueDateISO: finalDueDate,
           invoiceUrl: documentUrl,
           invoicePdfUrl: documentUrl,
           accounting: split,
@@ -1460,8 +1484,12 @@ export const createBoardInvoice = async (req, res) => {
       success: true,
       documentType: documentTypeNorm,
       invoiceUrl: isReceipt ? updated?.invoiceUrl : documentUrl,
+      invoicePdfUrl: isReceipt ? updated?.invoicePdfUrl : documentUrl,
       receiptUrl: isReceipt ? documentUrl : updated?.receiptUrl,
+      receiptPdfUrl: isReceipt ? documentUrl : updated?.receiptPdfUrl,
       invoiceCompany: invoiceCompany.brand,
+      invoiceDateISO,
+      invoiceDueDateISO: finalDueDate,
       row: updated,
     });
   } catch (error) {
