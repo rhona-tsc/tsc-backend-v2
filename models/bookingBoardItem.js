@@ -47,11 +47,6 @@ const PaymentsSchema = new mongoose.Schema(
     bandPaymentsSent: { type: Boolean, default: false },
     boardInvoicePdfUrl: { type: String, default: "" },
     boardInvoiceCreatedAt: { type: Date },
-    boardReceiptPdfUrl: { type: String, default: "" },
-    receiptPdfUrl: { type: String, default: "" },
-    receiptCreatedAt: { type: Date },
-    invoicePaid: { type: Boolean, default: false },
-    paidAt: { type: Date },
     bandPayments: [
       {
         musicianId: mongoose.Types.ObjectId,
@@ -85,7 +80,7 @@ const BookingDetailsSchema = new mongoose.Schema(
 
 const AccountingSchema = new mongoose.Schema(
   {
-     invoiceCompany: {
+    invoiceCompany: {
       type: String,
       enum: ["TSC", "BMM"],
       default: "TSC",
@@ -115,6 +110,9 @@ const BookingBoardItemSchema = new mongoose.Schema(
     eventDateISO: { type: String, index: true }, // "2025-09-20"
     enquiryDateISO: { type: String }, // "yyyy-mm-dd" — first contact
     bookingDateISO: { type: String }, // "yyyy-mm-dd" — when confirmed/paid
+    invoiceDateISO: { type: String }, // when invoice was generated
+
+    invoiceDueDateISO: { type: String }, // payment due date
     grossValue: { type: Number, default: 0 },
     netCommission: { type: Number, default: 0 }, // agency commission amount £
     agent: { type: String }, // e.g. "Encore", "TSC Direct", "Other Agent"
@@ -128,18 +126,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
     county: { type: String },
     payments: PaymentsSchema,
     invoiceUrl: { type: String, default: "" },
-     invoiceCompany: {
-      type: String,
-      enum: ["TSC", "BMM"],
-      default: "TSC",
-    },
     invoicePdfUrl: { type: String, default: "" },
-    receiptUrl: { type: String, default: "" },
-    receiptPdfUrl: { type: String, default: "" },
-    receiptCreatedAt: { type: Date },
-    balancePaid: { type: Boolean, default: false },
-    balanceStatus: { type: String, default: "" },
-    paidAt: { type: Date },
     bandSize: { type: Number, default: 0 }, // excluding manager
     lineupSelected: { type: String }, // human label e.g. "6-Piece (2xVoc, Sax, Gtr, Bass, Drums)"
     lineupComposition: [{ type: String }], // e.g. ["Lead Vocal","Guitar","Bass","Drums"]
@@ -158,8 +145,6 @@ const BookingBoardItemSchema = new mongoose.Schema(
     visibility: {
       grossAndCommissionVisibleToAdminOnly: { type: Boolean, default: true },
     },
-
-
   },
   { timestamps: true },
 );
