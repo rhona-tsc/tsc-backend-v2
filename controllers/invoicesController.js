@@ -1529,7 +1529,7 @@ export const createBoardInvoice = async (req, res) => {
       invoiceDateISO,
       finalDueDate,
       invoiceCompany: invoiceCompany.brand,
-      vatRate,
+      vatRate: split.vatRate,
     });
 
     const boardSetPatch = isReceipt
