@@ -1076,6 +1076,7 @@ const registerDeputy = async (req, res) => {
 
   try {
     const body = req.body;
+    const hasBodyField = (key) => Object.prototype.hasOwnProperty.call(body || {}, key);
 
     // helpers
     const safeParse = (v, fallback) => {
@@ -1132,31 +1133,62 @@ const registerDeputy = async (req, res) => {
     const basicInfo = safeParse(body.basicInfo, {});
     const address = safeParse(body.address, musician.address || {});
     const bank = safeParse(body.bank_account, musician.bank_account || {});
-    const academic_credentials = safeParse(body.academic_credentials, []);
-    const agreementCheckboxes = safeParse(body.agreementCheckboxes, []);
-    const paAndBackline = safeParse(body.paAndBackline, []); // optional
-    const backline = safeParse(body.backline, []);
-    const vocalMics = safeParse(body.vocalMics, {});
-    const inEarMonitoring = safeParse(body.inEarMonitoring, {});
-    const instrumentMics = safeParse(body.instrumentMics, {});
-    const speechMics = safeParse(body.speechMics, {});
-    const instrumentation = safeParse(body.instrumentation, []);
-    const awards = safeParse(body.awards, []);
-    const sessions = safeParse(body.sessions, []);
-    const function_bands_performed_with = safeParse(
-      body.function_bands_performed_with,
-      [],
-    );
-    const original_bands_performed_with = safeParse(
-      body.original_bands_performed_with,
-      [],
-    );
-    const social_media_links = safeParse(body.social_media_links, []);
-    const customRepertoire =
-      typeof body.customRepertoire === "string" ? body.customRepertoire : "";
-    const selectedSongs = safeParse(body.selectedSongs, []);
-    const other_skills = safeParse(body.other_skills, []);
-    const logistics = safeParse(body.logistics, []);
+    const academic_credentials = hasBodyField("academic_credentials")
+      ? safeParse(body.academic_credentials, [])
+      : musician.academic_credentials || [];
+    const agreementCheckboxes = hasBodyField("agreementCheckboxes")
+      ? safeParse(body.agreementCheckboxes, [])
+      : musician.agreementCheckboxes || [];
+    const paAndBackline = hasBodyField("paAndBackline")
+      ? safeParse(body.paAndBackline, [])
+      : musician.paAndBackline || []; // optional
+    const backline = hasBodyField("backline")
+      ? safeParse(body.backline, [])
+      : musician.backline || [];
+    const vocalMics = hasBodyField("vocalMics")
+      ? safeParse(body.vocalMics, {})
+      : musician.vocalMics || {};
+    const inEarMonitoring = hasBodyField("inEarMonitoring")
+      ? safeParse(body.inEarMonitoring, {})
+      : musician.inEarMonitoring || {};
+    const instrumentMics = hasBodyField("instrumentMics")
+      ? safeParse(body.instrumentMics, {})
+      : musician.instrumentMics || {};
+    const speechMics = hasBodyField("speechMics")
+      ? safeParse(body.speechMics, {})
+      : musician.speechMics || {};
+    const instrumentation = hasBodyField("instrumentation")
+      ? safeParse(body.instrumentation, [])
+      : musician.instrumentation || [];
+    const awards = hasBodyField("awards")
+      ? safeParse(body.awards, [])
+      : musician.awards || [];
+    const sessions = hasBodyField("sessions")
+      ? safeParse(body.sessions, [])
+      : musician.sessions || [];
+    const function_bands_performed_with = hasBodyField("function_bands_performed_with")
+      ? safeParse(body.function_bands_performed_with, [])
+      : musician.function_bands_performed_with || [];
+    const original_bands_performed_with = hasBodyField("original_bands_performed_with")
+      ? safeParse(body.original_bands_performed_with, [])
+      : musician.original_bands_performed_with || [];
+    const social_media_links = hasBodyField("social_media_links")
+      ? safeParse(body.social_media_links, [])
+      : musician.social_media_links || [];
+    const customRepertoire = hasBodyField("customRepertoire")
+      ? typeof body.customRepertoire === "string"
+        ? body.customRepertoire
+        : ""
+      : musician.customRepertoire || "";
+    const selectedSongs = hasBodyField("selectedSongs")
+      ? safeParse(body.selectedSongs, [])
+      : musician.selectedSongs || [];
+    const other_skills = hasBodyField("other_skills")
+      ? safeParse(body.other_skills, [])
+      : musician.other_skills || [];
+    const logistics = hasBodyField("logistics")
+      ? safeParse(body.logistics, [])
+      : musician.logistics || [];
 
     const normalizeBandRefs = (arr, nameKey, emailKey) =>
       (Array.isArray(arr) ? arr : [])
@@ -1234,7 +1266,10 @@ const registerDeputy = async (req, res) => {
 
     musician.markModified("basicInfo");
 
-    const functionBandVideoLinks = parseArrayField(body.functionBandVideoLinks)
+    const functionBandVideoLinks = parseArrayField(
+      body.functionBandVideoLinks,
+      musician.functionBandVideoLinks || [],
+    )
       .map((x) => ({
         title: (x?.title || "").trim(),
         url: (x?.url || "").trim(),
@@ -1243,6 +1278,7 @@ const registerDeputy = async (req, res) => {
 
     const tscApprovedFunctionBandVideoLinks = parseArrayField(
       body.tscApprovedFunctionBandVideoLinks,
+      musician.tscApprovedFunctionBandVideoLinks || [],
     )
       .map((x) => ({
         title: (x?.title || "").trim(),
@@ -1250,7 +1286,10 @@ const registerDeputy = async (req, res) => {
       }))
       .filter((x) => x.url);
 
-    const originalBandVideoLinks = parseArrayField(body.originalBandVideoLinks)
+    const originalBandVideoLinks = parseArrayField(
+      body.originalBandVideoLinks,
+      musician.originalBandVideoLinks || [],
+    )
       .map((x) => ({
         title: (x?.title || "").trim(),
         url: (x?.url || "").trim(),
@@ -1259,6 +1298,7 @@ const registerDeputy = async (req, res) => {
 
     const tscApprovedOriginalBandVideoLinks = parseArrayField(
       body.tscApprovedOriginalBandVideoLinks,
+      musician.tscApprovedOriginalBandVideoLinks || [],
     )
       .map((x) => ({
         title: (x?.title || "").trim(),
@@ -1267,22 +1307,52 @@ const registerDeputy = async (req, res) => {
       .filter((x) => x.url);
 
     // lighting / PA
-    const cableLogistics = safeParse(body.cableLogistics, []);
-    const extensionCableLogistics = safeParse(body.extensionCableLogistics, []);
-    const uplights = safeParse(body.uplights, []);
-    const tbars = safeParse(body.tbars, []);
-    const lightBars = safeParse(body.lightBars, []);
-    const discoBall = safeParse(body.discoBall, []);
-    const otherLighting = safeParse(body.otherLighting, []);
-    const paSpeakerSpecs = safeParse(body.paSpeakerSpecs, []);
-    const mixingDesk = safeParse(body.mixingDesk, []);
-    const floorMonitorSpecs = safeParse(body.floorMonitorSpecs, []);
-    const djEquipment = safeParse(body.djEquipment, []);
-    const additionalEquipment = safeParse(body.additionalEquipment, {});
+    const cableLogistics = hasBodyField("cableLogistics")
+      ? safeParse(body.cableLogistics, [])
+      : musician.cableLogistics || [];
+    const extensionCableLogistics = hasBodyField("extensionCableLogistics")
+      ? safeParse(body.extensionCableLogistics, [])
+      : musician.extensionCableLogistics || [];
+    const uplights = hasBodyField("uplights")
+      ? safeParse(body.uplights, [])
+      : musician.uplights || [];
+    const tbars = hasBodyField("tbars")
+      ? safeParse(body.tbars, [])
+      : musician.tbars || [];
+    const lightBars = hasBodyField("lightBars")
+      ? safeParse(body.lightBars, [])
+      : musician.lightBars || [];
+    const discoBall = hasBodyField("discoBall")
+      ? safeParse(body.discoBall, [])
+      : musician.discoBall || [];
+    const otherLighting = hasBodyField("otherLighting")
+      ? safeParse(body.otherLighting, [])
+      : musician.otherLighting || [];
+    const paSpeakerSpecs = hasBodyField("paSpeakerSpecs")
+      ? safeParse(body.paSpeakerSpecs, [])
+      : musician.paSpeakerSpecs || [];
+    const mixingDesk = hasBodyField("mixingDesk")
+      ? safeParse(body.mixingDesk, [])
+      : musician.mixingDesk || [];
+    const floorMonitorSpecs = hasBodyField("floorMonitorSpecs")
+      ? safeParse(body.floorMonitorSpecs, [])
+      : musician.floorMonitorSpecs || [];
+    const djEquipment = hasBodyField("djEquipment")
+      ? safeParse(body.djEquipment, [])
+      : musician.djEquipment || [];
+    const additionalEquipment = hasBodyField("additionalEquipment")
+      ? safeParse(body.additionalEquipment, {})
+      : musician.additionalEquipment || {};
 
-    const djEquipmentCategories = safeParse(body.djEquipmentCategories, []);
-    const djGearRequired = safeParse(body.djGearRequired, []);
-    const instrumentSpecsRaw = safeParse(body.instrumentSpecs, []);
+    const djEquipmentCategories = hasBodyField("djEquipmentCategories")
+      ? safeParse(body.djEquipmentCategories, [])
+      : musician.djEquipmentCategories || [];
+    const djGearRequired = hasBodyField("djGearRequired")
+      ? safeParse(body.djGearRequired, [])
+      : musician.djGearRequired || [];
+    const instrumentSpecsRaw = hasBodyField("instrumentSpecs")
+      ? safeParse(body.instrumentSpecs, [])
+      : musician.instrumentSpecs || [];
     const instrumentSpecs = (
       Array.isArray(instrumentSpecsRaw) ? instrumentSpecsRaw : []
     )
@@ -1292,19 +1362,25 @@ const registerDeputy = async (req, res) => {
       }))
       .filter((x) => x.name || x.wattage > 0);
     // wardrobe / extra images as URL strings
-    const digitalWardrobeBlackTie = urlArray(body.digitalWardrobeBlackTie);
-    const digitalWardrobeFormal = urlArray(body.digitalWardrobeFormal);
-    const digitalWardrobeSmartCasual = urlArray(
-      body.digitalWardrobeSmartCasual,
-    );
-    const digitalWardrobeSessionAllBlack = urlArray(
-      body.digitalWardrobeSessionAllBlack,
-    );
-    const additionalImages = urlArray(body.additionalImages);
+    const digitalWardrobeBlackTie = hasBodyField("digitalWardrobeBlackTie")
+      ? urlArray(body.digitalWardrobeBlackTie)
+      : musician.digitalWardrobeBlackTie || [];
+    const digitalWardrobeFormal = hasBodyField("digitalWardrobeFormal")
+      ? urlArray(body.digitalWardrobeFormal)
+      : musician.digitalWardrobeFormal || [];
+    const digitalWardrobeSmartCasual = hasBodyField("digitalWardrobeSmartCasual")
+      ? urlArray(body.digitalWardrobeSmartCasual)
+      : musician.digitalWardrobeSmartCasual || [];
+    const digitalWardrobeSessionAllBlack = hasBodyField("digitalWardrobeSessionAllBlack")
+      ? urlArray(body.digitalWardrobeSessionAllBlack)
+      : musician.digitalWardrobeSessionAllBlack || [];
+    const additionalImages = hasBodyField("additionalImages")
+      ? urlArray(body.additionalImages)
+      : musician.additionalImages || [];
 
     // ---- MP3s: files OR JSON
-    let coverMp3s = [];
-    let originalMp3s = [];
+    let coverMp3s = musician.coverMp3s || [];
+    let originalMp3s = musician.originalMp3s || [];
     if (req.files?.coverMp3s?.length) {
       coverMp3s = req.files.coverMp3s.map((f) => ({ title: "", url: f.path }));
     } else {
@@ -1496,17 +1572,23 @@ const registerDeputy = async (req, res) => {
 
     // vocals
     if (!musician.vocals) musician.vocals = {};
-    const vocalsParsed = safeParse(body.vocals, {});
+    const vocalsParsed = hasBodyField("vocals")
+      ? safeParse(body.vocals, {})
+      : musician.vocals || {};
     musician.vocals.type = Array.isArray(vocalsParsed.type)
       ? vocalsParsed.type
-      : [];
-    musician.vocals.gender = vocalsParsed.gender || "";
-    musician.vocals.range = vocalsParsed.range || "";
+      : musician.vocals.type || [];
+    musician.vocals.gender = vocalsParsed.gender ?? musician.vocals.gender ?? "";
+    musician.vocals.range = vocalsParsed.range ?? musician.vocals.range ?? "";
     musician.vocals.rap =
-      vocalsParsed.rap === true || vocalsParsed.rap === "true";
+      vocalsParsed.rap === true ||
+      vocalsParsed.rap === "true" ||
+      vocalsParsed.rap === "yes" ||
+      musician.vocals.rap ||
+      "";
     musician.vocals.genres = Array.isArray(vocalsParsed.genres)
       ? vocalsParsed.genres
-      : [];
+      : musician.vocals.genres || [];
 
 
     const isHttpUrl = (s) => typeof s === "string" && /^https?:\/\//i.test(s);
