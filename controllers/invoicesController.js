@@ -1065,12 +1065,27 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       align: "right",
     });
 
+    const invoiceExtras = Array.isArray(row?.extras)
+      ? row.extras
+      : Array.isArray(row?.bookingDetails?.extras)
+        ? row.bookingDetails.extras
+        : [];
+
+    const visibleExtras = invoiceExtras
+      .map((extra) => ({
+        description: String(extra?.name || extra?.key || "Extra").trim(),
+        qty: String(Number(extra?.quantity || 1) || 1),
+        amount: Number(extra?.price || 0) * (Number(extra?.quantity || 1) || 1),
+      }))
+      .filter((extra) => extra.description && Number(extra.amount || 0) !== 0);
+
     const rows = [
       {
         description: "Band fee / artist performance fee",
         qty: "1",
         amount: split.passThroughGross,
       },
+      ...visibleExtras,
       {
         description: "Music management (VAT inclusive)",
         qty: "1",
