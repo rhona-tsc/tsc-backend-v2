@@ -62,6 +62,34 @@ const PaymentsSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const BookingExtraSchema = new mongoose.Schema(
+  {
+    id: { type: String },
+    key: { type: String, default: "" },
+    name: { type: String, default: "" },
+    quantity: { type: Number, default: 1 },
+    price: { type: Number, default: 0 },
+    arrivalTime: { type: String, default: "" },
+    finishTime: { type: String, default: "" },
+    category: { type: String, default: "" },
+    pricingMode: { type: String, default: "flat" },
+    appliedMinutes: { type: Number, default: 0 },
+    billableMemberCount: { type: Number, default: 0 },
+    payoutMemberIds: [{ type: mongoose.Schema.Types.ObjectId }],
+    payoutMemberNames: [{ type: String }],
+    paLateStay: { type: mongoose.Schema.Types.Mixed, default: null },
+  },
+  { _id: false },
+);
+
+const ManualAdjustmentSchema = new mongoose.Schema(
+  {
+    label: { type: String, default: "" },
+    amount: { type: Number, default: 0 },
+  },
+  { _id: false },
+);
+
 const BookingDetailsSchema = new mongoose.Schema(
   {
     eventType: { type: String }, // Wedding, Corporate, etc.
@@ -74,6 +102,8 @@ const BookingDetailsSchema = new mongoose.Schema(
       notes: String,
     },
     djServicesBooked: { type: Boolean, default: false },
+    extras: [BookingExtraSchema],
+    manualAdjustment: ManualAdjustmentSchema,
   },
   { _id: false },
 );
@@ -137,6 +167,10 @@ const BookingBoardItemSchema = new mongoose.Schema(
     sessionId: { type: String },
     accounting: AccountingSchema,
     bookingDetails: BookingDetailsSchema,
+    extras: [BookingExtraSchema],
+    manualAdjustment: ManualAdjustmentSchema,
+    manualAdjustmentLabel: { type: String, default: "" },
+    manualAdjustmentAmount: { type: Number, default: 0 },
     allocation: AllocationSchema,
     review: ReviewSchema,
 

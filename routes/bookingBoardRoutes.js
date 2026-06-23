@@ -1292,6 +1292,33 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         invoiceCompany,
       };
     }
+
+    // --- EXTRAS & MANUAL ADJUSTMENT PATCH LOGIC ---
+    if (Array.isArray(body.extras)) {
+      body.extras = body.extras.map((extra) => ({
+        ...extra,
+        quantity: Number(extra?.quantity || 1) || 1,
+        price: Number(extra?.price || 0) || 0,
+        appliedMinutes: Number(extra?.appliedMinutes || 0) || 0,
+        billableMemberCount: Number(extra?.billableMemberCount || 0) || 0,
+      }));
+    }
+
+    if (body.manualAdjustmentAmount !== undefined || body.manualAdjustmentLabel !== undefined) {
+      body.manualAdjustment = {
+        label: String(body.manualAdjustmentLabel || body.manualAdjustment?.label || ""),
+        amount: Number(body.manualAdjustmentAmount ?? body.manualAdjustment?.amount ?? 0) || 0,
+      };
+    }
+
+    if (Array.isArray(body.extras) || body.manualAdjustment) {
+      body.bookingDetails = {
+        ...(body.bookingDetails || {}),
+        ...(Array.isArray(body.extras) ? { extras: body.extras } : {}),
+        ...(body.manualAdjustment ? { manualAdjustment: body.manualAdjustment } : {}),
+      };
+    }
+
     const isAdmin = isTSCAdmin(req.user);
 
     // Non-admins can only do lightweight row edits
@@ -1307,6 +1334,10 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       delete body.bookingDetails;
       delete body.accounting;
       delete body.invoiceCompany;
+      delete body.extras;
+      delete body.manualAdjustment;
+      delete body.manualAdjustmentLabel;
+      delete body.manualAdjustmentAmount;
     }
 
     // First try: treat :id as a real Booking _id
@@ -1389,8 +1420,35 @@ router.patch("/:id", musicianAuth, async (req, res) => {
           body.accounting?.invoiceCompany ||
           "TSC",
 
-        bookingDetails:
-          normalized?.bookingDetails || savedBooking?.bookingDetails || {},
+        bookingDetails: {
+          ...(normalized?.bookingDetails || savedBooking?.bookingDetails || {}),
+          ...(Array.isArray(body.extras) ? { extras: body.extras } : {}),
+          ...(body.manualAdjustment ? { manualAdjustment: body.manualAdjustment } : {}),
+        },
+        extras: Array.isArray(body.extras)
+          ? body.extras
+          : Array.isArray(savedBooking?.extras)
+            ? savedBooking.extras
+            : Array.isArray(savedBooking?.bookingDetails?.extras)
+              ? savedBooking.bookingDetails.extras
+              : [],
+        manualAdjustment:
+          body.manualAdjustment ||
+          savedBooking?.manualAdjustment ||
+          savedBooking?.bookingDetails?.manualAdjustment ||
+          { label: "", amount: 0 },
+        manualAdjustmentLabel:
+          body.manualAdjustment?.label ||
+          savedBooking?.manualAdjustment?.label ||
+          savedBooking?.bookingDetails?.manualAdjustment?.label ||
+          "",
+        manualAdjustmentAmount:
+          Number(
+            body.manualAdjustment?.amount ||
+              savedBooking?.manualAdjustment?.amount ||
+              savedBooking?.bookingDetails?.manualAdjustment?.amount ||
+              0,
+          ) || 0,
         actsSummary: Array.isArray(savedBooking?.actsSummary)
           ? savedBooking.actsSummary
           : [],
@@ -1460,7 +1518,17 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
     const row = await BookingBoardItem.findByIdAndUpdate(
       req.params.id,
-      { $set: body },
+      {
+        $set: {
+          ...body,
+          ...(Array.isArray(body.extras)
+            ? { "bookingDetails.extras": body.extras }
+            : {}),
+          ...(body.manualAdjustment
+            ? { "bookingDetails.manualAdjustment": body.manualAdjustment }
+            : {}),
+        },
+      },
       { new: true },
     );
 
