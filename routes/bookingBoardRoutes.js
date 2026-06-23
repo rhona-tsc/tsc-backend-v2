@@ -1516,16 +1516,23 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       }
     }
 
+    const { bookingDetails: bodyBookingDetails, ...bodyWithoutBookingDetails } = body;
+
+    const bookingDetailsPatch = {
+      ...(bodyBookingDetails || {}),
+      ...(Array.isArray(body.extras) ? { extras: body.extras } : {}),
+      ...(body.manualAdjustment
+        ? { manualAdjustment: body.manualAdjustment }
+        : {}),
+    };
+
     const row = await BookingBoardItem.findByIdAndUpdate(
       req.params.id,
       {
         $set: {
-          ...body,
-          ...(Array.isArray(body.extras)
-            ? { "bookingDetails.extras": body.extras }
-            : {}),
-          ...(body.manualAdjustment
-            ? { "bookingDetails.manualAdjustment": body.manualAdjustment }
+          ...bodyWithoutBookingDetails,
+          ...(Object.keys(bookingDetailsPatch).length
+            ? { bookingDetails: bookingDetailsPatch }
             : {}),
         },
       },
