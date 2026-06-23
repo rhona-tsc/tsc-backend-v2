@@ -799,6 +799,7 @@ const getDueDateThursdayWeekBefore = (eventDateValue) => {
 const firstNonEmpty = (...values) =>
   values.find((value) => String(value || "").trim()) || "";
 
+
 const getInvoiceLogoPath = (invoiceCompany) => {
   const envLogoPath =
     invoiceCompany?.brand === "BMM"
@@ -811,6 +812,94 @@ const getInvoiceLogoPath = (invoiceCompany) => {
       : "";
 
   return envLogoPath || fallbackLogoPath;
+};
+
+// Helper: get invoice extras and manual adjustment
+const getInvoiceExtrasAndAdjustment = (row) => {
+  const invoiceExtras = Array.isArray(row?.extras)
+    ? row.extras
+    : Array.isArray(row?.bookingDetails?.extras)
+      ? row.bookingDetails.extras
+      : [];
+
+  const extrasTotal = round2(
+    invoiceExtras.reduce(
+      (sum, extra) =>
+        sum + Number(extra?.price || 0) * (Number(extra?.quantity || 1) || 1),
+      0,
+    ),
+  );
+
+  const manualAdjustment =
+    row?.manualAdjustment || row?.bookingDetails?.manualAdjustment || null;
+
+  const manualAdjustmentAmount = round2(
+    Number(row?.manualAdjustmentAmount ?? manualAdjustment?.amount ?? 0) || 0,
+  );
+
+  const manualAdjustmentLabel = String(
+    row?.manualAdjustmentLabel || manualAdjustment?.label || "Manual adjustment",
+  ).trim();
+
+  return {
+    invoiceExtras,
+    extrasTotal,
+    manualAdjustment,
+    manualAdjustmentAmount,
+    manualAdjustmentLabel,
+  };
+};
+
+// Helper: build board invoice split
+const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
+  const {
+    extrasTotal,
+    manualAdjustmentAmount,
+  } = getInvoiceExtrasAndAdjustment(rowForInvoice);
+
+  const storedGross = round2(
+    rowForInvoice.grossValue ||
+      rowForInvoice.totals?.fullAmount ||
+      rowForInvoice.amount ||
+      rowForInvoice.fee ||
+      0,
+  );
+
+  const accounting = rowForInvoice.accounting || {};
+  const vatRate = Number(accounting.vatRate ?? invoiceCompany.vatRate ?? 0);
+
+  const commissionGross = round2(
+    accounting.commissionGross ||
+      rowForInvoice.netCommission ||
+      rowForInvoice.commissionGross ||
+      rowForInvoice.commission ||
+      rowForInvoice.estimatedCommission ||
+      0,
+  );
+
+  const passThroughGross = round2(
+    accounting.passThroughGross ||
+      rowForInvoice.passThroughGross ||
+      Math.max(storedGross - commissionGross - extrasTotal - manualAdjustmentAmount, 0),
+  );
+
+  const commissionSplit = vatFromGross(commissionGross, vatRate);
+  const calculatedGross = round2(
+    passThroughGross + commissionGross + extrasTotal + manualAdjustmentAmount,
+  );
+
+  return {
+    gross: calculatedGross || storedGross,
+    storedGross,
+    extrasTotal,
+    manualAdjustmentAmount,
+    invoiceCompany: invoiceCompany.brand,
+    vatRate,
+    commissionGross,
+    commissionNet: commissionSplit.net,
+    commissionVat: commissionSplit.vat,
+    passThroughGross,
+  };
 };
 
 const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
@@ -1065,17 +1154,19 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       align: "right",
     });
 
-    const invoiceExtras = Array.isArray(row?.extras)
-      ? row.extras
-      : Array.isArray(row?.bookingDetails?.extras)
-        ? row.bookingDetails.extras
-        : [];
+    const {
+      invoiceExtras,
+      manualAdjustmentAmount,
+      manualAdjustmentLabel,
+    } = getInvoiceExtrasAndAdjustment(row);
 
     const visibleExtras = invoiceExtras
       .map((extra) => ({
         description: String(extra?.name || extra?.key || "Extra").trim(),
         qty: String(Number(extra?.quantity || 1) || 1),
-        amount: Number(extra?.price || 0) * (Number(extra?.quantity || 1) || 1),
+        amount: round2(
+          Number(extra?.price || 0) * (Number(extra?.quantity || 1) || 1),
+        ),
       }))
       .filter((extra) => extra.description && Number(extra.amount || 0) !== 0);
 
@@ -1086,6 +1177,15 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         amount: split.passThroughGross,
       },
       ...visibleExtras,
+      ...(manualAdjustmentAmount !== 0
+        ? [
+            {
+              description: manualAdjustmentLabel || "Manual adjustment",
+              qty: "1",
+              amount: manualAdjustmentAmount,
+            },
+          ]
+        : []),
       {
         description: "Music management (VAT inclusive)",
         qty: "1",
@@ -1145,23 +1245,48 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       width: 90,
       align: "right",
     });
+
+    let totalsLineY = totalsY + 62;
+    let totalLabelY = totalsY + 74;
+
+    if (Number(split.extrasTotal || 0) !== 0) {
+      doc.text("Extras", totalsX, totalsY + 54, { width: 125 });
+      doc.text(formatMoney(split.extrasTotal), totalsX + 125, totalsY + 54, {
+        width: 90,
+        align: "right",
+      });
+      totalsLineY += 18;
+      totalLabelY += 18;
+    }
+
+    if (Number(split.manualAdjustmentAmount || 0) !== 0) {
+      doc.text("Manual adjustment", totalsX, totalsLineY - 8, { width: 125 });
+      doc.text(formatMoney(split.manualAdjustmentAmount), totalsX + 125, totalsLineY - 8, {
+        width: 90,
+        align: "right",
+      });
+      totalsLineY += 18;
+      totalLabelY += 18;
+    }
+
     doc
       .strokeColor(accent)
       .lineWidth(1.5)
-      .moveTo(totalsX, totalsY + 62)
-      .lineTo(totalsX + 215, totalsY + 62)
+      .moveTo(totalsX, totalsLineY)
+      .lineTo(totalsX + 215, totalsLineY)
       .stroke();
     doc.fillColor(text).font("Helvetica-Bold").fontSize(13);
-    doc.text(isReceipt ? "Total paid" : "Total due", totalsX, totalsY + 74, {
+    doc.text(isReceipt ? "Total paid" : "Total due", totalsX, totalLabelY, {
       width: 125,
     });
-    doc.text(formatMoney(split.gross), totalsX + 125, totalsY + 74, {
+    doc.text(formatMoney(split.gross), totalsX + 125, totalLabelY, {
       width: 90,
       align: "right",
     });
 
     // Payment details and VAT note.
     const paymentY = cardY + cardH - 112;
+    const vatNoteY = Math.max(paymentY, totalLabelY + 32);
 
     doc
       .fillColor(text)
@@ -1236,7 +1361,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
           ? "Thank you, payment has been received. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee."
           : "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee.",
         cardX + 270,
-        paymentY,
+        vatNoteY,
         { width: cardW - 296 },
       );
 
@@ -1327,44 +1452,7 @@ export const createBoardInvoice = async (req, res) => {
 
     const invoiceCompany = getInvoiceCompany(rowForInvoice);
 
-    const gross = round2(
-      rowForInvoice.grossValue ||
-        rowForInvoice.totals?.fullAmount ||
-        rowForInvoice.amount ||
-        rowForInvoice.fee ||
-        0,
-    );
-
-    const accounting = rowForInvoice.accounting || {};
-    const vatRate = Number(accounting.vatRate ?? invoiceCompany.vatRate ?? 0);
-
-    const commissionGross = round2(
-      accounting.commissionGross ||
-        rowForInvoice.netCommission ||
-        rowForInvoice.commissionGross ||
-        rowForInvoice.commission ||
-        rowForInvoice.estimatedCommission ||
-        0,
-    );
-
-    const passThroughGross = round2(
-      accounting.passThroughGross ||
-        rowForInvoice.passThroughGross ||
-        Math.max(gross - commissionGross, 0),
-    );
-
-    const commissionSplit = vatFromGross(commissionGross, vatRate);
-    const calculatedGross = round2(commissionGross + passThroughGross || gross);
-
-    const split = {
-      gross: calculatedGross,
-      invoiceCompany: invoiceCompany.brand,
-      vatRate,
-      commissionGross,
-      commissionNet: commissionSplit.net,
-      commissionVat: commissionSplit.vat,
-      passThroughGross,
-    };
+    const split = buildBoardInvoiceSplit(rowForInvoice, invoiceCompany);
 
     console.log("🧾 Invoice debug:", {
       documentType: documentTypeNorm,
@@ -1379,6 +1467,10 @@ export const createBoardInvoice = async (req, res) => {
       actTscName: rowForInvoice.actTscName,
       actName: rowForInvoice.actName,
       tscName: rowForInvoice.tscName,
+      extrasTotal: split.extrasTotal,
+      manualAdjustmentAmount: split.manualAdjustmentAmount,
+      storedGross: split.storedGross,
+      calculatedGross: split.gross,
     });
 
     const pdfBuffer = await makeInvoicePdfBuffer(
@@ -1547,22 +1639,7 @@ export const serveBoardReceiptPdf = async (req, res) => {
     };
 
     const invoiceCompany = getInvoiceCompany(rowForInvoice);
-    const accounting = rowForInvoice.accounting || {};
-    const vatRate = Number(accounting.vatRate ?? invoiceCompany.vatRate ?? 0);
-
-    const commissionGross = round2(accounting.commissionGross || 0);
-    const passThroughGross = round2(accounting.passThroughGross || 0);
-    const commissionSplit = vatFromGross(commissionGross, vatRate);
-
-    const split = {
-      gross: round2(commissionGross + passThroughGross),
-      invoiceCompany: invoiceCompany.brand,
-      vatRate,
-      commissionGross,
-      commissionNet: commissionSplit.net,
-      commissionVat: commissionSplit.vat,
-      passThroughGross,
-    };
+    const split = buildBoardInvoiceSplit(rowForInvoice, invoiceCompany);
 
     const pdfBuffer = await makeInvoicePdfBuffer(
       rowForInvoice,
@@ -1608,43 +1685,7 @@ export const serveBoardInvoicePdf = async (req, res) => {
 
     const invoiceCompany = getInvoiceCompany(rowForInvoice);
 
-    const gross = round2(
-      rowForInvoice.grossValue ||
-        rowForInvoice.totals?.fullAmount ||
-        rowForInvoice.amount ||
-        rowForInvoice.fee ||
-        0,
-    );
-
-    const accounting = rowForInvoice.accounting || {};
-    const vatRate = Number(accounting.vatRate ?? invoiceCompany.vatRate ?? 0);
-
-    const commissionGross = round2(
-      accounting.commissionGross ||
-        rowForInvoice.netCommission ||
-        rowForInvoice.commissionGross ||
-        rowForInvoice.commission ||
-        rowForInvoice.estimatedCommission ||
-        0,
-    );
-
-    const passThroughGross = round2(
-      accounting.passThroughGross ||
-        rowForInvoice.passThroughGross ||
-        Math.max(gross - commissionGross, 0),
-    );
-
-    const commissionSplit = vatFromGross(commissionGross, vatRate);
-
-    const split = {
-      gross: round2(commissionGross + passThroughGross || gross),
-      invoiceCompany: invoiceCompany.brand,
-      vatRate,
-      commissionGross,
-      commissionNet: commissionSplit.net,
-      commissionVat: commissionSplit.vat,
-      passThroughGross,
-    };
+    const split = buildBoardInvoiceSplit(rowForInvoice, invoiceCompany);
 
     const pdfBuffer = await makeInvoicePdfBuffer(
       rowForInvoice,
