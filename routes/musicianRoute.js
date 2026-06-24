@@ -2,7 +2,7 @@ import express from "express";
 import Stripe from "stripe";
 import multer from "multer";
 import mongoose from "mongoose";
-import { emailContract } from "../controllers/musicianController.js";
+import { autosaveMusicianMedia, emailContract } from "../controllers/musicianController.js";
 import upload from "../middleware/multer.js";
 import agentAuth from "../middleware/agentAuth.js";
 import verifyToken from "../middleware/musicianAuth.js";
@@ -311,6 +311,12 @@ router.get(
   getStripeConnectPayoutStatus
 );
 
+router.post(
+  "/autosave/media",
+  verifyToken,
+  uploadFields,
+  autosaveMusicianMedia
+);
 /* ---------------- Deputy registration ---------------- */
 router.post("/moderation/register-deputy", uploadFields, registerDeputy);
 

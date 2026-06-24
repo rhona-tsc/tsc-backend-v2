@@ -1028,6 +1028,58 @@ const createStripeConnectOnboardingLink = async (req, res) => {
   }
 };
 
+export const autosaveMusicianMedia = async (req, res) => {
+  try {
+    const musicianId = req.user?._id || req.user?.id || req.user?.musicianId;
+
+    if (!musicianId) {
+      return res.status(401).json({ success: false, message: "Unauthorised" });
+    }
+
+    const musician = await musicianModel.findById(musicianId);
+    if (!musician) {
+      return res.status(404).json({ success: false, message: "Musician not found" });
+    }
+
+    const updates = {};
+
+    if (req.files?.profilePicture?.[0]) {
+      const uploaded = await uploader(
+        req.files.profilePicture[0].buffer,
+        req.files.profilePicture[0].originalname || "profile.jpg",
+        "musicians"
+      );
+      updates.profilePhoto = uploaded.secure_url;
+      updates.profilePicture = uploaded.secure_url;
+    }
+
+    if (req.files?.coverHeroImage?.[0]) {
+      const uploaded = await uploader(
+        req.files.coverHeroImage[0].buffer,
+        req.files.coverHeroImage[0].originalname || "cover.jpg",
+        "musicians"
+      );
+      updates.coverHeroImage = uploaded.secure_url;
+    }
+
+    if (Object.keys(updates).length) {
+      musician.set(updates);
+      await musician.save();
+    }
+
+    return res.json({
+      success: true,
+      updates,
+    });
+  } catch (err) {
+    console.error("❌ autosaveMusicianMedia failed:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Media autosave failed",
+    });
+  }
+};
+
 const registerDeputy = async (req, res) => {
   const reqId =
     req.get("x-request-id") ||
