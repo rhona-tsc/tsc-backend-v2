@@ -1043,33 +1043,56 @@ export const autosaveMusicianMedia = async (req, res) => {
 
     const updates = {};
 
-    if (req.files?.profilePicture?.[0]) {
-      const uploaded = await uploader(
-        req.files.profilePicture[0].buffer,
-        req.files.profilePicture[0].originalname || "profile.jpg",
-        "musicians"
-      );
-      updates.profilePhoto = uploaded.secure_url;
-      updates.profilePicture = uploaded.secure_url;
+    const getUrl = async (file, fallbackName) => {
+      if (!file) return "";
+
+      if (file.path && /^https?:\/\//i.test(file.path)) {
+        return file.path;
+      }
+
+      if (file.buffer) {
+        const uploaded = await uploader(
+          file.buffer,
+          file.originalname || fallbackName,
+          "musicians",
+        );
+        return uploaded?.secure_url || uploaded?.url || "";
+      }
+
+      return "";
+    };
+
+    const profileUrl = await getUrl(
+      req.files?.profilePicture?.[0] || req.files?.profilePhoto?.[0],
+      "profile.jpg",
+    );
+
+    const coverUrl = await getUrl(
+      req.files?.coverHeroImage?.[0],
+      "cover.jpg",
+    );
+
+    if (profileUrl) {
+      updates.profilePhoto = profileUrl;
+      updates.profilePicture = profileUrl;
     }
 
-    if (req.files?.coverHeroImage?.[0]) {
-      const uploaded = await uploader(
-        req.files.coverHeroImage[0].buffer,
-        req.files.coverHeroImage[0].originalname || "cover.jpg",
-        "musicians"
-      );
-      updates.coverHeroImage = uploaded.secure_url;
+    if (coverUrl) {
+      updates.coverHeroImage = coverUrl;
     }
 
     if (Object.keys(updates).length) {
       musician.set(updates);
+      musician.markModified("profilePhoto");
+      musician.markModified("profilePicture");
+      musician.markModified("coverHeroImage");
       await musician.save();
     }
 
     return res.json({
       success: true,
       updates,
+      ...updates,
     });
   } catch (err) {
     console.error("❌ autosaveMusicianMedia failed:", err);
