@@ -76,10 +76,21 @@ const getAccountingSplit = (row, gross, depositPaid) => {
       : Number(depositPaid || 0),
   );
 
+  const invoiceCompany = String(acc.invoiceCompany || "TSC").toUpperCase();
+  const vatTaxPointISO = String(
+    row?.invoiceDateISO || row?.invoiceDueDateISO || row?.eventDateISO || "",
+  ).slice(0, 10);
+  const isBmmVatBooking =
+    invoiceCompany === "BMM" && vatTaxPointISO >= "2026-02-07";
+
+  const vatRate = Number(acc.vatRate || 0.2);
+
   const commissionVat = round2(
-    hasUsefulAccounting && Number(acc.commissionVat || 0) > 0
-      ? Number(acc.commissionVat || 0)
-      : commissionGross * (0.2 / 1.2),
+    isBmmVatBooking
+      ? hasUsefulAccounting && Number(acc.commissionVat || 0) > 0
+        ? Number(acc.commissionVat || 0)
+        : commissionGross * (vatRate / (1 + vatRate))
+      : 0,
   );
 
   const commissionNet = round2(
@@ -95,6 +106,10 @@ const getAccountingSplit = (row, gross, depositPaid) => {
   );
 
   return {
+    invoiceCompany,
+    vatTaxPointISO,
+    vatRate,
+    isBmmVatBooking,
     commissionGross,
     commissionVat,
     commissionNet,
