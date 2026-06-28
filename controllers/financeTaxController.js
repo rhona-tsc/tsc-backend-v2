@@ -93,6 +93,7 @@ const shouldApplySalesVat = (item) => {
   );
 };
 
+
 const shouldApplyPurchaseVat = (item) => {
   return (
     item.direction === "out" &&
@@ -100,6 +101,154 @@ const shouldApplyPurchaseVat = (item) => {
       String(item.vatTreatment || "").toLowerCase(),
     )
   );
+};
+
+const getPreRegistrationVatWindows = (entity = "BMM") => {
+  const vatStart = getVatRegistrationStartDate(entity);
+  if (!vatStart) return null;
+
+  const servicesFrom = new Date(vatStart);
+  servicesFrom.setUTCMonth(servicesFrom.getUTCMonth() - 6);
+  servicesFrom.setUTCHours(0, 0, 0, 0);
+
+  const goodsFrom = new Date(vatStart);
+  goodsFrom.setUTCFullYear(goodsFrom.getUTCFullYear() - 4);
+  goodsFrom.setUTCHours(0, 0, 0, 0);
+
+  const to = new Date(vatStart);
+  to.setUTCDate(to.getUTCDate() - 1);
+  to.setUTCHours(23, 59, 59, 999);
+
+  return {
+    servicesFrom,
+    goodsFrom,
+    to,
+  };
+};
+
+const getPreRegistrationVatCategory = (item) => {
+  const raw = String(
+    item.preRegistrationVatCategory ||
+      item.vatReclaimCategory ||
+      item.assetType ||
+      item.purchaseType ||
+      item.category ||
+      item.title ||
+      item.description ||
+      item.notes ||
+      "",
+  ).toLowerCase();
+
+  if (
+    raw.includes("goods") ||
+    raw.includes("asset") ||
+    raw.includes("equipment") ||
+    raw.includes("laptop") ||
+    raw.includes("computer") ||
+    raw.includes("monitor") ||
+    raw.includes("phone") ||
+    raw.includes("camera") ||
+    raw.includes("furniture") ||
+    raw.includes("hardware") ||
+    raw.includes("printer")
+  ) {
+    return "goods";
+  }
+
+  return "services";
+};
+
+const shouldApplyPreRegistrationPurchaseVat = (item) => {
+  return (
+    item.direction === "out" &&
+    ["standard", "vatable", "standard_rate"].includes(
+      String(item.vatTreatment || "").toLowerCase(),
+    )
+  );
+};
+
+const calculatePreRegistrationVatReclaim = async ({ entity = "BMM" }) => {
+  const windows = getPreRegistrationVatWindows(entity);
+
+  if (!windows) {
+    return {
+      totalPreRegistrationVatReclaimable: 0,
+      servicesVatReclaimable: 0,
+      goodsVatReclaimable: 0,
+      servicesCount: 0,
+      goodsCount: 0,
+      items: [],
+      windows: null,
+    };
+  }
+
+  const transactions = await FinanceTransaction.find({
+    entity,
+    direction: "out",
+    date: { $gte: windows.goodsFrom, $lte: windows.to },
+  }).lean();
+
+  const items = [];
+  let servicesVatReclaimable = 0;
+  let goodsVatReclaimable = 0;
+  let servicesCount = 0;
+  let goodsCount = 0;
+
+  transactions.forEach((tx) => {
+    if (!shouldApplyPreRegistrationPurchaseVat(tx)) return;
+
+    const category = getPreRegistrationVatCategory(tx);
+    const date = new Date(tx.date);
+
+    if (Number.isNaN(date.getTime())) return;
+    if (category === "services" && date < windows.servicesFrom) return;
+    if (category === "goods" && date < windows.goodsFrom) return;
+
+    const vatAmount = Number(getVatAmount(tx).toFixed(2));
+    if (vatAmount <= 0) return;
+
+    if (category === "goods") {
+      goodsVatReclaimable += vatAmount;
+      goodsCount += 1;
+    } else {
+      servicesVatReclaimable += vatAmount;
+      servicesCount += 1;
+    }
+
+    items.push({
+      _id: tx._id,
+      date: tx.date,
+      title:
+        tx.title ||
+        tx.description ||
+        tx.payee ||
+        tx.reference ||
+        "Pre-registration VAT item",
+      amount: toNumber(tx.amount),
+      vatAmount,
+      category,
+      vatTreatment: tx.vatTreatment,
+      vatRate: tx.vatRate || 0.2,
+    });
+  });
+
+  const totalPreRegistrationVatReclaimable = Number(
+    (servicesVatReclaimable + goodsVatReclaimable).toFixed(2),
+  );
+
+  return {
+    totalPreRegistrationVatReclaimable,
+    servicesVatReclaimable: Number(servicesVatReclaimable.toFixed(2)),
+    goodsVatReclaimable: Number(goodsVatReclaimable.toFixed(2)),
+    servicesCount,
+    goodsCount,
+    items,
+    windows: {
+      servicesFrom: windows.servicesFrom,
+      goodsFrom: windows.goodsFrom,
+      to: windows.to,
+    },
+  };
 };
 
 export const getVatForecast = async (req, res) => {
@@ -124,6 +273,7 @@ export const getVatForecast = async (req, res) => {
           vatRegistered: false,
         },
         quarters: [],
+        preRegistrationVat: null,
         summary: {
           totalVatOnSales: 0,
           totalVatReclaimable: 0,
@@ -176,6 +326,7 @@ export const getVatForecast = async (req, res) => {
           quarter: key,
           vatOnSales: 0,
           vatReclaimable: 0,
+          preRegistrationVatReclaimable: 0,
           netVatDue: 0,
           salesGross: 0,
           purchasesGross: 0,
@@ -190,8 +341,9 @@ export const getVatForecast = async (req, res) => {
       return quarters.get(key);
     };
 
-    // Actual bank transactions: mainly useful for VAT reclaimable purchases
-    // and any manually-tagged VATable income/expenses.
+    // Actual bank transactions from the VAT registration date onwards:
+    // mainly useful for VAT reclaimable purchases and any manually-tagged
+    // VATable income/expenses.
     const transactionQuery = { entity };
     if (Object.keys(dateQuery).length) transactionQuery.date = dateQuery;
 
@@ -299,11 +451,28 @@ export const getVatForecast = async (req, res) => {
       });
     }
 
+    const preRegistrationVat = await calculatePreRegistrationVatReclaim({
+      entity,
+    });
+
+    // Pre-registration VAT reclaim is only applied to the first VAT return.
+    if (preRegistrationVat.totalPreRegistrationVatReclaimable > 0) {
+      const firstVatReturn = ensureQuarter(vatRegistrationStartDate);
+
+      firstVatReturn.preRegistrationVatReclaimable +=
+        preRegistrationVat.totalPreRegistrationVatReclaimable;
+      firstVatReturn.vatReclaimable +=
+        preRegistrationVat.totalPreRegistrationVatReclaimable;
+    }
+
     const quartersArray = Array.from(quarters.values())
       .map((row) => ({
         ...row,
         vatOnSales: Number(row.vatOnSales.toFixed(2)),
         vatReclaimable: Number(row.vatReclaimable.toFixed(2)),
+        preRegistrationVatReclaimable: Number(
+          row.preRegistrationVatReclaimable.toFixed(2),
+        ),
         netVatDue: Number((row.vatOnSales - row.vatReclaimable).toFixed(2)),
         salesGross: Number(row.salesGross.toFixed(2)),
         purchasesGross: Number(row.purchasesGross.toFixed(2)),
@@ -323,8 +492,10 @@ export const getVatForecast = async (req, res) => {
           vatRegistrationStartDate?.toISOString?.() || null,
         vatStagger: "March, June, September, December",
         boardBookingsIncluded: includeForecastRows,
+        preRegistrationVatIncluded: true,
       },
       quarters: quartersArray,
+      preRegistrationVat,
       summary: {
         totalVatOnSales: Number(
           quartersArray.reduce((sum, row) => sum + row.vatOnSales, 0).toFixed(2),
@@ -334,6 +505,8 @@ export const getVatForecast = async (req, res) => {
             .reduce((sum, row) => sum + row.vatReclaimable, 0)
             .toFixed(2),
         ),
+        totalPreRegistrationVatReclaimable:
+          preRegistrationVat.totalPreRegistrationVatReclaimable,
         totalNetVatDue: Number(
           quartersArray.reduce((sum, row) => sum + row.netVatDue, 0).toFixed(2),
         ),
