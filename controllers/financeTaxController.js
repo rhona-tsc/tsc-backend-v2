@@ -1,5 +1,6 @@
 import FinanceTransaction from "../models/financeTransactionModel.js";
 import ForecastEvent from "../models/forecastEventModel.js";
+import BookingBoardItem from "../models/bookingBoardItem.js";
 
 const toNumber = (value) => Number(value || 0);
 
@@ -27,16 +28,17 @@ const getVatQuarter = (date, entity = "BMM") => {
   const month = d.getUTCMonth() + 1;
   const vatStart = getVatRegistrationStartDate(entity);
 
-  // BMM VAT registration begins 1 Feb 2026. First return runs Feb-Mar 2026,
-  // then normal Mar/Jun/Sep/Dec stagger thereafter.
-  if (
-    entity === "BMM" &&
-    vatStart &&
-    d >= vatStart &&
-    d <= new Date(Date.UTC(2026, 2, 31, 23, 59, 59, 999))
-  ) {
-    return "2026-Q1";
-  }
+// BMM VAT registration begins 7 Feb 2026.
+// First VAT return runs 7 Feb 2026 to 30 Jun 2026,
+// with payment due 7 Aug 2026.
+if (
+  entity === "BMM" &&
+  vatStart &&
+  d >= vatStart &&
+  d <= new Date(Date.UTC(2026, 5, 30, 23, 59, 59, 999))
+) {
+  return "2026-Q2";
+}
 
   if ([1, 2, 3].includes(month)) return `${year}-Q1`;
   if ([4, 5, 6].includes(month)) return `${year}-Q2`;
@@ -102,7 +104,14 @@ const shouldApplyPurchaseVat = (item) => {
 
 export const getVatForecast = async (req, res) => {
   try {
-    const { entity = "BMM", startDate, endDate, includeForecast = true } = req.query;
+    const {
+      entity = "BMM",
+      startDate,
+      endDate,
+      includeForecast = true,
+    } = req.query;
+
+    const includeForecastRows = String(includeForecast) !== "false";
 
     if (!isVatRegisteredEntity(entity)) {
       return res.json({
@@ -111,7 +120,7 @@ export const getVatForecast = async (req, res) => {
           entity,
           startDate: startDate || null,
           endDate: endDate || null,
-          includeForecast: String(includeForecast) !== "false",
+          includeForecast: includeForecastRows,
           vatRegistered: false,
         },
         quarters: [],
@@ -131,27 +140,31 @@ export const getVatForecast = async (req, res) => {
 
     if (vatRegistrationStartDate) {
       dateQuery.$gte = dateQuery.$gte
-        ? new Date(Math.max(dateQuery.$gte.getTime(), vatRegistrationStartDate.getTime()))
+        ? new Date(
+            Math.max(
+              dateQuery.$gte.getTime(),
+              vatRegistrationStartDate.getTime(),
+            ),
+          )
         : vatRegistrationStartDate;
     }
 
-    const transactionQuery = { entity };
-    if (Object.keys(dateQuery).length) transactionQuery.date = dateQuery;
+    const isWithinVatDateRange = (date) => {
+      const d = new Date(date);
+      if (Number.isNaN(d.getTime())) return false;
+      if (dateQuery.$gte && d < dateQuery.$gte) return false;
+      if (dateQuery.$lte && d > dateQuery.$lte) return false;
+      return true;
+    };
 
-    const transactions = await FinanceTransaction.find(transactionQuery).lean();
-
-    let forecastEvents = [];
-
-    if (String(includeForecast) !== "false") {
-      const forecastQuery = {
-        entity,
-        status: { $in: ["forecast", "confirmed"] },
-      };
-
-      if (Object.keys(dateQuery).length) forecastQuery.expectedDate = dateQuery;
-
-      forecastEvents = await ForecastEvent.find(forecastQuery).lean();
-    }
+    const getBoardVatTaxPointDate = (booking) => {
+      return String(
+        booking?.invoiceDateISO ||
+          booking?.invoiceDueDateISO ||
+          booking?.eventDateISO ||
+          "",
+      ).slice(0, 10);
+    };
 
     const quarters = new Map();
 
@@ -168,6 +181,7 @@ export const getVatForecast = async (req, res) => {
           purchasesGross: 0,
           transactionCount: 0,
           forecastEventCount: 0,
+          boardBookingCount: 0,
           paymentDueDate: getVatPaymentDueDate(key),
           vatableSales: 0,
         });
@@ -175,6 +189,13 @@ export const getVatForecast = async (req, res) => {
 
       return quarters.get(key);
     };
+
+    // Actual bank transactions: mainly useful for VAT reclaimable purchases
+    // and any manually-tagged VATable income/expenses.
+    const transactionQuery = { entity };
+    if (Object.keys(dateQuery).length) transactionQuery.date = dateQuery;
+
+    const transactions = await FinanceTransaction.find(transactionQuery).lean();
 
     transactions.forEach((tx) => {
       if (!isOnOrAfterDate(tx.date, vatRegistrationStartDate)) return;
@@ -185,13 +206,13 @@ export const getVatForecast = async (req, res) => {
 
       row.transactionCount += 1;
 
-  if (shouldApplySalesVat(tx)) {
-  const vatBaseAmount = getVatBaseAmount(tx);
+      if (shouldApplySalesVat(tx)) {
+        const vatBaseAmount = getVatBaseAmount(tx);
 
-  row.salesGross += amount;
-  row.vatOnSales += getVatAmount(tx);
-  row.vatableSales += vatBaseAmount;
-}
+        row.salesGross += amount;
+        row.vatOnSales += getVatAmount(tx);
+        row.vatableSales += vatBaseAmount;
+      }
 
       if (shouldApplyPurchaseVat(tx)) {
         row.purchasesGross += amount;
@@ -199,28 +220,84 @@ export const getVatForecast = async (req, res) => {
       }
     });
 
-    forecastEvents.forEach((event) => {
-      if (!isOnOrAfterDate(event.expectedDate, vatRegistrationStartDate)) return;
-      if (String(event.source || "") === TAX_EVENT_SOURCE) return;
+    // Booking board rows are the source of truth for BMM disclosed-agent VAT.
+    // VAT is only on BMM commission/management fee, not full client booking value.
+    if (includeForecastRows) {
+      const boardBookings = await BookingBoardItem.find({
+        "accounting.invoiceCompany": entity,
+      }).lean();
 
-      const row = ensureQuarter(event.expectedDate);
-      const amount = toNumber(event.amount);
+      boardBookings.forEach((booking) => {
+        const taxPointDate = getBoardVatTaxPointDate(booking);
+        if (!taxPointDate) return;
+        if (!isWithinVatDateRange(taxPointDate)) return;
+        if (!isOnOrAfterDate(taxPointDate, vatRegistrationStartDate)) return;
 
-      row.forecastEventCount += 1;
+        const commissionGross = toNumber(booking?.accounting?.commissionGross);
+        const storedCommissionVat = toNumber(booking?.accounting?.commissionVat);
+        const vatRate = toNumber(booking?.accounting?.vatRate) || 0.2;
 
-if (shouldApplySalesVat(event)) {
-  const vatBaseAmount = getVatBaseAmount(event);
+        if (commissionGross <= 0 && storedCommissionVat <= 0) return;
 
-  row.salesGross += amount;
-  row.vatOnSales += getVatAmount(event);
-  row.vatableSales += vatBaseAmount;
-}
+        const commissionVat =
+          storedCommissionVat > 0
+            ? storedCommissionVat
+            : getVatFromGross(commissionGross, vatRate);
 
-      if (shouldApplyPurchaseVat(event)) {
-        row.purchasesGross += amount;
-        row.vatReclaimable += getVatFromGross(amount);
-      }
-    });
+        const row = ensureQuarter(taxPointDate);
+
+        row.boardBookingCount += 1;
+        row.forecastEventCount += 1;
+        row.salesGross += toNumber(booking.grossValue);
+        row.vatableSales += commissionGross;
+        row.vatOnSales += commissionVat;
+      });
+    }
+
+    // Optional forecast events are still included for manually-created VATable
+    // items, but booking-generated client income is ignored to avoid double-counting
+    // the BookingBoardItem source-of-truth figures above.
+    if (includeForecastRows) {
+      const forecastQuery = {
+        entity,
+        status: { $in: ["forecast", "confirmed"] },
+      };
+
+      if (Object.keys(dateQuery).length) forecastQuery.expectedDate = dateQuery;
+
+      const forecastEvents = await ForecastEvent.find(forecastQuery).lean();
+
+      forecastEvents.forEach((event) => {
+        if (!isOnOrAfterDate(event.expectedDate, vatRegistrationStartDate)) return;
+        if (String(event.source || "") === TAX_EVENT_SOURCE) return;
+
+        const isClientIncomeEvent =
+          event.direction === "in" &&
+          ["client_deposit_in", "client_balance_in"].includes(
+            String(event.type || ""),
+          );
+
+        if (isClientIncomeEvent) return;
+
+        const row = ensureQuarter(event.expectedDate);
+        const amount = toNumber(event.amount);
+
+        row.forecastEventCount += 1;
+
+        if (shouldApplySalesVat(event)) {
+          const vatBaseAmount = getVatBaseAmount(event);
+
+          row.salesGross += amount;
+          row.vatOnSales += getVatAmount(event);
+          row.vatableSales += vatBaseAmount;
+        }
+
+        if (shouldApplyPurchaseVat(event)) {
+          row.purchasesGross += amount;
+          row.vatReclaimable += getVatFromGross(amount);
+        }
+      });
+    }
 
     const quartersArray = Array.from(quarters.values())
       .map((row) => ({
@@ -230,21 +307,22 @@ if (shouldApplySalesVat(event)) {
         netVatDue: Number((row.vatOnSales - row.vatReclaimable).toFixed(2)),
         salesGross: Number(row.salesGross.toFixed(2)),
         purchasesGross: Number(row.purchasesGross.toFixed(2)),
-        
         vatableSales: Number(row.vatableSales.toFixed(2)),
       }))
       .sort((a, b) => a.quarter.localeCompare(b.quarter));
 
-    res.json({
+    return res.json({
       success: true,
       filters: {
         entity,
         startDate: startDate || null,
         endDate: endDate || null,
-        includeForecast: String(includeForecast) !== "false",
+        includeForecast: includeForecastRows,
         vatRegistered: true,
-        vatRegistrationStartDate: vatRegistrationStartDate?.toISOString?.() || null,
+        vatRegistrationStartDate:
+          vatRegistrationStartDate?.toISOString?.() || null,
         vatStagger: "March, June, September, December",
+        boardBookingsIncluded: includeForecastRows,
       },
       quarters: quartersArray,
       summary: {
@@ -263,7 +341,7 @@ if (shouldApplySalesVat(event)) {
     });
   } catch (error) {
     console.error("getVatForecast error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
