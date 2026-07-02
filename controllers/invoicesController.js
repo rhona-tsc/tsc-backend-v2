@@ -9,9 +9,27 @@ import cloudinary from "../config/cloudinary.js";
 import path from "path";
 import fs from "fs";
 
+
+const STRIPE_API_VERSION = "2024-06-20";
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_V2, {
-  apiVersion: "2024-06-20",
+  apiVersion: STRIPE_API_VERSION,
 });
+
+const bmmStripe = process.env.BMM_STRIPE_SECRET_KEY
+  ? new Stripe(process.env.BMM_STRIPE_SECRET_KEY, {
+      apiVersion: STRIPE_API_VERSION,
+    })
+  : stripe;
+
+const getStripeClientForCompany = (invoiceCompany) => {
+  const brand = String(invoiceCompany?.brand || invoiceCompany || "TSC")
+    .trim()
+    .toUpperCase();
+
+  if (brand === "BMM") return bmmStripe;
+  return stripe;
+};
 
 const looksLikeObjectId = (v) =>
   typeof v === "string" && /^[0-9a-f]{24}$/i.test(v);
@@ -1388,6 +1406,7 @@ export const createBoardInvoice = async (req, res) => {
       bookingId,
       invoiceCompany: invoiceCompanyFromRequest,
       documentType = "invoice",
+      includePaymentLink = false,
     } = req.body;
 
     const documentStamp = `${Date.now()}`;
@@ -1499,11 +1518,13 @@ export const createBoardInvoice = async (req, res) => {
       const stream = cloudinary.uploader.upload_stream(
         {
           folder: "booking-board-invoices",
-          resource_type: "raw",
+          resource_type: "auto",
           public_id: `${publicIdPrefix}-${rowForInvoice.bookingRef || rowForInvoice._id}-${documentStamp}`,
           overwrite: false,
           invalidate: true,
           format: "pdf",
+          type: "upload",
+          flags: "inline",
         },
         (error, result) => {
           console.log("☁️ Cloudinary invoice/receipt upload result:", result);
@@ -1520,10 +1541,80 @@ export const createBoardInvoice = async (req, res) => {
     });
 
     const documentUrl = uploadResult.secure_url;
+    const browserDocumentUrl = String(documentUrl || "").replace(
+      "/raw/upload/",
+      "/image/upload/",
+    );
+
+    let cardPaymentUrl = "";
+    let cardPaymentSessionId = "";
+
+    if (includePaymentLink && !isReceipt) {
+      const paymentStripe = getStripeClientForCompany(invoiceCompany);
+      const origin = getOrigin(req);
+      const amountPence = Math.max(0, Math.round(Number(split.gross || 0) * 100));
+      const ref = rowForInvoice.bookingRef || String(rowForInvoice._id);
+      const customerEmail = getPrimaryEmail(rowForInvoice)
+        .split(",")
+        .map((email) => email.trim())
+        .filter(Boolean)[0];
+
+      if (!amountPence) {
+        throw new Error("Cannot create card payment link because invoice total is zero.");
+      }
+
+      const checkoutMetadata = {
+        category: "board_invoice",
+        payment_stage: "board_invoice",
+        paymentStage: "board_invoice",
+        bookingId: ref,
+        booking_ref: ref,
+        boardRowId: String(rowForInvoice._id),
+        bookingMongoId: String(rowForInvoice.sourceBookingId || rowForInvoice.bookingId || ""),
+        invoiceCompany: invoiceCompany.brand,
+        amount_pence: String(amountPence),
+        commission_gross: String(Number(split.commissionGross || 0).toFixed(2)),
+        commission_vat: String(Number(split.commissionVat || 0).toFixed(2)),
+        commission_net: String(Number(split.commissionNet || 0).toFixed(2)),
+        pass_through_gross: String(Number(split.passThroughGross || 0).toFixed(2)),
+      };
+
+      const session = await paymentStripe.checkout.sessions.create({
+        mode: "payment",
+        payment_method_types: ["card"],
+        customer_email: customerEmail || undefined,
+        line_items: [
+          {
+            price_data: {
+              currency: String(split.currency || rowForInvoice?.accounting?.currency || "GBP").toLowerCase(),
+              product_data: {
+                name: `Invoice ${ref}`,
+                description: `${actDisplayName || rowForInvoice.actName || "Booking"} - ${invoiceCompany.name}`,
+              },
+              unit_amount: amountPence,
+            },
+            quantity: 1,
+          },
+        ],
+        success_url: `${origin}/admin/booking-board?invoicePaid=1&bookingRef=${encodeURIComponent(ref)}&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/admin/booking-board?invoiceCanceled=1&bookingRef=${encodeURIComponent(ref)}`,
+        metadata: checkoutMetadata,
+        payment_intent_data: {
+          metadata: checkoutMetadata,
+        },
+      });
+
+      cardPaymentUrl = session.url || "";
+      cardPaymentSessionId = session.id || "";
+    }
 
     console.log("🧾 Invoice/receipt delivery URLs:", {
       secure_url: uploadResult.secure_url,
       forced_download_url: documentUrl,
+      browser_document_url: browserDocumentUrl,
+      includePaymentLink,
+      cardPaymentSessionId,
+      hasCardPaymentUrl: Boolean(cardPaymentUrl),
       documentType: documentTypeNorm,
       documentStamp,
       invoiceDateISO,
@@ -1535,16 +1626,16 @@ export const createBoardInvoice = async (req, res) => {
     const boardSetPatch = isReceipt
       ? {
           invoiceCompany: invoiceCompany.brand,
-          receiptUrl: documentUrl,
-          receiptPdfUrl: documentUrl,
+          receiptUrl: browserDocumentUrl,
+          receiptPdfUrl: browserDocumentUrl,
           receiptCreatedAt: now,
           balancePaid: true,
           balanceStatus: "paid",
           paidAt: now,
           "payments.balancePaymentReceived": true,
           "payments.invoicePaid": true,
-          "payments.boardReceiptPdfUrl": documentUrl,
-          "payments.receiptPdfUrl": documentUrl,
+          "payments.boardReceiptPdfUrl": browserDocumentUrl,
+          "payments.receiptPdfUrl": browserDocumentUrl,
           "payments.receiptCreatedAt": now,
           "payments.paidAt": now,
           accounting: split,
@@ -1553,10 +1644,16 @@ export const createBoardInvoice = async (req, res) => {
           invoiceCompany: invoiceCompany.brand,
           invoiceDateISO,
           invoiceDueDateISO: finalDueDate,
-          invoiceUrl: documentUrl,
-          invoicePdfUrl: documentUrl,
-          "payments.boardInvoicePdfUrl": documentUrl,
+          invoiceUrl: browserDocumentUrl,
+          invoicePdfUrl: browserDocumentUrl,
+          "payments.boardInvoicePdfUrl": browserDocumentUrl,
           "payments.boardInvoiceCreatedAt": now,
+          ...(cardPaymentUrl
+            ? {
+                "payments.balanceInvoiceUrl": cardPaymentUrl,
+                "payments.balanceInvoiceId": cardPaymentSessionId,
+              }
+            : {}),
           accounting: split,
         };
 
@@ -1572,8 +1669,8 @@ export const createBoardInvoice = async (req, res) => {
     const bookingSetPatch = isReceipt
       ? {
           invoiceCompany: invoiceCompany.brand,
-          receiptUrl: documentUrl,
-          receiptPdfUrl: documentUrl,
+          receiptUrl: browserDocumentUrl,
+          receiptPdfUrl: browserDocumentUrl,
           receiptCreatedAt: now,
           balancePaid: true,
           balanceStatus: "paid",
@@ -1584,8 +1681,17 @@ export const createBoardInvoice = async (req, res) => {
           invoiceCompany: invoiceCompany.brand,
           invoiceDateISO,
           invoiceDueDateISO: finalDueDate,
-          invoiceUrl: documentUrl,
-          invoicePdfUrl: documentUrl,
+          invoiceUrl: browserDocumentUrl,
+          invoicePdfUrl: browserDocumentUrl,
+          ...(cardPaymentUrl
+            ? {
+                paymentLink: cardPaymentUrl,
+                balanceInvoiceUrl: cardPaymentUrl,
+                balanceInvoiceId: cardPaymentSessionId,
+                balanceStatus: "sent",
+                balancePaid: false,
+              }
+            : {}),
           accounting: split,
         };
 
@@ -1604,16 +1710,19 @@ export const createBoardInvoice = async (req, res) => {
     return res.json({
       success: true,
       documentType: documentTypeNorm,
-      invoiceUrl: isReceipt ? updated?.invoiceUrl : documentUrl,
-      invoicePdfUrl: isReceipt ? updated?.invoicePdfUrl : documentUrl,
-      receiptUrl: isReceipt ? documentUrl : updated?.receiptUrl,
-      receiptPdfUrl: isReceipt ? documentUrl : updated?.receiptPdfUrl,
+      invoiceUrl: isReceipt ? updated?.invoiceUrl : browserDocumentUrl,
+      invoicePdfUrl: isReceipt ? updated?.invoicePdfUrl : browserDocumentUrl,
+      receiptUrl: isReceipt ? browserDocumentUrl : updated?.receiptUrl,
+      receiptPdfUrl: isReceipt ? browserDocumentUrl : updated?.receiptPdfUrl,
       previewUrl: isReceipt
         ? `/api/invoices/board-receipt/${row._id}`
         : `/api/invoices/board-invoice/${row._id}`,
       invoiceCompany: invoiceCompany.brand,
       invoiceDateISO,
       invoiceDueDateISO: finalDueDate,
+      paymentUrl: cardPaymentUrl,
+      cardPaymentUrl,
+      cardPaymentSessionId,
       row: updated,
     });
   } catch (error) {
