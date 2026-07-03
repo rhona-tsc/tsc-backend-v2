@@ -1526,7 +1526,6 @@ export const createBoardInvoice = async (req, res) => {
           overwrite: false,
           invalidate: true,
           type: "upload",
-          flags: "inline",
         },
         (error, result) => {
           console.log("☁️ Cloudinary invoice/receipt upload result:", result);
