@@ -1476,6 +1476,12 @@ export const createBoardInvoice = async (req, res) => {
 
     const split = buildBoardInvoiceSplit(rowForInvoice, invoiceCompany);
 
+    const actDisplayName = firstNonEmpty(
+  rowForInvoice.actName,
+  rowForInvoice.actTscName,
+  rowForInvoice.tscName,
+);
+
     console.log("🧾 Invoice debug:", {
       documentType: documentTypeNorm,
       bookingRef: rowForInvoice.bookingRef,
