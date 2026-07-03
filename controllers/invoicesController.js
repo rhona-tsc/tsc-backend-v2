@@ -9,7 +9,6 @@ import cloudinary from "../config/cloudinary.js";
 import path from "path";
 import fs from "fs";
 
-
 const STRIPE_API_VERSION = "2024-06-20";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_V2, {
@@ -817,7 +816,6 @@ const getDueDateThursdayWeekBefore = (eventDateValue) => {
 const firstNonEmpty = (...values) =>
   values.find((value) => String(value || "").trim()) || "";
 
-
 const getInvoiceLogoPath = (invoiceCompany) => {
   const envLogoPath =
     invoiceCompany?.brand === "BMM"
@@ -856,7 +854,9 @@ const getInvoiceExtrasAndAdjustment = (row) => {
   );
 
   const manualAdjustmentLabel = String(
-    row?.manualAdjustmentLabel || manualAdjustment?.label || "Manual adjustment",
+    row?.manualAdjustmentLabel ||
+      manualAdjustment?.label ||
+      "Manual adjustment",
   ).trim();
 
   return {
@@ -870,10 +870,8 @@ const getInvoiceExtrasAndAdjustment = (row) => {
 
 // Helper: build board invoice split
 const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
-  const {
-    extrasTotal,
-    manualAdjustmentAmount,
-  } = getInvoiceExtrasAndAdjustment(rowForInvoice);
+  const { extrasTotal, manualAdjustmentAmount } =
+    getInvoiceExtrasAndAdjustment(rowForInvoice);
 
   const storedGross = round2(
     rowForInvoice.grossValue ||
@@ -898,7 +896,10 @@ const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
   const passThroughGross = round2(
     accounting.passThroughGross ||
       rowForInvoice.passThroughGross ||
-      Math.max(storedGross - commissionGross - extrasTotal - manualAdjustmentAmount, 0),
+      Math.max(
+        storedGross - commissionGross - extrasTotal - manualAdjustmentAmount,
+        0,
+      ),
   );
 
   const commissionSplit = vatFromGross(commissionGross, vatRate);
@@ -1172,11 +1173,8 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       align: "right",
     });
 
-    const {
-      invoiceExtras,
-      manualAdjustmentAmount,
-      manualAdjustmentLabel,
-    } = getInvoiceExtrasAndAdjustment(row);
+    const { invoiceExtras, manualAdjustmentAmount, manualAdjustmentLabel } =
+      getInvoiceExtrasAndAdjustment(row);
 
     const visibleExtras = invoiceExtras
       .map((extra) => ({
@@ -1279,10 +1277,15 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
 
     if (Number(split.manualAdjustmentAmount || 0) !== 0) {
       doc.text("Manual adjustment", totalsX, totalsLineY - 8, { width: 125 });
-      doc.text(formatMoney(split.manualAdjustmentAmount), totalsX + 125, totalsLineY - 8, {
-        width: 90,
-        align: "right",
-      });
+      doc.text(
+        formatMoney(split.manualAdjustmentAmount),
+        totalsX + 125,
+        totalsLineY - 8,
+        {
+          width: 90,
+          align: "right",
+        },
+      );
       totalsLineY += 18;
       totalLabelY += 18;
     }
@@ -1518,11 +1521,10 @@ export const createBoardInvoice = async (req, res) => {
       const stream = cloudinary.uploader.upload_stream(
         {
           folder: "booking-board-invoices",
-          resource_type: "auto",
-          public_id: `${publicIdPrefix}-${rowForInvoice.bookingRef || rowForInvoice._id}-${documentStamp}`,
+          resource_type: "raw",
+          public_id: `${publicIdPrefix}-${rowForInvoice.bookingRef || rowForInvoice._id}-${documentStamp}.pdf`,
           overwrite: false,
           invalidate: true,
-          format: "pdf",
           type: "upload",
           flags: "inline",
         },
@@ -1541,10 +1543,7 @@ export const createBoardInvoice = async (req, res) => {
     });
 
     const documentUrl = uploadResult.secure_url;
-    const browserDocumentUrl = String(documentUrl || "").replace(
-      "/raw/upload/",
-      "/image/upload/",
-    );
+    const browserDocumentUrl = documentUrl;
 
     let cardPaymentUrl = "";
     let cardPaymentSessionId = "";
@@ -1552,7 +1551,10 @@ export const createBoardInvoice = async (req, res) => {
     if (includePaymentLink && !isReceipt) {
       const paymentStripe = getStripeClientForCompany(invoiceCompany);
       const origin = getOrigin(req);
-      const amountPence = Math.max(0, Math.round(Number(split.gross || 0) * 100));
+      const amountPence = Math.max(
+        0,
+        Math.round(Number(split.gross || 0) * 100),
+      );
       const ref = rowForInvoice.bookingRef || String(rowForInvoice._id);
       const customerEmail = getPrimaryEmail(rowForInvoice)
         .split(",")
@@ -1560,7 +1562,9 @@ export const createBoardInvoice = async (req, res) => {
         .filter(Boolean)[0];
 
       if (!amountPence) {
-        throw new Error("Cannot create card payment link because invoice total is zero.");
+        throw new Error(
+          "Cannot create card payment link because invoice total is zero.",
+        );
       }
 
       const checkoutMetadata = {
@@ -1570,13 +1574,17 @@ export const createBoardInvoice = async (req, res) => {
         bookingId: ref,
         booking_ref: ref,
         boardRowId: String(rowForInvoice._id),
-        bookingMongoId: String(rowForInvoice.sourceBookingId || rowForInvoice.bookingId || ""),
+        bookingMongoId: String(
+          rowForInvoice.sourceBookingId || rowForInvoice.bookingId || "",
+        ),
         invoiceCompany: invoiceCompany.brand,
         amount_pence: String(amountPence),
         commission_gross: String(Number(split.commissionGross || 0).toFixed(2)),
         commission_vat: String(Number(split.commissionVat || 0).toFixed(2)),
         commission_net: String(Number(split.commissionNet || 0).toFixed(2)),
-        pass_through_gross: String(Number(split.passThroughGross || 0).toFixed(2)),
+        pass_through_gross: String(
+          Number(split.passThroughGross || 0).toFixed(2),
+        ),
       };
 
       const session = await paymentStripe.checkout.sessions.create({
@@ -1586,7 +1594,9 @@ export const createBoardInvoice = async (req, res) => {
         line_items: [
           {
             price_data: {
-              currency: String(split.currency || rowForInvoice?.accounting?.currency || "GBP").toLowerCase(),
+              currency: String(
+                split.currency || rowForInvoice?.accounting?.currency || "GBP",
+              ).toLowerCase(),
               product_data: {
                 name: `Invoice ${ref}`,
                 description: `${actDisplayName || rowForInvoice.actName || "Booking"} - ${invoiceCompany.name}`,
