@@ -1308,23 +1308,44 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
 
     // Invoice table.
     const tableX = cardX + 26;
-    const tableY = detailY + 105;
+    const tableY = detailY + 95;
     const tableW = cardW - 52;
-    const descW = 300;
-    const qtyW = 55;
-    const amountW = tableW - descW - qtyW;
+    const splitW = isExtrasInvoice ? 72 : 0;
+    const qtyW = 38;
+    const amountW = 78;
+    const descW = tableW - qtyW - amountW - splitW - splitW;
 
-    doc.roundedRect(tableX, tableY, tableW, 30, 4).fill(navy);
-    doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(10);
-    doc.text("Description", tableX + 12, tableY + 10, { width: descW - 20 });
-    doc.text("Qty", tableX + descW + 8, tableY + 10, {
-      width: qtyW - 12,
-      align: "right",
-    });
-    doc.text("Amount", tableX + descW + qtyW + 8, tableY + 10, {
-      width: amountW - 20,
-      align: "right",
-    });
+    doc.roundedRect(tableX, tableY, tableW, 28, 4).fill(navy);
+    doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(9);
+    doc.text("Description", tableX + 10, tableY + 9, { width: descW - 14 });
+
+    if (isExtrasInvoice) {
+      doc.text("Pass-through", tableX + descW + 4, tableY + 9, {
+        width: splitW - 8,
+        align: "right",
+      });
+      doc.text("Mgmt fee", tableX + descW + splitW + 4, tableY + 9, {
+        width: splitW - 8,
+        align: "right",
+      });
+      doc.text("Qty", tableX + descW + splitW + splitW + 4, tableY + 9, {
+        width: qtyW - 8,
+        align: "right",
+      });
+      doc.text("Amount", tableX + descW + splitW + splitW + qtyW + 4, tableY + 9, {
+        width: amountW - 8,
+        align: "right",
+      });
+    } else {
+      doc.text("Qty", tableX + descW + 8, tableY + 9, {
+        width: qtyW - 12,
+        align: "right",
+      });
+      doc.text("Amount", tableX + descW + qtyW + 8, tableY + 9, {
+        width: amountW - 20,
+        align: "right",
+      });
+    }
 
     const { invoiceExtras, manualAdjustmentAmount, manualAdjustmentLabel } =
       getInvoiceExtrasAndAdjustment(row);
@@ -1344,19 +1365,42 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
           .filter((extra) => extra.description && Number(extra.amount || 0) !== 0);
 
     const rows = isExtrasInvoice
-      ? [
-          ...visibleExtras,
-          ...(split.managementVat > 0
-            ? [
-                {
-                  description: "VAT included within management fee only",
-                  qty: "",
-                  amount: split.managementVat,
-                  muted: true,
-                },
-              ]
-            : []),
-        ]
+      ? invoiceExtras
+          .map((extra) => {
+            const description = String(extra?.name || extra?.key || "Extra").trim();
+            const qty = String(Number(extra?.quantity || 1) || 1);
+            const quotedGross = round2(
+              Number(extra?.price || 0) * (Number(extra?.quantity || 1) || 1),
+            );
+            if (!description || quotedGross === 0) return null;
+
+            const explicitPassThrough = round2(Number(extra?.passThroughGross || 0));
+            const explicitManagement = round2(Number(extra?.managementGross || 0));
+            const refundableDeposit = isRefundableDepositExtra(extra);
+            const hasExplicitSplit = explicitPassThrough > 0 || explicitManagement > 0;
+
+            let passThroughAmount = hasExplicitSplit
+              ? explicitPassThrough
+              : refundableDeposit
+                ? quotedGross
+                : quotedGross;
+            let managementAmount = hasExplicitSplit ? explicitManagement : 0;
+
+            const splitTotal = round2(passThroughAmount + managementAmount);
+            if (splitTotal < quotedGross) {
+              passThroughAmount = round2(passThroughAmount + quotedGross - splitTotal);
+            }
+
+            return {
+              description,
+              qty,
+              passThroughAmount,
+              managementAmount,
+              amount: quotedGross,
+              refundableDeposit,
+            };
+          })
+          .filter(Boolean)
       : [
           {
             description: "Band fee / artist performance fee",
@@ -1386,25 +1430,64 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
           },
         ];
 
-    let y = tableY + 30;
+    let y = tableY + 28;
     rows.forEach((item, index) => {
-      const rowH = 34;
+      const rowH = isExtrasInvoice ? 30 : 34;
       doc
         .rect(tableX, y, tableW, rowH)
         .fill(index % 2 === 0 ? "#f9fafb" : "#ffffff");
+
       doc
         .fillColor(item.muted ? muted : text)
         .font(item.muted ? "Helvetica" : "Helvetica-Bold")
-        .fontSize(10);
-      doc.text(item.description, tableX + 12, y + 11, { width: descW - 20 });
-      doc.text(item.qty, tableX + descW + 8, y + 11, {
-        width: qtyW - 12,
-        align: "right",
-      });
-      doc.text(formatMoney(item.amount), tableX + descW + qtyW + 8, y + 11, {
-        width: amountW - 20,
-        align: "right",
-      });
+        .fontSize(isExtrasInvoice ? 8.5 : 10);
+
+      doc.text(item.description, tableX + 10, y + 9, { width: descW - 14 });
+
+      if (isExtrasInvoice) {
+        doc
+          .font("Helvetica")
+          .fontSize(8)
+          .fillColor(item.refundableDeposit ? muted : text);
+        doc.text(
+          item.refundableDeposit
+            ? `${formatMoney(item.passThroughAmount)} refundable`
+            : item.passThroughAmount
+              ? formatMoney(item.passThroughAmount)
+              : "—",
+          tableX + descW + 4,
+          y + 9,
+          { width: splitW - 8, align: "right" },
+        );
+
+        doc.fillColor(text);
+        doc.text(
+          item.managementAmount ? formatMoney(item.managementAmount) : "—",
+          tableX + descW + splitW + 4,
+          y + 9,
+          { width: splitW - 8, align: "right" },
+        );
+
+        doc.font("Helvetica-Bold").fontSize(8.5);
+        doc.text(item.qty, tableX + descW + splitW + splitW + 4, y + 9, {
+          width: qtyW - 8,
+          align: "right",
+        });
+        doc.text(formatMoney(item.amount), tableX + descW + splitW + splitW + qtyW + 4, y + 9, {
+          width: amountW - 8,
+          align: "right",
+        });
+      } else {
+        doc.text(item.qty, tableX + descW + 8, y + 11, {
+          width: qtyW - 12,
+          align: "right",
+        });
+        doc.text(formatMoney(item.amount), tableX + descW + qtyW + 8, y + 11, {
+          width: amountW - 20,
+          align: "right",
+        });
+      }
+
       doc
         .strokeColor(line)
         .moveTo(tableX, y + rowH)
@@ -1425,7 +1508,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       let offsetY = totalsY;
 
       if (Number(split.passThroughGross || 0) !== 0) {
-        doc.text("Pass-through extras", totalsX, offsetY, { width: 125 });
+        doc.text("Pass-through / deposits", totalsX, offsetY, { width: 125 });
         doc.text(formatMoney(split.passThroughGross), totalsX + 125, offsetY, {
           width: 90,
           align: "right",
@@ -1448,17 +1531,10 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         offsetY += 18;
       }
 
-      if (Number(split.refundableDepositGross || 0) !== 0) {
-        doc.text("Refundable deposit", totalsX, offsetY, { width: 125 });
-        doc.text(formatMoney(split.refundableDepositGross), totalsX + 125, offsetY, {
-          width: 90,
-          align: "right",
-        });
-        offsetY += 18;
-      }
+      // Removed refundable deposit line (was here)
 
-      totalsLineY = offsetY + 8;
-      totalLabelY = offsetY + 20;
+      totalsLineY = offsetY + 4;
+      totalLabelY = offsetY + 16;
     } else {
       doc.text("Band fee / pass-through", totalsX, totalsY, { width: 125 });
       doc.text(formatMoney(split.passThroughGross), totalsX + 125, totalsY, {
@@ -1598,7 +1674,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
             ? "Thank you, payment has been received. This receipt relates to additional services and/or equipment hire for the event."
             : "Thank you, payment has been received. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee."
           : isExtrasInvoice
-            ? "Please use the payment reference above so we can match your payment quickly. This invoice relates only to additional services and/or equipment hire for the event. VAT is charged only on the management fee element; pass-through costs and refundable deposits are shown separately."
+            ? "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the management fee element; pass-through costs and refundable deposits are separated in the table."
             : "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee.",
         cardX + 270,
         vatNoteY,
