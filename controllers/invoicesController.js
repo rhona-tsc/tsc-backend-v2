@@ -879,6 +879,117 @@ const getInvoiceExtrasAndAdjustment = (row) => {
   };
 };
 
+// Helper: build extra accounting lines for extras invoice
+const getExtraLineGross = (extra) =>
+  round2(Number(extra?.price || 0) * (Number(extra?.quantity || 1) || 1));
+
+const isRefundableDepositExtra = (extra) => {
+  const text = `${extra?.name || ""} ${extra?.key || ""} ${extra?.category || ""}`.toLowerCase();
+  return Boolean(
+    extra?.refundableDeposit ||
+      text.includes("deposit") ||
+      text.includes("refundable"),
+  );
+};
+
+const buildExtraAccountingLines = (invoiceExtras, vatRate = 0.2) => {
+  const lines = [];
+  let passThroughGross = 0;
+  let managementGross = 0;
+  let refundableDepositGross = 0;
+
+  invoiceExtras.forEach((extra) => {
+    const description = String(extra?.name || extra?.key || "Extra").trim();
+    const qty = String(Number(extra?.quantity || 1) || 1);
+    const lineGross = getExtraLineGross(extra);
+    if (!description || lineGross === 0) return;
+
+    const explicitPassThrough = round2(Number(extra?.passThroughGross || 0));
+    const explicitManagement = round2(Number(extra?.managementGross || 0));
+    const hasExplicitSplit = explicitPassThrough > 0 || explicitManagement > 0;
+    const refundableDeposit = isRefundableDepositExtra(extra);
+
+    if (hasExplicitSplit) {
+      const remainingGross = Math.max(
+        0,
+        round2(lineGross - explicitPassThrough - explicitManagement),
+      );
+
+      if (explicitPassThrough > 0) {
+        passThroughGross += explicitPassThrough;
+        lines.push({
+          description,
+          qty,
+          amount: explicitPassThrough,
+          bucket: refundableDeposit ? "refundable_deposit" : "pass_through",
+        });
+      }
+
+      if (remainingGross > 0) {
+        if (refundableDeposit) {
+          refundableDepositGross += remainingGross;
+          lines.push({
+            description: `${description} — refundable deposit`,
+            qty: "1",
+            amount: remainingGross,
+            bucket: "refundable_deposit",
+          });
+        } else {
+          passThroughGross += remainingGross;
+          lines.push({
+            description: `${description} — pass-through balance`,
+            qty: "1",
+            amount: remainingGross,
+            bucket: "pass_through",
+          });
+        }
+      }
+
+      if (explicitManagement > 0) {
+        managementGross += explicitManagement;
+        lines.push({
+          description: `Management fee — ${description}`,
+          qty: "1",
+          amount: explicitManagement,
+          bucket: "management",
+        });
+      }
+      return;
+    }
+
+    if (refundableDeposit) {
+      refundableDepositGross += lineGross;
+      lines.push({
+        description,
+        qty,
+        amount: lineGross,
+        bucket: "refundable_deposit",
+      });
+      return;
+    }
+
+    passThroughGross += lineGross;
+    lines.push({
+      description,
+      qty,
+      amount: lineGross,
+      bucket: "pass_through",
+    });
+  });
+
+  const managementSplit = vatFromGross(managementGross, vatRate);
+
+  return {
+    lines,
+    passThroughGross: round2(passThroughGross),
+    managementGross: round2(managementGross),
+    managementNet: managementSplit.net,
+    managementVat: managementSplit.vat,
+    refundableDepositGross: round2(refundableDepositGross),
+    gross: round2(passThroughGross + managementGross + refundableDepositGross),
+  };
+};
+
 // Helper: build board invoice split
 const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
   const invoiceType = String(rowForInvoice?.invoiceType || "main").toLowerCase();
@@ -897,20 +1008,26 @@ const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
   const vatRate = Number(accounting.vatRate ?? invoiceCompany.vatRate ?? 0);
 
   if (invoiceType === "extras") {
-    const extrasVatSplit = vatFromGross(extrasTotal, vatRate);
+    const { invoiceExtras } = getInvoiceExtrasAndAdjustment(rowForInvoice);
+    const extraAccounting = buildExtraAccountingLines(invoiceExtras, vatRate);
 
     return {
-      gross: extrasTotal,
+      gross: extraAccounting.gross,
       storedGross,
-      extrasTotal,
+      extrasTotal: extraAccounting.gross,
       manualAdjustmentAmount: 0,
       invoiceCompany: invoiceCompany.brand,
       invoiceType: "extras",
       vatRate,
-      commissionGross: extrasTotal,
-      commissionNet: extrasVatSplit.net,
-      commissionVat: extrasVatSplit.vat,
-      passThroughGross: 0,
+      commissionGross: extraAccounting.managementGross,
+      commissionNet: extraAccounting.managementNet,
+      commissionVat: extraAccounting.managementVat,
+      managementGross: extraAccounting.managementGross,
+      managementNet: extraAccounting.managementNet,
+      managementVat: extraAccounting.managementVat,
+      passThroughGross: extraAccounting.passThroughGross,
+      refundableDepositGross: extraAccounting.refundableDepositGross,
+      extraLines: extraAccounting.lines,
     };
   }
 
@@ -1212,25 +1329,29 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const { invoiceExtras, manualAdjustmentAmount, manualAdjustmentLabel } =
       getInvoiceExtrasAndAdjustment(row);
 
-    const visibleExtras = invoiceExtras
-      .map((extra) => ({
-        description: String(extra?.name || extra?.key || "Extra").trim(),
-        qty: String(Number(extra?.quantity || 1) || 1),
-        amount: round2(
-          Number(extra?.price || 0) * (Number(extra?.quantity || 1) || 1),
-        ),
-      }))
-      .filter((extra) => extra.description && Number(extra.amount || 0) !== 0);
+    const visibleExtras = isExtrasInvoice
+      ? Array.isArray(split?.extraLines)
+        ? split.extraLines
+        : []
+      : invoiceExtras
+          .map((extra) => ({
+            description: String(extra?.name || extra?.key || "Extra").trim(),
+            qty: String(Number(extra?.quantity || 1) || 1),
+            amount: round2(
+              Number(extra?.price || 0) * (Number(extra?.quantity || 1) || 1),
+            ),
+          }))
+          .filter((extra) => extra.description && Number(extra.amount || 0) !== 0);
 
     const rows = isExtrasInvoice
       ? [
           ...visibleExtras,
-          ...(split.commissionVat > 0
+          ...(split.managementVat > 0
             ? [
                 {
-                  description: "VAT included within extras total",
+                  description: "VAT included within management fee only",
                   qty: "",
-                  amount: split.commissionVat,
+                  amount: split.managementVat,
                   muted: true,
                 },
               ]
@@ -1301,23 +1422,43 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     let totalLabelY = totalsY + 12;
 
     if (isExtrasInvoice) {
-      doc.text("Extras", totalsX, totalsY, { width: 125 });
-      doc.text(formatMoney(split.extrasTotal), totalsX + 125, totalsY, {
-        width: 90,
-        align: "right",
-      });
-      if (Number(split.commissionVat || 0) !== 0) {
-        doc.text("VAT included", totalsX, totalsY + 18, { width: 125 });
-        doc.text(formatMoney(split.commissionVat), totalsX + 125, totalsY + 18, {
+      let offsetY = totalsY;
+
+      if (Number(split.passThroughGross || 0) !== 0) {
+        doc.text("Pass-through extras", totalsX, offsetY, { width: 125 });
+        doc.text(formatMoney(split.passThroughGross), totalsX + 125, offsetY, {
           width: 90,
           align: "right",
         });
-        totalsLineY = totalsY + 44;
-        totalLabelY = totalsY + 56;
-      } else {
-        totalsLineY = totalsY + 26;
-        totalLabelY = totalsY + 38;
+        offsetY += 18;
       }
+
+      if (Number(split.managementGross || 0) !== 0) {
+        doc.text("Management fee VAT-inc", totalsX, offsetY, { width: 125 });
+        doc.text(formatMoney(split.managementGross), totalsX + 125, offsetY, {
+          width: 90,
+          align: "right",
+        });
+        offsetY += 18;
+        doc.text("VAT on management fee", totalsX, offsetY, { width: 125 });
+        doc.text(formatMoney(split.managementVat), totalsX + 125, offsetY, {
+          width: 90,
+          align: "right",
+        });
+        offsetY += 18;
+      }
+
+      if (Number(split.refundableDepositGross || 0) !== 0) {
+        doc.text("Refundable deposit", totalsX, offsetY, { width: 125 });
+        doc.text(formatMoney(split.refundableDepositGross), totalsX + 125, offsetY, {
+          width: 90,
+          align: "right",
+        });
+        offsetY += 18;
+      }
+
+      totalsLineY = offsetY + 8;
+      totalLabelY = offsetY + 20;
     } else {
       doc.text("Band fee / pass-through", totalsX, totalsY, { width: 125 });
       doc.text(formatMoney(split.passThroughGross), totalsX + 125, totalsY, {
@@ -1457,7 +1598,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
             ? "Thank you, payment has been received. This receipt relates to additional services and/or equipment hire for the event."
             : "Thank you, payment has been received. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee."
           : isExtrasInvoice
-            ? "Please use the payment reference above so we can match your payment quickly. This invoice relates only to additional services and/or equipment hire for the event."
+            ? "Please use the payment reference above so we can match your payment quickly. This invoice relates only to additional services and/or equipment hire for the event. VAT is charged only on the management fee element; pass-through costs and refundable deposits are shown separately."
             : "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee.",
         cardX + 270,
         vatNoteY,
@@ -1675,6 +1816,11 @@ export const createBoardInvoice = async (req, res) => {
         ),
         invoiceCompany: invoiceCompany.brand,
         amount_pence: String(amountPence),
+        management_gross: String(Number(split.managementGross || 0).toFixed(2)),
+        management_vat: String(Number(split.managementVat || 0).toFixed(2)),
+        refundable_deposit_gross: String(
+          Number(split.refundableDepositGross || 0).toFixed(2),
+        ),
         commission_gross: String(Number(split.commissionGross || 0).toFixed(2)),
         commission_vat: String(Number(split.commissionVat || 0).toFixed(2)),
         commission_net: String(Number(split.commissionNet || 0).toFixed(2)),
