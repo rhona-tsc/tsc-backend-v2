@@ -832,11 +832,18 @@ const getInvoiceLogoPath = (invoiceCompany) => {
 
 // Helper: get invoice extras and manual adjustment
 const getInvoiceExtrasAndAdjustment = (row) => {
-  const invoiceExtras = Array.isArray(row?.extras)
+  const invoiceType = String(row?.invoiceType || "main").toLowerCase();
+
+  const sourceExtras = Array.isArray(row?.extras)
     ? row.extras
     : Array.isArray(row?.bookingDetails?.extras)
       ? row.bookingDetails.extras
       : [];
+
+  const invoiceExtras =
+    invoiceType === "extras"
+      ? sourceExtras.filter((extra) => extra?.includeOnExtrasInvoice !== false)
+      : sourceExtras.filter((extra) => extra?.includeOnMainInvoice !== false);
 
   const extrasTotal = round2(
     invoiceExtras.reduce(
@@ -849,9 +856,13 @@ const getInvoiceExtrasAndAdjustment = (row) => {
   const manualAdjustment =
     row?.manualAdjustment || row?.bookingDetails?.manualAdjustment || null;
 
-  const manualAdjustmentAmount = round2(
-    Number(row?.manualAdjustmentAmount ?? manualAdjustment?.amount ?? 0) || 0,
-  );
+  const manualAdjustmentAmount =
+    invoiceType === "extras"
+      ? 0
+      : round2(
+          Number(row?.manualAdjustmentAmount ?? manualAdjustment?.amount ?? 0) ||
+            0,
+        );
 
   const manualAdjustmentLabel = String(
     row?.manualAdjustmentLabel ||
@@ -870,6 +881,7 @@ const getInvoiceExtrasAndAdjustment = (row) => {
 
 // Helper: build board invoice split
 const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
+  const invoiceType = String(rowForInvoice?.invoiceType || "main").toLowerCase();
   const { extrasTotal, manualAdjustmentAmount } =
     getInvoiceExtrasAndAdjustment(rowForInvoice);
 
@@ -883,6 +895,24 @@ const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
 
   const accounting = rowForInvoice.accounting || {};
   const vatRate = Number(accounting.vatRate ?? invoiceCompany.vatRate ?? 0);
+
+  if (invoiceType === "extras") {
+    const extrasVatSplit = vatFromGross(extrasTotal, vatRate);
+
+    return {
+      gross: extrasTotal,
+      storedGross,
+      extrasTotal,
+      manualAdjustmentAmount: 0,
+      invoiceCompany: invoiceCompany.brand,
+      invoiceType: "extras",
+      vatRate,
+      commissionGross: extrasTotal,
+      commissionNet: extrasVatSplit.net,
+      commissionVat: extrasVatSplit.vat,
+      passThroughGross: 0,
+    };
+  }
 
   const commissionGross = round2(
     accounting.commissionGross ||
@@ -913,6 +943,7 @@ const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
     extrasTotal,
     manualAdjustmentAmount,
     invoiceCompany: invoiceCompany.brand,
+    invoiceType: "main",
     vatRate,
     commissionGross,
     commissionNet: commissionSplit.net,
@@ -944,8 +975,13 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const accent = invoiceCompany?.accent || "#43d8e8";
 
     const documentType = String(row?.documentType || "invoice").toLowerCase();
+    const invoiceType = String(row?.invoiceType || "main").toLowerCase();
+    const isExtrasInvoice = invoiceType === "extras";
     const isReceipt = documentType === "receipt";
-    const invoiceRef = row.bookingRef || row.bookingId || String(row._id);
+    const baseInvoiceRef = row.bookingRef || row.bookingId || String(row._id);
+    const invoiceRef = isExtrasInvoice
+      ? `${baseInvoiceRef}-EXTRAS`
+      : baseInvoiceRef;
     const clientName = firstNonEmpty(
       row.bookerName,
       row.clientName,
@@ -1186,34 +1222,48 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       }))
       .filter((extra) => extra.description && Number(extra.amount || 0) !== 0);
 
-    const rows = [
-      {
-        description: "Band fee / artist performance fee",
-        qty: "1",
-        amount: split.passThroughGross,
-      },
-      ...visibleExtras,
-      ...(manualAdjustmentAmount !== 0
-        ? [
-            {
-              description: manualAdjustmentLabel || "Manual adjustment",
-              qty: "1",
-              amount: manualAdjustmentAmount,
-            },
-          ]
-        : []),
-      {
-        description: "Music management (VAT inclusive)",
-        qty: "1",
-        amount: split.commissionGross,
-      },
-      {
-        description: "VAT included within management fee",
-        qty: "",
-        amount: split.commissionVat,
-        muted: true,
-      },
-    ];
+    const rows = isExtrasInvoice
+      ? [
+          ...visibleExtras,
+          ...(split.commissionVat > 0
+            ? [
+                {
+                  description: "VAT included within extras total",
+                  qty: "",
+                  amount: split.commissionVat,
+                  muted: true,
+                },
+              ]
+            : []),
+        ]
+      : [
+          {
+            description: "Band fee / artist performance fee",
+            qty: "1",
+            amount: split.passThroughGross,
+          },
+          ...visibleExtras,
+          ...(manualAdjustmentAmount !== 0
+            ? [
+                {
+                  description: manualAdjustmentLabel || "Manual adjustment",
+                  qty: "1",
+                  amount: manualAdjustmentAmount,
+                },
+              ]
+            : []),
+          {
+            description: "Music management (VAT inclusive)",
+            qty: "1",
+            amount: split.commissionGross,
+          },
+          {
+            description: "VAT included within management fee",
+            qty: "",
+            amount: split.commissionVat,
+            muted: true,
+          },
+        ];
 
     let y = tableY + 30;
     rows.forEach((item, index) => {
@@ -1246,48 +1296,72 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const totalsX = cardX + cardW - 245;
     const totalsY = y + 24;
     doc.fillColor(text).font("Helvetica").fontSize(10);
-    doc.text("Band fee / pass-through", totalsX, totalsY, { width: 125 });
-    doc.text(formatMoney(split.passThroughGross), totalsX + 125, totalsY, {
-      width: 90,
-      align: "right",
-    });
-    doc.text("Management fee VAT-inc", totalsX, totalsY + 18, { width: 125 });
-    doc.text(formatMoney(split.commissionGross), totalsX + 125, totalsY + 18, {
-      width: 90,
-      align: "right",
-    });
-    doc.text("VAT on management fee", totalsX, totalsY + 36, { width: 125 });
-    doc.text(formatMoney(split.commissionVat), totalsX + 125, totalsY + 36, {
-      width: 90,
-      align: "right",
-    });
 
-    let totalsLineY = totalsY + 62;
-    let totalLabelY = totalsY + 74;
+    let totalsLineY = totalsY;
+    let totalLabelY = totalsY + 12;
 
-    if (Number(split.extrasTotal || 0) !== 0) {
-      doc.text("Extras", totalsX, totalsY + 54, { width: 125 });
-      doc.text(formatMoney(split.extrasTotal), totalsX + 125, totalsY + 54, {
+    if (isExtrasInvoice) {
+      doc.text("Extras", totalsX, totalsY, { width: 125 });
+      doc.text(formatMoney(split.extrasTotal), totalsX + 125, totalsY, {
         width: 90,
         align: "right",
       });
-      totalsLineY += 18;
-      totalLabelY += 18;
-    }
-
-    if (Number(split.manualAdjustmentAmount || 0) !== 0) {
-      doc.text("Manual adjustment", totalsX, totalsLineY - 8, { width: 125 });
-      doc.text(
-        formatMoney(split.manualAdjustmentAmount),
-        totalsX + 125,
-        totalsLineY - 8,
-        {
+      if (Number(split.commissionVat || 0) !== 0) {
+        doc.text("VAT included", totalsX, totalsY + 18, { width: 125 });
+        doc.text(formatMoney(split.commissionVat), totalsX + 125, totalsY + 18, {
           width: 90,
           align: "right",
-        },
-      );
-      totalsLineY += 18;
-      totalLabelY += 18;
+        });
+        totalsLineY = totalsY + 44;
+        totalLabelY = totalsY + 56;
+      } else {
+        totalsLineY = totalsY + 26;
+        totalLabelY = totalsY + 38;
+      }
+    } else {
+      doc.text("Band fee / pass-through", totalsX, totalsY, { width: 125 });
+      doc.text(formatMoney(split.passThroughGross), totalsX + 125, totalsY, {
+        width: 90,
+        align: "right",
+      });
+      doc.text("Management fee VAT-inc", totalsX, totalsY + 18, { width: 125 });
+      doc.text(formatMoney(split.commissionGross), totalsX + 125, totalsY + 18, {
+        width: 90,
+        align: "right",
+      });
+      doc.text("VAT on management fee", totalsX, totalsY + 36, { width: 125 });
+      doc.text(formatMoney(split.commissionVat), totalsX + 125, totalsY + 36, {
+        width: 90,
+        align: "right",
+      });
+
+      totalsLineY = totalsY + 62;
+      totalLabelY = totalsY + 74;
+
+      if (Number(split.extrasTotal || 0) !== 0) {
+        doc.text("Extras", totalsX, totalsY + 54, { width: 125 });
+        doc.text(formatMoney(split.extrasTotal), totalsX + 125, totalsY + 54, {
+          width: 90,
+          align: "right",
+        });
+        totalsLineY += 18;
+        totalLabelY += 18;
+      }
+
+      if (Number(split.manualAdjustmentAmount || 0) !== 0) {
+        doc.text("Manual adjustment", totalsX, totalsLineY - 8, { width: 125 });
+        doc.text(
+          formatMoney(split.manualAdjustmentAmount),
+          totalsX + 125,
+          totalsLineY - 8,
+          {
+            width: 90,
+            align: "right",
+          },
+        );
+        totalsLineY += 18;
+        totalLabelY += 18;
+      }
     }
 
     doc
@@ -1379,8 +1453,12 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .fontSize(8)
       .text(
         isReceipt
-          ? "Thank you, payment has been received. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee."
-          : "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee.",
+          ? isExtrasInvoice
+            ? "Thank you, payment has been received. This receipt relates to additional services and/or equipment hire for the event."
+            : "Thank you, payment has been received. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee."
+          : isExtrasInvoice
+            ? "Please use the payment reference above so we can match your payment quickly. This invoice relates only to additional services and/or equipment hire for the event."
+            : "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee.",
         cardX + 270,
         vatNoteY,
         { width: cardW - 296 },
@@ -1409,11 +1487,14 @@ export const createBoardInvoice = async (req, res) => {
       bookingId,
       invoiceCompany: invoiceCompanyFromRequest,
       documentType = "invoice",
+      invoiceType = "main",
       includePaymentLink = false,
     } = req.body;
 
     const documentStamp = `${Date.now()}`;
     const documentTypeNorm = String(documentType || "invoice").toLowerCase();
+    const invoiceTypeNorm = String(invoiceType || "main").toLowerCase();
+    const isExtrasInvoice = invoiceTypeNorm === "extras";
     const isReceipt = documentTypeNorm === "receipt";
     const now = new Date();
     const invoiceDateISO = now.toISOString().slice(0, 10);
@@ -1463,6 +1544,7 @@ export const createBoardInvoice = async (req, res) => {
     const rowForInvoice = {
       ...row,
       documentType: documentTypeNorm,
+      invoiceType: invoiceTypeNorm,
       invoiceDateISO,
       invoiceDueDateISO: finalDueDate,
       invoiceCompany:
@@ -1484,6 +1566,8 @@ export const createBoardInvoice = async (req, res) => {
 
     console.log("🧾 Invoice debug:", {
       documentType: documentTypeNorm,
+      invoiceType: invoiceTypeNorm,
+      isExtrasInvoice,
       bookingRef: rowForInvoice.bookingRef,
       invoiceDateISO,
       finalDueDate,
@@ -1521,7 +1605,13 @@ export const createBoardInvoice = async (req, res) => {
       isPdf: pdfBuffer?.slice(0, 4).toString() === "%PDF",
     });
 
-    const publicIdPrefix = isReceipt ? "receipt" : "invoice";
+    const publicIdPrefix = isReceipt
+      ? isExtrasInvoice
+        ? "extras-receipt"
+        : "receipt"
+      : isExtrasInvoice
+        ? "extras-invoice"
+        : "invoice";
 
     const uploadResult = await new Promise((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
@@ -1576,6 +1666,7 @@ export const createBoardInvoice = async (req, res) => {
         category: "board_invoice",
         payment_stage: "board_invoice",
         paymentStage: "board_invoice",
+        invoiceType: invoiceTypeNorm,
         bookingId: ref,
         booking_ref: ref,
         boardRowId: String(rowForInvoice._id),
@@ -1631,6 +1722,7 @@ export const createBoardInvoice = async (req, res) => {
       cardPaymentSessionId,
       hasCardPaymentUrl: Boolean(cardPaymentUrl),
       documentType: documentTypeNorm,
+      invoiceType: invoiceTypeNorm,
       documentStamp,
       invoiceDateISO,
       finalDueDate,
@@ -1639,38 +1731,73 @@ export const createBoardInvoice = async (req, res) => {
     });
 
     const boardSetPatch = isReceipt
-      ? {
-          invoiceCompany: invoiceCompany.brand,
-          receiptUrl: browserDocumentUrl,
-          receiptPdfUrl: browserDocumentUrl,
-          receiptCreatedAt: now,
-          balancePaid: true,
-          balanceStatus: "paid",
-          paidAt: now,
-          "payments.balancePaymentReceived": true,
-          "payments.invoicePaid": true,
-          "payments.boardReceiptPdfUrl": browserDocumentUrl,
-          "payments.receiptPdfUrl": browserDocumentUrl,
-          "payments.receiptCreatedAt": now,
-          "payments.paidAt": now,
-          accounting: split,
-        }
-      : {
-          invoiceCompany: invoiceCompany.brand,
-          invoiceDateISO,
-          invoiceDueDateISO: finalDueDate,
-          invoiceUrl: browserDocumentUrl,
-          invoicePdfUrl: browserDocumentUrl,
-          "payments.boardInvoicePdfUrl": browserDocumentUrl,
-          "payments.boardInvoiceCreatedAt": now,
-          ...(cardPaymentUrl
-            ? {
-                "payments.balanceInvoiceUrl": cardPaymentUrl,
-                "payments.balanceInvoiceId": cardPaymentSessionId,
-              }
-            : {}),
-          accounting: split,
-        };
+      ? isExtrasInvoice
+        ? {
+            invoiceCompany: invoiceCompany.brand,
+            extrasReceiptUrl: browserDocumentUrl,
+            extrasReceiptPdfUrl: browserDocumentUrl,
+            extrasReceiptCreatedAt: now,
+            extrasPaid: true,
+            extrasStatus: "paid",
+            extrasPaidAt: now,
+            "payments.extrasPaymentReceived": true,
+            "payments.extrasInvoicePaid": true,
+            "payments.extrasReceiptPdfUrl": browserDocumentUrl,
+            "payments.extrasReceiptCreatedAt": now,
+            "payments.extrasPaidAt": now,
+            extrasAccounting: split,
+          }
+        : {
+            invoiceCompany: invoiceCompany.brand,
+            receiptUrl: browserDocumentUrl,
+            receiptPdfUrl: browserDocumentUrl,
+            receiptCreatedAt: now,
+            balancePaid: true,
+            balanceStatus: "paid",
+            paidAt: now,
+            "payments.balancePaymentReceived": true,
+            "payments.invoicePaid": true,
+            "payments.boardReceiptPdfUrl": browserDocumentUrl,
+            "payments.receiptPdfUrl": browserDocumentUrl,
+            "payments.receiptCreatedAt": now,
+            "payments.paidAt": now,
+            accounting: split,
+          }
+      : isExtrasInvoice
+        ? {
+            invoiceCompany: invoiceCompany.brand,
+            extrasInvoiceDateISO: invoiceDateISO,
+            extrasInvoiceDueDateISO: finalDueDate,
+            extrasInvoiceUrl: browserDocumentUrl,
+            extrasInvoicePdfUrl: browserDocumentUrl,
+            extrasStatus: "sent",
+            extrasPaid: false,
+            "payments.extrasInvoicePdfUrl": browserDocumentUrl,
+            "payments.extrasInvoiceCreatedAt": now,
+            ...(cardPaymentUrl
+              ? {
+                  "payments.extrasInvoiceUrl": cardPaymentUrl,
+                  "payments.extrasInvoiceId": cardPaymentSessionId,
+                }
+              : {}),
+            extrasAccounting: split,
+          }
+        : {
+            invoiceCompany: invoiceCompany.brand,
+            invoiceDateISO,
+            invoiceDueDateISO: finalDueDate,
+            invoiceUrl: browserDocumentUrl,
+            invoicePdfUrl: browserDocumentUrl,
+            "payments.boardInvoicePdfUrl": browserDocumentUrl,
+            "payments.boardInvoiceCreatedAt": now,
+            ...(cardPaymentUrl
+              ? {
+                  "payments.balanceInvoiceUrl": cardPaymentUrl,
+                  "payments.balanceInvoiceId": cardPaymentSessionId,
+                }
+              : {}),
+            accounting: split,
+          };
 
     const updated = await BookingBoardItem.findByIdAndUpdate(
       row._id,
@@ -1682,33 +1809,61 @@ export const createBoardInvoice = async (req, res) => {
     // dotted payments.* updates here. Keep receipt/invoice document URLs at the
     // top level on Booking, and store nested payments.* fields only on BookingBoardItem.
     const bookingSetPatch = isReceipt
-      ? {
-          invoiceCompany: invoiceCompany.brand,
-          receiptUrl: browserDocumentUrl,
-          receiptPdfUrl: browserDocumentUrl,
-          receiptCreatedAt: now,
-          balancePaid: true,
-          balanceStatus: "paid",
-          paidAt: now,
-          accounting: split,
-        }
-      : {
-          invoiceCompany: invoiceCompany.brand,
-          invoiceDateISO,
-          invoiceDueDateISO: finalDueDate,
-          invoiceUrl: browserDocumentUrl,
-          invoicePdfUrl: browserDocumentUrl,
-          ...(cardPaymentUrl
-            ? {
-                paymentLink: cardPaymentUrl,
-                balanceInvoiceUrl: cardPaymentUrl,
-                balanceInvoiceId: cardPaymentSessionId,
-                balanceStatus: "sent",
-                balancePaid: false,
-              }
-            : {}),
-          accounting: split,
-        };
+      ? isExtrasInvoice
+        ? {
+            invoiceCompany: invoiceCompany.brand,
+            extrasReceiptUrl: browserDocumentUrl,
+            extrasReceiptPdfUrl: browserDocumentUrl,
+            extrasReceiptCreatedAt: now,
+            extrasPaid: true,
+            extrasStatus: "paid",
+            extrasPaidAt: now,
+            extrasAccounting: split,
+          }
+        : {
+            invoiceCompany: invoiceCompany.brand,
+            receiptUrl: browserDocumentUrl,
+            receiptPdfUrl: browserDocumentUrl,
+            receiptCreatedAt: now,
+            balancePaid: true,
+            balanceStatus: "paid",
+            paidAt: now,
+            accounting: split,
+          }
+      : isExtrasInvoice
+        ? {
+            invoiceCompany: invoiceCompany.brand,
+            extrasInvoiceDateISO: invoiceDateISO,
+            extrasInvoiceDueDateISO: finalDueDate,
+            extrasInvoiceUrl: browserDocumentUrl,
+            extrasInvoicePdfUrl: browserDocumentUrl,
+            extrasStatus: "sent",
+            extrasPaid: false,
+            ...(cardPaymentUrl
+              ? {
+                  extrasPaymentLink: cardPaymentUrl,
+                  extrasStripeSessionId: cardPaymentSessionId,
+                }
+              : {}),
+            extrasAccounting: split,
+          }
+        : {
+            invoiceCompany: invoiceCompany.brand,
+            invoiceDateISO,
+            invoiceDueDateISO: finalDueDate,
+            invoiceUrl: browserDocumentUrl,
+            invoicePdfUrl: browserDocumentUrl,
+            ...(cardPaymentUrl
+              ? {
+                  paymentLink: cardPaymentUrl,
+                  balanceInvoiceUrl: cardPaymentUrl,
+                  balanceInvoiceId: cardPaymentSessionId,
+                  balanceStatus: "sent",
+                  balancePaid: false,
+                }
+              : {}),
+            accounting: split,
+          };
 
     await Booking.findOneAndUpdate(
       {
@@ -1725,13 +1880,50 @@ export const createBoardInvoice = async (req, res) => {
     return res.json({
       success: true,
       documentType: documentTypeNorm,
-      invoiceUrl: isReceipt ? updated?.invoiceUrl : browserDocumentUrl,
-      invoicePdfUrl: isReceipt ? updated?.invoicePdfUrl : browserDocumentUrl,
-      receiptUrl: isReceipt ? browserDocumentUrl : updated?.receiptUrl,
-      receiptPdfUrl: isReceipt ? browserDocumentUrl : updated?.receiptPdfUrl,
+      invoiceType: invoiceTypeNorm,
+      invoiceUrl: isReceipt
+        ? updated?.invoiceUrl
+        : isExtrasInvoice
+          ? updated?.invoiceUrl
+          : browserDocumentUrl,
+      invoicePdfUrl: isReceipt
+        ? updated?.invoicePdfUrl
+        : isExtrasInvoice
+          ? updated?.invoicePdfUrl
+          : browserDocumentUrl,
+      receiptUrl: isReceipt
+        ? isExtrasInvoice
+          ? updated?.receiptUrl
+          : browserDocumentUrl
+        : updated?.receiptUrl,
+      receiptPdfUrl: isReceipt
+        ? isExtrasInvoice
+          ? updated?.receiptPdfUrl
+          : browserDocumentUrl
+        : updated?.receiptPdfUrl,
+      extrasInvoiceUrl: isReceipt
+        ? updated?.extrasInvoiceUrl
+        : isExtrasInvoice
+          ? browserDocumentUrl
+          : updated?.extrasInvoiceUrl,
+      extrasInvoicePdfUrl: isReceipt
+        ? updated?.extrasInvoicePdfUrl
+        : isExtrasInvoice
+          ? browserDocumentUrl
+          : updated?.extrasInvoicePdfUrl,
+      extrasReceiptUrl: isReceipt
+        ? isExtrasInvoice
+          ? browserDocumentUrl
+          : updated?.extrasReceiptUrl
+        : updated?.extrasReceiptUrl,
+      extrasReceiptPdfUrl: isReceipt
+        ? isExtrasInvoice
+          ? browserDocumentUrl
+          : updated?.extrasReceiptPdfUrl
+        : updated?.extrasReceiptPdfUrl,
       previewUrl: isReceipt
-        ? `/api/invoices/board-receipt/${row._id}`
-        : `/api/invoices/board-invoice/${row._id}`,
+        ? `/api/invoices/board-receipt/${row._id}${isExtrasInvoice ? "?invoiceType=extras" : ""}`
+        : `/api/invoices/board-invoice/${row._id}${isExtrasInvoice ? "?invoiceType=extras" : ""}`,
       invoiceCompany: invoiceCompany.brand,
       invoiceDateISO,
       invoiceDueDateISO: finalDueDate,
@@ -1755,9 +1947,12 @@ export const serveBoardReceiptPdf = async (req, res) => {
 
     if (!row) return res.status(404).send("Receipt not found");
 
+    const invoiceTypeNorm = String(req.query?.invoiceType || "main").toLowerCase();
+
     const rowForInvoice = {
       ...row,
       documentType: "receipt",
+      invoiceType: invoiceTypeNorm,
       invoiceCompany:
         row.invoiceCompany || row?.accounting?.invoiceCompany || "TSC",
     };
@@ -1790,6 +1985,8 @@ export const serveBoardInvoicePdf = async (req, res) => {
 
     if (!row) return res.status(404).send("Invoice not found");
 
+    const invoiceTypeNorm = String(req.query?.invoiceType || "main").toLowerCase();
+
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
     const finalDueDate = firstNonEmpty(
       row.invoiceDueDateISO,
@@ -1802,6 +1999,7 @@ export const serveBoardInvoicePdf = async (req, res) => {
     const rowForInvoice = {
       ...row,
       documentType: "invoice",
+      invoiceType: invoiceTypeNorm,
       invoiceDueDateISO: finalDueDate,
       invoiceCompany:
         row.invoiceCompany || row?.accounting?.invoiceCompany || "TSC",

@@ -47,6 +47,20 @@ const PaymentsSchema = new mongoose.Schema(
     bandPaymentsSent: { type: Boolean, default: false },
     boardInvoicePdfUrl: { type: String, default: "" },
     boardInvoiceCreatedAt: { type: Date },
+    balanceInvoiceId: { type: String, default: "" },
+    invoicePaid: { type: Boolean, default: false },
+    receiptPdfUrl: { type: String, default: "" },
+    receiptCreatedAt: { type: Date },
+    paidAt: { type: Date },
+    extrasInvoiceUrl: { type: String, default: "" },
+    extrasInvoiceId: { type: String, default: "" },
+    extrasInvoicePdfUrl: { type: String, default: "" },
+    extrasInvoiceCreatedAt: { type: Date },
+    extrasPaymentReceived: { type: Boolean, default: false },
+    extrasInvoicePaid: { type: Boolean, default: false },
+    extrasReceiptPdfUrl: { type: String, default: "" },
+    extrasReceiptCreatedAt: { type: Date },
+    extrasPaidAt: { type: Date },
     bandPayments: [
       {
         musicianId: mongoose.Types.ObjectId,
@@ -78,6 +92,8 @@ const BookingExtraSchema = new mongoose.Schema(
     payoutMemberIds: [{ type: mongoose.Schema.Types.ObjectId }],
     payoutMemberNames: [{ type: String }],
     paLateStay: { type: mongoose.Schema.Types.Mixed, default: null },
+    includeOnMainInvoice: { type: Boolean, default: true },
+    includeOnExtrasInvoice: { type: Boolean, default: true },
   },
   { _id: false },
 );
@@ -126,6 +142,27 @@ const AccountingSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const ExtrasAccountingSchema = new mongoose.Schema(
+  {
+    invoiceCompany: {
+      type: String,
+      enum: ["TSC", "BMM"],
+      default: "BMM",
+    },
+    invoiceType: { type: String, default: "extras" },
+    paymentStage: { type: String, default: "extras" },
+    vatRate: { type: Number, default: 0.2 },
+    commissionGross: { type: Number, default: 0 },
+    commissionVat: { type: Number, default: 0 },
+    commissionNet: { type: Number, default: 0 },
+    passThroughGross: { type: Number, default: 0 },
+    extrasTotal: { type: Number, default: 0 },
+    gross: { type: Number, default: 0 },
+    currency: { type: String, default: "GBP" },
+  },
+  { _id: false },
+);
+
 const BookingBoardItemSchema = new mongoose.Schema(
   {
     // link to core booking if exists
@@ -157,6 +194,22 @@ const BookingBoardItemSchema = new mongoose.Schema(
     payments: PaymentsSchema,
     invoiceUrl: { type: String, default: "" },
     invoicePdfUrl: { type: String, default: "" },
+    receiptUrl: { type: String, default: "" },
+    receiptPdfUrl: { type: String, default: "" },
+    receiptCreatedAt: { type: Date },
+    balancePaid: { type: Boolean, default: false },
+    balanceStatus: { type: String, default: "" },
+    paidAt: { type: Date },
+    extrasInvoiceDateISO: { type: String, default: "" },
+    extrasInvoiceDueDateISO: { type: String, default: "" },
+    extrasInvoiceUrl: { type: String, default: "" },
+    extrasInvoicePdfUrl: { type: String, default: "" },
+    extrasReceiptUrl: { type: String, default: "" },
+    extrasReceiptPdfUrl: { type: String, default: "" },
+    extrasReceiptCreatedAt: { type: Date },
+    extrasStatus: { type: String, default: "" },
+    extrasPaid: { type: Boolean, default: false },
+    extrasPaidAt: { type: Date },
     bandSize: { type: Number, default: 0 }, // excluding manager
     lineupSelected: { type: String }, // human label e.g. "6-Piece (2xVoc, Sax, Gtr, Bass, Drums)"
     lineupComposition: [{ type: String }], // e.g. ["Lead Vocal","Guitar","Bass","Drums"]
@@ -166,6 +219,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
     source: { type: String, default: "" },
     sessionId: { type: String },
     accounting: AccountingSchema,
+    extrasAccounting: ExtrasAccountingSchema,
     bookingDetails: BookingDetailsSchema,
     extras: [BookingExtraSchema],
     manualAdjustment: ManualAdjustmentSchema,
