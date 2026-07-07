@@ -325,6 +325,19 @@ const ROLE_ALIASES = {
     "front of house",
     "sound engineering with pa & lights provision",
   ],
+  "pa & light provision": [
+    "pa & lights provision",
+    "pa and light provision",
+    "pa and lights provision",
+    "pa light provision",
+    "pa lights provision",
+    "pa provision",
+    "pa hire",
+    "sound engineering with pa & lights provision",
+    "sound engineering with pa and lights provision",
+    "sound engineer with pa & lights provision",
+    "sound engineer with pa and lights provision",
+  ],
 };
 
 const INSTRUMENT_ALIASES = {
@@ -411,6 +424,11 @@ const cleanRoleText = (value = "") => {
     .replace(/\bbacking singer\b/g, "backing vocalist")
     .replace(/\bbacking vocal\b/g, "backing vocalist")
     .replace(/\bsinger\b/g, "vocalist")
+    .replace(/\bpa\s*&\s*lights\s*provision\b/g, "pa & light provision")
+    .replace(/\bpa\s*and\s*lights\s*provision\b/g, "pa & light provision")
+    .replace(/\bpa\s*lights\s*provision\b/g, "pa & light provision")
+    .replace(/\bsound engineering with pa\s*&\s*lights provision\b/g, "sound engineering with pa & lights provision")
+    .replace(/\bsound engineering with pa\s*and\s*lights provision\b/g, "sound engineering with pa & lights provision")
     .replace(/\belectric guitarist\b/g, "guitarist")
     .replace(/\bacoustic guitarist\b/g, "guitarist");
 
@@ -1122,9 +1140,12 @@ export const findMatchingMusiciansForDeputyJob = async ({
         if (!hasInstrument(musician, cleanedInstrument)) return false;
       }
 
-if (!vocalistInstrumentalistOnly && !hasAnySecondary(musician, secondaryInstruments)) {
-  return false;
-}
+      if (
+        !vocalistInstrumentalistOnly &&
+        !hasAnySecondary(musician, secondaryInstruments)
+      ) {
+        return false;
+      }
       return true;
     })
     .map((musician) => {
@@ -1135,13 +1156,13 @@ if (!vocalistInstrumentalistOnly && !hasAnySecondary(musician, secondaryInstrume
           ? isLeadFemaleVocalist(musician)
             ? 1
             : 0
-         : vocalistInstrumentalistOnly
-  ? isLeadVocalistWithAnyInstrument(
-      musician,
-      requiredInstrumentsForVocalist,
-    )
-    ? 1
-    : 0
+          : vocalistInstrumentalistOnly
+            ? isLeadVocalistWithAnyInstrument(
+                musician,
+                requiredInstrumentsForVocalist,
+              )
+              ? 1
+              : 0
             : leadOnly
               ? isLeadVocalist(musician)
                 ? 1
