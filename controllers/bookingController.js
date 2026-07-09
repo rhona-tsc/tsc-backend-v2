@@ -2942,7 +2942,7 @@ bandLineup: assignedMusicians,
 });
 }
 
-export const myBookingBoardRows = async (req, res) => {
+ const myBookingBoardRows = async (req, res) => {
   console.log(
     `🐣 (controllers/bookingController.js) myBookingBoardRows called at`,
     new Date().toISOString(),
