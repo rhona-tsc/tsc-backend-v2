@@ -109,6 +109,40 @@ const ManualAdjustmentSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const AssignedMusicianSchema = new mongoose.Schema(
+  {
+    musicianId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
+    name: { type: String, default: "" },
+    firstName: { type: String, default: "" },
+    lastName: { type: String, default: "" },
+    email: { type: String, default: "", lowercase: true, trim: true, index: true },
+    phone: { type: String, default: "" },
+    role: { type: String, default: "" },
+    instrument: { type: String, default: "" },
+    status: {
+      type: String,
+      enum: ["proposed", "confirmed", "declined", "cancelled", "replaced"],
+      default: "confirmed",
+    },
+    fee: { type: Number, default: 0 },
+    travelFee: { type: Number, default: 0 },
+    totalFee: { type: Number, default: 0 },
+    paymentStatus: {
+      type: String,
+      enum: ["not_due", "pending", "paid", "held", "cancelled"],
+      default: "not_due",
+    },
+    notes: { type: String, default: "" },
+    source: { type: String, default: "manual" },
+    taggedAt: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
 const BookingDetailsSchema = new mongoose.Schema(
   {
     eventType: { type: String }, // Wedding, Corporate, etc.
@@ -122,6 +156,7 @@ const BookingDetailsSchema = new mongoose.Schema(
     },
     djServicesBooked: { type: Boolean, default: false },
     extras: [BookingExtraSchema],
+    assignedMusicians: [AssignedMusicianSchema],
     manualAdjustment: ManualAdjustmentSchema,
   },
   { _id: false },
@@ -220,6 +255,9 @@ const BookingBoardItemSchema = new mongoose.Schema(
     bandSize: { type: Number, default: 0 }, // excluding manager
     lineupSelected: { type: String }, // human label e.g. "6-Piece (2xVoc, Sax, Gtr, Bass, Drums)"
     lineupComposition: [{ type: String }], // e.g. ["Lead Vocal","Guitar","Bass","Drums"]
+    assignedMusicians: [AssignedMusicianSchema],
+    bookingMusicians: [AssignedMusicianSchema],
+    bandLineup: [AssignedMusicianSchema],
     arrivalTime: { type: String }, // “17:30”
     finishTime: { type: String }, // “23:30”
     sourceBookingId: { type: mongoose.Types.ObjectId, ref: "Booking" },
@@ -243,5 +281,12 @@ const BookingBoardItemSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+BookingBoardItemSchema.index({ "assignedMusicians.musicianId": 1, eventDateISO: 1 });
+BookingBoardItemSchema.index({ "assignedMusicians.email": 1, eventDateISO: 1 });
+BookingBoardItemSchema.index({ "bookingMusicians.musicianId": 1, eventDateISO: 1 });
+BookingBoardItemSchema.index({ "bookingMusicians.email": 1, eventDateISO: 1 });
+BookingBoardItemSchema.index({ "bandLineup.musicianId": 1, eventDateISO: 1 });
+BookingBoardItemSchema.index({ "bandLineup.email": 1, eventDateISO: 1 });
 
 export default mongoose.model("BookingBoardItem", BookingBoardItemSchema);

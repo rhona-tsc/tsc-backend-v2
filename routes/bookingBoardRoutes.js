@@ -1,6 +1,7 @@
 // routes/bookingBoardRoutes.js
 
 import express from "express";
+import mongoose from "mongoose";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import Booking from "../models/bookingModel.js";
 import actModel from "../models/actModel.js";
@@ -75,6 +76,95 @@ const calcVatFromVatInclusiveGross = (gross, vatRate = 0.2) => {
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const isValidObjectId = (value) =>
+  mongoose.Types.ObjectId.isValid(String(value || ""));
+
+const normaliseAssignedMusician = (value = {}) => {
+  if (!value) return null;
+
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return null;
+
+    const objectIdMatch = text.match(/[0-9a-fA-F]{24}/);
+    const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    const cleanedName = text
+      .replace(/[<(].*?[>)]/g, "")
+      .replace(/[0-9a-fA-F]{24}/g, "")
+      .trim();
+
+    return {
+      ...(isValidObjectId(objectIdMatch?.[0])
+        ? { musicianId: new mongoose.Types.ObjectId(objectIdMatch[0]) }
+        : {}),
+      name: cleanedName || text,
+      email: emailMatch?.[0]?.toLowerCase() || "",
+      source: "manual",
+    };
+  }
+
+  const rawId = String(
+    value?.musicianId || value?.userId || value?._id || value?.id || "",
+  ).trim();
+  const firstName = String(value?.firstName || value?.firstname || "").trim();
+  const lastName = String(value?.lastName || value?.lastname || "").trim();
+  const name = String(
+    value?.name || value?.fullName || [firstName, lastName].filter(Boolean).join(" ") || "",
+  ).trim();
+  const email = String(value?.email || value?.userEmail || value?.emailAddress || "")
+    .trim()
+    .toLowerCase();
+
+  if (!rawId && !name && !email) return null;
+
+  return {
+    ...(isValidObjectId(rawId)
+      ? { musicianId: new mongoose.Types.ObjectId(rawId) }
+      : {}),
+    name,
+    firstName,
+    lastName,
+    email,
+    phone: String(value?.phone || value?.phoneNumber || "").trim(),
+    role: String(value?.role || value?.position || value?.instrument || "").trim(),
+    instrument: String(value?.instrument || value?.role || "").trim(),
+    status: value?.status || "confirmed",
+    fee: Number(value?.fee || value?.baseFee || 0),
+    travelFee: Number(value?.travelFee || 0),
+    totalFee: Number(value?.totalFee || value?.fee || value?.baseFee || 0),
+    paymentStatus: value?.paymentStatus || "not_due",
+    notes: String(value?.notes || ""),
+    source: value?.source || "manual",
+  };
+};
+
+const normaliseAssignedMusicians = (value = []) => {
+  const arr = Array.isArray(value) ? value : String(value || "").split(/\n|,/);
+  const seen = new Set();
+
+  return arr
+    .map(normaliseAssignedMusician)
+    .filter(Boolean)
+    .filter((member) => {
+      const key = String(member.musicianId || member.email || member.name || "")
+        .trim()
+        .toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+};
+
+const getRowAssignedMusicians = (row = {}) =>
+  normaliseAssignedMusicians(
+    row.assignedMusicians ||
+      row.bookingMusicians ||
+      row.bandLineup ||
+      row.bookingDetails?.assignedMusicians ||
+      row.actsSummary?.[0]?.assignedMusicians ||
+      [],
+  );
+
 const toObjectIdString = (value) => {
   try {
     if (!value) return "";
@@ -129,6 +219,10 @@ const normaliseImportRow = (item = {}) => {
     item.bookingRef || item.ref || item.reference || item.bookingId,
   );
 
+  const assignedMusicians = normaliseAssignedMusicians(
+    item.assignedMusicians || item.bookingMusicians || item.bandLineup || item.musicians,
+  );
+
   return {
     bookingRef,
     invoiceCompany: cleanString(item.invoiceCompany || item.invoice_company || "TSC").toUpperCase() === "BMM" ? "BMM" : "TSC",
@@ -166,6 +260,9 @@ const normaliseImportRow = (item = {}) => {
     lineupComposition: Array.isArray(item.lineupComposition)
       ? item.lineupComposition
       : [],
+    assignedMusicians,
+    bookingMusicians: assignedMusicians,
+    bandLineup: assignedMusicians,
     arrivalTime: cleanString(item.arrivalTime),
     finishTime: cleanString(item.finishTime),
     payments: {
@@ -191,6 +288,7 @@ const normaliseImportRow = (item = {}) => {
       eventType: cleanString(item.eventType),
       evening: { sets: [] },
       djServicesBooked: Boolean(item.djServicesBooked),
+      assignedMusicians,
     },
     allocation: { status: "in_progress" },
     review: { requestedCount: 0, received: false },
@@ -281,6 +379,18 @@ const sanitizeBookingPatch = (body = {}) => {
     patch.actsSummary = patch.actsSummary.map((act) => ({ ...act }));
   }
 
+  if (Array.isArray(patch.assignedMusicians)) {
+    patch.assignedMusicians = normaliseAssignedMusicians(patch.assignedMusicians);
+  }
+
+  if (Array.isArray(patch.bookingMusicians)) {
+    patch.bookingMusicians = normaliseAssignedMusicians(patch.bookingMusicians);
+  }
+
+  if (Array.isArray(patch.bandLineup)) {
+    patch.bandLineup = normaliseAssignedMusicians(patch.bandLineup);
+  }
+
   if (patch.accounting && isPlainObject(patch.accounting)) {
     patch.accounting = {
       ...patch.accounting,
@@ -339,6 +449,18 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
 
   if (Array.isArray(patch.actsSummary)) {
     bookingDoc.actsSummary = patch.actsSummary;
+  }
+
+  if (Array.isArray(patch.assignedMusicians)) {
+    bookingDoc.assignedMusicians = patch.assignedMusicians;
+  }
+
+  if (Array.isArray(patch.bookingMusicians)) {
+    bookingDoc.bookingMusicians = patch.bookingMusicians;
+  }
+
+  if (Array.isArray(patch.bandLineup)) {
+    bookingDoc.bandLineup = patch.bandLineup;
   }
 
   if (patch.notes !== undefined) {
@@ -586,6 +708,18 @@ const mergeRowData = (preferred, secondary) => {
       preferred.lineupComposition.length
         ? preferred.lineupComposition
         : secondary?.lineupComposition,
+    assignedMusicians:
+      Array.isArray(preferred?.assignedMusicians) && preferred.assignedMusicians.length
+        ? preferred.assignedMusicians
+        : secondary?.assignedMusicians,
+    bookingMusicians:
+      Array.isArray(preferred?.bookingMusicians) && preferred.bookingMusicians.length
+        ? preferred.bookingMusicians
+        : secondary?.bookingMusicians,
+    bandLineup:
+      Array.isArray(preferred?.bandLineup) && preferred.bandLineup.length
+        ? preferred.bandLineup
+        : secondary?.bandLineup,
     arrivalTime: preferred?.arrivalTime || secondary?.arrivalTime,
     finishTime: preferred?.finishTime || secondary?.finishTime,
     bookingDetails: preferred?.bookingDetails || secondary?.bookingDetails,
@@ -771,6 +905,8 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     bandPaymentsSent: Boolean(doc?.bandPaymentsSent),
   };
 
+  const assignedMusicians = getRowAssignedMusicians(doc);
+
   const row = {
     _id: doc?._id,
     sourceBookingId: doc?._id,
@@ -797,6 +933,9 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     county,
     lineupSelected,
     lineupComposition,
+    assignedMusicians,
+    bookingMusicians: assignedMusicians,
+    bandLineup: assignedMusicians,
     arrivalTime:
       doc?.arrivalTime ||
       doc?.performanceTimes?.arrivalTime ||
@@ -807,7 +946,13 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
       doc?.performanceTimes?.finishTime ||
       actSummary?.performance?.finishTime ||
       "",
-    bookingDetails: doc?.bookingDetails || { djServicesBooked: false },
+    bookingDetails: {
+      ...(doc?.bookingDetails || { djServicesBooked: false }),
+      assignedMusicians:
+        doc?.bookingDetails?.assignedMusicians?.length
+          ? doc.bookingDetails.assignedMusicians
+          : assignedMusicians,
+    },
     payments: rawPayments.length ? rawPayments : paymentsMeta,
     accounting: doc?.accounting || null,
     balancePaid: Boolean(doc?.balancePaid),
@@ -948,6 +1093,68 @@ const buildBookingSearchClause = (q) => {
   };
 };
 
+router.get("/mine", musicianAuth, async (req, res) => {
+  try {
+    const user = req.user || {};
+    const userId = toObjectIdString(user?.musicianId || user?._id || user?.id);
+    const email = String(user?.email || "").trim().toLowerCase();
+    const fullName = String(
+      user?.name || [user?.firstName, user?.lastName].filter(Boolean).join(" ") || "",
+    ).trim();
+
+    const or = [];
+
+    if (isValidObjectId(userId)) {
+      const objectId = new mongoose.Types.ObjectId(userId);
+      or.push(
+        { "assignedMusicians.musicianId": objectId },
+        { "bookingMusicians.musicianId": objectId },
+        { "bandLineup.musicianId": objectId },
+        { "bookingDetails.assignedMusicians.musicianId": objectId },
+      );
+    }
+
+    if (email) {
+      or.push(
+        { "assignedMusicians.email": email },
+        { "bookingMusicians.email": email },
+        { "bandLineup.email": email },
+        { "bookingDetails.assignedMusicians.email": email },
+      );
+    }
+
+    if (fullName) {
+      const exactNameRegex = new RegExp(`^${escapeRegex(fullName)}$`, "i");
+      or.push(
+        { "assignedMusicians.name": exactNameRegex },
+        { "bookingMusicians.name": exactNameRegex },
+        { "bandLineup.name": exactNameRegex },
+        { "bookingDetails.assignedMusicians.name": exactNameRegex },
+      );
+    }
+
+    if (!or.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Could not identify musician from token.",
+      });
+    }
+
+    const rows = await BookingBoardItem.find({ $or: or })
+      .sort({ eventDateISO: 1, createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    return res.json({ success: true, rows, bookings: rows });
+  } catch (error) {
+    console.error("❌ GET /board/bookings/mine failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Could not load your gigs.",
+    });
+  }
+});
+
 // LIST bookings for booking board
 router.get("/", musicianAuth, async (req, res) => {
   try {
@@ -977,6 +1184,10 @@ const skip = (page - 1) * limit;
           { userEmail: email },
           { clientEmail: email },
           { "clientEmails.email": email },
+          { "assignedMusicians.email": email },
+          { "bookingMusicians.email": email },
+          { "bandLineup.email": email },
+          { "bookingDetails.assignedMusicians.email": email },
         ],
       };
 
@@ -1106,6 +1317,13 @@ router.post("/", musicianAuth, async (req, res) => {
       .trim()
       .toLowerCase();
 
+    const assignedMusicians = normaliseAssignedMusicians(
+      payload.assignedMusicians ||
+        payload.bookingMusicians ||
+        payload.bandLineup ||
+        payload.bookingDetails?.assignedMusicians,
+    );
+
     // --------- 1) Upsert Booking (source of truth) ----------
     const bookingPatch = {
       bookingId: bookingRef,
@@ -1145,6 +1363,14 @@ router.post("/", musicianAuth, async (req, res) => {
       // balance fields (optional)
       balanceInvoiceUrl: String(payload.balanceInvoiceUrl || "").trim(),
       balanceInvoicePdfUrl: String(payload.balanceInvoicePdfUrl || "").trim(),
+
+      assignedMusicians,
+      bookingMusicians: assignedMusicians,
+      bandLineup: assignedMusicians,
+      bookingDetails: {
+        ...(payload.bookingDetails || {}),
+        assignedMusicians,
+      },
     };
 
     // remove undefined so we don’t stomp fields
@@ -1198,11 +1424,17 @@ router.post("/", musicianAuth, async (req, res) => {
       lineupComposition: Array.isArray(payload.lineupComposition)
         ? payload.lineupComposition
         : [],
+      assignedMusicians,
+      bookingMusicians: assignedMusicians,
+      bandLineup: assignedMusicians,
 
       arrivalTime: String(payload.arrivalTime || "").trim(),
       finishTime: String(payload.finishTime || "").trim(),
 
-      bookingDetails: payload.bookingDetails || { djServicesBooked: false },
+      bookingDetails: {
+        ...(payload.bookingDetails || { djServicesBooked: false }),
+        assignedMusicians,
+      },
       allocation: payload.allocation || { status: "in_progress" },
       review: payload.review || { requestedCount: 0, received: false },
 
@@ -1319,6 +1551,16 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       };
     }
 
+    if (Array.isArray(body.assignedMusicians)) {
+      body.assignedMusicians = normaliseAssignedMusicians(body.assignedMusicians);
+      body.bookingMusicians = body.assignedMusicians;
+      body.bandLineup = body.assignedMusicians;
+      body.bookingDetails = {
+        ...(body.bookingDetails || {}),
+        assignedMusicians: body.assignedMusicians,
+      };
+    }
+
     const isAdmin = isTSCAdmin(req.user);
 
     // Non-admins can only do lightweight row edits
@@ -1338,6 +1580,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       delete body.manualAdjustment;
       delete body.manualAdjustmentLabel;
       delete body.manualAdjustmentAmount;
+      delete body.assignedMusicians;
+      delete body.bookingMusicians;
+      delete body.bandLineup;
     }
 
     // First try: treat :id as a real Booking _id
@@ -1412,6 +1657,11 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         clientAddress: body.clientAddress || savedBooking?.clientAddress || "",
         clientEmail: body.clientEmail || savedBooking?.clientEmail || "",
         clientEmails: body.clientEmails || [],
+        assignedMusicians:
+          body.assignedMusicians || normalized?.assignedMusicians || [],
+        bookingMusicians:
+          body.bookingMusicians || normalized?.bookingMusicians || [],
+        bandLineup: body.bandLineup || normalized?.bandLineup || [],
         accounting: savedBooking?.accounting || body.accounting || {},
         invoiceCompany:
           savedBooking?.invoiceCompany ||
@@ -1424,6 +1674,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
           ...(normalized?.bookingDetails || savedBooking?.bookingDetails || {}),
           ...(Array.isArray(body.extras) ? { extras: body.extras } : {}),
           ...(body.manualAdjustment ? { manualAdjustment: body.manualAdjustment } : {}),
+          ...(body.assignedMusicians
+            ? { assignedMusicians: body.assignedMusicians }
+            : {}),
         },
         extras: Array.isArray(body.extras)
           ? body.extras
@@ -1782,6 +2035,10 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
             bandPaymentsSent: false,
           },
 
+          assignedMusicians: [],
+          bookingMusicians: [],
+          bandLineup: [],
+
           bookingDetails: {
             eventType: String(row.eventType || row["Event Type"] || "").trim(),
             evening: { sets: [] },
@@ -1789,6 +2046,7 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
               String(row.djServicesBooked || row["DJ"] || "")
                 .trim()
                 .toLowerCase() === "yes",
+            assignedMusicians: [],
           },
 
           allocation: { status: "in_progress", gaps: [] },
@@ -1934,10 +2192,15 @@ for (const [index, row] of usableRecords.entries()) {
         bandPaymentsSent: false,
       },
 
+      assignedMusicians: [],
+      bookingMusicians: [],
+      bandLineup: [],
+
       bookingDetails: {
         eventType: cleanString(row.eventType),
         evening: { sets: [] },
         djServicesBooked: false,
+        assignedMusicians: [],
       },
 
       allocation: { status: "in_progress", gaps: [] },

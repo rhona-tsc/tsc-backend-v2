@@ -57,6 +57,147 @@ export async function lookupMusicianName(musicianId) {
   }
 }
 
+function isValidObjectId(value) {
+  return mongoose.Types.ObjectId.isValid(String(value || ""));
+}
+
+function compactAssignedMusician(value = {}) {
+  const musicianId = String(
+    value?.musicianId || value?.userId || value?._id || value?.id || "",
+  ).trim();
+
+  const firstName = String(value?.firstName || value?.firstname || "").trim();
+  const lastName = String(value?.lastName || value?.lastname || "").trim();
+
+  const name = String(
+    value?.name ||
+      value?.fullName ||
+      [firstName, lastName].filter(Boolean).join(" ") ||
+      "",
+  ).trim();
+
+  const email = String(
+    value?.email || value?.userEmail || value?.emailAddress || "",
+  )
+    .trim()
+    .toLowerCase();
+
+  const role = String(value?.role || value?.instrument || value?.position || "").trim();
+  const instrument = String(value?.instrument || value?.role || "").trim();
+
+  if (!musicianId && !name && !email) return null;
+
+  return {
+    ...(isValidObjectId(musicianId) ? { musicianId } : {}),
+    name,
+    firstName,
+    lastName,
+    email,
+    phone: String(value?.phone || value?.phoneNumber || "").trim(),
+    role,
+    instrument,
+    status: value?.status || "confirmed",
+    fee: Number(value?.fee || value?.baseFee || 0),
+    travelFee: Number(value?.travelFee || 0),
+    totalFee: Number(value?.totalFee || value?.fee || value?.baseFee || 0),
+    paymentStatus: value?.paymentStatus || "not_due",
+    notes: String(value?.notes || ""),
+    source: value?.source || "booking_sync",
+  };
+}
+
+async function resolveAssignedMusiciansFromBooking(booking = {}) {
+  const raw = [];
+
+  if (Array.isArray(booking.assignedMusicians)) raw.push(...booking.assignedMusicians);
+  if (Array.isArray(booking.bookingMusicians)) raw.push(...booking.bookingMusicians);
+  if (Array.isArray(booking.bandLineup)) raw.push(...booking.bandLineup);
+
+  const actsSummary = Array.isArray(booking.actsSummary) ? booking.actsSummary : [];
+
+  for (const item of actsSummary) {
+    if (Array.isArray(item?.assignedMusicians)) raw.push(...item.assignedMusicians);
+    if (Array.isArray(item?.bookingMusicians)) raw.push(...item.bookingMusicians);
+    if (Array.isArray(item?.bandLineup)) raw.push(...item.bandLineup);
+    if (Array.isArray(item?.bandMembers)) raw.push(...item.bandMembers);
+    if (Array.isArray(item?.lineup?.bandMembers)) raw.push(...item.lineup.bandMembers);
+
+    if (item?.selectedVocalist) {
+      raw.push({
+        ...item.selectedVocalist,
+        role: item.selectedVocalist.role || "Lead Vocalist",
+        instrument: item.selectedVocalist.instrument || "Lead Vocalist",
+      });
+    }
+
+    if (Array.isArray(item?.chosenVocalists)) {
+      raw.push(
+        ...item.chosenVocalists.map((vocalist) => ({
+          ...vocalist,
+          role: vocalist.role || "Lead Vocalist",
+          instrument: vocalist.instrument || "Lead Vocalist",
+        })),
+      );
+    }
+  }
+
+  const objectIds = raw
+    .map((entry) => {
+      if (typeof entry === "string" || entry instanceof mongoose.Types.ObjectId) {
+        return String(entry);
+      }
+
+      return String(
+        entry?.musicianId || entry?.userId || entry?._id || entry?.id || "",
+      );
+    })
+    .filter(isValidObjectId);
+
+  const docsById = new Map();
+
+  if (objectIds.length) {
+    const docs = await Musician.find({ _id: { $in: objectIds } })
+      .select("firstName lastName email phone phoneNumber")
+      .lean();
+
+    docs.forEach((doc) => docsById.set(String(doc._id), doc));
+  }
+
+  const normalised = raw
+    .map((entry) => {
+      if (typeof entry === "string" || entry instanceof mongoose.Types.ObjectId) {
+        const id = String(entry);
+        const doc = docsById.get(id);
+        return compactAssignedMusician({ ...(doc || {}), musicianId: id });
+      }
+
+      const id = String(
+        entry?.musicianId || entry?.userId || entry?._id || entry?.id || "",
+      );
+
+      const doc = docsById.get(id);
+
+      return compactAssignedMusician({
+        ...(doc || {}),
+        ...entry,
+        musicianId: id || entry?.musicianId,
+      });
+    })
+    .filter(Boolean);
+
+  const seen = new Set();
+
+  return normalised.filter((member) => {
+    const key = String(member.musicianId || member.email || member.name || "")
+      .toLowerCase();
+
+    if (!key || seen.has(key)) return false;
+
+    seen.add(key);
+    return true;
+  });
+}
+
 // bookingController.js (top-level, near other consts)
 const GOOGLE_REVIEW_URL =
   process.env.GOOGLE_REVIEW_URL ||
@@ -2604,6 +2745,8 @@ async function upsertBoardRowFromBooking(booking) {
     (m) => String(m.instrument || "").toLowerCase() !== "manager",
   ).length;
 
+  const assignedMusicians = await resolveAssignedMusiciansFromBooking(booking);
+
   // --- lineup composition ---
   const composition = Array.isArray(lineup?.bandMembers)
     ? lineup.bandMembers
@@ -2764,16 +2907,19 @@ async function upsertBoardRowFromBooking(booking) {
         lineupSelected:
           lineup?.label || lineup?.name || actFromSummary?.lineupLabel || "",
         lineupComposition: composition,
-
+assignedMusicians,
+bookingMusicians: assignedMusicians,
+bandLineup: assignedMusicians,
         arrivalTime:
           booking?.performanceTimes?.arrivalTime || booking.arrivalTime || "",
         bookingDetails: {
-          eventType: booking.eventType || "",
-          ceremony: booking.ceremony || {},
-          afternoon: booking.afternoon || {},
-          evening: booking.evening || {},
-          djServicesBooked: !!booking.djServicesBooked,
-        },
+  eventType: booking.eventType || "",
+  ceremony: booking.ceremony || {},
+  afternoon: booking.afternoon || {},
+  evening: booking.evening || {},
+  djServicesBooked: !!booking.djServicesBooked,
+  assignedMusicians,
+},
 
         eventType: booking.eventType || actFromSummary?.eventType || "",
 
@@ -2788,12 +2934,91 @@ async function upsertBoardRowFromBooking(booking) {
     { upsert: true, new: true },
   );
 
-  console.log("📋 upsertBoardRowFromBooking OK", {
-    bookingRef,
-    actId,
-    eventDateISO,
-  });
+ console.log("📋 upsertBoardRowFromBooking OK", {
+  bookingRef,
+  actId,
+  eventDateISO,
+  assignedMusicianCount: assignedMusicians.length,
+});
 }
+
+export const myBookingBoardRows = async (req, res) => {
+  console.log(
+    `🐣 (controllers/bookingController.js) myBookingBoardRows called at`,
+    new Date().toISOString(),
+    { user: req.user?._id || req.user?.id || null, query: req.query },
+  );
+
+  try {
+    const userId = String(
+      req.user?._id || req.user?.id || req.query.userId || req.body?.userId || "",
+    ).trim();
+
+    const email = String(
+      req.user?.email || req.query.email || req.body?.email || "",
+    )
+      .trim()
+      .toLowerCase();
+
+    const name = String(
+      req.user?.name ||
+        [req.user?.firstName, req.user?.lastName].filter(Boolean).join(" ") ||
+        req.query.name ||
+        "",
+    ).trim();
+
+    const or = [];
+
+    if (isValidObjectId(userId)) {
+      const objectId = new mongoose.Types.ObjectId(userId);
+
+      or.push(
+        { "assignedMusicians.musicianId": objectId },
+        { "bookingMusicians.musicianId": objectId },
+        { "bandLineup.musicianId": objectId },
+        { "bookingDetails.assignedMusicians.musicianId": objectId },
+      );
+    }
+
+    if (email) {
+      or.push(
+        { "assignedMusicians.email": email },
+        { "bookingMusicians.email": email },
+        { "bandLineup.email": email },
+        { "bookingDetails.assignedMusicians.email": email },
+      );
+    }
+
+    if (name) {
+      const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const exactNameRegex = new RegExp(`^${escapedName}$`, "i");
+
+      or.push(
+        { "assignedMusicians.name": exactNameRegex },
+        { "bookingMusicians.name": exactNameRegex },
+        { "bandLineup.name": exactNameRegex },
+        { "bookingDetails.assignedMusicians.name": exactNameRegex },
+      );
+    }
+
+    if (!or.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Could not identify musician from token, email, or userId.",
+      });
+    }
+
+    const rows = await BookingBoardItem.find({ $or: or })
+      .sort({ eventDateISO: 1, createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    return res.json({ success: true, rows, bookings: rows });
+  } catch (err) {
+    console.error("myBookingBoardRows error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
 
 export const ensureEmergencyContact = async (req, res) => {
   console.log(
@@ -3498,6 +3723,7 @@ export {
   completeBooking,
   manualCreateBooking,
   markMusicianAsPaid,
+  myBookingBoardRows,
   upsertBoardRowFromBooking,
   upsertEnquiryRowFromShortlist,
   computePerMemberFee,
