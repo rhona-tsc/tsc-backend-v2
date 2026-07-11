@@ -4,7 +4,111 @@ import BookingBoardItem from "../models/bookingBoardItem.js";
 import BookingForecast from "../models/bookingForecastModel.js";
 import generateForecastEventsFromBooking from "../utils/generateForecastEventsFromBooking.js";
 import getExpectedBalanceDateForSource from "../utils/paymentRules.js";
+import { generateTaxForecastEvents } from "./financeTaxController.js";
 
+const BOARD_SYNC_SOURCE = "booking_board_sync";
+
+const createMockResponse = () => {
+  let payload = null;
+  let statusCode = 200;
+
+  const response = {
+    status(code) {
+      statusCode = code;
+      return response;
+    },
+    json(value) {
+      payload = value;
+      return value;
+    },
+  };
+
+  return {
+    response,
+    getPayload: () => payload,
+    getStatusCode: () => statusCode,
+  };
+};
+
+const isPaidStatus = (value) =>
+  ["paid", "complete", "completed", "succeeded"].includes(
+    String(value || "").trim().toLowerCase(),
+  );
+
+const isClientBalancePaid = (row = {}) =>
+  Boolean(
+    row.balancePaid ||
+      row.payments?.balancePaymentReceived ||
+      row.payments?.invoicePaid ||
+      row.payments?.paidAt ||
+      row.paidAt ||
+      isPaidStatus(row.balanceStatus),
+  );
+
+const getInvoiceEntity = (row = {}) => {
+  const explicit = String(row.accounting?.invoiceCompany || "")
+    .trim()
+    .toUpperCase();
+
+  if (["TSC", "BMM"].includes(explicit)) return explicit;
+
+  const agent = String(row.agent || row.source || "")
+    .trim()
+    .toLowerCase();
+
+  return [
+    "direct",
+    "bmm",
+    "tsc",
+    "the supreme collective",
+    "weddingjam",
+    "wedding jam",
+    "staar productions",
+    "encore",
+  ].includes(agent)
+    ? "TSC"
+    : "BMM";
+};
+
+const getAssignedMusicians = (row = {}) => {
+  const candidates = [
+    ...(Array.isArray(row.assignedMusicians) ? row.assignedMusicians : []),
+    ...(Array.isArray(row.bookingMusicians) ? row.bookingMusicians : []),
+    ...(Array.isArray(row.bandLineup) ? row.bandLineup : []),
+    ...(Array.isArray(row.bookingDetails?.assignedMusicians)
+      ? row.bookingDetails.assignedMusicians
+      : []),
+  ];
+
+  const seen = new Set();
+
+  return candidates.filter((musician) => {
+    const key = String(
+      musician?.musicianId ||
+        musician?.email ||
+        `${musician?.name || musician?.firstName || ""}-${musician?.role || musician?.instrument || ""}`,
+    )
+      .trim()
+      .toLowerCase();
+
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const getPaidBandPaymentKeys = (row = {}) => {
+  const payments = Array.isArray(row.payments?.bandPayments)
+    ? row.payments.bandPayments
+    : [];
+
+  return new Set(
+    payments
+      .flatMap((payment) => [payment?.musicianId, payment?.email, payment?.name])
+      .filter(Boolean)
+      .map((value) => String(value).trim().toLowerCase()),
+  );
+};
 
 export const getForecastTimeline = async (req, res) => {
   try {
@@ -12,6 +116,10 @@ export const getForecastTimeline = async (req, res) => {
 
    const query = {
   status: { $in: ["forecast", "confirmed"] },
+  $or: [
+    { type: { $ne: "supplier_payment_out" } },
+    { source: BOARD_SYNC_SOURCE },
+  ],
 };
 
     if (entity) query.entity = entity;
@@ -119,6 +227,10 @@ export const getForecastMonthlySummary = async (req, res) => {
 
     const query = {
       status: { $in: ["forecast", "confirmed"] },
+      $or: [
+        { type: { $ne: "supplier_payment_out" } },
+        { source: BOARD_SYNC_SOURCE },
+      ],
     };
 
     if (entity) query.entity = entity;
@@ -291,28 +403,273 @@ const getAccounting = (row = {}) => {
 };
 
 const buildSupplierPaymentsFromBoardRow = (row = {}, passThroughGross = 0) => {
-  const payments = [];
-
   const eventDate = getEventDate(row);
+  const musicians = getAssignedMusicians(row);
+  const allBandPaymentsSent = Boolean(
+    row.payments?.bandPaymentsSent || row.bandPaymentsSent,
+  );
+  const paidKeys = getPaidBandPaymentKeys(row);
 
-  if (passThroughGross > 0) {
-    payments.push({
-      name: "Band",
+  const itemisedPayments = musicians
+    .map((musician) => {
+      const amount = round2(
+        Number(musician.totalFee || 0) ||
+          Number(musician.fee || 0) + Number(musician.travelFee || 0),
+      );
+
+      if (amount <= 0) return null;
+
+      const name =
+        musician.name ||
+        [musician.firstName, musician.lastName].filter(Boolean).join(" ") ||
+        musician.email ||
+        musician.role ||
+        musician.instrument ||
+        "Supplier";
+
+      const musicianKeys = [
+        musician.musicianId,
+        musician.email,
+        musician.name,
+        name,
+      ]
+        .filter(Boolean)
+        .map((value) => String(value).trim().toLowerCase());
+
+      const paid =
+        allBandPaymentsSent ||
+        musician.paymentStatus === "paid" ||
+        musicianKeys.some((key) => paidKeys.has(key));
+
+      if (paid) return null;
+
+      return {
+        name,
+        role: musician.role || musician.instrument || "Musician",
+        amount,
+        expectedPaymentDate: eventDate,
+        paid: false,
+        notes: "Generated from Booking Board musician allocation",
+      };
+    })
+    .filter(Boolean);
+
+  const itemisedTotal = round2(
+    itemisedPayments.reduce((sum, payment) => sum + payment.amount, 0),
+  );
+
+  const remainingPassThrough = allBandPaymentsSent
+    ? 0
+    : round2(Math.max(Number(passThroughGross || 0) - itemisedTotal, 0));
+
+  if (remainingPassThrough > 0) {
+    itemisedPayments.push({
+      name: itemisedPayments.length ? "Unallocated band balance" : "Band",
       role: "Pass-through supplier payment",
-      amount: passThroughGross,
+      amount: remainingPassThrough,
       expectedPaymentDate: eventDate,
-      paid: Boolean(row.payments?.bandPaymentsSent || row.bandPaymentsSent),
-      notes: "Generated from Booking Board pass-through amount",
+      paid: false,
+      notes: itemisedPayments.length
+        ? "Booking Board pass-through amount not yet allocated to a named musician"
+        : "Generated from Booking Board pass-through amount",
     });
   }
 
-  return payments;
+  return itemisedPayments;
+};
+
+
+const syncOneBoardBooking = async (boardBooking) => {
+  const eventDate = getEventDate(boardBooking);
+  const bookingMadeDate = getBookingDate(boardBooking);
+  const source = getAgent(boardBooking);
+  const entity = getInvoiceEntity(boardBooking);
+  const gross = round2(getGross(boardBooking));
+  const deposit = round2(getDeposit(boardBooking));
+
+  const { commissionGross, passThroughGross, vatRate } =
+    getAccounting(boardBooking);
+
+  const balanceAmount = round2(Math.max(gross - deposit, 0));
+  const clientNames = getClientName(boardBooking);
+  const actName = getActName(boardBooking);
+
+  if (!eventDate || !clientNames || !actName || gross <= 0) {
+    throw new Error(
+      `Booking Board item ${boardBooking?._id || "unknown"} is missing event date, client name, act name or gross value.`,
+    );
+  }
+
+  const bookingRef =
+    boardBooking.bookingRef ||
+    boardBooking.bookingId ||
+    boardBooking.reference ||
+    String(boardBooking._id);
+
+  const expectedBalanceDate =
+    getExpectedBalanceDateForSource({
+      source,
+      eventDate,
+      bookingMadeDate,
+    }) || eventDate;
+
+  const forecastPayload = {
+    entity,
+    bookingRef,
+    mondayItemName: `Booking Board - ${clientNames} / ${actName}`,
+    clientNames,
+    clientEmail:
+      boardBooking.clientEmail ||
+      boardBooking.clientEmails?.find?.((item) => item?.email)?.email ||
+      boardBooking.userEmail ||
+      boardBooking.userAddress?.email ||
+      "",
+    bookingMadeDate,
+    eventDate,
+    eventType: boardBooking.eventType || "",
+    county: boardBooking.county || boardBooking.userAddress?.county || "",
+    fullAddress:
+      boardBooking.venueAddress ||
+      boardBooking.venue ||
+      boardBooking.address ||
+      "",
+    source,
+    agent: source,
+    tscBandName: actName,
+    actName,
+    lineup:
+      boardBooking.lineupSelected ||
+      boardBooking.actsSummary?.[0]?.lineupLabel ||
+      "",
+    totalBookingValue: gross,
+    grossBookingValue: gross,
+    dealValue: gross,
+    depositAmount: deposit,
+    balanceAmount,
+    expectedDepositDate: bookingMadeDate,
+    expectedBalanceDate,
+    depositPaid: Boolean(
+      boardBooking.payments?.depositPaymentReceived ||
+        boardBooking.payments?.depositChargedAmount,
+    ),
+    balancePaid: isClientBalancePaid(boardBooking),
+    commissionAmount: commissionGross,
+    bmmFee: commissionGross,
+    rhonaFee: 0,
+    supplierPayments: buildSupplierPaymentsFromBoardRow(
+      boardBooking,
+      passThroughGross,
+    ),
+    notes: `Synced from Booking Board item ${boardBooking._id}`,
+    status: "confirmed",
+  };
+
+  const savedForecast = await BookingForecast.findOneAndUpdate(
+    {
+      $or: [
+        { bookingRef },
+        {
+          clientNames,
+          actName,
+          eventDate,
+        },
+      ],
+    },
+    forecastPayload,
+    {
+      new: true,
+      upsert: true,
+      runValidators: true,
+      setDefaultsOnInsert: true,
+    },
+  );
+
+  await ForecastEvent.deleteMany({
+    bookingForecastId: savedForecast._id,
+    isAutoGenerated: true,
+    status: { $in: ["forecast", "confirmed"] },
+  });
+
+  const generatedEvents = generateForecastEventsFromBooking(savedForecast)
+    .filter((event) => {
+      if (event.type === "client_balance_in") {
+        return !isClientBalancePaid(boardBooking);
+      }
+
+      if (event.type === "supplier_payment_out") {
+        return event.paid !== true;
+      }
+
+      return true;
+    })
+    .map((event) => {
+      const baseEvent = {
+        ...event,
+        entity,
+        source: BOARD_SYNC_SOURCE,
+      };
+
+      if (
+        baseEvent.direction === "in" &&
+        ["client_deposit_in", "client_balance_in"].includes(baseEvent.type)
+      ) {
+        return {
+          ...baseEvent,
+          vatTreatment: entity === "BMM" ? "standard" : "outside_scope",
+          vatRate: entity === "BMM" ? vatRate : 0,
+          vatBasis: entity === "BMM" ? "commission" : "outside_scope",
+          vatableAmount: entity === "BMM" ? commissionGross : 0,
+          taxTreatment: "income",
+        };
+      }
+
+      return {
+        ...baseEvent,
+        vatTreatment: "outside_scope",
+        vatRate: 0,
+        vatBasis: "outside_scope",
+        vatableAmount: 0,
+        taxTreatment: baseEvent.direction === "out" ? "expense" : "income",
+      };
+    });
+
+  if (generatedEvents.length) {
+    await ForecastEvent.insertMany(generatedEvents);
+  }
+
+  return {
+    bookingForecastId: savedForecast._id,
+    forecastEventsCreated: generatedEvents.length,
+    entity,
+  };
+};
+
+const regenerateBmmTaxForecasts = async () => {
+  const mock = createMockResponse();
+
+  await generateTaxForecastEvents(
+    {
+      body: {
+        entity: "BMM",
+        includeForecast: true,
+        taxRate: 0.25,
+      },
+    },
+    mock.response,
+  );
+
+  const payload = mock.getPayload();
+
+  if (mock.getStatusCode() >= 400 || !payload?.success) {
+    throw new Error(payload?.message || "BMM tax forecast regeneration failed.");
+  }
+
+  return payload;
 };
 
 export const syncBookingFromBoard = async (req, res) => {
   try {
     const { bookingId } = req.params;
-
     const boardBooking = await BookingBoardItem.findById(bookingId).lean();
 
     if (!boardBooking) {
@@ -322,168 +679,81 @@ export const syncBookingFromBoard = async (req, res) => {
       });
     }
 
-    const eventDate = getEventDate(boardBooking);
-    const bookingMadeDate = getBookingDate(boardBooking);
-    const source = getAgent(boardBooking);
-    const gross = round2(getGross(boardBooking));
-    const deposit = round2(getDeposit(boardBooking));
+    const result = await syncOneBoardBooking(boardBooking);
 
-    const { commissionGross, passThroughGross, vatRate } =
-      getAccounting(boardBooking);
-
-    const balanceAmount = round2(Math.max(gross - deposit, 0));
-    const clientNames = getClientName(boardBooking);
-    const actName = getActName(boardBooking);
-
-    if (!eventDate || !clientNames || !actName || gross <= 0) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Missing required finance sync data: event date, client name, act name or gross value.",
-      });
-    }
-
-    const bookingRef =
-      boardBooking.bookingRef ||
-      boardBooking.bookingId ||
-      boardBooking.reference ||
-      String(boardBooking._id);
-
-    const expectedBalanceDate =
-      getExpectedBalanceDateForSource({
-        source,
-        eventDate,
-        bookingMadeDate,
-      }) || eventDate;
-
-    const forecastPayload = {
-      bookingRef,
-      mondayItemName: `Booking Board - ${clientNames} / ${actName}`,
-      clientNames,
-      clientEmail:
-        boardBooking.clientEmail ||
-        boardBooking.clientEmails?.find?.((item) => item?.email)?.email ||
-        boardBooking.userEmail ||
-        boardBooking.userAddress?.email ||
-        "",
-      bookingMadeDate,
-      eventDate,
-      eventType: boardBooking.eventType || "",
-      county: boardBooking.county || boardBooking.userAddress?.county || "",
-      fullAddress:
-        boardBooking.venueAddress ||
-        boardBooking.venue ||
-        boardBooking.address ||
-        "",
-      source,
-      agent: source,
-
-      tscBandName: actName,
-      actName,
-      lineup:
-        boardBooking.lineupSelected ||
-        boardBooking.actsSummary?.[0]?.lineupLabel ||
-        "",
-
-      totalBookingValue: gross,
-      grossBookingValue: gross,
-      dealValue: gross,
-
-      depositAmount: deposit,
-      balanceAmount,
-
-      expectedDepositDate: bookingMadeDate,
-      expectedBalanceDate,
-
-      depositPaid: Boolean(
-        boardBooking.payments?.depositPaymentReceived ||
-          boardBooking.payments?.depositChargedAmount,
-      ),
-      balancePaid: Boolean(
-        boardBooking.payments?.balancePaymentReceived ||
-          boardBooking.balancePaid,
-      ),
-
-      commissionAmount: commissionGross,
-      bmmFee: commissionGross,
-      rhonaFee: 0,
-
-      supplierPayments: buildSupplierPaymentsFromBoardRow(
-        boardBooking,
-        passThroughGross,
-      ),
-
-      notes: `Synced from Booking Board item ${boardBooking._id}`,
-      status: "confirmed",
-    };
-
-    const savedForecast = await BookingForecast.findOneAndUpdate(
-      {
-        $or: [
-          { bookingRef },
-          {
-            clientNames,
-            actName,
-            eventDate,
-          },
-        ],
-      },
-      forecastPayload,
-      {
-        new: true,
-        upsert: true,
-        runValidators: true,
-        setDefaultsOnInsert: true,
-      },
-    );
-
-    await ForecastEvent.deleteMany({
-      bookingForecastId: savedForecast._id,
-      isAutoGenerated: true,
-      status: { $in: ["forecast", "confirmed"] },
-    });
-
-    const generatedEvents = generateForecastEventsFromBooking(savedForecast).map(
-      (event) => {
-        if (
-          event.direction === "in" &&
-          ["client_deposit_in", "client_balance_in"].includes(event.type)
-        ) {
-          return {
-            ...event,
-            vatTreatment: "standard",
-            vatRate,
-            vatBasis: "commission",
-            vatableAmount: commissionGross,
-            taxTreatment: "income",
-          };
-        }
-
-        return {
-          ...event,
-          vatTreatment: "outside_scope",
-          vatRate: 0,
-          vatBasis: "outside_scope",
-          vatableAmount: 0,
-          taxTreatment: event.direction === "out" ? "expense" : "income",
-        };
-      },
-    );
-
-    if (generatedEvents.length) {
-      await ForecastEvent.insertMany(generatedEvents);
-    }
-
-    res.json({
+    return res.json({
       success: true,
-      bookingForecastId: savedForecast._id,
-      forecastEventsCreated: generatedEvents.length,
+      bookingForecastId: result.bookingForecastId,
+      forecastEventsCreated: result.forecastEventsCreated,
+      entity: result.entity,
     });
   } catch (error) {
     console.error("syncBookingFromBoard error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
+    });
+  }
+};
+
+export const syncAllFinanceForecasts = async (req, res) => {
+  try {
+    const requestedEntity = String(req.body?.entity || "BMM")
+      .trim()
+      .toUpperCase();
+
+    if (!["TSC", "BMM"].includes(requestedEntity)) {
+      return res.status(400).json({
+        success: false,
+        message: "entity must be TSC or BMM",
+      });
+    }
+
+    const allBoardRows = await BookingBoardItem.find({}).lean();
+    const boardRows = allBoardRows.filter(
+      (row) => getInvoiceEntity(row) === requestedEntity,
+    );
+
+    let bookingsSynced = 0;
+    let forecastEventsCreated = 0;
+    const skipped = [];
+
+    for (const boardRow of boardRows) {
+      try {
+        const result = await syncOneBoardBooking(boardRow);
+        bookingsSynced += 1;
+        forecastEventsCreated += result.forecastEventsCreated || 0;
+      } catch (error) {
+        skipped.push({
+          bookingId: String(boardRow?._id || ""),
+          bookingRef: String(boardRow?.bookingRef || ""),
+          reason: error.message,
+        });
+      }
+    }
+
+    let taxForecast = null;
+    if (requestedEntity === "BMM") {
+      taxForecast = await regenerateBmmTaxForecasts();
+    }
+
+    return res.json({
+      success: true,
+      entity: requestedEntity,
+      bookingsFound: boardRows.length,
+      bookingsSynced,
+      forecastEventsCreated,
+      skippedCount: skipped.length,
+      skipped,
+      taxForecastEventsCreated:
+        Number(taxForecast?.created || taxForecast?.createdCount || 0) || 0,
+    });
+  } catch (error) {
+    console.error("syncAllFinanceForecasts error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Finance update failed.",
     });
   }
 };
