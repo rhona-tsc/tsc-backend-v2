@@ -7,6 +7,13 @@ const forecastEventSchema = new mongoose.Schema(
       ref: "BookingForecast",
     },
 
+    bookingRef: {
+  type: String,
+  trim: true,
+  default: "",
+  index: true,
+},
+
     accountId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "FinanceAccount",

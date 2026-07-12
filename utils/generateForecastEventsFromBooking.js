@@ -59,19 +59,23 @@ const createEvent = ({
   const vatableAmount =
     booking.commissionAmount || booking.bmmFee || booking.rhonaFee || 0;
 
-  return {
-    bookingForecastId: booking._id,
-    entity,
-    type,
+return {
+  bookingForecastId: booking._id,
+
+  bookingRef:
+    booking.bookingRef ||
+    booking.reference ||
+    booking.bookingId ||
+    "",
+
+  entity,
+  type,
     title,
     description,
     expectedDate,
     amount: Math.abs(toNumber(amount)),
     direction,
     status: "forecast",
-    bookingRef:
-      booking.bookingRef || booking.bookingId || booking.reference || "",
-
     clientNames: booking.clientNames,
 
     actName: booking.tscName || booking.actName || booking.bookedBandName || "",
