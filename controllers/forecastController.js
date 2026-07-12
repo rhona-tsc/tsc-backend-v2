@@ -8,6 +8,40 @@ import { generateTaxForecastEvents } from "./financeTaxController.js";
 
 const BOARD_SYNC_SOURCE = "booking_board_sync";
 
+const getTodayStart = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
+
+const toDate = (value) => {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+};
+
+const moveOverdueExpectedDateToToday = (event = {}) => {
+  const expectedDate = toDate(event.expectedDate);
+  const today = getTodayStart();
+
+  if (!expectedDate || expectedDate >= today) {
+    return event;
+  }
+
+  return {
+    ...event,
+    expectedDate: today,
+    notes: [
+      event.notes,
+      `Original expected date: ${expectedDate
+        .toISOString()
+        .slice(0, 10)}. Moved to today because the amount remains unpaid.`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
+};
+
 const createMockResponse = () => {
   let payload = null;
   let statusCode = 200;
@@ -336,11 +370,7 @@ export const getForecastMonthlySummary = async (req, res) => {
 
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 
-const toDate = (value) => {
-  if (!value) return undefined;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? undefined : date;
-};
+
 
 const getClientName = (row = {}) =>
   row.clientFirstNames ||
@@ -591,23 +621,23 @@ const syncOneBoardBooking = async (boardBooking) => {
   });
 
   const generatedEvents = generateForecastEventsFromBooking(savedForecast)
-    .filter((event) => {
-      if (event.type === "client_balance_in") {
-        return !isClientBalancePaid(boardBooking);
-      }
+  .filter((event) => {
+    if (event.type === "client_balance_in") {
+      return !isClientBalancePaid(boardBooking);
+    }
 
-      if (event.type === "supplier_payment_out") {
-        return event.paid !== true;
-      }
+    if (event.type === "supplier_payment_out") {
+      return event.paid !== true;
+    }
 
-      return true;
-    })
-    .map((event) => {
-      const baseEvent = {
-        ...event,
-        entity,
-        source: BOARD_SYNC_SOURCE,
-      };
+    return true;
+  })
+  .map((event) => {
+    const baseEvent = {
+      ...event,
+      entity,
+      source: BOARD_SYNC_SOURCE,
+    };
 
       if (
         baseEvent.direction === "in" &&
