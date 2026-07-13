@@ -1306,193 +1306,259 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       });
     }
 
-    // Invoice table.
+       // Invoice table.
     const tableX = cardX + 26;
     const tableY = detailY + 95;
     const tableW = cardW - 52;
-    const splitW = isExtrasInvoice ? 72 : 0;
+
+    // Both main and extras invoices use the same five-column layout.
+    const splitW = 72;
     const qtyW = 38;
     const amountW = 78;
     const descW = tableW - qtyW - amountW - splitW - splitW;
 
     doc.roundedRect(tableX, tableY, tableW, 28, 4).fill(navy);
     doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(9);
-    doc.text("Description", tableX + 10, tableY + 9, { width: descW - 14 });
 
-    if (isExtrasInvoice) {
-      doc.text("Pass-through", tableX + descW + 4, tableY + 9, {
+    doc.text("Description", tableX + 10, tableY + 9, {
+      width: descW - 14,
+    });
+
+    doc.text(
+      isExtrasInvoice ? "Pass-through" : "Supplier fee",
+      tableX + descW + 4,
+      tableY + 9,
+      {
         width: splitW - 8,
         align: "right",
-      });
-      doc.text("Mgmt fee", tableX + descW + splitW + 4, tableY + 9, {
+      },
+    );
+
+    doc.text(
+      "Mgmt fee",
+      tableX + descW + splitW + 4,
+      tableY + 9,
+      {
         width: splitW - 8,
         align: "right",
-      });
-      doc.text("Qty", tableX + descW + splitW + splitW + 4, tableY + 9, {
+      },
+    );
+
+    doc.text(
+      "Qty",
+      tableX + descW + splitW + splitW + 4,
+      tableY + 9,
+      {
         width: qtyW - 8,
         align: "right",
-      });
-      doc.text("Amount", tableX + descW + splitW + splitW + qtyW + 4, tableY + 9, {
+      },
+    );
+
+    doc.text(
+      "Amount",
+      tableX + descW + splitW + splitW + qtyW + 4,
+      tableY + 9,
+      {
         width: amountW - 8,
         align: "right",
-      });
+      },
+    );
+
+    const {
+      invoiceExtras,
+      manualAdjustmentAmount,
+      manualAdjustmentLabel,
+    } = getInvoiceExtrasAndAdjustment(row);
+
+    let rows = [];
+
+    if (isExtrasInvoice) {
+      rows = invoiceExtras
+        .map((extra) => {
+          const description = String(
+            extra?.name || extra?.key || "Extra",
+          ).trim();
+
+          const qty = String(Number(extra?.quantity || 1) || 1);
+
+          const quotedGross = round2(
+            Number(extra?.price || 0) *
+              (Number(extra?.quantity || 1) || 1),
+          );
+
+          if (!description || quotedGross === 0) return null;
+
+          const explicitPassThrough = round2(
+            Number(extra?.passThroughGross || 0),
+          );
+
+          const explicitManagement = round2(
+            Number(extra?.managementGross || 0),
+          );
+
+          const refundableDeposit = isRefundableDepositExtra(extra);
+
+          const hasExplicitSplit =
+            explicitPassThrough > 0 || explicitManagement > 0;
+
+          let passThroughAmount = hasExplicitSplit
+            ? explicitPassThrough
+            : quotedGross;
+
+          const managementAmount = hasExplicitSplit
+            ? explicitManagement
+            : 0;
+
+          const splitTotal = round2(
+            passThroughAmount + managementAmount,
+          );
+
+          // Any amount not explicitly allocated is treated as pass-through.
+          if (splitTotal < quotedGross) {
+            passThroughAmount = round2(
+              passThroughAmount + quotedGross - splitTotal,
+            );
+          }
+
+          return {
+            description,
+            qty,
+            supplierAmount: passThroughAmount,
+            managementAmount,
+            amount: quotedGross,
+            refundableDeposit,
+          };
+        })
+        .filter(Boolean);
     } else {
-      doc.text("Qty", tableX + descW + 8, tableY + 9, {
-        width: qtyW - 12,
-        align: "right",
+      // Main booking displayed as one row split between supplier and management.
+      rows.push({
+        description: "Band performance and music management",
+        qty: "1",
+        supplierAmount: round2(split.passThroughGross),
+        managementAmount: round2(split.commissionGross),
+        amount: round2(
+          Number(split.passThroughGross || 0) +
+            Number(split.commissionGross || 0),
+        ),
       });
-      doc.text("Amount", tableX + descW + qtyW + 8, tableY + 9, {
-        width: amountW - 20,
-        align: "right",
+
+      // Extras included on the main invoice are treated as supplier costs.
+      invoiceExtras.forEach((extra) => {
+        const description = String(
+          extra?.name || extra?.key || "Extra",
+        ).trim();
+
+        const qty = String(Number(extra?.quantity || 1) || 1);
+
+        const amount = round2(
+          Number(extra?.price || 0) *
+            (Number(extra?.quantity || 1) || 1),
+        );
+
+        if (!description || amount === 0) return;
+
+        rows.push({
+          description,
+          qty,
+          supplierAmount: amount,
+          managementAmount: 0,
+          amount,
+          refundableDeposit: isRefundableDepositExtra(extra),
+        });
       });
+
+      if (manualAdjustmentAmount !== 0) {
+        rows.push({
+          description:
+            manualAdjustmentLabel || "Manual adjustment",
+          qty: "1",
+          supplierAmount: manualAdjustmentAmount,
+          managementAmount: 0,
+          amount: manualAdjustmentAmount,
+        });
+      }
     }
 
-    const { invoiceExtras, manualAdjustmentAmount, manualAdjustmentLabel } =
-      getInvoiceExtrasAndAdjustment(row);
-
-    const visibleExtras = isExtrasInvoice
-      ? Array.isArray(split?.extraLines)
-        ? split.extraLines
-        : []
-      : invoiceExtras
-          .map((extra) => ({
-            description: String(extra?.name || extra?.key || "Extra").trim(),
-            qty: String(Number(extra?.quantity || 1) || 1),
-            amount: round2(
-              Number(extra?.price || 0) * (Number(extra?.quantity || 1) || 1),
-            ),
-          }))
-          .filter((extra) => extra.description && Number(extra.amount || 0) !== 0);
-
-    const rows = isExtrasInvoice
-      ? invoiceExtras
-          .map((extra) => {
-            const description = String(extra?.name || extra?.key || "Extra").trim();
-            const qty = String(Number(extra?.quantity || 1) || 1);
-            const quotedGross = round2(
-              Number(extra?.price || 0) * (Number(extra?.quantity || 1) || 1),
-            );
-            if (!description || quotedGross === 0) return null;
-
-            const explicitPassThrough = round2(Number(extra?.passThroughGross || 0));
-            const explicitManagement = round2(Number(extra?.managementGross || 0));
-            const refundableDeposit = isRefundableDepositExtra(extra);
-            const hasExplicitSplit = explicitPassThrough > 0 || explicitManagement > 0;
-
-            let passThroughAmount = hasExplicitSplit
-              ? explicitPassThrough
-              : refundableDeposit
-                ? quotedGross
-                : quotedGross;
-            let managementAmount = hasExplicitSplit ? explicitManagement : 0;
-
-            const splitTotal = round2(passThroughAmount + managementAmount);
-            if (splitTotal < quotedGross) {
-              passThroughAmount = round2(passThroughAmount + quotedGross - splitTotal);
-            }
-
-            return {
-              description,
-              qty,
-              passThroughAmount,
-              managementAmount,
-              amount: quotedGross,
-              refundableDeposit,
-            };
-          })
-          .filter(Boolean)
-      : [
-          {
-            description: "Band fee / artist performance fee",
-            qty: "1",
-            amount: split.passThroughGross,
-          },
-          ...visibleExtras,
-          ...(manualAdjustmentAmount !== 0
-            ? [
-                {
-                  description: manualAdjustmentLabel || "Manual adjustment",
-                  qty: "1",
-                  amount: manualAdjustmentAmount,
-                },
-              ]
-            : []),
-          {
-            description: "Music management (VAT inclusive)",
-            qty: "1",
-            amount: split.commissionGross,
-          },
-          {
-            description: "VAT included within management fee",
-            qty: "",
-            amount: split.commissionVat,
-            muted: true,
-          },
-        ];
-
     let y = tableY + 28;
+
     rows.forEach((item, index) => {
-      const rowH = isExtrasInvoice ? 30 : 34;
+      const rowH = 30;
+
       doc
         .rect(tableX, y, tableW, rowH)
         .fill(index % 2 === 0 ? "#f9fafb" : "#ffffff");
 
       doc
-        .fillColor(item.muted ? muted : text)
-        .font(item.muted ? "Helvetica" : "Helvetica-Bold")
-        .fontSize(isExtrasInvoice ? 8.5 : 10);
+        .fillColor(text)
+        .font("Helvetica-Bold")
+        .fontSize(8.5);
 
-      doc.text(item.description, tableX + 10, y + 9, { width: descW - 14 });
+      doc.text(item.description, tableX + 10, y + 9, {
+        width: descW - 14,
+      });
 
-      if (isExtrasInvoice) {
-        doc
-          .font("Helvetica")
-          .fontSize(8)
-          .fillColor(item.refundableDeposit ? muted : text);
-        doc.text(
-          item.refundableDeposit
-            ? `${formatMoney(item.passThroughAmount)} refundable`
-            : item.passThroughAmount
-              ? formatMoney(item.passThroughAmount)
-              : "—",
-          tableX + descW + 4,
-          y + 9,
-          { width: splitW - 8, align: "right" },
-        );
+      doc
+        .font("Helvetica")
+        .fontSize(8)
+        .fillColor(item.refundableDeposit ? muted : text);
 
-        doc.fillColor(text);
-        doc.text(
-          item.managementAmount ? formatMoney(item.managementAmount) : "—",
-          tableX + descW + splitW + 4,
-          y + 9,
-          { width: splitW - 8, align: "right" },
-        );
+      doc.text(
+        item.refundableDeposit
+          ? `${formatMoney(item.supplierAmount)} refundable`
+          : Number(item.supplierAmount || 0) !== 0
+            ? formatMoney(item.supplierAmount)
+            : "—",
+        tableX + descW + 4,
+        y + 9,
+        {
+          width: splitW - 8,
+          align: "right",
+        },
+      );
 
-        doc.font("Helvetica-Bold").fontSize(8.5);
-        doc.text(item.qty, tableX + descW + splitW + splitW + 4, y + 9, {
+      doc.fillColor(text);
+
+      doc.text(
+        Number(item.managementAmount || 0) !== 0
+          ? formatMoney(item.managementAmount)
+          : "—",
+        tableX + descW + splitW + 4,
+        y + 9,
+        {
+          width: splitW - 8,
+          align: "right",
+        },
+      );
+
+      doc.font("Helvetica-Bold").fontSize(8.5);
+
+      doc.text(
+        item.qty,
+        tableX + descW + splitW + splitW + 4,
+        y + 9,
+        {
           width: qtyW - 8,
           align: "right",
-        });
-        doc.text(formatMoney(item.amount), tableX + descW + splitW + splitW + qtyW + 4, y + 9, {
+        },
+      );
+
+      doc.text(
+        formatMoney(item.amount),
+        tableX + descW + splitW + splitW + qtyW + 4,
+        y + 9,
+        {
           width: amountW - 8,
           align: "right",
-        });
-      } else {
-        doc.text(item.qty, tableX + descW + 8, y + 11, {
-          width: qtyW - 12,
-          align: "right",
-        });
-        doc.text(formatMoney(item.amount), tableX + descW + qtyW + 8, y + 11, {
-          width: amountW - 20,
-          align: "right",
-        });
-      }
+        },
+      );
 
       doc
         .strokeColor(line)
         .moveTo(tableX, y + rowH)
         .lineTo(tableX + tableW, y + rowH)
         .stroke();
+
       y += rowH;
     });
 
