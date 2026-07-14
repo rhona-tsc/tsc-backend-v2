@@ -993,8 +993,11 @@ const buildExtraAccountingLines = (invoiceExtras, vatRate = 0.2) => {
 // Helper: build board invoice split
 const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
   const invoiceType = String(rowForInvoice?.invoiceType || "main").toLowerCase();
-  const { extrasTotal, manualAdjustmentAmount } =
-    getInvoiceExtrasAndAdjustment(rowForInvoice);
+  const {
+  invoiceExtras,
+  extrasTotal,
+  manualAdjustmentAmount,
+} = getInvoiceExtrasAndAdjustment(rowForInvoice);
 
   const storedGross = round2(
     rowForInvoice.grossValue ||
@@ -1049,24 +1052,60 @@ const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
       ),
   );
 
+  const extraAccounting = buildExtraAccountingLines(
+  invoiceExtras,
+  vatRate,
+);
+
   const commissionSplit = vatFromGross(commissionGross, vatRate);
   const calculatedGross = round2(
     passThroughGross + commissionGross + extrasTotal + manualAdjustmentAmount,
   );
 
-  return {
-    gross: calculatedGross || storedGross,
-    storedGross,
-    extrasTotal,
-    manualAdjustmentAmount,
-    invoiceCompany: invoiceCompany.brand,
-    invoiceType: "main",
-    vatRate,
-    commissionGross,
-    commissionNet: commissionSplit.net,
-    commissionVat: commissionSplit.vat,
-    passThroughGross,
-  };
+ return {
+  gross: calculatedGross || storedGross,
+  storedGross,
+  extrasTotal,
+  manualAdjustmentAmount,
+  invoiceCompany: invoiceCompany.brand,
+  invoiceType: "main",
+  vatRate,
+
+  // Main booking split
+  commissionGross,
+  commissionNet: commissionSplit.net,
+  commissionVat: commissionSplit.vat,
+  passThroughGross,
+
+  // Extras split
+  extraPassThroughGross: extraAccounting.passThroughGross,
+  extraManagementGross: extraAccounting.managementGross,
+  extraManagementNet: extraAccounting.managementNet,
+  extraManagementVat: extraAccounting.managementVat,
+  extraRefundableDepositGross:
+    extraAccounting.refundableDepositGross,
+
+  // Combined invoice totals
+  totalSupplierGross: round2(
+    passThroughGross +
+      extraAccounting.passThroughGross +
+      extraAccounting.refundableDepositGross,
+  ),
+
+  totalManagementGross: round2(
+    commissionGross + extraAccounting.managementGross,
+  ),
+
+  totalManagementNet: round2(
+    commissionSplit.net + extraAccounting.managementNet,
+  ),
+
+  totalManagementVat: round2(
+    commissionSplit.vat + extraAccounting.managementVat,
+  ),
+
+};
+
 };
 
 const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
@@ -1324,15 +1363,15 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       width: descW - 14,
     });
 
-    doc.text(
-      isExtrasInvoice ? "Pass-through" : "Supplier fee",
-      tableX + descW + 4,
-      tableY + 9,
-      {
-        width: splitW - 8,
-        align: "right",
-      },
-    );
+ doc.text(
+  "Supplier fee",
+  tableX + descW + 4,
+  tableY + 9,
+  {
+    width: splitW - 8,
+    align: "right",
+  },
+);
 
     doc.text(
       "Mgmt fee",
@@ -1443,7 +1482,8 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         ),
       });
 
-      // Extras included on the main invoice are treated as supplier costs.
+      // Extras included on the main invoice use the same accounting split
+      // as they do on the dedicated extras invoice.
       invoiceExtras.forEach((extra) => {
         const description = String(
           extra?.name || extra?.key || "Extra",
@@ -1451,20 +1491,53 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
 
         const qty = String(Number(extra?.quantity || 1) || 1);
 
-        const amount = round2(
+        const quotedGross = round2(
           Number(extra?.price || 0) *
             (Number(extra?.quantity || 1) || 1),
         );
 
-        if (!description || amount === 0) return;
+        if (!description || quotedGross === 0) return;
+
+        const explicitPassThrough = round2(
+          Number(extra?.passThroughGross || 0),
+        );
+
+        const explicitManagement = round2(
+          Number(extra?.managementGross || 0),
+        );
+
+        const hasExplicitSplit =
+          explicitPassThrough > 0 || explicitManagement > 0;
+
+        const refundableDeposit = isRefundableDepositExtra(extra);
+
+        let supplierAmount = hasExplicitSplit
+          ? explicitPassThrough
+          : quotedGross;
+
+        const managementAmount = hasExplicitSplit
+          ? explicitManagement
+          : 0;
+
+        const allocatedTotal = round2(
+          supplierAmount + managementAmount,
+        );
+
+        // Keep the displayed columns equal to the full quoted amount.
+        // Any unallocated remainder is treated as supplier/pass-through.
+        if (allocatedTotal < quotedGross) {
+          supplierAmount = round2(
+            supplierAmount + quotedGross - allocatedTotal,
+          );
+        }
 
         rows.push({
           description,
           qty,
-          supplierAmount: amount,
-          managementAmount: 0,
-          amount,
-          refundableDeposit: isRefundableDepositExtra(extra),
+          supplierAmount,
+          managementAmount,
+          amount: quotedGross,
+          refundableDeposit,
         });
       });
 
@@ -1601,51 +1674,76 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
 
       totalsLineY = offsetY + 4;
       totalLabelY = offsetY + 16;
-    } else {
-      doc.text("Band fee / pass-through", totalsX, totalsY, { width: 125 });
-      doc.text(formatMoney(split.passThroughGross), totalsX + 125, totalsY, {
+   } else {
+  let offsetY = totalsY;
+
+  doc.text("Supplier / pass-through fees", totalsX, offsetY, {
+    width: 125,
+  });
+  doc.text(
+    formatMoney(
+      split.totalSupplierGross ?? split.passThroughGross,
+    ),
+    totalsX + 125,
+    offsetY,
+    {
+      width: 90,
+      align: "right",
+    },
+  );
+  offsetY += 18;
+
+  doc.text("Management fees VAT-inc", totalsX, offsetY, {
+    width: 125,
+  });
+  doc.text(
+    formatMoney(
+      split.totalManagementGross ?? split.commissionGross,
+    ),
+    totalsX + 125,
+    offsetY,
+    {
+      width: 90,
+      align: "right",
+    },
+  );
+  offsetY += 18;
+
+  doc.text("VAT within management fees", totalsX, offsetY, {
+    width: 125,
+  });
+  doc.text(
+    formatMoney(
+      split.totalManagementVat ?? split.commissionVat,
+    ),
+    totalsX + 125,
+    offsetY,
+    {
+      width: 90,
+      align: "right",
+    },
+  );
+  offsetY += 18;
+
+  if (Number(split.manualAdjustmentAmount || 0) !== 0) {
+    doc.text("Manual adjustment", totalsX, offsetY, {
+      width: 125,
+    });
+    doc.text(
+      formatMoney(split.manualAdjustmentAmount),
+      totalsX + 125,
+      offsetY,
+      {
         width: 90,
         align: "right",
-      });
-      doc.text("Management fee VAT-inc", totalsX, totalsY + 18, { width: 125 });
-      doc.text(formatMoney(split.commissionGross), totalsX + 125, totalsY + 18, {
-        width: 90,
-        align: "right",
-      });
-      doc.text("VAT on management fee", totalsX, totalsY + 36, { width: 125 });
-      doc.text(formatMoney(split.commissionVat), totalsX + 125, totalsY + 36, {
-        width: 90,
-        align: "right",
-      });
+      },
+    );
+    offsetY += 18;
+  }
 
-      totalsLineY = totalsY + 62;
-      totalLabelY = totalsY + 74;
-
-      if (Number(split.extrasTotal || 0) !== 0) {
-        doc.text("Extras", totalsX, totalsY + 54, { width: 125 });
-        doc.text(formatMoney(split.extrasTotal), totalsX + 125, totalsY + 54, {
-          width: 90,
-          align: "right",
-        });
-        totalsLineY += 18;
-        totalLabelY += 18;
-      }
-
-      if (Number(split.manualAdjustmentAmount || 0) !== 0) {
-        doc.text("Manual adjustment", totalsX, totalsLineY - 8, { width: 125 });
-        doc.text(
-          formatMoney(split.manualAdjustmentAmount),
-          totalsX + 125,
-          totalsLineY - 8,
-          {
-            width: 90,
-            align: "right",
-          },
-        );
-        totalsLineY += 18;
-        totalLabelY += 18;
-      }
-    }
+  totalsLineY = offsetY + 4;
+  totalLabelY = offsetY + 16;
+}
 
     doc
       .strokeColor(accent)
