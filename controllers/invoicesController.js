@@ -33,6 +33,47 @@ const getStripeClientForCompany = (invoiceCompany) => {
 const looksLikeObjectId = (v) =>
   typeof v === "string" && /^[0-9a-f]{24}$/i.test(v);
 
+const BMM_VAT_ENROLMENT_DATE_ISO =
+  process.env.BMM_VAT_ENROLMENT_DATE_ISO || "2026-02-06";
+
+const getInvoiceCompanyBrand = (row) =>
+  String(row?.invoiceCompany || row?.accounting?.invoiceCompany || "TSC")
+    .trim()
+    .toUpperCase();
+
+const getBookingDateForVat = (row) => {
+  const value =
+    row?.bookingDateISO ||
+    row?.bookingDate ||
+    row?.enquiryDateISO ||
+    row?.enquiryDate ||
+    "";
+
+  if (!value) return null;
+
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(value))
+    ? new Date(`${value}T00:00:00Z`)
+    : new Date(value);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const getEffectiveVatRate = (row, fallbackRate = 0) => {
+  const storedRate = Number(row?.accounting?.vatRate ?? fallbackRate);
+
+  if (getInvoiceCompanyBrand(row) !== "BMM") {
+    return Number.isFinite(storedRate) ? storedRate : 0;
+  }
+
+  const bookingDate = getBookingDateForVat(row);
+  const enrolmentDate = new Date(`${BMM_VAT_ENROLMENT_DATE_ISO}T00:00:00Z`);
+
+  // Do not retrospectively charge VAT on BMM bookings made before enrolment.
+  if (bookingDate && bookingDate < enrolmentDate) return 0;
+
+  return Number.isFinite(storedRate) ? storedRate : 0;
+};
+
 // Keep the same origin helper you used elsewhere
 const getOrigin = (req) => {
   const env = process.env.FRONTEND_URL && String(process.env.FRONTEND_URL);
@@ -401,7 +442,7 @@ export const createInvoicePayLink = async (req, res) => {
     const clampPence = (n) => Math.max(0, roundInt(n));
 
     const DEPOSIT_RATE = Number(process.env.TSC_DEPOSIT_RATE ?? 0.33);
-    const VAT_RATE = Number(process.env.TSC_VAT_RATE ?? 0.2);
+    const DEFAULT_VAT_RATE = Number(process.env.TSC_VAT_RATE ?? 0.2);
 
     const {
       bookingIdOrRef,
@@ -451,6 +492,8 @@ export const createInvoicePayLink = async (req, res) => {
         message: "Booking not found.",
       });
     }
+
+    const VAT_RATE = getEffectiveVatRate(booking, DEFAULT_VAT_RATE);
 
     // Void old invoice first, if requested
     let voidedInvoice = null;
@@ -734,22 +777,20 @@ const getPrimaryEmail = (row) =>
   "";
 
 const getInvoiceCompany = (row) => {
-  const invoiceCompany = String(
-    row?.invoiceCompany || row?.accounting?.invoiceCompany || "TSC",
-  )
-    .trim()
-    .toUpperCase();
+  const invoiceCompany = getInvoiceCompanyBrand(row);
 
   if (invoiceCompany === "BMM") {
+    const vatRate = getEffectiveVatRate(row, 0.2);
+
     return {
       name: "Bamboo Music Management Ltd",
       address: "Cramond, Reeves Lane, Roydon, CM19 5LE",
       email: "bamboomusicmgmt@gmail.com",
       companyNumber: "09318270",
-      vatNumber: "517 6408 85",
+      vatNumber: vatRate > 0 ? "517 6408 85" : "",
       brand: "BMM",
       accent: "#43d8e8",
-      vatRate: 0.2,
+      vatRate,
       bank: {
         accountName: "Bamboo Music Management Ltd",
         bankName: "Mettle (Prepay Technologies)",
@@ -1008,7 +1049,8 @@ const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
   );
 
   const accounting = rowForInvoice.accounting || {};
-  const vatRate = Number(accounting.vatRate ?? invoiceCompany.vatRate ?? 0);
+  // Date-based company policy overrides stale accounting saved on the row.
+  const vatRate = Number(invoiceCompany.vatRate ?? accounting.vatRate ?? 0);
 
   if (invoiceType === "extras") {
     const { invoiceExtras } = getInvoiceExtrasAndAdjustment(rowForInvoice);
@@ -1134,6 +1176,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const invoiceType = String(row?.invoiceType || "main").toLowerCase();
     const isExtrasInvoice = invoiceType === "extras";
     const isReceipt = documentType === "receipt";
+    const chargesVat = Number(split?.vatRate || 0) > 0;
     const baseInvoiceRef = row.bookingRef || row.bookingId || String(row._id);
     const invoiceRef = isExtrasInvoice
       ? `${baseInvoiceRef}-EXTRAS`
@@ -1656,18 +1699,25 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       }
 
       if (Number(split.managementGross || 0) !== 0) {
-        doc.text("Management fee VAT-inc", totalsX, offsetY, { width: 125 });
+        doc.text(
+          chargesVat ? "Management fee VAT-inc" : "Management fee",
+          totalsX,
+          offsetY,
+          { width: 125 },
+        );
         doc.text(formatMoney(split.managementGross), totalsX + 125, offsetY, {
           width: 90,
           align: "right",
         });
         offsetY += 18;
-        doc.text("VAT on management fee", totalsX, offsetY, { width: 125 });
-        doc.text(formatMoney(split.managementVat), totalsX + 125, offsetY, {
-          width: 90,
-          align: "right",
-        });
-        offsetY += 18;
+        if (chargesVat) {
+          doc.text("VAT on management fee", totalsX, offsetY, { width: 125 });
+          doc.text(formatMoney(split.managementVat), totalsX + 125, offsetY, {
+            width: 90,
+            align: "right",
+          });
+          offsetY += 18;
+        }
       }
 
       // Removed refundable deposit line (was here)
@@ -1693,9 +1743,12 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
   );
   offsetY += 18;
 
-  doc.text("Management fees VAT-inc", totalsX, offsetY, {
-    width: 125,
-  });
+  doc.text(
+    chargesVat ? "Management fees VAT-inc" : "Management fees",
+    totalsX,
+    offsetY,
+    { width: 125 },
+  );
   doc.text(
     formatMoney(
       split.totalManagementGross ?? split.commissionGross,
@@ -1709,21 +1762,18 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
   );
   offsetY += 18;
 
-  doc.text("VAT within management fees", totalsX, offsetY, {
-    width: 125,
-  });
-  doc.text(
-    formatMoney(
-      split.totalManagementVat ?? split.commissionVat,
-    ),
-    totalsX + 125,
-    offsetY,
-    {
-      width: 90,
-      align: "right",
-    },
-  );
-  offsetY += 18;
+  if (chargesVat) {
+    doc.text("VAT within management fees", totalsX, offsetY, {
+      width: 125,
+    });
+    doc.text(
+      formatMoney(split.totalManagementVat ?? split.commissionVat),
+      totalsX + 125,
+      offsetY,
+      { width: 90, align: "right" },
+    );
+    offsetY += 18;
+  }
 
   if (Number(split.manualAdjustmentAmount || 0) !== 0) {
     doc.text("Manual adjustment", totalsX, offsetY, {
@@ -1833,7 +1883,11 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .font("Helvetica")
       .fontSize(8)
       .text(
-        isReceipt
+        !chargesVat
+          ? isReceipt
+            ? "Thank you, payment has been received."
+            : "Please use the payment reference above so we can match your payment quickly."
+          : isReceipt
           ? isExtrasInvoice
             ? "Thank you, payment has been received. This receipt relates to additional services and/or equipment hire for the event."
             : "Thank you, payment has been received. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee."
