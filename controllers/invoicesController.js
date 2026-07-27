@@ -1327,7 +1327,13 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       },
     );
     doc.text(
-      `Issue date: ${formatInvoiceDate(new Date())}`,
+      `Issue date: ${formatInvoiceDate(
+        row?.invoiceDateISO ||
+          row?.bookingDateISO ||
+          row?.invoiceDate ||
+          row?.bookingDate ||
+          new Date(),
+      )}`,
       cardX + cardW - 230,
       cardY + 61,
       {
