@@ -34,7 +34,7 @@ const looksLikeObjectId = (v) =>
   typeof v === "string" && /^[0-9a-f]{24}$/i.test(v);
 
 const BMM_VAT_ENROLMENT_DATE_ISO =
-  process.env.BMM_VAT_ENROLMENT_DATE_ISO || "2026-02-06";
+  process.env.BMM_VAT_ENROLMENT_DATE_ISO || "2026-02-07";
 
 const getInvoiceCompanyBrand = (row) =>
   String(row?.invoiceCompany || row?.accounting?.invoiceCompany || "TSC")
@@ -45,6 +45,10 @@ const getBookingDateForVat = (row) => {
   const value =
     row?.bookingDateISO ||
     row?.bookingDate ||
+    row?.invoiceDateISO ||
+    row?.invoiceDate ||
+    row?.payments?.boardInvoiceCreatedAt ||
+    row?.createdAt ||
     row?.enquiryDateISO ||
     row?.enquiryDate ||
     "";
@@ -68,8 +72,11 @@ const getEffectiveVatRate = (row, fallbackRate = 0) => {
   const bookingDate = getBookingDateForVat(row);
   const enrolmentDate = new Date(`${BMM_VAT_ENROLMENT_DATE_ISO}T00:00:00Z`);
 
-  // Do not retrospectively charge VAT on BMM bookings made before enrolment.
-  if (bookingDate && bookingDate < enrolmentDate) return 0;
+  // A real booking/invoice issue date takes precedence over stale accounting
+  // imported from the previous system.
+  if (bookingDate) {
+    return bookingDate < enrolmentDate ? 0 : Number(fallbackRate || 0);
+  }
 
   return Number.isFinite(storedRate) ? storedRate : 0;
 };
@@ -1932,7 +1939,6 @@ export const createBoardInvoice = async (req, res) => {
     const isExtrasInvoice = invoiceTypeNorm === "extras";
     const isReceipt = documentTypeNorm === "receipt";
     const now = new Date();
-    const invoiceDateISO = now.toISOString().slice(0, 10);
 
     if (!bookingId) {
       return res.status(400).json({
@@ -1949,6 +1955,12 @@ export const createBoardInvoice = async (req, res) => {
         message: "Booking board row not found",
       });
     }
+
+    // Historical imports use the booking date as the original invoice issue
+    // date. Only fall back to the current date when no usable date exists.
+    const invoiceDateISO =
+      getBookingDateForVat(row)?.toISOString().slice(0, 10) ||
+      now.toISOString().slice(0, 10);
 
     if (isReceipt) {
       const isPaid = Boolean(
