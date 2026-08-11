@@ -1344,11 +1344,16 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     doc.text(
       isReceipt
         ? `Payment date: ${formatInvoiceDate(
-            row?.payments?.paidAt ||
-              row?.paidAt ||
-              row?.payments?.invoicePaidAt ||
-              row?.payments?.balancePaymentReceivedAt ||
-              new Date(),
+            isExtrasInvoice
+  ? row?.payments?.extrasPaidAt ||
+    row?.extrasPaidAt ||
+    row?.payments?.paidAt ||
+    new Date()
+  : row?.payments?.paidAt ||
+    row?.paidAt ||
+    row?.payments?.invoicePaidAt ||
+    row?.payments?.balancePaymentReceivedAt ||
+    new Date(),
           )}`
         : `Due date: ${formatInvoiceDate(dueDate) || "TBC"}`,
       cardX + cardW - 230,
@@ -1968,22 +1973,30 @@ export const createBoardInvoice = async (req, res) => {
       getBookingDateForVat(row)?.toISOString().slice(0, 10) ||
       now.toISOString().slice(0, 10);
 
-    if (isReceipt) {
-      const isPaid = Boolean(
+ if (isReceipt) {
+  const isPaid = isExtrasInvoice
+    ? Boolean(
+        row?.extrasPaid ||
+          row?.extrasStatus === "paid" ||
+          row?.payments?.extrasPaymentReceived ||
+          row?.payments?.extrasInvoicePaid,
+      )
+    : Boolean(
         row?.payments?.balancePaymentReceived ||
-        row?.payments?.invoicePaid ||
-        row?.balancePaid ||
-        row?.balanceStatus === "paid",
+          row?.payments?.invoicePaid ||
+          row?.balancePaid ||
+          row?.balanceStatus === "paid",
       );
 
-      if (!isPaid) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invoice must be marked as paid before generating a receipt.",
-        });
-      }
-    }
+  if (!isPaid) {
+    return res.status(400).json({
+      success: false,
+      message: isExtrasInvoice
+        ? "Extras invoice must be marked as paid before generating an extras receipt."
+        : "Invoice must be marked as paid before generating a receipt.",
+    });
+  }
+}
 
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
     const finalDueDate = firstNonEmpty(
