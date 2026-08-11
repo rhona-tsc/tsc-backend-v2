@@ -847,18 +847,66 @@ const formatInvoiceDate = (value) => {
 };
 
 const getDueDateThursdayWeekBefore = (eventDateValue) => {
-  const eventDate = new Date(eventDateValue);
+  if (!eventDateValue) return "";
+
+  const eventDate = /^\d{4}-\d{2}-\d{2}$/.test(String(eventDateValue))
+    ? new Date(`${eventDateValue}T12:00:00`)
+    : new Date(eventDateValue);
+
   if (Number.isNaN(eventDate.getTime())) return "";
 
   const due = new Date(eventDate);
   due.setDate(due.getDate() - 7);
 
-  // Move back to Thursday of that week
-  const day = due.getDay(); // Sun 0, Mon 1, Thu 4
-  const diffToThursday = day - 4;
+  // Move back to Thursday of that week.
+  const diffToThursday = due.getDay() - 4;
   due.setDate(due.getDate() - diffToThursday);
 
-  return formatInvoiceDate(due);
+  // Store a stable machine-readable date, not a formatted display value.
+  return [
+    due.getFullYear(),
+    String(due.getMonth() + 1).padStart(2, "0"),
+    String(due.getDate()).padStart(2, "0"),
+  ].join("-");
+};
+
+const getSafeInvoiceDueDate = (row, eventDateValue) => {
+  const calculatedDueDate =
+    getDueDateThursdayWeekBefore(eventDateValue);
+
+  const storedDueDate = firstNonEmpty(
+    row?.invoiceDueDateISO,
+    row?.invoiceDueDate,
+    row?.dueDateISO,
+    row?.dueDate,
+  );
+
+  if (!storedDueDate) return calculatedDueDate;
+
+  const stored = /^\d{4}-\d{2}-\d{2}$/.test(String(storedDueDate))
+    ? new Date(`${storedDueDate}T12:00:00`)
+    : new Date(storedDueDate);
+
+  const event = /^\d{4}-\d{2}-\d{2}$/.test(String(eventDateValue))
+    ? new Date(`${eventDateValue}T12:00:00`)
+    : new Date(eventDateValue);
+
+  if (
+    Number.isNaN(stored.getTime()) ||
+    Number.isNaN(event.getTime())
+  ) {
+    return calculatedDueDate;
+  }
+
+  const differenceInDays =
+    (event.getTime() - stored.getTime()) / 86400000;
+
+  // A due date must precede the event and be reasonably close to it.
+  if (differenceInDays < 0 || differenceInDays > 370) {
+    return calculatedDueDate;
+  }
+
+  return storedDueDate;
 };
 
 const firstNonEmpty = (...values) =>
@@ -1197,13 +1245,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     );
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
     const eventDateFormatted = formatInvoiceDate(eventDate);
-    const dueDate = firstNonEmpty(
-      row.invoiceDueDateISO,
-      row.invoiceDueDate,
-      row.dueDateISO,
-      row.dueDate,
-      getDueDateThursdayWeekBefore(eventDate),
-    );
+    const dueDate = getSafeInvoiceDueDate(row, eventDate);
     const paymentReference = row.bookingRef || row.bookingId || String(row._id);
     const actDisplayName = firstNonEmpty(
       row.actName,
@@ -1999,13 +2041,7 @@ export const createBoardInvoice = async (req, res) => {
 }
 
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
-    const finalDueDate = firstNonEmpty(
-      row.invoiceDueDateISO,
-      row.invoiceDueDate,
-      row.dueDateISO,
-      row.dueDate,
-      getDueDateThursdayWeekBefore(eventDate),
-    );
+    const finalDueDate = getSafeInvoiceDueDate(row, eventDate);
 
     const rowForInvoice = {
       ...row,
@@ -2459,13 +2495,7 @@ export const serveBoardInvoicePdf = async (req, res) => {
     const invoiceTypeNorm = String(req.query?.invoiceType || "main").toLowerCase();
 
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
-    const finalDueDate = firstNonEmpty(
-      row.invoiceDueDateISO,
-      row.invoiceDueDate,
-      row.dueDateISO,
-      row.dueDate,
-      getDueDateThursdayWeekBefore(eventDate),
-    );
+    const finalDueDate = getSafeInvoiceDueDate(row, eventDate);
 
     const rowForInvoice = {
       ...row,
