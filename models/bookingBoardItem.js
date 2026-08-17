@@ -228,6 +228,16 @@ const BookingBoardItemSchema = new mongoose.Schema(
     clientEmails: [EmailSchema],
     clientEmail: { type: String },
     clientAddress: { type: String, default: "" },
+    // Optional payer details used only for extras invoices and receipts.
+    // Empty values fall back to the main client billing details.
+    extrasBillingName: { type: String, default: "", trim: true },
+    extrasBillingEmail: {
+      type: String,
+      default: "",
+      trim: true,
+      lowercase: true,
+    },
+    extrasBillingAddress: { type: String, default: "", trim: true },
     eventType: { type: String },
     actName: { type: String },
     actTscName: { type: String },

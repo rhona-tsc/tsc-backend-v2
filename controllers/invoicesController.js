@@ -1236,13 +1236,16 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const invoiceRef = isExtrasInvoice
       ? `${baseInvoiceRef}-EXTRAS`
       : baseInvoiceRef;
-    const clientName = firstNonEmpty(
+    const mainClientName = firstNonEmpty(
       row.bookerName,
       row.clientName,
       row.booker,
       row.clientFirstNames,
       "Client",
     );
+    const clientName = isExtrasInvoice
+      ? firstNonEmpty(row.extrasBillingName, mainClientName)
+      : mainClientName;
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
     const eventDateFormatted = formatInvoiceDate(eventDate);
     const dueDate = getSafeInvoiceDueDate(row, eventDate);
@@ -1252,7 +1255,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       row.actTscName,
       row.tscName,
     );
-    const clientAddress = firstNonEmpty(
+    const mainClientAddress = firstNonEmpty(
       row.clientAddress,
       row.billingAddress,
       row.userAddress?.billingAddress,
@@ -1267,6 +1270,12 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
           .filter(Boolean)
           .join(", "),
     );
+    const clientAddress = isExtrasInvoice
+      ? firstNonEmpty(row.extrasBillingAddress, mainClientAddress)
+      : mainClientAddress;
+    const clientEmail = isExtrasInvoice
+      ? firstNonEmpty(row.extrasBillingEmail, getPrimaryEmail(row))
+      : getPrimaryEmail(row);
 
     // Dark navy full-page background.
     doc.rect(0, 0, pageWidth, pageHeight).fill(navy);
@@ -1422,7 +1431,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       .text("Bill to", cardX + 26, detailY);
     doc.font("Helvetica").fontSize(10).fillColor(text);
     doc.text(clientName, cardX + 26, detailY + 20);
-    doc.text(getPrimaryEmail(row), cardX + 26, detailY + 35);
+    doc.text(clientEmail, cardX + 26, detailY + 35);
     if (clientAddress) {
       doc.text(clientAddress, cardX + 26, detailY + 50, { width: 230 });
     }
@@ -2153,10 +2162,16 @@ export const createBoardInvoice = async (req, res) => {
         Math.round(Number(split.gross || 0) * 100),
       );
       const ref = rowForInvoice.bookingRef || String(rowForInvoice._id);
-      const customerEmail = getPrimaryEmail(rowForInvoice)
+      const billingEmail = isExtrasInvoice
+        ? firstNonEmpty(
+            rowForInvoice.extrasBillingEmail,
+            getPrimaryEmail(rowForInvoice),
+          )
+        : getPrimaryEmail(rowForInvoice);
+      const customerEmail = String(billingEmail || "")
         .split(",")
         .map((email) => email.trim())
-        .filter(Boolean)[0];
+        .find(Boolean);
 
       if (!amountPence) {
         throw new Error(
