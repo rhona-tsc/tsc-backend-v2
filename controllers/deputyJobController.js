@@ -6250,10 +6250,15 @@ export const presentDeputyApplicant = async (req, res) => {
       });
     }
 
-    if (String(job?.jobType || "").toLowerCase() !== "enquiry") {
+    const canPresentApplicants = ["enquiry", "booked"].includes(
+      String(job?.jobType || "").trim().toLowerCase(),
+    );
+
+    if (!canPresentApplicants) {
       return res.status(400).json({
         success: false,
-        message: "Applicants can only be presented on enquiry deputy jobs",
+        message:
+          "Applicants can only be presented on enquiry or booked deputy jobs",
       });
     }
 
@@ -7138,15 +7143,15 @@ export const manualApplyAndPresentDeputyJob = async (req, res) => {
       });
     }
 
-    const isEnquiryJob =
-      String(job?.jobType || "")
-        .trim()
-        .toLowerCase() === "enquiry";
+    const canPresentApplicants = ["enquiry", "booked"].includes(
+      String(job?.jobType || "").trim().toLowerCase(),
+    );
 
-    if (!isEnquiryJob) {
+    if (!canPresentApplicants) {
       return res.status(400).json({
         success: false,
-        message: "Manual apply and present is only available for enquiry jobs",
+        message:
+          "Manual apply and present is only available for enquiry or booked jobs",
       });
     }
 
