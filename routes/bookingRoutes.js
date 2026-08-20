@@ -14,6 +14,7 @@ import {
   generateContractPdf,
 } from "../controllers/bookingController.js";
 import Booking from "../models/bookingModel.js";
+import Act from "../models/actModel.js";
 import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
@@ -470,9 +471,13 @@ const getEventDateForPdf = (answers, booking) => {
       "eventDetails.date",
     ]);
 
-  if (!raw) return "TBC";
+  const refMatch = String(booking?.bookingId || "").match(/^(\d{2})(\d{2})(\d{2})-/);
+  const fallback = refMatch
+    ? new Date(2000 + Number(refMatch[1]), Number(refMatch[2]) - 1, Number(refMatch[3]))
+    : null;
+  if (!raw && !fallback) return "TBC";
 
-  const date = new Date(raw);
+  const date = raw ? new Date(raw) : fallback;
   if (Number.isNaN(date.getTime())) return raw;
 
   return date.toLocaleDateString("en-GB", {
@@ -506,62 +511,21 @@ const getScheduleRowsForPdf = (answers) => {
     }
   };
 
-  const customBandFinishRow = simpleRows.find(
-    (row) =>
-      String(row?.label || row?.activity || row?.title || "")
-        .trim()
-        .toLowerCase() === "band finish",
-  );
+  const fixedRows = [
+    ["Band arrival / load-in", answers?.schedule_simple_arrival || answers?.scheduleSimpleArrival, answers?.schedule_simple_arrival_notes],
+    ["Setup", answers?.schedule_simple_setup || answers?.scheduleSimpleSetup, answers?.schedule_simple_setup_notes],
+    ["Soundcheck", answers?.schedule_simple_soundcheck || answers?.scheduleSimpleSoundcheck, answers?.schedule_simple_soundcheck_notes],
+    ["Start time", answers?.schedule_simple_start || answers?.scheduleSimpleStart, answers?.schedule_simple_start_notes],
+    ["Live set 1", answers?.schedule_simple_set1 || answers?.scheduleSimpleSet1, answers?.schedule_simple_set1_notes],
+    ["Intermission", answers?.schedule_simple_between1 || answers?.scheduleSimpleBetween1, answers?.schedule_simple_between1_notes],
+    ["Live set 2", answers?.schedule_simple_set2 || answers?.scheduleSimpleSet2, answers?.schedule_simple_set2_notes],
+    ["Band finish", answers?.schedule_simple_finish_time || answers?.scheduleSimpleFinishTime || answers?.schedule_time_finish || answers?.scheduleTimeFinish, answers?.schedule_simple_finish_notes],
+  ];
 
-  addRow(
-    "Band arrival / load-in",
-    answers?.schedule_simple_arrival || answers?.scheduleSimpleArrival,
-  );
-  addRow(
-    "Setup",
-    answers?.schedule_simple_setup || answers?.scheduleSimpleSetup,
-  );
-  addRow(
-    "Soundcheck",
-    answers?.schedule_simple_soundcheck || answers?.scheduleSimpleSoundcheck,
-  );
-  addRow(
-    "Live set 1",
-    answers?.schedule_simple_set1 || answers?.scheduleSimpleSet1,
-  );
-  addRow(
-    "Intermission",
-    answers?.schedule_simple_between1 || answers?.scheduleSimpleBetween1,
-  );
-  addRow(
-    "Live set 2",
-    answers?.schedule_simple_set2 || answers?.scheduleSimpleSet2,
-  );
-
-  addRow(
-    "Band finish",
-    customBandFinishRow?.time ||
-      customBandFinishRow?.value ||
-      answers?.schedule_simple_band_finish ||
-      answers?.scheduleSimpleBandFinish ||
-      answers?.schedule_simple_finish_time ||
-      answers?.scheduleSimpleFinishTime ||
-      answers?.schedule_time_finish ||
-      answers?.scheduleTimeFinish,
-    customBandFinishRow?.notes || "",
-  );
-
-  simpleRows.forEach((row) => {
+  const addCustomRowsForSlot = (slot) => simpleRows
+    .filter((row) => Number(row?.slot) === slot)
+    .forEach((row) => {
     const rawLabel = row?.label || row?.activity || row?.title;
-
-    if (
-      String(rawLabel || "")
-        .trim()
-        .toLowerCase() === "band finish"
-    ) {
-      return;
-    }
-
     const label =
       String(rawLabel || "")
         .trim()
@@ -572,20 +536,14 @@ const getScheduleRowsForPdf = (answers) => {
     const time = row?.time || row?.value;
     const notes = row?.notes;
 
-    const duplicate = rows.some(
-      (existing) =>
-        String(existing.activity).trim().toLowerCase() ===
-          String(label || "")
-            .trim()
-            .toLowerCase() &&
-        String(existing.time).trim().toLowerCase() ===
-          String(time || "")
-            .trim()
-            .toLowerCase(),
-    );
-
-    if (!duplicate) addRow(label, time, notes);
+    addRow(label, time, notes);
   });
+
+  fixedRows.forEach((fixed, slot) => {
+    addCustomRowsForSlot(slot);
+    addRow(...fixed);
+  });
+  addCustomRowsForSlot(8);
 
   return rows;
 };
@@ -617,12 +575,25 @@ const getFirstActSummary = (booking) => {
   return null;
 };
 
-const getLineupLabelForPdf = (booking) => {
+const resolveActLineupForPdf = (booking, act) => {
+  const firstAct = getFirstActSummary(booking) || {};
+  const wantedId = String(firstAct.lineupId || booking?.lineupId || "");
+  const wantedLabel = String(firstAct.lineupLabel || firstAct.lineup?.actSize || "").trim().toLowerCase();
+  return (act?.lineups || []).find((lineup) =>
+    [lineup?._id, lineup?.lineupId, lineup?.id].some((id) => String(id || "") === wantedId),
+  ) || (act?.lineups || []).find((lineup) =>
+    wantedLabel && String(lineup?.actSize || "").trim().toLowerCase() === wantedLabel,
+  ) || firstAct.lineup || null;
+};
+
+const getLineupLabelForPdf = (booking, act) => {
   const firstAct = getFirstActSummary(booking);
+  const lineup = resolveActLineupForPdf(booking, act);
 
   return (
     firstAct?.lineupLabel ||
     firstAct?.lineupName ||
+    lineup?.actSize ||
     firstAct?.lineup?.actSize ||
     firstAct?.lineup?.lineupLabel ||
     firstAct?.actSize ||
@@ -633,7 +604,30 @@ const getLineupLabelForPdf = (booking) => {
   );
 };
 
-const getPromoLinksForPdf = (booking) => {
+const getLineupMembersForPdf = (booking, act) => {
+  const firstAct = getFirstActSummary(booking) || {};
+  const lineup = resolveActLineupForPdf(booking, act);
+  return lineup?.bandMembers || firstAct.bandMembers || firstAct.lineup?.bandMembers || [];
+};
+
+const isNonPerformerForPdf = (member = {}) =>
+  member.isNonPerformer === true ||
+  /manager|management/i.test(`${member.instrument || ""} ${(member.additionalRoles || []).map((role) => role?.role || role?.title).join(" ")}`);
+
+const getLineupDescriptionForPdf = (booking, act) =>
+  getLineupMembersForPdf(booking, act)
+    .filter((member) => !isNonPerformerForPdf(member))
+    .map((member) => {
+      const roles = (member.additionalRoles || [])
+        .filter((role) => role?.isEssential && !/sound engineer/i.test(role?.role || ""))
+        .map((role) => role?.role || role?.title)
+        .filter(Boolean);
+      return [member.instrument, ...roles].filter(Boolean).join(" / ");
+    })
+    .filter(Boolean)
+    .join("; ");
+
+const getPromoLinksForPdf = (booking, act) => {
   const firstAct = getFirstActSummary(booking);
 
   const candidates = [
@@ -646,6 +640,8 @@ const getPromoLinksForPdf = (booking) => {
     booking?.act?.videos,
     booking?.act?.videoUrls,
     booking?.act?.promoVideos,
+    act?.tscVideos,
+    act?.videos,
   ];
 
   const urls = [];
@@ -673,9 +669,9 @@ const getChangingRoomForPdf = (answers) => {
 
   if (!formatted) return noInfo;
 
-  return formatted.toLowerCase() === "no"
-    ? "No exclusive changing room"
-    : formatted;
+  if (formatted.toLowerCase() === "no") return "Not provided";
+  const notes = pickAnswer(answers, ["changing_room_notes", "changingRoomNotes"]);
+  return notes ? `Provided - ${notes}` : "Provided";
 };
 
 const getBookerPhoneForPdf = (answers, booking) =>
@@ -709,18 +705,15 @@ const getBookerEmailForPdf = (answers, booking) =>
     "customerEmail",
   ]);
 
-const getActImageUrlForPdf = (booking) => {
+const getActImageUrlsForPdf = (booking, act) => {
   const firstAct = getFirstActSummary(booking);
-  const image =
-    firstAct?.image ||
-    firstAct?.images?.[0] ||
-    booking?.act?.image ||
-    booking?.act?.images?.[0];
-  if (typeof image === "string") return image;
-  return image?.url || image?.secure_url || "";
+  const urlOf = (image) => typeof image === "string" ? image : image?.url || image?.secure_url || "";
+  const gallery = Array.isArray(act?.images) ? act.images : [];
+  const candidates = [gallery[0], firstAct?.image, gallery[1], ...(act?.profileImage || []), ...(act?.coverImage || [])];
+  return [...new Set(candidates.map(urlOf).filter(Boolean))].slice(0, 3);
 };
 
-const getHotMealsRequiredForPdf = (answers, booking) => {
+const getHotMealsRequiredForPdf = (answers, booking, act) => {
   const explicit = pickAnswer(answers, [
     "hot_meals_required",
     "hotMealsRequired",
@@ -728,7 +721,9 @@ const getHotMealsRequiredForPdf = (answers, booking) => {
   if (explicit) return explicit;
 
   const firstAct = getFirstActSummary(booking);
+  const lineup = resolveActLineupForPdf(booking, act);
   const candidates = [
+    lineup?.hotMeal,
     firstAct?.lineup?.hotMeal,
     firstAct?.hotMeal,
     booking?.lineup?.hotMeal,
@@ -740,7 +735,11 @@ const getHotMealsRequiredForPdf = (answers, booking) => {
     if (formatted) return formatted;
   }
 
-  return noInfo;
+  const performerCount = getLineupMembersForPdf(booking, act).filter(
+    (member) => !isNonPerformerForPdf(member),
+  ).length;
+  const count = performerCount || Number(String(firstAct?.lineupLabel || "").match(/\d+/)?.[0]) || 1;
+  return `${count} hot meal${count === 1 ? "" : "s"} and refreshments required`;
 };
 
 const getPaidParkingSummaryForPdf = (answers) => {
@@ -788,7 +787,7 @@ const fetchImageBufferForPdf = async (url) => {
   }
 };
 
-const buildEventSheetPdfBuffer = async (booking) => {
+const buildEventSheetPdfBuffer = async (booking, act = null) => {
   const doc = new PDFDocument({ margin: 42, size: "A4" });
   const chunks = [];
 
@@ -808,10 +807,11 @@ const buildEventSheetPdfBuffer = async (booking) => {
   const eventDate = getEventDateForPdf(answers, booking);
   const venue = getVenueForPdf(answers, booking);
   const ref = booking?.bookingId || String(booking?._id || "");
-  const lineupLabel = getLineupLabelForPdf(booking);
+  const lineupLabel = getLineupLabelForPdf(booking, act);
+  const lineupDescription = getLineupDescriptionForPdf(booking, act);
   const bookerPhone = getBookerPhoneForPdf(answers, booking);
-  const actImageUrl = getActImageUrlForPdf(booking);
-  const actImageBuffer = await fetchImageBufferForPdf(actImageUrl);
+  const actImageUrls = getActImageUrlsForPdf(booking, act);
+  const actImageBuffers = (await Promise.all(actImageUrls.map(fetchImageBufferForPdf))).filter(Boolean);
 
   const pageWidth = doc.page.width;
   const left = doc.page.margins.left;
@@ -829,8 +829,8 @@ const buildEventSheetPdfBuffer = async (booking) => {
     }
   };
 
-  const sectionTitle = (title) => {
-    ensureSpace(45);
+  const sectionTitle = (title, expectedHeight = 150) => {
+    ensureSpace(expectedHeight);
     doc.moveDown(0.7);
     doc
       .font("Helvetica-Bold")
@@ -978,16 +978,13 @@ const buildEventSheetPdfBuffer = async (booking) => {
     .text(bandName, { align: "center" });
   doc.moveDown(1.1);
 
-  if (actImageBuffer) {
+  if (actImageBuffers.length) {
     try {
       ensureSpace(150);
-      const imageWidth = Math.min(contentWidth, 360);
-      const imageX = left + (contentWidth - imageWidth) / 2;
-      doc.image(actImageBuffer, imageX, doc.y, {
-        fit: [imageWidth, 135],
-        align: "center",
-        valign: "center",
-      });
+      const gap = 8;
+      const imageWidth = (contentWidth - gap * (actImageBuffers.length - 1)) / actImageBuffers.length;
+      const imageY = doc.y;
+      actImageBuffers.forEach((buffer, index) => doc.image(buffer, left + index * (imageWidth + gap), imageY, { fit: [imageWidth, 135], align: "center", valign: "center" }));
       doc.y += 150;
     } catch (error) {
       console.warn("⚠️ Could not add event sheet image to PDF", {
@@ -1031,7 +1028,7 @@ const buildEventSheetPdfBuffer = async (booking) => {
   sectionTitle("Event overview");
   labelValue("Event type", eventType, { showFallback: true });
   labelValue("Band name", bandName, { showFallback: true });
-  labelValue("Lineup size", lineupLabel, { showFallback: true });
+  labelValue("Lineup", [lineupLabel, lineupDescription].filter(Boolean).join(" - "), { showFallback: true });
   labelValue("Bookers", coupleNames, { showFallback: true });
   labelValue("Booker phone", bookerPhone, { showFallback: true });
   labelValue("Venue address", venue, { showFallback: true });
@@ -1061,7 +1058,7 @@ const buildEventSheetPdfBuffer = async (booking) => {
     pickAnswer(answers, ["attire_notes", "attireNotes", "attire"]),
     { showFallback: true },
   );
-  labelValue("Promo video reference", getPromoLinksForPdf(booking), {
+  labelValue("Promo video reference", getPromoLinksForPdf(booking, act), {
     showFallback: true,
   });
   sectionTitle("Schedule");
@@ -1076,9 +1073,10 @@ const buildEventSheetPdfBuffer = async (booking) => {
   );
 
   sectionTitle("Parking & load-in");
+  const parkingAvailability = pickAnswer(answers, ["parking_available", "parkingAvailable"]);
   labelValue(
     "Parking availability",
-    pickAnswer(answers, ["parking_available", "parkingAvailable"]),
+    parkingAvailability,
     { showFallback: true },
   );
   labelValue(
@@ -1086,17 +1084,21 @@ const buildEventSheetPdfBuffer = async (booking) => {
     pickAnswer(answers, ["parking_num_cars", "parkingNumCars"]),
     { showFallback: true },
   );
-  labelValue(
-    "On-site spaces",
-    pickAnswer(answers, ["parking_spaces_on_site", "parkingSpacesOnSite"]),
-    { showFallback: true },
-  );
-  labelValue("Paid parking required", getPaidParkingSummaryForPdf(answers), {
-    showFallback: true,
-  });
+  if (String(parkingAvailability).toLowerCase() !== "yes") {
+    labelValue(
+      "On-site spaces",
+      pickAnswer(answers, ["parking_spaces_on_site", "parkingSpacesOnSite"]),
+      { showFallback: true },
+    );
+    labelValue("Paid parking required", getPaidParkingSummaryForPdf(answers), {
+      showFallback: true,
+    });
+  }
   labelValue(
     "Parking location / address",
     pickAnswer(answers, [
+      "parking_pin",
+      "parkingPin",
       "parking_address",
       "parkingAddress",
       "parking_location",
@@ -1104,11 +1106,14 @@ const buildEventSheetPdfBuffer = async (booking) => {
     ]),
     { showFallback: true },
   );
-  labelValue(
-    "Parking cost per car",
-    pickAnswer(answers, ["parking_cost_per_car", "parkingCostPerCar"]),
-    { showFallback: true },
-  );
+  if (String(parkingAvailability).toLowerCase() !== "yes") {
+    labelValue(
+      "Parking cost per car",
+      pickAnswer(answers, ["parking_cost_per_car", "parkingCostPerCar"]),
+      { showFallback: true },
+    );
+  }
+  labelValue("Special parking instructions", pickAnswer(answers, ["parking_notes", "parkingNotes"]));
   boxedNote(
     "Load-in instructions",
     pickAnswer(answers, [
@@ -1165,12 +1170,13 @@ const buildEventSheetPdfBuffer = async (booking) => {
   sectionTitle("Food & refreshments");
   labelValue(
     "Hot meals required",
-    getHotMealsRequiredForPdf(answers, booking),
+    getHotMealsRequiredForPdf(answers, booking, act),
     { showFallback: true },
   );
   labelValue(
     "Meal timing / catering notes",
     pickAnswer(answers, [
+      "dietary_notes",
       "meal_time",
       "mealTime",
       "food_notes",
@@ -1190,14 +1196,16 @@ const buildEventSheetPdfBuffer = async (booking) => {
   );
 
   sectionTitle("Contacts");
-  const contacts = pickAnswer(answers, [
+  const personalContacts = pickAnswer(answers, [
     "contacts_personal",
     "contactsPersonal",
     "contacts",
     "point_of_contact",
     "pointOfContact",
   ]);
-  boxedNote("Point of contact", contacts, { showFallback: true });
+  const venueContacts = pickAnswer(answers, ["contacts_venue", "contactsVenue"]);
+  boxedNote("Personal point of contact", personalContacts, { showFallback: true });
+  boxedNote("Venue point of contact", venueContacts, { showFallback: true });
 
   sectionTitle("Music");
   labelValue(
@@ -1242,12 +1250,14 @@ const buildEventSheetPdfBuffer = async (booking) => {
     "Spotify playlist / DJ notes",
     pickAnswer(answers, [
       "spotify_playlist",
+      "spotify_playlist_links",
       "spotifyPlaylist",
       "spotify_playlist_url",
       "spotifyPlaylistUrl",
       "playlist_url",
       "playlistUrl",
       "dj_requests",
+      "advanced_dj_requests",
       "djRequests",
       "playlist_notes",
       "playlistNotes",
@@ -1268,7 +1278,7 @@ const buildEventSheetPdfBuffer = async (booking) => {
   );
   boxedNote(
     "Additional notes",
-    pickAnswer(answers, ["notes", "additional_notes", "additionalNotes"]),
+    pickAnswer(answers, ["free_notes", "notes", "additional_notes", "additionalNotes"]),
     { showFallback: true },
   );
 
@@ -1399,21 +1409,10 @@ const buildEventSheetPdfBuffer = async (booking) => {
     "clientEmail",
     "userEmail",
   ]);
+  void excludedKeys;
 
-  const otherEntries = Object.entries(answers).filter(([key, value]) => {
-    if (!key || excludedKeys.has(key)) return false;
-    if (value == null || value === "") return false;
-    if (String(key).toLowerCase().includes("base64")) return false;
-    if (String(key).toLowerCase().includes("screenshot_url")) return false;
-    return true;
-  });
-
-  if (otherEntries.length) {
-    sectionTitle("Other submitted details");
-    otherEntries.forEach(([key, value]) =>
-      labelValue(humaniseEventSheetKey(key), value, { large: true }),
-    );
-  }
+  // Deliberately do not print an "Other submitted details" overflow section.
+  // Every operational field must be mapped into its relevant section above.
 
   doc.moveDown(1);
   ensureSpace(30);
@@ -1540,6 +1539,18 @@ router.post("/notify-band", async (req, res) => {
       depopulate: false,
     });
 
+    const firstActId =
+      bookingForPdf?.actsSummary?.[0]?.actId || bookingForPdf?.act || null;
+    const actForPdf = firstActId
+      ? await Act.findById(firstActId).lean().catch((error) => {
+          console.warn("Could not load act details for event-sheet PDF", {
+            actId: String(firstActId),
+            message: error?.message,
+          });
+          return null;
+        })
+      : null;
+
     console.log("🧾 PDF booking fields check", {
       bookingId: bookingForPdf.bookingId,
       date: bookingForPdf.date,
@@ -1551,7 +1562,7 @@ router.post("/notify-band", async (req, res) => {
       firstLineupLabel: bookingForPdf.actsSummary?.[0]?.lineupLabel,
     });
 
-    const pdfBuffer = await buildEventSheetPdfBuffer(bookingForPdf);
+    const pdfBuffer = await buildEventSheetPdfBuffer(bookingForPdf, actForPdf);
     const safeRef = String(ref || "event-sheet").replace(/[^a-z0-9-_]+/gi, "-");
 
     const mailResult = await transporter.sendMail({
