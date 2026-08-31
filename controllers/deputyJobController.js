@@ -4277,9 +4277,18 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       ? job.notifications.filter((n) => n?.status === "sent")
       : [];
 
-    const existingSentIds = existingSuccessfulNotifications
-      .map((n) => asObjectIdString(n?.musicianId))
-      .filter(Boolean);
+    const existingSentIds = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(job.notifiedMusicianIds)
+            ? job.notifiedMusicianIds
+            : []),
+          ...existingSuccessfulNotifications.map((n) => n?.musicianId),
+        ]
+          .map((id) => asObjectIdString(id))
+          .filter(Boolean),
+      ),
+    );
 
     const existingSentEmails = existingSuccessfulNotifications
       .map((n) => normaliseEmail(n?.email || ""))
@@ -4549,252 +4558,252 @@ export const sendDeputyBookingEmail = async (req, res) => {
   }
 };
 
-  export const twilioInboundDeputyAllocation = async (req, res) => {
-    try {
-      const bodyText = normaliseString(req.body?.Body || "");
-      const buttonText = normaliseString(req.body?.ButtonText || "");
-      const buttonPayload = normaliseString(req.body?.ButtonPayload || "");
-      const repliedSid = normaliseString(
-        req.body?.OriginalRepliedMessageSid || "",
-      );
-      const inboundMessageSid = normaliseString(req.body?.MessageSid || "");
-      const fromRaw = normaliseString(req.body?.From || req.body?.WaId || "");
-      const fromPhone = toE164(fromRaw);
+export const twilioInboundDeputyAllocation = async (req, res) => {
+  try {
+    const bodyText = normaliseString(req.body?.Body || "");
+    const buttonText = normaliseString(req.body?.ButtonText || "");
+    const buttonPayload = normaliseString(req.body?.ButtonPayload || "");
+    const repliedSid = normaliseString(
+      req.body?.OriginalRepliedMessageSid || "",
+    );
+    const inboundMessageSid = normaliseString(req.body?.MessageSid || "");
+    const fromRaw = normaliseString(req.body?.From || req.body?.WaId || "");
+    const fromPhone = toE164(fromRaw);
 
-      const rawReply = (buttonPayload || buttonText || bodyText)
-        .trim()
-        .toLowerCase();
-      const normalisedReply = rawReply.replace(/\s+/g, " ").trim().toLowerCase();
-      const compactReply = normalisedReply.replace(/\s+/g, "");
+    const rawReply = (buttonPayload || buttonText || bodyText)
+      .trim()
+      .toLowerCase();
+    const normalisedReply = rawReply.replace(/\s+/g, " ").trim().toLowerCase();
+    const compactReply = normalisedReply.replace(/\s+/g, "");
 
-      let action = null;
+    let action = null;
 
-      // Accept
-      if (
-        normalisedReply === "yes" ||
-        normalisedReply === "yes, book me in!" ||
-        normalisedReply === "i am available" ||
-        normalisedReply === "i'm available" ||
-        normalisedReply === "available" ||
-        normalisedReply.includes("book me in")
-      ) {
-        action = "accept";
-      }
+    // Accept
+    if (
+      normalisedReply === "yes" ||
+      normalisedReply === "yes, book me in!" ||
+      normalisedReply === "i am available" ||
+      normalisedReply === "i'm available" ||
+      normalisedReply === "available" ||
+      normalisedReply.includes("book me in")
+    ) {
+      action = "accept";
+    }
 
-      // Decline
-      if (
-        compactReply === "notavailable" ||
-        normalisedReply.includes("not available") ||
-        normalisedReply.includes("unavailable") ||
-        normalisedReply.includes("changed my mind")
-      ) {
-        action = "decline";
-      }
+    // Decline
+    if (
+      compactReply === "notavailable" ||
+      normalisedReply.includes("not available") ||
+      normalisedReply.includes("unavailable") ||
+      normalisedReply.includes("changed my mind")
+    ) {
+      action = "decline";
+    }
 
-      // IMPORTANT: bail out early if we can't interpret the reply
-      if (!action) {
-        console.warn("⚠️ twilioInboundDeputyAllocation: unrecognised reply", {
-          bodyText,
-          buttonText,
-          buttonPayload,
-          fromPhone,
-          repliedSid,
-        });
-        return res.status(200).send("<Response/>");
-      }
+    // IMPORTANT: bail out early if we can't interpret the reply
+    if (!action) {
+      console.warn("⚠️ twilioInboundDeputyAllocation: unrecognised reply", {
+        bodyText,
+        buttonText,
+        buttonPayload,
+        fromPhone,
+        repliedSid,
+      });
+      return res.status(200).send("<Response/>");
+    }
 
-      const job = await deputyJobModel.findOne({
-        notifications: {
-          $elemMatch: {
-            providerMessageId: repliedSid,
-            channel: "whatsapp",
-            type: { $in: ["allocation_request", "allocation"] },
-          },
+    const job = await deputyJobModel.findOne({
+      notifications: {
+        $elemMatch: {
+          providerMessageId: repliedSid,
+          channel: "whatsapp",
+          type: { $in: ["allocation_request", "allocation"] },
         },
-      });
+      },
+    });
 
-      if (!job) {
-        console.warn(
-          "⚠️ twilioInboundDeputyAllocation: no deputy job found for replied SID",
-          {
-            repliedSid,
-            fromPhone,
-          },
-        );
-        return res.status(200).send("<Response/>");
-      }
-
-      const allocationNotification = (job.notifications || []).find(
-        (item) =>
-          String(item?.providerMessageId || "") === repliedSid &&
-          String(item?.channel || "") === "whatsapp" &&
-          ["allocation_request", "allocation"].includes(String(item?.type || "")),
-      );
-
-      const matchedApplication = findApplicationByAnyIdentity(job, {
-        musicianId: allocationNotification?.musicianId || job.allocatedMusicianId,
-        phone: fromPhone,
-        email: allocationNotification?.email || "",
-      });
-
-      const targetMusicianId =
-        allocationNotification?.musicianId ||
-        matchedApplication?.musicianId ||
-        job.allocatedMusicianId;
-
-      const musician = targetMusicianId
-        ? await musicianModel.findById(targetMusicianId).lean()
-        : null;
-
-      if (!musician) {
-        console.warn("⚠️ twilioInboundDeputyAllocation: musician not found", {
-          jobId: String(job._id),
+    if (!job) {
+      console.warn(
+        "⚠️ twilioInboundDeputyAllocation: no deputy job found for replied SID",
+        {
           repliedSid,
           fromPhone,
-          targetMusicianId: String(targetMusicianId || ""),
-        });
-        return res.status(200).send("<Response/>");
+        },
+      );
+      return res.status(200).send("<Response/>");
+    }
+
+    const allocationNotification = (job.notifications || []).find(
+      (item) =>
+        String(item?.providerMessageId || "") === repliedSid &&
+        String(item?.channel || "") === "whatsapp" &&
+        ["allocation_request", "allocation"].includes(String(item?.type || "")),
+    );
+
+    const matchedApplication = findApplicationByAnyIdentity(job, {
+      musicianId: allocationNotification?.musicianId || job.allocatedMusicianId,
+      phone: fromPhone,
+      email: allocationNotification?.email || "",
+    });
+
+    const targetMusicianId =
+      allocationNotification?.musicianId ||
+      matchedApplication?.musicianId ||
+      job.allocatedMusicianId;
+
+    const musician = targetMusicianId
+      ? await musicianModel.findById(targetMusicianId).lean()
+      : null;
+
+    if (!musician) {
+      console.warn("⚠️ twilioInboundDeputyAllocation: musician not found", {
+        jobId: String(job._id),
+        repliedSid,
+        fromPhone,
+        targetMusicianId: String(targetMusicianId || ""),
+      });
+      return res.status(200).send("<Response/>");
+    }
+
+    const getOrdinalSuffix = (day) => {
+      const n = Number(day);
+      if (n >= 11 && n <= 13) return "th";
+      const last = n % 10;
+      if (last === 1) return "st";
+      if (last === 2) return "nd";
+      if (last === 3) return "rd";
+      return "th";
+    };
+
+    const formatFullDate = (value) => {
+      if (!value) return "TBC";
+
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return normaliseString(value) || "TBC";
+
+      const weekday = date.toLocaleDateString("en-GB", { weekday: "long" });
+      const month = date.toLocaleDateString("en-GB", { month: "long" });
+      const day = date.getDate();
+      const year = date.getFullYear();
+
+      return `${weekday}, ${day}${getOrdinalSuffix(day)} ${month} ${year}`;
+    };
+
+    const musicianName = [musician.firstName, musician.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    const musicianDisplayName = [
+      normaliseString(musician?.firstName || ""),
+      normaliseString(musician?.lastName || "").charAt(0)
+        ? `${normaliseString(musician?.lastName || "").charAt(0)}.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
+    const jobTitle = normaliseString(
+      job.title || job.instrument || "Deputy opportunity",
+    );
+    const location = normaliseString(
+      job.location || job.locationName || job.venue || "Location TBC",
+    );
+    const dateText = formatFullDate(job.eventDate);
+    const feeText = getDeputyNetFeeText(job);
+
+    const musicianEmail = normaliseString(
+      musician.email || matchedApplication?.email || "",
+    ).toLowerCase();
+    const musicianPhone =
+      fromPhone ||
+      toE164(
+        musician.phone ||
+          musician.phoneNumber ||
+          matchedApplication?.phone ||
+          "",
+      ) ||
+      "";
+
+    const posterEmail = normaliseString(
+      job.createdByEmail || job.clientEmail || "",
+    ).toLowerCase();
+
+    if (action === "accept") {
+      // Mark booked/filled etc (your helper should set the correct job fields)
+      applyBookedStateToJob(job, musician);
+
+      job.notifications = [
+        ...(job.notifications || []),
+        {
+          musicianId: musician._id,
+          email: musicianEmail,
+          phone: musicianPhone,
+          channel: "whatsapp",
+          type: "allocation_accepted",
+          subject: `Deputy accepted: ${jobTitle}`,
+          previewHtml: "",
+          previewText: `Accepted via WhatsApp by ${musicianName}`,
+          providerMessageId: inboundMessageSid,
+          status: "sent",
+          sentAt: new Date(),
+        },
+      ];
+
+      await job.save();
+
+      // WhatsApp confirmation back to musician
+      if (musicianPhone) {
+        try {
+          await sendWhatsAppText(
+            musicianPhone,
+            "Wonderful! Please consider yourself booked. We’ll let the band know, and you should hear from them shortly.",
+          );
+        } catch (whatsAppError) {
+          console.error(
+            "❌ Failed to send deputy acceptance WhatsApp confirmation:",
+            whatsAppError,
+          );
+        }
       }
 
-      const getOrdinalSuffix = (day) => {
-        const n = Number(day);
-        if (n >= 11 && n <= 13) return "th";
-        const last = n % 10;
-        if (last === 1) return "st";
-        if (last === 2) return "nd";
-        if (last === 3) return "rd";
-        return "th";
-      };
+      // Email the musician full details
+      if (musicianEmail) {
+        try {
+          const callTime = normaliseString(
+            job?.callTime || job?.startTime || "",
+          );
+          const finishTime = normaliseString(
+            job?.finishTime || job?.endTime || "",
+          );
+          const notes = normaliseString(job?.notes || "");
+          const requiredInstruments = normaliseList(job?.requiredInstruments);
+          const essentialSkills = normaliseList(job?.essentialRoles);
+          const requiredSkills = normaliseList(job?.requiredSkills);
+          const preferredExtraSkills = normaliseList(job?.desiredRoles);
+          const secondaryInstruments = normaliseList(job?.secondaryInstruments);
+          const genres = normaliseList(job?.genres);
+          const tags = normaliseList(job?.tags);
+          const setLengths = normaliseList(job?.setLengths);
+          const whatsIncluded = normaliseList(job?.whatsIncluded);
+          const claimableExpenses = normaliseList(job?.claimableExpenses);
 
-      const formatFullDate = (value) => {
-        if (!value) return "TBC";
+          const bandContactName = normaliseString(
+            job?.createdByName || "The Supreme Collective",
+          );
+          const bandContactEmail = normaliseString(
+            job?.createdByEmail || "hello@thesupremecollective.co.uk",
+          );
+          const bandContactPhone = normaliseString(job?.createdByPhone || "");
 
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return normaliseString(value) || "TBC";
+          const payout = getMusicianPayoutSummary(musician);
+          const payoutSettingsUrl = getMusicianPayoutSettingsUrl(musician);
 
-        const weekday = date.toLocaleDateString("en-GB", { weekday: "long" });
-        const month = date.toLocaleDateString("en-GB", { month: "long" });
-        const day = date.getDate();
-        const year = date.getFullYear();
-
-        return `${weekday}, ${day}${getOrdinalSuffix(day)} ${month} ${year}`;
-      };
-
-      const musicianName = [musician.firstName, musician.lastName]
-        .filter(Boolean)
-        .join(" ")
-        .trim();
-      const musicianDisplayName = [
-        normaliseString(musician?.firstName || ""),
-        normaliseString(musician?.lastName || "").charAt(0)
-          ? `${normaliseString(musician?.lastName || "").charAt(0)}.`
-          : "",
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .trim();
-
-      const jobTitle = normaliseString(
-        job.title || job.instrument || "Deputy opportunity",
-      );
-      const location = normaliseString(
-        job.location || job.locationName || job.venue || "Location TBC",
-      );
-      const dateText = formatFullDate(job.eventDate);
-      const feeText = getDeputyNetFeeText(job);
-
-      const musicianEmail = normaliseString(
-        musician.email || matchedApplication?.email || "",
-      ).toLowerCase();
-      const musicianPhone =
-        fromPhone ||
-        toE164(
-          musician.phone ||
-            musician.phoneNumber ||
-            matchedApplication?.phone ||
-            "",
-        ) ||
-        "";
-
-      const posterEmail = normaliseString(
-        job.createdByEmail || job.clientEmail || "",
-      ).toLowerCase();
-
-      if (action === "accept") {
-        // Mark booked/filled etc (your helper should set the correct job fields)
-        applyBookedStateToJob(job, musician);
-
-        job.notifications = [
-          ...(job.notifications || []),
-          {
-            musicianId: musician._id,
-            email: musicianEmail,
-            phone: musicianPhone,
-            channel: "whatsapp",
-            type: "allocation_accepted",
-            subject: `Deputy accepted: ${jobTitle}`,
-            previewHtml: "",
-            previewText: `Accepted via WhatsApp by ${musicianName}`,
-            providerMessageId: inboundMessageSid,
-            status: "sent",
-            sentAt: new Date(),
-          },
-        ];
-
-        await job.save();
-
-        // WhatsApp confirmation back to musician
-        if (musicianPhone) {
-          try {
-            await sendWhatsAppText(
-              musicianPhone,
-              "Wonderful! Please consider yourself booked. We’ll let the band know, and you should hear from them shortly.",
-            );
-          } catch (whatsAppError) {
-            console.error(
-              "❌ Failed to send deputy acceptance WhatsApp confirmation:",
-              whatsAppError,
-            );
-          }
-        }
-
-        // Email the musician full details
-        if (musicianEmail) {
-          try {
-            const callTime = normaliseString(
-              job?.callTime || job?.startTime || "",
-            );
-            const finishTime = normaliseString(
-              job?.finishTime || job?.endTime || "",
-            );
-            const notes = normaliseString(job?.notes || "");
-            const requiredInstruments = normaliseList(job?.requiredInstruments);
-            const essentialSkills = normaliseList(job?.essentialRoles);
-            const requiredSkills = normaliseList(job?.requiredSkills);
-            const preferredExtraSkills = normaliseList(job?.desiredRoles);
-            const secondaryInstruments = normaliseList(job?.secondaryInstruments);
-            const genres = normaliseList(job?.genres);
-            const tags = normaliseList(job?.tags);
-            const setLengths = normaliseList(job?.setLengths);
-            const whatsIncluded = normaliseList(job?.whatsIncluded);
-            const claimableExpenses = normaliseList(job?.claimableExpenses);
-
-            const bandContactName = normaliseString(
-              job?.createdByName || "The Supreme Collective",
-            );
-            const bandContactEmail = normaliseString(
-              job?.createdByEmail || "hello@thesupremecollective.co.uk",
-            );
-            const bandContactPhone = normaliseString(job?.createdByPhone || "");
-
-            const payout = getMusicianPayoutSummary(musician);
-            const payoutSettingsUrl = getMusicianPayoutSettingsUrl(musician);
-
-            await sendEmail({
-              to: musicianEmail,
-              bcc: DEPUTY_JOB_BCC_EMAIL,
-              subject: `Confirmed: ${jobTitle}`,
-              html: `
+          await sendEmail({
+            to: musicianEmail,
+            bcc: DEPUTY_JOB_BCC_EMAIL,
+            subject: `Confirmed: ${jobTitle}`,
+            html: `
                 <div style="font-family: Arial, sans-serif; line-height: 1.65; color: #111; max-width: 720px;">
                   <p>Hi ${escapeHtml(normaliseString(musician.firstName || "there"))},</p>
 
@@ -4875,51 +4884,51 @@ export const sendDeputyBookingEmail = async (req, res) => {
                   </p>
                 </div>
               `,
-            });
-          } catch (musicianEmailError) {
-            console.error(
-              "❌ Failed to send musician deputy acceptance email:",
-              musicianEmailError,
-            );
-          }
+          });
+        } catch (musicianEmailError) {
+          console.error(
+            "❌ Failed to send musician deputy acceptance email:",
+            musicianEmailError,
+          );
         }
+      }
 
-        // Email the poster/band
-        if (posterEmail) {
-          try {
-            const requiredInstruments = normaliseList(job?.requiredInstruments);
-            const essentialSkills = normaliseList(job?.essentialRoles);
-            const requiredSkills = normaliseList(job?.requiredSkills);
-            const preferredExtraSkills = normaliseList(job?.desiredRoles);
-            const secondaryInstruments = normaliseList(job?.secondaryInstruments);
-            const genres = normaliseList(job?.genres);
-            const tags = normaliseList(job?.tags);
-            const setLengths = normaliseList(job?.setLengths);
-            const whatsIncluded = normaliseList(job?.whatsIncluded);
-            const claimableExpenses = normaliseList(job?.claimableExpenses);
+      // Email the poster/band
+      if (posterEmail) {
+        try {
+          const requiredInstruments = normaliseList(job?.requiredInstruments);
+          const essentialSkills = normaliseList(job?.essentialRoles);
+          const requiredSkills = normaliseList(job?.requiredSkills);
+          const preferredExtraSkills = normaliseList(job?.desiredRoles);
+          const secondaryInstruments = normaliseList(job?.secondaryInstruments);
+          const genres = normaliseList(job?.genres);
+          const tags = normaliseList(job?.tags);
+          const setLengths = normaliseList(job?.setLengths);
+          const whatsIncluded = normaliseList(job?.whatsIncluded);
+          const claimableExpenses = normaliseList(job?.claimableExpenses);
 
-            const callTime = normaliseString(
-              job?.callTime || job?.startTime || "",
-            );
-            const finishTime = normaliseString(
-              job?.finishTime || job?.endTime || "",
-            );
-            const notes = normaliseString(job?.notes || "");
+          const callTime = normaliseString(
+            job?.callTime || job?.startTime || "",
+          );
+          const finishTime = normaliseString(
+            job?.finishTime || job?.endTime || "",
+          );
+          const notes = normaliseString(job?.notes || "");
 
-            const paymentDate = job?.releaseOn
-              ? new Date(job.releaseOn).toLocaleDateString("en-GB", {
-                  weekday: "long",
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric",
-                })
-              : "TBC";
+          const paymentDate = job?.releaseOn
+            ? new Date(job.releaseOn).toLocaleDateString("en-GB", {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              })
+            : "TBC";
 
-            await sendEmail({
-              to: posterEmail,
-              bcc: DEPUTY_JOB_BCC_EMAIL,
-              subject: `Deputy accepted: ${jobTitle}`,
-              html: `
+          await sendEmail({
+            to: posterEmail,
+            bcc: DEPUTY_JOB_BCC_EMAIL,
+            subject: `Deputy accepted: ${jobTitle}`,
+            html: `
                 <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
                   <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
                     <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
@@ -4997,103 +5006,103 @@ export const sendDeputyBookingEmail = async (req, res) => {
                   </div>
                 </div>
               `,
-            });
-          } catch (posterEmailError) {
-            console.error(
-              "❌ Failed to send poster deputy acceptance email:",
-              posterEmailError,
-            );
-          }
+          });
+        } catch (posterEmailError) {
+          console.error(
+            "❌ Failed to send poster deputy acceptance email:",
+            posterEmailError,
+          );
         }
-
-        return res.status(200).send("<Response/>");
       }
 
-      // action === "decline"
-      {
-        const now = new Date();
-        const safeMusicianId = asObjectIdString(
-          musician._id || musician.musicianId,
-        );
+      return res.status(200).send("<Response/>");
+    }
 
-        job.status = "open";
-        job.workflowStage = "sent_to_matches";
-        job.allocatedMusicianId = null;
-        job.allocatedMusicianName = "";
-        job.allocatedAt = null;
-        job.bookedMusicianId = null;
-        job.bookedMusicianName = "";
-        job.bookingConfirmedAt = null;
+    // action === "decline"
+    {
+      const now = new Date();
+      const safeMusicianId = asObjectIdString(
+        musician._id || musician.musicianId,
+      );
 
-        job.applications = (job.applications || []).map((application) => {
-          const sameMusician =
-            asObjectIdString(application?.musicianId) === safeMusicianId;
-          return {
-            ...application,
-            status: sameMusician ? "declined" : application.status,
-            declinedAt: sameMusician ? now : application.declinedAt || null,
-          };
-        });
+      job.status = "open";
+      job.workflowStage = "sent_to_matches";
+      job.allocatedMusicianId = null;
+      job.allocatedMusicianName = "";
+      job.allocatedAt = null;
+      job.bookedMusicianId = null;
+      job.bookedMusicianName = "";
+      job.bookingConfirmedAt = null;
 
-        job.notifications = [
-          ...(job.notifications || []),
-          {
-            musicianId: musician._id,
-            email: musicianEmail,
-            phone: musicianPhone,
-            channel: "whatsapp",
-            type: "allocation_declined",
-            subject: `Deputy declined: ${jobTitle}`,
-            previewHtml: "",
-            previewText: `Declined via WhatsApp by ${musicianName}`,
-            providerMessageId: inboundMessageSid,
-            status: "sent",
-            sentAt: now,
-          },
-        ];
+      job.applications = (job.applications || []).map((application) => {
+        const sameMusician =
+          asObjectIdString(application?.musicianId) === safeMusicianId;
+        return {
+          ...application,
+          status: sameMusician ? "declined" : application.status,
+          declinedAt: sameMusician ? now : application.declinedAt || null,
+        };
+      });
 
-        await job.save();
+      job.notifications = [
+        ...(job.notifications || []),
+        {
+          musicianId: musician._id,
+          email: musicianEmail,
+          phone: musicianPhone,
+          channel: "whatsapp",
+          type: "allocation_declined",
+          subject: `Deputy declined: ${jobTitle}`,
+          previewHtml: "",
+          previewText: `Declined via WhatsApp by ${musicianName}`,
+          providerMessageId: inboundMessageSid,
+          status: "sent",
+          sentAt: now,
+        },
+      ];
 
-        if (musicianPhone) {
-          try {
-            await sendWhatsAppText(
-              musicianPhone,
-              "Thanks for letting us know. We’ve updated the job and will look for another deputy.",
-            );
-          } catch (whatsAppError) {
-            console.error(
-              "❌ Failed to send deputy decline WhatsApp confirmation:",
-              whatsAppError,
-            );
-          }
+      await job.save();
+
+      if (musicianPhone) {
+        try {
+          await sendWhatsAppText(
+            musicianPhone,
+            "Thanks for letting us know. We’ve updated the job and will look for another deputy.",
+          );
+        } catch (whatsAppError) {
+          console.error(
+            "❌ Failed to send deputy decline WhatsApp confirmation:",
+            whatsAppError,
+          );
         }
+      }
 
-        if (posterEmail) {
-          try {
-            const requiredInstruments = normaliseList(job?.requiredInstruments);
-            const essentialSkills = normaliseList(job?.essentialRoles);
-            const requiredSkills = normaliseList(job?.requiredSkills);
-            const preferredExtraSkills = normaliseList(job?.desiredRoles);
-            const secondaryInstruments = normaliseList(job?.secondaryInstruments);
-            const genres = normaliseList(job?.genres);
-            const tags = normaliseList(job?.tags);
-            const setLengths = normaliseList(job?.setLengths);
-            const whatsIncluded = normaliseList(job?.whatsIncluded);
-            const claimableExpenses = normaliseList(job?.claimableExpenses);
+      if (posterEmail) {
+        try {
+          const requiredInstruments = normaliseList(job?.requiredInstruments);
+          const essentialSkills = normaliseList(job?.essentialRoles);
+          const requiredSkills = normaliseList(job?.requiredSkills);
+          const preferredExtraSkills = normaliseList(job?.desiredRoles);
+          const secondaryInstruments = normaliseList(job?.secondaryInstruments);
+          const genres = normaliseList(job?.genres);
+          const tags = normaliseList(job?.tags);
+          const setLengths = normaliseList(job?.setLengths);
+          const whatsIncluded = normaliseList(job?.whatsIncluded);
+          const claimableExpenses = normaliseList(job?.claimableExpenses);
 
-            const callTime = normaliseString(
-              job?.callTime || job?.startTime || "",
-            );
-            const finishTime = normaliseString(
-              job?.finishTime || job?.endTime || "",
-            );
-            const notes = normaliseString(job?.notes || "");
+          const callTime = normaliseString(
+            job?.callTime || job?.startTime || "",
+          );
+          const finishTime = normaliseString(
+            job?.finishTime || job?.endTime || "",
+          );
+          const notes = normaliseString(job?.notes || "");
 
-            await sendEmail({
-              to: posterEmail,
-              bcc: DEPUTY_JOB_BCC_EMAIL,
-              subject: `Deputy declined: ${jobTitle}`,
-              html: `
+          await sendEmail({
+            to: posterEmail,
+            bcc: DEPUTY_JOB_BCC_EMAIL,
+            subject: `Deputy declined: ${jobTitle}`,
+            html: `
                 <div style="margin:0; padding:0; background:#f7f7f7; font-family:Arial, sans-serif; color:#111;">
                   <div style="max-width:700px; margin:0 auto; padding:32px 20px;">
                     <div style="background:#111; border-radius:20px 20px 0 0; padding:28px 32px; text-align:left;">
@@ -5161,27 +5170,27 @@ export const sendDeputyBookingEmail = async (req, res) => {
                   </div>
                 </div>
               `,
-            });
-          } catch (posterEmailError) {
-            console.error(
-              "❌ Failed to send poster deputy decline email:",
-              posterEmailError,
-            );
-          }
+          });
+        } catch (posterEmailError) {
+          console.error(
+            "❌ Failed to send poster deputy decline email:",
+            posterEmailError,
+          );
         }
-
-        return res.status(200).send("<Response/>");
       }
-    } catch (error) {
-      console.error("❌ twilioInboundDeputyAllocation error:", error);
+
       return res.status(200).send("<Response/>");
     }
-  };
+  } catch (error) {
+    console.error("❌ twilioInboundDeputyAllocation error:", error);
+    return res.status(200).send("<Response/>");
+  }
+};
 
 export const twilioInboundDeputyJob = async (req, res) => {
   try {
     const bodyText = String(req.body?.Body || "");
-    const buttonText = String(req.body?.ButtonText || "");  
+    const buttonText = String(req.body?.ButtonText || "");
     const buttonPayload = String(req.body?.ButtonPayload || "");
     const fromRaw = String(req.body?.From || req.body?.WaId || "");
     const repliedSid = String(req.body?.OriginalRepliedMessageSid || "");
@@ -6276,7 +6285,9 @@ export const presentDeputyApplicant = async (req, res) => {
     }
 
     const canPresentApplicants = ["enquiry", "booked"].includes(
-      String(job?.jobType || "").trim().toLowerCase(),
+      String(job?.jobType || "")
+        .trim()
+        .toLowerCase(),
     );
 
     if (!canPresentApplicants) {
@@ -7169,7 +7180,9 @@ export const manualApplyAndPresentDeputyJob = async (req, res) => {
     }
 
     const canPresentApplicants = ["enquiry", "booked"].includes(
-      String(job?.jobType || "").trim().toLowerCase(),
+      String(job?.jobType || "")
+        .trim()
+        .toLowerCase(),
     );
 
     if (!canPresentApplicants) {
