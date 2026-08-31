@@ -268,6 +268,25 @@ lastLoginAt: { type: Date, default: null, index: true },
     other_skills: { type: [String], default: [] },
     logistics: { type: [String], default: [] },
 
+    // Structured matching flags. Keep other_skills during the transition so
+    // existing profiles continue to match.
+    capabilities: {
+      soundEngineering: { type: Boolean, default: false, index: true },
+      paProvision: { type: Boolean, default: false, index: true },
+      lightingProvision: { type: Boolean, default: false, index: true },
+      lightingProvisionNeedsCheck: {
+        type: Boolean,
+        default: false,
+        index: true,
+      },
+    },
+
+    legacyImport: {
+      source: { type: String, default: "" },
+      mailchimpTags: { type: [String], default: [] },
+      importedAt: { type: Date, default: null },
+    },
+
     vocalMics: {
       wireless_vocal_mics: { type: String, default: null, set: (v) => (v === "" ? null : v) },
       wired_vocal_mics: { type: String, default: null, set: (v) => (v === "" ? null : v) },

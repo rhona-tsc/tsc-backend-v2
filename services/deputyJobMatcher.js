@@ -900,6 +900,42 @@ const hasAllEssentialRoles = (musician, essentialRoles = []) => {
     const wanted = cleanRoleText(requiredRole);
     if (!wanted) return true;
 
+    // Business rule: owning a PA is sufficient evidence that the musician can
+    // sound-engineer the band. Legacy combined skills remain supported.
+    if (wanted === "sound engineering") {
+      return (
+        musician?.capabilities?.soundEngineering === true ||
+        musician?.capabilities?.paProvision === true ||
+        searchableRoles.some((role) =>
+          /sound engineer|sound engineering|\bpa\b|pa provision/.test(role),
+        )
+      );
+    }
+
+    if (/^pa(?:\s*&\s*light)? provision$|^pa provision$/.test(wanted)) {
+      const hasPa =
+        musician?.capabilities?.paProvision === true ||
+        searchableRoles.some((role) =>
+          /\bpa\b|pa provision|sound engineering with pa/.test(role),
+        );
+      if (!wanted.includes("light")) return hasPa;
+      const hasLights =
+        musician?.capabilities?.lightingProvision === true ||
+        searchableRoles.some((role) =>
+          /light provision|lights provision|pa\s*&\s*lights/.test(role),
+        );
+      return hasPa && hasLights;
+    }
+
+    if (/light(?:ing)? provision|lights required/.test(wanted)) {
+      return (
+        musician?.capabilities?.lightingProvision === true ||
+        searchableRoles.some((role) =>
+          /light provision|lights provision|pa\s*&\s*lights/.test(role),
+        )
+      );
+    }
+
     if (/backing\s*voc|backing vocalist|bv/.test(wanted)) {
       return searchableRoles.some((type) =>
         /backing\s*voc|backing vocalist|bv|lead\s*voc|lead vocalist|lead singer|vocalist|singer/.test(
@@ -1233,6 +1269,35 @@ export const findMatchingMusiciansForDeputyJob = async ({
         deputyMatchPercent: Math.round(
           Math.max(0, Math.min(1, deputyMatchScore)) * 100,
         ),
+        matchFlags: {
+          soundEngineeringConfirmed:
+            musician?.capabilities?.soundEngineering === true ||
+            musician?.capabilities?.paProvision === true ||
+            getArrayValues(musician?.other_skills).some((role) =>
+              /sound engineer|sound engineering|\bpa\b/i.test(role),
+            ),
+          paProvisionConfirmed:
+            musician?.capabilities?.paProvision === true ||
+            getArrayValues(musician?.other_skills).some((role) =>
+              /\bpa\b|pa provision/i.test(role),
+            ),
+          lightingProvisionConfirmed:
+            musician?.capabilities?.lightingProvision === true ||
+            getArrayValues(musician?.other_skills).some((role) =>
+              /lights? provision|pa\s*&\s*lights/i.test(role),
+            ),
+          lightingProvisionNeedsCheck:
+            (musician?.capabilities?.paProvision === true ||
+              getArrayValues(musician?.other_skills).some((role) =>
+                /\bpa\b|pa provision/i.test(role),
+              )) &&
+            !(
+              musician?.capabilities?.lightingProvision === true ||
+              getArrayValues(musician?.other_skills).some((role) =>
+                /lights? provision|pa\s*&\s*lights/i.test(role),
+              )
+            ),
+        },
       };
     })
     .sort((a, b) => b.deputyMatchScore - a.deputyMatchScore);

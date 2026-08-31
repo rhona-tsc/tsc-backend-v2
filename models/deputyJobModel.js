@@ -42,6 +42,12 @@ const deputyJobApplicationSchema = new mongoose.Schema(
       locationFit: { type: Number, default: 0 },
       songFit: { type: Number, default: 0 },
     },
+    matchFlags: {
+      soundEngineeringConfirmed: { type: Boolean, default: false },
+      paProvisionConfirmed: { type: Boolean, default: false },
+      lightingProvisionConfirmed: { type: Boolean, default: false },
+      lightingProvisionNeedsCheck: { type: Boolean, default: false },
+    },
 
     shortlistedAt: { type: Date, default: null },
     presentedAt: { type: Date, default: null },
@@ -130,6 +136,12 @@ const deputyJobMatchSnapshotSchema = new mongoose.Schema(
       genreFit: { type: Number, default: 0 },
       locationFit: { type: Number, default: 0 },
       songFit: { type: Number, default: 0 },
+    },
+    matchFlags: {
+      soundEngineeringConfirmed: { type: Boolean, default: false },
+      paProvisionConfirmed: { type: Boolean, default: false },
+      lightingProvisionConfirmed: { type: Boolean, default: false },
+      lightingProvisionNeedsCheck: { type: Boolean, default: false },
     },
     notified: { type: Boolean, default: false },
     notifiedAt: { type: Date, default: null },

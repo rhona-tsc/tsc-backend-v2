@@ -805,6 +805,15 @@ const buildMatchSnapshot = (musician = {}) => ({
       musician?._debug?.songOverlapPct || musician?._debug?.songFit || 0,
     ),
   },
+  matchFlags: {
+    soundEngineeringConfirmed:
+      musician?.matchFlags?.soundEngineeringConfirmed === true,
+    paProvisionConfirmed: musician?.matchFlags?.paProvisionConfirmed === true,
+    lightingProvisionConfirmed:
+      musician?.matchFlags?.lightingProvisionConfirmed === true,
+    lightingProvisionNeedsCheck:
+      musician?.matchFlags?.lightingProvisionNeedsCheck === true,
+  },
   notified: false,
   notifiedAt: null,
 });
@@ -2945,6 +2954,16 @@ export const getDeputyJobApplications = async (req, res) => {
             locationFit: Number(application?.matchSummary?.locationFit || 0),
             songFit: Number(application?.matchSummary?.songFit || 0),
           },
+          matchFlags: {
+            soundEngineeringConfirmed:
+              application?.matchFlags?.soundEngineeringConfirmed === true,
+            paProvisionConfirmed:
+              application?.matchFlags?.paProvisionConfirmed === true,
+            lightingProvisionConfirmed:
+              application?.matchFlags?.lightingProvisionConfirmed === true,
+            lightingProvisionNeedsCheck:
+              application?.matchFlags?.lightingProvisionNeedsCheck === true,
+          },
           presentationId: normaliseString(application?.presentationId || ""),
           profileViewCount: Number(application?.profileViewCount || 0),
           uniqueProfileViewCount: Number(
@@ -3211,6 +3230,12 @@ export const applyToDeputyJob = async (req, res) => {
         genreFit: 0,
         locationFit: 0,
         songFit: 0,
+      },
+      matchFlags: matchedSnapshot?.matchFlags || {
+        soundEngineeringConfirmed: false,
+        paProvisionConfirmed: false,
+        lightingProvisionConfirmed: false,
+        lightingProvisionNeedsCheck: false,
       },
     });
 
