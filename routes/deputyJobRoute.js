@@ -18,6 +18,7 @@ import {
   saveDeputyJobPaymentMethod,
   chargeDeputyJob,
   runDeputyPayoutCron,
+  listDeputyPayments,
   twilioInboundDeputyJob,
   twilioInboundDeputyAllocation,
   previewDeputyJobNotification,
@@ -107,6 +108,14 @@ deputyJobRouter.get("/", (req, res, next) => {
 
 }, listDeputyJobs);
 
+deputyJobRouter.get("/payments", authUser, listDeputyPayments);
+
+/**
+ * Defaults to a non-mutating preview. Sending { dryRun: false } can only
+ * transfer when AUTO_DEPUTY_PAYOUTS_ENABLED=true and the cron secret matches.
+ */
+deputyJobRouter.post("/run-payout-cron", runDeputyPayoutCron);
+
 /**
  * Read job + matches
  * Keep /:id/matches before /:id
@@ -193,7 +202,6 @@ deputyJobRouter.post("/:id/charge", authUser, chargeDeputyJob);
  * Daily payout cron
  * Protected in controller with cron secret
  */
-deputyJobRouter.post("/run-payout-cron", runDeputyPayoutCron);
 
 /**
  * Applications

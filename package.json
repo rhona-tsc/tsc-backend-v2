@@ -4,6 +4,7 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
+    "test": "node --test",
     "start": "node server.js",
     "server": "nodemon server.js",
     "postinstall": "npx puppeteer browsers install chrome",

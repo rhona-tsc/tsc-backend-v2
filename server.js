@@ -823,6 +823,10 @@ cron.schedule(
     console.log("💸 [CRON] Running deputy payout release...");
     try {
       const result = await runDeputyPayoutRelease({ asOfDate: new Date() });
+      if (result.disabled) {
+        console.log("🔒 [CRON] Deputy payouts disabled; no transfers attempted.");
+        return;
+      }
       console.log("✅ [CRON] Deputy payout release complete:", {
         checkedCount: result.checkedCount,
         releasedCount: result.releasedCount,

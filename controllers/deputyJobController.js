@@ -3787,11 +3787,21 @@ export const runDeputyPayoutCron = async (req, res) => {
     if (!ensureCronSecret(req, res)) return;
 
     const asOfDate = parseDateOrNull(req.body?.asOfDate) || new Date();
-    const result = await runDeputyPayoutRelease({ asOfDate });
+    const dryRun = req.body?.dryRun !== false;
+    const result = await runDeputyPayoutRelease({ asOfDate, dryRun });
+
+    if (result.disabled) {
+      return res.status(503).json({
+        ...result,
+        message: "Automatic deputy payouts are disabled",
+      });
+    }
 
     return res.json({
       success: true,
-      message: `Deputy payout cron completed. ${result.releasedCount || 0} payouts released.`,
+      message: dryRun
+        ? `Deputy payout preview completed. ${result.checkedCount || 0} payouts are eligible.`
+        : `Deputy payout cron completed. ${result.releasedCount || 0} payouts released.`,
       ...result,
     });
   } catch (error) {
@@ -3800,6 +3810,44 @@ export const runDeputyPayoutCron = async (req, res) => {
       success: false,
       message: "Failed to run deputy payout cron",
       error: error.message,
+    });
+  }
+};
+
+export const listDeputyPayments = async (req, res) => {
+  try {
+    if (!canManuallyAllocateDeputyJob(req)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admin or agent users can view deputy payments",
+      });
+    }
+
+    const jobs = await deputyJobModel.find({
+      $or: [
+        { paymentStatus: { $ne: "not_started" } },
+        { payoutStatus: { $ne: "not_ready" } },
+      ],
+    })
+      .select(
+        [
+          "title", "instrument", "eventDate", "venue", "currency",
+          "grossAmount", "commissionAmount", "stripeFeeAmount", "deputyNetAmount",
+          "paymentStatus", "payoutStatus", "releaseOn", "chargedAt",
+          "payoutScheduledAt", "payoutPaidAt", "paymentFailureReason",
+          "latestTransferId", "bookedMusicianId", "bookedMusicianName",
+          "createdAt", "updatedAt",
+        ].join(" "),
+      )
+      .sort({ releaseOn: 1, eventDate: 1 })
+      .lean();
+
+    return res.json({ success: true, payments: jobs });
+  } catch (error) {
+    console.error("❌ listDeputyPayments error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch deputy payments",
     });
   }
 };

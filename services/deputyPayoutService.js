@@ -6,6 +6,9 @@ import musicianModel from "../models/musicianModel.js";
 
 const PAYOUT_READY_STATUSES = ["scheduled", "pending"];
 
+export const isAutomaticDeputyPayoutEnabled = (env = process.env) =>
+  normaliseString(env.AUTO_DEPUTY_PAYOUTS_ENABLED).toLowerCase() === "true";
+
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
 
 const stripe = stripeSecretKey
@@ -365,8 +368,15 @@ const sendInternalFinanceSummary = async ({ transporter, summary }) => {
 };
 
 
-const releaseDeputyPayout = async ({ job, transporter }) => {
- const lockedJob = await markJobPendingForPayout(job._id, job.releaseOn || new Date());
+const releaseDeputyPayout = async ({
+  job,
+  transporter,
+  stripeClient = stripe,
+}) => {
+  const lockedJob = await markJobPendingForPayout(
+    job._id,
+    job.releaseOn || new Date(),
+  );
   if (!lockedJob) {
     return {
       success: false,
@@ -375,7 +385,7 @@ const releaseDeputyPayout = async ({ job, transporter }) => {
     };
   }
 
-  if (!stripe) {
+  if (!stripeClient) {
     lockedJob.payoutStatus = "held";
     pushPaymentEvent(lockedJob, {
       type: "manual_adjustment",
@@ -461,19 +471,25 @@ const releaseDeputyPayout = async ({ job, transporter }) => {
 
   let transfer;
   try {
-    transfer = await stripe.transfers.create({
-      amount: transferAmountPence,
-      currency: normaliseCurrency(lockedJob.currency || "GBP").toLowerCase(),
-      destination: normaliseString(musician?.stripeConnect?.accountId || ""),
-      metadata: {
-        deputyJobId: String(lockedJob._id),
-        musicianId: String(musician._id),
-        eventDate: normaliseString(lockedJob.eventDate || ""),
-        grossAmount: String(Number(lockedJob.grossAmount || lockedJob.fee || 0)),
-        commissionAmount: String(Number(lockedJob.commissionAmount || 0)),
-        deputyNetAmount: String(Number(lockedJob.deputyNetAmount || 0)),
+    transfer = await stripeClient.transfers.create(
+      {
+        amount: transferAmountPence,
+        currency: normaliseCurrency(lockedJob.currency || "GBP").toLowerCase(),
+        destination: normaliseString(musician?.stripeConnect?.accountId || ""),
+        metadata: {
+          deputyJobId: String(lockedJob._id),
+          musicianId: String(musician._id),
+          eventDate: normaliseString(lockedJob.eventDate || ""),
+          grossAmount: String(Number(lockedJob.grossAmount || lockedJob.fee || 0)),
+          commissionAmount: String(Number(lockedJob.commissionAmount || 0)),
+          deputyNetAmount: String(Number(lockedJob.deputyNetAmount || 0)),
+        },
       },
-    });
+      {
+        // Retrying a crashed cron run must not create a second transfer.
+        idempotencyKey: `deputy-payout-${String(lockedJob._id)}`,
+      },
+    );
   } catch (error) {
     lockedJob.payoutStatus = "held";
     pushPaymentEvent(lockedJob, {
@@ -546,16 +562,59 @@ const releaseDeputyPayout = async ({ job, transporter }) => {
   };
 };
 
-export const runDeputyPayoutRelease = async ({ asOfDate = new Date() } = {}) => {
-  const transporter = buildMailer();
+export const runDeputyPayoutRelease = async ({
+  asOfDate = new Date(),
+  dryRun = false,
+  allowTransfers = isAutomaticDeputyPayoutEnabled(),
+  stripeClient = stripe,
+} = {}) => {
+  if (!allowTransfers && !dryRun) {
+    return {
+      success: false,
+      disabled: true,
+      checkedCount: 0,
+      releasedCount: 0,
+      totalReleased: 0,
+      results: [],
+      financeEmailResult: {
+        success: false,
+        skipped: true,
+        reason: "automatic_payouts_disabled",
+      },
+    };
+  }
+
+  const transporter = dryRun ? null : buildMailer();
   const readyJobs = await getReadyDeputyJobsForPayout(asOfDate);
+
+  if (dryRun) {
+    return {
+      success: true,
+      dryRun: true,
+      checkedCount: readyJobs.length,
+      releasedCount: 0,
+      totalReleased: 0,
+      results: readyJobs.map((job) => ({
+        success: true,
+        preview: true,
+        jobId: String(job._id),
+        amount: Number(job.deputyNetAmount || 0),
+        currency: normaliseCurrency(job.currency || "GBP"),
+      })),
+      financeEmailResult: { success: false, skipped: true, reason: "dry_run" },
+    };
+  }
 
   const results = [];
   let totalReleased = 0;
 
   for (const job of readyJobs) {
     try {
-      const result = await releaseDeputyPayout({ job, transporter });
+      const result = await releaseDeputyPayout({
+        job,
+        transporter,
+        stripeClient,
+      });
       results.push(result);
 
       if (result?.success) {
