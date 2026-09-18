@@ -9,14 +9,17 @@ const PAYOUT_READY_STATUSES = ["scheduled", "pending"];
 export const isAutomaticDeputyPayoutEnabled = (env = process.env) =>
   normaliseString(env.AUTO_DEPUTY_PAYOUTS_ENABLED).toLowerCase() === "true";
 
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
+// Musician/deputy payouts are made by Bamboo Music Management. Keep this
+// credential separate from the Stripe account used for TSC client charges so a
+// missing Bamboo key can never silently send funds from the wrong business.
+const stripeSecretKey = process.env.BMM_STRIPE_SECRET_KEY || "";
 
 const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
   : null;
 
   if (!stripeSecretKey) {
-  console.warn("⚠️ STRIPE_SECRET_KEY missing — deputy payout release will HOLD payouts.");
+  console.warn("⚠️ BMM_STRIPE_SECRET_KEY missing — deputy payout release will HOLD payouts.");
 }
 
 const normaliseString = (value) => String(value || "").trim();
@@ -588,19 +591,46 @@ export const runDeputyPayoutRelease = async ({
   const readyJobs = await getReadyDeputyJobsForPayout(asOfDate);
 
   if (dryRun) {
-    return {
-      success: true,
-      dryRun: true,
-      checkedCount: readyJobs.length,
-      releasedCount: 0,
-      totalReleased: 0,
-      results: readyJobs.map((job) => ({
-        success: true,
+    const results = [];
+    for (const job of readyJobs) {
+      const musician = await musicianModel.findById(job.bookedMusicianId).lean();
+      const accountId = normaliseString(musician?.stripeConnect?.accountId || "");
+      let validationError = "";
+
+      if (!stripeClient) {
+        validationError = "missing_bmm_stripe_configuration";
+      } else if (!hasTransferCapability(musician)) {
+        validationError = "missing_stripe_connect_account";
+      } else {
+        try {
+          const account = await stripeClient.accounts.retrieve(accountId);
+          if (account?.details_submitted !== true || account?.payouts_enabled !== true) {
+            validationError = "stripe_connect_account_incomplete";
+          }
+        } catch (error) {
+          validationError = error?.code || error?.message || "stripe_connect_account_not_accessible";
+        }
+      }
+
+      results.push({
+        success: !validationError,
         preview: true,
         jobId: String(job._id),
         amount: Number(job.deputyNetAmount || 0),
         currency: normaliseCurrency(job.currency || "GBP"),
-      })),
+        stripeAccountVerified: !validationError,
+        ...(validationError ? { reason: validationError } : {}),
+      });
+    }
+
+    return {
+      success: results.every((result) => result.success),
+      dryRun: true,
+      checkedCount: readyJobs.length,
+      verifiedCount: results.filter((result) => result.success).length,
+      releasedCount: 0,
+      totalReleased: 0,
+      results,
       financeEmailResult: { success: false, skipped: true, reason: "dry_run" },
     };
   }
