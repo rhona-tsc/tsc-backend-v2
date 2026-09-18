@@ -9,17 +9,16 @@ const PAYOUT_READY_STATUSES = ["scheduled", "pending"];
 export const isAutomaticDeputyPayoutEnabled = (env = process.env) =>
   normaliseString(env.AUTO_DEPUTY_PAYOUTS_ENABLED).toLowerCase() === "true";
 
-// Musician/deputy payouts are made by Bamboo Music Management. Keep this
-// credential separate from the Stripe account used for TSC client charges so a
-// missing Bamboo key can never silently send funds from the wrong business.
-const stripeSecretKey = process.env.BMM_STRIPE_SECRET_KEY || "";
+// Deputy Stripe Connect accounts were onboarded under the TSC platform, so
+// payouts must use that platform's credential.
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
 
 const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
   : null;
 
   if (!stripeSecretKey) {
-  console.warn("⚠️ BMM_STRIPE_SECRET_KEY missing — deputy payout release will HOLD payouts.");
+  console.warn("⚠️ STRIPE_SECRET_KEY missing — deputy payout release will HOLD payouts.");
 }
 
 const normaliseString = (value) => String(value || "").trim();
