@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 // Keep module initialisation inert: no Stripe client is constructed.
 delete process.env.STRIPE_SECRET_KEY;
+delete process.env.BMM_STRIPE_SECRET_KEY;
 delete process.env.AUTO_DEPUTY_PAYOUTS_ENABLED;
 
 const { isAutomaticDeputyPayoutEnabled, runDeputyPayoutRelease } =
@@ -34,24 +35,51 @@ test("dry run reports eligible jobs without locking or transferring", async (t) 
   const originals = {
     find: deputyJobModel.find,
     findOneAndUpdate: deputyJobModel.findOneAndUpdate,
+    musicianFindById: musicianModel.findById,
   };
-  t.after(() => Object.assign(deputyJobModel, originals));
+  t.after(() => {
+    deputyJobModel.find = originals.find;
+    deputyJobModel.findOneAndUpdate = originals.findOneAndUpdate;
+    musicianModel.findById = originals.musicianFindById;
+  });
 
   let lockCalls = 0;
   let transferCalls = 0;
   deputyJobModel.find = async () => [
-    { _id: "job-preview", deputyNetAmount: 125.5, currency: "gbp" },
+    {
+      _id: "job-preview",
+      bookedMusicianId: "musician-preview",
+      deputyNetAmount: 125.5,
+      currency: "gbp",
+    },
   ];
   deputyJobModel.findOneAndUpdate = async () => { lockCalls += 1; };
+  musicianModel.findById = () => ({
+    lean: async () => ({
+      _id: "musician-preview",
+      stripeConnect: {
+        accountId: "acct_preview",
+        payoutsEnabled: true,
+        detailsSubmitted: true,
+      },
+    }),
+  });
 
   const result = await runDeputyPayoutRelease({
     dryRun: true,
     allowTransfers: false,
-    stripeClient: { transfers: { create: async () => { transferCalls += 1; } } },
+    stripeClient: {
+      accounts: {
+        retrieve: async () => ({ details_submitted: true, payouts_enabled: true }),
+      },
+      transfers: { create: async () => { transferCalls += 1; } },
+    },
   });
 
   assert.equal(result.dryRun, true);
   assert.equal(result.checkedCount, 1);
+  assert.equal(result.verifiedCount, 1);
+  assert.equal(result.results[0].stripeAccountVerified, true);
   assert.equal(result.results[0].amount, 125.5);
   assert.equal(lockCalls, 0);
   assert.equal(transferCalls, 0);
