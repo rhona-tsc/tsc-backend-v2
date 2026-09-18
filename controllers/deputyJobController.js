@@ -14,6 +14,7 @@ import { sendWhatsAppText } from "../utils/twilioClient.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import mongoose from "mongoose";
 import deputyPresentationModel from "../models/deputyPresentationModel.js";
+import bookingBoardItemModel from "../models/bookingBoardItem.js";
 import crypto from "crypto";
 
 const DEPUTY_JOB_BCC_EMAIL =
@@ -3846,27 +3847,133 @@ export const listDeputyPayments = async (req, res) => {
       .sort({ releaseOn: 1, eventDate: 1 })
       .lean();
 
+    const bookingRows = await bookingBoardItemModel
+      .find({
+        $or: [
+          { "assignedMusicians.0": { $exists: true } },
+          { "bookingMusicians.0": { $exists: true } },
+          { "bandLineup.0": { $exists: true } },
+          { "bookingDetails.assignedMusicians.0": { $exists: true } },
+        ],
+      })
+      .select(
+        [
+          "bookingRef", "bookerName", "clientFirstNames", "eventDateISO",
+          "actName", "actTscName", "address", "county", "accounting",
+          "balancePaid", "balanceStatus", "payments", "assignedMusicians",
+          "bookingMusicians", "bandLineup", "bookingDetails.assignedMusicians",
+        ].join(" "),
+      )
+      .lean();
+
+    const getBookingMembers = (row = {}) => {
+      const candidates = [
+        row.assignedMusicians,
+        row.bookingMusicians,
+        row.bandLineup,
+        row.bookingDetails?.assignedMusicians,
+      ];
+      return candidates.find((value) => Array.isArray(value) && value.length) || [];
+    };
+
+    const bookingMembers = bookingRows.flatMap((row) =>
+      getBookingMembers(row)
+        .filter((member) =>
+          !["declined", "cancelled", "replaced"].includes(
+            normaliseString(member?.status).toLowerCase(),
+          ),
+        )
+        .filter((member) => Number(member?.totalFee || member?.fee || 0) > 0)
+        .map((member) => ({ row, member })),
+    );
+
     const musicianIds = Array.from(
       new Set(
-        jobs
-          .map((job) => asObjectIdString(job.bookedMusicianId))
+        [
+          ...jobs.map((job) => job.bookedMusicianId),
+          ...bookingMembers.map(({ member }) => member.musicianId),
+        ]
+          .map(asObjectIdString)
+          .filter(Boolean),
+      ),
+    );
+    const musicianEmails = Array.from(
+      new Set(
+        bookingMembers
+          .map(({ member }) => normaliseString(member?.email).toLowerCase())
           .filter(Boolean),
       ),
     );
     const musicians = await musicianModel
-      .find({ _id: { $in: musicianIds } })
+      .find({
+        $or: [
+          { _id: { $in: musicianIds } },
+          { email: { $in: musicianEmails } },
+        ],
+      })
       .select("firstName lastName email bank_account stripeConnect")
       .lean();
     const musiciansById = new Map(
       musicians.map((musician) => [asObjectIdString(musician._id), musician]),
     );
+    const musiciansByEmail = new Map(
+      musicians.map((musician) => [normaliseString(musician.email).toLowerCase(), musician]),
+    );
 
-    const payments = jobs.map((job) => {
+    const historicalCutoff = new Date("2026-09-18T00:00:00.000Z");
+    const approvedHistoricalPayments = [
+      { name: "sammy kamel", date: "2026-08-01", amount: 277.57 },
+      { email: "isaacdelosreyes@gmail.com", date: "2026-08-01", amount: 252 },
+      { email: "allexanava@gmail.com", date: "2026-08-08", amount: 245 },
+      { name: "evie alberti", date: "2026-09-05", amount: 255.9 },
+      { email: "hello@ramaen.co.uk", date: "2026-09-05", amount: 397.5 },
+      { email: "isaacdelosreyes@gmail.com", date: "2026-09-05", amount: 580 },
+      { name: "mason keefe", date: "2026-09-05", amount: 390.84 },
+      { email: "joshbetleymusic@gmail.com", date: "2026-09-05", amount: 397.5 },
+      { name: "matt duduryn", date: "2026-09-05", amount: 255.9 },
+      { name: "denquar chupak", date: "2026-09-05", amount: 368.19 },
+      { email: "renesbbwi@gmail.com", date: "2026-09-05", amount: 449 },
+      { email: "info@ioneofficial.com", date: "2026-09-09", amount: 350 },
+      { email: "emma_osei_lah@hotmail.com", date: "2026-09-12", amount: 416 },
+      { email: "renesbbwi@gmail.com", date: "2026-09-12", amount: 382 },
+      { email: "jeremypeterallen@gmail.com", date: "2026-09-17", amount: 322.5 },
+      { name: "sebastian fernandez", date: "2026-09-17", amount: 247.5 },
+    ];
+
+    const isApprovedHistoricalPayment = ({ eventDate: rawEventDate, name: rawName, email: rawEmail, amount: rawAmount }) => {
+      const eventDate = parseDateOrNull(rawEventDate);
+      if (!eventDate || eventDate >= historicalCutoff) return true;
+
+      const date = eventDate.toISOString().slice(0, 10);
+      const name = normaliseString(rawName).toLowerCase();
+      const email = normaliseString(rawEmail).toLowerCase();
+      const amount = Number(rawAmount || 0);
+
+      return approvedHistoricalPayments.some(
+        (approved) =>
+          approved.date === date &&
+          Math.abs(approved.amount - amount) < 0.005 &&
+          ((approved.email && email === approved.email) ||
+            (approved.name &&
+              (name === approved.name ||
+                name.startsWith(`${approved.name} `) ||
+                approved.name.startsWith(`${name} `)))),
+      );
+    };
+
+    const deputyPayments = jobs.filter((job) =>
+      isApprovedHistoricalPayment({
+        eventDate: job.eventDate,
+        name: job.bookedMusicianName,
+        amount: job.deputyNetAmount,
+      }),
+    ).map((job) => {
       const musician = musiciansById.get(asObjectIdString(job.bookedMusicianId));
       const payout = getMusicianPayoutSummary(musician || {});
 
       return {
         ...job,
+        paymentSource: "deputy_job",
         payoutDetails: {
           hasPayoutDetails: payout.hasPayoutDetails,
           isStripeReady: payout.isStripeReady,
@@ -3885,6 +3992,99 @@ export const listDeputyPayments = async (req, res) => {
         },
       };
     });
+
+    const bookingPayments = bookingMembers
+      .filter(({ row, member }) =>
+        isApprovedHistoricalPayment({
+          eventDate: row.eventDateISO,
+          name: member.name,
+          email: member.email,
+          amount: member.totalFee || member.fee,
+        }),
+      )
+      .map(({ row, member }) => {
+        const musician =
+          musiciansById.get(asObjectIdString(member.musicianId)) ||
+          musiciansByEmail.get(normaliseString(member.email).toLowerCase());
+        const payout = getMusicianPayoutSummary(musician || {});
+        const fee = Number(member.totalFee || member.fee || 0);
+        const memberPaymentStatus = normaliseString(member.paymentStatus).toLowerCase();
+        const clientPaid = Boolean(
+          row.balancePaid ||
+          row.payments?.balancePaymentReceived ||
+          row.payments?.invoicePaid,
+        );
+        const payoutStatus = memberPaymentStatus === "paid"
+          ? "paid"
+          : memberPaymentStatus === "pending"
+            ? "pending"
+            : memberPaymentStatus === "held"
+              ? "held"
+              : memberPaymentStatus === "cancelled"
+                ? "cancelled"
+                : "not_ready";
+
+        return {
+          _id: `booking-board-${String(row._id)}-${asObjectIdString(member.musicianId) || normaliseString(member.email).toLowerCase()}`,
+          sourceRecordId: String(row._id),
+          paymentSource: "booking_board",
+          title: member.role || member.instrument || row.actTscName || row.actName || "Booking musician",
+          instrument: member.instrument || member.role || "",
+          venue: [row.address, row.county].filter(Boolean).join(", "),
+          eventDate: row.eventDateISO,
+          currency: normaliseCurrency(row.accounting?.currency || "GBP"),
+          grossAmount: fee,
+          commissionAmount: 0,
+          deputyNetAmount: fee,
+          paymentStatus: clientPaid ? "paid" : "not_recorded",
+          payoutStatus,
+          payoutPaidAt: payoutStatus === "paid" ? row.payments?.paidAt || row.paidAt || null : null,
+          releaseOn: null,
+          bookedMusicianId: member.musicianId || musician?._id || null,
+          bookedMusicianName: member.name || [musician?.firstName, musician?.lastName].filter(Boolean).join(" "),
+          bookingRef: row.bookingRef || "",
+          clientName: row.clientFirstNames || row.bookerName || "",
+          payoutDetails: {
+            hasPayoutDetails: payout.hasPayoutDetails,
+            isStripeReady: payout.isStripeReady,
+            hasStripeAccount: payout.hasStripeAccount,
+            detailsSubmitted: payout.detailsSubmitted,
+            payoutsEnabled: payout.payoutsEnabled,
+            hasManualBankDetails: payout.hasManualBankDetails,
+            bankAccountEnding: payout.ending,
+            status: payout.isStripeReady
+              ? "stripe_ready"
+              : payout.hasManualBankDetails
+                ? "manual_bank_ready"
+                : payout.hasStripeAccount
+                  ? "stripe_incomplete"
+                  : "missing",
+          },
+        };
+      });
+
+    const seenPayments = new Set(
+      deputyPayments.map((payment) => [
+        String(payment.eventDate || "").slice(0, 10),
+        Number(payment.deputyNetAmount || 0).toFixed(2),
+        normaliseString(payment.bookedMusicianName).toLowerCase(),
+      ].join("|")),
+    );
+    const payments = [
+      ...deputyPayments,
+      ...bookingPayments.filter((payment) => {
+        const key = [
+          String(payment.eventDate || "").slice(0, 10),
+          Number(payment.deputyNetAmount || 0).toFixed(2),
+          normaliseString(payment.bookedMusicianName).toLowerCase(),
+        ].join("|");
+        if (seenPayments.has(key)) return false;
+        seenPayments.add(key);
+        return true;
+      }),
+    ].sort((left, right) =>
+      String(left.eventDate || "").localeCompare(String(right.eventDate || "")),
+    );
 
     return res.json({ success: true, payments });
   } catch (error) {
