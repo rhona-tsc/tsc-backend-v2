@@ -3823,26 +3823,70 @@ export const listDeputyPayments = async (req, res) => {
       });
     }
 
+    // The payment tracker is allocation-led, not advert-led. bookedMusicianId is
+    // only set once the selected musician accepts and is cleared when they
+    // decline, so this guarantees one current payee per role and excludes open
+    // adverts, unconverted enquiries and cancelled jobs.
     const jobs = await deputyJobModel.find({
-      $or: [
-        { paymentStatus: { $ne: "not_started" } },
-        { payoutStatus: { $ne: "not_ready" } },
-      ],
+      bookedMusicianId: { $ne: null },
+      jobType: { $ne: "enquiry" },
+      status: { $ne: "cancelled" },
     })
       .select(
         [
-          "title", "instrument", "eventDate", "venue", "currency",
+          "title", "instrument", "eventDate", "venue", "currency", "jobType",
+          "status",
           "grossAmount", "commissionAmount", "stripeFeeAmount", "deputyNetAmount",
           "paymentStatus", "payoutStatus", "releaseOn", "chargedAt",
           "payoutScheduledAt", "payoutPaidAt", "paymentFailureReason",
           "latestTransferId", "bookedMusicianId", "bookedMusicianName",
-          "createdAt", "updatedAt",
+          "bookingConfirmedAt", "createdAt", "updatedAt",
         ].join(" "),
       )
       .sort({ releaseOn: 1, eventDate: 1 })
       .lean();
 
-    return res.json({ success: true, payments: jobs });
+    const musicianIds = Array.from(
+      new Set(
+        jobs
+          .map((job) => asObjectIdString(job.bookedMusicianId))
+          .filter(Boolean),
+      ),
+    );
+    const musicians = await musicianModel
+      .find({ _id: { $in: musicianIds } })
+      .select("firstName lastName email bank_account stripeConnect")
+      .lean();
+    const musiciansById = new Map(
+      musicians.map((musician) => [asObjectIdString(musician._id), musician]),
+    );
+
+    const payments = jobs.map((job) => {
+      const musician = musiciansById.get(asObjectIdString(job.bookedMusicianId));
+      const payout = getMusicianPayoutSummary(musician || {});
+
+      return {
+        ...job,
+        payoutDetails: {
+          hasPayoutDetails: payout.hasPayoutDetails,
+          isStripeReady: payout.isStripeReady,
+          hasStripeAccount: payout.hasStripeAccount,
+          detailsSubmitted: payout.detailsSubmitted,
+          payoutsEnabled: payout.payoutsEnabled,
+          hasManualBankDetails: payout.hasManualBankDetails,
+          bankAccountEnding: payout.ending,
+          status: payout.isStripeReady
+            ? "stripe_ready"
+            : payout.hasManualBankDetails
+              ? "manual_bank_ready"
+              : payout.hasStripeAccount
+                ? "stripe_incomplete"
+                : "missing",
+        },
+      };
+    });
+
+    return res.json({ success: true, payments });
   } catch (error) {
     console.error("❌ listDeputyPayments error:", error);
     return res.status(500).json({
