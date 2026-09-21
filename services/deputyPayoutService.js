@@ -534,11 +534,19 @@ const releaseDeputyPayout = async ({
   });
   await lockedJob.save();
 
-  const remittanceResult = await sendDeputyRemittanceAdvice({
-    transporter,
-    job: lockedJob,
-    musician,
-  });
+  let remittanceResult;
+  try {
+    remittanceResult = await sendDeputyRemittanceAdvice({
+      transporter,
+      job: lockedJob,
+      musician,
+    });
+  } catch (error) {
+    remittanceResult = {
+      success: false,
+      reason: error?.message || "Failed to send deputy remittance advice",
+    };
+  }
 
   if (!remittanceResult?.success) {
     pushPaymentEvent(lockedJob, {
@@ -688,10 +696,18 @@ const releasedJobs = results
     failures,
   };
 
-  const financeEmailResult = await sendInternalFinanceSummary({
-    transporter,
-    summary,
-  });
+  let financeEmailResult;
+  try {
+    financeEmailResult = await sendInternalFinanceSummary({
+      transporter,
+      summary,
+    });
+  } catch (error) {
+    financeEmailResult = {
+      success: false,
+      reason: error?.message || "Failed to send finance summary email",
+    };
+  }
 
   return {
     success: true,
