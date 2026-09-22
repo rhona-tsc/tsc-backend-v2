@@ -120,6 +120,50 @@ const buildStatusMatch = (statuses = []) => {
   return ors.length ? { $or: ors } : {};
 };
 
+const normaliseVideoUrl = (value = "") =>
+  String(value || "")
+    .trim()
+    .replace(/\/$/, "")
+    .toLowerCase();
+
+const addVideoReviewSummary = (deputy) => {
+  const uploaded = [
+    ...(Array.isArray(deputy.functionBandVideoLinks)
+      ? deputy.functionBandVideoLinks
+      : []),
+    ...(Array.isArray(deputy.originalBandVideoLinks)
+      ? deputy.originalBandVideoLinks
+      : []),
+  ].filter((video) => normaliseVideoUrl(video?.url));
+
+  const approvedUrls = new Set(
+    [
+      ...(Array.isArray(deputy.tscApprovedFunctionBandVideoLinks)
+        ? deputy.tscApprovedFunctionBandVideoLinks
+        : []),
+      ...(Array.isArray(deputy.tscApprovedOriginalBandVideoLinks)
+        ? deputy.tscApprovedOriginalBandVideoLinks
+        : []),
+    ]
+      .map((video) => normaliseVideoUrl(video?.url))
+      .filter(Boolean),
+  );
+
+  const uniqueUploadedUrls = [
+    ...new Set(uploaded.map((video) => normaliseVideoUrl(video.url))),
+  ];
+  const unvettedVideoCount = uniqueUploadedUrls.filter(
+    (url) => !approvedUrls.has(url),
+  ).length;
+
+  return {
+    ...deputy,
+    uploadedVideoCount: uniqueUploadedUrls.length,
+    unvettedVideoCount,
+    needsVideoReview: unvettedVideoCount > 0,
+  };
+};
+
 const fetchByStatuses = async (statuses) => {
   const statusMatch = buildStatusMatch(statuses);
   const query = { role: "musician", ...(statusMatch.$or ? { ...statusMatch } : {}) };
@@ -172,12 +216,13 @@ export const listDeputiesReviewQueue = async (req, res) => {
     const all = String(req.query.all || "").toLowerCase() === "true";
 
     if (all) {
-      const deputies = await musicianModel
+      const deputyDocs = await musicianModel
         .find({ role: { $in: ["musician", "deputy"] } })
         .select(
-          "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt"
+          "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks"
         )
         .lean();
+      const deputies = deputyDocs.map(addVideoReviewSummary);
 
       return res.json({
         success: true,
@@ -198,15 +243,16 @@ export const listDeputiesReviewQueue = async (req, res) => {
       ? statuses
       : ["pending", "Approved, changes pending"];
 
-    const deputies = await musicianModel
+    const deputyDocs = await musicianModel
       .find({
         role: { $in: ["musician", "deputy"] },
         status: { $in: wanted },
       })
       .select(
-        "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt"
+        "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks"
       )
       .lean();
+    const deputies = deputyDocs.map(addVideoReviewSummary);
 
     return res.json({
       success: true,
@@ -218,4 +264,3 @@ export const listDeputiesReviewQueue = async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
-
