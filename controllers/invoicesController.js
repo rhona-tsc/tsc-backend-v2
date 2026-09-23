@@ -1158,9 +1158,19 @@ const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
   const calculatedGross = round2(
     passThroughGross + commissionGross + extrasTotal + manualAdjustmentAmount,
   );
+  const invoiceGross = calculatedGross || storedGross;
+  const depositPaid = round2(
+    Math.max(
+      0,
+      Number(rowForInvoice?.payments?.depositChargedAmount || 0),
+    ),
+  );
+  const amountDue = round2(Math.max(invoiceGross - depositPaid, 0));
 
  return {
-  gross: calculatedGross || storedGross,
+  gross: invoiceGross,
+  depositPaid,
+  amountDue,
   storedGross,
   extrasTotal,
   manualAdjustmentAmount,
@@ -1841,7 +1851,8 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       offsetY,
       { width: 90, align: "right" },
     );
-    offsetY += 18;
+    // The VAT label wraps to two lines in the totals column.
+    offsetY += 28;
   }
 
   if (Number(split.manualAdjustmentAmount || 0) !== 0) {
@@ -1850,6 +1861,25 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     });
     doc.text(
       formatMoney(split.manualAdjustmentAmount),
+      totalsX + 125,
+      offsetY,
+      {
+        width: 90,
+        align: "right",
+      },
+    );
+    offsetY += 18;
+  }
+
+  if (Number(split.depositPaid || 0) > 0) {
+    doc.text(
+      isReceipt ? "Deposit previously paid" : "Deposit already paid",
+      totalsX,
+      offsetY,
+      { width: 125 },
+    );
+    doc.text(
+      `-${formatMoney(split.depositPaid)}`,
       totalsX + 125,
       offsetY,
       {
@@ -1874,10 +1904,17 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     doc.text(isReceipt ? "Total paid" : "Total due", totalsX, totalLabelY, {
       width: 125,
     });
-    doc.text(formatMoney(split.gross), totalsX + 125, totalLabelY, {
+    doc.text(
+      formatMoney(
+        isExtrasInvoice ? split.gross : split.amountDue ?? split.gross,
+      ),
+      totalsX + 125,
+      totalLabelY,
+      {
       width: 90,
       align: "right",
-    });
+      },
+    );
 
     // Payment details and VAT note.
     const paymentY = cardY + cardH - 112;
@@ -2159,7 +2196,11 @@ export const createBoardInvoice = async (req, res) => {
       const origin = getOrigin(req);
       const amountPence = Math.max(
         0,
-        Math.round(Number(split.gross || 0) * 100),
+        Math.round(
+          Number(
+            isExtrasInvoice ? split.gross : split.amountDue ?? split.gross,
+          ) * 100,
+        ),
       );
       const ref = rowForInvoice.bookingRef || String(rowForInvoice._id);
       const billingEmail = isExtrasInvoice
