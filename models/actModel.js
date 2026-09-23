@@ -271,6 +271,7 @@ minDisplayPrice: { type: Number, default: null },
     },
     reviews: [
       {
+        reviewId: { type: String, index: true },
         clientFirstName: { type: String },
         clientLastName: { type: String },
         clientProfilePhoto: { type: String },
@@ -283,6 +284,14 @@ minDisplayPrice: { type: Number, default: null },
         verified: { type: Boolean, default: false },
         // Store event media as array of URLs (to be set after upload)
         eventMedia: [String],
+        source: {
+          type: String,
+          enum: ["act", "booking", "admin", "imported"],
+          default: "act",
+        },
+        bookingBoardItemId: { type: mongoose.Schema.Types.ObjectId },
+        bookingId: { type: mongoose.Schema.Types.ObjectId },
+        createdAt: { type: Date, default: Date.now },
       },
     ],
     lineups: [

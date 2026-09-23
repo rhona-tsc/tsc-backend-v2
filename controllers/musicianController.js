@@ -1250,6 +1250,9 @@ const registerDeputy = async (req, res) => {
     const social_media_links = hasBodyField("social_media_links")
       ? safeParse(body.social_media_links, [])
       : musician.social_media_links || [];
+    const reviews = hasBodyField("reviews")
+      ? safeParse(body.reviews, [])
+      : musician.reviews || [];
     const customRepertoire = hasBodyField("customRepertoire")
       ? typeof body.customRepertoire === "string"
         ? body.customRepertoire
@@ -1508,6 +1511,7 @@ const registerDeputy = async (req, res) => {
         function_bands_performed_with: functionBandsClean,
         original_bands_performed_with: originalBandsClean,
         social_media_links,
+        reviews,
         selectedSongs,
         other_skills,
         logistics,
@@ -1605,6 +1609,34 @@ const registerDeputy = async (req, res) => {
     musician.function_bands_performed_with = functionBandsClean;
     musician.original_bands_performed_with = originalBandsClean;
     musician.social_media_links = social_media_links;
+    const protectedBookingReviews = Array.isArray(musician.reviews)
+      ? musician.reviews
+          .filter((review) => review?.source === "booking")
+          .map((review) =>
+            review?.toObject ? review.toObject() : { ...review },
+          )
+      : [];
+    const editableReviews = Array.isArray(reviews)
+      ? reviews
+          .filter((review) => review?.source !== "booking")
+          .map((review) => ({
+            ...review,
+            clientFirstName: String(review?.clientFirstName || "").trim(),
+            clientLastName: String(review?.clientLastName || "").trim(),
+            clientEmail: String(review?.clientEmail || "").trim().toLowerCase(),
+            comment: String(review?.comment || "").trim(),
+            rating:
+              Number(review?.rating) >= 1 && Number(review?.rating) <= 5
+                ? Number(review.rating)
+                : undefined,
+            eventMedia: Array.isArray(review?.eventMedia)
+              ? review.eventMedia.filter(Boolean)
+              : [],
+            source: review?.source || "musician",
+          }))
+          .filter((review) => review.comment)
+      : [];
+    musician.reviews = [...protectedBookingReviews, ...editableReviews];
     musician.customRepertoire = customRepertoire;
     musician.selectedSongs = selectedSongs;
     musician.other_skills = other_skills;
@@ -1739,6 +1771,7 @@ const registerDeputy = async (req, res) => {
     musician.markModified("function_bands_performed_with");
     musician.markModified("original_bands_performed_with");
     musician.markModified("social_media_links");
+    musician.markModified("reviews");
     musician.markModified("functionBandVideoLinks");
     musician.markModified("tscApprovedFunctionBandVideoLinks");
     musician.markModified("originalBandVideoLinks");

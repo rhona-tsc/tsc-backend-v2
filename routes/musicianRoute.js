@@ -50,6 +50,18 @@ const findMusicianByIdOrSlug = async (value) => {
   return musicianModel.findOne({ musicianSlug: raw.toLowerCase() }).lean();
 };
 
+const sanitizePublicMusician = (doc) => {
+  if (!doc) return doc;
+  return {
+    ...doc,
+    reviews: (Array.isArray(doc.reviews) ? doc.reviews : []).map((review) => {
+      const publicReview = { ...review };
+      delete publicReview.clientEmail;
+      return publicReview;
+    }),
+  };
+};
+
 const resolveMusicianObjectId = async (value) => {
   const doc = await findMusicianByIdOrSlug(value);
   return doc?._id ? String(doc._id) : null;
@@ -510,7 +522,9 @@ router.get("/", async (req, res) => {
     const q = { role: "musician" };
     if (status) q.status = status;
     const list = await musicianModel.find(q).lean();
-    res.json({ musicians: Array.isArray(list) ? list : [] });
+    res.json({
+      musicians: Array.isArray(list) ? list.map(sanitizePublicMusician) : [],
+    });
   } catch (err) {
     console.error("❌ Error listing musicians:", err);
     res.status(500).json({ message: "Server error" });
@@ -521,7 +535,8 @@ router.get("/", async (req, res) => {
 router.get("/profile/:idOrSlug", async (req, res) => {
   try {
     const { idOrSlug } = req.params;
-    const doc = await findMusicianByIdOrSlug(idOrSlug);
+    const rawDoc = await findMusicianByIdOrSlug(idOrSlug);
+    const doc = sanitizePublicMusician(rawDoc);
     if (!doc) return res.status(404).json({ message: "Musician not found" });
 
     return res.json({
@@ -1008,7 +1023,8 @@ router.get("/dashboard/:idOrSlug", verifyToken, async (req, res) => {
 const readMusicianByIdOrSlug = async (req, res) => {
   try {
     const { idOrSlug } = req.params;
-    const doc = await findMusicianByIdOrSlug(idOrSlug);
+    const rawDoc = await findMusicianByIdOrSlug(idOrSlug);
+    const doc = sanitizePublicMusician(rawDoc);
     if (!doc) return res.status(404).json({ message: "Musician not found" });
 
     return res.json({

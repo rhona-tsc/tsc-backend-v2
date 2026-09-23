@@ -25,6 +25,7 @@ const AllocationSchema = new mongoose.Schema(
 
 const ReviewSchema = new mongoose.Schema(
   {
+    reviewId: { type: String, default: "" },
     requestedCount: { type: Number, default: 0 },
     lastRequestedAt: { type: Date },
     received: { type: Boolean, default: false },
@@ -34,6 +35,19 @@ const ReviewSchema = new mongoose.Schema(
       enum: ["internal", "google", "trustpilot", "other"],
       default: "internal",
     },
+    clientFirstName: { type: String, default: "" },
+    clientLastName: { type: String, default: "" },
+    clientEmail: { type: String, default: "" },
+    rating: { type: Number, min: 1, max: 5 },
+    comment: { type: String, default: "" },
+    eventType: { type: String, default: "" },
+    eventLocation: { type: String, default: "" },
+    eventDate: { type: Date },
+    eventMedia: [{ type: String }],
+    verified: { type: Boolean, default: false },
+    receivedAt: { type: Date },
+    linkedActId: { type: mongoose.Schema.Types.ObjectId },
+    linkedMusicianIds: [{ type: mongoose.Schema.Types.ObjectId }],
   },
   { _id: false },
 );
@@ -209,6 +223,8 @@ const BookingBoardItemSchema = new mongoose.Schema(
   {
     // link to core booking if exists
     bookingId: { type: mongoose.Types.ObjectId, ref: "Booking" },
+    actId: { type: mongoose.Types.ObjectId, ref: "Act" },
+    actsSummary: { type: [mongoose.Schema.Types.Mixed], default: [] },
 
     // visible columns
     bookerName: { type: String },

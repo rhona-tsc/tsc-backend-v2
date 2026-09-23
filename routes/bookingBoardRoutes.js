@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import Booking from "../models/bookingModel.js";
 import actModel from "../models/actModel.js";
+import musicianModel from "../models/musicianModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 import { parse } from "csv-parse/sync";
 import financeForecastBookingModel from "../models/financeForecastBookingModel.js";
@@ -1499,6 +1500,137 @@ router.patch("/:id/mark-paid", musicianAuth, async (req, res) => {
       success: false,
       message: error.message || "Could not mark booking paid.",
     });
+  }
+});
+
+router.put("/:id/review", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin access required." });
+    }
+
+    const comment = cleanString(req.body?.comment);
+    if (!comment) {
+      return res.status(400).json({ success: false, message: "Review text is required." });
+    }
+
+    const validId = mongoose.isValidObjectId(req.params.id);
+    const booking = validId ? await Booking.findById(req.params.id).lean() : null;
+    let boardRow = validId ? await BookingBoardItem.findById(req.params.id) : null;
+    if (!boardRow && booking) {
+      boardRow = await BookingBoardItem.findOne({
+        $or: [
+          { sourceBookingId: booking._id },
+          { bookingId: booking._id },
+          ...(booking.bookingId ? [{ bookingRef: booking.bookingId }] : []),
+        ],
+      });
+    }
+    if (!boardRow && !booking) {
+      return res.status(404).json({ success: false, message: "Booking row not found." });
+    }
+
+    const reviewId =
+      cleanString(req.body?.reviewId || boardRow?.review?.reviewId) ||
+      new mongoose.Types.ObjectId().toString();
+    const bookingData = booking || {};
+    const actIdCandidate = cleanString(
+      req.body?.actId ||
+        boardRow?.actId ||
+        boardRow?.actsSummary?.[0]?.actId ||
+        bookingData?.actsSummary?.[0]?.actId ||
+        bookingData?.act,
+    );
+    const actId = mongoose.isValidObjectId(actIdCandidate)
+      ? new mongoose.Types.ObjectId(actIdCandidate)
+      : null;
+
+    const allocationSources = [
+      boardRow?.assignedMusicians,
+      boardRow?.bookingMusicians,
+      boardRow?.bandLineup,
+      boardRow?.bookingDetails?.assignedMusicians,
+      bookingData?.assignedMusicians,
+      bookingData?.bookingMusicians,
+      bookingData?.bandLineup,
+      bookingData?.bookingDetails?.assignedMusicians,
+    ];
+    const musicianIds = [
+      ...new Set(
+        allocationSources
+          .flatMap((items) => (Array.isArray(items) ? items : []))
+          .filter((item) => !item?.status || item.status === "confirmed")
+          .map((item) => cleanString(item?.musicianId || item?._id))
+          .filter((id) => mongoose.isValidObjectId(id)),
+      ),
+    ].map((id) => new mongoose.Types.ObjectId(id));
+
+    const rating = Number(req.body?.rating);
+    const sharedReview = {
+      reviewId,
+      clientFirstName: cleanString(req.body?.clientFirstName),
+      clientLastName: cleanString(req.body?.clientLastName),
+      clientEmail: cleanString(req.body?.clientEmail).toLowerCase(),
+      rating: rating >= 1 && rating <= 5 ? rating : undefined,
+      comment,
+      eventType: cleanString(req.body?.eventType || boardRow?.eventType),
+      eventLocation: cleanString(req.body?.eventLocation || boardRow?.county || boardRow?.address),
+      eventDate: req.body?.eventDate || boardRow?.eventDateISO || bookingData?.eventDate || bookingData?.date || undefined,
+      eventMedia: Array.isArray(req.body?.eventMedia) ? req.body.eventMedia.filter(Boolean) : [],
+      verified: true,
+      source: "booking",
+      bookingBoardItemId: boardRow?._id,
+      bookingId: booking?._id || boardRow?.bookingId,
+      actId: actId || undefined,
+      createdAt: boardRow?.review?.receivedAt || new Date(),
+    };
+    const profileReview = { ...sharedReview };
+    delete profileReview.clientEmail;
+
+    if (boardRow) {
+      boardRow.review = {
+        ...(boardRow.review?.toObject ? boardRow.review.toObject() : boardRow.review || {}),
+        ...sharedReview,
+        source: "internal",
+        received: true,
+        receivedAt: new Date(),
+        linkedActId: actId || undefined,
+        linkedMusicianIds: musicianIds,
+      };
+      await boardRow.save();
+    }
+
+    await actModel.updateMany(
+      { "reviews.reviewId": reviewId },
+      { $pull: { reviews: { reviewId } } },
+    );
+    await musicianModel.updateMany(
+      { "reviews.reviewId": reviewId },
+      { $pull: { reviews: { reviewId } } },
+    );
+
+    if (actId) {
+      await actModel.updateOne(
+        { _id: actId },
+        { $push: { reviews: profileReview } },
+      );
+    }
+    if (musicianIds.length) {
+      await musicianModel.updateMany(
+        { _id: { $in: musicianIds } },
+        { $push: { reviews: profileReview } },
+      );
+    }
+
+    return res.json({
+      success: true,
+      row: boardRow,
+      linkedAct: Boolean(actId),
+      linkedMusicianCount: musicianIds.length,
+    });
+  } catch (error) {
+    console.error("❌ booking review save failed", error);
+    return res.status(400).json({ success: false, message: error.message });
   }
 });
 

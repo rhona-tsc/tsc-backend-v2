@@ -133,6 +133,31 @@ lastLoginAt: { type: Date, default: null, index: true },
         url: { type: String, default: "" },
       },
     ],
+    reviews: [
+      {
+        reviewId: { type: String, index: true },
+        clientFirstName: { type: String, default: "" },
+        clientLastName: { type: String, default: "" },
+        clientEmail: { type: String, default: "" },
+        clientProfilePhoto: { type: String, default: "" },
+        eventType: { type: String, default: "" },
+        eventLocation: { type: String, default: "" },
+        eventDate: { type: Date },
+        rating: { type: Number, min: 1, max: 5 },
+        comment: { type: String, required: true },
+        verified: { type: Boolean, default: false },
+        eventMedia: [{ type: String }],
+        source: {
+          type: String,
+          enum: ["musician", "booking", "admin", "imported"],
+          default: "musician",
+        },
+        bookingBoardItemId: { type: mongoose.Schema.Types.ObjectId },
+        bookingId: { type: mongoose.Schema.Types.ObjectId },
+        actId: { type: mongoose.Schema.Types.ObjectId },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
 
     agreementCheckboxes: [
       {
