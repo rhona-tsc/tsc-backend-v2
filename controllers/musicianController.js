@@ -1400,6 +1400,19 @@ const registerDeputy = async (req, res) => {
         url: String(item?.url || "").trim(),
       }))
       .filter((item) => item.url);
+    const requestedSocialPreference = String(
+      body.socialFeedConnectionPreference ??
+        musician.socialFeedConnectionPreference ??
+        "undecided",
+    ).toLowerCase();
+    const socialFeedConnectionPreference = [
+      "undecided",
+      "interested",
+      "not_now",
+      "connected",
+    ].includes(requestedSocialPreference)
+      ? requestedSocialPreference
+      : "undecided";
 
     // lighting / PA
     const cableLogistics = hasBodyField("cableLogistics")
@@ -1536,6 +1549,7 @@ const registerDeputy = async (req, res) => {
         tscApprovedFunctionBandVideoLinks,
         originalBandVideoLinks,
         socialHighlightPostLinks,
+        socialFeedConnectionPreference,
         tscApprovedOriginalBandVideoLinks,
         cableLogistics,
         extensionCableLogistics,
@@ -1666,6 +1680,10 @@ const registerDeputy = async (req, res) => {
       tscApprovedFunctionBandVideoLinks;
     musician.originalBandVideoLinks = originalBandVideoLinks;
     musician.socialHighlightPostLinks = socialHighlightPostLinks;
+    if (musician.socialFeedConnectionPreference !== socialFeedConnectionPreference) {
+      musician.socialFeedPreferenceUpdatedAt = new Date();
+    }
+    musician.socialFeedConnectionPreference = socialFeedConnectionPreference;
     musician.tscApprovedOriginalBandVideoLinks =
       tscApprovedOriginalBandVideoLinks;
 

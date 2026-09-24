@@ -142,6 +142,12 @@ lastLoginAt: { type: Date, default: null, index: true },
         url: { type: String, default: "" },
       },
     ],
+    socialFeedConnectionPreference: {
+      type: String,
+      enum: ["undecided", "interested", "not_now", "connected"],
+      default: "undecided",
+    },
+    socialFeedPreferenceUpdatedAt: { type: Date, default: null },
     tscApprovedFunctionBandVideoLinks: [videoLinkSchema],
     tscApprovedOriginalBandVideoLinks: [videoLinkSchema],
     reviews: [
