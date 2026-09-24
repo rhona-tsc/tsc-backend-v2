@@ -1344,15 +1344,27 @@ const registerDeputy = async (req, res) => {
 
     musician.markModified("basicInfo");
 
-    const functionBandVideoLinks = parseArrayField(
+    const mergeVideoModeration = (incoming, existing = []) => {
+      const previousByUrl = new Map(
+        (Array.isArray(existing) ? existing : []).map((item) => [
+          String(item?.url || "").trim().toLowerCase(),
+          typeof item?.toObject === "function" ? item.toObject() : item,
+        ]),
+      );
+      return incoming
+        .map((item) => {
+          const title = String(item?.title || "").trim();
+          const url = String(item?.url || "").trim();
+          const previous = previousByUrl.get(url.toLowerCase()) || {};
+          return { ...previous, title, url };
+        })
+        .filter((item) => item.url);
+    };
+
+    const functionBandVideoLinks = mergeVideoModeration(parseArrayField(
       body.functionBandVideoLinks,
       musician.functionBandVideoLinks || [],
-    )
-      .map((x) => ({
-        title: (x?.title || "").trim(),
-        url: (x?.url || "").trim(),
-      }))
-      .filter((x) => x.url);
+    ), musician.functionBandVideoLinks);
 
     const tscApprovedFunctionBandVideoLinks = parseArrayField(
       body.tscApprovedFunctionBandVideoLinks,
@@ -1364,15 +1376,10 @@ const registerDeputy = async (req, res) => {
       }))
       .filter((x) => x.url);
 
-    const originalBandVideoLinks = parseArrayField(
+    const originalBandVideoLinks = mergeVideoModeration(parseArrayField(
       body.originalBandVideoLinks,
       musician.originalBandVideoLinks || [],
-    )
-      .map((x) => ({
-        title: (x?.title || "").trim(),
-        url: (x?.url || "").trim(),
-      }))
-      .filter((x) => x.url);
+    ), musician.originalBandVideoLinks);
 
     const tscApprovedOriginalBandVideoLinks = parseArrayField(
       body.tscApprovedOriginalBandVideoLinks,
@@ -1383,6 +1390,16 @@ const registerDeputy = async (req, res) => {
         url: (x?.url || "").trim(),
       }))
       .filter((x) => x.url);
+
+    const socialHighlightPostLinks = parseArrayField(
+      body.socialHighlightPostLinks,
+      musician.socialHighlightPostLinks || [],
+    )
+      .map((item) => ({
+        title: String(item?.title || "").trim(),
+        url: String(item?.url || "").trim(),
+      }))
+      .filter((item) => item.url);
 
     // lighting / PA
     const cableLogistics = hasBodyField("cableLogistics")
@@ -1518,6 +1535,7 @@ const registerDeputy = async (req, res) => {
         functionBandVideoLinks,
         tscApprovedFunctionBandVideoLinks,
         originalBandVideoLinks,
+        socialHighlightPostLinks,
         tscApprovedOriginalBandVideoLinks,
         cableLogistics,
         extensionCableLogistics,
@@ -1647,6 +1665,7 @@ const registerDeputy = async (req, res) => {
     musician.tscApprovedFunctionBandVideoLinks =
       tscApprovedFunctionBandVideoLinks;
     musician.originalBandVideoLinks = originalBandVideoLinks;
+    musician.socialHighlightPostLinks = socialHighlightPostLinks;
     musician.tscApprovedOriginalBandVideoLinks =
       tscApprovedOriginalBandVideoLinks;
 
@@ -1775,6 +1794,7 @@ const registerDeputy = async (req, res) => {
     musician.markModified("functionBandVideoLinks");
     musician.markModified("tscApprovedFunctionBandVideoLinks");
     musician.markModified("originalBandVideoLinks");
+    musician.markModified("socialHighlightPostLinks");
     musician.markModified("tscApprovedOriginalBandVideoLinks");
     musician.markModified("digitalWardrobeBlackTie");
     musician.markModified("digitalWardrobeFormal");

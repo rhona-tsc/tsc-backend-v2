@@ -1,5 +1,30 @@
 import mongoose from "mongoose";
 
+const videoModerationFlagSchema = new mongoose.Schema(
+  {
+    type: { type: String, default: "" },
+    label: { type: String, default: "" },
+    evidence: { type: String, default: "" },
+    severity: { type: String, enum: ["info", "warning", "high"], default: "warning" },
+  },
+  { _id: false },
+);
+
+const videoLinkSchema = new mongoose.Schema({
+  title: { type: String, default: "" },
+  url: { type: String, default: "" },
+  provider: { type: String, default: "unknown" },
+  accessStatus: { type: String, default: "unchecked" },
+  moderationStatus: { type: String, default: "not_started" },
+  moderationReason: { type: String, default: "" },
+  moderationFlags: { type: [videoModerationFlagSchema], default: [] },
+  azureVideoId: { type: String, default: "" },
+  azureState: { type: String, default: "" },
+  azureProcessedAt: { type: Date, default: null },
+  lastModerationAttemptAt: { type: Date, default: null },
+  manuallyReviewedAt: { type: Date, default: null },
+});
+
 const normE164 = (raw = "") => {
   let v = String(raw || "").trim().replace(/^whatsapp:/i, "").replace(/\s+/g, "");
   if (!v) return "";
@@ -109,30 +134,16 @@ lastLoginAt: { type: Date, default: null, index: true },
       email: { type: String },
     },
 
-    functionBandVideoLinks: [
+    functionBandVideoLinks: [videoLinkSchema],
+    originalBandVideoLinks: [videoLinkSchema],
+    socialHighlightPostLinks: [
       {
         title: { type: String, default: "" },
         url: { type: String, default: "" },
       },
     ],
-    originalBandVideoLinks: [
-      {
-        title: { type: String, default: "" },
-        url: { type: String, default: "" },
-      },
-    ],
-    tscApprovedFunctionBandVideoLinks: [
-      {
-        title: { type: String, default: "" },
-        url: { type: String, default: "" },
-      },
-    ],
-    tscApprovedOriginalBandVideoLinks: [
-      {
-        title: { type: String, default: "" },
-        url: { type: String, default: "" },
-      },
-    ],
+    tscApprovedFunctionBandVideoLinks: [videoLinkSchema],
+    tscApprovedOriginalBandVideoLinks: [videoLinkSchema],
     reviews: [
       {
         reviewId: { type: String, index: true },

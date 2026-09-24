@@ -2,6 +2,12 @@
 import PendingSong from "../models/pendingSongModel.js";
 import Song from "../models/songModel.js";
 import musicianModel from "../models/musicianModel.js";
+import {
+  classifyVideoUrl,
+  extractModerationFlags,
+  getAzureVideoIndex,
+  submitVideoToAzure,
+} from "../services/videoModerationService.js";
 
 /* =========================
  *  SONG MODERATION (unchanged)
@@ -155,13 +161,143 @@ const addVideoReviewSummary = (deputy) => {
   const unvettedVideoCount = uniqueUploadedUrls.filter(
     (url) => !approvedUrls.has(url),
   ).length;
+  const allVideos = [...uploaded];
+  const videoModerationCounts = allVideos.reduce((counts, video) => {
+    const status = video?.moderationStatus || "not_started";
+    counts[status] = (counts[status] || 0) + 1;
+    return counts;
+  }, {});
+  const moderationFlagCount = allVideos.reduce(
+    (count, video) => count + (Array.isArray(video?.moderationFlags) ? video.moderationFlags.length : 0),
+    0,
+  );
 
   return {
     ...deputy,
     uploadedVideoCount: uniqueUploadedUrls.length,
     unvettedVideoCount,
     needsVideoReview: unvettedVideoCount > 0,
+    videoModerationCounts,
+    moderationFlagCount,
   };
+};
+
+const VIDEO_FIELDS = ["functionBandVideoLinks", "originalBandVideoLinks"];
+
+const findVideo = (musician, videoId) => {
+  for (const field of VIDEO_FIELDS) {
+    const video = musician[field]?.id?.(videoId);
+    if (video) return { field, video };
+  }
+  return null;
+};
+
+const applyClassification = (video, classification) => {
+  video.provider = classification.provider;
+  video.lastModerationAttemptAt = new Date();
+  if (!classification.automationEligible) {
+    video.accessStatus = classification.accessStatus || "unsupported";
+    video.moderationStatus = "manual_required";
+    video.moderationReason = classification.reason;
+  }
+};
+
+export const analyseDeputyVideos = async (req, res) => {
+  try {
+    const musician = await musicianModel.findById(req.params.id);
+    if (!musician) return res.status(404).json({ success: false, message: "Deputy not found" });
+    const results = [];
+    for (const field of VIDEO_FIELDS) {
+      for (const video of musician[field] || []) {
+        if (!video.url || ["approved", "rejected", "completed"].includes(video.moderationStatus)) continue;
+        if (video.moderationStatus === "processing" && video.azureVideoId) {
+          try {
+            const index = await getAzureVideoIndex(video.azureVideoId);
+            video.azureState = index.state || "Unknown";
+            video.lastModerationAttemptAt = new Date();
+            if (String(index.state).toLowerCase() === "processed") {
+              video.moderationFlags = extractModerationFlags(index);
+              video.moderationStatus = "completed";
+              video.moderationReason = video.moderationFlags.length ? "Potential contact or identity details detected" : "No automatic contact-detail flags detected";
+              video.azureProcessedAt = new Date();
+            }
+            results.push({ videoId: video._id, provider: video.provider, status: video.moderationStatus, flags: video.moderationFlags.length });
+          } catch (error) {
+            video.moderationReason = error.message;
+            results.push({ videoId: video._id, provider: video.provider, status: "processing", reason: error.message });
+          }
+          continue;
+        }
+        const classification = classifyVideoUrl(video.url);
+        applyClassification(video, classification);
+        if (!classification.automationEligible) {
+          results.push({ videoId: video._id, provider: classification.provider, status: "manual_required", reason: classification.reason });
+          continue;
+        }
+        try {
+          const azure = await submitVideoToAzure({ mediaUrl: classification.resolvedMediaUrl || video.url, name: video.title || `${musician.firstName || "Musician"} video` });
+          video.accessStatus = "accessible";
+          video.azureVideoId = azure.id || azure.videoId || "";
+          video.azureState = azure.state || "Uploaded";
+          video.moderationStatus = "processing";
+          video.moderationReason = "Azure analysis is running";
+          results.push({ videoId: video._id, provider: classification.provider, status: "processing" });
+        } catch (error) {
+          video.accessStatus = classification.provider === "google_drive" ? "access_required" : "error";
+          video.moderationStatus = classification.provider === "google_drive" ? "manual_required" : "failed";
+          video.moderationReason = error.message;
+          results.push({ videoId: video._id, provider: classification.provider, status: video.moderationStatus, reason: error.message });
+        }
+      }
+    }
+    await musician.save();
+    return res.json({ success: true, message: "Video moderation started", results });
+  } catch (error) {
+    console.error("Video moderation start failed:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to analyse videos" });
+  }
+};
+
+export const refreshDeputyVideoAnalysis = async (req, res) => {
+  try {
+    const musician = await musicianModel.findById(req.params.id);
+    if (!musician) return res.status(404).json({ success: false, message: "Deputy not found" });
+    const found = findVideo(musician, req.params.videoId);
+    if (!found) return res.status(404).json({ success: false, message: "Video not found" });
+    if (!found.video.azureVideoId) return res.status(400).json({ success: false, message: "This video has not been submitted to Azure" });
+    const index = await getAzureVideoIndex(found.video.azureVideoId);
+    found.video.azureState = index.state || "Unknown";
+    found.video.lastModerationAttemptAt = new Date();
+    if (String(index.state).toLowerCase() === "processed") {
+      found.video.moderationFlags = extractModerationFlags(index);
+      found.video.moderationStatus = "completed";
+      found.video.moderationReason = found.video.moderationFlags.length ? "Potential contact or identity details detected" : "No automatic contact-detail flags detected";
+      found.video.azureProcessedAt = new Date();
+    }
+    await musician.save();
+    return res.json({ success: true, video: found.video });
+  } catch (error) {
+    console.error("Video moderation refresh failed:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to refresh analysis" });
+  }
+};
+
+export const reviewDeputyVideo = async (req, res) => {
+  try {
+    const musician = await musicianModel.findById(req.params.id);
+    if (!musician) return res.status(404).json({ success: false, message: "Deputy not found" });
+    const found = findVideo(musician, req.params.videoId);
+    if (!found) return res.status(404).json({ success: false, message: "Video not found" });
+    const decision = String(req.body?.decision || "").toLowerCase();
+    if (!["approved", "rejected"].includes(decision)) return res.status(400).json({ success: false, message: "Decision must be approved or rejected" });
+    found.video.moderationStatus = decision;
+    found.video.moderationReason = String(req.body?.reason || "Manual review completed");
+    found.video.manuallyReviewedAt = new Date();
+    await musician.save();
+    return res.json({ success: true, video: found.video });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || "Failed to save review" });
+  }
 };
 
 const fetchByStatuses = async (statuses) => {

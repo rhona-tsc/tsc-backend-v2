@@ -1,4 +1,5 @@
 import express from "express";
+import adminAuth from "../middleware/adminAuth.js";
 import musicianModel from "../models/musicianModel.js";
 import PendingSong from "../models/pendingSongModel.js";
 import actModel from "../models/actModel.js";
@@ -13,6 +14,9 @@ import {
   listPendingDeputies,
   listChangesPendingDeputies,
   listDeputiesReviewQueue,
+  analyseDeputyVideos,
+  refreshDeputyVideoAnalysis,
+  reviewDeputyVideo,
 } from "../controllers/moderationController.js";
 
 import { getDeputyById } from "../controllers/musicianController.js";
@@ -147,6 +151,9 @@ router.get("/deputies/changes-pending", listChangesPendingDeputies);
 
 // NEW: combined queue (supports ?statuses= CSV)
 router.get("/deputies/review-queue", listDeputiesReviewQueue);
+router.post("/deputy/:id/videos/analyse", adminAuth, analyseDeputyVideos);
+router.post("/deputy/:id/videos/:videoId/refresh", adminAuth, refreshDeputyVideoAnalysis);
+router.patch("/deputy/:id/videos/:videoId/review", adminAuth, reviewDeputyVideo);
 
 // fetch by id (used elsewhere)
 router.get("/deputy/:id", async (req, res) => {
