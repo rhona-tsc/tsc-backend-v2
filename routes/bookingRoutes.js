@@ -1,5 +1,6 @@
 // routes/bookingRoutes.js
 import express from "express";
+import { buildEventSheetUrl } from "../utils/publicSiteUrl.js";
 import verifyToken from "../middleware/agentAuth.js";
 import {
   createCheckoutSession,
@@ -287,14 +288,8 @@ const getBookingEventDate = (booking) => {
 };
 
 const getEventSheetUrl = (req, booking) => {
-  const base =
-    process.env.FRONTEND_URL ||
-    process.env.CLIENT_URL ||
-    process.env.PUBLIC_FRONTEND_URL ||
-    "https://thesupremecollective.co.uk";
-
   const ref = booking?.bookingId || String(booking?._id || "");
-  return `${String(base).replace(/\/$/, "")}/event-sheet/${ref}`;
+  return buildEventSheetUrl(ref);
 };
 
 const getEmailConfig = () => {

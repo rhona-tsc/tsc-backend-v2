@@ -5,6 +5,7 @@ import BookingBoardItem from "../../models/bookingBoardItem.js";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { buildEventSheetUrl } from "../../utils/publicSiteUrl.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -96,9 +97,7 @@ export async function sendContractEmail({ booking, pdfBuffer }) {
   const twoWeeksBefore = new Date(eventDate.getTime());
   twoWeeksBefore.setDate(twoWeeksBefore.getDate() - 14);
 
-  const eventSheetUrl = `${
-    process.env.FRONTEND_BASE_URL || "http://localhost:5174"
-  }/event-sheet/${booking.bookingId}`;
+  const eventSheetUrl = buildEventSheetUrl(booking.bookingId);
 
   const bodyHtml = `
     <p>Hi ${booking?.userAddress?.firstName || ""},</p>

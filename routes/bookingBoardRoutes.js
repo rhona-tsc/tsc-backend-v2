@@ -468,6 +468,13 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
     bookingDoc.notes = patch.notes;
   }
 
+  if (patch.eventType !== undefined) {
+    bookingDoc.eventType = String(patch.eventType || "").trim();
+    bookingDoc.bookingDetails = mergeDeep(bookingDoc.bookingDetails || {}, {
+      eventType: bookingDoc.eventType,
+    });
+  }
+
   if (patch.amount !== undefined) {
     bookingDoc.amount = patch.amount;
   }
@@ -1778,6 +1785,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
       const mirrorPatch = {
         updatedAt: new Date(),
+        eventType: body.eventType || normalized?.eventType || savedBooking?.eventType || "",
         grossValue:
           Number(
             savedBooking?.totals?.fullAmount ||

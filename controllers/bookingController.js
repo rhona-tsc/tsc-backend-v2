@@ -36,6 +36,7 @@ import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.
 import { normalize } from "../utils/phoneUtils.js";
 import chromium from "@sparticuz/chromium";
 import { sendContractEmail } from "./helpers/sendContractEmail.js";
+import { buildEventSheetUrl } from "../utils/publicSiteUrl.js";
 import { triggerBookingRequests } from "./allocationController.js";
 
 /**
@@ -1805,9 +1806,7 @@ const completeBooking = async (req, res) => {
           const twoWeeksBefore = new Date(eventDate.getTime());
           twoWeeksBefore.setDate(twoWeeksBefore.getDate() - 14);
 
-          const eventSheetUrl = `${
-            process.env.FRONTEND_URL || "http://thesupremecollective.co.uk"
-          }/event-sheet/${order.bookingId}`;
+          const eventSheetUrl = buildEventSheetUrl(order.bookingId);
 
           // Your main body (unchanged), with signature appended
           const bodyHtml = `
