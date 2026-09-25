@@ -139,7 +139,20 @@ lastLoginAt: { type: Date, default: null, index: true },
     socialHighlightPostLinks: [
       {
         title: { type: String, default: "" },
+        // The original platform URL is retained for syncing/moderation, but is
+        // never rendered on the public profile.
         url: { type: String, default: "" },
+        mediaUrl: { type: String, default: "" },
+        thumbnailUrl: { type: String, default: "" },
+        mediaType: {
+          type: String,
+          enum: ["image", "video", "embed", "carousel", "unknown"],
+          default: "unknown",
+        },
+        platform: { type: String, default: "" },
+        tag: { type: String, maxlength: 60, default: "" },
+        visible: { type: Boolean, default: true },
+        importedAt: { type: Date, default: null },
       },
     ],
     socialFeedConnectionPreference: {
@@ -148,6 +161,32 @@ lastLoginAt: { type: Date, default: null, index: true },
       default: "undecided",
     },
     socialFeedPreferenceUpdatedAt: { type: Date, default: null },
+    socialConnections: {
+      meta: {
+        connected: { type: Boolean, default: false },
+        accountId: { type: String, default: "" },
+        pageId: { type: String, default: "" },
+        accessTokenEncrypted: { type: String, default: "", select: false },
+        refreshTokenEncrypted: { type: String, default: "", select: false },
+        scopes: [{ type: String }],
+        expiresAt: { type: Date, default: null },
+        connectedAt: { type: Date, default: null },
+        lastSyncedAt: { type: Date, default: null },
+        lastSyncError: { type: String, default: "" },
+      },
+      tiktok: {
+        connected: { type: Boolean, default: false },
+        accountId: { type: String, default: "" },
+        accessTokenEncrypted: { type: String, default: "", select: false },
+        refreshTokenEncrypted: { type: String, default: "", select: false },
+        scopes: [{ type: String }],
+        expiresAt: { type: Date, default: null },
+        refreshExpiresAt: { type: Date, default: null },
+        connectedAt: { type: Date, default: null },
+        lastSyncedAt: { type: Date, default: null },
+        lastSyncError: { type: String, default: "" },
+      },
+    },
     tscApprovedFunctionBandVideoLinks: [videoLinkSchema],
     tscApprovedOriginalBandVideoLinks: [videoLinkSchema],
     reviews: [

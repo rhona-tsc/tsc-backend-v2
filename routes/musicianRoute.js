@@ -52,7 +52,7 @@ const findMusicianByIdOrSlug = async (value) => {
 
 const sanitizePublicMusician = (doc) => {
   if (!doc) return doc;
-  return {
+  const sanitized = {
     ...doc,
     reviews: (Array.isArray(doc.reviews) ? doc.reviews : []).map((review) => {
       const publicReview = { ...review };
@@ -60,6 +60,8 @@ const sanitizePublicMusician = (doc) => {
       return publicReview;
     }),
   };
+  delete sanitized.socialConnections;
+  return sanitized;
 };
 
 const resolveMusicianObjectId = async (value) => {

@@ -38,6 +38,7 @@ import newsletterRoutes from "./routes/newsletterRoutes.js";
 import v2Routes from "./routes/v2.js";
 import agentDashboardRoutes from "./routes/agentDashboardRoutes.js";
 import sitemapRoutes from "./routes/sitemapRoutes.js";
+import socialOAuthRoutes from "./routes/socialOAuthRoutes.js";
 import enquiryBoardRoutes from "./routes/enquiryBoardRoutes.js";
 import adminRoutes from "./routes/admin.js";
 import messageRoutes from "./routes/messageRoutes.js";
@@ -654,6 +655,7 @@ app.use(
 );
 
 app.use("/api/sitemap", sitemapRoutes);
+app.use("/api/social-oauth", socialOAuthRoutes);
 app.use("/api/v2", v2Routes);
 app.use("/api/agent-dashboard", agentDashboardRoutes);
 

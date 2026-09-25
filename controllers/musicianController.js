@@ -1398,8 +1398,19 @@ const registerDeputy = async (req, res) => {
       .map((item) => ({
         title: String(item?.title || "").trim(),
         url: String(item?.url || "").trim(),
+        mediaUrl: String(item?.mediaUrl || "").trim(),
+        thumbnailUrl: String(item?.thumbnailUrl || "").trim(),
+        mediaType: ["image", "video", "embed", "carousel"].includes(
+          String(item?.mediaType || "").toLowerCase(),
+        )
+          ? String(item.mediaType).toLowerCase()
+          : "unknown",
+        platform: String(item?.platform || "").trim(),
+        tag: String(item?.tag || item?.title || "").trim().slice(0, 60),
+        visible: item?.visible !== false,
+        importedAt: item?.importedAt || null,
       }))
-      .filter((item) => item.url);
+      .filter((item) => item.url || item.mediaUrl || item.thumbnailUrl);
     const requestedSocialPreference = String(
       body.socialFeedConnectionPreference ??
         musician.socialFeedConnectionPreference ??
