@@ -24,6 +24,11 @@ import { autosaveMusicianForm, listAutosaveHistory } from "../controllers/musici
 import bcrypt from "bcryptjs";
 import { getStripeConnectPayoutStatus } from "../controllers/deputyJobController.js";
 import { generateAndPublishMusicianBio } from "../services/musicianBioService.js";
+import {
+  getLatestMusicianBioBackfillJob,
+  getMusicianBioBackfillJob,
+  startMusicianBioBackfill,
+} from "../services/musicianBioBackfillService.js";
 
 const router = express.Router();
 
@@ -432,6 +437,41 @@ console.log("PATCH original_bands_performed_with:", req.body?.original_bands_per
     console.error("❌ save deputy (moderation) failed:", err);
     return res.status(500).json({ success: false, message: "Failed to save deputy" });
   }
+});
+
+router.post("/moderation/bios/backfill/start", verifyToken, async (req, res) => {
+  try {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (role !== "agent") {
+      return res.status(403).json({ success: false, message: "Admin access required" });
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        message: "AI biography generation is not configured. Add OPENAI_API_KEY to the backend environment and redeploy.",
+      });
+    }
+    const job = await startMusicianBioBackfill({ createdBy: req.user?._id || null });
+    return res.status(202).json({ success: true, job });
+  } catch (error) {
+    console.error("❌ failed to start musician bio backfill:", error);
+    return res.status(500).json({ success: false, message: error?.message || "Failed to start biography backfill" });
+  }
+});
+
+router.get("/moderation/bios/backfill/latest", verifyToken, async (req, res) => {
+  const role = String(req.user?.role || "").toLowerCase();
+  if (role !== "agent") return res.status(403).json({ success: false, message: "Admin access required" });
+  const job = await getLatestMusicianBioBackfillJob();
+  return res.json({ success: true, job });
+});
+
+router.get("/moderation/bios/backfill/:jobId", verifyToken, async (req, res) => {
+  const role = String(req.user?.role || "").toLowerCase();
+  if (role !== "agent") return res.status(403).json({ success: false, message: "Admin access required" });
+  const job = await getMusicianBioBackfillJob(req.params.jobId);
+  if (!job) return res.status(404).json({ success: false, message: "Biography job not found" });
+  return res.json({ success: true, job });
 });
 
 router.post("/moderation/bios/backfill", verifyToken, async (req, res) => {
