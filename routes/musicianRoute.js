@@ -23,6 +23,7 @@ import bookingModel from "../models/bookingModel.js";
 import { autosaveMusicianForm, listAutosaveHistory } from "../controllers/musicianAutosave.controller.js";
 import bcrypt from "bcryptjs";
 import { getStripeConnectPayoutStatus } from "../controllers/deputyJobController.js";
+import { generateAndPublishMusicianBio } from "../services/musicianBioService.js";
 
 const router = express.Router();
 
@@ -368,6 +369,13 @@ router.patch("/moderation/deputy/:id/save", verifyToken, async (req, res) => {
       );
     }
 
+    if (Object.prototype.hasOwnProperty.call(updates, "tscApprovedBio")) {
+      updates.approvedBioSource = "manual";
+      updates.aiBioReviewRequired = false;
+      updates.aiBioReviewedAt = new Date();
+      updates.aiBioGenerationError = "";
+    }
+
     // ✅ Use mongoose setter (casts + marks modified properly)
     doc.set(updates);
 
@@ -394,6 +402,29 @@ console.log("PATCH original_bands_performed_with:", req.body?.original_bands_per
   } catch (err) {
     console.error("❌ save deputy (moderation) failed:", err);
     return res.status(500).json({ success: false, message: "Failed to save deputy" });
+  }
+});
+
+router.post("/moderation/deputy/:id/generate-bio", verifyToken, async (req, res) => {
+  try {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (role !== "agent") {
+      return res.status(403).json({ success: false, message: "Admin access required" });
+    }
+
+    const result = await generateAndPublishMusicianBio(req.params.id, { force: true });
+    if (!result.generated) {
+      return res.status(422).json({ success: false, message: result.error || result.reason || "Bio could not be generated" });
+    }
+
+    return res.json({
+      success: true,
+      message: "AI bio generated, published and flagged for review",
+      biography: result.biography,
+    });
+  } catch (error) {
+    console.error("❌ generate musician bio failed:", error);
+    return res.status(500).json({ success: false, message: "Failed to generate musician bio" });
   }
 });
 

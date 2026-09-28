@@ -10,6 +10,7 @@ import connectCloudinary from "../config/cloudinary.js";
 import { uploader } from "../utils/cloudinary.js";
 import puppeteer from "puppeteer";
 import mongoose from "mongoose";
+import { generateAndPublishMusicianBio } from "../services/musicianBioService.js";
 import Song from "../models/songModel.js";
 import { postcodes as POSTCODE_MAP_ARR } from "../utils/postcodes.js";
 
@@ -1615,8 +1616,15 @@ const registerDeputy = async (req, res) => {
     musician.role = body.role || musician.role || "musician";
     musician.status = musician.status || "pending";
     musician.bio = body.bio ?? musician.bio ?? "";
+    const previousApprovedBio = String(musician.tscApprovedBio || "").trim();
     musician.tscApprovedBio =
       body.tscApprovedBio ?? musician.tscApprovedBio ?? "";
+    const submittedApprovedBio = String(body.tscApprovedBio ?? "").trim();
+    if (submittedApprovedBio && submittedApprovedBio !== previousApprovedBio) {
+      musician.approvedBioSource = "manual";
+      musician.aiBioReviewRequired = false;
+      musician.aiBioReviewedAt = new Date();
+    }
     musician.tagLine = body.tagLine ?? musician.tagLine ?? "";
 
     if (body.dateRegistered) {
@@ -1880,6 +1888,7 @@ const registerDeputy = async (req, res) => {
     });
 
     const saved = await musician.save();
+    const bioGeneration = await generateAndPublishMusicianBio(saved._id);
 
     // END snapshot: read back from DB to confirm persisted shape
     const roundTrip = await musicianModel.findById(saved._id).lean();
@@ -1916,6 +1925,8 @@ const registerDeputy = async (req, res) => {
         status: saved.status,
         firstName: saved.firstName,
         lastName: saved.lastName,
+        aiBioGenerated: Boolean(bioGeneration?.generated),
+        aiBioReviewRequired: Boolean(roundTrip?.aiBioReviewRequired),
       },
     });
   } catch (err) {
@@ -2540,6 +2551,10 @@ const approveDeputy = async (req, res) => {
     musician.status = "approved";
     musician.profileLastReviewedAt = new Date();
     musician.profileUpdatedByUser = false;
+    if (musician.aiBioReviewRequired) {
+      musician.aiBioReviewRequired = false;
+      musician.aiBioReviewedAt = new Date();
+    }
 
     await musician.save();
 

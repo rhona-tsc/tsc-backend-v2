@@ -355,7 +355,7 @@ export const listDeputiesReviewQueue = async (req, res) => {
       const deputyDocs = await musicianModel
         .find({ role: { $in: ["musician", "deputy"] } })
         .select(
-          "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks"
+          "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks approvedBioSource aiBioReviewRequired aiBioGeneratedAt aiBioReviewedAt aiBioGenerationError"
         )
         .lean();
       const deputies = deputyDocs.map(addVideoReviewSummary);
@@ -385,7 +385,7 @@ export const listDeputiesReviewQueue = async (req, res) => {
         status: { $in: wanted },
       })
       .select(
-        "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks"
+        "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks approvedBioSource aiBioReviewRequired aiBioGeneratedAt aiBioReviewedAt aiBioGenerationError"
       )
       .lean();
     const deputies = deputyDocs.map(addVideoReviewSummary);

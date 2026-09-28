@@ -76,6 +76,18 @@ const musicianSchema = new mongoose.Schema(
 
     tagLine: { type: String, maxlength: 160 },
     tscApprovedBio: { type: String },
+    approvedBioSource: {
+      type: String,
+      enum: ["", "manual", "ai"],
+      default: "",
+      index: true,
+    },
+    aiBioReviewRequired: { type: Boolean, default: false, index: true },
+    aiBioGeneratedAt: { type: Date, default: null },
+    aiBioReviewedAt: { type: Date, default: null },
+    aiBioSourceHash: { type: String, default: "" },
+    aiBioModel: { type: String, default: "" },
+    aiBioGenerationError: { type: String, default: "" },
     bio: { type: String },
  // ✅ recommended: normalize in controllers, but adding index helps
     email: { type: String, index: true },
