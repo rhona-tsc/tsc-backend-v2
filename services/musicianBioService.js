@@ -80,8 +80,11 @@ export const generateAndPublishMusicianBio = async (musicianId, { force = false 
   }
 
   if (!process.env.OPENAI_API_KEY) {
-    musician.aiBioGenerationError = "OPENAI_API_KEY is not configured";
-    await musician.save();
+    await musicianModel.updateOne(
+      { _id: musician._id },
+      { $set: { aiBioGenerationError: "OPENAI_API_KEY is not configured" } },
+      { runValidators: false },
+    );
     return { generated: false, reason: "ai_not_configured" };
   }
 
@@ -108,21 +111,32 @@ export const generateAndPublishMusicianBio = async (musicianId, { force = false 
     if (biography.length < 80) throw new Error("Generated biography was too short");
     assertPublicBioIsPrivate(biography, musician);
 
-    musician.tscApprovedBio = biography;
-    musician.approvedBioSource = "ai";
-    musician.aiBioReviewRequired = true;
-    musician.aiBioGeneratedAt = new Date();
-    musician.aiBioReviewedAt = null;
-    musician.aiBioSourceHash = sourceHash;
-    musician.aiBioModel = model;
-    musician.aiBioGenerationError = "";
-    await musician.save();
+    await musicianModel.updateOne(
+      { _id: musician._id },
+      {
+        $set: {
+          tscApprovedBio: biography,
+          approvedBioSource: "ai",
+          aiBioReviewRequired: true,
+          aiBioGeneratedAt: new Date(),
+          aiBioReviewedAt: null,
+          aiBioSourceHash: sourceHash,
+          aiBioModel: model,
+          aiBioGenerationError: "",
+        },
+      },
+      { runValidators: false },
+    );
 
     return { generated: true, biography, model };
   } catch (error) {
-    musician.aiBioGenerationError = String(error?.message || "Biography generation failed").slice(0, 500);
-    await musician.save();
+    const generationError = String(error?.message || "Biography generation failed").slice(0, 500);
+    await musicianModel.updateOne(
+      { _id: musician._id },
+      { $set: { aiBioGenerationError: generationError } },
+      { runValidators: false },
+    );
     console.error("❌ AI musician bio generation failed:", error);
-    return { generated: false, reason: "generation_failed", error: musician.aiBioGenerationError };
+    return { generated: false, reason: "generation_failed", error: generationError };
   }
 };

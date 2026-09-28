@@ -339,7 +339,16 @@ router.post("/moderation/register-deputy", uploadFields, registerDeputy);
 router.patch("/moderation/deputy/:id/save", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body || {};
+    const stripBlankSubdocumentIds = (value) => {
+      if (Array.isArray(value)) return value.map(stripBlankSubdocumentIds);
+      if (!value || typeof value !== "object") return value;
+      return Object.fromEntries(
+        Object.entries(value)
+          .filter(([key, item]) => !(key === "_id" && String(item || "").trim() === ""))
+          .map(([key, item]) => [key, stripBlankSubdocumentIds(item)]),
+      );
+    };
+    const updates = stripBlankSubdocumentIds(req.body || {});
 
     const doc = await musicianModel.findById(id);
     if (!doc) return res.status(404).json({ success: false, message: "Musician not found" });
@@ -378,6 +387,26 @@ router.patch("/moderation/deputy/:id/save", verifyToken, async (req, res) => {
 
     // ✅ Use mongoose setter (casts + marks modified properly)
     doc.set(updates);
+
+    // Some imported legacy video rows contain `_id: ""`. Rebuild those
+    // subdocuments so Mongoose assigns valid IDs instead of blocking any
+    // otherwise unrelated moderation save.
+    [
+      "functionBandVideoLinks",
+      "originalBandVideoLinks",
+      "tscApprovedFunctionBandVideoLinks",
+      "tscApprovedOriginalBandVideoLinks",
+    ].forEach((field) => {
+      if (!Array.isArray(doc[field])) return;
+      doc[field] = doc[field].map((item) => {
+        const plain = typeof item?.toObject === "function"
+          ? item.toObject({ depopulate: true })
+          : { ...(item || {}) };
+        if (!mongoose.isValidObjectId(plain?._id)) delete plain._id;
+        return plain;
+      });
+      doc.markModified(field);
+    });
 
     // (extra safety for nested arrays/subdocs)
     if ("function_bands_performed_with" in updates) doc.markModified("function_bands_performed_with");
