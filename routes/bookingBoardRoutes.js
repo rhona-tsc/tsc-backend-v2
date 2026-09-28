@@ -1355,6 +1355,7 @@ router.post("/", musicianAuth, async (req, res) => {
       ).trim(),
       clientEmail: clientEmail || undefined,
       userEmail: clientEmail || undefined,
+      eventType: String(payload.eventType || "").trim(),
 
       // money
       amount: Number(payload.grossValue || 0) || 0,
@@ -1377,6 +1378,7 @@ router.post("/", musicianAuth, async (req, res) => {
       bandLineup: assignedMusicians,
       bookingDetails: {
         ...(payload.bookingDetails || {}),
+        eventType: String(payload.eventType || "").trim(),
         assignedMusicians,
       },
     };
@@ -1785,7 +1787,10 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
       const mirrorPatch = {
         updatedAt: new Date(),
-        eventType: body.eventType || normalized?.eventType || savedBooking?.eventType || "",
+        eventType:
+          body.eventType !== undefined
+            ? String(body.eventType || "").trim()
+            : normalized?.eventType || savedBooking?.eventType || "",
         grossValue:
           Number(
             savedBooking?.totals?.fullAmount ||

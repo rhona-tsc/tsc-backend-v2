@@ -423,6 +423,10 @@ const BookingSchema = new mongoose.Schema(
 
     // Event sheet
     eventSheet: EventSheetSchema,
+    // Admin-editable booking metadata used by the Booking Board. These were
+    // previously written by the route but silently discarded by Mongoose.
+    eventType: { type: String, default: "" },
+    bookingDetails: { type: mongoose.Schema.Types.Mixed, default: {} },
 
     // Manual booking helpers
     lineup: mongoose.Schema.Types.Mixed,

@@ -11,7 +11,7 @@ const router = express.Router();
 const API_BASE = String(
   process.env.SOCIAL_OAUTH_BASE_URL ||
     process.env.BACKEND_PUBLIC_URL ||
-    "https://tsc-backend-v2.onrender.com",
+    "https://tsc2025.onrender.com",
 ).replace(/\/+$/, "");
 const DASHBOARD_URL = String(
   process.env.SOCIAL_OAUTH_DASHBOARD_URL ||

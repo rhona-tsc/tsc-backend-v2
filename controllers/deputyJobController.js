@@ -2629,6 +2629,20 @@ export const createDeputyJob = async (req, res) => {
 export const listDeputyJobs = async (req, res) => {
   try {
     const appliedBy = String(req.query?.appliedBy || "").trim();
+    const requesterEmail = normaliseEmail(
+      req?.user?.email || req?.user?.useremail || "",
+    );
+    const requesterRole = normaliseString(
+      req?.user?.role || req?.user?.userrole || "",
+    ).toLowerCase();
+    const canViewHistorical =
+      requesterEmail === "hello@thesupremecollective.co.uk" ||
+      ["admin", "superadmin", "tsc_admin"].includes(requesterRole);
+    const includeHistorical =
+      canViewHistorical &&
+      ["true", "1", "yes"].includes(
+        normaliseString(req.query?.includeHistorical).toLowerCase(),
+      );
 
     const matchStage = {};
 
@@ -2701,7 +2715,41 @@ export const listDeputyJobs = async (req, res) => {
       },
     );
 
-    const jobs = await deputyJobModel.aggregate(pipeline);
+    let jobs = await deputyJobModel.aggregate(pipeline);
+
+    if (!includeHistorical) {
+      const now = new Date();
+      const londonDateParts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/London",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(now);
+      const datePart = (type) =>
+        londonDateParts.find((part) => part.type === type)?.value || "";
+      const todayKey = `${datePart("year")}-${datePart("month")}-${datePart("day")}`;
+      const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+      const hiddenStatuses = ["allocated", "filled", "closed", "cancelled"];
+
+      jobs = jobs.filter((job) => {
+        const jobDate = normaliseString(job?.eventDate || job?.date).slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(jobDate) && jobDate < todayKey) {
+          return false;
+        }
+
+        const status = normaliseString(job?.status).toLowerCase();
+        const updatedAt = parseDateOrNull(job?.updatedAt)?.getTime() || 0;
+        if (
+          hiddenStatuses.includes(status) &&
+          updatedAt &&
+          updatedAt < sevenDaysAgo
+        ) {
+          return false;
+        }
+
+        return true;
+      });
+    }
 
     await deputyJobModel.populate(jobs, [
       {
@@ -2718,6 +2766,8 @@ export const listDeputyJobs = async (req, res) => {
 
     res.json({
       success: true,
+      canViewHistorical,
+      includeHistorical,
       jobs: jobs.map(withDeputyJobAliases),
     });
   } catch (error) {

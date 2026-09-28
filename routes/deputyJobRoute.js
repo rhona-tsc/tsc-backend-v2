@@ -35,7 +35,7 @@ import {
   manualApplyAndPresentDeputyJob,
   trackDeputyPresentationView,
 } from "../controllers/deputyJobController.js";
-import authUser from "../middleware/auth.js";
+import authUser, { optionalAuthUser } from "../middleware/auth.js";
 
 const deputyJobRouter = express.Router();
 
@@ -106,7 +106,7 @@ deputyJobRouter.get("/", (req, res, next) => {
 
   next();
 
-}, listDeputyJobs);
+}, optionalAuthUser, listDeputyJobs);
 
 deputyJobRouter.get("/payments", authUser, listDeputyPayments);
 
