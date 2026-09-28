@@ -313,6 +313,13 @@ payoutStatus: {
       type: Boolean,
       default: false,
     },
+    automation: {
+      source: { type: String, default: "" },
+      bookingBoardItemId: { type: mongoose.Schema.Types.ObjectId, ref: "BookingBoardItem", default: null, index: true },
+      bookingRef: { type: String, default: "", index: true },
+      roleSlotId: { type: String, default: "", index: true },
+      enquiryMessageId: { type: mongoose.Schema.Types.ObjectId, ref: "EnquiryMessage", default: null },
+    },
     previewMode: { type: Boolean, default: false },
 
     createdBy: {

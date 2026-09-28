@@ -8,6 +8,11 @@ const enquiryMessageSchema = new mongoose.Schema(
     musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician", required: true },
 
     enquiryId:  { type: String, index: true }, // correlation id used in payloads
+    bookingRef: { type: String, default: "", index: true },
+    bookingBoardItemId: { type: mongoose.Schema.Types.ObjectId, ref: "BookingBoardItem", default: null, index: true },
+    roleSlotId: { type: String, default: "", index: true },
+    originalBandMemberId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    candidateSource: { type: String, default: "" },
 
     phone:            { type: String, required: true },
     duties:           { type: String },
@@ -53,6 +58,8 @@ autoEscalatedAt: { type: Date, default: null },
       MetaActId: String,
       MetaISODate: String,   // yyyy-mm-dd
       MetaAddress: String,
+      kind: String,
+      bookingRef: String,
     },
 
     // 🗓️ Google Calendar integration

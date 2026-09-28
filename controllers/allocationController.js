@@ -12,6 +12,8 @@ import AvailabilityModel from "../models/availabilityModel.js";
 import bookingBoardItem from "../models/bookingBoardItem.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
 import Booking from "../models/bookingModel.js";
+import DeputyJob from "../models/deputyJobModel.js";
+import mongoose from "mongoose";
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper: firstNameOf                             */
@@ -112,6 +114,380 @@ const buildMemberFee = ({ perMemberFee, member }) => {
   }
   const memberFee = Number(member?.fee || 0);
   return Number.isFinite(memberFee) && memberFee > 0 ? Math.ceil(memberFee) : 0;
+};
+
+const escapeRegex = (value = "") =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const musicianDisplayName = (musician = {}) =>
+  [
+    musician.firstName || musician.basicInfo?.firstName,
+    musician.lastName || musician.basicInfo?.lastName,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim() || musician.email || "Musician";
+
+const candidateContact = (musician = {}) => ({
+  email: String(musician.email || musician.basicInfo?.email || "").trim().toLowerCase(),
+  phone: normalizePhone(
+    musician.phone || musician.phoneNumber || musician.basicInfo?.phone || "",
+  ),
+});
+
+const buildRoleSlotId = (role = "", index = 0) =>
+  `${String(role || "role").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${index + 1}`;
+
+const resolveBoardItem = async (rawId) => {
+  if (!rawId) return null;
+  const value = String(rawId).trim();
+  const conditions = [{ bookingRef: value }];
+  if (mongoose.isValidObjectId(value)) {
+    conditions.unshift({ _id: value }, { bookingId: value }, { sourceBookingId: value });
+  }
+  return bookingBoardItem.findOne({ $or: conditions });
+};
+
+const getActLineupContext = async (board) => {
+  const actId = board?.actId || board?.actsSummary?.[0]?.actId || board?.actsSummary?.[0]?._id;
+  const act = actId ? await Act.findById(actId).lean() : null;
+  const requestedLineup = String(
+    board?.actsSummary?.[0]?.lineupId || board?.lineupId || "",
+  );
+  const lineup =
+    act?.lineups?.find(
+      (entry) =>
+        String(entry?._id || "") === requestedLineup ||
+        String(entry?.lineupId || "") === requestedLineup,
+    ) || act?.lineups?.[0] || null;
+  return { act, lineup };
+};
+
+const updateBoardRoleSlot = async (msg, changes = {}) => {
+  const board = msg?.bookingBoardItemId
+    ? await bookingBoardItem.findById(msg.bookingBoardItemId)
+    : await resolveBoardItem(msg?.bookingRef);
+  if (!board || !msg?.roleSlotId) return null;
+
+  const apply = (entries = []) =>
+    entries.map((entry) =>
+      entry?.roleSlotId === msg.roleSlotId || entry?.offerRequestId === msg.enquiryId
+        ? { ...(entry.toObject?.() || entry), ...changes }
+        : entry,
+    );
+  board.assignedMusicians = apply(board.assignedMusicians || []);
+  board.bookingMusicians = apply(board.bookingMusicians || []);
+  board.bandLineup = apply(board.bandLineup || []);
+  const acceptedCount = board.assignedMusicians.filter((item) =>
+    ["accepted", "confirmed"].includes(item?.status),
+  ).length;
+  const unresolvedCount = board.assignedMusicians.filter((item) =>
+    ["unfilled", "selected", "offered", "proposed", "declined", "unavailable"].includes(item?.status),
+  ).length;
+  board.allocation = {
+    ...(board.allocation?.toObject?.() || board.allocation || {}),
+    status: unresolvedCount ? (acceptedCount ? "in_progress" : "gap") : "fully_allocated",
+    lastCheckedAt: new Date(),
+  };
+  await board.save();
+  return board;
+};
+
+const postExhaustedRoleToDeputyBoard = async (msg, act) => {
+  const existing = await DeputyJob.findOne({
+    "automation.bookingBoardItemId": msg.bookingBoardItemId || null,
+    "automation.roleSlotId": msg.roleSlotId || "",
+    status: { $in: ["open", "allocated", "filled"] },
+  });
+  if (existing) return existing;
+
+  const role = String(msg.duties || "Musician").trim();
+  const eventDate = String(msg.meta?.MetaISODate || "").slice(0, 10);
+  const fee = Number(msg.fee || 0) || 0;
+  const job = await DeputyJob.create({
+    title: `${role} needed for ${act?.tscName || act?.name || "band booking"}`,
+    instrument: role,
+    requiredInstruments: [role],
+    eventDate,
+    date: eventDate,
+    venue: msg.formattedAddress || msg.meta?.MetaAddress || "",
+    location: msg.formattedAddress || msg.meta?.MetaAddress || "",
+    locationName: msg.formattedAddress || msg.meta?.MetaAddress || "",
+    jobType: "booked",
+    fee,
+    deputyNetAmount: fee,
+    paymentStatus: "not_required",
+    payoutStatus: "not_ready",
+    status: "open",
+    workflowStage: "applications_open",
+    previewMode: false,
+    notes: `Automatically posted after the act's deputy list was exhausted. Booking ${msg.bookingRef || ""}.`,
+    automation: {
+      source: "booking_allocation",
+      bookingBoardItemId: msg.bookingBoardItemId || null,
+      bookingRef: msg.bookingRef || "",
+      roleSlotId: msg.roleSlotId || "",
+      enquiryMessageId: msg._id,
+    },
+  });
+  await updateBoardRoleSlot(msg, {
+    status: "posted_to_job_board",
+    respondedAt: new Date(),
+    deputyJobId: job._id,
+  });
+  return job;
+};
+
+export const listRoleCandidates = async (req, res) => {
+  try {
+    const board = await resolveBoardItem(
+      req.query?.bookingBoardItemId || req.query?.bookingId || req.query?.bookingRef,
+    );
+    if (!board) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+
+    const role = String(req.query?.role || req.query?.instrument || "").trim();
+    if (!role) {
+      return res.status(400).json({ success: false, message: "A role is required" });
+    }
+
+    const query = String(req.query?.query || "").trim();
+    const roleRegex = new RegExp(escapeRegex(role), "i");
+    const textRegex = query ? new RegExp(escapeRegex(query), "i") : null;
+    const filters = [{ "instrumentation.instrument": roleRegex }, { other_skills: roleRegex }];
+    const textFilters = textRegex
+      ? [
+          { firstName: textRegex },
+          { lastName: textRegex },
+          { email: textRegex },
+          { "basicInfo.firstName": textRegex },
+          { "basicInfo.lastName": textRegex },
+        ]
+      : null;
+
+    const musicians = await Musician.find({
+      $and: [
+        { $or: filters },
+        ...(textFilters ? [{ $or: textFilters }] : []),
+      ],
+    })
+      .select("firstName lastName email phone phoneNumber basicInfo instrumentation other_skills profilePhoto")
+      .limit(80)
+      .lean();
+
+    const dateISO = String(board.eventDateISO || "").slice(0, 10);
+    const musicianIds = musicians.map((item) => item._id);
+    const unavailable = dateISO
+      ? await AvailabilityModel.find({
+          musicianId: { $in: musicianIds },
+          dateISO,
+          $or: [
+            { reply: { $in: ["yes", "unavailable"] } },
+            { status: { $in: ["accepted", "unavailable"] } },
+          ],
+        })
+          .select("musicianId reply status actId")
+          .lean()
+      : [];
+
+    const conflicts = dateISO
+      ? await bookingBoardItem
+          .find({
+            _id: { $ne: board._id },
+            eventDateISO: dateISO,
+            assignedMusicians: {
+              $elemMatch: {
+                musicianId: { $in: musicianIds },
+                status: { $in: ["accepted", "confirmed"] },
+              },
+            },
+          })
+          .select("bookingRef bookerName assignedMusicians")
+          .lean()
+      : [];
+
+    const unavailableIds = new Set(unavailable.map((item) => String(item.musicianId)));
+    const conflictById = new Map();
+    conflicts.forEach((item) => {
+      item.assignedMusicians?.forEach((member) => {
+        if (["accepted", "confirmed"].includes(member?.status)) {
+          conflictById.set(String(member.musicianId), item.bookingRef || item.bookerName || "another booking");
+        }
+      });
+    });
+
+    const { lineup } = await getActLineupContext(board);
+    const roleMembers = (lineup?.bandMembers || []).filter((member) =>
+      roleRegex.test(String(member?.instrument || member?.role || "")),
+    );
+    const primaryIds = new Set(roleMembers.map((member) => String(member?.musicianId || member?._id || "")));
+    const deputyIds = new Set(
+      roleMembers.flatMap((member) =>
+        (member?.deputies || []).map((deputy) => String(deputy?.musicianId || deputy?._id || "")),
+      ),
+    );
+
+    const candidates = musicians
+      .map((musician) => {
+        const id = String(musician._id);
+        const bookingConflict = conflictById.get(id) || "";
+        const isUnavailable = unavailableIds.has(id) || Boolean(bookingConflict);
+        return {
+          _id: musician._id,
+          name: musicianDisplayName(musician),
+          ...candidateContact(musician),
+          instrumentation: musician.instrumentation || [],
+          profilePhoto: musician.profilePhoto || "",
+          source: primaryIds.has(id) ? "primary" : deputyIds.has(id) ? "act_deputy" : "search",
+          available: !isUnavailable,
+          unavailableReason: bookingConflict
+            ? `Already allocated to ${bookingConflict}`
+            : unavailableIds.has(id)
+              ? "Unavailable or already accepted another booking on this date"
+              : "",
+        };
+      })
+      .sort((a, b) => {
+        const sourceRank = { primary: 0, act_deputy: 1, search: 2 };
+        return Number(b.available) - Number(a.available) || sourceRank[a.source] - sourceRank[b.source] || a.name.localeCompare(b.name);
+      });
+
+    return res.json({ success: true, role, dateISO, candidates });
+  } catch (error) {
+    console.error("listRoleCandidates error", error);
+    return res.status(500).json({ success: false, message: error?.message || "Failed to load candidates" });
+  }
+};
+
+export const offerBookingRole = async (req, res) => {
+  try {
+    const board = await resolveBoardItem(
+      req.body?.bookingBoardItemId || req.body?.bookingId || req.body?.bookingRef,
+    );
+    if (!board) return res.status(404).json({ success: false, message: "Booking not found" });
+
+    const role = String(req.body?.role || req.body?.instrument || "").trim();
+    const musicianId = String(req.body?.musicianId || "").trim();
+    if (!role || !mongoose.isValidObjectId(musicianId)) {
+      return res.status(400).json({ success: false, message: "Role and musician are required" });
+    }
+
+    const musician = await Musician.findById(musicianId).lean();
+    if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
+    const contact = candidateContact(musician);
+    if (!contact.phone) {
+      return res.status(400).json({ success: false, message: "This musician has no mobile number for an availability request" });
+    }
+
+    const roleSlotId = String(req.body?.roleSlotId || buildRoleSlotId(role, Number(req.body?.slotIndex || 0)));
+    const requestId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const dateISO = String(board.eventDateISO || req.body?.dateISO || "").slice(0, 10);
+    const formattedDate = formatWithOrdinal(dateISO);
+    const fee = Number(req.body?.fee || 0) || 0;
+    const { act, lineup } = await getActLineupContext(board);
+    if (!act) return res.status(400).json({ success: false, message: "This booking is not linked to an act" });
+    const originalBandMember =
+      (lineup?.bandMembers || []).find(
+        (member) => String(member?._id || "") === String(req.body?.originalBandMemberId || ""),
+      ) ||
+      (lineup?.bandMembers || []).find(
+        (member) =>
+          String(member?.instrument || member?.role || "").trim().toLowerCase() ===
+          role.toLowerCase(),
+      ) ||
+      null;
+    const originalBandMemberId = originalBandMember?._id || null;
+
+    const address = String(board.address || req.body?.address || "").trim();
+    const name = musicianDisplayName(musician);
+    const smsBody = buildBookingSMS({
+      firstName: firstNameOf(musician),
+      formattedDate,
+      formattedAddress: address,
+      fee,
+      duties: role,
+      actName: act.tscName || act.name || board.actName || "the band",
+      requestId,
+    });
+
+    const dryRun = req.body?.dryRun === true;
+    let messageSid = `dryrun_${requestId}`;
+    if (!dryRun) {
+      const sent = await sendWhatsAppMessage({
+        to: `whatsapp:${contact.phone}`,
+        contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+        requestId,
+        variables: {
+          "1": firstNameOf(musician), "2": formattedDate, "3": address,
+          "4": sanitizeFee(fee), "5": role,
+          "6": act.tscName || act.name || board.actName || "the band", "7": requestId,
+        },
+        smsBody,
+      });
+      messageSid = sent?.sid || "";
+    }
+
+    if (!dryRun) {
+      await EnquiryMessage.create({
+        actId: act._id,
+        lineupId: lineup?._id || lineup?.lineupId || null,
+        musicianId: musician._id,
+        enquiryId: requestId,
+        bookingRef: board.bookingRef || "",
+        bookingBoardItemId: board._id,
+        roleSlotId,
+        originalBandMemberId,
+        candidateSource: req.body?.candidateSource || "search",
+        phone: contact.phone,
+        duties: role,
+        fee: fee ? String(fee) : "",
+        formattedDate,
+        formattedAddress: address,
+        messageSid,
+        deliveryStatus: "sent",
+        status: "sent",
+        meta: {
+          actName: act.tscName || act.name || board.actName || "",
+          MetaActId: String(act._id), MetaISODate: dateISO, MetaAddress: address,
+          kind: "booking", bookingRef: board.bookingRef || "",
+        },
+        calendar: { attendeeEmail: contact.email, calendarStatus: "needsAction" },
+      });
+
+      await AvailabilityModel.findOneAndUpdate(
+        { actId: act._id, lineupId: lineup?._id || lineup?.lineupId || null, dateISO, phone: contact.phone },
+        {
+          $setOnInsert: { musicianId: musician._id, duties: role, fee: fee ? String(fee) : "", formattedDate, formattedAddress: address },
+          $set: { status: "sent", reply: null, bookingId: board.bookingRef || String(board._id), updatedAt: new Date() },
+        },
+        { upsert: true, new: true },
+      );
+
+      const candidate = {
+        musicianId: musician._id, name, firstName: musician.firstName || musician.basicInfo?.firstName || "",
+        lastName: musician.lastName || musician.basicInfo?.lastName || "", email: contact.email,
+        phone: contact.phone, role, instrument: role, status: "offered", fee, totalFee: fee,
+        paymentStatus: "not_due", source: "booking_role_offer", roleSlotId,
+        originalBandMemberId,
+        candidateSource: req.body?.candidateSource || "search", offerRequestId: requestId, offeredAt: new Date(),
+      };
+      const current = Array.isArray(board.assignedMusicians) ? board.assignedMusicians : [];
+      const index = current.findIndex((entry) => entry.roleSlotId === roleSlotId);
+      if (index >= 0) current[index] = candidate;
+      else current.push(candidate);
+      board.assignedMusicians = current;
+      board.bookingMusicians = current;
+      board.bandLineup = current;
+      board.allocation = { ...(board.allocation?.toObject?.() || board.allocation || {}), status: "in_progress", lastCheckedAt: new Date() };
+      await board.save();
+    }
+
+    return res.json({ success: true, dryRun, requestId, roleSlotId, musician: { _id: musician._id, name, ...contact } });
+  } catch (error) {
+    console.error("offerBookingRole error", error);
+    return res.status(500).json({ success: false, message: error?.message || "Failed to send availability request" });
+  }
 };
 
 /* -------------------------------------------------------------------------- */
@@ -756,6 +1132,13 @@ const booking = msg?.bookingRef
     { upsert: true, new: true }
   );
 
+  await updateBoardRoleSlot(msg, {
+    status: "accepted",
+    respondedAt: new Date(),
+    acceptedAt: new Date(),
+    calendarInviteSentAt: eventId && email ? new Date() : null,
+  });
+
   await refreshAllocationForActDate(msg.actId, msg.meta?.MetaISODate);
 
   return res.status(200).send("<Response/>");
@@ -787,6 +1170,12 @@ const booking = msg?.bookingRef
       );
 
       await refreshAllocationForActDate(msg.actId, msg.meta?.MetaISODate);
+
+      await updateBoardRoleSlot(msg, {
+        status: "unavailable",
+        respondedAt: new Date(),
+        declinedAt: new Date(),
+      });
 
       // Escalate to deputy
       await escalateToNextDeputy(msg);
@@ -823,6 +1212,12 @@ const booking = msg?.bookingRef
       );
 
       await refreshAllocationForActDate(msg.actId, msg.meta?.MetaISODate);
+
+      await updateBoardRoleSlot(msg, {
+        status: "declined",
+        respondedAt: new Date(),
+        declinedAt: new Date(),
+      });
 
       // Escalate to next deputy
       await escalateToNextDeputy(msg);
@@ -872,18 +1267,23 @@ export async function escalateToNextDeputy(msg) {
 
     // Identify the current musician in the lineup
     const current = members.find((m) => {
+      if (msg.originalBandMemberId && String(m._id) === String(msg.originalBandMemberId)) {
+        return true;
+      }
       const phones = normalizeFrom(m.phoneNumber || m.phone);
       return phones.includes(msg.phone);
     });
 
     if (!current) {
       console.warn("❗ escalateToNextDeputy: could not match current musician by phone");
+      await postExhaustedRoleToDeputyBoard(msg, act);
       return false;
     }
 
     const deputies = current.deputies || [];
     if (!deputies.length) {
-      console.log("ℹ️ No deputies — stopping escalation");
+      console.log("ℹ️ No deputies — posting role to deputy job board");
+      await postExhaustedRoleToDeputyBoard(msg, act);
       return false;
     }
 
@@ -907,7 +1307,8 @@ export async function escalateToNextDeputy(msg) {
     });
 
     if (!nextDep) {
-      console.log("ℹ️ All deputies have already been contacted. Stopping.");
+      console.log("ℹ️ All deputies contacted — posting role to deputy job board.");
+      await postExhaustedRoleToDeputyBoard(msg, act);
       return false;
     }
 
@@ -933,6 +1334,10 @@ export async function escalateToNextDeputy(msg) {
       musicianId: nextDep.musicianId || nextDep._id || null,
       enquiryId: newBookingId,
       bookingRef: msg.bookingRef || null,
+      bookingBoardItemId: msg.bookingBoardItemId || null,
+      roleSlotId: msg.roleSlotId || "",
+      originalBandMemberId: msg.originalBandMemberId || current._id || null,
+      candidateSource: "act_deputy",
       phone,
       duties: msg.duties,
       fee: msg.fee,
@@ -1014,6 +1419,22 @@ export async function escalateToNextDeputy(msg) {
       { _id: created._id },
       { $set: { messageSid: wa?.sid || null, deliveryStatus: "sent" } }
     );
+
+    const nextName = [nextDep.firstName, nextDep.lastName].filter(Boolean).join(" ").trim();
+    await updateBoardRoleSlot(msg, {
+      musicianId: nextDep.musicianId || nextDep._id || null,
+      name: nextName,
+      firstName: nextDep.firstName || "",
+      lastName: nextDep.lastName || "",
+      email: nextDep.email || "",
+      phone,
+      status: "offered",
+      candidateSource: "act_deputy",
+      offerRequestId: newBookingId,
+      offeredAt: new Date(),
+      respondedAt: null,
+      declinedAt: null,
+    });
 
     await AvailabilityModel.updateOne(
       {

@@ -405,6 +405,82 @@ console.log("PATCH original_bands_performed_with:", req.body?.original_bands_per
   }
 });
 
+router.post("/moderation/bios/backfill", verifyToken, async (req, res) => {
+  try {
+    const role = String(req.user?.role || "").toLowerCase();
+    if (role !== "agent") {
+      return res.status(403).json({ success: false, message: "Admin access required" });
+    }
+
+    const limit = Math.min(Math.max(Number(req.body?.limit || 5), 1), 10);
+    const cursor = String(req.body?.cursor || "").trim();
+    const query = {
+      $and: [
+        {
+          $or: [
+            { role: "musician" },
+            { role: "deputy" },
+            { role: { $exists: false } },
+            { isDeputy: true },
+          ],
+        },
+        {
+          $or: [
+            { tscApprovedBio: { $exists: false } },
+            { tscApprovedBio: null },
+            { tscApprovedBio: "" },
+          ],
+        },
+        ...(cursor && mongoose.isValidObjectId(cursor)
+          ? [{ _id: { $gt: new mongoose.Types.ObjectId(cursor) } }]
+          : []),
+      ],
+    };
+
+    const musicians = await musicianModel
+      .find(query)
+      .select("_id firstName lastName email")
+      .sort({ _id: 1 })
+      .limit(limit)
+      .lean();
+
+    const results = [];
+    for (const musician of musicians) {
+      const result = await generateAndPublishMusicianBio(musician._id);
+      results.push({
+        musicianId: musician._id,
+        name: [musician.firstName, musician.lastName].filter(Boolean).join(" ") || musician.email || "Musician",
+        generated: Boolean(result?.generated),
+        reason: result?.reason || "",
+        error: result?.error || "",
+      });
+    }
+
+    const nextCursor = musicians.length
+      ? String(musicians[musicians.length - 1]._id)
+      : cursor;
+    const hasMore = musicians.length === limit && Boolean(
+      await musicianModel.exists({
+        ...query,
+        _id: { $gt: new mongoose.Types.ObjectId(nextCursor) },
+      }),
+    );
+
+    return res.json({
+      success: true,
+      processed: results.length,
+      generated: results.filter((item) => item.generated).length,
+      skipped: results.filter((item) => !item.generated).length,
+      nextCursor,
+      hasMore,
+      results,
+    });
+  } catch (error) {
+    console.error("❌ musician bio backfill failed:", error);
+    return res.status(500).json({ success: false, message: error?.message || "Failed to backfill musician bios" });
+  }
+});
+
 router.post("/moderation/deputy/:id/generate-bio", verifyToken, async (req, res) => {
   try {
     const role = String(req.user?.role || "").toLowerCase();
