@@ -440,6 +440,13 @@ router.post("/moderation/bios/backfill", verifyToken, async (req, res) => {
     if (role !== "agent") {
       return res.status(403).json({ success: false, message: "Admin access required" });
     }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        code: "OPENAI_API_KEY_MISSING",
+        message: "AI biography generation is not configured. Add OPENAI_API_KEY to the backend environment and redeploy.",
+      });
+    }
 
     const limit = Math.min(Math.max(Number(req.body?.limit || 5), 1), 10);
     const cursor = String(req.body?.cursor || "").trim();
@@ -458,6 +465,13 @@ router.post("/moderation/bios/backfill", verifyToken, async (req, res) => {
             { tscApprovedBio: { $exists: false } },
             { tscApprovedBio: null },
             { tscApprovedBio: "" },
+          ],
+        },
+        {
+          $or: [
+            { bio: { $type: "string", $regex: /.{40}/s } },
+            { "selectedSongs.2": { $exists: true } },
+            { "instrumentation.0": { $exists: true } },
           ],
         },
         ...(cursor && mongoose.isValidObjectId(cursor)
@@ -485,6 +499,20 @@ router.post("/moderation/bios/backfill", verifyToken, async (req, res) => {
       });
     }
 
+    const generationFailure = results.find(
+      (item) => item.reason === "generation_failed" || item.reason === "ai_not_configured",
+    );
+    if (generationFailure) {
+      return res.status(502).json({
+        success: false,
+        code: "AI_BIO_GENERATION_FAILED",
+        message: generationFailure.error || "OpenAI could not generate biographies. Check the backend AI configuration and billing.",
+        processed: results.length,
+        generated: results.filter((item) => item.generated).length,
+        results,
+      });
+    }
+
     const nextCursor = musicians.length
       ? String(musicians[musicians.length - 1]._id)
       : cursor;
@@ -500,6 +528,13 @@ router.post("/moderation/bios/backfill", verifyToken, async (req, res) => {
       processed: results.length,
       generated: results.filter((item) => item.generated).length,
       skipped: results.filter((item) => !item.generated).length,
+      reasons: results.reduce((summary, item) => {
+        if (!item.generated) {
+          const reason = item.reason || "unknown";
+          summary[reason] = (summary[reason] || 0) + 1;
+        }
+        return summary;
+      }, {}),
       nextCursor,
       hasMore,
       results,
