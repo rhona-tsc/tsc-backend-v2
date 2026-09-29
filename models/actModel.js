@@ -334,6 +334,7 @@ minDisplayPrice: { type: Number, default: null },
 
         bandMembers: [
           {
+            musicianId: { type: String, default: "" },
             firstName: { type: String },
             lastName: { type: String },
             phoneNumber: { type: String },

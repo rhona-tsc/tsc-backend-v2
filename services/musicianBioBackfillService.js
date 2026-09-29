@@ -170,3 +170,14 @@ export const getLatestMusicianBioBackfillJob = async () => {
   }
   return job;
 };
+
+export const resumePendingMusicianBioBackfills = async () => {
+  const jobs = await MusicianBioBackfillJob.find({
+    status: { $in: ["queued", "running"] },
+  })
+    .select("_id")
+    .lean();
+
+  jobs.forEach((job) => queueMusicianBioBackfill(job._id));
+  return jobs.length;
+};

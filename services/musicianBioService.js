@@ -89,7 +89,11 @@ export const generateAndPublishMusicianBio = async (musicianId, { force = false 
   }
 
   const model = process.env.OPENAI_BIO_MODEL || "gpt-4o-mini";
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const client = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    timeout: 60000,
+    maxRetries: 2,
+  });
 
   try {
     const completion = await client.chat.completions.create({

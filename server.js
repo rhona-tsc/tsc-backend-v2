@@ -43,6 +43,7 @@ import enquiryBoardRoutes from "./routes/enquiryBoardRoutes.js";
 import adminRoutes from "./routes/admin.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import deputyOpportunityRoutes from "./routes/deputyOpportunityRoutes.js";
+import { resumePendingMusicianBioBackfills } from "./services/musicianBioBackfillService.js";
 import deputyJobRouter from "./routes/deputyJobRoute.js";
 import forecastRouter from "./routes/forecastRoute.js";
 import financeAccountRouter from "./routes/financeAccountRoute.js";
@@ -70,6 +71,9 @@ import Booking from "./models/bookingModel.js";
 import financeReconciliationRouter from "./routes/financeReconciliationRoute.js";
 import financeTaxRouter from "./routes/financeTaxRoute.js";
 import financeForecastRoutes from "./routes/financeForecastRoutes.js";
+import originalsRoutes from "./routes/originalsRoutes.js";
+import { runOriginalsAutomation } from "./services/originalsAutomationService.js";
+import regularDeputiesRoutes from "./routes/regularDeputiesRoutes.js";
 
 /* -------------------------------------------------------------------------- */
 /*                               Boot + env log                               */
@@ -560,7 +564,16 @@ app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 /*                         DB + Cloudinary boot/config                         */
 /* -------------------------------------------------------------------------- */
 
-connectDB();
+connectDB()
+  .then(async () => {
+    const resumedJobs = await resumePendingMusicianBioBackfills();
+    if (resumedJobs) {
+      console.log(`▶️ Resumed ${resumedJobs} musician biography backfill job(s)`);
+    }
+  })
+  .catch((error) => {
+    console.error("❌ Could not resume musician biography backfills:", error?.message || error);
+  });
 connectCloudinary();
 
 cloudinary.config({
@@ -688,6 +701,8 @@ app.use("/api/board/enquiries", enquiryBoardRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/deputy-opportunities", deputyOpportunityRoutes);
 app.use("/api/deputy-jobs", deputyJobRouter);
+app.use("/api/originals", originalsRoutes);
+app.use("/api/regular-deputies", regularDeputiesRoutes);
 
 app.use("/api/cart", cartRouter);
 app.use("/api/booking", bookingRoutes);
@@ -816,6 +831,18 @@ app.get("/api/availability/process-deferred", async (_req, res) => {
 // Run chase & escalation every hour
 cron.schedule("0 * * * *", async () => {
   await runChaseAndEscalation();
+});
+
+// Originals automation only updates workflow state and queues notifications.
+// It never sends messages directly and is disabled unless deliberately enabled.
+cron.schedule("*/5 * * * *", async () => {
+  if (String(process.env.ORIGINALS_AUTOMATION_ENABLED || "").toLowerCase() !== "true") return;
+  try {
+    const result = await runOriginalsAutomation();
+    console.log("🎼 [CRON] Originals workflow automation complete:", result);
+  } catch (error) {
+    console.error("❌ [CRON] Originals workflow automation failed:", error?.message || error);
+  }
 });
 
 // Release deputy payouts daily at 06:00 London time
