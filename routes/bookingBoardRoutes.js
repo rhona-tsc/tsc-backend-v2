@@ -393,6 +393,7 @@ const sanitizeBookingPatch = (body = {}) => {
   }
 
   if (patch.accounting && isPlainObject(patch.accounting)) {
+    const requestedVatRate = Number(patch.accounting.vatRate ?? 0.2);
     patch.accounting = {
       ...patch.accounting,
       invoiceCompany:
@@ -401,7 +402,7 @@ const sanitizeBookingPatch = (body = {}) => {
           .toUpperCase() === "BMM"
           ? "BMM"
           : "TSC",
-      vatRate: Number(patch.accounting.vatRate ?? 0.2) || 0.2,
+      vatRate: Number.isFinite(requestedVatRate) ? requestedVatRate : 0.2,
 
       commissionGross: Number(patch.accounting.commissionGross || 0) || 0,
 
@@ -422,6 +423,52 @@ const sanitizeBookingPatch = (body = {}) => {
 
 const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
   const patch = sanitizeBookingPatch(rawPatch);
+
+  const requestedEventDate = patch.eventDateISO || patch.eventDate || patch.date;
+  if (requestedEventDate !== undefined) {
+    const dateOnly = String(requestedEventDate || "").slice(0, 10);
+    const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)
+      ? new Date(`${dateOnly}T00:00:00.000Z`)
+      : null;
+    bookingDoc.eventDate = parsedDate;
+    bookingDoc.date = parsedDate;
+  }
+
+  if (patch.bookingDateISO !== undefined) {
+    const dateOnly = String(patch.bookingDateISO || "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+      bookingDoc.bookingDate = new Date(`${dateOnly}T00:00:00.000Z`);
+    }
+  }
+
+  const scalarFields = [
+    "agent",
+    "clientAddress",
+    "county",
+    "lineupSelected",
+    "arrivalTime",
+    "finishTime",
+    "actName",
+    "actTscName",
+  ];
+  scalarFields.forEach((field) => {
+    if (
+      patch[field] !== undefined &&
+      bookingDoc.constructor?.schema?.path(field)
+    ) {
+      bookingDoc[field] = patch[field];
+    }
+  });
+
+  if (patch.clientEmail !== undefined || patch.userEmail !== undefined) {
+    const email = String(patch.clientEmail || patch.userEmail || "").trim();
+    bookingDoc.clientEmail = email;
+    bookingDoc.userEmail = email;
+  }
+
+  if (patch.clientFirstNames !== undefined || patch.clientName !== undefined || patch.bookerName !== undefined) {
+    bookingDoc.clientName = String(patch.clientFirstNames || patch.clientName || patch.bookerName || "").trim();
+  }
 
   if (patch.totals && isPlainObject(patch.totals)) {
     bookingDoc.totals = mergeDeep(
@@ -1787,6 +1834,27 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
       const mirrorPatch = {
         updatedAt: new Date(),
+        ...(body.eventDateISO !== undefined || body.eventDate !== undefined || body.date !== undefined
+          ? { eventDateISO: isoDateOnly(savedBooking?.eventDate || savedBooking?.date) }
+          : {}),
+        ...(body.bookingDateISO !== undefined
+          ? { bookingDateISO: String(body.bookingDateISO || "").slice(0, 10) }
+          : {}),
+        ...(body.enquiryDateISO !== undefined
+          ? { enquiryDateISO: String(body.enquiryDateISO || "").slice(0, 10) }
+          : {}),
+        ...(body.agent !== undefined ? { agent: body.agent } : {}),
+        ...(body.actName !== undefined ? { actName: body.actName } : {}),
+        ...(body.actTscName !== undefined ? { actTscName: body.actTscName } : {}),
+        ...(body.address !== undefined ? { address: body.address } : {}),
+        ...(body.county !== undefined ? { county: body.county } : {}),
+        ...(body.lineupSelected !== undefined ? { lineupSelected: body.lineupSelected } : {}),
+        ...(body.bandSize !== undefined ? { bandSize: Number(body.bandSize || 0) || 0 } : {}),
+        ...(body.arrivalTime !== undefined ? { arrivalTime: body.arrivalTime } : {}),
+        ...(body.finishTime !== undefined ? { finishTime: body.finishTime } : {}),
+        ...(body.clientFirstNames !== undefined
+          ? { clientFirstNames: String(body.clientFirstNames || "").trim() }
+          : {}),
         eventType:
           body.eventType !== undefined
             ? String(body.eventType || "").trim()

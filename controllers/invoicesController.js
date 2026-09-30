@@ -8,6 +8,7 @@ import PDFDocument from "pdfkit";
 import cloudinary from "../config/cloudinary.js";
 import path from "path";
 import fs from "fs";
+import sendEmail from "../utils/sendEmail.js";
 
 const STRIPE_API_VERSION = "2024-06-20";
 
@@ -1940,11 +1941,16 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       );
       doc.text(
         `Payment received: ${formatInvoiceDate(
-          row?.payments?.paidAt ||
-            row?.paidAt ||
-            row?.payments?.invoicePaidAt ||
-            row?.payments?.balancePaymentReceivedAt ||
-            new Date(),
+          isExtrasInvoice
+            ? row?.payments?.extrasPaidAt ||
+                row?.extrasPaidAt ||
+                row?.payments?.paidAt ||
+                new Date()
+            : row?.payments?.paidAt ||
+                row?.paidAt ||
+                row?.payments?.invoicePaidAt ||
+                row?.payments?.balancePaymentReceivedAt ||
+                new Date(),
         )}`,
         cardX + 26,
         paymentY + 44,
@@ -2030,6 +2036,8 @@ export const createBoardInvoice = async (req, res) => {
       documentType = "invoice",
       invoiceType = "main",
       includePaymentLink = false,
+      paymentDate,
+      sendReceipt = false,
     } = req.body;
 
     const documentStamp = `${Date.now()}`;
@@ -2038,6 +2046,13 @@ export const createBoardInvoice = async (req, res) => {
     const isExtrasInvoice = invoiceTypeNorm === "extras";
     const isReceipt = documentTypeNorm === "receipt";
     const now = new Date();
+    const requestedPaidAt = paymentDate
+      ? new Date(`${String(paymentDate).slice(0, 10)}T12:00:00.000Z`)
+      : now;
+
+    if (isReceipt && Number.isNaN(requestedPaidAt.getTime())) {
+      return res.status(400).json({ success: false, message: "A valid payment date is required." });
+    }
 
     if (!bookingId) {
       return res.status(400).json({
@@ -2091,6 +2106,22 @@ export const createBoardInvoice = async (req, res) => {
 
     const rowForInvoice = {
       ...row,
+      ...(isReceipt
+        ? {
+            paidAt: isExtrasInvoice ? row?.paidAt : requestedPaidAt,
+            extrasPaidAt: isExtrasInvoice ? requestedPaidAt : row?.extrasPaidAt,
+            payments: {
+              ...(row?.payments || {}),
+              ...(isExtrasInvoice
+                ? { extrasPaidAt: requestedPaidAt }
+                : {
+                    paidAt: requestedPaidAt,
+                    invoicePaidAt: requestedPaidAt,
+                    balancePaymentReceivedAt: requestedPaidAt,
+                  }),
+            },
+          }
+        : {}),
       documentType: documentTypeNorm,
       invoiceType: invoiceTypeNorm,
       invoiceDateISO,
@@ -2302,12 +2333,12 @@ export const createBoardInvoice = async (req, res) => {
             extrasReceiptCreatedAt: now,
             extrasPaid: true,
             extrasStatus: "paid",
-            extrasPaidAt: now,
+            extrasPaidAt: requestedPaidAt,
             "payments.extrasPaymentReceived": true,
             "payments.extrasInvoicePaid": true,
             "payments.extrasReceiptPdfUrl": browserDocumentUrl,
             "payments.extrasReceiptCreatedAt": now,
-            "payments.extrasPaidAt": now,
+            "payments.extrasPaidAt": requestedPaidAt,
             extrasAccounting: split,
           }
         : {
@@ -2317,13 +2348,15 @@ export const createBoardInvoice = async (req, res) => {
             receiptCreatedAt: now,
             balancePaid: true,
             balanceStatus: "paid",
-            paidAt: now,
+            paidAt: requestedPaidAt,
             "payments.balancePaymentReceived": true,
             "payments.invoicePaid": true,
             "payments.boardReceiptPdfUrl": browserDocumentUrl,
             "payments.receiptPdfUrl": browserDocumentUrl,
             "payments.receiptCreatedAt": now,
-            "payments.paidAt": now,
+            "payments.paidAt": requestedPaidAt,
+            "payments.invoicePaidAt": requestedPaidAt,
+            "payments.balancePaymentReceivedAt": requestedPaidAt,
             accounting: split,
           }
       : isExtrasInvoice
@@ -2380,7 +2413,7 @@ export const createBoardInvoice = async (req, res) => {
             extrasReceiptCreatedAt: now,
             extrasPaid: true,
             extrasStatus: "paid",
-            extrasPaidAt: now,
+            extrasPaidAt: requestedPaidAt,
             extrasAccounting: split,
           }
         : {
@@ -2390,7 +2423,7 @@ export const createBoardInvoice = async (req, res) => {
             receiptCreatedAt: now,
             balancePaid: true,
             balanceStatus: "paid",
-            paidAt: now,
+            paidAt: requestedPaidAt,
             accounting: split,
           }
       : isExtrasInvoice
@@ -2439,6 +2472,26 @@ export const createBoardInvoice = async (req, res) => {
       },
       { $set: bookingSetPatch },
     );
+
+    let receiptEmailResult = null;
+    if (isReceipt && sendReceipt) {
+      const recipient = isExtrasInvoice
+        ? firstNonEmpty(rowForInvoice.extrasBillingEmail, getPrimaryEmail(rowForInvoice))
+        : getPrimaryEmail(rowForInvoice);
+      const reference = rowForInvoice.bookingRef || String(rowForInvoice._id);
+      receiptEmailResult = await sendEmail({
+        to: recipient,
+        subject: `Payment receipt ${reference}${isExtrasInvoice ? " - extras" : ""}`,
+        text: `Hi ${firstNonEmpty(rowForInvoice.clientFirstNames, rowForInvoice.bookerName, "there")},\n\nThank you. Please find attached your payment receipt for booking ${reference}. The payment was received on ${formatInvoiceDate(requestedPaidAt)}.\n\nWarmest wishes,\nThe Supreme Collective`,
+        attachments: [
+          {
+            filename: `receipt-${reference}${isExtrasInvoice ? "-extras" : ""}.pdf`,
+            content: pdfBuffer,
+            contentType: "application/pdf",
+          },
+        ],
+      });
+    }
 
     return res.json({
       success: true,
@@ -2493,6 +2546,7 @@ export const createBoardInvoice = async (req, res) => {
       paymentUrl: cardPaymentUrl,
       cardPaymentUrl,
       cardPaymentSessionId,
+      receiptEmailResult,
       row: updated,
     });
   } catch (error) {
