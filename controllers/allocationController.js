@@ -526,6 +526,21 @@ export const offerBookingRole = async (req, res) => {
     const dateISO = String(board.eventDateISO || req.body?.dateISO || "").slice(0, 10);
     const formattedDate = formatWithOrdinal(dateISO);
     const fee = Number(req.body?.fee || 0) || 0;
+    const earlyArrivalMinutes = Math.max(
+      0,
+      Number(req.body?.earlyArrivalMinutes || 0) || 0,
+    );
+    const earlyArrivalTime = String(req.body?.earlyArrivalTime || "").trim();
+    const roleWithArrival = [
+      role,
+      earlyArrivalMinutes
+        ? `${earlyArrivalMinutes}-minute early arrival`
+        : earlyArrivalTime
+          ? `early arrival at ${earlyArrivalTime}`
+          : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
     const { act, lineup } = await getActLineupContext(board);
     if (!act) return res.status(400).json({ success: false, message: "This booking is not linked to an act" });
     const originalBandMember =
@@ -547,7 +562,7 @@ export const offerBookingRole = async (req, res) => {
       formattedDate,
       formattedAddress: address,
       fee,
-      duties: role,
+      duties: roleWithArrival,
       actName: act.tscName || act.name || board.actName || "the band",
       requestId,
     });
@@ -561,7 +576,7 @@ export const offerBookingRole = async (req, res) => {
         requestId,
         variables: {
           "1": firstNameOf(musician), "2": formattedDate, "3": address,
-          "4": sanitizeFee(fee), "5": role,
+          "4": sanitizeFee(fee), "5": roleWithArrival,
           "6": act.tscName || act.name || board.actName || "the band", "7": requestId,
         },
         smsBody,
@@ -581,7 +596,7 @@ export const offerBookingRole = async (req, res) => {
         originalBandMemberId,
         candidateSource: req.body?.candidateSource || "search",
         phone: contact.phone,
-        duties: role,
+        duties: roleWithArrival,
         fee: fee ? String(fee) : "",
         formattedDate,
         formattedAddress: address,
@@ -599,7 +614,7 @@ export const offerBookingRole = async (req, res) => {
       await AvailabilityModel.findOneAndUpdate(
         { actId: act._id, lineupId: lineup?._id || lineup?.lineupId || null, dateISO, phone: contact.phone },
         {
-          $setOnInsert: { musicianId: musician._id, duties: role, fee: fee ? String(fee) : "", formattedDate, formattedAddress: address },
+          $setOnInsert: { musicianId: musician._id, duties: roleWithArrival, fee: fee ? String(fee) : "", formattedDate, formattedAddress: address },
           $set: { status: "sent", reply: null, bookingId: board.bookingRef || String(board._id), updatedAt: new Date() },
         },
         { upsert: true, new: true },
@@ -609,6 +624,7 @@ export const offerBookingRole = async (req, res) => {
         musicianId: musician._id, name, firstName: musician.firstName || musician.basicInfo?.firstName || "",
         lastName: musician.lastName || musician.basicInfo?.lastName || "", email: contact.email,
         phone: contact.phone, role, instrument: role, status: "offered", fee, totalFee: fee,
+        earlyArrivalMinutes, earlyArrivalTime,
         paymentStatus: "not_due", source: "booking_role_offer", roleSlotId,
         originalBandMemberId,
         candidateSource: req.body?.candidateSource || "search", offerRequestId: requestId, offeredAt: new Date(),

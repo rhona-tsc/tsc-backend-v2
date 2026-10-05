@@ -176,6 +176,8 @@ const AssignedMusicianSchema = new mongoose.Schema(
     fee: { type: Number, default: 0 },
     travelFee: { type: Number, default: 0 },
     totalFee: { type: Number, default: 0 },
+    earlyArrivalMinutes: { type: Number, default: 0, min: 0 },
+    earlyArrivalTime: { type: String, default: "" },
     paymentStatus: {
       type: String,
       enum: ["not_due", "pending", "paid", "held", "cancelled"],
