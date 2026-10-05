@@ -61,6 +61,8 @@ const buildProjectFields = (body = {}, { partial = false } = {}) => {
     fields.requestedRoles = normaliseRequestedRoles(body.requestedRoles);
   }
   if (!partial || has("hasInitialStem")) fields.hasInitialStem = body.hasInitialStem === true;
+  if (!partial || has("sourceType")) fields.sourceType = clean(body.sourceType) || "none";
+  if (!partial || has("ownerSongwritingClaim")) fields.ownerSongwritingClaim = body.ownerSongwritingClaim === true;
   if (!partial || has("ownerAnonymous")) fields.ownerAnonymous = body.ownerAnonymous === true;
   if (!partial || has("ownerCreditName")) fields.ownerCreditName = clean(body.ownerCreditName);
   if (!partial || has("bpm")) {

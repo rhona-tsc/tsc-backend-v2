@@ -24,7 +24,7 @@ export const calculateOriginalsSplits = ({ project, acceptedSubmissions = [] }) 
 
   const composition = new Map();
   const claimers = contributions.filter((item) => item.songwritingChoice === "songwriting_claim");
-  if (project.hasInitialStem) {
+  if (project.ownerSongwritingClaim === true || (project.ownerSongwritingClaim == null && project.hasInitialStem)) {
     const totalUnits = contributions.length + 1;
     const unit = 100 / totalUnits;
     const ownerUnits = 1 + contributions.filter((item) => item.songwritingChoice !== "songwriting_claim").length;

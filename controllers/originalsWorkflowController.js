@@ -10,6 +10,8 @@ import originalNotificationModel from "../models/originalNotificationModel.js";
 import originalInvitationModel from "../models/originalInvitationModel.js";
 import musicianModel from "../models/musicianModel.js";
 import originalCreditVersionModel from "../models/originalCreditVersionModel.js";
+import originalIssueModel from "../models/originalIssueModel.js";
+import originalMessageModel from "../models/originalMessageModel.js";
 import {
   canRequestReservationExtension,
   getOriginalsUserId,
@@ -27,10 +29,11 @@ const objectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ""))
 const AUDIO_MIMES = new Set([
   "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/aiff",
   "audio/x-aiff", "audio/flac", "audio/x-flac", "audio/mp4", "audio/x-m4a",
+  "audio/aac", "audio/ogg", "audio/webm", "audio/opus",
 ]);
 const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime"]);
 const ASSET_KINDS = new Set([
-  "initial_stem", "demo", "click_track", "take_stem", "take_mixdown", "mix", "master",
+  "initial_stem", "guide_track", "demo", "voice_note", "video_submission", "click_track", "take_stem", "take_mixdown", "mix", "master",
 ]);
 
 const audit = ({ projectId, roundId, reservationId, type, user, metadata = {} }) =>
@@ -62,7 +65,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
   try {
     const project = await originalProjectModel.findById(req.params.id).lean();
     if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
-    const [rounds, reservations, submissions, assets, notifications, invitations, creditVersions] = await Promise.all([
+    const [rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages] = await Promise.all([
       originalRoundModel.find({ projectId: project._id }).sort({ sequence: 1 }).lean(),
       originalReservationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).lean(),
       originalSubmissionModel.find({ projectId: project._id }).sort({ submittedAt: -1 }).lean(),
@@ -74,8 +77,10 @@ export const getOriginalProjectWorkspace = async (req, res) => {
         .populate("invitedMusicianId", "firstName lastName email instrument")
         .sort({ createdAt: -1 }).lean(),
       originalCreditVersionModel.find({ projectId: project._id }).sort({ version: -1 }).lean(),
+      originalIssueModel.find({ projectId: project._id }).sort({ createdAt: -1 }).lean(),
+      originalMessageModel.find({ projectId: project._id }).sort({ createdAt: 1 }).limit(500).lean(),
     ]);
-    return res.json({ success: true, project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions });
+    return res.json({ success: true, project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages });
   } catch (error) {
     console.error("❌ getOriginalProjectWorkspace error:", error);
     return res.status(500).json({ success: false, message: "Failed to load project workspace" });
@@ -92,7 +97,7 @@ export const uploadOriginalAsset = async (req, res) => {
     if (![...AUDIO_MIMES, ...VIDEO_MIMES].includes(req.file.mimetype)) {
       return res.status(415).json({ success: false, message: "Use WAV, MP3, AIFF, FLAC, M4A, MP4 or MOV" });
     }
-    if (VIDEO_MIMES.has(req.file.mimetype) && kind !== "demo") {
+    if (VIDEO_MIMES.has(req.file.mimetype) && !["demo", "video_submission"].includes(kind)) {
       return res.status(415).json({ success: false, message: "Video is only allowed for project demos" });
     }
 
@@ -104,9 +109,9 @@ export const uploadOriginalAsset = async (req, res) => {
     }
     if (reservationId) {
       const reservation = await originalReservationModel.findOne({
-        _id: reservationId, projectId: project._id, musicianId: ownerId, state: "active",
+        _id: reservationId, projectId: project._id, musicianId: ownerId, state: { $in: ["active", "submitted"] },
       });
-      if (!reservation || reservation.expiresAt <= new Date()) {
+      if (!reservation || (reservation.state === "active" && reservation.expiresAt <= new Date())) {
         return res.status(409).json({ success: false, message: "This reservation is not active" });
       }
     }
@@ -125,10 +130,24 @@ export const uploadOriginalAsset = async (req, res) => {
       cloudinaryResourceType: uploaded.resource_type || "video",
       cloudinaryFormat: uploaded.format || "",
       deliveryType: "authenticated",
+      finalEligible: !["guide_track", "demo", "voice_note", "video_submission", "click_track", "take_mixdown"].includes(kind),
     });
-    if (["initial_stem", "demo", "click_track"].includes(kind)) {
+    if (["initial_stem", "guide_track", "demo", "video_submission", "voice_note", "click_track"].includes(kind)) {
       project.initialAssetIds.addToSet(asset._id);
-      if (kind === "initial_stem") project.hasInitialStem = true;
+      if (kind === "initial_stem") {
+        project.hasInitialStem = true;
+        project.sourceType = "final_eligible_stem";
+        project.ownerSongwritingClaim = true;
+      }
+      if (kind === "guide_track") {
+        project.sourceType = "guide_track";
+        project.hasInitialStem = true;
+        project.ownerSongwritingClaim = true;
+      }
+      if (kind === "video_submission") {
+        project.sourceType = "video_demo";
+        project.ownerSongwritingClaim = req.body?.songwritingClaim === "true";
+      }
       await project.save();
     }
     await audit({ projectId: project._id, roundId, reservationId, type: "asset_uploaded", user: req.user, metadata: { assetId: String(asset._id), kind } });
@@ -136,6 +155,145 @@ export const uploadOriginalAsset = async (req, res) => {
   } catch (error) {
     console.error("❌ uploadOriginalAsset error:", error);
     return res.status(500).json({ success: false, message: "Private upload failed" });
+  }
+};
+
+export const postOriginalMessage = async (req, res) => {
+  try {
+    const project = await originalProjectModel.findById(req.params.id).lean();
+    if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
+    const body = clean(req.body?.body);
+    const voiceAssetId = objectId(req.body?.voiceAssetId) || null;
+    if (!body && !voiceAssetId) return res.status(400).json({ success: false, message: "Write a message or attach a voice note" });
+    if (voiceAssetId) {
+      const voice = await originalAssetModel.findOne({ _id: voiceAssetId, projectId: project._id, kind: "voice_note", state: "active" });
+      if (!voice) return res.status(400).json({ success: false, message: "Voice note is unavailable" });
+    }
+    const message = await originalMessageModel.create({
+      projectId: project._id,
+      authorId: objectId(getOriginalsUserId(req.user)),
+      body,
+      voiceAssetId,
+      authorAnonymous: req.body?.anonymous === true,
+      authorCreditName: clean(req.body?.creditName),
+    });
+    const participantIds = await originalSubmissionModel.distinct("musicianId", {
+      projectId: project._id,
+      state: { $nin: ["rejected", "withdrawn", "retracted"] },
+    });
+    const reservedIds = await originalReservationModel.distinct("musicianId", {
+      projectId: project._id,
+      state: { $in: ["active", "submitted"] },
+    });
+    const authorId = String(objectId(getOriginalsUserId(req.user)) || "");
+    const recipientIds = [...new Set([
+      String(project.ownerId || ""),
+      ...participantIds.map(String),
+      ...reservedIds.map(String),
+    ])].filter((id) => objectId(id) && id !== authorId);
+    if (recipientIds.length) {
+      await originalNotificationModel.insertMany(
+        recipientIds.map((recipientMusicianId) => ({
+          projectId: project._id,
+          recipientMusicianId,
+          eventKey: `group-message:${message._id}:${recipientMusicianId}`,
+          channels: ["whatsapp"],
+          template: "originals_group_chat_message",
+          payload: {
+            messageId: String(message._id),
+            projectId: String(project._id),
+            projectTitle: project.title,
+            preview: body.slice(0, 240),
+            hasVoiceNote: Boolean(voiceAssetId),
+          },
+        })),
+        { ordered: false },
+      ).catch((error) => {
+        if (error?.code !== 11000 && !error?.writeErrors?.every((item) => item?.code === 11000)) throw error;
+      });
+    }
+    await audit({ projectId: project._id, type: "group_message_posted", user: req.user, metadata: { messageId: String(message._id), hasVoiceNote: Boolean(voiceAssetId) } });
+    return res.status(201).json({ success: true, message });
+  } catch (error) {
+    console.error("❌ postOriginalMessage error:", error);
+    return res.status(500).json({ success: false, message: "Failed to post message" });
+  }
+};
+
+export const replaceOriginalSubmission = async (req, res) => {
+  try {
+    const submission = await originalSubmissionModel.findById(req.params.submissionId);
+    if (!submission || submission.state !== "submitted") return res.status(409).json({ success: false, message: "Only a pending submission can be replaced" });
+    const round = await originalRoundModel.findById(submission.roundId).lean();
+    const laterRound = await originalRoundModel.exists({ projectId: submission.projectId, sequence: { $gt: round.sequence } });
+    if (laterRound) return res.status(409).json({ success: false, message: "This project has moved to the next stage; open a concern instead" });
+    const takes = Array.isArray(req.body?.takes) ? req.body.takes.slice(0, 3) : [];
+    if (!takes.length) return res.status(400).json({ success: false, message: "Add at least one replacement take" });
+    const assetIds = takes.flatMap((take) => [take.stemAssetId, take.mixdownAssetId]).map(objectId);
+    const assets = await originalAssetModel.find({ _id: { $in: assetIds }, reservationId: submission.reservationId, ownerId: submission.musicianId, state: "active" }).lean();
+    if (assets.length !== new Set(assetIds).size) return res.status(400).json({ success: false, message: "Replacement files are unavailable" });
+    const kinds = new Map(assets.map((asset) => [String(asset._id), asset.kind]));
+    if (takes.some((take) => kinds.get(String(take.stemAssetId)) !== "take_stem" || kinds.get(String(take.mixdownAssetId)) !== "take_mixdown")) return res.status(400).json({ success: false, message: "Each replacement needs a stem and mixdown" });
+    const oldAssetIds = submission.takes.flatMap((take) => [take.stemAssetId, take.mixdownAssetId]);
+    await originalAssetModel.updateMany({ _id: { $in: oldAssetIds } }, { $set: { state: "hidden" } });
+    submission.takes = takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId, notes: clean(take.notes) }));
+    submission.revision += 1;
+    submission.notes = clean(req.body?.notes);
+    await submission.save();
+    await audit({ projectId: submission.projectId, roundId: submission.roundId, reservationId: submission.reservationId, type: "submission_replaced", user: req.user, metadata: { submissionId: String(submission._id), revision: submission.revision } });
+    return res.json({ success: true, submission });
+  } catch (error) {
+    console.error("❌ replaceOriginalSubmission error:", error);
+    return res.status(500).json({ success: false, message: "Failed to replace submission" });
+  }
+};
+
+export const openOriginalIssue = async (req, res) => {
+  try {
+    const submission = await originalSubmissionModel.findById(req.params.submissionId);
+    if (!submission || !["submitted", "accepted"].includes(submission.state)) return res.status(404).json({ success: false, message: "Submission is unavailable" });
+    const category = clean(req.body?.category);
+    const reason = clean(req.body?.reason);
+    if (!["lyrics", "creative_direction", "credit", "conduct", "other"].includes(category) || !reason) return res.status(400).json({ success: false, message: "Choose a category and explain the concern" });
+    const actorId = objectId(getOriginalsUserId(req.user));
+    const issue = await originalIssueModel.create({ projectId: submission.projectId, submissionId: submission._id, openedBy: actorId, category, priorSubmissionState: submission.state, messages: [{ authorId: actorId, type: "reason", body: reason }] });
+    submission.state = "retraction_requested";
+    await submission.save();
+    await audit({ projectId: submission.projectId, roundId: submission.roundId, type: "retraction_review_opened", user: req.user, metadata: { issueId: String(issue._id), submissionId: String(submission._id), category } });
+    return res.status(201).json({ success: true, issue });
+  } catch (error) {
+    console.error("❌ openOriginalIssue error:", error);
+    return res.status(500).json({ success: false, message: "Failed to open concern" });
+  }
+};
+
+export const updateOriginalIssue = async (req, res) => {
+  try {
+    const issue = await originalIssueModel.findById(req.params.issueId);
+    if (!issue || ["resolved", "retraction_confirmed", "cancelled"].includes(issue.state)) return res.status(404).json({ success: false, message: "Open concern not found" });
+    const action = clean(req.body?.action);
+    const body = clean(req.body?.body);
+    if (!["propose_remedy", "request_amendments", "resolve", "confirm_retraction"].includes(action) || !body) return res.status(400).json({ success: false, message: "Choose an action and add a note" });
+    const actorId = objectId(getOriginalsUserId(req.user));
+    const type = action === "propose_remedy" ? "response" : action === "request_amendments" ? "amendment_request" : "resolution_note";
+    issue.messages.push({ authorId: actorId, type, body });
+    issue.state = action === "propose_remedy" ? "remedy_proposed" : action === "request_amendments" ? "further_amendments" : action === "resolve" ? "resolved" : "retraction_confirmed";
+    if (["resolve", "confirm_retraction"].includes(action)) issue.resolvedAt = new Date();
+    await issue.save();
+    const submission = await originalSubmissionModel.findById(issue.submissionId);
+    if (action === "resolve") submission.state = issue.priorSubmissionState;
+    if (action === "confirm_retraction") {
+      submission.state = "retracted";
+      const ids = submission.outputAssetId ? [submission.outputAssetId] : submission.takes.flatMap((take) => [take.stemAssetId, take.mixdownAssetId]);
+      await originalAssetModel.updateMany({ _id: { $in: ids } }, { $set: { state: "hidden" } });
+      await originalProjectModel.updateOne({ _id: submission.projectId }, { $set: { state: "owner_review", currentCreditVersionId: null } });
+    }
+    await submission.save();
+    await audit({ projectId: issue.projectId, roundId: submission.roundId, type: `issue_${action}`, user: req.user, metadata: { issueId: String(issue._id), submissionId: String(submission._id) } });
+    return res.json({ success: true, issue, submission });
+  } catch (error) {
+    console.error("❌ updateOriginalIssue error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update concern" });
   }
 };
 

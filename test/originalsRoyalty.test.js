@@ -36,6 +36,17 @@ test("an initial-stem owner receives unclaimed composition units", () => {
   assert.equal(splits.composition.find((share) => share.recipientId === "bassist").percent, 33.333333);
 });
 
+test("a non-final guide or video can preserve the owner's songwriting claim", () => {
+  const splits = calculateOriginalsSplits({
+    project: { ownerId: "owner", hasInitialStem: false, ownerSongwritingClaim: true },
+    acceptedSubmissions: [
+      { category: "contribution", musicianId: "pianist", roleName: "Piano", songwritingChoice: "master_only" },
+      ...production,
+    ],
+  });
+  assert.deepEqual(splits.composition.map(({ recipientId, percent }) => [recipientId, percent]), [["owner", 100]]);
+});
+
 test("a project without a stem splits composition among claimers, or everybody if nobody claims", () => {
   const base = [
     { category: "contribution", musicianId: "guitarist", roleName: "Guitar", songwritingChoice: "master_only" },

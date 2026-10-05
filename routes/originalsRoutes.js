@@ -17,12 +17,16 @@ import {
   getOriginalProjectWorkspace,
   inviteOriginalMusician,
   openNextOriginalRound,
+  openOriginalIssue,
+  postOriginalMessage,
   requestReservationExtension,
   reserveOriginalRound,
   reopenOriginalRound,
+  replaceOriginalSubmission,
   searchOriginalMusicians,
   submitOriginalTakes,
   submitOriginalProduction,
+  updateOriginalIssue,
   uploadOriginalAsset,
 } from "../controllers/originalsWorkflowController.js";
 import { canAccessOriginalsPreview, isOriginalsEnabled } from "../services/originalsPolicyService.js";
@@ -83,6 +87,10 @@ router.post("/projects/:id/credits", createOriginalCreditVersion);
 router.post("/credit-versions/:versionId/confirm", confirmOriginalCreditVersion);
 router.post("/credit-versions/:versionId/finalise", finaliseOriginalCreditsAsAdmin);
 router.post("/projects/:id/complete", completeOriginalProject);
+router.post("/projects/:id/messages", postOriginalMessage);
+router.post("/submissions/:submissionId/replace", replaceOriginalSubmission);
+router.post("/submissions/:submissionId/issues", openOriginalIssue);
+router.post("/issues/:issueId", updateOriginalIssue);
 router.get("/readiness", getOriginalsReadiness);
 router.get("/musicians/:musicianId/stats", getOriginalsMusicianStats);
 

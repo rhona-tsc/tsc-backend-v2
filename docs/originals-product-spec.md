@@ -2,6 +2,16 @@
 
 > Current pilot status: private preview. Both the frontend routes and every `/api/originals` endpoint are restricted to Rhona's allowlisted account. The broader musician access described below remains the launch design, not the current access policy.
 
+## 0.1 Subsequent product decisions
+
+- A listing may begin with a final-eligible stem, a reference-only guide track, a video demo, or no source file.
+- Guide tracks are retained privately for reference and evidence but are explicitly excluded from final-production assets.
+- A guide track or video demo may establish the owner's songwriting claim even when that media is absent from the final master.
+- Project creation and project chat accept common voice-note formats, including M4A, AAC, MP3, WAV, OGG, Opus, and WebM audio.
+- Contributors may replace a pending submission with a new revision only before a later project round exists. Superseded files are hidden and retained for audit.
+- Retraction is a structured concern/remedy process: reason, proposed remedy, optional further amendments, then resolution or confirmed retraction. Confirmed retraction hides the material and invalidates the current credit snapshot.
+- Each project has a private group chat for creative clarification before recording, with optional private voice-note attachments.
+
 Status: approved product direction; contracts require specialist music-law review  
 Phase: Phase 1 planning  
 Last updated: 29 September 2026

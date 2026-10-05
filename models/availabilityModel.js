@@ -34,6 +34,7 @@ bandMemberId: { type: mongoose.Schema.Types.ObjectId, index: true },
 
     dateISO: { type: String, index: true },
     date: { type: Date },
+    bookingId: { type: String, default: "", index: true },
 
     v2: { type: Boolean, default: false, index: true },
 
@@ -78,6 +79,9 @@ requestId: { type: String, index: true },
     calendarInviteEmail: { type: String },
     calendarInviteSentAt: { type: Date },
     calendarDeclinedAt: { type: Date },
+    calendarCancellationConfirmationPending: { type: Boolean, default: false, index: true },
+    calendarCancellationConfirmationSentAt: { type: Date },
+    calendarCancellationConfirmedAt: { type: Date },
     calendarStatus: {
       type: String,
       enum: [
@@ -86,6 +90,7 @@ requestId: { type: String, index: true },
         "tentative",
         "declined",
         "cancelled",
+        "decline_confirmation_pending",
         null,
       ],
       default: null,

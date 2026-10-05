@@ -130,6 +130,6 @@ test("anonymous owners require a credit alias and initial-stem projects require 
 
   assert.deepEqual(errors, [
     "An artistic or credit name is required for an anonymous owner",
-    "An initial stem must be uploaded when the project has a starting stem",
+    "The selected starting reference must be uploaded",
   ]);
 });

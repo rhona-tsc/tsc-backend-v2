@@ -78,6 +78,7 @@ export const normaliseRequestedRoles = (value) => {
 
 export const validateOriginalProjectForModeration = (project = {}) => {
   const errors = [];
+  const sourceType = project.sourceType || (project.hasInitialStem ? "final_eligible_stem" : "none");
   if (!String(project.title || "").trim()) errors.push("Project title is required");
   if (!String(project.description || "").trim()) errors.push("Project description is required");
   if (!Array.isArray(project.genres) || !project.genres.length) {
@@ -90,12 +91,12 @@ export const validateOriginalProjectForModeration = (project = {}) => {
     errors.push("An artistic or credit name is required for an anonymous owner");
   }
   if (
-    project.hasInitialStem &&
+    sourceType !== "none" &&
     (!Array.isArray(project.initialAssetIds) || !project.initialAssetIds.length)
   ) {
-    errors.push("An initial stem must be uploaded when the project has a starting stem");
+    errors.push("The selected starting reference must be uploaded");
   }
-  if (!project.hasInitialStem) {
+  if (["none", "video_demo"].includes(sourceType)) {
     const foundationRoles = (project.requestedRoles || []).filter(
       (role) => role?.foundationEligible,
     );

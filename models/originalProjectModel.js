@@ -51,6 +51,12 @@ const originalProjectSchema = new mongoose.Schema(
     genres: { type: [String], default: [] },
     requestedRoles: { type: [requestedRoleSchema], default: [] },
     hasInitialStem: { type: Boolean, default: false },
+    sourceType: {
+      type: String,
+      enum: ["none", "final_eligible_stem", "guide_track", "video_demo"],
+      default: "none",
+    },
+    ownerSongwritingClaim: { type: Boolean, default: false },
     initialAssetIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "originalasset" }],
     bpm: { type: Number, default: null, min: 1, max: 400 },
     musicalKey: { type: String, default: "", trim: true },

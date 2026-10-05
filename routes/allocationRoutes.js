@@ -1,12 +1,13 @@
 // backend/routes/allocationRoutes.js
 import express from "express";
-import { triggerBookingRequests, twilioInboundBooking, listRoleCandidates, offerBookingRole } from "../controllers/allocationController.js";
+import { triggerBookingRequests, twilioInboundBooking, listRoleCandidates, offerBookingRole, withdrawMyBooking } from "../controllers/allocationController.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 
 const router = express.Router();
 
 router.get("/role-candidates", musicianAuth, listRoleCandidates);
 router.post("/offer-role", musicianAuth, offerBookingRole);
+router.post("/bookings/:id/withdraw", musicianAuth, withdrawMyBooking);
 
 /* -------------------------------------------------------------------------- */
 /*                              ROUTE: /trigger                               */

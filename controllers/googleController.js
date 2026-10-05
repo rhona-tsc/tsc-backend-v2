@@ -370,6 +370,28 @@ export async function updateCalendarEvent({ eventId, ensureAttendees = [] }) {
   });
 }
 
+export async function reinstateCalendarAttendee({ eventId, email }) {
+  if (!eventId || !email) return null;
+  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+  const calendarId = "primary";
+  const ev = await calendar.events.get({ calendarId, eventId });
+  const target = String(email).trim().toLowerCase();
+  const attendees = (ev.data.attendees || []).map((attendee) =>
+    String(attendee?.email || "").trim().toLowerCase() === target
+      ? { ...attendee, responseStatus: "needsAction" }
+      : attendee,
+  );
+  if (!attendees.some((attendee) => String(attendee?.email || "").trim().toLowerCase() === target)) {
+    attendees.push({ email: target, responseStatus: "needsAction" });
+  }
+  return calendar.events.patch({
+    calendarId,
+    eventId,
+    requestBody: { attendees },
+    sendUpdates: "all",
+  });
+}
+
 export const watchCalendar = async () => {
   console.log(`😈 (controllers/googleController.js) watchCalendar called at`, new Date().toISOString());
   const watchResponse = await calendar.events.watch({

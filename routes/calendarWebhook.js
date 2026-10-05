@@ -1,8 +1,9 @@
 // routes/calendarWebhook.js
 import express from "express";
 import AvailabilityModel from "../models/availabilityModel.js";
-import Act from "../models/actModel.js";
+import Musician from "../models/musicianModel.js";
 import { google } from "googleapis";
+import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 
 const router = express.Router();
 
@@ -38,25 +39,30 @@ router.post("/notifications", async (req, res) => {
     for (const ev of events) {
       const eventId = ev.id;
       const status = ev.status; // "confirmed" | "cancelled"
-      const attendee = (ev.attendees || [])[0];
-      const responseStatus = attendee?.responseStatus; // "accepted" | "declined" | "tentative" | "needsAction"
-
-      const calStatus =
-        status === "cancelled" ? "cancelled" :
-        responseStatus || null;
-
-      const isDecline = calStatus === "declined" || calStatus === "cancelled";
-
-      const doc = await AvailabilityModel.findOneAndUpdate(
-        { calendarEventId: eventId },
-        {
-          $set: {
-            calendarStatus: calStatus,
-            ...(isDecline ? { calendarDeclinedAt: new Date() } : {}),
-          },
-        },
-        { new: true }
-      );
+      const availabilityRows = await AvailabilityModel.find({ calendarEventId: eventId });
+      for (const existing of availabilityRows) {
+        const musician = existing.musicianId
+          ? await Musician.findById(existing.musicianId)
+              .select("firstName email basicInfo.firstName basicInfo.email")
+              .lean()
+          : null;
+        const inviteEmail = String(
+          existing.calendarInviteEmail || musician?.email || musician?.basicInfo?.email || "",
+        ).trim().toLowerCase();
+        const attendee = (ev.attendees || []).find(
+          (entry) => String(entry?.email || "").trim().toLowerCase() === inviteEmail,
+        );
+        const responseStatus = attendee?.responseStatus;
+        const calStatus = status === "cancelled" ? "cancelled" : responseStatus || null;
+        const isDecline = calStatus === "declined" || calStatus === "cancelled";
+        const wasPending = existing.calendarCancellationConfirmationPending;
+        existing.calendarStatus = isDecline ? "decline_confirmation_pending" : calStatus;
+        if (isDecline) {
+          existing.calendarDeclinedAt = new Date();
+          existing.calendarCancellationConfirmationPending = true;
+        }
+        await existing.save();
+        const doc = existing;
 
       if (doc) {
         console.log("🔗 Updated Availability from calendar:", {
@@ -65,20 +71,30 @@ router.post("/notifications", async (req, res) => {
           calendarStatus: calStatus,
         });
 
-        // Clear badge if declined/cancelled
-        if (isDecline && doc.actId) {
-          await Act.findByIdAndUpdate(doc.actId, {
-            $set: { "availabilityBadges.active": false },
-            $unset: {
-              "availabilityBadges.vocalistName": "",
-              "availabilityBadges.inPromo": "",
-              "availabilityBadges.dateISO": "",
-              "availabilityBadges.address": "",
-              "availabilityBadges.setAt": "",
-            },
+        if (
+          isDecline &&
+          !wasPending &&
+          doc.phone &&
+          process.env.TWILIO_CALENDAR_CANCELLATION_CONFIRMATION_SID
+        ) {
+          const firstName = musician?.firstName || musician?.basicInfo?.firstName || "there";
+          const details = [doc.formattedDate, doc.formattedAddress, doc.duties].filter(Boolean).join(" · ");
+          await sendWhatsAppMessage({
+            to: doc.phone,
+            contentSid: process.env.TWILIO_CALENDAR_CANCELLATION_CONFIRMATION_SID,
+            requestId: `CAL_${doc._id}`,
+            variables: { "1": firstName, "2": details || "your booking" },
+            smsBody: `Hi ${firstName}, we received a declined calendar response for ${details || "your gig"}. Please confirm: YES, I'M UNAVAILABLE or NO, REINSTATE INVITE.`,
           });
-          console.log("🏷️ Cleared availability badge for act", String(doc.actId));
+          doc.calendarCancellationConfirmationSentAt = new Date();
+          await doc.save();
+        } else if (isDecline && !wasPending) {
+          console.warn(
+            "Calendar decline requires confirmation, but the Twilio confirmation template is not configured.",
+            { availabilityId: String(doc._id) },
+          );
         }
+      }
       }
     }
 

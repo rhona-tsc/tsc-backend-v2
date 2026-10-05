@@ -8,7 +8,7 @@ const originalAssetSchema = new mongoose.Schema(
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: "musician", required: true, index: true },
     kind: {
       type: String,
-      enum: ["initial_stem", "demo", "click_track", "take_stem", "take_mixdown", "mix", "master"],
+      enum: ["initial_stem", "guide_track", "demo", "voice_note", "video_submission", "click_track", "take_stem", "take_mixdown", "mix", "master"],
       required: true,
     },
     originalName: { type: String, required: true, trim: true },
@@ -18,6 +18,7 @@ const originalAssetSchema = new mongoose.Schema(
     cloudinaryResourceType: { type: String, enum: ["video", "raw"], required: true },
     cloudinaryFormat: { type: String, default: "", trim: true },
     deliveryType: { type: String, default: "authenticated" },
+    finalEligible: { type: Boolean, default: true },
     state: { type: String, enum: ["active", "hidden", "deleted"], default: "active", index: true },
   },
   { timestamps: true },

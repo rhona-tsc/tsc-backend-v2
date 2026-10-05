@@ -7,6 +7,7 @@ import {
   ensureBookingEvent,
   appendLineToEventDescription,
   addAttendeeToEvent,
+  reinstateCalendarAttendee,
 } from "./googleController.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import bookingBoardItem from "../models/bookingBoardItem.js";
@@ -191,6 +192,146 @@ const updateBoardRoleSlot = async (msg, changes = {}) => {
   };
   await board.save();
   return board;
+};
+
+const musicianMatchesAssignment = (entry = {}, user = {}) => {
+  const userId = String(user?.musicianId || user?._id || user?.id || "");
+  const email = String(user?.email || "").trim().toLowerCase();
+  return Boolean(
+    (userId && String(entry?.musicianId || "") === userId) ||
+      (email && String(entry?.email || "").trim().toLowerCase() === email),
+  );
+};
+
+export const withdrawAllocatedBooking = async ({ board, assignment, user, reason = "", source = "portal" }) => {
+  const now = new Date();
+  const roleSlotId = String(assignment?.roleSlotId || "");
+  const offerRequestId = String(assignment?.offerRequestId || "");
+  const deputyJobId = assignment?.deputyJobId || null;
+  const apply = (entries = []) =>
+    entries.map((entry) =>
+      (roleSlotId && String(entry?.roleSlotId || "") === roleSlotId) ||
+      (offerRequestId && String(entry?.offerRequestId || "") === offerRequestId) ||
+      musicianMatchesAssignment(entry, user)
+        ? {
+            ...(entry.toObject?.() || entry),
+            status: "withdrawn",
+            withdrawnAt: now,
+            withdrawalReason: String(reason || "").trim(),
+            withdrawalSource: source,
+            respondedAt: now,
+          }
+        : entry,
+    );
+
+  board.assignedMusicians = apply(board.assignedMusicians || []);
+  board.bookingMusicians = apply(board.bookingMusicians || []);
+  board.bandLineup = apply(board.bandLineup || []);
+  if (board.bookingDetails) {
+    board.bookingDetails.assignedMusicians = apply(
+      board.bookingDetails.assignedMusicians || [],
+    );
+  }
+  const role = String(assignment?.role || assignment?.instrument || "Musician");
+  const gaps = Array.isArray(board.allocation?.gaps)
+    ? board.allocation.gaps.filter((gap) => String(gap?.instrument || "").toLowerCase() !== role.toLowerCase())
+    : [];
+  gaps.push({ instrument: role, needed: 1 });
+  board.allocation = {
+    ...(board.allocation?.toObject?.() || board.allocation || {}),
+    status: "gap",
+    lastCheckedAt: now,
+    notes: `${role} withdrew on ${now.toLocaleDateString("en-GB")}. Reallocation required.`,
+    gaps,
+  };
+  await board.save();
+
+  if (deputyJobId && mongoose.isValidObjectId(deputyJobId)) {
+    const job = await DeputyJob.findById(deputyJobId);
+    if (job) {
+      job.status = "open";
+      job.workflowStage = "applications_open";
+      job.allocatedMusicianId = null;
+      job.allocatedMusicianSlug = "";
+      job.allocatedMusicianName = "";
+      job.allocatedAt = null;
+      job.bookedMusicianId = null;
+      job.bookedMusicianSlug = "";
+      job.bookedMusicianName = "";
+      job.bookingConfirmedAt = null;
+      job.applications = (job.applications || []).map((application) =>
+        musicianMatchesAssignment(application, user)
+          ? { ...(application.toObject?.() || application), status: "withdrawn", withdrawnAt: now }
+          : application,
+      );
+      await job.save();
+      return { route: "job_board_reopened", job };
+    }
+  }
+
+  const msg = offerRequestId
+    ? await EnquiryMessage.findOne({ enquiryId: offerRequestId })
+    : await EnquiryMessage.findOne({
+        bookingBoardItemId: board._id,
+        roleSlotId,
+        musicianId: assignment?.musicianId || undefined,
+      }).sort({ createdAt: -1 });
+  if (msg) {
+    await EnquiryMessage.updateOne(
+      { _id: msg._id },
+      { $set: { reply: "withdrawn", repliedAt: now, status: "read" } },
+    );
+    await escalateToNextDeputy(msg);
+    return { route: "act_deputy_chain" };
+  }
+
+  const fallbackMessage = {
+    bookingBoardItemId: board._id,
+    bookingRef: board.bookingRef,
+    roleSlotId: roleSlotId || buildRoleSlotId(role, 0),
+    duties: role,
+    fee: assignment?.totalFee || assignment?.fee || 0,
+    formattedAddress: board.address || board.venue || "",
+    meta: { MetaISODate: board.eventDateISO },
+  };
+  const { act } = await getActLineupContext(board);
+  const job = await postExhaustedRoleToDeputyBoard(fallbackMessage, act);
+  return { route: "job_board_created", job };
+};
+
+export const withdrawMyBooking = async (req, res) => {
+  try {
+    const board = await resolveBoardItem(req.params?.id || req.body?.bookingId);
+    if (!board) return res.status(404).json({ success: false, message: "Booking not found" });
+    const pools = [
+      ...(board.assignedMusicians || []),
+      ...(board.bookingMusicians || []),
+      ...(board.bandLineup || []),
+      ...(board.bookingDetails?.assignedMusicians || []),
+    ];
+    const assignment = pools.find(
+      (entry) => musicianMatchesAssignment(entry, req.user) &&
+        ["accepted", "confirmed"].includes(String(entry?.status || "").toLowerCase()),
+    );
+    if (!assignment) {
+      return res.status(404).json({ success: false, message: "No confirmed allocation was found for your profile." });
+    }
+    const result = await withdrawAllocatedBooking({
+      board,
+      assignment,
+      user: req.user,
+      reason: req.body?.reason,
+      source: "musician_portal",
+    });
+    return res.json({
+      success: true,
+      message: "Your availability has been withdrawn and the role has been reopened.",
+      reallocationRoute: result.route,
+    });
+  } catch (error) {
+    console.error("withdrawMyBooking failed:", error);
+    return res.status(500).json({ success: false, message: error.message || "Could not withdraw availability." });
+  }
 };
 
 const postExhaustedRoleToDeputyBoard = async (msg, act) => {
@@ -929,6 +1070,58 @@ export const twilioInboundBooking = async (req, res) => {
     // 1️⃣ Determine musician reply type
     // ---------------------------------------------------------
     const rawReply = buttonPayload || buttonText || bodyText || "";
+    const calendarCancelYes = /calendar[_ -]?cancel[_ -]?yes|yes,? i['’]?m unavailable(?: now)?/i.test(rawReply);
+    const calendarCancelNo = /calendar[_ -]?cancel[_ -]?no|no,? (?:please )?reinstate(?: invite)?/i.test(rawReply);
+    if (calendarCancelYes || calendarCancelNo) {
+      const variants = normalizeFrom(fromRaw);
+      const availability = await AvailabilityModel.findOne({
+        phone: { $in: variants },
+        calendarCancellationConfirmationPending: true,
+      }).sort({ calendarCancellationConfirmationSentAt: -1 });
+      if (!availability) return res.status(200).send("<Response/>");
+
+      if (calendarCancelNo) {
+        await reinstateCalendarAttendee({
+          eventId: availability.calendarEventId,
+          email: availability.calendarInviteEmail,
+        });
+        availability.calendarCancellationConfirmationPending = false;
+        availability.calendarStatus = "needsAction";
+        availability.calendarDeclinedAt = null;
+        availability.status = "accepted";
+        availability.reply = "yes";
+        await availability.save();
+        return res.status(200).send("<Response/>");
+      }
+
+      const board = await resolveBoardItem(availability.bookingId);
+      if (board) {
+        const pools = [
+          ...(board.assignedMusicians || []),
+          ...(board.bookingMusicians || []),
+          ...(board.bandLineup || []),
+          ...(board.bookingDetails?.assignedMusicians || []),
+        ];
+        const user = { musicianId: availability.musicianId, email: availability.calendarInviteEmail };
+        const assignment = pools.find((entry) => musicianMatchesAssignment(entry, user));
+        if (assignment) {
+          await withdrawAllocatedBooking({
+            board,
+            assignment,
+            user,
+            reason: "Confirmed after declining the calendar invitation",
+            source: "calendar_decline_confirmed",
+          });
+        }
+      }
+      availability.calendarCancellationConfirmationPending = false;
+      availability.calendarCancellationConfirmedAt = new Date();
+      availability.calendarStatus = "declined";
+      availability.status = "unavailable";
+      availability.reply = "unavailable";
+      await availability.save();
+      return res.status(200).send("<Response/>");
+    }
     const replyType = interpretReply(rawReply);
 
     console.log("🦚 replyType detected:", replyType);
@@ -1117,6 +1310,8 @@ const booking = msg?.bookingRef
         status: "accepted",
         updatedAt: new Date(),
         calendarEventId: eventId || null,
+        calendarInviteEmail: email || "",
+        calendarInviteSentAt: eventId && email ? new Date() : null,
         bookingId: msg.bookingRef || null,
       },
       $setOnInsert: {

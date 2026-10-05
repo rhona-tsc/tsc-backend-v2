@@ -15,7 +15,9 @@ import { sendEmail } from "../utils/sendEmail.js";
 import mongoose from "mongoose";
 import deputyPresentationModel from "../models/deputyPresentationModel.js";
 import bookingBoardItemModel from "../models/bookingBoardItem.js";
+import AvailabilityModel from "../models/availabilityModel.js";
 import crypto from "crypto";
+import { ensureBookingEvent, addAttendeeToEvent } from "./googleController.js";
 
 const DEPUTY_JOB_BCC_EMAIL =
   process.env.DEPUTY_JOB_BCC_EMAIL || "hello@thesupremecollective.co.uk";
@@ -2152,6 +2154,113 @@ const applyBookedStateToJob = (job, musician) => {
   });
 
   return now;
+};
+
+const syncBookedDeputyToBookingBoard = async (job, musician) => {
+  const boardId = job?.automation?.bookingBoardItemId;
+  if (!boardId) return null;
+  const board = await bookingBoardItemModel.findById(boardId);
+  if (!board) return null;
+
+  const roleSlotId = normaliseString(job?.automation?.roleSlotId || `deputy-job-${job._id}`);
+  const name = [musician?.firstName, musician?.lastName].filter(Boolean).join(" ").trim();
+  const email = normaliseEmail(musician?.email || "");
+  const role = normaliseString(job?.instrument || job?.requiredInstruments?.[0] || job?.title || "Musician");
+  const assignment = {
+    musicianId: musician?._id || musician?.musicianId,
+    name,
+    firstName: musician?.firstName || "",
+    lastName: musician?.lastName || "",
+    email,
+    phone: musician?.phone || musician?.phoneNumber || "",
+    role,
+    instrument: role,
+    status: "confirmed",
+    roleSlotId,
+    candidateSource: "job_board",
+    acceptedAt: new Date(),
+    respondedAt: new Date(),
+    deputyJobId: job._id,
+    fee: Number(job?.deputyNetAmount || job?.fee || 0),
+    totalFee: Number(job?.deputyNetAmount || job?.fee || 0),
+    source: "deputy_job",
+  };
+  const upsert = (entries = []) => {
+    const next = [...entries];
+    const index = next.findIndex((entry) => String(entry?.roleSlotId || "") === roleSlotId);
+    if (index >= 0) next[index] = assignment;
+    else next.push(assignment);
+    return next;
+  };
+  board.assignedMusicians = upsert(board.assignedMusicians || []);
+  board.bookingMusicians = upsert(board.bookingMusicians || []);
+  board.bandLineup = upsert(board.bandLineup || []);
+  if (board.bookingDetails) {
+    board.bookingDetails.assignedMusicians = upsert(board.bookingDetails.assignedMusicians || []);
+  }
+  const unresolved = board.assignedMusicians.filter((entry) =>
+    ["unfilled", "selected", "offered", "proposed", "declined", "unavailable", "withdrawn", "posted_to_job_board"].includes(entry?.status),
+  );
+  board.allocation = {
+    ...(board.allocation?.toObject?.() || board.allocation || {}),
+    status: unresolved.length ? "in_progress" : "fully_allocated",
+    lastCheckedAt: new Date(),
+    gaps: (board.allocation?.gaps || []).filter(
+      (gap) => normaliseString(gap?.instrument).toLowerCase() !== role.toLowerCase(),
+    ),
+  };
+
+  if (board.actId && board.eventDateISO && email) {
+    try {
+      const event = await ensureBookingEvent({
+        actId: board.actId,
+        dateISO: board.eventDateISO,
+        address: board.address || board.venue || "",
+      });
+      const eventId = event?.id || event?.data?.id || event;
+      if (eventId) {
+        await addAttendeeToEvent({ eventId, email });
+        const phone = musician?.phone || musician?.phoneNumber || "";
+        if (phone) {
+          await AvailabilityModel.findOneAndUpdate(
+            { requestKey: `deputy-job-${job._id}`, musicianId: musician._id },
+            {
+              $set: {
+                actId: board.actId,
+                musicianId: musician._id,
+                musicianName: name,
+                phone,
+                duties: role,
+                fee: String(assignment.totalFee || ""),
+                formattedDate: board.eventDateISO,
+                formattedAddress: board.address || board.venue || "",
+                dateISO: board.eventDateISO,
+                bookingId: board.bookingRef || String(board._id),
+                reply: "yes",
+                status: "accepted",
+                calendarEventId: eventId,
+                calendarInviteEmail: email,
+                calendarInviteSentAt: new Date(),
+                calendarStatus: "needsAction",
+                confirmedBooking: true,
+              },
+              $setOnInsert: { requestKey: `deputy-job-${job._id}` },
+            },
+            { upsert: true, new: true },
+          );
+        }
+        board.assignedMusicians = board.assignedMusicians.map((entry) =>
+          String(entry?.roleSlotId || "") === roleSlotId
+            ? { ...(entry.toObject?.() || entry), calendarInviteSentAt: new Date() }
+            : entry,
+        );
+      }
+    } catch (error) {
+      console.error("Failed to add booked deputy to calendar event:", error?.message || error);
+    }
+  }
+  await board.save();
+  return board;
 };
 
 const markPaidDeputyJobReadyForPayout = ({ job, musician }) => {
@@ -4880,6 +4989,7 @@ export const sendDeputyBookingEmail = async (req, res) => {
     ];
 
     await job.save();
+    await syncBookedDeputyToBookingBoard(job, musician);
 
     const formattedJob = withDeputyJobAliases(job);
 
@@ -5093,6 +5203,7 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
       ];
 
       await job.save();
+      await syncBookedDeputyToBookingBoard(job, musician);
 
       // WhatsApp confirmation back to musician
       if (musicianPhone) {
