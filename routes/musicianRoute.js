@@ -1072,10 +1072,24 @@ router.get("/stats/:idOrSlug", verifyToken, async (req, res) => {
           "musicians.musicianId": musicianId
         }
       },
+      // Aggregation pipelines cannot use the update/query positional `$`
+      // operator in a field path. Unwind the lineup so only this musician's
+      // allocation contributes to their earnings total.
+      { $unwind: "$musicians" },
+      { $match: { "musicians.musicianId": musicianId } },
       {
         $group: {
           _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" }},
-          amount: { $sum: "$musicians.$.paidAmount" }
+          amount: {
+            $sum: {
+              $convert: {
+                input: "$musicians.paidAmount",
+                to: "double",
+                onError: 0,
+                onNull: 0
+              }
+            }
+          }
         }
       },
       { $sort: { _id: 1 } }
