@@ -17,6 +17,21 @@ const getYoutube = () => {
   return google.youtube({ version: "v3", auth: oauth });
 };
 
+export const inspectYoutubeVideo = async (videoId) => {
+  const youtube = getYoutube();
+  const result = await youtube.videos.list({ part: ["snippet", "status"], id: [videoId] });
+  const video = result.data?.items?.[0];
+  if (!video) return null;
+  return {
+    id: video.id,
+    title: video.snippet?.title || "",
+    channelId: video.snippet?.channelId || "",
+    channelTitle: video.snippet?.channelTitle || "",
+    embeddable: video.status?.embeddable !== false,
+    privacyStatus: video.status?.privacyStatus || "",
+  };
+};
+
 const clean = (value = "") => String(value || "").replace(/\s+/g, " ").trim();
 
 export const buildAnonymousYoutubeMetadata = ({ musician, submission }) => {

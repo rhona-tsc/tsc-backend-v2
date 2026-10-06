@@ -74,6 +74,10 @@ import financeForecastRoutes from "./routes/financeForecastRoutes.js";
 import originalsRoutes from "./routes/originalsRoutes.js";
 import { runOriginalsAutomation } from "./services/originalsAutomationService.js";
 import regularDeputiesRoutes from "./routes/regularDeputiesRoutes.js";
+import {
+  runVideoMigrationAutomation,
+  sendVideoReviewDigest,
+} from "./services/videoMigrationAutomationService.js";
 
 /* -------------------------------------------------------------------------- */
 /*                               Boot + env log                               */
@@ -844,6 +848,28 @@ cron.schedule("*/5 * * * *", async () => {
     console.error("❌ [CRON] Originals workflow automation failed:", error?.message || error);
   }
 });
+
+// Privately index new uploads and gradually inventory/check legacy video links.
+// Recipient messaging remains independently gated by environment flags.
+cron.schedule("*/15 * * * *", async () => {
+  if (String(process.env.VIDEO_MIGRATION_AUTOMATION_ENABLED || "").toLowerCase() !== "true") return;
+  try {
+    const result = await runVideoMigrationAutomation();
+    console.log("🎬 [CRON] Video migration automation complete:", result);
+  } catch (error) {
+    console.error("❌ [CRON] Video migration automation failed:", error?.message || error);
+  }
+}, { timezone: "Europe/London" });
+
+// Review digest: Wednesday and Friday at 09:00 London time, maximum 50 items.
+cron.schedule("0 9 * * 3,5", async () => {
+  try {
+    const result = await sendVideoReviewDigest();
+    console.log("📧 [CRON] Video review digest:", result);
+  } catch (error) {
+    console.error("❌ [CRON] Video review digest failed:", error?.message || error);
+  }
+}, { timezone: "Europe/London" });
 
 // Release deputy payouts daily at 06:00 London time
 cron.schedule(

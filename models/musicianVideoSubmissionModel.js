@@ -39,6 +39,8 @@ const musicianVideoSubmissionSchema = new mongoose.Schema(
     youtubeTitle: { type: String, default: "" },
     publishedAt: { type: Date, default: null },
     error: { type: String, default: "" },
+    musicianNotifiedAt: { type: Date, default: null },
+    musicianNotificationType: { type: String, default: "" },
   },
   { timestamps: true },
 );
