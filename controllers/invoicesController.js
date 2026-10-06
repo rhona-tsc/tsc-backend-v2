@@ -1473,11 +1473,13 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const tableY = detailY + 95;
     const tableW = cardW - 52;
 
-    // Both main and extras invoices use the same five-column layout.
-    const splitW = 72;
-    const qtyW = 38;
-    const amountW = 78;
-    const descW = tableW - qtyW - amountW - splitW - splitW;
+    // Extras show the single-item fee before quantity and the accounting split.
+    // Main invoices retain their existing five-column layout.
+    const unitW = isExtrasInvoice ? 62 : 0;
+    const splitW = isExtrasInvoice ? 64 : 72;
+    const qtyW = isExtrasInvoice ? 34 : 38;
+    const amountW = isExtrasInvoice ? 72 : 78;
+    const descW = tableW - unitW - qtyW - amountW - splitW - splitW;
 
     doc.roundedRect(tableX, tableY, tableW, 28, 4).fill(navy);
     doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(9);
@@ -1486,19 +1488,37 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       width: descW - 14,
     });
 
- doc.text(
-  "Supplier fee",
-  tableX + descW + 4,
-  tableY + 9,
-  {
-    width: splitW - 8,
-    align: "right",
-  },
-);
+    if (isExtrasInvoice) {
+      doc.text("Single fee", tableX + descW + 4, tableY + 9, {
+        width: unitW - 8,
+        align: "right",
+      });
+    }
+
+    const supplierX = isExtrasInvoice
+      ? tableX + descW + unitW + qtyW
+      : tableX + descW;
+    const managementX = supplierX + splitW;
+    const qtyX = isExtrasInvoice
+      ? tableX + descW + unitW
+      : managementX + splitW;
+    const amountX = isExtrasInvoice
+      ? managementX + splitW
+      : qtyX + qtyW;
+
+    doc.text("Qty", qtyX + 4, tableY + 9, {
+      width: qtyW - 8,
+      align: "right",
+    });
+
+    doc.text("Supplier fee", supplierX + 4, tableY + 9, {
+      width: splitW - 8,
+      align: "right",
+    });
 
     doc.text(
       "Mgmt fee",
-      tableX + descW + splitW + 4,
+      managementX + 4,
       tableY + 9,
       {
         width: splitW - 8,
@@ -1507,18 +1527,8 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     );
 
     doc.text(
-      "Qty",
-      tableX + descW + splitW + splitW + 4,
-      tableY + 9,
-      {
-        width: qtyW - 8,
-        align: "right",
-      },
-    );
-
-    doc.text(
       "Amount",
-      tableX + descW + splitW + splitW + qtyW + 4,
+      amountX + 4,
       tableY + 9,
       {
         width: amountW - 8,
@@ -1584,6 +1594,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
 
           return {
             description,
+            unitAmount: round2(Number(extra?.price || 0)),
             qty,
             supplierAmount: passThroughAmount,
             managementAmount,
@@ -1699,13 +1710,29 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         .fontSize(8)
         .fillColor(item.refundableDeposit ? muted : text);
 
+      if (isExtrasInvoice) {
+        doc.text(formatMoney(item.unitAmount), tableX + descW + 4, y + 9, {
+          width: unitW - 8,
+          align: "right",
+        });
+      }
+
+      doc.fillColor(text).font("Helvetica-Bold").fontSize(8.5);
+
+      doc.text(item.qty, qtyX + 4, y + 9, {
+        width: qtyW - 8,
+        align: "right",
+      });
+
+      doc.font("Helvetica").fontSize(8);
+
       doc.text(
         item.refundableDeposit
           ? `${formatMoney(item.supplierAmount)} refundable`
           : Number(item.supplierAmount || 0) !== 0
             ? formatMoney(item.supplierAmount)
             : "—",
-        tableX + descW + 4,
+        supplierX + 4,
         y + 9,
         {
           width: splitW - 8,
@@ -1719,7 +1746,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         Number(item.managementAmount || 0) !== 0
           ? formatMoney(item.managementAmount)
           : "—",
-        tableX + descW + splitW + 4,
+        managementX + 4,
         y + 9,
         {
           width: splitW - 8,
@@ -1730,18 +1757,8 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       doc.font("Helvetica-Bold").fontSize(8.5);
 
       doc.text(
-        item.qty,
-        tableX + descW + splitW + splitW + 4,
-        y + 9,
-        {
-          width: qtyW - 8,
-          align: "right",
-        },
-      );
-
-      doc.text(
         formatMoney(item.amount),
-        tableX + descW + splitW + splitW + qtyW + 4,
+        amountX + 4,
         y + 9,
         {
           width: amountW - 8,
