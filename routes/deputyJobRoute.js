@@ -4,7 +4,7 @@ import {
   createDeputyJob,
   listDeputyJobs,
   getDeputyJobById,
-   getDeputyJobApplications,
+  getDeputyJobApplications,
   applyToDeputyJob,
   previewDeputyJob,
   sendDeputyJobNotifications,
@@ -46,21 +46,20 @@ const deputyJobRouter = express.Router();
 deputyJobRouter.post(
   "/twilio/inbound",
   express.urlencoded({ extended: false }),
-  twilioInboundDeputyJob
+  twilioInboundDeputyJob,
 );
 
 deputyJobRouter.post(
   "/twilio/inbound-allocation",
   express.urlencoded({ extended: false }),
-  twilioInboundDeputyAllocation
+  twilioInboundDeputyAllocation,
 );
 
 deputyJobRouter.post(
   "/track-presentation-view",
   express.json(),
-  trackDeputyPresentationView
+  trackDeputyPresentationView,
 );
-
 
 /**
  * Preview / test / resend notifications for an existing job
@@ -68,31 +67,31 @@ deputyJobRouter.post(
 deputyJobRouter.post(
   "/:id/preview-notification",
   authUser,
-  previewDeputyJobNotification
+  previewDeputyJobNotification,
 );
 
 deputyJobRouter.post(
   "/:id/send-test-notification",
   authUser,
-  sendDeputyJobTestNotification
+  sendDeputyJobTestNotification,
 );
 
 deputyJobRouter.post(
   "/:id/resend-notifications",
   authUser,
-  resendDeputyJobNotifications
+  resendDeputyJobNotifications,
 );
 
 deputyJobRouter.post(
   "/:id/send-unnotified-notifications",
   authUser,
-  sendDeputyJobNotificationsToUnnotified
+  sendDeputyJobNotificationsToUnnotified,
 );
 
 deputyJobRouter.post(
   "/:id/send-remaining-notifications",
   authUser,
-  sendRemainingDeputyJobNotifications
+  sendRemainingDeputyJobNotifications,
 );
 
 /**
@@ -100,13 +99,16 @@ deputyJobRouter.post(
  */
 deputyJobRouter.post("/preview", authUser, previewDeputyJob);
 deputyJobRouter.post("/", authUser, createDeputyJob);
-deputyJobRouter.get("/", (req, res, next) => {
+deputyJobRouter.get(
+  "/",
+  (req, res, next) => {
+    res.set("Cache-Control", "no-store");
 
-  res.set("Cache-Control", "no-store");
-
-  next();
-
-}, optionalAuthUser, listDeputyJobs);
+    next();
+  },
+  optionalAuthUser,
+  listDeputyJobs,
+);
 
 deputyJobRouter.get("/payments", authUser, listDeputyPayments);
 
@@ -121,7 +123,7 @@ deputyJobRouter.post("/run-payout-cron", runDeputyPayoutCron);
  * Keep /:id/matches before /:id
  */
 deputyJobRouter.get("/:id/matches", authUser, listDeputyJobMatches);
-deputyJobRouter.get("/:id", getDeputyJobById);
+deputyJobRouter.get("/:id", optionalAuthUser, getDeputyJobById);
 deputyJobRouter.get("/:id/applications", authUser, getDeputyJobApplications);
 
 /**
@@ -130,50 +132,37 @@ deputyJobRouter.get("/:id/applications", authUser, getDeputyJobApplications);
 deputyJobRouter.post(
   "/:id/send-notifications",
   authUser,
-  sendDeputyJobNotifications
+  sendDeputyJobNotifications,
 );
 
 deputyJobRouter.post(
   "/:id/rematch-and-send-notifications",
   authUser,
-  rematchAndSendDeputyJobNotifications
+  rematchAndSendDeputyJobNotifications,
 );
 
 deputyJobRouter.post(
   "/:id/retry-failed-notifications",
   authUser,
-retryFailedDeputyJobNotifications
+  retryFailedDeputyJobNotifications,
 );
 
-deputyJobRouter.post(
-  "/:id/close",
-  authUser,
-  closeDeputyJob
-);
+deputyJobRouter.post("/:id/close", authUser, closeDeputyJob);
 
 deputyJobRouter.post(
   "/:id/present-applicant",
   authUser,
-  presentDeputyApplicant
+  presentDeputyApplicant,
 );
 
+deputyJobRouter.post("/:id/manual-allocate", authUser, manualAllocateDeputyJob);
 
-deputyJobRouter.post(
-  "/:id/manual-allocate",
-  authUser,
-  manualAllocateDeputyJob
-);
-
-deputyJobRouter.post(
-  "/:id/manual-apply",
-  authUser,
-  manualApplyDeputyJob
-);
+deputyJobRouter.post("/:id/manual-apply", authUser, manualApplyDeputyJob);
 
 deputyJobRouter.post(
   "/:id/manual-apply-and-present",
   authUser,
-  manualApplyAndPresentDeputyJob
+  manualApplyAndPresentDeputyJob,
 );
 
 /**
@@ -187,13 +176,13 @@ deputyJobRouter.post(
 deputyJobRouter.post(
   "/:id/create-setup-intent",
   authUser,
-  createDeputyJobSetupIntent
+  createDeputyJobSetupIntent,
 );
 
 deputyJobRouter.post(
   "/:id/save-payment-method",
   authUser,
-  saveDeputyJobPaymentMethod
+  saveDeputyJobPaymentMethod,
 );
 
 deputyJobRouter.post("/:id/charge", authUser, chargeDeputyJob);
@@ -211,7 +200,7 @@ deputyJobRouter.post("/:id/apply", authUser, applyToDeputyJob);
 deputyJobRouter.patch(
   "/:id/applications/:musicianId/status",
   authUser,
-  updateDeputyJobApplicationStatus
+  updateDeputyJobApplicationStatus,
 );
 
 /**
@@ -220,25 +209,25 @@ deputyJobRouter.patch(
 deputyJobRouter.post(
   "/:id/preview-allocation",
   authUser,
-  previewDeputyAllocation
+  previewDeputyAllocation,
 );
 
 deputyJobRouter.post(
   "/:id/confirm-allocation",
   authUser,
-  confirmDeputyAllocation
+  confirmDeputyAllocation,
 );
 
 deputyJobRouter.post(
   "/:id/preview-booking-email",
   authUser,
-  previewDeputyBookingEmail
+  previewDeputyBookingEmail,
 );
 
 deputyJobRouter.post(
   "/:id/send-booking-email",
   authUser,
-  sendDeputyBookingEmail
+  sendDeputyBookingEmail,
 );
 
 export default deputyJobRouter;

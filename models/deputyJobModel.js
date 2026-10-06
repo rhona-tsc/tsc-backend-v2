@@ -19,6 +19,9 @@ const deputyJobApplicationSchema = new mongoose.Schema(
     phoneNormalized: { type: String, default: "", trim: true },
 
     appliedAt: { type: Date, default: Date.now },
+    appliedRoles: { type: [String], default: [] },
+    presentedRoles: { type: [String], default: [] },
+    allocatedRoles: { type: [String], default: [] },
     status: {
       type: String,
       enum: [
@@ -190,12 +193,34 @@ const deputyJobPaymentEventSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const deputyJobRoleAllocationSchema = new mongoose.Schema(
+  {
+    role: { type: String, required: true, trim: true },
+    musicianId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "musician",
+      required: true,
+    },
+    musicianName: { type: String, default: "", trim: true },
+    musicianSlug: { type: String, default: "", trim: true },
+    status: {
+      type: String,
+      enum: ["allocated", "booked", "declined", "cancelled"],
+      default: "allocated",
+    },
+    allocatedAt: { type: Date, default: Date.now },
+    bookedAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const deputyJobSchema = new mongoose.Schema(
   {
     title: { type: String, default: "", trim: true },
 
     instrument: { type: String, required: true, trim: true, index: true },
     requiredInstruments: { type: [String], default: [] },
+    roleAllocations: { type: [deputyJobRoleAllocationSchema], default: [] },
     isVocalSlot: { type: Boolean, default: false },
 
     // canonical + aliases for frontend convenience
@@ -218,7 +243,6 @@ const deputyJobSchema = new mongoose.Schema(
       enum: ["booked", "enquiry"],
       default: "booked",
     },
-
 
     genres: { type: [String], default: [] },
     tags: { type: [String], default: [] },
@@ -254,29 +278,29 @@ const deputyJobSchema = new mongoose.Schema(
     grossAmount: { type: Number, default: 0 },
     commissionAmount: { type: Number, default: 0 },
     deputyNetAmount: { type: Number, default: 0 },
-payoutStatus: {
-  type: String,
-  enum: ["not_ready", "scheduled", "pending", "paid", "held", "cancelled"],
-  default: "not_ready",
-  index: true,
-},
-   paymentStatus: {
-  type: String,
-  enum: [
-    "not_started",
-    "setup_required",
-    "setup_pending",
-    "ready_to_charge",
-    "charge_pending",
-    "paid",
-    "failed",
-    "refunded",
-    "cancelled",
-    "not_required",
-  ],
-  default: "not_started",
-  index: true,
-},
+    payoutStatus: {
+      type: String,
+      enum: ["not_ready", "scheduled", "pending", "paid", "held", "cancelled"],
+      default: "not_ready",
+      index: true,
+    },
+    paymentStatus: {
+      type: String,
+      enum: [
+        "not_started",
+        "setup_required",
+        "setup_pending",
+        "ready_to_charge",
+        "charge_pending",
+        "paid",
+        "failed",
+        "refunded",
+        "cancelled",
+        "not_required",
+      ],
+      default: "not_started",
+      index: true,
+    },
 
     releaseOn: { type: Date, default: null, index: true },
     chargedAt: { type: Date, default: null },
@@ -287,11 +311,19 @@ payoutStatus: {
     paymentEvents: { type: [deputyJobPaymentEventSchema], default: [] },
 
     status: {
-  type: String,
-  enum: ["draft", "preview", "open", "allocated", "filled", "closed", "cancelled"],
-  default: "open",
-  index: true,
-},
+      type: String,
+      enum: [
+        "draft",
+        "preview",
+        "open",
+        "allocated",
+        "filled",
+        "closed",
+        "cancelled",
+      ],
+      default: "open",
+      index: true,
+    },
 
     workflowStage: {
       type: String,
@@ -315,10 +347,19 @@ payoutStatus: {
     },
     automation: {
       source: { type: String, default: "" },
-      bookingBoardItemId: { type: mongoose.Schema.Types.ObjectId, ref: "BookingBoardItem", default: null, index: true },
+      bookingBoardItemId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "BookingBoardItem",
+        default: null,
+        index: true,
+      },
       bookingRef: { type: String, default: "", index: true },
       roleSlotId: { type: String, default: "", index: true },
-      enquiryMessageId: { type: mongoose.Schema.Types.ObjectId, ref: "EnquiryMessage", default: null },
+      enquiryMessageId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "EnquiryMessage",
+        default: null,
+      },
     },
     previewMode: { type: Boolean, default: false },
 

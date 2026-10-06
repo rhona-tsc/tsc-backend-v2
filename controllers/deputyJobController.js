@@ -1316,6 +1316,7 @@ const buildApplicantPresentedEmailPreview = ({
   job,
   musician,
   profileUrl = "",
+  role = "",
 }) => {
   const firstName =
     musician?.firstName || musician?.basicInfo?.firstName || "there";
@@ -1337,12 +1338,14 @@ const buildApplicantPresentedEmailPreview = ({
         ? `${FRONTEND_URL}/musician/${encodeURIComponent(String(musician._id))}`
         : "");
 
-  const subject = `You've been presented for ${job?.title || job?.instrument || "a deputy opportunity"}`;
+  const roleText = normaliseString(role);
+  const subject = `You've been presented for ${job?.title || job?.instrument || "a deputy opportunity"}${roleText ? ` (${roleText})` : ""}`;
 
   const html = `
     <p>Hi ${firstName},</p>
     <p>You've been presented to the client for:</p>
     <p><strong>${job?.title || job?.instrument || "Deputy opportunity"}</strong></p>
+    ${roleText ? `<p><strong>Role:</strong> ${escapeHtml(roleText)}</p>` : ""}
     <p><strong>Date:</strong> ${job?.eventDate ? formatNiceDate(job.eventDate) : "TBC"}</p>
     <p><strong>Location:</strong> ${job?.location || job?.venue || job?.locationName || "TBC"}</p>
     ${
@@ -1381,6 +1384,7 @@ const buildApplicantPresentedEmailPreview = ({
 
 You've been presented to the client for:
 ${job?.title || job?.instrument || "Deputy opportunity"}
+${roleText ? `Role: ${roleText}` : ""}
 
 Date: ${job?.eventDate ? formatNiceDate(job.eventDate) : "TBC"}
 Location: ${job?.location || job?.venue || job?.locationName || "TBC"}
@@ -1894,7 +1898,12 @@ const canManuallyAllocateDeputyJob = (req) => {
   );
 };
 
-const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
+const upsertManualApplicationForAllocation = ({
+  job,
+  musician,
+  now,
+  role = "",
+}) => {
   const targetId = asObjectIdString(musician?._id);
   if (!targetId) return;
 
@@ -1952,6 +1961,18 @@ const upsertManualApplicationForAllocation = ({ job, musician, now }) => {
       existingApplication?.postcode ||
       "",
     status: "allocated",
+    appliedRoles: Array.from(
+      new Set([
+        ...normaliseList(existingApplication?.appliedRoles),
+        ...(role ? [role] : []),
+      ]),
+    ),
+    allocatedRoles: Array.from(
+      new Set([
+        ...normaliseList(existingApplication?.allocatedRoles),
+        ...(role ? [role] : []),
+      ]),
+    ),
     notes: existingApplication?.notes || "",
     deputyMatchScore:
       typeof existingApplication?.deputyMatchScore === "number"
@@ -2005,6 +2026,7 @@ const upsertPresentedApplicationForEnquiry = ({
   musician,
   now,
   presentationId,
+  role = "",
 }) => {
   const targetId = asObjectIdString(musician?._id);
   if (!targetId) return;
@@ -2015,6 +2037,15 @@ const upsertPresentedApplicationForEnquiry = ({
 
   const existingIndex = existingApplications.findIndex(
     (application) => asObjectIdString(application?.musicianId) === targetId,
+  );
+  const presentedRole = normaliseString(role);
+  const existingApplication = existingApplications[existingIndex];
+  const appliedRoles = normaliseList(existingApplication?.appliedRoles);
+  const presentedRoles = Array.from(
+    new Set([
+      ...normaliseList(existingApplication?.presentedRoles),
+      ...(presentedRole ? [presentedRole] : []),
+    ]),
   );
 
   const baseApplication = {
@@ -2045,6 +2076,9 @@ const upsertPresentedApplicationForEnquiry = ({
       "",
     postcode: musician?.address?.postcode || musician?.postcode || "",
     status: "presented",
+    appliedRoles:
+      appliedRoles.length || !presentedRole ? appliedRoles : [presentedRole],
+    presentedRoles,
     notes: "",
     deputyMatchScore:
       typeof existingApplications?.[existingIndex]?.deputyMatchScore ===
@@ -2162,10 +2196,20 @@ const syncBookedDeputyToBookingBoard = async (job, musician) => {
   const board = await bookingBoardItemModel.findById(boardId);
   if (!board) return null;
 
-  const roleSlotId = normaliseString(job?.automation?.roleSlotId || `deputy-job-${job._id}`);
-  const name = [musician?.firstName, musician?.lastName].filter(Boolean).join(" ").trim();
+  const roleSlotId = normaliseString(
+    job?.automation?.roleSlotId || `deputy-job-${job._id}`,
+  );
+  const name = [musician?.firstName, musician?.lastName]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
   const email = normaliseEmail(musician?.email || "");
-  const role = normaliseString(job?.instrument || job?.requiredInstruments?.[0] || job?.title || "Musician");
+  const role = normaliseString(
+    job?.instrument ||
+      job?.requiredInstruments?.[0] ||
+      job?.title ||
+      "Musician",
+  );
   const assignment = {
     musicianId: musician?._id || musician?.musicianId,
     name,
@@ -2187,7 +2231,9 @@ const syncBookedDeputyToBookingBoard = async (job, musician) => {
   };
   const upsert = (entries = []) => {
     const next = [...entries];
-    const index = next.findIndex((entry) => String(entry?.roleSlotId || "") === roleSlotId);
+    const index = next.findIndex(
+      (entry) => String(entry?.roleSlotId || "") === roleSlotId,
+    );
     if (index >= 0) next[index] = assignment;
     else next.push(assignment);
     return next;
@@ -2196,17 +2242,29 @@ const syncBookedDeputyToBookingBoard = async (job, musician) => {
   board.bookingMusicians = upsert(board.bookingMusicians || []);
   board.bandLineup = upsert(board.bandLineup || []);
   if (board.bookingDetails) {
-    board.bookingDetails.assignedMusicians = upsert(board.bookingDetails.assignedMusicians || []);
+    board.bookingDetails.assignedMusicians = upsert(
+      board.bookingDetails.assignedMusicians || [],
+    );
   }
   const unresolved = board.assignedMusicians.filter((entry) =>
-    ["unfilled", "selected", "offered", "proposed", "declined", "unavailable", "withdrawn", "posted_to_job_board"].includes(entry?.status),
+    [
+      "unfilled",
+      "selected",
+      "offered",
+      "proposed",
+      "declined",
+      "unavailable",
+      "withdrawn",
+      "posted_to_job_board",
+    ].includes(entry?.status),
   );
   board.allocation = {
     ...(board.allocation?.toObject?.() || board.allocation || {}),
     status: unresolved.length ? "in_progress" : "fully_allocated",
     lastCheckedAt: new Date(),
     gaps: (board.allocation?.gaps || []).filter(
-      (gap) => normaliseString(gap?.instrument).toLowerCase() !== role.toLowerCase(),
+      (gap) =>
+        normaliseString(gap?.instrument).toLowerCase() !== role.toLowerCase(),
     ),
   };
 
@@ -2251,12 +2309,18 @@ const syncBookedDeputyToBookingBoard = async (job, musician) => {
         }
         board.assignedMusicians = board.assignedMusicians.map((entry) =>
           String(entry?.roleSlotId || "") === roleSlotId
-            ? { ...(entry.toObject?.() || entry), calendarInviteSentAt: new Date() }
+            ? {
+                ...(entry.toObject?.() || entry),
+                calendarInviteSentAt: new Date(),
+              }
             : entry,
         );
       }
     } catch (error) {
-      console.error("Failed to add booked deputy to calendar event:", error?.message || error);
+      console.error(
+        "Failed to add booked deputy to calendar event:",
+        error?.message || error,
+      );
     }
   }
   await board.save();
@@ -2827,6 +2891,7 @@ export const listDeputyJobs = async (req, res) => {
           county: 1,
           postcode: 1,
           requiredInstruments: 1,
+          roleAllocations: 1,
           requiredSkills: 1,
           tags: 1,
           fee: 1,
@@ -2877,7 +2942,10 @@ export const listDeputyJobs = async (req, res) => {
       const hiddenStatuses = ["allocated", "filled", "closed", "cancelled"];
 
       jobs = jobs.filter((job) => {
-        const jobDate = normaliseString(job?.eventDate || job?.date).slice(0, 10);
+        const jobDate = normaliseString(job?.eventDate || job?.date).slice(
+          0,
+          10,
+        );
         if (/^\d{4}-\d{2}-\d{2}$/.test(jobDate) && jobDate < todayKey) {
           return false;
         }
@@ -2933,6 +3001,8 @@ export const getDeputyJobById = async (req, res) => {
         [
           "title",
           "instrument",
+          "requiredInstruments",
+          "roleAllocations",
           "requiredInstruments",
           "isVocalSlot",
           "date",
@@ -2994,6 +3064,8 @@ export const getDeputyJobById = async (req, res) => {
           "bookingConfirmedAt",
           "createdAt",
           "updatedAt",
+          "applications",
+          "roleAllocations",
         ].join(" "),
       )
       .populate(
@@ -3012,7 +3084,19 @@ export const getDeputyJobById = async (req, res) => {
         .json({ success: false, message: "Deputy job not found" });
     }
 
-    return res.json({ success: true, job: withDeputyJobAliases(job) });
+    const requesterId = asObjectIdString(
+      req?.user?._id || req?.user?.id || req?.user?.userId || "",
+    );
+    const myApplication = requesterId
+      ? (job.applications || []).find(
+          (application) =>
+            asObjectIdString(application?.musicianId) === requesterId,
+        ) || null
+      : null;
+    const safeJob = { ...job, myApplication };
+    delete safeJob.applications;
+
+    return res.json({ success: true, job: withDeputyJobAliases(safeJob) });
   } catch (error) {
     console.error("❌ getDeputyJobById error:", error);
     return res
@@ -3130,6 +3214,11 @@ export const getDeputyJobApplications = async (req, res) => {
           profileImage: normaliseString(application?.profileImage || ""),
           postcode: normaliseString(application?.postcode || ""),
           status: normaliseString(application?.status || "applied"),
+          appliedRoles: normaliseList(application?.appliedRoles).length
+            ? normaliseList(application?.appliedRoles)
+            : [normaliseString(job?.instrument || "Musician")],
+          presentedRoles: normaliseList(application?.presentedRoles),
+          allocatedRoles: normaliseList(application?.allocatedRoles),
           appliedAt: application?.appliedAt || null,
           shortlistedAt: application?.shortlistedAt || null,
           presentedAt: application?.presentedAt || null,
@@ -3223,6 +3312,12 @@ export const getDeputyJobApplications = async (req, res) => {
         _id: job._id,
         title: normaliseString(job?.title || job?.instrument || "Deputy job"),
         instrument: normaliseString(job?.instrument || ""),
+        requiredInstruments: normaliseList(job?.requiredInstruments).length
+          ? normaliseList(job?.requiredInstruments)
+          : [normaliseString(job?.instrument || "Musician")],
+        roleAllocations: Array.isArray(job?.roleAllocations)
+          ? job.roleAllocations
+          : [],
         status: normaliseString(job?.status || ""),
         workflowStage: normaliseString(job?.workflowStage || ""),
         jobType: normaliseString(job?.jobType || ""),
@@ -3331,16 +3426,51 @@ export const applyToDeputyJob = async (req, res) => {
       ? job.applications
       : [];
 
-    const alreadyApplied = existingApplications.some(
+    const availableRoles = normaliseList(
+      job.requiredInstruments?.length
+        ? job.requiredInstruments
+        : [job.instrument],
+    );
+    const requestedRoles = normaliseList(
+      req.body?.roles || req.body?.appliedRoles,
+    );
+    const selectedRoles = (
+      requestedRoles.length ? requestedRoles : availableRoles.slice(0, 1)
+    )
+      .map((requestedRole) =>
+        availableRoles.find(
+          (availableRole) =>
+            availableRole.toLowerCase() === requestedRole.toLowerCase(),
+        ),
+      )
+      .filter(Boolean);
+
+    if (!selectedRoles.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select at least one role from this deputy job",
+        availableRoles,
+      });
+    }
+
+    const existingApplication = existingApplications.find(
       (a) =>
         asObjectIdString(a?.musicianId) ===
         asObjectIdString(authenticatedMusicianId),
     );
 
-    if (alreadyApplied) {
+    const existingRoles = normaliseList(existingApplication?.appliedRoles);
+    const newRoles = selectedRoles.filter(
+      (role) =>
+        !existingRoles.some(
+          (existingRole) => existingRole.toLowerCase() === role.toLowerCase(),
+        ),
+    );
+
+    if (existingApplication && !newRoles.length) {
       return res.status(400).json({
         success: false,
-        message: "You have already applied for this opportunity",
+        message: "You have already applied for the selected role or roles",
       });
     }
 
@@ -3405,7 +3535,7 @@ export const applyToDeputyJob = async (req, res) => {
     const applicationHistoryUrl =
       "https://admin.thesupremecollective.co.uk/my-deputy-applications";
 
-    job.applications.push({
+    const applicationPayload = {
       musicianId: authenticatedMusicianId,
       firstName: applicantFirstName,
       lastName: applicantLastName,
@@ -3422,6 +3552,9 @@ export const applyToDeputyJob = async (req, res) => {
       postcode: musician?.address?.postcode || musician?.postcode || "",
       status: "applied",
       appliedAt: new Date(),
+      appliedRoles: existingApplication
+        ? Array.from(new Set([...existingRoles, ...newRoles]))
+        : selectedRoles,
       deputyMatchScore: Number(matchedSnapshot?.deputyMatchScore || 0),
       matchSummary: matchedSnapshot?.matchSummary || {
         instrument: "",
@@ -3436,7 +3569,14 @@ export const applyToDeputyJob = async (req, res) => {
         lightingProvisionConfirmed: false,
         lightingProvisionNeedsCheck: false,
       },
-    });
+    };
+
+    if (existingApplication) {
+      existingApplication.appliedRoles = applicationPayload.appliedRoles;
+      existingApplication.status = existingApplication.status || "applied";
+    } else {
+      job.applications.push(applicationPayload);
+    }
 
     job.applicationCount = Array.isArray(job.applications)
       ? job.applications.length
@@ -3510,6 +3650,8 @@ export const applyToDeputyJob = async (req, res) => {
               job.location || job.venue || job.locationName || "TBC"
             }</p>
 
+            <p><strong>Role${selectedRoles.length === 1 ? "" : "s"}:</strong> ${selectedRoles.join(", ")}</p>
+
             <p>We’ll be in touch if you’re shortlisted, presented to the client, or allocated.</p>
 
             <p>Please ensure your profile has a cover photo, at least one video, and your repertoire to be considered for this opportunity.</p>
@@ -3533,6 +3675,7 @@ We’ve received your application for ${
 
 Date: ${job.eventDate ? formatNiceDate(job.eventDate) : "TBC"}
 Location: ${job.location || job.venue || job.locationName || "TBC"}
+Role${selectedRoles.length === 1 ? "" : "s"}: ${selectedRoles.join(", ")}
 
 We’ll be in touch if you’re shortlisted, presented to the client, or allocated.
 
@@ -4023,20 +4166,38 @@ export const listDeputyPayments = async (req, res) => {
     // only set once the selected musician accepts and is cleared when they
     // decline, so this guarantees one current payee per role and excludes open
     // adverts, unconverted enquiries and cancelled jobs.
-    const jobs = await deputyJobModel.find({
-      bookedMusicianId: { $ne: null },
-      jobType: { $ne: "enquiry" },
-      status: { $ne: "cancelled" },
-    })
+    const jobs = await deputyJobModel
+      .find({
+        bookedMusicianId: { $ne: null },
+        jobType: { $ne: "enquiry" },
+        status: { $ne: "cancelled" },
+      })
       .select(
         [
-          "title", "instrument", "eventDate", "venue", "currency", "jobType",
+          "title",
+          "instrument",
+          "eventDate",
+          "venue",
+          "currency",
+          "jobType",
           "status",
-          "grossAmount", "commissionAmount", "stripeFeeAmount", "deputyNetAmount",
-          "paymentStatus", "payoutStatus", "releaseOn", "chargedAt",
-          "payoutScheduledAt", "payoutPaidAt", "paymentFailureReason",
-          "latestTransferId", "bookedMusicianId", "bookedMusicianName",
-          "bookingConfirmedAt", "createdAt", "updatedAt",
+          "grossAmount",
+          "commissionAmount",
+          "stripeFeeAmount",
+          "deputyNetAmount",
+          "paymentStatus",
+          "payoutStatus",
+          "releaseOn",
+          "chargedAt",
+          "payoutScheduledAt",
+          "payoutPaidAt",
+          "paymentFailureReason",
+          "latestTransferId",
+          "bookedMusicianId",
+          "bookedMusicianName",
+          "bookingConfirmedAt",
+          "createdAt",
+          "updatedAt",
         ].join(" "),
       )
       .sort({ releaseOn: 1, eventDate: 1 })
@@ -4053,10 +4214,22 @@ export const listDeputyPayments = async (req, res) => {
       })
       .select(
         [
-          "bookingRef", "bookerName", "clientFirstNames", "eventDateISO",
-          "actName", "actTscName", "address", "county", "accounting",
-          "balancePaid", "balanceStatus", "payments", "assignedMusicians",
-          "bookingMusicians", "bandLineup", "bookingDetails.assignedMusicians",
+          "bookingRef",
+          "bookerName",
+          "clientFirstNames",
+          "eventDateISO",
+          "actName",
+          "actTscName",
+          "address",
+          "county",
+          "accounting",
+          "balancePaid",
+          "balanceStatus",
+          "payments",
+          "assignedMusicians",
+          "bookingMusicians",
+          "bandLineup",
+          "bookingDetails.assignedMusicians",
         ].join(" "),
       )
       .lean();
@@ -4068,15 +4241,18 @@ export const listDeputyPayments = async (req, res) => {
         row.bandLineup,
         row.bookingDetails?.assignedMusicians,
       ];
-      return candidates.find((value) => Array.isArray(value) && value.length) || [];
+      return (
+        candidates.find((value) => Array.isArray(value) && value.length) || []
+      );
     };
 
     const bookingMembers = bookingRows.flatMap((row) =>
       getBookingMembers(row)
-        .filter((member) =>
-          !["declined", "cancelled", "replaced"].includes(
-            normaliseString(member?.status).toLowerCase(),
-          ),
+        .filter(
+          (member) =>
+            !["declined", "cancelled", "replaced"].includes(
+              normaliseString(member?.status).toLowerCase(),
+            ),
         )
         .filter((member) => Number(member?.totalFee || member?.fee || 0) > 0)
         .map((member) => ({ row, member })),
@@ -4112,7 +4288,10 @@ export const listDeputyPayments = async (req, res) => {
       musicians.map((musician) => [asObjectIdString(musician._id), musician]),
     );
     const musiciansByEmail = new Map(
-      musicians.map((musician) => [normaliseString(musician.email).toLowerCase(), musician]),
+      musicians.map((musician) => [
+        normaliseString(musician.email).toLowerCase(),
+        musician,
+      ]),
     );
 
     const historicalCutoff = new Date("2026-09-18T00:00:00.000Z");
@@ -4131,11 +4310,20 @@ export const listDeputyPayments = async (req, res) => {
       { email: "info@ioneofficial.com", date: "2026-09-09", amount: 350 },
       { email: "emma_osei_lah@hotmail.com", date: "2026-09-12", amount: 416 },
       { email: "renesbbwi@gmail.com", date: "2026-09-12", amount: 382 },
-      { email: "jeremypeterallen@gmail.com", date: "2026-09-17", amount: 322.5 },
+      {
+        email: "jeremypeterallen@gmail.com",
+        date: "2026-09-17",
+        amount: 322.5,
+      },
       { name: "sebastian fernandez", date: "2026-09-17", amount: 247.5 },
     ];
 
-    const isApprovedHistoricalPayment = ({ eventDate: rawEventDate, name: rawName, email: rawEmail, amount: rawAmount }) => {
+    const isApprovedHistoricalPayment = ({
+      eventDate: rawEventDate,
+      name: rawName,
+      email: rawEmail,
+      amount: rawAmount,
+    }) => {
       const eventDate = parseDateOrNull(rawEventDate);
       if (!eventDate || eventDate >= historicalCutoff) return true;
 
@@ -4156,37 +4344,41 @@ export const listDeputyPayments = async (req, res) => {
       );
     };
 
-    const deputyPayments = jobs.filter((job) =>
-      isApprovedHistoricalPayment({
-        eventDate: job.eventDate,
-        name: job.bookedMusicianName,
-        amount: job.deputyNetAmount,
-      }),
-    ).map((job) => {
-      const musician = musiciansById.get(asObjectIdString(job.bookedMusicianId));
-      const payout = getMusicianPayoutSummary(musician || {});
+    const deputyPayments = jobs
+      .filter((job) =>
+        isApprovedHistoricalPayment({
+          eventDate: job.eventDate,
+          name: job.bookedMusicianName,
+          amount: job.deputyNetAmount,
+        }),
+      )
+      .map((job) => {
+        const musician = musiciansById.get(
+          asObjectIdString(job.bookedMusicianId),
+        );
+        const payout = getMusicianPayoutSummary(musician || {});
 
-      return {
-        ...job,
-        paymentSource: "deputy_job",
-        payoutDetails: {
-          hasPayoutDetails: payout.hasPayoutDetails,
-          isStripeReady: payout.isStripeReady,
-          hasStripeAccount: payout.hasStripeAccount,
-          detailsSubmitted: payout.detailsSubmitted,
-          payoutsEnabled: payout.payoutsEnabled,
-          hasManualBankDetails: payout.hasManualBankDetails,
-          bankAccountEnding: payout.ending,
-          status: payout.isStripeReady
-            ? "stripe_ready"
-            : payout.hasManualBankDetails
-              ? "manual_bank_ready"
-              : payout.hasStripeAccount
-                ? "stripe_incomplete"
-                : "missing",
-        },
-      };
-    });
+        return {
+          ...job,
+          paymentSource: "deputy_job",
+          payoutDetails: {
+            hasPayoutDetails: payout.hasPayoutDetails,
+            isStripeReady: payout.isStripeReady,
+            hasStripeAccount: payout.hasStripeAccount,
+            detailsSubmitted: payout.detailsSubmitted,
+            payoutsEnabled: payout.payoutsEnabled,
+            hasManualBankDetails: payout.hasManualBankDetails,
+            bankAccountEnding: payout.ending,
+            status: payout.isStripeReady
+              ? "stripe_ready"
+              : payout.hasManualBankDetails
+                ? "manual_bank_ready"
+                : payout.hasStripeAccount
+                  ? "stripe_incomplete"
+                  : "missing",
+          },
+        };
+      });
 
     const bookingPayments = bookingMembers
       .filter(({ row, member }) =>
@@ -4203,27 +4395,35 @@ export const listDeputyPayments = async (req, res) => {
           musiciansByEmail.get(normaliseString(member.email).toLowerCase());
         const payout = getMusicianPayoutSummary(musician || {});
         const fee = Number(member.totalFee || member.fee || 0);
-        const memberPaymentStatus = normaliseString(member.paymentStatus).toLowerCase();
+        const memberPaymentStatus = normaliseString(
+          member.paymentStatus,
+        ).toLowerCase();
         const clientPaid = Boolean(
           row.balancePaid ||
           row.payments?.balancePaymentReceived ||
           row.payments?.invoicePaid,
         );
-        const payoutStatus = memberPaymentStatus === "paid"
-          ? "paid"
-          : memberPaymentStatus === "pending"
-            ? "pending"
-            : memberPaymentStatus === "held"
-              ? "held"
-              : memberPaymentStatus === "cancelled"
-                ? "cancelled"
-                : "not_ready";
+        const payoutStatus =
+          memberPaymentStatus === "paid"
+            ? "paid"
+            : memberPaymentStatus === "pending"
+              ? "pending"
+              : memberPaymentStatus === "held"
+                ? "held"
+                : memberPaymentStatus === "cancelled"
+                  ? "cancelled"
+                  : "not_ready";
 
         return {
           _id: `booking-board-${String(row._id)}-${asObjectIdString(member.musicianId) || normaliseString(member.email).toLowerCase()}`,
           sourceRecordId: String(row._id),
           paymentSource: "booking_board",
-          title: member.role || member.instrument || row.actTscName || row.actName || "Booking musician",
+          title:
+            member.role ||
+            member.instrument ||
+            row.actTscName ||
+            row.actName ||
+            "Booking musician",
           instrument: member.instrument || member.role || "",
           venue: [row.address, row.county].filter(Boolean).join(", "),
           eventDate: row.eventDateISO,
@@ -4233,10 +4433,15 @@ export const listDeputyPayments = async (req, res) => {
           deputyNetAmount: fee,
           paymentStatus: clientPaid ? "paid" : "not_recorded",
           payoutStatus,
-          payoutPaidAt: payoutStatus === "paid" ? row.payments?.paidAt || row.paidAt || null : null,
+          payoutPaidAt:
+            payoutStatus === "paid"
+              ? row.payments?.paidAt || row.paidAt || null
+              : null,
           releaseOn: null,
           bookedMusicianId: member.musicianId || musician?._id || null,
-          bookedMusicianName: member.name || [musician?.firstName, musician?.lastName].filter(Boolean).join(" "),
+          bookedMusicianName:
+            member.name ||
+            [musician?.firstName, musician?.lastName].filter(Boolean).join(" "),
           bookingRef: row.bookingRef || "",
           clientName: row.clientFirstNames || row.bookerName || "",
           payoutDetails: {
@@ -4259,11 +4464,13 @@ export const listDeputyPayments = async (req, res) => {
       });
 
     const seenPayments = new Set(
-      deputyPayments.map((payment) => [
-        String(payment.eventDate || "").slice(0, 10),
-        Number(payment.deputyNetAmount || 0).toFixed(2),
-        normaliseString(payment.bookedMusicianName).toLowerCase(),
-      ].join("|")),
+      deputyPayments.map((payment) =>
+        [
+          String(payment.eventDate || "").slice(0, 10),
+          Number(payment.deputyNetAmount || 0).toFixed(2),
+          normaliseString(payment.bookedMusicianName).toLowerCase(),
+        ].join("|"),
+      ),
     );
     const payments = [
       ...deputyPayments,
@@ -6755,7 +6962,7 @@ export const presentDeputyApplicant = async (req, res) => {
       });
     }
 
-    const { musicianId } = req.body || {};
+    const { musicianId, role } = req.body || {};
     const safeMusicianId = asObjectIdString(musicianId);
 
     if (!safeMusicianId) {
@@ -6787,6 +6994,24 @@ export const presentDeputyApplicant = async (req, res) => {
       });
     }
 
+    const availableRoles = normaliseList(
+      job.requiredInstruments?.length
+        ? job.requiredInstruments
+        : [job.instrument],
+    );
+    const matchedRole = availableRoles.find(
+      (candidate) =>
+        candidate.toLowerCase() === normaliseString(role).toLowerCase(),
+    );
+
+    if (availableRoles.length > 1 && !matchedRole) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid role is required for this multi-role job",
+      });
+    }
+    const presentedRole = matchedRole || availableRoles[0] || "";
+
     const musician = await findMatchedMusicianFromJob(job, safeMusicianId);
     if (!musician) {
       return res.status(404).json({
@@ -6804,6 +7029,7 @@ export const presentDeputyApplicant = async (req, res) => {
       musician,
       now,
       presentationId,
+      role: presentedRole,
     });
 
     // 2) Create presentation tracking record
@@ -6848,6 +7074,7 @@ export const presentDeputyApplicant = async (req, res) => {
       job,
       musician,
       profileUrl: trackedProfileUrl,
+      role: presentedRole,
     });
 
     let emailSent = false;
@@ -6930,6 +7157,7 @@ export const presentDeputyApplicant = async (req, res) => {
       presentation: {
         presentationId,
         trackedProfileUrl,
+        role: presentedRole,
       },
     });
   } catch (error) {
@@ -6997,6 +7225,7 @@ export const manualAllocateDeputyJob = async (req, res) => {
 
     const {
       musicianId,
+      role: requestedRole = "",
       skipCharge = false,
       retryAllocationOnly = false,
     } = req.body || {};
@@ -7010,6 +7239,25 @@ export const manualAllocateDeputyJob = async (req, res) => {
     }
 
     const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
+
+    const requiredRoles = normaliseList(
+      job.requiredInstruments?.length
+        ? job.requiredInstruments
+        : [job.instrument],
+    );
+    const allocationRole =
+      requiredRoles.find(
+        (role) =>
+          role.toLowerCase() === normaliseString(requestedRole).toLowerCase(),
+      ) || (requiredRoles.length === 1 ? requiredRoles[0] : "");
+
+    if (!allocationRole) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select which role this musician is being booked for",
+        requiredRoles,
+      });
+    }
 
     if (!musicianId) {
       return res.status(400).json({
@@ -7049,7 +7297,31 @@ export const manualAllocateDeputyJob = async (req, res) => {
 
     const now = new Date();
 
-    upsertManualApplicationForAllocation({ job, musician, now });
+    upsertManualApplicationForAllocation({
+      job,
+      musician,
+      now,
+      role: allocationRole,
+    });
+
+    job.roleAllocations = Array.isArray(job.roleAllocations)
+      ? job.roleAllocations.filter(
+          (allocation) =>
+            normaliseString(allocation?.role).toLowerCase() !==
+            allocationRole.toLowerCase(),
+        )
+      : [];
+    job.roleAllocations.push({
+      role: allocationRole,
+      musicianId: musician._id,
+      musicianName: [musician.firstName, musician.lastName]
+        .filter(Boolean)
+        .join(" ")
+        .trim(),
+      musicianSlug: musician?.musicianSlug || "",
+      status: "allocated",
+      allocatedAt: now,
+    });
 
     job.allocatedMusicianId = musician._id;
     job.allocatedMusicianSlug = musician?.musicianSlug || "";
@@ -7058,8 +7330,18 @@ export const manualAllocateDeputyJob = async (req, res) => {
       .join(" ")
       .trim();
     job.allocatedAt = now;
-    job.status = "allocated";
-    job.workflowStage = "allocated";
+    const filledRoles = new Set(
+      job.roleAllocations
+        .filter((allocation) =>
+          ["allocated", "booked"].includes(allocation?.status),
+        )
+        .map((allocation) => normaliseString(allocation?.role).toLowerCase()),
+    );
+    const allRolesAllocated = requiredRoles.every((role) =>
+      filledRoles.has(role.toLowerCase()),
+    );
+    job.status = allRolesAllocated ? "allocated" : "open";
+    job.workflowStage = allRolesAllocated ? "allocated" : "applications_open";
     job.releaseOn = job.releaseOn || buildDefaultReleaseOn(job.eventDate);
 
     if (!job.grossAmount && !job.commissionAmount && !job.deputyNetAmount) {
@@ -7207,6 +7489,8 @@ export const manualAllocateDeputyJob = async (req, res) => {
     return res.json({
       success: true,
       message: responseMessage,
+      allocatedRole: allocationRole,
+      allRolesAllocated,
       job: withDeputyJobAliases(job),
       allocatedMusician: musician,
       chargeResult,
@@ -7433,20 +7717,39 @@ export const manualApplyDeputyJob = async (req, res) => {
       });
     }
 
+    const availableRoles = normaliseList(
+      job.requiredInstruments?.length
+        ? job.requiredInstruments
+        : [job.instrument],
+    );
+    const requestedRoles = normaliseList(
+      req.body?.roles || req.body?.appliedRoles || req.body?.role,
+    );
+    const selectedRoles = (
+      requestedRoles.length ? requestedRoles : availableRoles.slice(0, 1)
+    )
+      .map((requestedRole) =>
+        availableRoles.find(
+          (availableRole) =>
+            availableRole.toLowerCase() === requestedRole.toLowerCase(),
+        ),
+      )
+      .filter(Boolean);
+
+    if (!selectedRoles.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select at least one valid role",
+        availableRoles,
+      });
+    }
+
     const existingApplicationIndex = Array.isArray(job.applications)
       ? job.applications.findIndex(
           (application) =>
             String(application?.musicianId || "") === String(musician._id),
         )
       : -1;
-
-    if (existingApplicationIndex !== -1) {
-      return res.status(400).json({
-        success: false,
-        message: "This musician is already on the applications list",
-        job: withDeputyJobAliases(job),
-      });
-    }
 
     const firstName = String(
       musician?.firstName || musician?.basicInfo?.firstName || "",
@@ -7479,7 +7782,7 @@ export const manualApplyDeputyJob = async (req, res) => {
 
     const musicianLoginUrl = "https://admin.thesupremecollective.co.uk/login";
 
-    job.applications.push({
+    const applicationPayload = {
       musicianId: musician._id,
       firstName,
       lastName,
@@ -7487,6 +7790,7 @@ export const manualApplyDeputyJob = async (req, res) => {
       phone,
       appliedAt: new Date(),
       status: "applied",
+      appliedRoles: selectedRoles,
       notes: "Added manually by admin/agent",
       deputyMatchScore,
       matchSummary: {
@@ -7496,7 +7800,19 @@ export const manualApplyDeputyJob = async (req, res) => {
         locationFit: 0,
         songFit: 0,
       },
-    });
+    };
+
+    if (existingApplicationIndex !== -1) {
+      const existingApplication = job.applications[existingApplicationIndex];
+      existingApplication.appliedRoles = Array.from(
+        new Set([
+          ...normaliseList(existingApplication?.appliedRoles),
+          ...selectedRoles,
+        ]),
+      );
+    } else {
+      job.applications.push(applicationPayload);
+    }
 
     job.applicationCount = job.applications.length;
 
