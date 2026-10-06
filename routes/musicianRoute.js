@@ -58,15 +58,71 @@ const findMusicianByIdOrSlug = async (value) => {
 
 const sanitizePublicMusician = (doc) => {
   if (!doc) return doc;
-  const sanitized = {
-    ...doc,
-    reviews: (Array.isArray(doc.reviews) ? doc.reviews : []).map((review) => {
+  const publicFields = [
+    "_id",
+    "musicianId",
+    "musicianSlug",
+    "firstName",
+    "lastName",
+    "name",
+    "role",
+    "status",
+    "bio",
+    "tscApprovedBio",
+    "tagLine",
+    "profilePhoto",
+    "coverHeroImage",
+    "additionalImages",
+    "instrumentation",
+    "vocals",
+    "other_skills",
+    "logistics",
+    "functionBandVideoLinks",
+    "originalBandVideoLinks",
+    "tscApprovedFunctionBandVideoLinks",
+    "tscApprovedOriginalBandVideoLinks",
+    "socialHighlightPostLinks",
+    "coverMp3s",
+    "originalMp3s",
+    "selectedSongs",
+    "repertoire",
+    "academic_credentials",
+    "awards",
+    "function_bands_performed_with",
+    "original_bands_performed_with",
+    "sessions",
+    "reviews",
+  ];
+
+  const sanitized = {};
+  for (const field of publicFields) {
+    if (doc[field] !== undefined) sanitized[field] = doc[field];
+  }
+
+  sanitized.reviews = (Array.isArray(doc.reviews) ? doc.reviews : []).map(
+    (review) => {
       const publicReview = { ...review };
       delete publicReview.clientEmail;
       return publicReview;
-    }),
-  };
-  delete sanitized.socialConnections;
+    },
+  );
+
+  sanitized.socialHighlightPostLinks = (
+    Array.isArray(doc.socialHighlightPostLinks)
+      ? doc.socialHighlightPostLinks
+      : []
+  )
+    .filter((post) => post?.visible !== false)
+    .map((post) => ({
+      _id: post?._id,
+      title: post?.title || "",
+      mediaUrl: post?.mediaUrl || "",
+      thumbnailUrl: post?.thumbnailUrl || "",
+      mediaType: post?.mediaType || "unknown",
+      platform: post?.platform || "",
+      tag: post?.tag || "",
+    }));
+
   return sanitized;
 };
 
@@ -773,6 +829,29 @@ const readProtectedMusicianByIdOrSlug = async (req, res) => {
     const doc = await findMusicianByIdOrSlug(idOrSlug);
     if (!doc) {
       return res.status(404).json({ success: false, message: "Musician not found" });
+    }
+
+    const requesterId = String(
+      req.user?.id || req.user?._id || req.user?.musicianId || "",
+    );
+    const requesterRole = String(req.user?.role || "").toLowerCase();
+    const requesterEmail = String(req.user?.email || "").toLowerCase();
+    const configuredAdminEmails = String(
+      process.env.ADMIN_EMAILS || process.env.ADMIN_EMAIL || "",
+    )
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean);
+    const isAdmin =
+      ["admin", "agent", "superadmin"].includes(requesterRole) ||
+      configuredAdminEmails.includes(requesterEmail);
+    const isSelf = requesterId && requesterId === String(doc._id);
+
+    if (!isAdmin && !isSelf) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to view this private profile",
+      });
     }
 
     return res.json({
