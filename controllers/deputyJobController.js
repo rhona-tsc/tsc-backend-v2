@@ -2738,6 +2738,9 @@ export const createDeputyJob = async (req, res) => {
 export const listDeputyJobs = async (req, res) => {
   try {
     const appliedBy = String(req.query?.appliedBy || "").trim();
+    const requesterId = asObjectIdString(
+      req?.user?.id || req?.user?._id || req?.user?.userId || "",
+    );
     const requesterEmail = normaliseEmail(
       req?.user?.email || req?.user?.useremail || "",
     );
@@ -2747,8 +2750,21 @@ export const listDeputyJobs = async (req, res) => {
     const canViewHistorical =
       requesterEmail === "hello@thesupremecollective.co.uk" ||
       ["admin", "superadmin", "tsc_admin"].includes(requesterRole);
+    const isOwnApplicationHistory = Boolean(
+      appliedBy && requesterId && requesterId === asObjectIdString(appliedBy),
+    );
+
+    if (appliedBy && !canViewHistorical && !isOwnApplicationHistory) {
+      return res.status(requesterId ? 403 : 401).json({
+        success: false,
+        message: requesterId
+          ? "You can only view your own deputy job applications"
+          : "Please log in to view your deputy job applications",
+      });
+    }
+
     const includeHistorical =
-      canViewHistorical &&
+      (canViewHistorical || isOwnApplicationHistory) &&
       ["true", "1", "yes"].includes(
         normaliseString(req.query?.includeHistorical).toLowerCase(),
       );
@@ -2775,6 +2791,25 @@ export const listDeputyJobs = async (req, res) => {
           matchedCount: {
             $size: { $ifNull: ["$matchedMusicians", []] },
           },
+          myApplication: appliedBy
+            ? {
+                $arrayElemAt: [
+                  {
+                    $filter: {
+                      input: { $ifNull: ["$applications", []] },
+                      as: "application",
+                      cond: {
+                        $eq: [
+                          { $toString: "$$application.musicianId" },
+                          asObjectIdString(appliedBy),
+                        ],
+                      },
+                    },
+                  },
+                  0,
+                ],
+              }
+            : null,
         },
       },
       {
@@ -2818,6 +2853,7 @@ export const listDeputyJobs = async (req, res) => {
           bookedMusicianSlug: 1,
           applicationCount: 1,
           matchedCount: 1,
+          myApplication: 1,
           updatedAt: 1,
           createdAt: 1,
         },
@@ -2876,6 +2912,7 @@ export const listDeputyJobs = async (req, res) => {
     res.json({
       success: true,
       canViewHistorical,
+      isOwnApplicationHistory,
       includeHistorical,
       jobs: jobs.map(withDeputyJobAliases),
     });
@@ -3365,6 +3402,8 @@ export const applyToDeputyJob = async (req, res) => {
       : "";
 
     const musicianLoginUrl = "https://admin.thesupremecollective.co.uk/login";
+    const applicationHistoryUrl =
+      "https://admin.thesupremecollective.co.uk/my-deputy-applications";
 
     job.applications.push({
       musicianId: authenticatedMusicianId,
@@ -3476,12 +3515,13 @@ export const applyToDeputyJob = async (req, res) => {
             <p>Please ensure your profile has a cover photo, at least one video, and your repertoire to be considered for this opportunity.</p>
 
             <p style="margin: 24px 0;">
+              <a href="${applicationHistoryUrl}" style="display:inline-block;background:#111111;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:600;margin-right:8px;">Check application status</a>
               ${
                 applicantProfileUrl
                   ? `<a href="${applicantProfileUrl}" style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:600;margin-right:8px;">Check your profile</a>`
                   : ""
               }
-              <a href="${musicianLoginUrl}" style="display:inline-block;background:#111111;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:600;">Log in to update profile</a>
+              <a href="${musicianLoginUrl}" style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:600;">Log in to update profile</a>
             </p>
             <p>🤍<br/>The Supreme Collective</p>
           `,
@@ -3494,18 +3534,14 @@ We’ve received your application for ${
 Date: ${job.eventDate ? formatNiceDate(job.eventDate) : "TBC"}
 Location: ${job.location || job.venue || job.locationName || "TBC"}
 
-  <p>We’ll be in touch if you’re shortlisted, presented to the client, or allocated.</p>
+We’ll be in touch if you’re shortlisted, presented to the client, or allocated.
 
-            <p>Please ensure your profile has a cover photo, at least one video, and your repertoire to be considered for this opportunity.</p>
+Check your application status: ${applicationHistoryUrl}
+${applicantProfileUrl ? `Check your profile: ${applicantProfileUrl}` : ""}
+Log in to update your profile: ${musicianLoginUrl}
 
-            <p style="margin: 24px 0;">
-              ${
-                applicantProfileUrl
-                  ? `<a href="${applicantProfileUrl}" style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:600;margin-right:8px;">Check your profile</a>`
-                  : ""
-              }
-              <a href="${musicianLoginUrl}" style="display:inline-block;background:#111111;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:999px;font-weight:600;">Log in to update profile</a>
-            </p>
+Please ensure your profile has a cover photo, at least one video, and your repertoire to be considered for this opportunity.
+
 The Supreme Collective`,
         });
 

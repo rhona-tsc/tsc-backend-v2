@@ -19,7 +19,7 @@ const makeResponse = () => ({
   },
 });
 
-test("historical deputy posts are returned only to authorised admins", async (t) => {
+test("historical deputy posts are returned to admins and the musician who applied", async (t) => {
   const originalAggregate = deputyJobModel.aggregate;
   const originalPopulate = deputyJobModel.populate;
   t.after(() => {
@@ -85,4 +85,34 @@ test("historical deputy posts are returned only to authorised admins", async (t)
   );
   assert.equal(adminResponse.body.canViewHistorical, true);
   assert.equal(adminResponse.body.includeHistorical, true);
+
+  const musicianId = "507f1f77bcf86cd799439011";
+  const ownHistoryResponse = makeResponse();
+  await listDeputyJobs(
+    {
+      query: { appliedBy: musicianId, includeHistorical: "true" },
+      user: { id: musicianId, role: "musician", email: "player@example.com" },
+    },
+    ownHistoryResponse,
+  );
+  assert.deepEqual(
+    ownHistoryResponse.body.jobs.map((job) => job.title),
+    ["Historic drums job", "Future drums job"],
+  );
+  assert.equal(ownHistoryResponse.body.isOwnApplicationHistory, true);
+  assert.equal(ownHistoryResponse.body.includeHistorical, true);
+
+  const otherMusicianResponse = makeResponse();
+  await listDeputyJobs(
+    {
+      query: { appliedBy: musicianId, includeHistorical: "true" },
+      user: {
+        id: "507f191e810c19729de860ea",
+        role: "musician",
+        email: "other@example.com",
+      },
+    },
+    otherMusicianResponse,
+  );
+  assert.equal(otherMusicianResponse.statusCode, 403);
 });
