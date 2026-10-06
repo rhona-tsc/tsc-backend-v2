@@ -65,6 +65,61 @@ const formatDate = (value) => {
   });
 };
 
+const normaliseList = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value.split(",").map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+};
+
+const formatDateRange = (job = {}) => {
+  const start = formatDate(job?.eventDate || job?.date);
+  const rawEnd = job?.eventEndDate || job?.endDate || "";
+  if (!rawEnd) return start;
+
+  const end = formatDate(rawEnd);
+  return end && end !== start ? `${start} – ${end}` : start;
+};
+
+const getMatchedRoles = (musician = {}, job = {}) => {
+  const matched = normaliseList(musician?.matchedRoles);
+  if (matched.length) return matched;
+
+  const required = normaliseList(job?.requiredInstruments);
+  return required.length
+    ? required
+    : [job?.instrument || job?.title || "Musician"].filter(Boolean);
+};
+
+const formatRoleRequirements = (job = {}) => {
+  const requirements = Array.isArray(job?.roleRequirements)
+    ? job.roleRequirements
+    : [];
+  if (requirements.length) {
+    return requirements
+      .map((item) => {
+        const role = String(item?.role || "").trim();
+        const quantity = Math.max(1, Number(item?.quantity) || 1);
+        return role ? `${quantity} × ${role}` : "";
+      })
+      .filter(Boolean);
+  }
+  return normaliseList(job?.requiredInstruments);
+};
+
+const formatFeeBasis = (job = {}) =>
+  String(job?.feeBasis || "").toLowerCase() === "per_day"
+    ? "per day"
+    : "for the full engagement";
+
+const joinDetails = (primary = [], other = "") =>
+  [...normaliseList(primary), String(other || "").trim()]
+    .filter(Boolean)
+    .join(", ");
+
 const getOrdinalSuffix = (day) => {
   const numericDay = Number(day);
   if (!Number.isInteger(numericDay)) return "";
@@ -162,12 +217,23 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
   const safeTitle = escapeHtml(
     job?.title || job?.instrument || "Deputy opportunity",
   );
-  const instrument = escapeHtml(job?.instrument || job?.title || "TBC");
-  const date = escapeHtml(formatDate(job?.eventDate || job?.date));
+  const matchedRoles = getMatchedRoles(musician, job);
+  const roleRequirements = formatRoleRequirements(job);
+  const instrument = escapeHtml(matchedRoles.join(", ") || "TBC");
+  const date = escapeHtml(formatDateRange(job));
   const time = escapeHtml(buildTime(job));
   const location = escapeHtml(buildLocation(job));
   const fee = escapeHtml(
     formatFee(getDeputyFeeForEmail(job), job?.currency || "GBP"),
+  );
+  const feeBasis = escapeHtml(formatFeeBasis(job));
+  const allRoles = escapeHtml(roleRequirements.join(", "));
+  const setLengths = escapeHtml(normaliseList(job?.setLengths).join(", "));
+  const whatsIncluded = escapeHtml(
+    joinDetails(job?.whatsIncluded, job?.whatsIncludedOther),
+  );
+  const claimableExpenses = escapeHtml(
+    joinDetails(job?.claimableExpenses, job?.claimableExpensesOther),
   );
   const notes = job?.notes
     ? `<li style="margin:0 0 8px;"><strong>Notes:</strong> ${escapeHtml(job.notes)}</li>`
@@ -264,11 +330,15 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
           <div style="margin-bottom:28px; padding:24px; background:#fafafa; border:1px solid #ececec; border-radius:22px;">
             <h3 style="margin:0 0 14px; font-size:16px; color:#111111;">Job details</h3>
             <ul style="margin:0; padding-left:20px; font-size:14px; line-height:1.8; color:#333333;">
-              <li style="margin:0 0 8px;"><strong>Role:</strong> ${instrument}</li>
-              <li style="margin:0 0 8px;"><strong>Date:</strong> ${date}</li>
+              <li style="margin:0 0 8px;"><strong>Your matching role${matchedRoles.length === 1 ? "" : "s"}:</strong> ${instrument}</li>
+              ${allRoles ? `<li style="margin:0 0 8px;"><strong>All roles required:</strong> ${allRoles}</li>` : ""}
+              <li style="margin:0 0 8px;"><strong>Date${job?.eventEndDate || job?.endDate ? "s" : ""}:</strong> ${date}</li>
               <li style="margin:0 0 8px;"><strong>Time:</strong> ${time}</li>
               <li style="margin:0 0 8px;"><strong>Location:</strong> ${location}</li>
-              <li style="margin:0 0 8px;"><strong>Deputy fee:</strong> ${fee}</li>
+              <li style="margin:0 0 8px;"><strong>Deputy fee:</strong> ${fee} ${feeBasis}</li>
+              ${setLengths ? `<li style="margin:0 0 8px;"><strong>Set lengths:</strong> ${setLengths}</li>` : ""}
+              ${whatsIncluded ? `<li style="margin:0 0 8px;"><strong>Included:</strong> ${whatsIncluded}</li>` : ""}
+              ${claimableExpenses ? `<li style="margin:0 0 8px;"><strong>Claimable expenses:</strong> ${claimableExpenses}</li>` : ""}
               ${notes}
             </ul>
           </div>
@@ -437,11 +507,23 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
 const buildTextEmail = ({ musician, job, applyUrl }) => {
   const firstName = musician?.firstName || "there";
   const safeTitle = job?.title || job?.instrument || "Deputy opportunity";
-  const instrument = job?.instrument || job?.title || "TBC";
-  const date = formatDate(job?.eventDate || job?.date);
+  const matchedRoles = getMatchedRoles(musician, job);
+  const instrument = matchedRoles.join(", ") || "TBC";
+  const roleRequirements = formatRoleRequirements(job).join(", ");
+  const date = formatDateRange(job);
   const time = buildTime(job);
   const location = buildLocation(job);
   const fee = formatFee(getDeputyFeeForEmail(job), job?.currency || "GBP");
+  const feeBasis = formatFeeBasis(job);
+  const setLengths = normaliseList(job?.setLengths).join(", ");
+  const whatsIncluded = joinDetails(
+    job?.whatsIncluded,
+    job?.whatsIncludedOther,
+  );
+  const claimableExpenses = joinDetails(
+    job?.claimableExpenses,
+    job?.claimableExpensesOther,
+  );
   const notes = job?.notes ? `Notes: ${job.notes}` : "";
 
   const WEBSITE_URL = "https://thesupremecollective.co.uk";
@@ -471,11 +553,15 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
     "A new deputy opportunity has just come in that may be a fit for you. Please review the details below and use the link to apply.",
     "",
     safeTitle,
-    `Role: ${instrument}`,
-    `Date: ${date}`,
+    `Your matching role${matchedRoles.length === 1 ? "" : "s"}: ${instrument}`,
+    roleRequirements ? `All roles required: ${roleRequirements}` : "",
+    `Date${job?.eventEndDate || job?.endDate ? "s" : ""}: ${date}`,
     `Time: ${time}`,
     `Location: ${location}`,
-    `Deputy fee: ${fee}`,
+    `Deputy fee: ${fee} ${feeBasis}`,
+    setLengths ? `Set lengths: ${setLengths}` : "",
+    whatsIncluded ? `Included: ${whatsIncluded}` : "",
+    claimableExpenses ? `Claimable expenses: ${claimableExpenses}` : "",
     notes,
     "",
     `View & apply: ${applyUrl}`,

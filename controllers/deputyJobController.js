@@ -1854,6 +1854,37 @@ const runMatcherForJob = async ({
 };
 
 const getMatchedMusiciansForJob = async (job) => {
+  const requiredInstruments = normaliseList(job?.requiredInstruments);
+
+  // Multi-role jobs must be matched role by role. Older/deployed versions of
+  // the create flow could persist only the primary role's recipients, leaving
+  // a job with six requested instruments but only the trumpet players stored.
+  // Rebuilding here makes manual notification/resume self-healing.
+  if (requiredInstruments.length > 1) {
+    const matcherResult = await runMatcherForJob({
+      job,
+      previewRecipientEmail: job?.clientEmail || job?.createdByEmail || "",
+      createdBy: job?.createdBy || null,
+      primaryInstrument: job?.instrument || requiredInstruments[0] || "",
+      resolvedInstruments: requiredInstruments,
+      effectiveIsVocalSlot: Boolean(job?.isVocalSlot),
+      resolvedEssentialRoles: normaliseList(job?.essentialRoles),
+      matcherDesiredRoles: normaliseList(job?.desiredRoles),
+      resolvedSecondaryInstruments: normaliseList(job?.secondaryInstruments),
+      resolvedGenres: normaliseList(job?.genres),
+      resolvedTags: normaliseList(job?.tags),
+      inferredCounty: job?.county || "",
+      inferredPostcode: job?.postcode || "",
+      mode: "send",
+    });
+
+    job.matchedMusicianIds = matcherResult.matchedMusicianIds;
+    job.matchedMusicians = matcherResult.matchedMusicians;
+    job.matchedCount = matcherResult.matches.length;
+
+    return matcherResult.matches;
+  }
+
   const ids = Array.isArray(job?.matchedMusicianIds)
     ? job.matchedMusicianIds
     : [];
@@ -3879,20 +3910,54 @@ export const sendDeputyJobNotifications = async (req, res) => {
       });
     }
 
+    const alreadyNotifiedIds = new Set(
+      (Array.isArray(job.notifiedMusicianIds) ? job.notifiedMusicianIds : [])
+        .map(asObjectIdString)
+        .filter(Boolean),
+    );
+    const musiciansToNotify = matches.filter(
+      (musician) =>
+        !alreadyNotifiedIds.has(
+          asObjectIdString(musician?._id || musician?.id),
+        ),
+    );
+
+    if (!musiciansToNotify.length) {
+      await job.save();
+      return res.json({
+        success: true,
+        message: "All matched musicians have already been notified",
+        canSendNotifications: true,
+        requiresCardSetup: false,
+        job: withDeputyJobAliases(job),
+        matchedCount: job.matchedCount,
+        notifiedCount: job.notifiedCount,
+        newlyNotifiedCount: 0,
+      });
+    }
+
     const notificationResults = await notifyMusiciansAboutDeputyJob({
       job,
-      musicians: matches,
+      musicians: musiciansToNotify,
     });
 
     const sentIds = notificationResults
       .filter((r) => r.status === "sent" && r.musicianId)
       .map((r) => r.musicianId);
 
-    job.notifiedMusicianIds = sentIds;
-    job.notifications = notificationResults;
-    job.notifiedCount = notificationResults.filter(
-      (r) => r.status === "sent",
-    ).length;
+    job.notifiedMusicianIds = Array.from(
+      new Set([
+        ...(Array.isArray(job.notifiedMusicianIds)
+          ? job.notifiedMusicianIds.map(asObjectIdString)
+          : []),
+        ...sentIds.map(asObjectIdString),
+      ].filter(Boolean)),
+    );
+    job.notifications = [
+      ...(Array.isArray(job.notifications) ? job.notifications : []),
+      ...notificationResults,
+    ];
+    job.notifiedCount = job.notifiedMusicianIds.length;
     job.status = "open";
     job.previewMode = false;
     job.workflowStage = "sent_to_matches";
@@ -3918,6 +3983,9 @@ export const sendDeputyJobNotifications = async (req, res) => {
       requiresCardSetup: false,
       job: withDeputyJobAliases(job),
       notifiedCount: job.notifiedCount,
+      newlyNotifiedCount: notificationResults.filter(
+        (r) => r.status === "sent",
+      ).length,
     });
   } catch (error) {
     console.error("❌ sendDeputyJobNotifications error:", error);
