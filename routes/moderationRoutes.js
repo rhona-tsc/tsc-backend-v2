@@ -20,6 +20,11 @@ import {
 } from "../controllers/moderationController.js";
 
 import { getDeputyById } from "../controllers/musicianController.js";
+import {
+  getMusicianVideoForReview,
+  listMusicianVideoSubmissionsForReview,
+  reviewMusicianVideoSubmission,
+} from "../controllers/musicianVideoSubmissionController.js";
 
 const router = express.Router();
 
@@ -154,6 +159,9 @@ router.get("/deputies/review-queue", listDeputiesReviewQueue);
 router.post("/deputy/:id/videos/analyse", adminAuth, analyseDeputyVideos);
 router.post("/deputy/:id/videos/:videoId/refresh", adminAuth, refreshDeputyVideoAnalysis);
 router.patch("/deputy/:id/videos/:videoId/review", adminAuth, reviewDeputyVideo);
+router.get("/video-submissions/:submissionId", adminAuth, getMusicianVideoForReview);
+router.patch("/video-submissions/:submissionId/review", adminAuth, reviewMusicianVideoSubmission);
+router.get("/video-submissions", adminAuth, listMusicianVideoSubmissionsForReview);
 
 // fetch by id (used elsewhere)
 router.get("/deputy/:id", async (req, res) => {

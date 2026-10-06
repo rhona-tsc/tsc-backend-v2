@@ -29,6 +29,11 @@ import {
   getMusicianBioBackfillJob,
   startMusicianBioBackfill,
 } from "../services/musicianBioBackfillService.js";
+import {
+  listMyMusicianVideos,
+  refreshMusicianVideoSubmission,
+  uploadMusicianVideo,
+} from "../controllers/musicianVideoSubmissionController.js";
 
 const router = express.Router();
 
@@ -37,6 +42,10 @@ const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
 const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
   : null;
+
+router.post("/:id/video-submissions", verifyToken, upload.single("video"), uploadMusicianVideo);
+router.get("/:id/video-submissions", verifyToken, listMyMusicianVideos);
+router.post("/:id/video-submissions/:submissionId/refresh", verifyToken, refreshMusicianVideoSubmission);
 
 if (!stripeSecretKey) {
   console.warn("⚠️ STRIPE_SECRET_KEY missing — Stripe routes will be limited/disabled.");

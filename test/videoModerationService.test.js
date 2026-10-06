@@ -24,3 +24,8 @@ test("extracts contact and identity indicators from Azure insights", () => {
   const types = new Set(flags.map((flag) => flag.type));
   for (const type of ["email", "phone", "website", "social_handle", "person_name", "brand_name"]) assert.ok(types.has(type), `missing ${type}`);
 });
+
+test("flags all visible OCR text for a human anonymity check", () => {
+  const flags = extractModerationFlags({ videos: [{ insights: { ocr: [{ text: "Sarah Luck presents" }] } }] });
+  assert.equal(flags.some((flag) => flag.type === "visible_text" && flag.evidence.includes("Sarah Luck")), true);
+});

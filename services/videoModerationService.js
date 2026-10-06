@@ -121,6 +121,10 @@ export const extractModerationFlags = (index = {}) => {
     ...(insights.ocr || []).map((item) => item.text),
   ].filter(Boolean).join(" \n");
   const flags = [];
+  for (const item of insights.ocr || []) {
+    const evidence = String(item?.text || "").trim();
+    if (evidence) flags.push({ type: "visible_text", label: "On-screen text detected", severity: "warning", evidence: evidence.slice(0, 180) });
+  }
   const addMatches = (regex, type, label, severity = "high") => {
     for (const match of text.matchAll(regex)) flags.push({ type, label, severity, evidence: match[0].slice(0, 180) });
   };
