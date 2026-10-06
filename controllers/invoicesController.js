@@ -9,6 +9,7 @@ import cloudinary from "../config/cloudinary.js";
 import path from "path";
 import fs from "fs";
 import sendEmail from "../utils/sendEmail.js";
+import { getDepositPaidToInvoiceCompany } from "../utils/invoiceDeposit.js";
 
 const STRIPE_API_VERSION = "2024-06-20";
 
@@ -1160,12 +1161,7 @@ const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
     passThroughGross + commissionGross + extrasTotal + manualAdjustmentAmount,
   );
   const invoiceGross = calculatedGross || storedGross;
-  const depositPaid = round2(
-    Math.max(
-      0,
-      Number(rowForInvoice?.payments?.depositChargedAmount || 0),
-    ),
-  );
+  const depositPaid = round2(getDepositPaidToInvoiceCompany(rowForInvoice));
   const amountDue = round2(Math.max(invoiceGross - depositPaid, 0));
 
  return {
@@ -1973,7 +1969,9 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         paymentY + 44,
       );
       doc.text(
-        `Amount received: ${formatMoney(split.gross)}`,
+        `Amount received: ${formatMoney(
+          isExtrasInvoice ? split.gross : split.amountDue ?? split.gross,
+        )}`,
         cardX + 26,
         paymentY + 58,
       );
