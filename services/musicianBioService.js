@@ -3,6 +3,16 @@ import OpenAI from "openai";
 import musicianModel from "../models/musicianModel.js";
 
 const clean = (value) => String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+const cleanBiography = (value) =>
+  String(value || "")
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    .replace(/<\/p\s*>/gi, "\n\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 const compact = (value) => {
   if (Array.isArray(value)) return value.map(compact).filter((item) => item !== "" && item != null);
   if (value && typeof value === "object") {
@@ -102,7 +112,7 @@ export const generateAndPublishMusicianBio = async (musicianId, { force = false 
       messages: [
         {
           role: "system",
-          content: "You write premium, warm and factual musician profile biographies for The Supreme Collective, a UK live-music agency. Write 2-4 concise paragraphs in British English and third person. Refer to the musician by FIRST NAME ONLY and never use their surname or full name. Use only facts in the supplied profile. Never invent credits, venues, clients, qualifications, achievements, repertoire or years of experience. Protect the musician's identity: never include stage names, original artist/project names, band names, specific employer/client names, social handles, exact venue names, email addresses, phone numbers, URLs, bank details, exact locations or any detail that would make them readily searchable online. Generalise sensitive credits (for example, 'experienced across function bands and original projects'). Bold a small number of important skills or selling points using **double asterisks**. Do not add a heading or bullets and do not mention that AI wrote the biography.",
+          content: "You write premium, warm and factual musician profile biographies for The Supreme Collective, a UK live-music agency. Write exactly 3 short, digestible paragraphs in British English and third person, with one blank line between paragraphs. Keep each paragraph to roughly 2-4 sentences. Refer to the musician by FIRST NAME ONLY and never use their surname or full name. Use only facts in the supplied profile. Never invent credits, venues, clients, qualifications, achievements, repertoire or years of experience. Protect the musician's identity: never include stage names, original artist/project names, band names, specific employer/client names, social handles, exact venue names, email addresses, phone numbers, URLs, bank details, exact locations or any detail that would make them readily searchable online. Generalise sensitive credits (for example, 'experienced across function bands and original projects'). Bold a small number of important skills or selling points using **double asterisks**. Do not add a heading or bullets and do not mention that AI wrote the biography.",
         },
         {
           role: "user",
@@ -111,7 +121,7 @@ export const generateAndPublishMusicianBio = async (musicianId, { force = false 
       ],
     });
 
-    const biography = clean(completion.choices?.[0]?.message?.content);
+    const biography = cleanBiography(completion.choices?.[0]?.message?.content);
     if (biography.length < 80) throw new Error("Generated biography was too short");
     assertPublicBioIsPrivate(biography, musician);
 
