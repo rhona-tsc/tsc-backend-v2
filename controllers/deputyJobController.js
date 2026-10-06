@@ -158,6 +158,14 @@ export function formatNiceDate(dateISO) {
   return `${weekday}, ${day}${suffix} ${month} ${year}`;
 }
 
+const formatDeputyJobDateRange = (job = {}) => {
+  const start = normaliseString(job?.eventDate || job?.date);
+  const end = normaliseString(job?.eventEndDate || job?.endDate);
+  if (!start) return "TBC";
+  if (!end || end === start) return formatNiceDate(start);
+  return `${formatNiceDate(start)} – ${formatNiceDate(end)}`;
+};
+
 const normaliseBoolean = (value) => {
   if (value === true || value === "true" || value === 1 || value === "1")
     return true;
@@ -795,6 +803,7 @@ const buildMatchSnapshot = (musician = {}) => ({
     musician?.profile_picture ||
     "",
   musicianSlug: musician?.musicianSlug || "",
+  matchedRoles: normaliseList(musician?.matchedRoles),
   deputyMatchScore: Number(musician?.deputyMatchScore || 0),
   matchPct: Number(musician?.matchPct || 0),
   matchSummary: {
@@ -1346,7 +1355,7 @@ const buildApplicantPresentedEmailPreview = ({
     <p>You've been presented to the client for:</p>
     <p><strong>${job?.title || job?.instrument || "Deputy opportunity"}</strong></p>
     ${roleText ? `<p><strong>Role:</strong> ${escapeHtml(roleText)}</p>` : ""}
-    <p><strong>Date:</strong> ${job?.eventDate ? formatNiceDate(job.eventDate) : "TBC"}</p>
+    <p><strong>Date${job?.eventEndDate ? "s" : ""}:</strong> ${formatDeputyJobDateRange(job)}</p>
     <p><strong>Location:</strong> ${job?.location || job?.venue || job?.locationName || "TBC"}</p>
     ${
       finalProfileUrl
@@ -1386,7 +1395,7 @@ You've been presented to the client for:
 ${job?.title || job?.instrument || "Deputy opportunity"}
 ${roleText ? `Role: ${roleText}` : ""}
 
-Date: ${job?.eventDate ? formatNiceDate(job.eventDate) : "TBC"}
+Date${job?.eventEndDate ? "s" : ""}: ${formatDeputyJobDateRange(job)}
 Location: ${job?.location || job?.venue || job?.locationName || "TBC"}
 ${finalProfileUrl ? `Profile: ${finalProfileUrl}` : ""}
 
@@ -1593,6 +1602,8 @@ const buildJobPayloadFromRequest = (req) => {
     title = "",
     date = "",
     eventDate = "",
+    endDate = "",
+    eventEndDate = "",
     callTime = "",
     startTime = "",
     finishTime = "",
@@ -1604,6 +1615,7 @@ const buildJobPayloadFromRequest = (req) => {
     postcode = "",
     instrument = "",
     requiredInstruments = [],
+    roleRequirements = [],
     isVocalSlot = false,
     genres = [],
     tags = [],
@@ -1637,6 +1649,21 @@ const buildJobPayloadFromRequest = (req) => {
     normaliseString(jobType).toLowerCase() === "enquiry" ? "enquiry" : "booked";
 
   const resolvedInstruments = normaliseArray(requiredInstruments);
+  const resolvedRoleRequirements = resolvedInstruments.map((role) => {
+    const matchingRequirement = (
+      Array.isArray(roleRequirements) ? roleRequirements : []
+    ).find(
+      (requirement) =>
+        normaliseString(requirement?.role).toLowerCase() === role.toLowerCase(),
+    );
+    return {
+      role,
+      quantity: Math.max(
+        1,
+        Math.min(50, Number(matchingRequirement?.quantity) || 1),
+      ),
+    };
+  });
   const resolvedEssentialRoles = normaliseArray(essentialRoles);
   const resolvedRequiredSkills = normaliseArray(requiredSkills);
   const resolvedDesiredRoles = normaliseArray(desiredRoles);
@@ -1660,6 +1687,7 @@ const buildJobPayloadFromRequest = (req) => {
   );
 
   const resolvedEventDate = normaliseString(eventDate || date);
+  const resolvedEventEndDate = normaliseString(eventEndDate || endDate);
   const resolvedStartTime = normaliseString(startTime || callTime);
   const resolvedEndTime = normaliseString(endTime || finishTime);
   const resolvedLocationName = normaliseString(locationName || venue);
@@ -1689,6 +1717,7 @@ const buildJobPayloadFromRequest = (req) => {
     primaryInstrument,
     effectiveIsVocalSlot,
     resolvedInstruments,
+    resolvedRoleRequirements,
     resolvedEssentialRoles,
     resolvedRequiredSkills,
     matcherDesiredRoles,
@@ -1701,6 +1730,7 @@ const buildJobPayloadFromRequest = (req) => {
     whatsIncludedOther: normaliseString(whatsIncludedOther),
     claimableExpensesOther: normaliseString(claimableExpensesOther),
     resolvedEventDate,
+    resolvedEventEndDate,
     resolvedStartTime,
     resolvedEndTime,
     resolvedLocationName,
@@ -1738,6 +1768,7 @@ const runMatcherForJob = async ({
   previewRecipientEmail,
   createdBy,
   primaryInstrument,
+  resolvedInstruments = [],
   effectiveIsVocalSlot,
   resolvedEssentialRoles,
   matcherDesiredRoles,
@@ -1751,17 +1782,41 @@ const runMatcherForJob = async ({
   const effectiveLimit =
     mode === "preview" ? MATCH_LIMIT_PREVIEW : MATCH_LIMIT_SEND;
 
-  const matches = await findMatchingMusiciansForDeputyJob({
-    instrument: primaryInstrument,
-    isVocalSlot: effectiveIsVocalSlot,
-    essentialRoles: resolvedEssentialRoles,
-    desiredRoles: matcherDesiredRoles,
-    secondaryInstruments: resolvedSecondaryInstruments,
-    genres: resolvedGenres.length ? resolvedGenres : resolvedTags,
-    county: inferredCounty,
-    postcode: inferredPostcode,
-    excludeIds: createdBy ? [String(createdBy)] : [],
-  });
+  const rolesToMatch = normaliseList(resolvedInstruments).length
+    ? normaliseList(resolvedInstruments)
+    : [primaryInstrument];
+  const matchesByMusicianId = new Map();
+
+  for (const role of rolesToMatch) {
+    const roleMatches = await findMatchingMusiciansForDeputyJob({
+      instrument: role,
+      isVocalSlot: /vocal|singer|rapper|rap|mc/i.test(role)
+        ? true
+        : effectiveIsVocalSlot && role === primaryInstrument,
+      essentialRoles: resolvedEssentialRoles,
+      desiredRoles: matcherDesiredRoles,
+      secondaryInstruments: resolvedSecondaryInstruments,
+      genres: resolvedGenres.length ? resolvedGenres : resolvedTags,
+      county: inferredCounty,
+      postcode: inferredPostcode,
+      excludeIds: createdBy ? [String(createdBy)] : [],
+    });
+
+    for (const musician of roleMatches) {
+      const id = asObjectIdString(musician?._id || musician?.id);
+      if (!id) continue;
+      const existing = matchesByMusicianId.get(id);
+      const matchedRoles = Array.from(
+        new Set([...(existing?.matchedRoles || []), role]),
+      );
+      matchesByMusicianId.set(id, {
+        ...(existing || musician),
+        matchedRoles,
+      });
+    }
+  }
+
+  const matches = Array.from(matchesByMusicianId.values());
 
   const limitedMatches =
     typeof effectiveLimit === "number" && effectiveLimit > 0
@@ -2470,6 +2525,7 @@ const findRecentDuplicateDeputyJob = async ({
     title: built.title,
     instrument: built.primaryInstrument,
     eventDate: built.resolvedEventDate,
+    eventEndDate: built.resolvedEventEndDate,
     startTime: built.resolvedStartTime,
     endTime: built.resolvedEndTime,
     location: built.resolvedLocation,
@@ -2589,9 +2645,12 @@ export const createDeputyJob = async (req, res) => {
       title: built.title,
       instrument: built.primaryInstrument,
       requiredInstruments: built.resolvedInstruments,
+      roleRequirements: built.resolvedRoleRequirements,
       isVocalSlot: built.effectiveIsVocalSlot,
       date: built.resolvedEventDate,
       eventDate: built.resolvedEventDate,
+      endDate: built.resolvedEventEndDate,
+      eventEndDate: built.resolvedEventEndDate,
       callTime: built.resolvedStartTime,
       startTime: built.resolvedStartTime,
       finishTime: built.resolvedEndTime,
@@ -2670,6 +2729,7 @@ export const createDeputyJob = async (req, res) => {
       previewRecipientEmail: built.clientEmail || createdByEmail,
       createdBy,
       primaryInstrument: built.primaryInstrument,
+      resolvedInstruments: built.resolvedInstruments,
       effectiveIsVocalSlot: built.effectiveIsVocalSlot,
       resolvedEssentialRoles: built.resolvedEssentialRoles,
       matcherDesiredRoles: built.matcherDesiredRoles,
@@ -2881,6 +2941,8 @@ export const listDeputyJobs = async (req, res) => {
           title: 1,
           date: 1,
           eventDate: 1,
+          eventEndDate: 1,
+          endDate: 1,
           callTime: 1,
           startTime: 1,
           finishTime: 1,
@@ -2891,6 +2953,7 @@ export const listDeputyJobs = async (req, res) => {
           county: 1,
           postcode: 1,
           requiredInstruments: 1,
+          roleRequirements: 1,
           roleAllocations: 1,
           requiredSkills: 1,
           tags: 1,
@@ -3002,11 +3065,13 @@ export const getDeputyJobById = async (req, res) => {
           "title",
           "instrument",
           "requiredInstruments",
+          "roleRequirements",
           "roleAllocations",
-          "requiredInstruments",
           "isVocalSlot",
           "date",
           "eventDate",
+          "eventEndDate",
+          "endDate",
           "callTime",
           "startTime",
           "finishTime",
@@ -3113,11 +3178,16 @@ export const getDeputyJobApplications = async (req, res) => {
         [
           "title",
           "instrument",
+          "requiredInstruments",
+          "roleRequirements",
+          "roleAllocations",
           "status",
           "workflowStage",
           "jobType",
           "eventDate",
+          "eventEndDate",
           "date",
+          "endDate",
           "callTime",
           "startTime",
           "finishTime",
@@ -3315,6 +3385,9 @@ export const getDeputyJobApplications = async (req, res) => {
         requiredInstruments: normaliseList(job?.requiredInstruments).length
           ? normaliseList(job?.requiredInstruments)
           : [normaliseString(job?.instrument || "Musician")],
+        roleRequirements: Array.isArray(job?.roleRequirements)
+          ? job.roleRequirements
+          : [],
         roleAllocations: Array.isArray(job?.roleAllocations)
           ? job.roleAllocations
           : [],
@@ -3322,6 +3395,7 @@ export const getDeputyJobApplications = async (req, res) => {
         workflowStage: normaliseString(job?.workflowStage || ""),
         jobType: normaliseString(job?.jobType || ""),
         eventDate: job?.eventDate || job?.date || null,
+        eventEndDate: job?.eventEndDate || job?.endDate || null,
         callTime: normaliseString(job?.callTime || job?.startTime || ""),
         finishTime: normaliseString(job?.finishTime || job?.endTime || ""),
         location:
@@ -3642,9 +3716,7 @@ export const applyToDeputyJob = async (req, res) => {
               job.title || job.instrument || "Deputy opportunity"
             }</strong></p>
 
-            <p><strong>Date:</strong> ${
-              job.eventDate ? formatNiceDate(job.eventDate) : "TBC"
-            }</p>
+            <p><strong>Date${job.eventEndDate ? "s" : ""}:</strong> ${formatDeputyJobDateRange(job)}</p>
 
             <p><strong>Location:</strong> ${
               job.location || job.venue || job.locationName || "TBC"
@@ -3673,7 +3745,7 @@ We’ve received your application for ${
             job.title || job.instrument || "Deputy opportunity"
           }.
 
-Date: ${job.eventDate ? formatNiceDate(job.eventDate) : "TBC"}
+Date${job.eventEndDate ? "s" : ""}: ${formatDeputyJobDateRange(job)}
 Location: ${job.location || job.venue || job.locationName || "TBC"}
 Role${selectedRoles.length === 1 ? "" : "s"}: ${selectedRoles.join(", ")}
 
@@ -3960,6 +4032,7 @@ export const saveDeputyJobPaymentMethod = async (req, res) => {
         previewRecipientEmail: job.clientEmail || job.createdByEmail || "",
         createdBy: job.createdBy || null,
         primaryInstrument: job.instrument,
+        resolvedInstruments: job.requiredInstruments,
         effectiveIsVocalSlot: Boolean(job.isVocalSlot),
         resolvedEssentialRoles: Array.isArray(job.essentialRoles)
           ? job.essentialRoles
@@ -4923,6 +4996,7 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
       previewRecipientEmail: job.clientEmail || job.createdByEmail || "",
       createdBy: job.createdBy || null,
       primaryInstrument: job.instrument,
+      resolvedInstruments: job.requiredInstruments,
       effectiveIsVocalSlot: Boolean(job.isVocalSlot),
       resolvedEssentialRoles: Array.isArray(job.essentialRoles)
         ? job.essentialRoles
@@ -7245,6 +7319,16 @@ export const manualAllocateDeputyJob = async (req, res) => {
         ? job.requiredInstruments
         : [job.instrument],
     );
+    const totalRequiredPlaces = requiredRoles.reduce((total, role) => {
+      const requirement = (
+        Array.isArray(job.roleRequirements) ? job.roleRequirements : []
+      ).find(
+        (item) =>
+          normaliseString(item?.role).toLowerCase() === role.toLowerCase(),
+      );
+      return total + Math.max(1, Number(requirement?.quantity) || 1);
+    }, 0);
+    const isMultiPlaceJob = totalRequiredPlaces > 1;
     const allocationRole =
       requiredRoles.find(
         (role) =>
@@ -7284,6 +7368,7 @@ export const manualAllocateDeputyJob = async (req, res) => {
     const shouldSkipCharge =
       Boolean(skipCharge) ||
       Boolean(retryAllocationOnly) ||
+      isMultiPlaceJob ||
       hasSuccessfulCharge;
 
     const musician = await musicianModel.findById(musicianId).lean();
@@ -7305,14 +7390,35 @@ export const manualAllocateDeputyJob = async (req, res) => {
     });
 
     job.roleAllocations = Array.isArray(job.roleAllocations)
-      ? job.roleAllocations.filter(
-          (allocation) =>
-            normaliseString(allocation?.role).toLowerCase() !==
-            allocationRole.toLowerCase(),
-        )
+      ? job.roleAllocations
       : [];
+    const roleRequirement = (
+      Array.isArray(job.roleRequirements) ? job.roleRequirements : []
+    ).find(
+      (requirement) =>
+        normaliseString(requirement?.role).toLowerCase() ===
+        allocationRole.toLowerCase(),
+    );
+    const requiredQuantity = Math.max(
+      1,
+      Number(roleRequirement?.quantity) || 1,
+    );
+    const existingRoleAllocations = job.roleAllocations.filter(
+      (allocation) =>
+        normaliseString(allocation?.role).toLowerCase() ===
+          allocationRole.toLowerCase() &&
+        ["allocated", "booked"].includes(allocation?.status),
+    );
+
+    if (existingRoleAllocations.length >= requiredQuantity) {
+      return res.status(400).json({
+        success: false,
+        message: `All ${allocationRole} places have already been allocated`,
+      });
+    }
     job.roleAllocations.push({
       role: allocationRole,
+      slotNumber: existingRoleAllocations.length + 1,
       musicianId: musician._id,
       musicianName: [musician.firstName, musician.lastName]
         .filter(Boolean)
@@ -7330,16 +7436,22 @@ export const manualAllocateDeputyJob = async (req, res) => {
       .join(" ")
       .trim();
     job.allocatedAt = now;
-    const filledRoles = new Set(
-      job.roleAllocations
-        .filter((allocation) =>
+    const allRolesAllocated = requiredRoles.every((role) => {
+      const requirement = (
+        Array.isArray(job.roleRequirements) ? job.roleRequirements : []
+      ).find(
+        (item) =>
+          normaliseString(item?.role).toLowerCase() === role.toLowerCase(),
+      );
+      const quantity = Math.max(1, Number(requirement?.quantity) || 1);
+      const filledCount = job.roleAllocations.filter(
+        (allocation) =>
+          normaliseString(allocation?.role).toLowerCase() ===
+            role.toLowerCase() &&
           ["allocated", "booked"].includes(allocation?.status),
-        )
-        .map((allocation) => normaliseString(allocation?.role).toLowerCase()),
-    );
-    const allRolesAllocated = requiredRoles.every((role) =>
-      filledRoles.has(role.toLowerCase()),
-    );
+      ).length;
+      return filledCount >= quantity;
+    });
     job.status = allRolesAllocated ? "allocated" : "open";
     job.workflowStage = allRolesAllocated ? "allocated" : "applications_open";
     job.releaseOn = job.releaseOn || buildDefaultReleaseOn(job.eventDate);
@@ -7380,7 +7492,11 @@ export const manualAllocateDeputyJob = async (req, res) => {
     } else {
       job.paymentStatus = "not_required";
     }
-    if (!isEnquiryJob && (chargeResult?.success || chargeResult?.skipped)) {
+    if (
+      !isEnquiryJob &&
+      !isMultiPlaceJob &&
+      (chargeResult?.success || chargeResult?.skipped)
+    ) {
       if (
         String(job.paymentStatus || "").toLowerCase() !== "paid" &&
         chargeResult?.skipped
@@ -7389,6 +7505,12 @@ export const manualAllocateDeputyJob = async (req, res) => {
       }
 
       markPaidDeputyJobReadyForPayout({ job, musician });
+    }
+    if (!isEnquiryJob && isMultiPlaceJob) {
+      job.paymentStatus = "not_required";
+      job.payoutStatus = "not_ready";
+      job.paymentFailureReason =
+        "Multi-place deputy jobs require role-specific payment handling.";
     }
 
     const application = findApplicationFromJob(job, musician._id);
@@ -7888,7 +8010,7 @@ export const manualApplyDeputyJob = async (req, res) => {
             },</p>
             <p>We’ve received your application for:</p>
             <p><strong>${job.title || job.instrument || "Deputy opportunity"}</strong></p>
-            <p><strong>Date:</strong> ${job.eventDate ? formatNiceDate(job.eventDate) : "TBC"}</p>
+            <p><strong>Date${job.eventEndDate ? "s" : ""}:</strong> ${formatDeputyJobDateRange(job)}</p>
             <p><strong>Location:</strong> ${job.location || job.venue || job.locationName || "TBC"}</p>
   <p>We’ll be in touch if you’re shortlisted, presented to the client, or allocated.</p>
 
@@ -7912,7 +8034,7 @@ export const manualApplyDeputyJob = async (req, res) => {
 
 We’ve received your application for ${job.title || job.instrument || "Deputy opportunity"}.
 
-Date: ${job.eventDate ? formatNiceDate(job.eventDate) : "TBC"}
+Date${job.eventEndDate ? "s" : ""}: ${formatDeputyJobDateRange(job)}
 Location: ${job.location || job.venue || job.locationName || "TBC"}
 
   <p>We’ll be in touch if you’re shortlisted, presented to the client, or allocated.</p>

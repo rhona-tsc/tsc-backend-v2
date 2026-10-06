@@ -131,6 +131,7 @@ const deputyJobMatchSnapshotSchema = new mongoose.Schema(
     phone: { type: String, default: "", trim: true },
     profilePicture: { type: String, default: "", trim: true },
     musicianSlug: { type: String, default: "", trim: true },
+    matchedRoles: { type: [String], default: [] },
     deputyMatchScore: { type: Number, default: 0 },
     matchPct: { type: Number, default: 0 },
     matchSummary: {
@@ -196,6 +197,7 @@ const deputyJobPaymentEventSchema = new mongoose.Schema(
 const deputyJobRoleAllocationSchema = new mongoose.Schema(
   {
     role: { type: String, required: true, trim: true },
+    slotNumber: { type: Number, default: 1, min: 1 },
     musicianId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "musician",
@@ -214,18 +216,29 @@ const deputyJobRoleAllocationSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const deputyJobRoleRequirementSchema = new mongoose.Schema(
+  {
+    role: { type: String, required: true, trim: true },
+    quantity: { type: Number, default: 1, min: 1, max: 50 },
+  },
+  { _id: false },
+);
+
 const deputyJobSchema = new mongoose.Schema(
   {
     title: { type: String, default: "", trim: true },
 
     instrument: { type: String, required: true, trim: true, index: true },
     requiredInstruments: { type: [String], default: [] },
+    roleRequirements: { type: [deputyJobRoleRequirementSchema], default: [] },
     roleAllocations: { type: [deputyJobRoleAllocationSchema], default: [] },
     isVocalSlot: { type: Boolean, default: false },
 
     // canonical + aliases for frontend convenience
     eventDate: { type: String, default: "", index: true },
     date: { type: String, default: "", index: true },
+    eventEndDate: { type: String, default: "", index: true },
+    endDate: { type: String, default: "", index: true },
 
     startTime: { type: String, default: "" },
     callTime: { type: String, default: "" },
