@@ -273,6 +273,11 @@ const deputyJobSchema = new mongoose.Schema(
     claimableExpensesOther: { type: String, default: "", trim: true },
 
     fee: { type: Number, default: 0 },
+    feeBasis: {
+      type: String,
+      enum: ["per_day", "full_engagement"],
+      default: "full_engagement",
+    },
     currency: { type: String, default: "GBP", trim: true, uppercase: true },
     notes: { type: String, default: "", trim: true },
     stripeFeeAmount: { type: Number, default: 0 },

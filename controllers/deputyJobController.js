@@ -84,7 +84,12 @@ const getDeputyNetFeeAmount = (job = {}) => {
 
 const getDeputyNetFeeText = (job = {}) => {
   const netAmount = getDeputyNetFeeAmount(job);
-  return netAmount > 0 ? formatMoney(netAmount, job?.currency || "GBP") : "TBC";
+  if (netAmount <= 0) return "TBC";
+  const basis =
+    normaliseString(job?.feeBasis).toLowerCase() === "per_day"
+      ? "per day"
+      : "for the full engagement";
+  return `${formatMoney(netAmount, job?.currency || "GBP")} ${basis}`;
 };
 
 const asObjectIdString = (value) => {
@@ -1629,6 +1634,7 @@ const buildJobPayloadFromRequest = (req) => {
     claimableExpenses = [],
     claimableExpensesOther = "",
     fee = 0,
+    feeBasis = "full_engagement",
     currency = "GBP",
     notes = "",
     clientName = "",
@@ -1738,6 +1744,10 @@ const buildJobPayloadFromRequest = (req) => {
     inferredCounty,
     inferredPostcode,
     fee: Number(fee) || 0,
+    feeBasis:
+      normaliseString(feeBasis).toLowerCase() === "per_day"
+        ? "per_day"
+        : "full_engagement",
     currency: normaliseCurrency(currency),
     notes: normaliseString(notes),
     clientName: normaliseString(clientName),
@@ -2530,6 +2540,7 @@ const findRecentDuplicateDeputyJob = async ({
     endTime: built.resolvedEndTime,
     location: built.resolvedLocation,
     fee: built.fee,
+    feeBasis: built.feeBasis,
     clientEmail: built.clientEmail,
     status: { $in: ["draft", "preview", "open", "allocated", "filled"] },
   };
@@ -2637,6 +2648,7 @@ export const createDeputyJob = async (req, res) => {
       endTime: built.resolvedEndTime,
       location: built.resolvedLocation,
       fee: built.fee,
+      feeBasis: built.feeBasis,
       jobType: built.jobType,
       mode: built.mode,
     });
@@ -2674,6 +2686,7 @@ export const createDeputyJob = async (req, res) => {
       claimableExpenses: built.resolvedClaimableExpenses,
       claimableExpensesOther: built.claimableExpensesOther,
       fee: built.fee,
+      feeBasis: built.feeBasis,
       currency: built.currency,
       notes: built.notes,
       clientName: built.clientName,
@@ -2958,6 +2971,7 @@ export const listDeputyJobs = async (req, res) => {
           requiredSkills: 1,
           tags: 1,
           fee: 1,
+          feeBasis: 1,
           currency: 1,
           grossAmount: 1,
           commissionAmount: 1,
@@ -3093,6 +3107,7 @@ export const getDeputyJobById = async (req, res) => {
           "claimableExpenses",
           "claimableExpensesOther",
           "fee",
+          "feeBasis",
           "currency",
           "grossAmount",
           "commissionAmount",
