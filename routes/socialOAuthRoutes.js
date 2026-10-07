@@ -145,6 +145,7 @@ router.get("/:provider/start", musicianAuth, async (req, res) => {
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("scope", "user.info.basic,video.list");
     authUrl.searchParams.set("state", state);
+    authUrl.searchParams.set("disable_auto_auth", "1");
   }
 
   return res.json({ success: true, provider, authUrl: authUrl.toString() });
