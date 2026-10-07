@@ -91,7 +91,7 @@ export const searchRegularDeputyMusicians = async (req, res) => {
     const musicians = await musicianModel.find({
       $and: [textMatch].filter(Boolean),
     })
-      .select("firstName lastName email basicInfo instrumentation other_skills vocals.genres genres profilePhoto")
+      .select("firstName lastName email basicInfo musicianSlug instrumentation other_skills vocals.genres genres profilePhoto")
       .lean();
     const safeMusicians = musicians.map((musician) => {
       const genres = Array.from(new Set([
@@ -113,6 +113,7 @@ export const searchRegularDeputyMusicians = async (req, res) => {
       success: true,
       musicians: safeMusicians.map(({ musician, genres, genreMatch }) => ({
         _id: musician._id,
+        musicianSlug: musician.musicianSlug || "",
         name: [musician.firstName || musician.basicInfo?.firstName, musician.lastName || musician.basicInfo?.lastName].filter(Boolean).join(" "),
         email: musician.email || musician.basicInfo?.email || "",
         instruments: Array.from(new Set([
