@@ -219,10 +219,15 @@ router.get("/tiktok/callback", async (req, res) => {
 
 router.post("/:provider/sync", musicianAuth, async (req, res) => {
   const provider = String(req.params.provider || "").toLowerCase();
+  if (!providerConfig[provider]) {
+    return res.status(404).json({ success: false, message: "Unknown social provider" });
+  }
   try {
     const musician = await musicianModel
       .findById(req.userId)
-      .select("+socialConnections.meta.accessTokenEncrypted +socialConnections.tiktok.accessTokenEncrypted socialConnections socialHighlightPostLinks");
+      .select(
+        `socialHighlightPostLinks socialConnections.${provider}.accountId +socialConnections.${provider}.accessTokenEncrypted`,
+      );
     if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
 
     let posts = [];
@@ -268,15 +273,16 @@ router.post("/:provider/sync", musicianAuth, async (req, res) => {
         visible: true,
         importedAt: new Date(),
       }));
-    } else {
-      return res.status(404).json({ success: false, message: "Unknown social provider" });
     }
 
     const manualPosts = (musician.socialHighlightPostLinks || []).filter((post) => !post.importedAt);
-    musician.socialHighlightPostLinks = [...manualPosts, ...posts];
-    musician.socialConnections[provider].lastSyncedAt = new Date();
-    musician.socialConnections[provider].lastSyncError = "";
-    await musician.save();
+    await musicianModel.findByIdAndUpdate(req.userId, {
+      $set: {
+        socialHighlightPostLinks: [...manualPosts, ...posts],
+        [`socialConnections.${provider}.lastSyncedAt`]: new Date(),
+        [`socialConnections.${provider}.lastSyncError`]: "",
+      },
+    });
     return res.json({ success: true, provider, importedCount: posts.length });
   } catch (error) {
     await musicianModel.findByIdAndUpdate(req.userId, {
