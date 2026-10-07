@@ -82,15 +82,23 @@ export const searchRegularDeputyMusicians = async (req, res) => {
         { firstName: pattern }, { lastName: pattern }, { email: pattern },
         { "basicInfo.firstName": pattern }, { "basicInfo.lastName": pattern },
         { "instrumentation.instrument": pattern },
+        { other_skills: pattern },
       ],
-    }).select("firstName lastName email basicInfo instrumentation profilePhoto").limit(30).lean();
+    })
+      .select("firstName lastName email basicInfo instrumentation other_skills profilePhoto")
+      .sort({ firstName: 1, lastName: 1 })
+      .limit(250)
+      .lean();
     return res.json({
       success: true,
       musicians: musicians.map((musician) => ({
         _id: musician._id,
         name: [musician.firstName || musician.basicInfo?.firstName, musician.lastName || musician.basicInfo?.lastName].filter(Boolean).join(" "),
         email: musician.email || musician.basicInfo?.email || "",
-        instruments: (musician.instrumentation || []).map((item) => item.instrument).filter(Boolean),
+        instruments: Array.from(new Set([
+          ...(musician.instrumentation || []).map((item) => item.instrument),
+          ...(musician.other_skills || []),
+        ].map(clean).filter(Boolean))),
         image: musician.profilePhoto || "",
       })),
     });
@@ -107,14 +115,37 @@ export const updateRegularDeputyRole = async (req, res) => {
     if (![actId, lineupId, memberId].every(validId)) return res.status(400).json({ success: false, message: "Invalid act role" });
     const action = clean(req.body?.action);
     const musicianId = clean(req.body?.musicianId);
-    if (!["replace_primary", "add_deputy", "remove_deputy"].includes(action)) return res.status(400).json({ success: false, message: "Invalid update action" });
+    if (!["replace_primary", "add_deputy", "remove_deputy", "reorder_deputies"].includes(action)) return res.status(400).json({ success: false, message: "Invalid update action" });
     const act = await actModel.findById(actId);
     const lineup = act?.lineups?.id(lineupId);
     const member = lineup?.bandMembers?.id(memberId);
     if (!act || !lineup || !member) return res.status(404).json({ success: false, message: "Act role not found" });
 
     let selectedMusician = null;
-    if (action === "remove_deputy") {
+    if (action === "reorder_deputies") {
+      const requestedOrder = Array.isArray(req.body?.musicianIds)
+        ? req.body.musicianIds.map(clean).filter(Boolean)
+        : [];
+      const currentDeputies = member.deputies || [];
+      const deputyId = (deputy) => clean(
+        deputy.musicianId || deputy._id || deputy.id || deputy.clientKey,
+      );
+      const currentIds = currentDeputies.map(deputyId);
+      const isExactOrder =
+        requestedOrder.length === currentIds.length &&
+        new Set(requestedOrder).size === requestedOrder.length &&
+        currentIds.every((id) => requestedOrder.includes(id));
+
+      if (!isExactOrder) {
+        return res.status(400).json({
+          success: false,
+          message: "Deputy order is out of date. Refresh and try again.",
+        });
+      }
+
+      const deputyById = new Map(currentDeputies.map((deputy) => [deputyId(deputy), deputy]));
+      member.deputies = requestedOrder.map((id) => deputyById.get(id));
+    } else if (action === "remove_deputy") {
       member.deputies = (member.deputies || []).filter((deputy) =>
         ![deputy.musicianId, deputy._id, deputy.id, deputy.clientKey].some((value) => clean(value) === musicianId),
       );
