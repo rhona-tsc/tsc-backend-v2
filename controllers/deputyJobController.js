@@ -7156,9 +7156,21 @@ export const presentDeputyApplicant = async (req, res) => {
         ? job.requiredInstruments
         : [job.instrument],
     );
-    const matchedRole = availableRoles.find(
-      (candidate) =>
-        candidate.toLowerCase() === normaliseString(role).toLowerCase(),
+    const existingApplication = (job.applications || []).find(
+      (application) =>
+        asObjectIdString(application?.musicianId) === safeMusicianId,
+    );
+    const requestedRoles = normaliseList([
+      role,
+      ...normaliseList(req.body?.roles),
+      ...normaliseList(existingApplication?.appliedRoles),
+      existingApplication?.matchSummary?.instrument,
+    ]);
+    const matchedRole = availableRoles.find((candidate) =>
+      requestedRoles.some(
+        (requestedRole) =>
+          candidate.toLowerCase() === requestedRole.toLowerCase(),
+      ),
     );
 
     if (availableRoles.length > 1 && !matchedRole) {
