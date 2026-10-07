@@ -316,10 +316,45 @@ router.post("/:provider/sync", musicianAuth, async (req, res) => {
 router.delete("/:provider", musicianAuth, async (req, res) => {
   const provider = String(req.params.provider || "").toLowerCase();
   if (!providerConfig[provider]) return res.status(404).json({ success: false, message: "Unknown social provider" });
+  const musician = await musicianModel
+    .findById(req.userId)
+    .select(`socialHighlightPostLinks +socialConnections.${provider}.accessTokenEncrypted`);
+  if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
+
+  // Revoke TikTok's grant as well as removing our local copy of the credentials.
+  if (provider === "tiktok") {
+    const token = decryptSocialToken(musician.socialConnections?.tiktok?.accessTokenEncrypted);
+    if (token) {
+      const config = providerConfig.tiktok;
+      const body = new URLSearchParams({
+        client_key: config.clientId(),
+        client_secret: config.clientSecret(),
+        token,
+      });
+      await getJson("https://open.tiktokapis.com/v2/oauth/revoke/", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      });
+    }
+  }
+
+  const importedPlatform = provider === "meta" ? "instagram" : provider;
+  const remainingPosts = (musician.socialHighlightPostLinks || []).filter(
+    (post) => !(post.importedAt && String(post.platform || "").toLowerCase() === importedPlatform),
+  );
   await musicianModel.findByIdAndUpdate(req.userId, {
-    $set: { [`socialConnections.${provider}`]: {} },
+    $set: {
+      [`socialConnections.${provider}`]: {},
+      socialHighlightPostLinks: remainingPosts,
+    },
   });
-  return res.json({ success: true, provider, connected: false });
+  return res.json({
+    success: true,
+    provider,
+    connected: false,
+    removedPostCount: (musician.socialHighlightPostLinks || []).length - remainingPosts.length,
+  });
 });
 
 export default router;
