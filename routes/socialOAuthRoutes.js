@@ -1,5 +1,6 @@
 import express from "express";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 import musicianAuth from "../middleware/musicianAuth.js";
 import musicianModel from "../models/musicianModel.js";
 import {
@@ -70,7 +71,13 @@ const getJson = async (url, options = {}) => {
 router.get("/status", musicianAuth, async (req, res) => {
   const musician = await musicianModel
     .findById(req.userId)
-    .select("socialFeedConnectionPreference socialConnections")
+    .select(
+      "socialFeedConnectionPreference " +
+        "socialConnections.meta.connected socialConnections.meta.connectedAt socialConnections.meta.lastSyncedAt " +
+        "+socialConnections.meta.accessTokenEncrypted " +
+        "socialConnections.tiktok.connected socialConnections.tiktok.connectedAt socialConnections.tiktok.lastSyncedAt " +
+        "+socialConnections.tiktok.accessTokenEncrypted",
+    )
     .lean();
   if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
 
@@ -80,13 +87,19 @@ router.get("/status", musicianAuth, async (req, res) => {
     providers: {
       meta: {
         configured: Boolean(providerConfig.meta.clientId() && providerConfig.meta.clientSecret()),
-        connected: Boolean(musician.socialConnections?.meta?.connected),
+        connected: Boolean(
+          musician.socialConnections?.meta?.connected &&
+            musician.socialConnections?.meta?.accessTokenEncrypted,
+        ),
         connectedAt: musician.socialConnections?.meta?.connectedAt || null,
         lastSyncedAt: musician.socialConnections?.meta?.lastSyncedAt || null,
       },
       tiktok: {
         configured: Boolean(providerConfig.tiktok.clientId() && providerConfig.tiktok.clientSecret()),
-        connected: Boolean(musician.socialConnections?.tiktok?.connected),
+        connected: Boolean(
+          musician.socialConnections?.tiktok?.connected &&
+            musician.socialConnections?.tiktok?.accessTokenEncrypted,
+        ),
         connectedAt: musician.socialConnections?.tiktok?.connectedAt || null,
         lastSyncedAt: musician.socialConnections?.tiktok?.lastSyncedAt || null,
       },
@@ -157,7 +170,7 @@ router.get("/meta/callback", async (req, res) => {
     const pages = await getJson(pagesUrl);
     const page = (pages.data || []).find((item) => item.instagram_business_account?.id) || pages.data?.[0];
 
-    await musicianModel.findByIdAndUpdate(state.musicianId, {
+    await musicianModel.collection.updateOne({ _id: new mongoose.Types.ObjectId(state.musicianId) }, {
       $set: {
         "socialConnections.meta.connected": true,
         "socialConnections.meta.accountId": page?.instagram_business_account?.id || "",
@@ -196,7 +209,7 @@ router.get("/tiktok/callback", async (req, res) => {
       body,
     });
 
-    await musicianModel.findByIdAndUpdate(state.musicianId, {
+    await musicianModel.collection.updateOne({ _id: new mongoose.Types.ObjectId(state.musicianId) }, {
       $set: {
         "socialConnections.tiktok.connected": true,
         "socialConnections.tiktok.accountId": token.open_id || "",
