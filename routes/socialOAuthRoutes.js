@@ -75,6 +75,44 @@ const getJson = async (url, options = {}) => {
   return body;
 };
 
+const fetchTikTokPosts = async (token) => {
+  const data = await getJson(
+    "https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,duration,cover_image_url,embed_link",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ max_count: 12 }),
+    },
+  );
+  return (data.data?.videos || []).map((video) => ({
+    title: "",
+    tag: String(video.title || "").slice(0, 60),
+    url: "",
+    mediaUrl: video.embed_link ? `${video.embed_link}${video.embed_link.includes("?") ? "&" : "?"}hide_author=1` : "",
+    thumbnailUrl: video.cover_image_url || "",
+    mediaType: video.embed_link ? "embed" : "image",
+    platform: "tiktok",
+    visible: true,
+    importedAt: new Date(),
+  }));
+};
+
+const saveImportedPosts = async (musicianId, provider, posts) => {
+  const musician = await musicianModel.findById(musicianId).select("socialHighlightPostLinks");
+  if (!musician) throw new Error("Musician not found");
+  const importedPlatform = provider === "meta" ? "instagram" : provider;
+  const retainedPosts = (musician.socialHighlightPostLinks || []).filter(
+    (post) => !(post.importedAt && String(post.platform || "").toLowerCase() === importedPlatform),
+  );
+  await musicianModel.findByIdAndUpdate(musicianId, {
+    $set: {
+      socialHighlightPostLinks: [...retainedPosts, ...posts],
+      [`socialConnections.${provider}.lastSyncedAt`]: new Date(),
+      [`socialConnections.${provider}.lastSyncError`]: "",
+    },
+  });
+};
+
 router.get("/status", musicianAuth, async (req, res) => {
   const musician = await musicianModel
     .findById(req.userId)
@@ -232,6 +270,14 @@ router.get("/tiktok/callback", async (req, res) => {
         socialFeedPreferenceUpdatedAt: new Date(),
       },
     });
+    try {
+      const posts = await fetchTikTokPosts(token.access_token);
+      await saveImportedPosts(state.musicianId, "tiktok", posts);
+    } catch (syncError) {
+      await musicianModel.findByIdAndUpdate(state.musicianId, {
+        $set: { "socialConnections.tiktok.lastSyncError": syncError.message },
+      }).catch(() => {});
+    }
     return redirectResult(res, "tiktok", "connected");
   } catch (error) {
     return redirectResult(res, "tiktok", "error", error.message);
@@ -255,25 +301,7 @@ router.post("/:provider/sync", musicianAuth, async (req, res) => {
     if (provider === "tiktok") {
       const token = decryptSocialToken(musician.socialConnections?.tiktok?.accessTokenEncrypted);
       if (!token) throw new Error("TikTok is not connected");
-      const data = await getJson(
-        "https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,duration,cover_image_url,embed_link",
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ max_count: 12 }),
-        },
-      );
-      posts = (data.data?.videos || []).map((video) => ({
-        title: "",
-        tag: String(video.title || "").slice(0, 60),
-        url: "",
-        mediaUrl: video.embed_link ? `${video.embed_link}${video.embed_link.includes("?") ? "&" : "?"}hide_author=1` : "",
-        thumbnailUrl: video.cover_image_url || "",
-        mediaType: video.embed_link ? "embed" : "image",
-        platform: "tiktok",
-        visible: true,
-        importedAt: new Date(),
-      }));
+      posts = await fetchTikTokPosts(token);
     } else if (provider === "meta") {
       const connection = musician.socialConnections?.meta;
       const token = decryptSocialToken(connection?.accessTokenEncrypted);
@@ -296,14 +324,7 @@ router.post("/:provider/sync", musicianAuth, async (req, res) => {
       }));
     }
 
-    const manualPosts = (musician.socialHighlightPostLinks || []).filter((post) => !post.importedAt);
-    await musicianModel.findByIdAndUpdate(req.userId, {
-      $set: {
-        socialHighlightPostLinks: [...manualPosts, ...posts],
-        [`socialConnections.${provider}.lastSyncedAt`]: new Date(),
-        [`socialConnections.${provider}.lastSyncError`]: "",
-      },
-    });
+    await saveImportedPosts(req.userId, provider, posts);
     return res.json({ success: true, provider, importedCount: posts.length });
   } catch (error) {
     await musicianModel.findByIdAndUpdate(req.userId, {
