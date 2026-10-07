@@ -70,20 +70,35 @@ const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl }) => ({
     `Chat on WhatsApp: ${TSC_WHATSAPP_URL}`,
   ].join("\n"),
   html: `
-    <p>Hi ${escapeHtml(recipientName)},</p>
-    <p>You have been invited to join <strong>${escapeHtml(actName)}</strong> as a regular deputy <strong>${escapeHtml(roleName)}</strong>.</p>
-    <p>Create your secure Supreme Collective login and complete your musician profile using the button below.</p>
-    <p><a href="${escapeHtml(setupUrl)}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#ff6667;color:#fff;text-decoration:none;font-weight:700;">Accept invitation and create my profile</a></p>
-    <p style="color:#666;font-size:13px;">This secure link expires in 24 hours.</p>
-    <p>Best wishes,<br />The Supreme Collective</p>
-    <div style="max-width:600px;margin:22px 0 0;text-align:center;">
-      <a href="${GOOGLE_REVIEWS_URL}" style="display:inline-block;text-decoration:none;margin-bottom:14px;">
-        <img src="${GOOGLE_REVIEWS_BADGE_URL}" width="192" height="48" alt="The Supreme Collective — 5-star Google reviews" style="display:block;width:192px;height:48px;border:0;object-fit:contain;margin:0 auto;" />
-      </a>
-      <a href="${GOOGLE_REVIEWS_URL}" style="display:block;text-decoration:none;">
-        <img src="${TSC_REVIEW_GIF_URL}" width="600" alt="Reviews from Supreme Collective clients" style="display:block;width:100%;max-width:600px;height:auto;border:0;margin:0 auto;" />
-      </a>
-      <a href="${TSC_WHATSAPP_URL}" style="display:inline-block;margin-top:16px;padding:12px 24px;border-radius:10px;background:#25D366;color:#ffffff;text-decoration:none;font-size:17px;font-weight:700;">Chat on WhatsApp</a>
+    <div style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111111;">
+      <div style="max-width:720px;margin:0 auto;padding:28px 16px;">
+        <div style="background:#111111;border-radius:28px 28px 0 0;overflow:hidden;text-align:center;">
+          <div style="padding:18px 28px 8px;">
+            <p style="margin:0;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#ff6667;font-weight:700;">The Supreme Collective</p>
+          </div>
+          <div style="padding:0 28px 30px;">
+            <h1 style="margin:8px 0 10px;font-size:34px;line-height:1.05;color:#ffffff;font-weight:800;">Regular Deputy Invitation</h1>
+            <p style="margin:0;font-size:16px;line-height:1.7;color:#f3f3f3;">We’d love to welcome you to the team.</p>
+          </div>
+        </div>
+        <div style="background:#ffffff;border:1px solid #e8e8e8;border-top:0;border-radius:0 0 28px 28px;padding:30px 28px;box-shadow:0 10px 30px rgba(0,0,0,0.04);">
+          <p style="margin:0 0 18px;font-size:16px;line-height:1.7;color:#333333;">Hi ${escapeHtml(recipientName)},</p>
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.8;color:#444444;">You have been invited to join <strong>${escapeHtml(actName)}</strong> as a regular deputy <strong>${escapeHtml(roleName)}</strong>.</p>
+          <p style="margin:0 0 22px;font-size:15px;line-height:1.8;color:#444444;">Create your secure Supreme Collective login and complete your musician profile using the button below.</p>
+          <p style="margin:0 0 12px;text-align:center;"><a href="${escapeHtml(setupUrl)}" style="display:inline-block;padding:14px 24px;border-radius:999px;background:#ff6667;color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;">Accept invitation and create my profile</a></p>
+          <p style="margin:0 0 24px;color:#666666;font-size:13px;text-align:center;">This secure link expires in 24 hours.</p>
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.7;color:#444444;">Best wishes,<br /><strong>The Supreme Collective</strong></p>
+          <div style="margin:22px 0 0;padding:22px;background:#fafafa;border:1px solid #ececec;border-radius:22px;text-align:center;">
+            <a href="${GOOGLE_REVIEWS_URL}" style="display:inline-block;text-decoration:none;margin-bottom:14px;">
+              <img src="${GOOGLE_REVIEWS_BADGE_URL}" width="192" height="48" alt="The Supreme Collective — 5-star Google reviews" style="display:block;width:192px;height:48px;border:0;object-fit:contain;margin:0 auto;" />
+            </a>
+            <a href="${GOOGLE_REVIEWS_URL}" style="display:block;text-decoration:none;">
+              <img src="${TSC_REVIEW_GIF_URL}" width="600" alt="Reviews from Supreme Collective clients" style="display:block;width:100%;max-width:600px;height:auto;border:0;margin:0 auto;" />
+            </a>
+            <a href="${TSC_WHATSAPP_URL}" style="display:inline-block;margin-top:16px;padding:12px 24px;border-radius:999px;background:#25D366;color:#ffffff;text-decoration:none;font-size:17px;font-weight:700;">Chat on WhatsApp</a>
+          </div>
+        </div>
+      </div>
     </div>
   `,
 });
