@@ -57,7 +57,14 @@ const getJson = async (url, options = {}) => {
   } catch {
     body = { raw: text };
   }
-  if (!response.ok || body?.error) {
+  const providerError = body?.error;
+  const providerErrorCode = String(
+    typeof providerError === "object" ? providerError?.code || "" : providerError || "",
+  ).toLowerCase();
+  const hasProviderError = Boolean(
+    providerError && !["0", "ok", "success"].includes(providerErrorCode),
+  );
+  if (!response.ok || hasProviderError) {
     const message =
       body?.error_description ||
       body?.error?.message ||
