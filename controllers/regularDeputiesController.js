@@ -43,6 +43,14 @@ const escapeHtml = (value) => clean(value)
   .replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;")
   .replace(/'/g, "&#39;");
+const GOOGLE_REVIEWS_URL =
+  "https://g.page/r/CesVpcolTfSxEB0/review";
+const GOOGLE_REVIEWS_BADGE_URL =
+  "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777059616/google-icon2_wc33od.png";
+const TSC_REVIEW_GIF_URL =
+  "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777045559/TSC_Signature_2026_svgxr5.gif";
+const TSC_WHATSAPP_URL =
+  "https://api.whatsapp.com/send/?phone=447594223200&text&type=phone_number&app_absent=0";
 const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl }) => ({
   subject: `Invitation to join ${actName} as a regular deputy`,
   text: [
@@ -57,6 +65,9 @@ const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl }) => ({
     "",
     "Best wishes,",
     "The Supreme Collective",
+    "",
+    `Google reviews: ${GOOGLE_REVIEWS_URL}`,
+    `Chat on WhatsApp: ${TSC_WHATSAPP_URL}`,
   ].join("\n"),
   html: `
     <p>Hi ${escapeHtml(recipientName)},</p>
@@ -65,6 +76,15 @@ const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl }) => ({
     <p><a href="${escapeHtml(setupUrl)}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#ff6667;color:#fff;text-decoration:none;font-weight:700;">Accept invitation and create my profile</a></p>
     <p style="color:#666;font-size:13px;">This secure link expires in 24 hours.</p>
     <p>Best wishes,<br />The Supreme Collective</p>
+    <div style="max-width:600px;margin:22px 0 0;text-align:center;">
+      <a href="${GOOGLE_REVIEWS_URL}" style="display:inline-block;text-decoration:none;margin-bottom:14px;">
+        <img src="${GOOGLE_REVIEWS_BADGE_URL}" width="192" height="48" alt="The Supreme Collective — 5-star Google reviews" style="display:block;width:192px;height:48px;border:0;object-fit:contain;margin:0 auto;" />
+      </a>
+      <a href="${GOOGLE_REVIEWS_URL}" style="display:block;text-decoration:none;">
+        <img src="${TSC_REVIEW_GIF_URL}" width="600" alt="Reviews from Supreme Collective clients" style="display:block;width:100%;max-width:600px;height:auto;border:0;margin:0 auto;" />
+      </a>
+      <a href="${TSC_WHATSAPP_URL}" style="display:inline-block;margin-top:16px;padding:12px 24px;border-radius:10px;background:#25D366;color:#ffffff;text-decoration:none;font-size:17px;font-weight:700;">Chat on WhatsApp</a>
+    </div>
   `,
 });
 
