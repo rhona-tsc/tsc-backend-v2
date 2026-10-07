@@ -424,6 +424,104 @@ export const copyFirstLineupDeputies = async (req, res) => {
   }
 };
 
+export const copyDeputiesFromAct = async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { actId } = req.params;
+    const sourceActId = clean(req.body?.sourceActId);
+    const sourceLineupId = clean(req.body?.sourceLineupId);
+    const targetLineupId = clean(req.body?.targetLineupId);
+    const applyToAllLineups = req.body?.applyToAllLineups !== false;
+
+    if (![actId, sourceActId, sourceLineupId].every(validId)) {
+      return res.status(400).json({ success: false, message: "Choose a source act and lineup" });
+    }
+    if (String(actId) === sourceActId) {
+      return res.status(400).json({ success: false, message: "Choose a different source act" });
+    }
+    if (!applyToAllLineups && !validId(targetLineupId)) {
+      return res.status(400).json({ success: false, message: "Choose a destination lineup" });
+    }
+
+    const [targetAct, sourceAct] = await Promise.all([
+      actModel.findById(actId),
+      actModel.findById(sourceActId),
+    ]);
+    if (!targetAct || !sourceAct) {
+      return res.status(404).json({ success: false, message: "Act not found" });
+    }
+
+    const sourceLineup = sourceAct.lineups?.id(sourceLineupId);
+    if (!sourceLineup) {
+      return res.status(404).json({ success: false, message: "Source lineup not found" });
+    }
+    const targetLineups = applyToAllLineups
+      ? Array.from(targetAct.lineups || [])
+      : [targetAct.lineups?.id(targetLineupId)].filter(Boolean);
+    if (!targetLineups.length) {
+      return res.status(404).json({ success: false, message: "Destination lineup not found" });
+    }
+
+    const sourceMembers = (sourceLineup.bandMembers || []).filter((member) =>
+      clean(member.instrument),
+    );
+    let rolesMatched = 0;
+    let deputiesAdded = 0;
+
+    for (const targetLineup of targetLineups) {
+      const usedSourceIndexes = new Set();
+      for (const targetMember of targetLineup.bandMembers || []) {
+        const targetPrimaryId = clean(targetMember.musicianId);
+        const targetInstrument = normalise(targetMember.instrument);
+        let sourceIndex = sourceMembers.findIndex(
+          (member, index) =>
+            !usedSourceIndexes.has(index) &&
+            targetPrimaryId &&
+            clean(member.musicianId) === targetPrimaryId,
+        );
+        if (sourceIndex < 0) {
+          sourceIndex = sourceMembers.findIndex(
+            (member, index) =>
+              !usedSourceIndexes.has(index) &&
+              targetInstrument &&
+              normalise(member.instrument) === targetInstrument,
+          );
+        }
+        if (sourceIndex < 0) continue;
+
+        usedSourceIndexes.add(sourceIndex);
+        rolesMatched += 1;
+        const sourceDeputies = (sourceMembers[sourceIndex].deputies || []).filter(
+          (deputy) => deputyId(deputy) && deputyId(deputy) !== targetPrimaryId,
+        );
+        const existingDeputies = targetMember.deputies || [];
+        const sourceIds = new Set(sourceDeputies.map(deputyId));
+        const existingIds = new Set(existingDeputies.map(deputyId).filter(Boolean));
+        deputiesAdded += [...sourceIds].filter((id) => !existingIds.has(id)).length;
+        targetMember.deputies = [
+          ...sourceDeputies.map(copyDeputySnapshot),
+          ...existingDeputies
+            .filter((deputy) => !sourceIds.has(deputyId(deputy)))
+            .map(copyDeputySnapshot),
+        ];
+      }
+    }
+
+    targetAct.markModified("lineups");
+    await targetAct.save();
+    return res.json({
+      success: true,
+      message: "Regular deputies copied from source act",
+      rolesMatched,
+      deputiesAdded,
+      lineupsUpdated: targetLineups.length,
+    });
+  } catch (error) {
+    console.error("❌ copyDeputiesFromAct error:", error);
+    return res.status(500).json({ success: false, message: "Failed to copy deputies from source act" });
+  }
+};
+
 export const getActMemberDetailsRequest = async (req, res) => {
   try {
     const request = await actMemberDetailsRequestModel.findOne({ tokenHash: hashToken(req.params.token), state: "queued" }).lean();
