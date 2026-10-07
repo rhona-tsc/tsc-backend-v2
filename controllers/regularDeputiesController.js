@@ -93,6 +93,19 @@ export const listRegularDeputies = async (req, res) => {
       expiresAt: { $gt: new Date() },
     }).select("actId lineupId memberId state emailDeliveryState expiresAt").lean();
     const requestByMember = new Map(openRequests.map((request) => [`${request.actId}:${request.lineupId}:${request.memberId}`, request]));
+    const deputyMusicianIds = Array.from(new Set(
+      acts.flatMap((act) => (act.lineups || []).flatMap((lineup) =>
+        (lineup.bandMembers || []).flatMap((member) =>
+          (member.deputies || []).map(deputyId).filter(validId),
+        ),
+      )),
+    ));
+    const deputyAccounts = await musicianModel.find({ _id: { $in: deputyMusicianIds } })
+      .select("_id hasSetPassword onboardingStatus")
+      .lean();
+    const deputyAccountById = new Map(
+      deputyAccounts.map((musician) => [String(musician._id), musician]),
+    );
     const safeActs = acts.map((act) => ({
       _id: act._id,
       name: act.tscName || act.name || "Unnamed act",
@@ -128,6 +141,9 @@ export const listRegularDeputies = async (req, res) => {
             firstName: deputy.firstName || "",
             lastName: deputy.lastName || "",
             image: deputy.image || "",
+            invitePending:
+              deputyAccountById.has(deputyId(deputy)) &&
+              deputyAccountById.get(deputyId(deputy))?.hasSetPassword !== true,
           })),
           detailsRequest: requestByMember.get(`${act._id}:${lineup._id}:${member._id}`) || null,
         };
@@ -138,6 +154,125 @@ export const listRegularDeputies = async (req, res) => {
   } catch (error) {
     console.error("❌ listRegularDeputies error:", error);
     return res.status(500).json({ success: false, message: "Failed to load regular deputies" });
+  }
+};
+
+export const inviteRegularDeputy = async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { actId, lineupId, memberId } = req.params;
+    if (![actId, lineupId, memberId].every(validId)) {
+      return res.status(400).json({ success: false, message: "Invalid act role" });
+    }
+    const firstName = clean(req.body?.firstName);
+    const lastName = clean(req.body?.lastName);
+    const email = clean(req.body?.email).toLowerCase();
+    if (!firstName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, message: "Enter their first name and a valid email address" });
+    }
+
+    const act = await actModel.findById(actId);
+    const lineup = act?.lineups?.id(lineupId);
+    const member = lineup?.bandMembers?.id(memberId);
+    if (!act || !lineup || !member) {
+      return res.status(404).json({ success: false, message: "Act role not found" });
+    }
+
+    let musician = await musicianModel.findOne({ email });
+    if (musician?.hasSetPassword) {
+      return res.status(409).json({
+        success: false,
+        message: "This email already belongs to a registered musician. Add them using the musician search instead.",
+      });
+    }
+    if (!musician) {
+      musician = await musicianModel.create({
+        firstName,
+        lastName,
+        email,
+        basicInfo: { firstName, lastName, email },
+        role: "musician",
+        onboardingStatus: "invited",
+      });
+    } else {
+      musician.firstName = musician.firstName || firstName;
+      musician.lastName = musician.lastName || lastName;
+      musician.basicInfo = {
+        ...(musician.basicInfo?.toObject?.() || musician.basicInfo || {}),
+        firstName: musician.basicInfo?.firstName || firstName,
+        lastName: musician.basicInfo?.lastName || lastName,
+        email,
+      };
+    }
+
+    const musicianId = String(musician._id);
+    if (clean(member.musicianId) === musicianId) {
+      return res.status(409).json({ success: false, message: "This musician is already the original member" });
+    }
+    const alreadyAdded = (member.deputies || []).some(
+      (deputy) => deputyId(deputy) === musicianId,
+    );
+    if (!alreadyAdded) member.deputies.push(musicianSnapshot(musician));
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const now = new Date();
+    musician.inviteTokenHash = hashToken(rawToken);
+    musician.inviteTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    musician.mustChangePassword = true;
+    musician.onboardingInvitedAt = musician.onboardingInvitedAt || now;
+    musician.onboardingStatus = "invited";
+    musician.lastInviteSentAt = now;
+    musician.inviteCount = Number(musician.inviteCount || 0) + 1;
+    await musician.save();
+    act.markModified("lineups");
+    await act.save();
+
+    const setupBase = String(
+      process.env.ADMIN_FRONTEND_URL || "https://admin.thesupremecollective.co.uk",
+    ).replace(/\/$/, "");
+    const setupUrl = `${setupBase}/set-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
+    const actName = act.tscName || act.name || "a Supreme Collective act";
+    const roleName = member.instrument || "musician";
+    const recipientName = [firstName, lastName].filter(Boolean).join(" ");
+    const emailResult = await sendEmail({
+      to: email,
+      bcc: "hello@thesupremecollective.co.uk",
+      subject: `Invitation to join ${actName} as a regular deputy`,
+      text: [
+        `Hi ${recipientName},`,
+        "",
+        `You have been invited to join ${actName} as a regular deputy ${roleName}.`,
+        "Create your secure Supreme Collective login and complete your musician profile using the link below:",
+        "",
+        setupUrl,
+        "",
+        "This link expires in 24 hours.",
+        "",
+        "Best wishes,",
+        "The Supreme Collective",
+      ].join("\n"),
+      html: `
+        <p>Hi ${escapeHtml(recipientName)},</p>
+        <p>You have been invited to join <strong>${escapeHtml(actName)}</strong> as a regular deputy <strong>${escapeHtml(roleName)}</strong>.</p>
+        <p>Create your secure Supreme Collective login and complete your musician profile using the button below.</p>
+        <p><a href="${escapeHtml(setupUrl)}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#ff6667;color:#fff;text-decoration:none;font-weight:700;">Accept invitation and create my profile</a></p>
+        <p style="color:#666;font-size:13px;">This secure link expires in 24 hours.</p>
+        <p>Best wishes,<br />The Supreme Collective</p>
+      `,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: alreadyAdded ? "Invitation resent" : "Deputy invited",
+      emailSent: emailResult?.ok !== false,
+      musicianId,
+    });
+  } catch (error) {
+    console.error("❌ inviteRegularDeputy error:", error);
+    if (error?.code === 11000) {
+      return res.status(409).json({ success: false, message: "A musician with this email already exists" });
+    }
+    return res.status(500).json({ success: false, message: "Failed to invite deputy" });
   }
 };
 
