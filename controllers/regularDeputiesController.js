@@ -74,24 +74,44 @@ export const searchRegularDeputyMusicians = async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
     const query = clean(req.query?.q);
-    if (query.length < 2) return res.json({ success: true, musicians: [] });
+    const genre = clean(req.query?.genre);
+    if (query.length < 2 && !genre) return res.json({ success: true, musicians: [] });
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const pattern = new RegExp(escaped, "i");
-    const musicians = await musicianModel.find({
+    const textMatch = query.length >= 2 ? {
       $or: [
         { firstName: pattern }, { lastName: pattern }, { email: pattern },
         { "basicInfo.firstName": pattern }, { "basicInfo.lastName": pattern },
         { "instrumentation.instrument": pattern },
         { other_skills: pattern },
       ],
+    } : null;
+    const escapedGenre = genre.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const genrePattern = new RegExp(`^${escapedGenre}$`, "i");
+    const musicians = await musicianModel.find({
+      $and: [textMatch].filter(Boolean),
     })
-      .select("firstName lastName email basicInfo instrumentation other_skills profilePhoto")
-      .sort({ firstName: 1, lastName: 1 })
-      .limit(250)
+      .select("firstName lastName email basicInfo instrumentation other_skills vocals.genres genres profilePhoto")
       .lean();
+    const safeMusicians = musicians.map((musician) => {
+      const genres = Array.from(new Set([
+        ...(musician.vocals?.genres || []),
+        ...(musician.genres || []),
+      ].map(clean).filter(Boolean)));
+      return {
+        musician,
+        genres,
+        genreMatch: Boolean(genre && genres.some((item) => genrePattern.test(item))),
+      };
+    }).sort((a, b) => {
+      if (a.genreMatch !== b.genreMatch) return a.genreMatch ? -1 : 1;
+      const aName = clean(a.musician.firstName || a.musician.basicInfo?.firstName);
+      const bName = clean(b.musician.firstName || b.musician.basicInfo?.firstName);
+      return aName.localeCompare(bName, "en", { sensitivity: "base" });
+    });
     return res.json({
       success: true,
-      musicians: musicians.map((musician) => ({
+      musicians: safeMusicians.map(({ musician, genres, genreMatch }) => ({
         _id: musician._id,
         name: [musician.firstName || musician.basicInfo?.firstName, musician.lastName || musician.basicInfo?.lastName].filter(Boolean).join(" "),
         email: musician.email || musician.basicInfo?.email || "",
@@ -99,6 +119,8 @@ export const searchRegularDeputyMusicians = async (req, res) => {
           ...(musician.instrumentation || []).map((item) => item.instrument),
           ...(musician.other_skills || []),
         ].map(clean).filter(Boolean))),
+        genres,
+        genreMatch,
         image: musician.profilePhoto || "",
       })),
     });
