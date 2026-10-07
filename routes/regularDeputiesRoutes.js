@@ -6,6 +6,7 @@ import {
   listRegularDeputies,
   getActMemberDetailsRequest,
   inviteRegularDeputy,
+  previewRegularDeputyInvite,
   searchRegularDeputyMusicians,
   submitActMemberDetailsRequest,
   updateRegularDeputyRole,
@@ -19,6 +20,10 @@ router.get("/", listRegularDeputies);
 router.get("/musicians/search", searchRegularDeputyMusicians);
 router.post("/acts/:actId/copy-first-lineup", copyFirstLineupDeputies);
 router.post("/acts/:actId/copy-from-act", copyDeputiesFromAct);
+router.post(
+  "/acts/:actId/lineups/:lineupId/members/:memberId/invite-preview",
+  previewRegularDeputyInvite,
+);
 router.post(
   "/acts/:actId/lineups/:lineupId/members/:memberId/invite",
   inviteRegularDeputy,

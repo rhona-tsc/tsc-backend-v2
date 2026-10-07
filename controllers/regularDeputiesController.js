@@ -43,6 +43,38 @@ const escapeHtml = (value) => clean(value)
   .replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;")
   .replace(/'/g, "&#39;");
+const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl }) => ({
+  subject: `Invitation to join ${actName} as a regular deputy`,
+  text: [
+    `Hi ${recipientName},`,
+    "",
+    `You have been invited to join ${actName} as a regular deputy ${roleName}.`,
+    "Create your secure Supreme Collective login and complete your musician profile using the link below:",
+    "",
+    setupUrl,
+    "",
+    "This link expires in 24 hours.",
+    "",
+    "Best wishes,",
+    "The Supreme Collective",
+  ].join("\n"),
+  html: `
+    <p>Hi ${escapeHtml(recipientName)},</p>
+    <p>You have been invited to join <strong>${escapeHtml(actName)}</strong> as a regular deputy <strong>${escapeHtml(roleName)}</strong>.</p>
+    <p>Create your secure Supreme Collective login and complete your musician profile using the button below.</p>
+    <p><a href="${escapeHtml(setupUrl)}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#ff6667;color:#fff;text-decoration:none;font-weight:700;">Accept invitation and create my profile</a></p>
+    <p style="color:#666;font-size:13px;">This secure link expires in 24 hours.</p>
+    <p>Best wishes,<br />The Supreme Collective</p>
+  `,
+});
+
+const findActRole = async ({ actId, lineupId, memberId }) => {
+  if (![actId, lineupId, memberId].every(validId)) return {};
+  const act = await actModel.findById(actId);
+  const lineup = act?.lineups?.id(lineupId);
+  const member = lineup?.bandMembers?.id(memberId);
+  return { act, lineup, member };
+};
 
 const getProfileSkills = (musician) => [
   ...(musician.instrumentation || []).map((item) => item?.instrument || item),
@@ -171,9 +203,7 @@ export const inviteRegularDeputy = async (req, res) => {
       return res.status(400).json({ success: false, message: "Enter their first name and a valid email address" });
     }
 
-    const act = await actModel.findById(actId);
-    const lineup = act?.lineups?.id(lineupId);
-    const member = lineup?.bandMembers?.id(memberId);
+    const { act, lineup, member } = await findActRole({ actId, lineupId, memberId });
     if (!act || !lineup || !member) {
       return res.status(404).json({ success: false, message: "Act role not found" });
     }
@@ -234,31 +264,11 @@ export const inviteRegularDeputy = async (req, res) => {
     const actName = act.tscName || act.name || "a Supreme Collective act";
     const roleName = member.instrument || "musician";
     const recipientName = [firstName, lastName].filter(Boolean).join(" ");
+    const invitation = deputyInviteEmail({ recipientName, actName, roleName, setupUrl });
     const emailResult = await sendEmail({
       to: email,
       bcc: "hello@thesupremecollective.co.uk",
-      subject: `Invitation to join ${actName} as a regular deputy`,
-      text: [
-        `Hi ${recipientName},`,
-        "",
-        `You have been invited to join ${actName} as a regular deputy ${roleName}.`,
-        "Create your secure Supreme Collective login and complete your musician profile using the link below:",
-        "",
-        setupUrl,
-        "",
-        "This link expires in 24 hours.",
-        "",
-        "Best wishes,",
-        "The Supreme Collective",
-      ].join("\n"),
-      html: `
-        <p>Hi ${escapeHtml(recipientName)},</p>
-        <p>You have been invited to join <strong>${escapeHtml(actName)}</strong> as a regular deputy <strong>${escapeHtml(roleName)}</strong>.</p>
-        <p>Create your secure Supreme Collective login and complete your musician profile using the button below.</p>
-        <p><a href="${escapeHtml(setupUrl)}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#ff6667;color:#fff;text-decoration:none;font-weight:700;">Accept invitation and create my profile</a></p>
-        <p style="color:#666;font-size:13px;">This secure link expires in 24 hours.</p>
-        <p>Best wishes,<br />The Supreme Collective</p>
-      `,
+      ...invitation,
     });
 
     return res.status(201).json({
@@ -273,6 +283,40 @@ export const inviteRegularDeputy = async (req, res) => {
       return res.status(409).json({ success: false, message: "A musician with this email already exists" });
     }
     return res.status(500).json({ success: false, message: "Failed to invite deputy" });
+  }
+};
+
+export const previewRegularDeputyInvite = async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { actId, lineupId, memberId } = req.params;
+    const firstName = clean(req.body?.firstName);
+    const lastName = clean(req.body?.lastName);
+    const email = clean(req.body?.email).toLowerCase();
+    if (!firstName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, message: "Enter their first name and a valid email address" });
+    }
+    const { act, lineup, member } = await findActRole({ actId, lineupId, memberId });
+    if (!act || !lineup || !member) {
+      return res.status(404).json({ success: false, message: "Act role not found" });
+    }
+    const actName = act.tscName || act.name || "a Supreme Collective act";
+    const roleName = member.instrument || "musician";
+    const recipientName = [firstName, lastName].filter(Boolean).join(" ");
+    const setupUrl = `${String(process.env.ADMIN_FRONTEND_URL || "https://admin.thesupremecollective.co.uk").replace(/\/$/, "")}/set-password?token=TEST-PREVIEW-LINK&email=${encodeURIComponent(email)}`;
+    const result = await sendEmail({
+      to: email,
+      testMode: true,
+      forceTo: "hello@thesupremecollective.co.uk",
+      ...deputyInviteEmail({ recipientName, actName, roleName, setupUrl }),
+    });
+    if (result?.ok === false) {
+      return res.status(502).json({ success: false, message: "The test email could not be delivered. Please check the email service settings." });
+    }
+    return res.json({ success: true, message: "Test invitation sent to hello@thesupremecollective.co.uk" });
+  } catch (error) {
+    console.error("❌ previewRegularDeputyInvite error:", error);
+    return res.status(500).json({ success: false, message: "Could not send the test invitation. Please try again." });
   }
 };
 
