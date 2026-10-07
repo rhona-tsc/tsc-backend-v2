@@ -7,6 +7,8 @@ import {
   getActMemberDetailsRequest,
   inviteRegularDeputy,
   previewRegularDeputyInvite,
+  showRegularDeputyUnsubscribe,
+  unsubscribeRegularDeputy,
   searchRegularDeputyMusicians,
   submitActMemberDetailsRequest,
   updateRegularDeputyRole,
@@ -15,6 +17,8 @@ import {
 const router = express.Router();
 router.get("/details/:token", getActMemberDetailsRequest);
 router.post("/details/:token", submitActMemberDetailsRequest);
+router.get("/unsubscribe", showRegularDeputyUnsubscribe);
+router.post("/unsubscribe", unsubscribeRegularDeputy);
 router.use(authUser);
 router.get("/", listRegularDeputies);
 router.get("/musicians/search", searchRegularDeputyMusicians);

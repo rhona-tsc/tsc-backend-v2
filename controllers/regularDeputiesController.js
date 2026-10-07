@@ -1,10 +1,12 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import actModel from "../models/actModel.js";
 import musicianModel from "../models/musicianModel.js";
 import { canModerateOriginals } from "../services/originalsPolicyService.js";
 import actMemberDetailsRequestModel from "../models/actMemberDetailsRequestModel.js";
 import sendEmail from "../utils/sendEmail.js";
+import deputyInviteSuppressionModel from "../models/deputyInviteSuppressionModel.js";
 
 const clean = (value) => String(value || "").trim();
 const normalise = (value) => clean(value).toLowerCase();
@@ -36,6 +38,11 @@ const copyDeputySnapshot = (deputy) => ({
   image: clean(deputy?.image),
 });
 const hashToken = (token) => crypto.createHash("sha256").update(token).digest("hex");
+const emailHash = (email) => hashToken(normalise(email));
+const unsubscribeSecret = () => process.env.EMAIL_UNSUBSCRIBE_SECRET || process.env.JWT_SECRET;
+const unsubscribeBase = () => String(
+  process.env.BACKEND_PUBLIC_URL || process.env.BACKEND_URL || "https://tsc-backend-v2.onrender.com",
+).replace(/\/$/, "");
 const publicSiteBase = () => String(process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "https://admin.thesupremecollective.co.uk").replace(/\/$/, "");
 const escapeHtml = (value) => clean(value)
   .replace(/&/g, "&amp;")
@@ -45,13 +52,29 @@ const escapeHtml = (value) => clean(value)
   .replace(/'/g, "&#39;");
 const GOOGLE_REVIEWS_URL =
   "https://g.page/r/CesVpcolTfSxEB0/review";
-const GOOGLE_REVIEWS_BADGE_URL =
-  "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777059616/google-icon2_wc33od.png";
 const TSC_REVIEW_GIF_URL =
   "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777045559/TSC_Signature_2026_svgxr5.gif";
 const TSC_WHATSAPP_URL =
   "https://api.whatsapp.com/send/?phone=447594223200&text&type=phone_number&app_absent=0";
-const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl }) => ({
+const INSTAGRAM_URL = "https://instagram.com/thesupremecollective";
+const YOUTUBE_URL = "https://www.youtube.com/channel/UC6HhRZA4XLVajrz5vk5vn2A";
+const WEBSITE_URL = "https://thesupremecollective.co.uk";
+const INSTAGRAM_ICON_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777056960/instagram-icon_rtespa.png";
+const YOUTUBE_ICON_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777056960/1_lo9yf6.png";
+const WEBSITE_ICON_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777207820/website-icon_nuahjk.png";
+const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl, email, isPreview = false }) => {
+  const unsubscribeToken = isPreview ? "" : jwt.sign(
+      { purpose: "deputy_invite_unsubscribe", email: normalise(email) },
+      unsubscribeSecret(),
+      { expiresIn: "30d" },
+    );
+  const unsubscribeUrl = isPreview
+    ? "#"
+    : `${unsubscribeBase()}/api/regular-deputies/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`;
+  const unsubscribeLabel = isPreview
+    ? "Unsubscribe from deputy invitations (disabled in this test)"
+    : "Unsubscribe from deputy invitations";
+  return ({
   subject: `Invitation to join ${actName} as a regular deputy`,
   text: [
     `Hi ${recipientName},`,
@@ -68,6 +91,7 @@ const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl }) => ({
     "",
     `Google reviews: ${GOOGLE_REVIEWS_URL}`,
     `Chat on WhatsApp: ${TSC_WHATSAPP_URL}`,
+    isPreview ? "Unsubscribe: disabled in this test" : `Unsubscribe: ${unsubscribeUrl}`,
   ].join("\n"),
   html: `
     <div style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111111;">
@@ -89,19 +113,29 @@ const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl }) => ({
           <p style="margin:0 0 24px;color:#666666;font-size:13px;text-align:center;">This secure link expires in 24 hours.</p>
           <p style="margin:0 0 18px;font-size:15px;line-height:1.7;color:#444444;">Best wishes,<br /><strong>The Supreme Collective</strong></p>
           <div style="margin:22px 0 0;padding:22px;background:#fafafa;border:1px solid #ececec;border-radius:22px;text-align:center;">
-            <a href="${GOOGLE_REVIEWS_URL}" style="display:inline-block;text-decoration:none;margin-bottom:14px;">
-              <img src="${GOOGLE_REVIEWS_BADGE_URL}" width="192" height="48" alt="The Supreme Collective — 5-star Google reviews" style="display:block;width:192px;height:48px;border:0;object-fit:contain;margin:0 auto;" />
-            </a>
             <a href="${GOOGLE_REVIEWS_URL}" style="display:block;text-decoration:none;">
               <img src="${TSC_REVIEW_GIF_URL}" width="600" alt="Reviews from Supreme Collective clients" style="display:block;width:100%;max-width:600px;height:auto;border:0;margin:0 auto;" />
             </a>
             <a href="${TSC_WHATSAPP_URL}" style="display:inline-block;margin-top:16px;padding:12px 24px;border-radius:999px;background:#25D366;color:#ffffff;text-decoration:none;font-size:17px;font-weight:700;">Chat on WhatsApp</a>
+            <div style="margin-top:22px;padding-top:20px;border-top:1px solid #e3e3e3;text-align:left;">
+              <h3 style="margin:0 0 14px;font-size:16px;color:#111111;">Find us online</h3>
+              <p style="margin:0 0 18px;">
+                <a href="${INSTAGRAM_URL}" style="display:inline-block;margin-right:12px;text-decoration:none;"><img src="${INSTAGRAM_ICON_URL}" width="32" height="32" alt="Instagram" style="border:0;" /></a>
+                <a href="${YOUTUBE_URL}" style="display:inline-block;margin-right:12px;text-decoration:none;"><img src="${YOUTUBE_ICON_URL}" width="32" height="32" alt="YouTube" style="border:0;" /></a>
+                <a href="${WEBSITE_URL}" style="display:inline-block;text-decoration:none;"><img src="${WEBSITE_ICON_URL}" width="32" height="32" alt="The Supreme Collective website" style="border:0;" /></a>
+              </p>
+              <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#555555;">Keep your profile up to date by signing in here: <a href="https://admin.thesupremecollective.co.uk" style="color:#ff6667;text-decoration:none;font-weight:700;">admin.thesupremecollective.co.uk</a></p>
+              <p style="margin:0 0 8px;font-size:12px;line-height:1.7;color:#777777;">Copyright © 2026 The Supreme Collective Ltd. All rights reserved.</p>
+              <p style="margin:0 0 8px;font-size:12px;line-height:1.7;color:#777777;">Registered Office: 71-75, Shelton Street, Covent Garden, London, WC2H 9JQ, United Kingdom | Company Number: 16883956</p>
+              <p style="margin:0;"><a href="${unsubscribeUrl}" style="color:#ff6667;text-decoration:none;font-size:12px;font-weight:700;">${unsubscribeLabel}</a></p>
+            </div>
           </div>
         </div>
       </div>
     </div>
   `,
-});
+  });
+};
 
 const findActRole = async ({ actId, lineupId, memberId }) => {
   if (![actId, lineupId, memberId].every(validId)) return {};
@@ -237,6 +271,12 @@ export const inviteRegularDeputy = async (req, res) => {
     if (!firstName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ success: false, message: "Enter their first name and a valid email address" });
     }
+    if (await deputyInviteSuppressionModel.exists({ emailHash: emailHash(email) })) {
+      return res.status(409).json({
+        success: false,
+        message: "This person has unsubscribed from deputy invitations and cannot be invited again.",
+      });
+    }
 
     const { act, lineup, member } = await findActRole({ actId, lineupId, memberId });
     if (!act || !lineup || !member) {
@@ -299,7 +339,7 @@ export const inviteRegularDeputy = async (req, res) => {
     const actName = act.tscName || act.name || "a Supreme Collective act";
     const roleName = member.instrument || "musician";
     const recipientName = [firstName, lastName].filter(Boolean).join(" ");
-    const invitation = deputyInviteEmail({ recipientName, actName, roleName, setupUrl });
+    const invitation = deputyInviteEmail({ recipientName, actName, roleName, setupUrl, email });
     const emailResult = await sendEmail({
       to: email,
       bcc: "hello@thesupremecollective.co.uk",
@@ -343,7 +383,7 @@ export const previewRegularDeputyInvite = async (req, res) => {
       to: email,
       testMode: true,
       forceTo: "hello@thesupremecollective.co.uk",
-      ...deputyInviteEmail({ recipientName, actName, roleName, setupUrl }),
+      ...deputyInviteEmail({ recipientName, actName, roleName, setupUrl, email, isPreview: true }),
     });
     if (result?.ok === false) {
       return res.status(502).json({ success: false, message: "The test email could not be delivered. Please check the email service settings." });
@@ -352,6 +392,71 @@ export const previewRegularDeputyInvite = async (req, res) => {
   } catch (error) {
     console.error("❌ previewRegularDeputyInvite error:", error);
     return res.status(500).json({ success: false, message: "Could not send the test invitation. Please try again." });
+  }
+};
+
+const unsubscribeTokenPayload = (token) => {
+  const payload = jwt.verify(clean(token), unsubscribeSecret());
+  if (payload?.purpose !== "deputy_invite_unsubscribe" || !normalise(payload?.email)) {
+    throw new Error("Invalid unsubscribe token");
+  }
+  return { email: normalise(payload.email) };
+};
+
+const unsubscribePage = ({ token, complete = false, error = "" }) => `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Deputy invitation preferences</title></head>
+<body style="margin:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111;">
+  <main style="max-width:620px;margin:48px auto;padding:0 18px;">
+    <section style="overflow:hidden;border-radius:24px;background:#fff;border:1px solid #e8e8e8;box-shadow:0 10px 30px rgba(0,0,0,.05);">
+      <header style="padding:28px;background:#111;text-align:center;"><p style="margin:0 0 8px;color:#ff6667;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">The Supreme Collective</p><h1 style="margin:0;color:#fff;font-size:30px;">Deputy invitation preferences</h1></header>
+      <div style="padding:30px;line-height:1.7;">
+        ${complete ? `<h2 style="margin-top:0;">You’ve been unsubscribed</h2><p>Your pending account and deputy listings have been removed. You won’t receive or be eligible for any further regular deputy invitations at this email address.</p>` : error ? `<h2 style="margin-top:0;">This link is no longer valid</h2><p>${escapeHtml(error)}</p>` : `<h2 style="margin-top:0;">Unsubscribe from deputy invitations?</h2><p>This will remove your pending account from The Supreme Collective, remove you from every act’s regular deputy list and prevent future invitations to this email address.</p><form method="post" action="/api/regular-deputies/unsubscribe"><input type="hidden" name="token" value="${escapeHtml(token)}"><button type="submit" style="border:0;border-radius:999px;background:#ff6667;color:#fff;padding:13px 22px;font-size:16px;font-weight:700;cursor:pointer;">Confirm unsubscribe and remove me</button></form>`}
+      </div>
+    </section>
+  </main>
+</body></html>`;
+
+export const showRegularDeputyUnsubscribe = async (req, res) => {
+  try {
+    unsubscribeTokenPayload(req.query?.token);
+    return res.type("html").send(unsubscribePage({ token: req.query.token }));
+  } catch {
+    return res.status(400).type("html").send(unsubscribePage({ error: "The unsubscribe link may have expired. Please contact hello@thesupremecollective.co.uk if you would still like to be removed." }));
+  }
+};
+
+export const unsubscribeRegularDeputy = async (req, res) => {
+  try {
+    const { email } = unsubscribeTokenPayload(req.body?.token);
+    const musician = await musicianModel.findOne({ email }).select("_id hasSetPassword").lean();
+    const musicianId = clean(musician?._id);
+    const acts = await actModel.find({
+      $or: [
+        { "lineups.bandMembers.deputies.email": email },
+        ...(musicianId ? [{ "lineups.bandMembers.deputies.musicianId": musicianId }] : []),
+      ],
+    });
+    await Promise.all(acts.map(async (act) => {
+      for (const lineup of act.lineups || []) {
+        for (const member of lineup.bandMembers || []) {
+          member.deputies = (member.deputies || []).filter((deputy) =>
+            normalise(deputy?.email) !== email && (!musicianId || deputyId(deputy) !== musicianId));
+        }
+      }
+      act.markModified("lineups");
+      await act.save();
+    }));
+    if (musician && musician.hasSetPassword !== true) {
+      await musicianModel.deleteOne({ _id: musician._id });
+    }
+    await deputyInviteSuppressionModel.updateOne(
+      { emailHash: emailHash(email) },
+      { $set: { reason: "recipient_unsubscribed", unsubscribedAt: new Date() } },
+      { upsert: true },
+    );
+    return res.type("html").send(unsubscribePage({ complete: true }));
+  } catch {
+    return res.status(400).type("html").send(unsubscribePage({ error: "The unsubscribe link may have expired. Please contact hello@thesupremecollective.co.uk if you would still like to be removed." }));
   }
 };
 
