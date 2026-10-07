@@ -1,6 +1,7 @@
 import express from "express";
 import authUser from "../middleware/auth.js";
 import {
+  copyFirstLineupDeputies,
   listRegularDeputies,
   getActMemberDetailsRequest,
   searchRegularDeputyMusicians,
@@ -14,5 +15,6 @@ router.post("/details/:token", submitActMemberDetailsRequest);
 router.use(authUser);
 router.get("/", listRegularDeputies);
 router.get("/musicians/search", searchRegularDeputyMusicians);
+router.post("/acts/:actId/copy-first-lineup", copyFirstLineupDeputies);
 router.patch("/acts/:actId/lineups/:lineupId/members/:memberId", updateRegularDeputyRole);
 export default router;

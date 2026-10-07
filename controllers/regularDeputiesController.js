@@ -4,8 +4,10 @@ import actModel from "../models/actModel.js";
 import musicianModel from "../models/musicianModel.js";
 import { canModerateOriginals } from "../services/originalsPolicyService.js";
 import actMemberDetailsRequestModel from "../models/actMemberDetailsRequestModel.js";
+import sendEmail from "../utils/sendEmail.js";
 
 const clean = (value) => String(value || "").trim();
+const normalise = (value) => clean(value).toLowerCase();
 const validId = (value) => mongoose.Types.ObjectId.isValid(clean(value));
 const requireAdmin = (req, res) => {
   if (canModerateOriginals(req.user)) return true;
@@ -20,8 +22,64 @@ const musicianSnapshot = (musician) => ({
   phoneNumber: clean(musician.phone || musician.basicInfo?.phone),
   image: clean(musician.profilePhoto),
 });
+const deputyId = (deputy) => clean(
+  deputy?.musicianId || deputy?._id || deputy?.id || deputy?.clientKey,
+);
+const copyDeputySnapshot = (deputy) => ({
+  id: clean(deputy?.id || deputy?._id),
+  musicianId: clean(deputy?.musicianId),
+  clientKey: clean(deputy?.clientKey),
+  firstName: clean(deputy?.firstName),
+  lastName: clean(deputy?.lastName),
+  email: clean(deputy?.email).toLowerCase(),
+  phoneNumber: clean(deputy?.phoneNumber),
+  image: clean(deputy?.image),
+});
 const hashToken = (token) => crypto.createHash("sha256").update(token).digest("hex");
 const publicSiteBase = () => String(process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "https://admin.thesupremecollective.co.uk").replace(/\/$/, "");
+const escapeHtml = (value) => clean(value)
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;")
+  .replace(/'/g, "&#39;");
+
+const getProfileSkills = (musician) => [
+  ...(musician.instrumentation || []).map((item) => item?.instrument || item),
+  ...(musician.other_skills || []),
+  ...(musician.vocals?.type || []),
+].map(normalise).filter(Boolean);
+
+const profileMeetsRequirement = (musician, requirement) => {
+  const wanted = normalise(requirement);
+  const skills = getProfileSkills(musician);
+  const hasSkill = (pattern) => skills.some((skill) => pattern.test(skill));
+
+  if (/sound engineer|sound engineering/.test(wanted)) {
+    return musician.capabilities?.soundEngineering === true ||
+      musician.capabilities?.paProvision === true ||
+      hasSkill(/sound engineer|sound engineering|audio engineer|\bfoh\b|front of house|\bpa\b|pa provision/);
+  }
+  if (/pa.*light|light.*pa/.test(wanted)) {
+    const hasPa = musician.capabilities?.paProvision === true || hasSkill(/\bpa\b|pa provision/);
+    const hasLights = musician.capabilities?.lightingProvision === true || hasSkill(/light provision|lights provision|pa.*lights/);
+    return hasPa && hasLights;
+  }
+  if (/\bpa\b|pa provision/.test(wanted)) {
+    return musician.capabilities?.paProvision === true || hasSkill(/\bpa\b|pa provision|sound engineering with pa/);
+  }
+  if (/light/.test(wanted)) {
+    return musician.capabilities?.lightingProvision === true || hasSkill(/light provision|lights provision/);
+  }
+  if (/backing.*voc|\bbv\b/.test(wanted)) {
+    return hasSkill(/backing.*voc|\bbv\b|lead.*voc|vocalist|singer/);
+  }
+  if (/musical direct|band leader|\bmd\b/.test(wanted)) {
+    return hasSkill(/musical direct|band leader|\bmd\b/);
+  }
+
+  return skills.some((skill) => skill.includes(wanted) || wanted.includes(skill));
+};
 
 export const listRegularDeputies = async (req, res) => {
   if (!requireAdmin(req, res)) return;
@@ -43,9 +101,21 @@ export const listRegularDeputies = async (req, res) => {
         _id: lineup._id,
         lineupId: lineup.lineupId,
         actSize: lineup.actSize || "Lineup",
-        roles: (lineup.bandMembers || []).filter((member) => clean(member.instrument)).map((member) => ({
+        roles: (lineup.bandMembers || []).filter((member) => clean(member.instrument)).map((member) => {
+          const essentialAdditionalRoles = (member.additionalRoles || [])
+            .filter((additionalRole) => additionalRole?.isEssential && clean(additionalRole?.role))
+            .map((additionalRole) => clean(additionalRole.role))
+            .filter((additionalRole) => additionalRole.toLowerCase() !== clean(member.instrument).toLowerCase());
+          const roleLabel = Array.from(new Set([
+            clean(member.instrument),
+            ...essentialAdditionalRoles,
+          ])).join(" & ");
+
+          return {
           memberId: member._id,
           role: member.instrument,
+          roleLabel,
+          essentialAdditionalRoles,
           primary: {
             musicianId: member.musicianId || "",
             firstName: member.firstName || "",
@@ -60,7 +130,8 @@ export const listRegularDeputies = async (req, res) => {
             image: deputy.image || "",
           })),
           detailsRequest: requestByMember.get(`${act._id}:${lineup._id}:${member._id}`) || null,
-        })),
+        };
+        }),
       })),
     }));
     return res.json({ success: true, acts: safeActs });
@@ -75,6 +146,13 @@ export const searchRegularDeputyMusicians = async (req, res) => {
   try {
     const query = clean(req.query?.q);
     const genre = clean(req.query?.genre);
+    let requirements = [];
+    try {
+      const parsed = JSON.parse(clean(req.query?.requirements) || "[]");
+      requirements = Array.isArray(parsed) ? parsed.map(clean).filter(Boolean) : [];
+    } catch {
+      requirements = [];
+    }
     if (query.length < 2 && !genre) return res.json({ success: true, musicians: [] });
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const pattern = new RegExp(escaped, "i");
@@ -91,19 +169,32 @@ export const searchRegularDeputyMusicians = async (req, res) => {
     const musicians = await musicianModel.find({
       $and: [textMatch].filter(Boolean),
     })
-      .select("firstName lastName email basicInfo musicianSlug instrumentation other_skills vocals.genres genres profilePhoto")
+      .select("firstName lastName email basicInfo musicianSlug instrumentation other_skills vocals genres capabilities profilePhoto")
       .lean();
     const safeMusicians = musicians.map((musician) => {
       const genres = Array.from(new Set([
         ...(musician.vocals?.genres || []),
         ...(musician.genres || []),
       ].map(clean).filter(Boolean)));
+      const matchedRequirements = requirements.filter((requirement) =>
+        profileMeetsRequirement(musician, requirement),
+      );
+      const missingRequirements = requirements.filter(
+        (requirement) => !matchedRequirements.includes(requirement),
+      );
       return {
         musician,
         genres,
         genreMatch: Boolean(genre && genres.some((item) => genrePattern.test(item))),
+        matchedRequirements,
+        missingRequirements,
+        requirementsMatch: Boolean(requirements.length && !missingRequirements.length),
       };
     }).sort((a, b) => {
+      if (a.requirementsMatch !== b.requirementsMatch) return a.requirementsMatch ? -1 : 1;
+      if (a.matchedRequirements.length !== b.matchedRequirements.length) {
+        return b.matchedRequirements.length - a.matchedRequirements.length;
+      }
       if (a.genreMatch !== b.genreMatch) return a.genreMatch ? -1 : 1;
       const aName = clean(a.musician.firstName || a.musician.basicInfo?.firstName);
       const bName = clean(b.musician.firstName || b.musician.basicInfo?.firstName);
@@ -111,7 +202,7 @@ export const searchRegularDeputyMusicians = async (req, res) => {
     });
     return res.json({
       success: true,
-      musicians: safeMusicians.map(({ musician, genres, genreMatch }) => ({
+      musicians: safeMusicians.map(({ musician, genres, genreMatch, matchedRequirements, missingRequirements, requirementsMatch }) => ({
         _id: musician._id,
         musicianSlug: musician.musicianSlug || "",
         name: [musician.firstName || musician.basicInfo?.firstName, musician.lastName || musician.basicInfo?.lastName].filter(Boolean).join(" "),
@@ -122,6 +213,9 @@ export const searchRegularDeputyMusicians = async (req, res) => {
         ].map(clean).filter(Boolean))),
         genres,
         genreMatch,
+        matchedRequirements,
+        missingRequirements,
+        requirementsMatch,
         image: musician.profilePhoto || "",
       })),
     });
@@ -227,12 +321,43 @@ export const updateRegularDeputyRole = async (req, res) => {
         expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
         emailDeliveryState: "queued",
       });
+      const formUrl = `${publicSiteBase()}/regular-deputies/details/${rawToken}`;
+      const recipientName = [snapshot.firstName, snapshot.lastName].filter(Boolean).join(" ") || "there";
+      const actName = act.tscName || act.name || "your act";
+      const emailResult = await sendEmail({
+        to: snapshot.email,
+        bcc: "hello@thesupremecollective.co.uk",
+        subject: `Please confirm your details for ${actName}`,
+        text: [
+          `Hi ${recipientName},`,
+          "",
+          `You have been listed as the original ${member.instrument || "musician"} for ${actName}.`,
+          "Please use the secure link below to confirm the details we need for future bookings and payments:",
+          "",
+          formUrl,
+          "",
+          "This link expires in 14 days.",
+          "",
+          "Best wishes,",
+          "The Supreme Collective",
+        ].join("\n"),
+        html: `
+          <p>Hi ${escapeHtml(recipientName)},</p>
+          <p>You have been listed as the original <strong>${escapeHtml(member.instrument || "musician")}</strong> for <strong>${escapeHtml(actName)}</strong>.</p>
+          <p>Please use the secure link below to confirm the details we need for future bookings and payments.</p>
+          <p><a href="${escapeHtml(formUrl)}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#111;color:#fff;text-decoration:none;font-weight:600;">Confirm my details</a></p>
+          <p style="color:#666;font-size:13px;">This secure link expires in 14 days.</p>
+          <p>Best wishes,<br />The Supreme Collective</p>
+        `,
+      });
+      request.emailDeliveryState = emailResult?.ok ? "sent" : "failed";
+      await request.save();
       detailsRequest = {
         _id: request._id,
         state: request.state,
         emailDeliveryState: request.emailDeliveryState,
         expiresAt: request.expiresAt,
-        formUrl: `${publicSiteBase()}/regular-deputies/details/${rawToken}`,
+        formUrl,
       };
     } else {
       act.markModified("lineups");
@@ -242,6 +367,60 @@ export const updateRegularDeputyRole = async (req, res) => {
   } catch (error) {
     console.error("❌ updateRegularDeputyRole error:", error);
     return res.status(500).json({ success: false, message: "Failed to update regular deputies" });
+  }
+};
+
+export const copyFirstLineupDeputies = async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const { actId } = req.params;
+    if (!validId(actId)) return res.status(400).json({ success: false, message: "Invalid act" });
+    const act = await actModel.findById(actId);
+    if (!act) return res.status(404).json({ success: false, message: "Act not found" });
+    if (!Array.isArray(act.lineups) || act.lineups.length < 2) {
+      return res.status(400).json({ success: false, message: "This act does not have any additional lineups" });
+    }
+
+    const sourceMembers = (act.lineups[0].bandMembers || []).filter((member) => clean(member.instrument));
+    let rolesMatched = 0;
+    let deputiesAdded = 0;
+    for (const targetLineup of act.lineups.slice(1)) {
+      const usedSourceIndexes = new Set();
+      for (const targetMember of targetLineup.bandMembers || []) {
+        const primaryId = clean(targetMember.musicianId);
+        const instrument = normalise(targetMember.instrument);
+        let sourceIndex = sourceMembers.findIndex((member, index) =>
+          !usedSourceIndexes.has(index) && primaryId && clean(member.musicianId) === primaryId,
+        );
+        if (sourceIndex < 0) {
+          sourceIndex = sourceMembers.findIndex((member, index) =>
+            !usedSourceIndexes.has(index) && instrument && normalise(member.instrument) === instrument,
+          );
+        }
+        if (sourceIndex < 0) continue;
+
+        usedSourceIndexes.add(sourceIndex);
+        rolesMatched += 1;
+        const sourceDeputies = sourceMembers[sourceIndex].deputies || [];
+        const existingDeputies = targetMember.deputies || [];
+        const sourceIds = new Set(sourceDeputies.map(deputyId).filter(Boolean));
+        const existingIds = new Set(existingDeputies.map(deputyId).filter(Boolean));
+        deputiesAdded += [...sourceIds].filter((id) => !existingIds.has(id)).length;
+        targetMember.deputies = [
+          ...sourceDeputies.map(copyDeputySnapshot),
+          ...existingDeputies
+            .filter((deputy) => !sourceIds.has(deputyId(deputy)))
+            .map(copyDeputySnapshot),
+        ];
+      }
+    }
+
+    act.markModified("lineups");
+    await act.save();
+    return res.json({ success: true, message: "First lineup deputies copied", rolesMatched, deputiesAdded });
+  } catch (error) {
+    console.error("❌ copyFirstLineupDeputies error:", error);
+    return res.status(500).json({ success: false, message: "Failed to copy first lineup deputies" });
   }
 };
 
