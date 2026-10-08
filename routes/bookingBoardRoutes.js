@@ -63,11 +63,24 @@ const parseTime = (value) => {
 
 const parseMoneyLine = (text, label) => {
   const raw = captureLine(text, label);
-  const match = raw.match(/\b([A-Z]{3})\s*([\d,.]+)/i);
+  const match = raw.match(/(?:\b(GBP|EUR|USD)\b|([£€$]))\s*([\d,.]+)/i);
+  const symbolCurrency = {
+    "£": "GBP",
+    "€": "EUR",
+    "$": "USD",
+  }[match?.[2]];
   return {
-    currency: cleanString(match?.[1]).toUpperCase(),
-    amount: Number(String(match?.[2] || "").replace(/,/g, "")) || 0,
+    currency: cleanString(match?.[1] || symbolCurrency).toUpperCase(),
+    amount: Number(String(match?.[3] || "").replace(/,/g, "")) || 0,
   };
+};
+
+const addCalendarDays = (isoDate, days) => {
+  if (!isoDate || !Number.isFinite(Number(days))) return "";
+  const date = new Date(`${isoDate}T12:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setUTCDate(date.getUTCDate() + Number(days));
+  return date.toISOString().slice(0, 10);
 };
 
 export const parseBookingContract = (contractText, invoiceText = "") => {
@@ -91,6 +104,14 @@ export const parseBookingContract = (contractText, invoiceText = "") => {
     .map(cleanString)
     .filter(Boolean);
   const currency = total.currency || deposit.currency || "GBP";
+  const depositDueDays = Number(
+    contractText.match(
+      /deposit[\s\S]{0,180}?payable[\s\S]{0,120}?within\s+(\d+)\s+days/i,
+    )?.[1] || 0,
+  );
+  const depositDueDateISO =
+    invoiceDueDateISO ||
+    (depositDueDays > 0 ? addCalendarDays(issueDateISO, depositDueDays) : "");
 
   return {
     bookerName: captureLine(contractText, "Contact Name"),
@@ -137,7 +158,7 @@ export const parseBookingContract = (contractText, invoiceText = "") => {
     depositInvoice: {
       invoiceNumber: invoiceRef,
       issueDateISO: invoiceDateISO || issueDateISO,
-      dueDateISO: invoiceDueDateISO,
+      dueDateISO: depositDueDateISO,
       currency,
       gross: deposit.amount,
       net: Number(invoiceText.match(/Net Total\s*([\d,.]+)/i)?.[1]?.replace(/,/g, "")) || 0,

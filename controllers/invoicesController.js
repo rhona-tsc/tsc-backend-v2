@@ -1214,8 +1214,12 @@ const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
 
 const applyDepositInvoiceSplit = (split, row) => {
   const depositGross = Number(row?.depositInvoice?.gross || 0);
-  const depositNet = Number(row?.depositInvoice?.net || 0);
-  const depositVat = Number(row?.depositInvoice?.vat || 0);
+  const storedNet = Number(row?.depositInvoice?.net || 0);
+  const storedVat = Number(row?.depositInvoice?.vat || 0);
+  const calculated = vatFromGross(depositGross, Number(split?.vatRate || 0));
+  const hasStoredTaxSplit = storedNet > 0 || storedVat > 0;
+  const depositNet = hasStoredTaxSplit ? storedNet : calculated.net;
+  const depositVat = hasStoredTaxSplit ? storedVat : calculated.vat;
   Object.assign(split, {
     gross: depositGross,
     amountDue: depositGross,
@@ -1283,7 +1287,9 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const baseInvoiceRef = row.bookingRef || row.bookingId || String(row._id);
     const invoiceRef = isExtrasInvoice
       ? `${baseInvoiceRef}-EXTRAS`
-      : baseInvoiceRef;
+      : isDepositInvoice
+        ? `${baseInvoiceRef}-DEPOSIT`
+        : baseInvoiceRef;
     const mainClientName = firstNonEmpty(
       row.bookerName,
       row.clientName,
@@ -1296,7 +1302,9 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       : mainClientName;
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
     const eventDateFormatted = formatInvoiceDate(eventDate);
-    const dueDate = getSafeInvoiceDueDate(row, eventDate);
+    const dueDate = isDepositInvoice
+      ? firstNonEmpty(row?.depositInvoice?.dueDateISO, row?.invoiceDueDateISO)
+      : getSafeInvoiceDueDate(row, eventDate);
     const paymentReference = row.bookingRef || row.bookingId || String(row._id);
     const actDisplayName = firstNonEmpty(
       row.actName,
@@ -1366,11 +1374,22 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     doc
       .fillColor("#ffffff")
       .font("Helvetica-Bold")
-      .fontSize(26)
-      .text(isReceipt ? "RECEIPT" : "INVOICE", pageWidth - 220, 42, {
-        width: 170,
-        align: "right",
-      });
+      .fontSize(isDepositInvoice ? 20 : 26)
+      .text(
+        isReceipt
+          ? isDepositInvoice
+            ? "DEPOSIT RECEIPT"
+            : "RECEIPT"
+          : isDepositInvoice
+            ? "DEPOSIT INVOICE"
+            : "INVOICE",
+        pageWidth - 250,
+        42,
+        {
+          width: 200,
+          align: "right",
+        },
+      );
 
     // Main white invoice card.
     const cardX = 42;
@@ -1415,7 +1434,10 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         align: "right",
       },
     );
-    doc.font("Helvetica").fontSize(10).fillColor(text);
+    doc
+      .font("Helvetica")
+      .fontSize(isDepositInvoice ? 8.5 : 10)
+      .fillColor(text);
     doc.text(
       `${isReceipt ? "Receipt" : "Invoice"} ref: ${invoiceRef}`,
       cardX + cardW - 230,
@@ -1425,6 +1447,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         align: "right",
       },
     );
+    doc.fontSize(10);
     doc.text(
       `Issue date: ${formatInvoiceDate(
         row?.invoiceDateISO ||
@@ -2137,9 +2160,20 @@ export const createBoardInvoice = async (req, res) => {
       });
     }
 
+    if (isDepositInvoice && Number(row?.depositInvoice?.gross || 0) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "No deposit amount is recorded for this booking. Update the deposit before generating its invoice.",
+      });
+    }
+
     // Historical imports use the booking date as the original invoice issue
     // date. Only fall back to the current date when no usable date exists.
     const invoiceDateISO =
+      (isDepositInvoice && row?.depositInvoice?.issueDateISO
+        ? String(row.depositInvoice.issueDateISO).slice(0, 10)
+        : "") ||
       getBookingDateForVat(row)?.toISOString().slice(0, 10) ||
       now.toISOString().slice(0, 10);
 
@@ -2171,7 +2205,10 @@ export const createBoardInvoice = async (req, res) => {
 }
 
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
-    const finalDueDate = getSafeInvoiceDueDate(row, eventDate);
+    const finalDueDate =
+      (isDepositInvoice && row?.depositInvoice?.dueDateISO
+        ? String(row.depositInvoice.dueDateISO).slice(0, 10)
+        : "") || getSafeInvoiceDueDate(row, eventDate);
 
     const rowForInvoice = {
       ...row,
@@ -2259,10 +2296,14 @@ export const createBoardInvoice = async (req, res) => {
     const publicIdPrefix = isReceipt
       ? isExtrasInvoice
         ? "extras-receipt"
-        : "receipt"
+        : isDepositInvoice
+          ? "deposit-receipt"
+          : "receipt"
       : isExtrasInvoice
         ? "extras-invoice"
-        : "invoice";
+        : isDepositInvoice
+          ? "deposit-invoice"
+          : "invoice";
 
     const uploadResult = await new Promise((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
@@ -2413,6 +2454,15 @@ export const createBoardInvoice = async (req, res) => {
             "payments.extrasPaidAt": requestedPaidAt,
             extrasAccounting: split,
           }
+        : isDepositInvoice
+          ? {
+              invoiceCompany: invoiceCompany.brand,
+              "depositInvoice.receiptUrl": browserDocumentUrl,
+              "depositInvoice.receiptPdfUrl": browserDocumentUrl,
+              "depositInvoice.receiptCreatedAt": now,
+              "depositInvoice.paidAt": requestedPaidAt,
+              "depositInvoice.status": "paid",
+            }
         : {
             invoiceCompany: invoiceCompany.brand,
             receiptUrl: browserDocumentUrl,
@@ -2431,7 +2481,17 @@ export const createBoardInvoice = async (req, res) => {
             "payments.balancePaymentReceivedAt": requestedPaidAt,
             accounting: split,
           }
-      : isExtrasInvoice
+      : isDepositInvoice
+        ? {
+            invoiceCompany: invoiceCompany.brand,
+            "depositInvoice.issueDateISO": invoiceDateISO,
+            "depositInvoice.dueDateISO": finalDueDate,
+            "depositInvoice.invoiceUrl": browserDocumentUrl,
+            "depositInvoice.invoicePdfUrl": browserDocumentUrl,
+            "depositInvoice.invoiceCreatedAt": now,
+            "depositInvoice.status": "issued",
+          }
+        : isExtrasInvoice
         ? {
             invoiceCompany: invoiceCompany.brand,
             extrasInvoiceDateISO: invoiceDateISO,
@@ -2488,6 +2548,15 @@ export const createBoardInvoice = async (req, res) => {
             extrasPaidAt: requestedPaidAt,
             extrasAccounting: split,
           }
+        : isDepositInvoice
+          ? {
+              invoiceCompany: invoiceCompany.brand,
+              "depositInvoice.receiptUrl": browserDocumentUrl,
+              "depositInvoice.receiptPdfUrl": browserDocumentUrl,
+              "depositInvoice.receiptCreatedAt": now,
+              "depositInvoice.paidAt": requestedPaidAt,
+              "depositInvoice.status": "paid",
+            }
         : {
             invoiceCompany: invoiceCompany.brand,
             receiptUrl: browserDocumentUrl,
@@ -2498,7 +2567,17 @@ export const createBoardInvoice = async (req, res) => {
             paidAt: requestedPaidAt,
             accounting: split,
           }
-      : isExtrasInvoice
+      : isDepositInvoice
+        ? {
+            invoiceCompany: invoiceCompany.brand,
+            "depositInvoice.issueDateISO": invoiceDateISO,
+            "depositInvoice.dueDateISO": finalDueDate,
+            "depositInvoice.invoiceUrl": browserDocumentUrl,
+            "depositInvoice.invoicePdfUrl": browserDocumentUrl,
+            "depositInvoice.invoiceCreatedAt": now,
+            "depositInvoice.status": "issued",
+          }
+        : isExtrasInvoice
         ? {
             invoiceCompany: invoiceCompany.brand,
             extrasInvoiceDateISO: invoiceDateISO,
@@ -2680,7 +2759,10 @@ export const serveBoardInvoicePdf = async (req, res) => {
     const invoiceTypeNorm = String(req.query?.invoiceType || "main").toLowerCase();
 
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
-    const finalDueDate = getSafeInvoiceDueDate(row, eventDate);
+    const finalDueDate =
+      (invoiceTypeNorm === "deposit" && row?.depositInvoice?.dueDateISO
+        ? String(row.depositInvoice.dueDateISO).slice(0, 10)
+        : "") || getSafeInvoiceDueDate(row, eventDate);
 
     const rowForInvoice = {
       ...row,
