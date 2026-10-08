@@ -276,6 +276,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
     agent: { type: String }, // e.g. "Encore", "TSC Direct", "Other Agent"
     clientEmails: [EmailSchema],
     clientEmail: { type: String },
+    clientPhone: { type: String, default: "" },
     clientAddress: { type: String, default: "" },
     // Optional payer details used only for extras invoices and receipts.
     // Empty values fall back to the main client billing details.
@@ -319,6 +320,12 @@ const BookingBoardItemSchema = new mongoose.Schema(
     bandLineup: [AssignedMusicianSchema],
     arrivalTime: { type: String }, // “17:30”
     finishTime: { type: String }, // “23:30”
+    performancePlan: { type: String, default: "" },
+    setupTime: { type: String, default: "" },
+    changeTime: { type: String, default: "" },
+    paymentInstructions: { type: mongoose.Schema.Types.Mixed, default: {} },
+    depositInvoice: { type: mongoose.Schema.Types.Mixed, default: {} },
+    importMetadata: { type: mongoose.Schema.Types.Mixed, default: {} },
     sourceBookingId: { type: mongoose.Types.ObjectId, ref: "Booking" },
     source: { type: String, default: "" },
     sessionId: { type: String },

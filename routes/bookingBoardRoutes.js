@@ -10,8 +10,18 @@ import musicianAuth from "../middleware/musicianAuth.js";
 import { parse } from "csv-parse/sync";
 import financeForecastBookingModel from "../models/financeForecastBookingModel.js";
 import multer from "multer";
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024, files: 2 },
+  fileFilter: (_req, file, callback) => {
+    const isPdf =
+      file.mimetype === "application/pdf" ||
+      String(file.originalname || "").toLowerCase().endsWith(".pdf");
+    callback(isPdf ? null : new Error("Only PDF files can be imported."), isPdf);
+  },
+});
 
 const router = express.Router();
 
@@ -23,6 +33,141 @@ const toNumber = (value) => {
 };
 
 const cleanString = (value) => String(value || "").trim();
+
+const captureLine = (text, label) => {
+  const match = String(text || "").match(
+    new RegExp(`^${label}[ \\t]*:[ \\t]*([^\\r\\n]*)$`, "im"),
+  );
+  return cleanString(match?.[1]);
+};
+
+const parseContractDate = (value) => {
+  const cleaned = cleanString(value).replace(/(\d)(st|nd|rd|th)\b/gi, "$1");
+  if (!cleaned) return "";
+  const parsed = new Date(`${cleaned} 12:00:00 UTC`);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+};
+
+const parseTime = (value) => {
+  const text = cleanString(value).toLowerCase();
+  if (!text || text === "tbc") return "";
+  const match = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (!match) return "";
+  let hour = Number(match[1]);
+  const minute = Number(match[2] || 0);
+  if (match[3] === "pm" && hour < 12) hour += 12;
+  if (match[3] === "am" && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+};
+
+const parseMoneyLine = (text, label) => {
+  const raw = captureLine(text, label);
+  const match = raw.match(/\b([A-Z]{3})\s*([\d,.]+)/i);
+  return {
+    currency: cleanString(match?.[1]).toUpperCase(),
+    amount: Number(String(match?.[2] || "").replace(/,/g, "")) || 0,
+  };
+};
+
+export const parseBookingContract = (contractText, invoiceText = "") => {
+  const total = parseMoneyLine(contractText, "Total");
+  const deposit = parseMoneyLine(contractText, "Deposit");
+  const balance = parseMoneyLine(contractText, "Balance to pay");
+  const issueDateISO = parseContractDate(captureLine(contractText, "Date of Issue"));
+  const invoiceDateISO = parseContractDate(
+    invoiceText.match(/\b(\d{1,2}\s+[A-Za-z]+\s+\d{4})\b/)?.[1],
+  );
+  const invoiceDueDateISO = parseContractDate(
+    invoiceText.match(/Payment due by\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})/i)?.[1],
+  );
+  const contractRef = captureLine(contractText, "Contract Ref");
+  const invoiceRef = cleanString(invoiceText.match(/INVOICE\s+([^\n]+)/i)?.[1]);
+  const lineup = captureLine(contractText, "Artist Line-up");
+  const lineupComposition = lineup
+    .replace(/^\d+[- ]piece\s*/i, "")
+    .replace(/^\(|\)$/g, "")
+    .split(/,/) 
+    .map(cleanString)
+    .filter(Boolean);
+  const currency = total.currency || deposit.currency || "GBP";
+
+  return {
+    bookerName: captureLine(contractText, "Contact Name"),
+    clientFirstNames: captureLine(contractText, "Contact Name").split(/\s+/)[0] || "",
+    clientEmail: captureLine(contractText, "Contact Email"),
+    clientPhone: captureLine(contractText, "Contact Telephone"),
+    clientAddress: captureLine(contractText, "Contact Address"),
+    bookingRef: contractRef,
+    eventDateISO: parseContractDate(captureLine(contractText, "Event Date")),
+    bookingDateISO: issueDateISO,
+    invoiceDateISO: invoiceDateISO || issueDateISO,
+    invoiceDueDateISO,
+    eventType: captureLine(contractText, "Event Type"),
+    agent: "Direct",
+    actName: captureLine(contractText, "Artist Name") ||
+      contractText.match(/'Artist'\s*\(([^)]+)\)/i)?.[1] || "",
+    actTscName: captureLine(contractText, "Artist Name") ||
+      contractText.match(/'Artist'\s*\(([^)]+)\)/i)?.[1] || "",
+    address: captureLine(contractText, "Venue Address"),
+    grossValue: total.amount,
+    commissionGross: deposit.amount,
+    passThroughGross: balance.amount,
+    vatRate: invoiceText ? 0.2 : 0,
+    invoiceCompany: "BMM",
+    currency,
+    lineupSelected: lineup,
+    lineupComposition,
+    bandSize: Number(lineup.match(/(\d+)\s*[- ]piece/i)?.[1] || 0),
+    arrivalTime: parseTime(captureLine(contractText, "Artist Arrival Time")),
+    finishTime: parseTime(captureLine(contractText, "Artist Finish Time")),
+    setupTime: captureLine(contractText, "Artist Setup Time"),
+    changeTime: captureLine(contractText, "Artist Change Time"),
+    performancePlan: captureLine(contractText, "Performance Plan"),
+    accounting: {
+      invoiceCompany: "BMM",
+      paymentStage: "deposit",
+      vatRate: invoiceText ? 0.2 : 0,
+      commissionGross: deposit.amount,
+      commissionVat: invoiceText ? round2(deposit.amount / 6) : 0,
+      commissionNet: invoiceText ? round2(deposit.amount * 5 / 6) : deposit.amount,
+      passThroughGross: balance.amount,
+      currency,
+    },
+    depositInvoice: {
+      invoiceNumber: invoiceRef,
+      issueDateISO: invoiceDateISO || issueDateISO,
+      dueDateISO: invoiceDueDateISO,
+      currency,
+      gross: deposit.amount,
+      net: Number(invoiceText.match(/Net Total\s*([\d,.]+)/i)?.[1]?.replace(/,/g, "")) || 0,
+      vat: Number(invoiceText.match(/VAT\s*([\d,.]+)\s+EUR Total/i)?.[1]?.replace(/,/g, "")) || 0,
+      status: "issued",
+    },
+    paymentInstructions: invoiceText ? {
+      bankName: "Barclays",
+      accountName: invoiceText.match(/Account Holder:\s*([^\n]+)/i)?.[1]?.trim() || "",
+      accountNumber: invoiceText.match(/account number\s+(\d+)/i)?.[1] || "",
+      sortCode: invoiceText.match(/sort code\s+([\d-]+)/i)?.[1] || "",
+      iban: invoiceText.match(/IBAN:\s*([^\s]+)/i)?.[1] || "",
+      swiftBic: invoiceText.match(/SWIFTBIC:\s*([^\s]+)/i)?.[1] || "",
+      paymentReference: invoiceText.match(/Payment Reference:\s*([^\n]+)/i)?.[1]?.trim() || contractRef,
+      note: "Use these client-specific payment details instead of the standard invoice account.",
+    } : {},
+    importMetadata: {
+      source: "contract_pdf",
+      contractFilename: "",
+      invoiceFilename: "",
+      importedAt: new Date().toISOString(),
+      incompleteFields: [
+        !captureLine(contractText, "Contact Address") && "clientAddress",
+        !captureLine(contractText, "Venue Address") && "venueAddress",
+        captureLine(contractText, "Artist Start Time").toLowerCase() === "tbc" && "startTime",
+        captureLine(contractText, "Artist Finish Time").toLowerCase() === "tbc" && "finishTime",
+      ].filter(Boolean),
+    },
+  };
+};
 
 const looksLikeRealBookingRow = (row = {}) => {
   const client = cleanString(row.clientFirstNames || row["Client Name"] || row.Name);
@@ -1340,6 +1485,50 @@ rows,
   }
 });
 
+router.post(
+  "/import-contract/preview",
+  musicianAuth,
+  upload.fields([
+    { name: "contract", maxCount: 1 },
+    { name: "invoice", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      if (!isTSCAdmin(req.user)) {
+        return res.status(403).json({ success: false, message: "Admin only." });
+      }
+      const contractFile = req.files?.contract?.[0];
+      const invoiceFile = req.files?.invoice?.[0];
+      if (!contractFile) {
+        return res.status(400).json({ success: false, message: "Please upload a contract PDF." });
+      }
+
+      const [contractResult, invoiceResult] = await Promise.all([
+        pdfParse(contractFile.buffer),
+        invoiceFile ? pdfParse(invoiceFile.buffer) : Promise.resolve({ text: "" }),
+      ]);
+      const draft = parseBookingContract(contractResult.text, invoiceResult.text);
+      draft.importMetadata.contractFilename = contractFile.originalname;
+      draft.importMetadata.invoiceFilename = invoiceFile?.originalname || "";
+
+      if (!draft.bookingRef || !draft.eventDateISO || !draft.actName) {
+        return res.status(422).json({
+          success: false,
+          message: "I could not reliably find the contract reference, event date and artist. Please add this booking manually.",
+        });
+      }
+
+      return res.json({ success: true, draft });
+    } catch (error) {
+      console.error("❌ contract import preview failed:", error);
+      return res.status(400).json({
+        success: false,
+        message: error?.message || "Could not read the uploaded contract.",
+      });
+    }
+  },
+);
+
 router.post("/", musicianAuth, async (req, res) => {
   try {
     if (!isTSCAdmin(req.user)) {
@@ -1468,6 +1657,7 @@ router.post("/", musicianAuth, async (req, res) => {
 
       clientEmails: clientEmail ? [{ email: clientEmail }] : [],
       clientEmail,
+      clientPhone: String(payload.clientPhone || "").trim(),
       clientAddress: String(payload.clientAddress || "").trim(),
       accounting: payload.accounting || undefined,
       eventType: String(payload.eventType || "").trim(),
@@ -1487,6 +1677,12 @@ router.post("/", musicianAuth, async (req, res) => {
 
       arrivalTime: String(payload.arrivalTime || "").trim(),
       finishTime: String(payload.finishTime || "").trim(),
+      performancePlan: String(payload.performancePlan || "").trim(),
+      setupTime: String(payload.setupTime || "").trim(),
+      changeTime: String(payload.changeTime || "").trim(),
+      paymentInstructions: payload.paymentInstructions || {},
+      depositInvoice: payload.depositInvoice || {},
+      importMetadata: payload.importMetadata || {},
 
       bookingDetails: {
         ...(payload.bookingDetails || { djServicesBooked: false }),

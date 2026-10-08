@@ -1237,6 +1237,16 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const documentType = String(row?.documentType || "invoice").toLowerCase();
     const invoiceType = String(row?.invoiceType || "main").toLowerCase();
     const isExtrasInvoice = invoiceType === "extras";
+    const currency = String(
+      row?.accounting?.currency || row?.depositInvoice?.currency || "GBP",
+    ).toUpperCase();
+    const formatMoney = (value) =>
+      new Intl.NumberFormat("en-GB", {
+        style: "currency",
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(Number(value || 0));
     const isReceipt = documentType === "receipt";
     const chargesVat = Number(split?.vatRate || 0) > 0;
     const baseInvoiceRef = row.bookingRef || row.bookingId || String(row._id);
@@ -1976,30 +1986,38 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         paymentY + 58,
       );
     } else {
+      const customBank = row?.paymentInstructions || {};
+      const bankDetails = Object.keys(customBank).length
+        ? customBank
+        : invoiceCompany.bank || {};
       doc.text(
-        `Account name: ${invoiceCompany.bank?.accountName || invoiceCompany.name}`,
+        `Account name: ${bankDetails.accountName || invoiceCompany.name}`,
         cardX + 26,
         paymentY + 16,
       );
-      if (invoiceCompany.bank?.bankName) {
+      if (bankDetails.bankName) {
         doc.text(
-          `Bank: ${invoiceCompany.bank.bankName}`,
+          `Bank: ${bankDetails.bankName}`,
           cardX + 26,
           paymentY + 30,
         );
       }
       doc.text(
-        `Sort code: ${invoiceCompany.bank?.sortCode || ""}`,
+        bankDetails.iban
+          ? `IBAN: ${bankDetails.iban}`
+          : `Sort code: ${bankDetails.sortCode || ""}`,
         cardX + 26,
         paymentY + 44,
       );
       doc.text(
-        `Account number: ${invoiceCompany.bank?.accountNumber || ""}`,
+        bankDetails.swiftBic
+          ? `SWIFT/BIC: ${bankDetails.swiftBic}`
+          : `Account number: ${bankDetails.accountNumber || ""}`,
         cardX + 26,
         paymentY + 58,
       );
       doc.text(
-        `Payment reference: ${paymentReference}`,
+        `Payment reference: ${bankDetails.paymentReference || paymentReference}`,
         cardX + 26,
         paymentY + 72,
       );
@@ -2059,6 +2077,7 @@ export const createBoardInvoice = async (req, res) => {
     const documentTypeNorm = String(documentType || "invoice").toLowerCase();
     const invoiceTypeNorm = String(invoiceType || "main").toLowerCase();
     const isExtrasInvoice = invoiceTypeNorm === "extras";
+    const isDepositInvoice = invoiceTypeNorm === "deposit";
     const isReceipt = documentTypeNorm === "receipt";
     const now = new Date();
     const requestedPaidAt = paymentDate
@@ -2099,6 +2118,8 @@ export const createBoardInvoice = async (req, res) => {
           row?.payments?.extrasPaymentReceived ||
           row?.payments?.extrasInvoicePaid,
       )
+    : isDepositInvoice
+      ? String(row?.depositInvoice?.status || "").toLowerCase() === "paid"
     : Boolean(
         row?.payments?.balancePaymentReceived ||
           row?.payments?.invoicePaid ||
@@ -2151,6 +2172,23 @@ export const createBoardInvoice = async (req, res) => {
     const invoiceCompany = getInvoiceCompany(rowForInvoice);
 
     const split = buildBoardInvoiceSplit(rowForInvoice, invoiceCompany);
+    if (isDepositInvoice) {
+      const depositGross = Number(rowForInvoice?.depositInvoice?.gross || 0);
+      const depositNet = Number(rowForInvoice?.depositInvoice?.net || 0);
+      const depositVat = Number(rowForInvoice?.depositInvoice?.vat || 0);
+      split.gross = depositGross;
+      split.amountDue = depositGross;
+      split.storedGross = depositGross;
+      split.depositPaid = 0;
+      split.passThroughGross = 0;
+      split.commissionGross = depositGross;
+      split.commissionNet = depositNet;
+      split.commissionVat = depositVat;
+      split.totalSupplierGross = 0;
+      split.totalManagementGross = depositGross;
+      split.totalManagementNet = depositNet;
+      split.totalManagementVat = depositVat;
+    }
 
     const actDisplayName = firstNonEmpty(
   rowForInvoice.actName,
