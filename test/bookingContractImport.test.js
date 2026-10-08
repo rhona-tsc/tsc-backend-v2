@@ -34,6 +34,7 @@ Bamboo Music Management Booking Contract issued on behalf of the 'Artist' (Romy 
   assert.equal(draft.passThroughGross, 1100);
   assert.equal(draft.currency, "GBP");
   assert.equal(draft.depositInvoice.gross, 500);
+  assert.equal(draft.depositInvoice.invoiceCompany, "BMM");
   assert.equal(draft.depositInvoice.issueDateISO, "2026-10-08");
   assert.equal(draft.depositInvoice.dueDateISO, "2026-10-15");
 });

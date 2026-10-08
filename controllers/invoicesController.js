@@ -43,6 +43,37 @@ const getInvoiceCompanyBrand = (row) =>
     .trim()
     .toUpperCase();
 
+const resolveDocumentInvoiceCompanyBrand = ({
+  row,
+  invoiceType = "main",
+  requestedBrand = "",
+}) => {
+  const requested = String(requestedBrand || "").trim().toUpperCase();
+  if (requested === "BMM" || requested === "TSC") return requested;
+
+  if (String(invoiceType || "main").toLowerCase() === "deposit") {
+    const depositBrand = String(row?.depositInvoice?.invoiceCompany || "")
+      .trim()
+      .toUpperCase();
+    if (depositBrand === "BMM" || depositBrand === "TSC") {
+      return depositBrand;
+    }
+
+    const bookingRef = String(row?.bookingRef || row?.bookingId || "")
+      .trim()
+      .toUpperCase();
+    const importedFromContract =
+      String(row?.importMetadata?.source || "").toLowerCase() ===
+      "contract_pdf";
+
+    if (importedFromContract || /^BBM(?:\s|[-_])/.test(bookingRef)) {
+      return "BMM";
+    }
+  }
+
+  return getInvoiceCompanyBrand(row);
+};
+
 const getBookingDateForVat = (row) => {
   const value =
     row?.bookingDateISO ||
@@ -2233,10 +2264,11 @@ export const createBoardInvoice = async (req, res) => {
       invoiceDateISO,
       invoiceDueDateISO: finalDueDate,
       invoiceCompany:
-        invoiceCompanyFromRequest ||
-        row.invoiceCompany ||
-        row?.accounting?.invoiceCompany ||
-        "TSC",
+        resolveDocumentInvoiceCompanyBrand({
+          row,
+          invoiceType: invoiceTypeNorm,
+          requestedBrand: invoiceCompanyFromRequest,
+        }),
     };
 
     const invoiceCompany = getInvoiceCompany(rowForInvoice);
@@ -2722,7 +2754,10 @@ export const serveBoardReceiptPdf = async (req, res) => {
       documentType: "receipt",
       invoiceType: invoiceTypeNorm,
       invoiceCompany:
-        row.invoiceCompany || row?.accounting?.invoiceCompany || "TSC",
+        resolveDocumentInvoiceCompanyBrand({
+          row,
+          invoiceType: invoiceTypeNorm,
+        }),
     };
 
     const invoiceCompany = getInvoiceCompany(rowForInvoice);
@@ -2770,7 +2805,10 @@ export const serveBoardInvoicePdf = async (req, res) => {
       invoiceType: invoiceTypeNorm,
       invoiceDueDateISO: finalDueDate,
       invoiceCompany:
-        row.invoiceCompany || row?.accounting?.invoiceCompany || "TSC",
+        resolveDocumentInvoiceCompanyBrand({
+          row,
+          invoiceType: invoiceTypeNorm,
+        }),
     };
 
     const invoiceCompany = getInvoiceCompany(rowForInvoice);

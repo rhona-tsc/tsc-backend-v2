@@ -156,6 +156,7 @@ export const parseBookingContract = (contractText, invoiceText = "") => {
       currency,
     },
     depositInvoice: {
+      invoiceCompany: "BMM",
       invoiceNumber: invoiceRef,
       issueDateISO: invoiceDateISO || issueDateISO,
       dueDateISO: depositDueDateISO,
