@@ -1264,13 +1264,15 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         ? row?.depositInvoice?.currency || row?.accounting?.currency || "GBP"
         : row?.accounting?.currency || row?.depositInvoice?.currency || "GBP",
     ).toUpperCase();
-    const formatMoney = (value) =>
-      new Intl.NumberFormat("en-GB", {
+    const formatMoney = (value) => {
+      const formatted = new Intl.NumberFormat("en-GB", {
         style: "currency",
         currency,
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       }).format(Number(value || 0));
+      return currency === "EUR" ? formatted.replace(/^€\s*/, "€ ") : formatted;
+    };
     const isReceipt = documentType === "receipt";
     const chargesVat = Number(split?.vatRate || 0) > 0;
     const baseInvoiceRef = row.bookingRef || row.bookingId || String(row._id);
