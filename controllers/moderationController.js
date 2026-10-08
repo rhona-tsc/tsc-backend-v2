@@ -3,6 +3,10 @@ import PendingSong from "../models/pendingSongModel.js";
 import Song from "../models/songModel.js";
 import musicianModel from "../models/musicianModel.js";
 import {
+  getActiveApplicantPriorities,
+  withApplicantPriority,
+} from "../services/deputyApplicantPriorityService.js";
+import {
   classifyVideoUrl,
   extractModerationFlags,
   getAzureVideoIndex,
@@ -358,7 +362,12 @@ export const listDeputiesReviewQueue = async (req, res) => {
           "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks approvedBioSource aiBioReviewRequired aiBioGeneratedAt aiBioReviewedAt aiBioGenerationError"
         )
         .lean();
-      const deputies = deputyDocs.map(addVideoReviewSummary);
+      const priorityMap = await getActiveApplicantPriorities(
+        deputyDocs.map((deputy) => deputy._id),
+      );
+      const deputies = deputyDocs
+        .map(addVideoReviewSummary)
+        .map((deputy) => withApplicantPriority(deputy, priorityMap, deputy._id));
 
       return res.json({
         success: true,
@@ -388,7 +397,12 @@ export const listDeputiesReviewQueue = async (req, res) => {
         "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks approvedBioSource aiBioReviewRequired aiBioGeneratedAt aiBioReviewedAt aiBioGenerationError"
       )
       .lean();
-    const deputies = deputyDocs.map(addVideoReviewSummary);
+    const priorityMap = await getActiveApplicantPriorities(
+      deputyDocs.map((deputy) => deputy._id),
+    );
+    const deputies = deputyDocs
+      .map(addVideoReviewSummary)
+      .map((deputy) => withApplicantPriority(deputy, priorityMap, deputy._id));
 
     return res.json({
       success: true,

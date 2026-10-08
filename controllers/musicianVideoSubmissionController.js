@@ -4,6 +4,10 @@ import musicianModel from "../models/musicianModel.js";
 import musicianVideoSubmissionModel from "../models/musicianVideoSubmissionModel.js";
 import { extractModerationFlags, getAzureVideoIndex, submitVideoToAzure } from "../services/videoModerationService.js";
 import { buildAnonymousYoutubeMetadata, publishVideoToYoutube } from "../services/youtubeVideoService.js";
+import {
+  getActiveApplicantPriorities,
+  withApplicantPriority,
+} from "../services/deputyApplicantPriorityService.js";
 
 const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
 const clean = (value = "") => String(value || "").trim();
@@ -149,12 +153,28 @@ export const listMusicianVideoSubmissionsForReview = async (_req, res) => {
       .find({ status: { $in: ["processing", "manual_required", "ready_for_review", "publishing", "failed"] } })
       .populate("musicianId", "firstName lastName email musicianSlug")
       .sort({ createdAt: -1 });
+    const priorityMap = await getActiveApplicantPriorities(
+      submissions.map((item) => item.musicianId?._id || item.musicianId),
+    );
+    const prioritised = submissions
+      .map((item) =>
+        withApplicantPriority(
+          {
+            ...serialise(item, { includeAccessUrl: true }),
+            musician: item.musicianId,
+          },
+          priorityMap,
+          item.musicianId?._id || item.musicianId,
+        ),
+      )
+      .sort(
+        (a, b) =>
+          Number(b.clientPriority || 0) - Number(a.clientPriority || 0) ||
+          new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
+      );
     return res.json({
       success: true,
-      submissions: submissions.map((item) => ({
-        ...serialise(item, { includeAccessUrl: true }),
-        musician: item.musicianId,
-      })),
+      submissions: prioritised,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Could not load the video review queue" });
