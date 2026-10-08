@@ -49,7 +49,9 @@ const parseContractDate = (value) => {
 };
 
 const parseTime = (value) => {
-  const text = cleanString(value).toLowerCase();
+  const text = cleanString(value)
+    .toLowerCase()
+    .replace(/(\d)\.(\d{2})/g, "$1:$2");
   if (!text || text === "tbc") return "";
   const match = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
   if (!match) return "";
@@ -83,7 +85,129 @@ const addCalendarDays = (isoDate, days) => {
   return date.toISOString().slice(0, 10);
 };
 
+const parseEncoreBooking = (bookingText, acceptedEmailText = "") => {
+  const primary = String(bookingText || "");
+  const supporting = String(acceptedEmailText || "");
+  const combined = `${primary}\n${supporting}`;
+  const money = (pattern) =>
+    Number(combined.match(pattern)?.[1]?.replace(/,/g, "")) || 0;
+  const reference = cleanString(
+    combined.match(/Job reference\s*:\s*([a-z0-9-]+?)(?=What's|\s|$)/i)?.[1] ||
+      combined.match(/\[([a-z0-9-]+)\]/i)?.[1],
+  );
+  const actName = cleanString(
+    primary.match(/Booked as\s*:\s*\n?([^\r\n]+)/i)?.[1] ||
+      supporting.match(/Hi\s+([^,\r\n]+),/i)?.[1],
+  ).replace(/Cancel booking.*$/i, "").trim();
+  const clientName = cleanString(
+    primary.match(/Contact details\s*:\s*\n([^\r\n]+)/i)?.[1] ||
+      combined.match(/location with\s+([^\s]+)\s+if/i)?.[1],
+  );
+  const email = cleanString(
+    primary.match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{1,4}(?:\s*\n\s*[A-Z])?)/i)?.[1],
+  ).replace(/\s+/g, "");
+  const phone = cleanString(
+    primary.match(/Contact details\s*:[\s\S]{0,180}?(0\d(?:[\s-]?\d){9,10})/i)?.[1] ||
+      primary.match(/call\s+[^\r\n]+\s+on\s+(0\d(?:[\s-]?\d){9,10})/i)?.[1],
+  ).replace(/\s+/g, "");
+  const eventDateText = cleanString(
+    primary.match(/Date\s*:\s*\n([^\r\n]+)/i)?.[1] ||
+      supporting.match(/Saturday\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})/i)?.[1],
+  );
+  const bookingDateText = cleanString(
+    supporting.match(/(\d{1,2}\s+[A-Za-z]+\s+\d{4})\s+at\s+\d{1,2}:\d{2}/i)?.[1] ||
+      primary.match(/(\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]+\s+\d{4})\s*You accepted this booking/i)?.[1],
+  );
+  const enquiryDateText = cleanString(
+    primary.match(/(\d{1,2}(?:st|nd|rd|th)\s+[A-Za-z]+\s+\d{4})\s*[^\r\n]{1,80}?requested a quote/i)?.[1],
+  );
+  const venueBlock = cleanString(
+    primary.match(/Location\s*:\s*\n([\s\S]{0,160}?)\nDate\s*:/i)?.[1] ||
+      supporting.match(/Booking details[\s\S]*?\n([^\n]+\n[^\n]+)\nSaturday/i)?.[1],
+  );
+  const address = venueBlock
+    .split(/\r?\n/)
+    .map(cleanString)
+    .filter(Boolean)
+    .join(", ");
+  const lineup = cleanString(primary.match(/Line-up\s*:\s*\n([^\r\n]+)/i)?.[1]);
+  const performanceFee = money(/Performance fee\s*£\s*([\d,.]+)/i) ||
+    money(/You quoted\s*:\s*£\s*([\d,.]+)/i);
+  const serviceFee = money(/Service fee\s*-?\s*£\s*([\d,.]+)/i);
+  const earnings = money(/Your earnings\s*:?\s*£\s*([\d,.]+)/i);
+  const depositPaid = /Deposit paid\s*-\s*Encore Pay/i.test(primary);
+  const depositAmount = depositPaid && earnings ? round2(earnings * 0.1) : 0;
+  const arrivalTime = parseTime(
+    primary.match(/Arrive\s*\n([^\r\n]+)/i)?.[1] ||
+      supporting.match(/\n(\d{1,2}:\d{2}\s*(?:am|pm))\s+for\s+\d+/i)?.[1],
+  );
+
+  return {
+    bookerName: clientName,
+    clientFirstNames: clientName.split(/\s+/)[0] || "",
+    clientEmail: email,
+    clientPhone: phone,
+    clientAddress: "",
+    bookingRef: reference,
+    eventDateISO: parseContractDate(eventDateText),
+    enquiryDateISO: parseContractDate(enquiryDateText),
+    bookingDateISO: parseContractDate(bookingDateText),
+    eventType: /wedding/i.test(combined) ? "Wedding" : "",
+    agent: "Encore",
+    actName,
+    actTscName: actName,
+    address,
+    grossValue: performanceFee,
+    commissionGross: serviceFee,
+    passThroughGross: earnings,
+    vatRate: 0,
+    invoiceCompany: "TSC",
+    currency: "GBP",
+    lineupSelected: lineup,
+    lineupComposition: [],
+    bandSize: Number(lineup.match(/(\d+)\s*musicians?/i)?.[1] || 0),
+    arrivalTime,
+    finishTime: "",
+    performancePlan: cleanString(
+      primary.match(/This quote is for\s*:\s*\n([^\r\n]+)/i)?.[1] ||
+        supporting.match(/\((\d+\s*x\s*\d+min sets)\)/i)?.[1],
+    ),
+    accounting: {
+      invoiceCompany: "TSC",
+      paymentStage: depositPaid ? "deposit" : "",
+      vatRate: 0,
+      commissionGross: serviceFee,
+      commissionVat: 0,
+      commissionNet: serviceFee,
+      passThroughGross: earnings,
+      currency: "GBP",
+    },
+    payments: {
+      depositAmount,
+      depositChargedAmount: depositAmount,
+      balancePaymentReceived: false,
+      bandPaymentsSent: false,
+    },
+    importMetadata: {
+      source: "encore_pdf",
+      contractFilename: "",
+      invoiceFilename: "",
+      importedAt: new Date().toISOString(),
+      incompleteFields: [
+        !address && "venueAddress",
+        !email && "clientEmail",
+        !arrivalTime && "arrivalTime",
+        "finishTime",
+      ].filter(Boolean),
+    },
+  };
+};
+
 export const parseBookingContract = (contractText, invoiceText = "") => {
+  if (/Job reference\s*:|Encore Pay|encoremusicians\.com/i.test(`${contractText}\n${invoiceText}`)) {
+    return parseEncoreBooking(contractText, invoiceText);
+  }
+
   const total = parseMoneyLine(contractText, "Total");
   const deposit = parseMoneyLine(contractText, "Deposit");
   const balance = parseMoneyLine(contractText, "Balance to pay");
@@ -1534,7 +1658,7 @@ router.post(
       const contractFile = req.files?.contract?.[0];
       const invoiceFile = req.files?.invoice?.[0];
       if (!contractFile) {
-        return res.status(400).json({ success: false, message: "Please upload a contract PDF." });
+        return res.status(400).json({ success: false, message: "Please upload a booking or contract PDF." });
       }
 
       const [contractResult, invoiceResult] = await Promise.all([
@@ -1548,7 +1672,7 @@ router.post(
       if (!draft.bookingRef || !draft.eventDateISO || !draft.actName) {
         return res.status(422).json({
           success: false,
-          message: "I could not reliably find the contract reference, event date and artist. Please add this booking manually.",
+          message: "I could not reliably find the booking reference, event date and artist. Please add this booking manually.",
         });
       }
 
