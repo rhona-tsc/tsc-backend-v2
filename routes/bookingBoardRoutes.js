@@ -928,6 +928,15 @@ const mergeRowData = (preferred, secondary) => {
       Array.isArray(preferred?.payments) && preferred.payments.length
         ? preferred.payments
         : secondary?.payments,
+    depositInvoice:
+      preferred?.depositInvoice?.gross
+        ? preferred.depositInvoice
+        : secondary?.depositInvoice,
+    paymentInstructions:
+      preferred?.paymentInstructions?.iban ||
+      preferred?.paymentInstructions?.accountNumber
+        ? preferred.paymentInstructions
+        : secondary?.paymentInstructions,
     balancePaid: Boolean(preferred?.balancePaid ?? secondary?.balancePaid),
     bandPaymentsSent: Boolean(
       preferred?.bandPaymentsSent ?? secondary?.bandPaymentsSent,
@@ -1156,6 +1165,8 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     },
     payments: rawPayments.length ? rawPayments : paymentsMeta,
     accounting: doc?.accounting || null,
+    depositInvoice: doc?.depositInvoice || null,
+    paymentInstructions: doc?.paymentInstructions || null,
     balancePaid: Boolean(doc?.balancePaid),
     bandPaymentsSent: Boolean(doc?.bandPaymentsSent),
 
