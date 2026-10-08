@@ -24,7 +24,7 @@ const compact = (value) => {
 export const buildMusicianBioSource = (musician) => compact({
   firstName: musician.firstName,
   submittedBio: musician.bio,
-  tagline: musician.tagLine,
+  submittedTagline: musician.tagLineSource === "ai" ? "" : musician.tagLine,
   instruments: musician.instrumentation,
   vocals: musician.vocals,
   skills: musician.other_skills,
@@ -71,22 +71,37 @@ const hasUsefulSource = (source) => clean(source.submittedBio).length >= 40 ||
   (Array.isArray(source.repertoire) && source.repertoire.length >= 3) ||
   (Array.isArray(source.instruments) && source.instruments.length > 0);
 
-export const generateAndPublishMusicianBio = async (musicianId, { force = false } = {}) => {
+export const generateAndPublishMusicianBio = async (musicianId, options = {}) => {
   const musician = await musicianModel.findById(musicianId);
   if (!musician) return { generated: false, reason: "musician_not_found" };
 
+  const forceBio = Boolean(options.forceBio ?? options.force);
+  const forceTagline = Boolean(options.forceTagline);
   const existingBio = clean(musician.tscApprovedBio);
-  const sourceIsAi = musician.approvedBioSource === "ai";
-  if (!force && existingBio && !sourceIsAi) {
-    return { generated: false, reason: "manual_bio_preserved" };
-  }
-
   const source = buildMusicianBioSource(musician.toObject());
   if (!hasUsefulSource(source)) return { generated: false, reason: "insufficient_profile_information" };
 
   const sourceHash = hashSource(source);
-  if (!force && sourceIsAi && musician.aiBioSourceHash === sourceHash) {
-    return { generated: false, reason: "source_unchanged" };
+  const sourceIsAi = musician.approvedBioSource === "ai";
+  const existingTagline = clean(musician.tagLine);
+  const taglineIsAi = musician.tagLineSource === "ai";
+  const shouldGenerateBio =
+    forceBio ||
+    (!existingBio || sourceIsAi) &&
+      !(sourceIsAi && musician.aiBioSourceHash === sourceHash);
+  const shouldGenerateTagline =
+    forceTagline ||
+    !existingTagline ||
+    (taglineIsAi && musician.aiTaglineSourceHash !== sourceHash);
+
+  if (!shouldGenerateBio && !shouldGenerateTagline) {
+    return {
+      generated: false,
+      reason:
+        existingBio && !sourceIsAi && existingTagline && !taglineIsAi
+          ? "manual_profile_copy_preserved"
+          : "source_unchanged",
+    };
   }
 
   if (!process.env.OPENAI_API_KEY) {
@@ -105,8 +120,14 @@ export const generateAndPublishMusicianBio = async (musicianId, { force = false 
     maxRetries: 2,
   });
 
-  try {
-    const completion = await client.chat.completions.create({
+  let biography = "";
+  let tagline = "";
+  let biographyError = "";
+  let taglineError = "";
+
+  if (shouldGenerateBio) {
+    try {
+      const completion = await client.chat.completions.create({
       model,
       temperature: 0.45,
       messages: [
@@ -121,36 +142,101 @@ export const generateAndPublishMusicianBio = async (musicianId, { force = false 
       ],
     });
 
-    const biography = cleanBiography(completion.choices?.[0]?.message?.content);
-    if (biography.length < 80) throw new Error("Generated biography was too short");
-    assertPublicBioIsPrivate(biography, musician);
+      biography = cleanBiography(completion.choices?.[0]?.message?.content);
+      if (biography.length < 80) throw new Error("Generated biography was too short");
+      assertPublicBioIsPrivate(biography, musician);
 
-    await musicianModel.updateOne(
-      { _id: musician._id },
-      {
-        $set: {
-          tscApprovedBio: biography,
-          approvedBioSource: "ai",
-          aiBioReviewRequired: true,
-          aiBioGeneratedAt: new Date(),
-          aiBioReviewedAt: null,
-          aiBioSourceHash: sourceHash,
-          aiBioModel: model,
-          aiBioGenerationError: "",
+      await musicianModel.updateOne(
+        { _id: musician._id },
+        {
+          $set: {
+            tscApprovedBio: biography,
+            approvedBioSource: "ai",
+            aiBioReviewRequired: true,
+            aiBioGeneratedAt: new Date(),
+            aiBioReviewedAt: null,
+            aiBioSourceHash: sourceHash,
+            aiBioModel: model,
+            aiBioGenerationError: "",
+          },
         },
-      },
-      { runValidators: false },
-    );
-
-    return { generated: true, biography, model };
-  } catch (error) {
-    const generationError = String(error?.message || "Biography generation failed").slice(0, 500);
-    await musicianModel.updateOne(
-      { _id: musician._id },
-      { $set: { aiBioGenerationError: generationError } },
-      { runValidators: false },
-    );
-    console.error("❌ AI musician bio generation failed:", error);
-    return { generated: false, reason: "generation_failed", error: generationError };
+        { runValidators: false },
+      );
+    } catch (error) {
+      biographyError = String(error?.message || "Biography generation failed").slice(0, 500);
+      await musicianModel.updateOne(
+        { _id: musician._id },
+        { $set: { aiBioGenerationError: biographyError } },
+        { runValidators: false },
+      );
+      console.error("❌ AI musician bio generation failed:", error);
+    }
   }
+
+  if (shouldGenerateTagline) {
+    try {
+      const completion = await client.chat.completions.create({
+        model,
+        temperature: 0.5,
+        messages: [
+          {
+            role: "system",
+            content: "Write one premium musician-profile tagline in British English using only the supplied facts. It must be a single phrase or sentence of 45-120 characters, with no name, heading, quotation marks, emoji or full stop at the end. Lead with the musician's strongest instrument, vocal ability or live-performance strength. Never invent experience or credits. Never include band names, artist names, clients, venues, locations, contact details, URLs or social handles.",
+          },
+          {
+            role: "user",
+            content: `Create the public profile tagline from this application data:\n${JSON.stringify(source)}`,
+          },
+        ],
+      });
+      tagline = clean(completion.choices?.[0]?.message?.content)
+        .replace(/^["'“”]+|["'“”]+$/g, "")
+        .replace(/[.!]\s*$/, "")
+        .slice(0, 120)
+        .trim();
+      if (tagline.length < 20) throw new Error("Generated tagline was too short");
+      assertPublicBioIsPrivate(tagline, musician);
+
+      await musicianModel.updateOne(
+        { _id: musician._id },
+        {
+          $set: {
+            tagLine: tagline,
+            tagLineSource: "ai",
+            aiTaglineReviewRequired: true,
+            aiTaglineGeneratedAt: new Date(),
+            aiTaglineReviewedAt: null,
+            aiTaglineSourceHash: sourceHash,
+            aiTaglineModel: model,
+            aiTaglineGenerationError: "",
+          },
+        },
+        { runValidators: false },
+      );
+    } catch (error) {
+      taglineError = String(error?.message || "Tagline generation failed").slice(0, 500);
+      await musicianModel.updateOne(
+        { _id: musician._id },
+        { $set: { aiTaglineGenerationError: taglineError } },
+        { runValidators: false },
+      );
+      console.error("❌ AI musician tagline generation failed:", error);
+    }
+  }
+
+  const generated = Boolean(biography || tagline);
+  return {
+    generated,
+    biography,
+    tagline,
+    biographyGenerated: Boolean(biography),
+    taglineGenerated: Boolean(tagline),
+    model,
+    ...(!generated
+      ? {
+          reason: "generation_failed",
+          error: [biographyError, taglineError].filter(Boolean).join("; "),
+        }
+      : {}),
+  };
 };

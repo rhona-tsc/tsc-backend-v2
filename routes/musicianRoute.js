@@ -454,6 +454,12 @@ router.patch("/moderation/deputy/:id/save", verifyToken, async (req, res) => {
       updates.aiBioReviewedAt = new Date();
       updates.aiBioGenerationError = "";
     }
+    if (Object.prototype.hasOwnProperty.call(updates, "tagLine")) {
+      updates.tagLineSource = "manual";
+      updates.aiTaglineReviewRequired = false;
+      updates.aiTaglineReviewedAt = new Date();
+      updates.aiTaglineGenerationError = "";
+    }
 
     // ✅ Use mongoose setter (casts + marks modified properly)
     doc.set(updates);
@@ -567,9 +573,20 @@ router.post("/moderation/bios/backfill", verifyToken, async (req, res) => {
         },
         {
           $or: [
-            { tscApprovedBio: { $exists: false } },
-            { tscApprovedBio: null },
-            { tscApprovedBio: "" },
+            {
+              $or: [
+                { tscApprovedBio: { $exists: false } },
+                { tscApprovedBio: null },
+                { tscApprovedBio: "" },
+              ],
+            },
+            {
+              $or: [
+                { tagLine: { $exists: false } },
+                { tagLine: null },
+                { tagLine: "" },
+              ],
+            },
           ],
         },
         {
@@ -657,15 +674,18 @@ router.post("/moderation/deputy/:id/generate-bio", verifyToken, async (req, res)
       return res.status(403).json({ success: false, message: "Admin access required" });
     }
 
-    const result = await generateAndPublishMusicianBio(req.params.id, { force: true });
+    const result = await generateAndPublishMusicianBio(req.params.id, { forceBio: true });
     if (!result.generated) {
       return res.status(422).json({ success: false, message: result.error || result.reason || "Bio could not be generated" });
     }
 
     return res.json({
       success: true,
-      message: "AI bio generated, published and flagged for review",
+      message: result.taglineGenerated
+        ? "AI biography and tagline generated and flagged for review"
+        : "AI biography generated and flagged for review",
       biography: result.biography,
+      tagline: result.tagline,
     });
   } catch (error) {
     console.error("❌ generate musician bio failed:", error);

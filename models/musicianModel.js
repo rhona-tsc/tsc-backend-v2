@@ -75,6 +75,18 @@ const musicianSchema = new mongoose.Schema(
     musicianSlug: { type: String, unique: true, sparse: true, index: true },
 
     tagLine: { type: String, maxlength: 160 },
+    tagLineSource: {
+      type: String,
+      enum: ["", "manual", "ai"],
+      default: "",
+      index: true,
+    },
+    aiTaglineReviewRequired: { type: Boolean, default: false, index: true },
+    aiTaglineGeneratedAt: { type: Date, default: null },
+    aiTaglineReviewedAt: { type: Date, default: null },
+    aiTaglineSourceHash: { type: String, default: "" },
+    aiTaglineModel: { type: String, default: "" },
+    aiTaglineGenerationError: { type: String, default: "" },
     tscApprovedBio: { type: String },
     approvedBioSource: {
       type: String,

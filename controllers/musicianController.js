@@ -1625,7 +1625,15 @@ const registerDeputy = async (req, res) => {
       musician.aiBioReviewRequired = false;
       musician.aiBioReviewedAt = new Date();
     }
+    const previousTagLine = String(musician.tagLine || "").trim();
     musician.tagLine = body.tagLine ?? musician.tagLine ?? "";
+    const submittedTagLine = String(body.tagLine ?? "").trim();
+    if (submittedTagLine && submittedTagLine !== previousTagLine) {
+      musician.tagLineSource = "manual";
+      musician.aiTaglineReviewRequired = false;
+      musician.aiTaglineReviewedAt = new Date();
+      musician.aiTaglineGenerationError = "";
+    }
 
     if (body.dateRegistered) {
       const d = new Date(body.dateRegistered);

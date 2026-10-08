@@ -22,9 +22,20 @@ const eligibleQuery = (cursor = null) => ({
     },
     {
       $or: [
-        { tscApprovedBio: { $exists: false } },
-        { tscApprovedBio: null },
-        { tscApprovedBio: "" },
+        {
+          $or: [
+            { tscApprovedBio: { $exists: false } },
+            { tscApprovedBio: null },
+            { tscApprovedBio: "" },
+          ],
+        },
+        {
+          $or: [
+            { tagLine: { $exists: false } },
+            { tagLine: null },
+            { tagLine: "" },
+          ],
+        },
       ],
     },
     {
