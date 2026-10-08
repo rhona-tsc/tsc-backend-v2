@@ -359,7 +359,7 @@ export const listDeputiesReviewQueue = async (req, res) => {
       const deputyDocs = await musicianModel
         .find({ role: { $in: ["musician", "deputy"] } })
         .select(
-          "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks approvedBioSource aiBioReviewRequired aiBioGeneratedAt aiBioReviewedAt aiBioGenerationError tagLine tagLineSource aiTaglineReviewRequired aiTaglineGeneratedAt aiTaglineReviewedAt aiTaglineGenerationError"
+          "_id musicianSlug firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks approvedBioSource aiBioReviewRequired aiBioGeneratedAt aiBioReviewedAt aiBioGenerationError tagLine tagLineSource aiTaglineReviewRequired aiTaglineGeneratedAt aiTaglineReviewedAt aiTaglineGenerationError"
         )
         .lean();
       const priorityMap = await getActiveApplicantPriorities(
@@ -394,7 +394,7 @@ export const listDeputiesReviewQueue = async (req, res) => {
         status: { $in: wanted },
       })
       .select(
-        "_id firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks approvedBioSource aiBioReviewRequired aiBioGeneratedAt aiBioReviewedAt aiBioGenerationError tagLine tagLineSource aiTaglineReviewRequired aiTaglineGeneratedAt aiTaglineReviewedAt aiTaglineGenerationError"
+        "_id musicianSlug firstName lastName name email status dateRegistered profileLastEditedAt profileLastReviewedAt profileUpdatedByUser lastLoginAt functionBandVideoLinks originalBandVideoLinks tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks approvedBioSource aiBioReviewRequired aiBioGeneratedAt aiBioReviewedAt aiBioGenerationError tagLine tagLineSource aiTaglineReviewRequired aiTaglineGeneratedAt aiTaglineReviewedAt aiTaglineGenerationError"
       )
       .lean();
     const priorityMap = await getActiveApplicantPriorities(
