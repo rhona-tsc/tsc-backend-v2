@@ -1727,6 +1727,10 @@ router.post("/", musicianAuth, async (req, res) => {
       updatedAt: new Date(),
     };
 
+    const existingBoardRow = await BookingBoardItem.findOne({ bookingRef })
+      .select("_id")
+      .lean();
+
     const boardRow = await BookingBoardItem.findOneAndUpdate(
       { bookingRef },
       { $set: boardPatch, $setOnInsert: { createdAt: new Date() } },
@@ -1735,6 +1739,7 @@ router.post("/", musicianAuth, async (req, res) => {
 
     return res.json({
       success: true,
+      operation: existingBoardRow ? "updated" : "created",
       row: {
         ...(boardRow?.toObject ? boardRow.toObject() : boardRow),
         sourceBookingId: booking._id, // handy for the frontend
