@@ -1258,8 +1258,11 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     const documentType = String(row?.documentType || "invoice").toLowerCase();
     const invoiceType = String(row?.invoiceType || "main").toLowerCase();
     const isExtrasInvoice = invoiceType === "extras";
+    const isDepositInvoice = invoiceType === "deposit";
     const currency = String(
-      row?.accounting?.currency || row?.depositInvoice?.currency || "GBP",
+      invoiceType === "deposit"
+        ? row?.depositInvoice?.currency || row?.accounting?.currency || "GBP"
+        : row?.accounting?.currency || row?.depositInvoice?.currency || "GBP",
     ).toUpperCase();
     const formatMoney = (value) =>
       new Intl.NumberFormat("en-GB", {
@@ -1633,7 +1636,9 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     } else {
       // Main booking displayed as one row split between supplier and management.
       rows.push({
-        description: "Band performance and music management",
+        description: isDepositInvoice
+          ? `Booking deposit${row?.actName ? ` — ${row.actName}` : ""}`
+          : "Band performance and music management",
         qty: "1",
         supplierAmount: round2(split.passThroughGross),
         managementAmount: round2(split.commissionGross),
