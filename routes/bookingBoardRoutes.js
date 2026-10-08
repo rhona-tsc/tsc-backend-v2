@@ -276,6 +276,7 @@ const normaliseAssignedMusician = (value = {}) => {
     instrument: String(value?.instrument || value?.role || "").trim(),
     status: value?.status || "confirmed",
     fee: Number(value?.fee || value?.baseFee || 0),
+    currency: String(value?.currency || value?.feeCurrency || "GBP").trim().toUpperCase(),
     travelFee: Number(value?.travelFee || 0),
     totalFee: Number(value?.totalFee || value?.fee || value?.baseFee || 0),
     paymentStatus: value?.paymentStatus || "not_due",

@@ -79,8 +79,9 @@ const normalizePhone = (raw = "") => {
   return v;
 };
 
-const buildBookingSMS = ({ firstName, formattedDate, formattedAddress, fee, duties, actName, requestId }) => {
-  return `Hi ${firstName || "there"}, booking request for ${formattedDate} at ${formattedAddress} with ${actName}. Role: ${duties || "performance"}. Fee: £${sanitizeFee(fee) || "TBC"}. Reply YES (YESBOOK_${requestId}) or NO (NOBOOK_${requestId}). 🤍 TSC`;
+const buildBookingSMS = ({ firstName, formattedDate, formattedAddress, fee, currency = "GBP", duties, actName, requestId }) => {
+  const symbol = String(currency).toUpperCase() === "EUR" ? "€" : String(currency).toUpperCase() === "USD" ? "$" : "£";
+  return `Hi ${firstName || "there"}, booking request for ${formattedDate} at ${formattedAddress} with ${actName}. Role: ${duties || "performance"}. Fee: ${symbol}${sanitizeFee(fee) || "TBC"}. Reply YES (YESBOOK_${requestId}) or NO (NOBOOK_${requestId}). 🤍 TSC`;
 };
 
 
@@ -526,6 +527,7 @@ export const offerBookingRole = async (req, res) => {
     const dateISO = String(board.eventDateISO || req.body?.dateISO || "").slice(0, 10);
     const formattedDate = formatWithOrdinal(dateISO);
     const fee = Number(req.body?.fee || 0) || 0;
+    const currency = String(req.body?.currency || "GBP").trim().toUpperCase();
     const earlyArrivalMinutes = Math.max(
       0,
       Number(req.body?.earlyArrivalMinutes || 0) || 0,
@@ -562,6 +564,7 @@ export const offerBookingRole = async (req, res) => {
       formattedDate,
       formattedAddress: address,
       fee,
+      currency,
       duties: roleWithArrival,
       actName: act.tscName || act.name || board.actName || "the band",
       requestId,
@@ -606,7 +609,7 @@ export const offerBookingRole = async (req, res) => {
         meta: {
           actName: act.tscName || act.name || board.actName || "",
           MetaActId: String(act._id), MetaISODate: dateISO, MetaAddress: address,
-          kind: "booking", bookingRef: board.bookingRef || "",
+          kind: "booking", bookingRef: board.bookingRef || "", currency,
         },
         calendar: { attendeeEmail: contact.email, calendarStatus: "needsAction" },
       });
@@ -623,7 +626,7 @@ export const offerBookingRole = async (req, res) => {
       const candidate = {
         musicianId: musician._id, name, firstName: musician.firstName || musician.basicInfo?.firstName || "",
         lastName: musician.lastName || musician.basicInfo?.lastName || "", email: contact.email,
-        phone: contact.phone, role, instrument: role, status: "offered", fee, totalFee: fee,
+        phone: contact.phone, role, instrument: role, status: "offered", fee, totalFee: fee, currency,
         earlyArrivalMinutes, earlyArrivalTime,
         paymentStatus: "not_due", source: "booking_role_offer", roleSlotId,
         originalBandMemberId,

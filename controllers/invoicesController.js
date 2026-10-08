@@ -1212,6 +1212,27 @@ const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
 
 };
 
+const applyDepositInvoiceSplit = (split, row) => {
+  const depositGross = Number(row?.depositInvoice?.gross || 0);
+  const depositNet = Number(row?.depositInvoice?.net || 0);
+  const depositVat = Number(row?.depositInvoice?.vat || 0);
+  Object.assign(split, {
+    gross: depositGross,
+    amountDue: depositGross,
+    storedGross: depositGross,
+    depositPaid: 0,
+    passThroughGross: 0,
+    commissionGross: depositGross,
+    commissionNet: depositNet,
+    commissionVat: depositVat,
+    totalSupplierGross: 0,
+    totalManagementGross: depositGross,
+    totalManagementNet: depositNet,
+    totalManagementVat: depositVat,
+  });
+  return split;
+};
+
 const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
   new Promise((resolve, reject) => {
     const doc = new PDFDocument({
@@ -2173,21 +2194,7 @@ export const createBoardInvoice = async (req, res) => {
 
     const split = buildBoardInvoiceSplit(rowForInvoice, invoiceCompany);
     if (isDepositInvoice) {
-      const depositGross = Number(rowForInvoice?.depositInvoice?.gross || 0);
-      const depositNet = Number(rowForInvoice?.depositInvoice?.net || 0);
-      const depositVat = Number(rowForInvoice?.depositInvoice?.vat || 0);
-      split.gross = depositGross;
-      split.amountDue = depositGross;
-      split.storedGross = depositGross;
-      split.depositPaid = 0;
-      split.passThroughGross = 0;
-      split.commissionGross = depositGross;
-      split.commissionNet = depositNet;
-      split.commissionVat = depositVat;
-      split.totalSupplierGross = 0;
-      split.totalManagementGross = depositGross;
-      split.totalManagementNet = depositNet;
-      split.totalManagementVat = depositVat;
+      applyDepositInvoiceSplit(split, rowForInvoice);
     }
 
     const actDisplayName = firstNonEmpty(
@@ -2591,8 +2598,8 @@ export const createBoardInvoice = async (req, res) => {
           : updated?.extrasReceiptPdfUrl
         : updated?.extrasReceiptPdfUrl,
       previewUrl: isReceipt
-        ? `/api/invoices/board-receipt/${row._id}${isExtrasInvoice ? "?invoiceType=extras" : ""}`
-        : `/api/invoices/board-invoice/${row._id}${isExtrasInvoice ? "?invoiceType=extras" : ""}`,
+        ? `/api/invoices/board-receipt/${row._id}${invoiceTypeNorm !== "main" ? `?invoiceType=${invoiceTypeNorm}` : ""}`
+        : `/api/invoices/board-invoice/${row._id}${invoiceTypeNorm !== "main" ? `?invoiceType=${invoiceTypeNorm}` : ""}`,
       invoiceCompany: invoiceCompany.brand,
       invoiceDateISO,
       invoiceDueDateISO: finalDueDate,
@@ -2629,6 +2636,9 @@ export const serveBoardReceiptPdf = async (req, res) => {
 
     const invoiceCompany = getInvoiceCompany(rowForInvoice);
     const split = buildBoardInvoiceSplit(rowForInvoice, invoiceCompany);
+    if (invoiceTypeNorm === "deposit") {
+      applyDepositInvoiceSplit(split, rowForInvoice);
+    }
 
     const pdfBuffer = await makeInvoicePdfBuffer(
       rowForInvoice,
@@ -2672,6 +2682,9 @@ export const serveBoardInvoicePdf = async (req, res) => {
     const invoiceCompany = getInvoiceCompany(rowForInvoice);
 
     const split = buildBoardInvoiceSplit(rowForInvoice, invoiceCompany);
+    if (invoiceTypeNorm === "deposit") {
+      applyDepositInvoiceSplit(split, rowForInvoice);
+    }
 
     const pdfBuffer = await makeInvoicePdfBuffer(
       rowForInvoice,

@@ -174,6 +174,7 @@ const AssignedMusicianSchema = new mongoose.Schema(
     calendarInviteSentAt: { type: Date, default: null },
     deputyJobId: { type: mongoose.Schema.Types.ObjectId, ref: "deputyjob", default: null },
     fee: { type: Number, default: 0 },
+    currency: { type: String, default: "GBP", trim: true, uppercase: true },
     travelFee: { type: Number, default: 0 },
     totalFee: { type: Number, default: 0 },
     earlyArrivalMinutes: { type: Number, default: 0, min: 0 },
