@@ -1271,7 +1271,12 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       }).format(Number(value || 0));
-      return currency === "EUR" ? formatted.replace(/^€\s*/, "€ ") : formatted;
+      return currency === "EUR"
+        ? `EUR ${Number(value || 0).toLocaleString("en-GB", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}`
+        : formatted;
     };
     const isReceipt = documentType === "receipt";
     const chargesVat = Number(split?.vatRate || 0) > 0;
