@@ -11,6 +11,7 @@ export function setSharedIVR(book, { targets } = {}) {
     book?.eventDate ||
     book?.eventDateISO ||
     book?.date ||
+    book?.get?.("date") ||
     book?.performanceTimes?.eventDate ||
     book?.eventSheet?.answers?.event_date;
   const parsedGigDate = rawGigDate ? DateTime.fromJSDate(
