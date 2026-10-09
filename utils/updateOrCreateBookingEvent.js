@@ -1,7 +1,7 @@
 import { google } from "googleapis";
+import crypto from "crypto";
 import Booking from "../models/bookingModel.js";
 import { oauth2Client } from "../controllers/googleController.js";
-import { buildEventSheetUrl } from "./publicSiteUrl.js";
 
 const clean = (value = "") => String(value || "").trim();
 
@@ -83,18 +83,39 @@ const lineupFor = (booking = {}, assignedMusicians = []) => {
 };
 
 const eventSheetLink = (booking = {}) => {
-  const ref = bookingRefOf(booking);
-  if (!booking?.eventSheet?.submitted) return `${buildEventSheetUrl(ref)}?ro=1`;
+  const token = clean(booking?.eventSheet?.bandSheetToken);
   const backend = clean(
-    process.env.BACKEND_PUBLIC_URL || process.env.BACKEND_URL,
+    process.env.BACKEND_PUBLIC_URL ||
+      process.env.BACKEND_URL ||
+      "https://tsc-backend-v2.onrender.com",
   ).replace(/\/$/, "");
-  return backend
-    ? `${backend}/api/booking/${encodeURIComponent(ref)}/event-sheet/pdf`
-    : `${buildEventSheetUrl(ref)}?ro=1`;
+  if (token) {
+    return `${backend}/api/booking/band-sheet/${encodeURIComponent(token)}`;
+  }
+  const hostedPdf = clean(
+    booking?.eventSheet?.bandPdfUrl || booking?.eventSheet?.pdfUrl,
+  );
+  if (hostedPdf) return hostedPdf;
+  const ref = bookingRefOf(booking);
+  return `${backend}/api/booking/${encodeURIComponent(ref)}/event-sheet/pdf`;
 };
 
 export async function updateOrCreateBookingEvent({ booking, assignedMusicians = [] }) {
   if (!booking) throw new Error("Missing booking for calendar update");
+
+  if (!clean(booking?.eventSheet?.bandSheetToken)) {
+    const bandSheetToken = crypto.randomBytes(18).toString("base64url");
+    booking.eventSheet = {
+      ...(booking.eventSheet || {}),
+      bandSheetToken,
+    };
+    const identity = booking._id
+      ? { _id: booking._id }
+      : { bookingId: bookingRefOf(booking) };
+    await Booking.collection.updateOne(identity, {
+      $set: { "eventSheet.bandSheetToken": bandSheetToken },
+    });
+  }
 
   const cal = google.calendar({ version: "v3", auth: oauth2Client });
   const calendarId = "primary";

@@ -224,6 +224,9 @@ const EventSheetSchema = new mongoose.Schema(
     complete: { type: mongoose.Schema.Types.Mixed, default: {} },
     submitted: { type: Boolean, default: false },
     updatedAt: { type: Date, default: Date.now },
+    bandPdfUrl: { type: String, default: "" },
+    bandPdfGeneratedAt: { type: Date, default: null },
+    bandSheetToken: { type: String, default: "", index: true },
     emergencyContact: {
       number: String,
       ivrCode: String,

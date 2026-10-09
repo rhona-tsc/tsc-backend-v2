@@ -784,7 +784,7 @@ const fetchImageBufferForPdf = async (url) => {
   }
 };
 
-const buildEventSheetPdfBuffer = async (booking, act = null) => {
+export const buildEventSheetPdfBuffer = async (booking, act = null) => {
   const doc = new PDFDocument({ margin: 42, size: "A4" });
   const chunks = [];
 
@@ -1424,6 +1424,33 @@ const buildEventSheetPdfBuffer = async (booking, act = null) => {
   doc.end();
   return done;
 };
+
+router.get("/band-sheet/:token", async (req, res) => {
+  try {
+    const token = String(req.params?.token || "").trim();
+    if (!token) return res.status(404).send("Band event sheet not found");
+
+    const booking = await Booking.findOne({
+      "eventSheet.bandSheetToken": token,
+    }).lean();
+    if (!booking) return res.status(404).send("Band event sheet not found");
+
+    const actId = booking?.actsSummary?.[0]?.actId || booking?.act || null;
+    const act = actId ? await Act.findById(actId).lean() : null;
+    const pdf = await buildEventSheetPdfBuffer(booking, act);
+    const safeRef = String(booking.bookingId || booking._id).replace(/[^a-z0-9-_]+/gi, "-");
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="event-sheet-${safeRef}.pdf"`,
+      "Cache-Control": "private, no-store, max-age=0",
+      Pragma: "no-cache",
+    });
+    return res.send(pdf);
+  } catch (error) {
+    console.error("band event-sheet PDF route failed", error);
+    return res.status(500).send("Could not generate band event sheet PDF");
+  }
+});
 
 router.get("/:id/event-sheet/pdf", async (req, res) => {
   try {
