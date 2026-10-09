@@ -549,8 +549,14 @@ export const offerBookingRole = async (req, res) => {
       Number(req.body?.earlyArrivalMinutes || 0) || 0,
     );
     const earlyArrivalTime = String(req.body?.earlyArrivalTime || "").trim();
+    const duties = Array.from(new Set(
+      (Array.isArray(req.body?.duties) ? req.body.duties : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ));
     const roleWithArrival = [
       role,
+      ...duties,
       earlyArrivalMinutes
         ? `${earlyArrivalMinutes}-minute early arrival`
         : earlyArrivalTime
@@ -643,6 +649,7 @@ export const offerBookingRole = async (req, res) => {
         musicianId: musician._id, name, firstName: musician.firstName || musician.basicInfo?.firstName || "",
         lastName: musician.lastName || musician.basicInfo?.lastName || "", email: contact.email,
         phone: contact.phone, role, instrument: role, status: "offered", fee, totalFee: fee, currency,
+        duties,
         earlyArrivalMinutes, earlyArrivalTime,
         paymentStatus: "not_due", source: "booking_role_offer", roleSlotId,
         originalBandMemberId,
@@ -663,6 +670,75 @@ export const offerBookingRole = async (req, res) => {
   } catch (error) {
     console.error("offerBookingRole error", error);
     return res.status(500).json({ success: false, message: error?.message || "Failed to send availability request" });
+  }
+};
+
+export const confirmBookingRole = async (req, res) => {
+  try {
+    const board = await resolveBoardItem(
+      req.body?.bookingBoardItemId || req.body?.bookingId || req.body?.bookingRef,
+    );
+    if (!board) return res.status(404).json({ success: false, message: "Booking not found" });
+
+    const musicianId = String(req.body?.musicianId || "").trim();
+    const role = String(req.body?.role || req.body?.instrument || "").trim();
+    if (!role || !mongoose.isValidObjectId(musicianId)) {
+      return res.status(400).json({ success: false, message: "Role and musician are required" });
+    }
+    const musician = await Musician.findById(musicianId).lean();
+    if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
+
+    const roleSlotId = String(req.body?.roleSlotId || buildRoleSlotId(role));
+    const duties = Array.from(new Set(
+      (Array.isArray(req.body?.duties) ? req.body.duties : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ));
+    const fee = Number(req.body?.fee || 0) || 0;
+    const contact = candidateContact(musician);
+    const candidate = {
+      musicianId: musician._id,
+      name: musicianDisplayName(musician),
+      firstName: musician.firstName || musician.basicInfo?.firstName || "",
+      lastName: musician.lastName || musician.basicInfo?.lastName || "",
+      email: contact.email,
+      phone: contact.phone,
+      role,
+      instrument: role,
+      duties,
+      status: "confirmed",
+      fee,
+      totalFee: fee,
+      currency: String(req.body?.currency || "GBP").toUpperCase(),
+      paymentStatus: "not_due",
+      source: "manual_admin_confirmation",
+      candidateSource: "manual",
+      roleSlotId,
+      originalBandMemberId: req.body?.originalBandMemberId || null,
+      acceptedAt: new Date(),
+      respondedAt: new Date(),
+    };
+    const current = Array.isArray(board.assignedMusicians) ? board.assignedMusicians : [];
+    const index = current.findIndex((entry) => entry.roleSlotId === roleSlotId);
+    if (index >= 0) current[index] = candidate;
+    else current.push(candidate);
+    board.assignedMusicians = current;
+    board.bookingMusicians = current;
+    board.bandLineup = current;
+    board.bookingDetails = {
+      ...(board.bookingDetails?.toObject?.() || board.bookingDetails || {}),
+      assignedMusicians: current,
+    };
+    board.allocation = {
+      ...(board.allocation?.toObject?.() || board.allocation || {}),
+      status: "in_progress",
+      lastCheckedAt: new Date(),
+    };
+    await board.save();
+    return res.json({ success: true, roleSlotId, musician: candidate });
+  } catch (error) {
+    console.error("confirmBookingRole error", error);
+    return res.status(500).json({ success: false, message: error?.message || "Failed to confirm musician" });
   }
 };
 

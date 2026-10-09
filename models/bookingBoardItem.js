@@ -137,6 +137,7 @@ const AssignedMusicianSchema = new mongoose.Schema(
     phone: { type: String, default: "" },
     role: { type: String, default: "" },
     instrument: { type: String, default: "" },
+    duties: [{ type: String, trim: true }],
     status: {
       type: String,
       enum: [
