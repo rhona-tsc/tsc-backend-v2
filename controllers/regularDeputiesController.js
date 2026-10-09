@@ -79,7 +79,7 @@ const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl, email, 
   text: [
     `Hi ${recipientName},`,
     "",
-    `You have been invited to join ${actName} as a regular deputy ${roleName}.`,
+    `You have been invited to join ${actName} as a regular deputy for ${roleName}.`,
     "Create your secure Supreme Collective login and complete your musician profile using the link below:",
     "",
     setupUrl,
@@ -107,7 +107,7 @@ const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl, email, 
         </div>
         <div style="background:#ffffff;border:1px solid #e8e8e8;border-top:0;border-radius:0 0 28px 28px;padding:30px 28px;box-shadow:0 10px 30px rgba(0,0,0,0.04);">
           <p style="margin:0 0 18px;font-size:16px;line-height:1.7;color:#333333;">Hi ${escapeHtml(recipientName)},</p>
-          <p style="margin:0 0 18px;font-size:15px;line-height:1.8;color:#444444;">You have been invited to join <strong>${escapeHtml(actName)}</strong> as a regular deputy <strong>${escapeHtml(roleName)}</strong>.</p>
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.8;color:#444444;">You have been invited to join <strong>${escapeHtml(actName)}</strong> as a regular deputy for <strong>${escapeHtml(roleName)}</strong>.</p>
           <p style="margin:0 0 22px;font-size:15px;line-height:1.8;color:#444444;">Create your secure Supreme Collective login and complete your musician profile using the button below.</p>
           <p style="margin:0 0 12px;text-align:center;"><a href="${escapeHtml(setupUrl)}" style="display:inline-block;padding:14px 24px;border-radius:999px;background:#ff6667;color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;">Accept invitation and create my profile</a></p>
           <p style="margin:0 0 24px;color:#666666;font-size:13px;text-align:center;">This secure link expires in 24 hours.</p>
