@@ -691,10 +691,28 @@ export const offerBookingRole = async (req, res) => {
           { "basicInfo.phone": phone },
         ],
       }).lean();
-      if (!musician) {
-        const parts = name.split(/\s+/).filter(Boolean);
-        const firstName = parts.shift() || name;
-        const lastName = parts.join(" ");
+      const parts = name.split(/\s+/).filter(Boolean);
+      const firstName = parts.shift() || name;
+      const lastName = parts.join(" ");
+      if (musician) {
+        musician = await Musician.findByIdAndUpdate(
+          musician._id,
+          {
+            $set: {
+              firstName: musician.firstName || firstName,
+              lastName: musician.lastName || lastName,
+              email: musician.email || email,
+              phone,
+              phoneNormalized: phone,
+              "basicInfo.firstName": musician.basicInfo?.firstName || firstName,
+              "basicInfo.lastName": musician.basicInfo?.lastName || lastName,
+              "basicInfo.email": musician.basicInfo?.email || email,
+              "basicInfo.phone": phone,
+            },
+          },
+          { new: true },
+        ).lean();
+      } else {
         const created = await Musician.create({
           firstName,
           lastName,
