@@ -1,13 +1,27 @@
 // utils/proxySetup.js
 import { DateTime } from "luxon";
 
-export function setSharedIVR(book) {
+export function setSharedIVR(book, { targets } = {}) {
   // book = a Booking mongoose doc or plain object
   const TZ = "Europe/London";
 
   // derive gig day from your own source of truth:
-  const gigISO = book?.cartMeta?.selectedDate   // e.g. "2025-09-21"
-    || (book?.date ? new Date(book.date).toISOString().slice(0,10) : null);
+  const rawGigDate =
+    book?.cartMeta?.selectedDate ||
+    book?.eventDate ||
+    book?.eventDateISO ||
+    book?.date ||
+    book?.performanceTimes?.eventDate ||
+    book?.eventSheet?.answers?.event_date;
+  const parsedGigDate = rawGigDate ? DateTime.fromJSDate(
+    rawGigDate instanceof Date ? rawGigDate : new Date(rawGigDate),
+    { zone: TZ },
+  ) : null;
+  const gigISO = parsedGigDate?.isValid
+    ? parsedGigDate.toISODate()
+    : typeof rawGigDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rawGigDate)
+      ? rawGigDate
+      : null;
 
   if (!gigISO) return book;
 
@@ -26,7 +40,9 @@ export function setSharedIVR(book) {
     activeFrom: activeFrom.toJSDate(),
     activeUntil: activeUntil.toJSDate(),
     ringStrategy: book.contactRouting?.ringStrategy || "hunt",
-    targets: book.contactRouting?.targets || [], // fill below
+    targets: Array.isArray(targets)
+      ? targets
+      : book.contactRouting?.targets || [],
     active: true,
     note: "Emergency-only; IVR"
   };

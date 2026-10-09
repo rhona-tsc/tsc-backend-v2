@@ -403,16 +403,19 @@ export const listRoleCandidates = async (req, res) => {
           { firstName: textRegex },
           { lastName: textRegex },
           { email: textRegex },
+          { phone: textRegex },
+          { phoneNumber: textRegex },
           { "basicInfo.firstName": textRegex },
           { "basicInfo.lastName": textRegex },
+          { "basicInfo.email": textRegex },
+          { "basicInfo.phone": textRegex },
+          { "instrumentation.instrument": textRegex },
+          { other_skills: textRegex },
         ]
       : null;
 
     const musicians = await Musician.find({
-      $and: [
-        { $or: filters },
-        ...(textFilters ? [{ $or: textFilters }] : []),
-      ],
+      $or: textFilters || filters,
     })
       .select("firstName lastName email phone phoneNumber basicInfo instrumentation other_skills profilePhoto")
       .limit(80)
@@ -475,6 +478,14 @@ export const listRoleCandidates = async (req, res) => {
         const id = String(musician._id);
         const bookingConflict = conflictById.get(id) || "";
         const isUnavailable = unavailableIds.has(id) || Boolean(bookingConflict);
+        const roleMatch = [
+          ...(Array.isArray(musician.instrumentation)
+            ? musician.instrumentation.map((entry) => entry?.instrument)
+            : []),
+          ...(Array.isArray(musician.other_skills)
+            ? musician.other_skills
+            : [musician.other_skills]),
+        ].some((value) => roleRegex.test(String(value || "")));
         return {
           _id: musician._id,
           name: musicianDisplayName(musician),
@@ -482,6 +493,7 @@ export const listRoleCandidates = async (req, res) => {
           instrumentation: musician.instrumentation || [],
           profilePhoto: musician.profilePhoto || "",
           source: primaryIds.has(id) ? "primary" : deputyIds.has(id) ? "act_deputy" : "search",
+          roleMatch,
           available: !isUnavailable,
           unavailableReason: bookingConflict
             ? `Already allocated to ${bookingConflict}`
@@ -492,7 +504,10 @@ export const listRoleCandidates = async (req, res) => {
       })
       .sort((a, b) => {
         const sourceRank = { primary: 0, act_deputy: 1, search: 2 };
-        return Number(b.available) - Number(a.available) || sourceRank[a.source] - sourceRank[b.source] || a.name.localeCompare(b.name);
+        return Number(b.available) - Number(a.available) ||
+          Number(b.roleMatch) - Number(a.roleMatch) ||
+          sourceRank[a.source] - sourceRank[b.source] ||
+          a.name.localeCompare(b.name);
       });
 
     return res.json({ success: true, role, dateISO, candidates });

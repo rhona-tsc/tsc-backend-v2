@@ -3047,8 +3047,30 @@ export const ensureEmergencyContact = async (req, res) => {
         .json({ success: false, message: "Booking not found" });
     }
 
+    const assignedMusicians = await resolveAssignedMusiciansFromBooking(
+      book.toObject ? book.toObject() : book,
+    );
+    const targets = assignedMusicians
+      .map((member, index) => {
+        const phone = normalize(member.phone || "").find((value) =>
+          value.startsWith("+"),
+        );
+        if (!phone) return null;
+        return {
+          musicianId: member.musicianId,
+          name: member.name,
+          role: member.role || member.instrument || "Band member",
+          phone,
+          priority: index + 1,
+        };
+      })
+      .filter(Boolean);
+
     // If already present, just mirror to eventSheet
     if (book?.contactRouting?.ivrCode && book?.contactRouting?.proxyNumber) {
+      if (!book.contactRouting.targets?.length && targets.length) {
+        book.contactRouting.targets = targets;
+      }
       book.eventSheet = book.eventSheet || {};
       book.eventSheet.emergencyContact = mirrorEmergencyContact(
         book.contactRouting,
@@ -3064,11 +3086,25 @@ export const ensureEmergencyContact = async (req, res) => {
       });
     }
 
-    // Create + attach emergency contact data
-    setSharedIVR(book);
+    // Create + attach emergency contact data. Existing manually configured
+    // targets are retained when the booking does not yet have resolved phones.
+    setSharedIVR(book, { targets: targets.length ? targets : undefined });
+    if (!book?.contactRouting?.ivrCode || !book?.contactRouting?.proxyNumber) {
+      return res.status(422).json({
+        success: false,
+        message: "The booking needs a valid event date before its emergency line can be created.",
+      });
+    }
     await book.save();
 
-    return res.json({ success: true, booking: book });
+    return res.json({
+      success: true,
+      booking: book,
+      routingTargetCount: book.contactRouting?.targets?.length || 0,
+      warning: book.contactRouting?.targets?.length
+        ? ""
+        : "Emergency number created, but no band phone numbers are assigned yet.",
+    });
   } catch (err) {
     console.error("ensureEmergencyContact error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
