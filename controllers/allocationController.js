@@ -428,7 +428,8 @@ export const listRoleCandidates = async (req, res) => {
           musicianId: { $in: musicianIds },
           dateISO,
           $or: [
-            { reply: { $in: ["yes", "unavailable"] } },
+            { confirmedBooking: true },
+            { reply: "unavailable" },
             { status: { $in: ["accepted", "unavailable"] } },
           ],
         })

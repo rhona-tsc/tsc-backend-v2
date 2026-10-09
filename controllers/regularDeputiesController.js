@@ -749,6 +749,7 @@ export const copyDeputiesFromAct = async (req, res) => {
     const { actId } = req.params;
     const sourceActId = clean(req.body?.sourceActId);
     const sourceLineupId = clean(req.body?.sourceLineupId);
+    const sourceMemberId = clean(req.body?.sourceMemberId);
     const targetLineupId = clean(req.body?.targetLineupId);
     const applyToAllLineups = req.body?.applyToAllLineups !== false;
 
@@ -781,9 +782,21 @@ export const copyDeputiesFromAct = async (req, res) => {
       return res.status(404).json({ success: false, message: "Destination lineup not found" });
     }
 
+    if (sourceMemberId && !validId(sourceMemberId)) {
+      return res.status(400).json({ success: false, message: "Choose a valid source role" });
+    }
+    const selectedSourceMember = sourceMemberId
+      ? sourceLineup.bandMembers?.id(sourceMemberId)
+      : null;
+    if (sourceMemberId && !selectedSourceMember) {
+      return res.status(404).json({ success: false, message: "Source role not found" });
+    }
     const sourceMembers = (sourceLineup.bandMembers || []).filter((member) =>
-      clean(member.instrument),
+      clean(member.instrument) && (!sourceMemberId || String(member._id) === sourceMemberId),
     );
+    const selectedRole = selectedSourceMember
+      ? normalise(selectedSourceMember.instrument)
+      : "";
     let rolesMatched = 0;
     let deputiesAdded = 0;
 
@@ -792,6 +805,7 @@ export const copyDeputiesFromAct = async (req, res) => {
       for (const targetMember of targetLineup.bandMembers || []) {
         const targetPrimaryId = clean(targetMember.musicianId);
         const targetInstrument = normalise(targetMember.instrument);
+        if (selectedRole && targetInstrument !== selectedRole) continue;
         let sourceIndex = sourceMembers.findIndex(
           (member, index) =>
             !usedSourceIndexes.has(index) &&
@@ -834,6 +848,7 @@ export const copyDeputiesFromAct = async (req, res) => {
       rolesMatched,
       deputiesAdded,
       lineupsUpdated: targetLineups.length,
+      role: selectedSourceMember?.instrument || "",
     });
   } catch (error) {
     console.error("❌ copyDeputiesFromAct error:", error);
