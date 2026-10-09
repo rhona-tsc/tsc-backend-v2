@@ -150,6 +150,21 @@ const resolveBoardItem = async (rawId) => {
   return bookingBoardItem.findOne({ $or: conditions });
 };
 
+const resolveSourceBooking = async (board, select = "") => {
+  const conditions = [];
+  for (const value of [board?.bookingId, board?.sourceBookingId]) {
+    if (value && mongoose.isValidObjectId(String(value))) {
+      conditions.push({ _id: value });
+    }
+  }
+  if (board?.bookingRef) conditions.push({ bookingRef: board.bookingRef });
+  if (!conditions.length) return null;
+
+  const query = Booking.findOne({ $or: conditions });
+  if (select) query.select(select);
+  return query.lean();
+};
+
 const getActLineupContext = async (board) => {
   let linkedBooking = null;
   const boardActId =
@@ -159,18 +174,10 @@ const getActLineupContext = async (board) => {
   // linkage from their source booking. Resolve through that booking so role
   // offers still work, rather than presenting an unhelpful "not linked" error.
   if (!boardActId) {
-    const bookingConditions = [];
-    for (const value of [board?.bookingId, board?.sourceBookingId]) {
-      if (value && mongoose.isValidObjectId(String(value))) {
-        bookingConditions.push({ _id: value });
-      }
-    }
-    if (board?.bookingRef) bookingConditions.push({ bookingRef: board.bookingRef });
-    if (bookingConditions.length) {
-      linkedBooking = await Booking.findOne({ $or: bookingConditions })
-        .select("act actId lineupId actsSummary")
-        .lean();
-    }
+    linkedBooking = await resolveSourceBooking(
+      board,
+      "act actId lineupId actsSummary",
+    );
   }
 
   const actId =
@@ -610,7 +617,21 @@ export const offerBookingRole = async (req, res) => {
       null;
     const originalBandMemberId = originalBandMember?._id || null;
 
-    const address = String(board.address || req.body?.address || "").trim();
+    let address = String(board.address || req.body?.address || "").trim();
+    if (!address) {
+      const linkedBooking = await resolveSourceBooking(
+        board,
+        "venue venueAddress address eventAddress location",
+      );
+      address = String(
+        linkedBooking?.venueAddress ||
+          linkedBooking?.venue ||
+          linkedBooking?.address ||
+          linkedBooking?.eventAddress ||
+          linkedBooking?.location ||
+          "TBC",
+      ).trim();
+    }
     const name = musicianDisplayName(musician);
     const smsBody = buildBookingSMS({
       firstName: firstNameOf(musician),

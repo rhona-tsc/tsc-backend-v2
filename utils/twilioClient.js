@@ -286,6 +286,32 @@ const memberNames = firstLast(memberDisplayName);
     enrichedVars["7"] = requestId;
   }
 
+  const selectedContentSid = contentSid || process.env.TWILIO_ENQUIRY_SID;
+  const suppliedNumberedVars = Object.fromEntries(
+    Object.entries(variables || {}).filter(([key]) => /^\d+$/.test(key)),
+  );
+  let contentVariables = Object.keys(suppliedNumberedVars).length
+    ? suppliedNumberedVars
+    : enrichedVars;
+
+  // The approved instrumentalist booking template has exactly six slots.
+  // Twilio rejects the whole request when extra named variables or a seventh
+  // slot are supplied, even if slots 1-6 are valid.
+  if (
+    selectedContentSid &&
+    selectedContentSid === process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID
+  ) {
+    contentVariables = Object.fromEntries(
+      Object.entries(contentVariables).filter(([key]) => /^[1-6]$/.test(key)),
+    );
+  }
+  contentVariables = Object.fromEntries(
+    Object.entries(contentVariables).map(([key, value]) => [
+      key,
+      String(value ?? "").trim() || "TBC",
+    ]),
+  );
+
   console.log("📨 [sendWhatsAppMessage] PRE-SEND", {
     to: toE,
     from: fromE,
@@ -300,8 +326,8 @@ const memberNames = firstLast(memberDisplayName);
     profileUrl: memberProfileUrl,
     photoUrl: memberPhotoUrl,
     isDeputy,
-    variables: enrichedVars,
-    contentSid: contentSid || (typeof TWILIO_ENQUIRY_SID !== "undefined" ? TWILIO_ENQUIRY_SID : undefined),
+    variables: contentVariables,
+    contentSid: selectedContentSid,
     requestId,
     buttonsCount: Array.isArray(buttons) ? buttons.length : 0,
   });
@@ -321,8 +347,8 @@ const memberNames = firstLast(memberDisplayName);
       result = await client.messages.create({
         to: `whatsapp:${toE}`,
         from: `whatsapp:${fromE}`,
-        contentSid: contentSid || process.env.TWILIO_ENQUIRY_SID,
-        contentVariables: JSON.stringify(enrichedVars),
+        contentSid: selectedContentSid,
+        contentVariables: JSON.stringify(contentVariables),
         statusCallback,
       });
     } else {
