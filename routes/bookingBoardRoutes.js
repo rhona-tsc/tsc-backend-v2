@@ -450,12 +450,13 @@ const normaliseAssignedMusicians = (value = []) => {
 
 const getRowAssignedMusicians = (row = {}) =>
   normaliseAssignedMusicians(
-    row.assignedMusicians ||
-      row.bookingMusicians ||
-      row.bandLineup ||
-      row.bookingDetails?.assignedMusicians ||
-      row.actsSummary?.[0]?.assignedMusicians ||
-      [],
+    [
+      row.assignedMusicians,
+      row.bookingMusicians,
+      row.bandLineup,
+      row.bookingDetails?.assignedMusicians,
+      row.actsSummary?.[0]?.assignedMusicians,
+    ].find((items) => Array.isArray(items) && items.length) || [],
   );
 
 const toObjectIdString = (value) => {
