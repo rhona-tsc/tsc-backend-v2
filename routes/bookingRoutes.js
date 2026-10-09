@@ -17,12 +17,60 @@ import {
 import Booking from "../models/bookingModel.js";
 import Act from "../models/actModel.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
+import Musician from "../models/musicianModel.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
 import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
 
 const router = express.Router();
+
+const withConfirmedAllocation = async (booking) => {
+  if (!booking) return booking;
+  const plain = typeof booking.toObject === "function" ? booking.toObject() : booking;
+  const conditions = [];
+  if (plain.bookingId || plain.bookingRef) {
+    conditions.push({ bookingRef: plain.bookingId || plain.bookingRef });
+  }
+  if (plain._id) {
+    conditions.push({ bookingId: plain._id }, { sourceBookingId: plain._id });
+  }
+  const board = conditions.length
+    ? await BookingBoardItem.findOne({ $or: conditions }).lean()
+    : null;
+  const assignments = [
+    board?.assignedMusicians,
+    board?.bookingMusicians,
+    board?.bandLineup,
+  ].find((items) => Array.isArray(items) && items.length) || [];
+  const confirmed = assignments.filter((member) =>
+    ["accepted", "confirmed"].includes(
+      String(member?.status || "").trim().toLowerCase(),
+    ),
+  );
+  const musicianIds = confirmed
+    .map((member) => member?.musicianId)
+    .filter((id) => mongoose.isValidObjectId(String(id || "")));
+  const profiles = musicianIds.length
+    ? await Musician.find({ _id: { $in: musicianIds } })
+        .select("dietaryRequirements")
+        .lean()
+    : [];
+  const dietById = new Map(
+    profiles.map((profile) => [String(profile._id), profile.dietaryRequirements || ""]),
+  );
+  const enriched = confirmed.map((member) => ({
+    ...member,
+    dietaryRequirements:
+      member?.dietaryRequirements || dietById.get(String(member?.musicianId || "")) || "",
+  }));
+  return {
+    ...plain,
+    assignedMusicians: enriched,
+    bookingMusicians: enriched,
+    bandLineup: enriched,
+  };
+};
 
 /* -------------------------------------------------------------------------- */
 /*              POST /:id/ensure-emergency-contact                            */
@@ -136,7 +184,7 @@ router.get("/booking/:id", async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    res.json(booking);
+    res.json(await withConfirmedAllocation(booking));
   } catch (err) {
     console.error("❌ booking/:id fetch error:", err);
     res.status(500).json({ message: "Failed to fetch booking" });
@@ -158,7 +206,7 @@ router.get("/by-ref/:bookingId", async (req, res) => {
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
     }
-    res.json(booking);
+    res.json(await withConfirmedAllocation(booking));
   } catch (err) {
     console.error("❌ booking by-ref error:", err);
     res.status(500).json({ message: "Failed to fetch booking by ref" });

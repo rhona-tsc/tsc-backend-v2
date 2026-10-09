@@ -135,6 +135,7 @@ const AssignedMusicianSchema = new mongoose.Schema(
     lastName: { type: String, default: "" },
     email: { type: String, default: "", lowercase: true, trim: true, index: true },
     phone: { type: String, default: "" },
+    dietaryRequirements: { type: String, default: "" },
     role: { type: String, default: "" },
     instrument: { type: String, default: "" },
     duties: [{ type: String, trim: true }],
