@@ -420,7 +420,28 @@ const normaliseAssignedMusician = (value = {}) => {
     phone: String(value?.phone || value?.phoneNumber || "").trim(),
     role: String(value?.role || value?.position || value?.instrument || "").trim(),
     instrument: String(value?.instrument || value?.role || "").trim(),
+    duties: Array.from(
+      new Set(
+        (Array.isArray(value?.duties) ? value.duties : [])
+          .map((duty) => String(duty || "").trim())
+          .filter(Boolean),
+      ),
+    ),
     status: value?.status || "confirmed",
+    roleSlotId: String(value?.roleSlotId || "").trim(),
+    originalBandMemberId: isValidObjectId(value?.originalBandMemberId)
+      ? new mongoose.Types.ObjectId(value.originalBandMemberId)
+      : null,
+    candidateSource: String(value?.candidateSource || "").trim(),
+    offerRequestId: String(value?.offerRequestId || "").trim(),
+    offeredAt: value?.offeredAt || null,
+    respondedAt: value?.respondedAt || null,
+    acceptedAt: value?.acceptedAt || null,
+    declinedAt: value?.declinedAt || null,
+    withdrawnAt: value?.withdrawnAt || null,
+    deputyJobId: isValidObjectId(value?.deputyJobId)
+      ? new mongoose.Types.ObjectId(value.deputyJobId)
+      : null,
     fee: Number(value?.fee || value?.baseFee || 0),
     currency: String(value?.currency || value?.feeCurrency || "GBP").trim().toUpperCase(),
     travelFee: Number(value?.travelFee || 0),
@@ -439,9 +460,16 @@ const normaliseAssignedMusicians = (value = []) => {
     .map(normaliseAssignedMusician)
     .filter(Boolean)
     .filter((member) => {
-      const key = String(member.musicianId || member.email || member.name || "")
+      const identity = String(
+        member.musicianId || member.email || member.name || "",
+      )
         .trim()
         .toLowerCase();
+      const key = member.roleSlotId
+        ? `slot:${member.roleSlotId}`
+        : `${identity}|role:${String(member.role || member.instrument || "")
+            .trim()
+            .toLowerCase()}`;
       if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
