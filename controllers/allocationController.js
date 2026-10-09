@@ -663,12 +663,55 @@ export const offerBookingRole = async (req, res) => {
 
     const role = String(req.body?.role || req.body?.instrument || "").trim();
     const musicianId = String(req.body?.musicianId || "").trim();
-    if (!role || !mongoose.isValidObjectId(musicianId)) {
-      return res.status(400).json({ success: false, message: "Role and musician are required" });
+    const suppliedContact = req.body?.contact || {};
+    if (!role) {
+      return res.status(400).json({ success: false, message: "Role is required" });
     }
 
-    const musician = await Musician.findById(musicianId).lean();
-    if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
+    let musician = mongoose.isValidObjectId(musicianId)
+      ? await Musician.findById(musicianId).lean()
+      : null;
+    if (!musician && suppliedContact?.name) {
+      const name = String(suppliedContact.name || "").trim();
+      const email = String(suppliedContact.email || "").trim().toLowerCase();
+      const phone = normalizePhone(suppliedContact.phone || "");
+      if (!name || !email || !phone) {
+        return res.status(400).json({
+          success: false,
+          message: "Name, email address and mobile number are required",
+        });
+      }
+      const escapedEmail = email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      musician = await Musician.findOne({
+        $or: [
+          { email: { $regex: `^${escapedEmail}$`, $options: "i" } },
+          { "basicInfo.email": { $regex: `^${escapedEmail}$`, $options: "i" } },
+          { phoneNormalized: phone },
+          { phone },
+          { "basicInfo.phone": phone },
+        ],
+      }).lean();
+      if (!musician) {
+        const parts = name.split(/\s+/).filter(Boolean);
+        const firstName = parts.shift() || name;
+        const lastName = parts.join(" ");
+        const created = await Musician.create({
+          firstName,
+          lastName,
+          email,
+          phone,
+          phoneNormalized: phone,
+          basicInfo: { firstName, lastName, email, phone },
+          instrumentation: [{ instrument: role }],
+          onboardingStatus: "not_started",
+          hasSetPassword: false,
+        });
+        musician = created.toObject();
+      }
+    }
+    if (!musician) {
+      return res.status(404).json({ success: false, message: "Musician not found" });
+    }
     const contact = candidateContact(musician);
     if (!contact.phone) {
       return res.status(400).json({ success: false, message: "This musician has no mobile number for an availability request" });
