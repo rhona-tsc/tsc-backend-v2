@@ -2,7 +2,11 @@
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
 import EnquiryMessage from "../models/EnquiryMessage.js";
-import { sendWhatsAppMessage, sendSMSMessage } from "../utils/twilioClient.js";
+import {
+  sendWhatsAppMessage,
+  sendWhatsAppText,
+  sendSMSMessage,
+} from "../utils/twilioClient.js";
 import {
   ensureBookingEvent,
   appendLineToEventDescription,
@@ -15,6 +19,7 @@ import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.
 import Booking from "../models/bookingModel.js";
 import DeputyJob from "../models/deputyJobModel.js";
 import mongoose from "mongoose";
+import { promptForProfileAfterAcceptance } from "../services/onboardingAcceptancePrompt.js";
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper: firstNameOf                             */
@@ -84,6 +89,20 @@ const buildBookingSMS = ({ firstName, formattedDate, formattedAddress, fee, curr
   return `Hi ${firstName || "there"}, booking request for ${formattedDate} at ${formattedAddress} with ${actName}. Role: ${duties || "performance"}. Fee: ${symbol}${sanitizeFee(fee) || "TBC"}. Reply YES (YESBOOK_${requestId}) or NO (NOBOOK_${requestId}). 🤍 TSC`;
 };
 
+const AUTOMATED_REPLY_INSTRUCTION =
+  "This is an automated messaging service. Please use the quick reply buttons to answer this message. If you have additional questions about this gig, please message +44 7594 223200.";
+
+const sendInboundAcknowledgement = async ({ to, body, isWhatsApp = true }) => {
+  const phone = normalizePhone(to);
+  if (!phone) return;
+  try {
+    if (isWhatsApp) await sendWhatsAppText(phone, body);
+    else await sendSMSMessage(phone, body);
+  } catch (error) {
+    console.error("Failed to send inbound acknowledgement:", error?.message || error);
+  }
+};
+
 
 const findRealMusicianForMember = async (member = {}) => {
   try {
@@ -139,6 +158,25 @@ const candidateContact = (musician = {}) => ({
 
 const buildRoleSlotId = (role = "", index = 0) =>
   `${String(role || "role").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${index + 1}`;
+
+const findOriginalBandMemberForSlot = ({ lineup, role, roleSlotId, requestedId }) => {
+  const members = lineup?.bandMembers || [];
+  const requested = members.find(
+    (member) => String(member?._id || "") === String(requestedId || ""),
+  );
+  if (requested) return requested;
+
+  const matching = members.filter(
+    (member) =>
+      String(member?.instrument || member?.role || "").trim().toLowerCase() ===
+      String(role || "").trim().toLowerCase(),
+  );
+  const occurrence = Math.max(
+    0,
+    Number(String(roleSlotId || "").match(/-(\d+)$/)?.[1] || 1) - 1,
+  );
+  return matching[occurrence] || matching[0] || null;
+};
 
 const resolveBoardItem = async (rawId) => {
   if (!rawId) return null;
@@ -201,6 +239,66 @@ const getActLineupContext = async (board) => {
         String(entry?.lineupId || "") === requestedLineup,
     ) || act?.lineups?.[0] || null;
   return { act, lineup };
+};
+
+const completeAcceptedAssignment = async ({ board, assignment, musician = null }) => {
+  const booking = await resolveSourceBooking(board);
+  const email = String(
+    assignment?.email || musician?.email || musician?.basicInfo?.email || "",
+  ).trim().toLowerCase();
+  const phone = normalizePhone(
+    assignment?.phone || musician?.phone || musician?.phoneNumber || musician?.basicInfo?.phone || "",
+  );
+  let eventId = "";
+
+  try {
+    if (booking) {
+      eventId = await updateOrCreateBookingEvent({
+        booking,
+        assignedMusicians: board?.assignedMusicians || [],
+      });
+      if (eventId && email) await addAttendeeToEvent({ eventId, email });
+    }
+  } catch (calendarError) {
+    console.warn("Could not sync accepted musician to shared calendar", {
+      bookingRef: board?.bookingRef,
+      musicianId: String(assignment?.musicianId || musician?._id || ""),
+      message: calendarError?.message,
+    });
+  }
+
+  if (phone) {
+    const date = formatWithOrdinal(board?.eventDateISO || booking?.eventDateISO || booking?.date || "");
+    const roleAndDuties = [
+      assignment?.role || assignment?.instrument || "Musician",
+      ...(Array.isArray(assignment?.duties) ? assignment.duties : []),
+    ].filter(Boolean).join(" · ");
+    const fee = Number(assignment?.fee || assignment?.totalFee || 0);
+    const actName = board?.actName || booking?.actName || booking?.actsSummary?.[0]?.actName || "the band";
+    const body = [
+      `Hi ${assignment?.firstName || musician?.firstName || "there"}, thanks, we’ve received your reply. You're confirmed for ${actName} on ${date}.`,
+      `Role: ${roleAndDuties}. Fee: £${fee || "TBC"}.`,
+      eventId && email
+        ? `A shared calendar invitation has been sent to ${email}.`
+        : "Your calendar invitation will follow shortly.",
+      "🤍 TSC",
+    ].join("\n");
+    try {
+      await sendWhatsAppText(phone, body);
+    } catch (whatsAppError) {
+      try {
+        await sendSMSMessage(phone, body);
+      } catch (messageError) {
+        console.warn("Could not send booking acceptance confirmation", {
+          phone,
+          whatsAppMessage: whatsAppError?.message,
+          smsMessage: messageError?.message,
+        });
+      }
+    }
+  }
+
+  return { eventId, email };
 };
 
 const updateBoardRoleSlot = async (msg, changes = {}) => {
@@ -605,16 +703,12 @@ export const offerBookingRole = async (req, res) => {
       .join(" · ");
     const { act, lineup } = await getActLineupContext(board);
     if (!act) return res.status(400).json({ success: false, message: "This booking is not linked to an act" });
-    const originalBandMember =
-      (lineup?.bandMembers || []).find(
-        (member) => String(member?._id || "") === String(req.body?.originalBandMemberId || ""),
-      ) ||
-      (lineup?.bandMembers || []).find(
-        (member) =>
-          String(member?.instrument || member?.role || "").trim().toLowerCase() ===
-          role.toLowerCase(),
-      ) ||
-      null;
+    const originalBandMember = findOriginalBandMemberForSlot({
+      lineup,
+      role,
+      roleSlotId,
+      requestedId: req.body?.originalBandMemberId,
+    });
     const originalBandMemberId = originalBandMember?._id || null;
 
     let address = String(board.address || req.body?.address || "").trim();
@@ -741,6 +835,13 @@ export const confirmBookingRole = async (req, res) => {
     if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
 
     const roleSlotId = String(req.body?.roleSlotId || buildRoleSlotId(role));
+    const { lineup } = await getActLineupContext(board);
+    const originalBandMember = findOriginalBandMemberForSlot({
+      lineup,
+      role,
+      roleSlotId,
+      requestedId: req.body?.originalBandMemberId,
+    });
     const duties = Array.from(new Set(
       (Array.isArray(req.body?.duties) ? req.body.duties : [])
         .map((value) => String(value || "").trim())
@@ -748,7 +849,11 @@ export const confirmBookingRole = async (req, res) => {
     ));
     const fee = Number(req.body?.fee || 0) || 0;
     const contact = candidateContact(musician);
+    const current = Array.isArray(board.assignedMusicians) ? board.assignedMusicians : [];
+    const index = current.findIndex((entry) => entry.roleSlotId === roleSlotId);
+    const existing = index >= 0 ? current[index]?.toObject?.() || current[index] : {};
     const candidate = {
+      ...existing,
       musicianId: musician._id,
       name: musicianDisplayName(musician),
       firstName: musician.firstName || musician.basicInfo?.firstName || "",
@@ -766,12 +871,11 @@ export const confirmBookingRole = async (req, res) => {
       source: "manual_admin_confirmation",
       candidateSource: "manual",
       roleSlotId,
-      originalBandMemberId: req.body?.originalBandMemberId || null,
+      originalBandMemberId:
+        originalBandMember?._id || existing?.originalBandMemberId || null,
       acceptedAt: new Date(),
       respondedAt: new Date(),
     };
-    const current = Array.isArray(board.assignedMusicians) ? board.assignedMusicians : [];
-    const index = current.findIndex((entry) => entry.roleSlotId === roleSlotId);
     if (index >= 0) current[index] = candidate;
     else current.push(candidate);
     board.assignedMusicians = current;
@@ -787,6 +891,23 @@ export const confirmBookingRole = async (req, res) => {
       lastCheckedAt: new Date(),
     };
     await board.save();
+    const confirmation = await completeAcceptedAssignment({ board, assignment: candidate, musician });
+    if (confirmation.eventId && confirmation.email) {
+      candidate.calendarInviteSentAt = new Date();
+      const applyInviteTimestamp = (entries = []) => entries.map((entry) =>
+        entry?.roleSlotId === roleSlotId
+          ? { ...(entry.toObject?.() || entry), calendarInviteSentAt: candidate.calendarInviteSentAt }
+          : entry,
+      );
+      board.assignedMusicians = applyInviteTimestamp(board.assignedMusicians);
+      board.bookingMusicians = applyInviteTimestamp(board.bookingMusicians);
+      board.bandLineup = applyInviteTimestamp(board.bandLineup);
+      board.bookingDetails = {
+        ...(board.bookingDetails?.toObject?.() || board.bookingDetails || {}),
+        assignedMusicians: applyInviteTimestamp(board.bookingDetails?.assignedMusicians),
+      };
+      await board.save();
+    }
     return res.json({ success: true, roleSlotId, musician: candidate });
   } catch (error) {
     console.error("confirmBookingRole error", error);
@@ -1291,6 +1412,11 @@ export const twilioInboundBooking = async (req, res) => {
 
     if (!replyType) {
       console.warn("⚠️ Could not interpret reply; ignoring");
+      await sendInboundAcknowledgement({
+        to: fromRaw,
+        body: AUTOMATED_REPLY_INSTRUCTION,
+        isWhatsApp: /^whatsapp:/i.test(fromRaw) || Boolean(req.body?.WaId),
+      });
       return res.status(200).send("<Response/>");
     }
 
@@ -1490,12 +1616,40 @@ const booking = msg?.bookingRef
     { upsert: true, new: true }
   );
 
-  await updateBoardRoleSlot(msg, {
+  const updatedBoard = await updateBoardRoleSlot(msg, {
     status: "accepted",
     respondedAt: new Date(),
     acceptedAt: new Date(),
     calendarInviteSentAt: eventId && email ? new Date() : null,
   });
+
+  if (updatedBoard) {
+    const acceptedAssignment = (updatedBoard.assignedMusicians || []).find(
+      (entry) =>
+        entry?.roleSlotId === msg.roleSlotId ||
+        entry?.offerRequestId === msg.enquiryId ||
+        String(entry?.musicianId || "") === String(msg.musicianId || ""),
+    );
+    const acceptedMusician = msg.musicianId
+      ? await Musician.findById(msg.musicianId).lean()
+      : null;
+    await completeAcceptedAssignment({
+      board: updatedBoard,
+      assignment: acceptedAssignment || {
+        musicianId: msg.musicianId,
+        email,
+        phone: msg.phone,
+        role: msg.duties,
+        fee: msg.fee,
+      },
+      musician: acceptedMusician,
+    });
+
+    await promptForProfileAfterAcceptance({
+      musicianId: acceptedMusician?._id || msg.musicianId,
+      phone: msg.phone || fromRaw,
+    });
+  }
 
   await refreshAllocationForActDate(msg.actId, msg.meta?.MetaISODate);
 
@@ -1538,6 +1692,12 @@ const booking = msg?.bookingRef
       // Escalate to deputy
       await escalateToNextDeputy(msg);
 
+      await sendInboundAcknowledgement({
+        to: msg.phone || fromRaw,
+        body: "Thanks for letting us know. We’ve received your reply and updated your availability.",
+        isWhatsApp: /^whatsapp:/i.test(fromRaw) || Boolean(req.body?.WaId),
+      });
+
       return res.status(200).send("<Response/>");
     }
 
@@ -1579,6 +1739,12 @@ const booking = msg?.bookingRef
 
       // Escalate to next deputy
       await escalateToNextDeputy(msg);
+
+      await sendInboundAcknowledgement({
+        to: msg.phone || fromRaw,
+        body: "Thanks for letting us know. We’ve received your reply and updated your availability.",
+        isWhatsApp: /^whatsapp:/i.test(fromRaw) || Boolean(req.body?.WaId),
+      });
 
       return res.status(200).send("<Response/>");
     }

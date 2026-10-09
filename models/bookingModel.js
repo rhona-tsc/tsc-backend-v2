@@ -423,6 +423,7 @@ const BookingSchema = new mongoose.Schema(
 
     // Event sheet
     eventSheet: EventSheetSchema,
+    calendarEventId: { type: String, default: "", index: true },
     // Admin-editable booking metadata used by the Booking Board. These were
     // previously written by the route but silently discarded by Mongoose.
     eventType: { type: String, default: "" },

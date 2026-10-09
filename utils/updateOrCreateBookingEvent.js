@@ -1,36 +1,137 @@
 import { google } from "googleapis";
 import Booking from "../models/bookingModel.js";
 import { oauth2Client } from "../controllers/googleController.js";
+import { buildEventSheetUrl } from "./publicSiteUrl.js";
 
-export async function updateOrCreateBookingEvent({ booking }) {
+const clean = (value = "") => String(value || "").trim();
+
+const firstAct = (booking = {}) => booking?.actsSummary?.[0] || {};
+
+const bookingRefOf = (booking = {}) =>
+  clean(booking.bookingRef || booking.bookingId || booking._id);
+
+const dateOf = (booking = {}) => {
+  const raw =
+    booking.eventDateISO ||
+    booking.eventDate ||
+    booking.date ||
+    booking?.eventSheet?.answers?.event_date ||
+    firstAct(booking)?.performance?.date ||
+    "";
+  if (!raw) return "";
+  if (raw instanceof Date) return raw.toISOString().slice(0, 10);
+  return clean(raw).slice(0, 10);
+};
+
+const normaliseTime = (value, fallback) => {
+  const match = clean(value).match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return fallback;
+  return `${String(Math.min(23, Number(match[1]))).padStart(2, "0")}:${match[2]}`;
+};
+
+const eventTimes = (booking = {}) => {
+  const performance = {
+    ...(firstAct(booking)?.performance || {}),
+    ...(booking.performanceTimes || {}),
+  };
+  const dateISO = dateOf(booking);
+  const arrival = normaliseTime(
+    performance.arrivalTime || booking.arrivalTime,
+    "17:00",
+  );
+  const finish = normaliseTime(
+    performance.finishTime || booking.finishTime,
+    "23:59",
+  );
+  let finishDayOffset = Number(
+    performance.finishDayOffset ?? booking.finishDayOffset ?? 0,
+  );
+  if (!finishDayOffset && finish <= arrival) finishDayOffset = 1;
+  const endDate = new Date(`${dateISO}T12:00:00Z`);
+  endDate.setUTCDate(endDate.getUTCDate() + Math.max(0, finishDayOffset));
+  return {
+    dateISO,
+    start: `${dateISO}T${arrival}:00`,
+    end: `${endDate.toISOString().slice(0, 10)}T${finish}:00`,
+  };
+};
+
+const lineupFor = (booking = {}, assignedMusicians = []) => {
+  const candidates = [
+    assignedMusicians,
+    booking.assignedMusicians,
+    booking.bandLineup,
+    booking.bookingMusicians,
+    booking?.bookingDetails?.assignedMusicians,
+  ].find((items) => Array.isArray(items) && items.length) || [];
+  return candidates
+    .filter((member) => ["accepted", "confirmed"].includes(clean(member?.status).toLowerCase()))
+    .map((member) => {
+      const name = clean(
+        member?.name || [member?.firstName, member?.lastName].filter(Boolean).join(" "),
+      );
+      const duties = Array.isArray(member?.duties)
+        ? member.duties.map(clean).filter(Boolean)
+        : [];
+      const role = [member?.role || member?.instrument, ...duties]
+        .map(clean)
+        .filter(Boolean)
+        .filter((value, index, all) => all.indexOf(value) === index)
+        .join(" · ");
+      return [name || "Band member", role].filter(Boolean).join(" — ");
+    });
+};
+
+const eventSheetLink = (booking = {}) => {
+  const ref = bookingRefOf(booking);
+  if (!booking?.eventSheet?.submitted) return `${buildEventSheetUrl(ref)}?ro=1`;
+  const backend = clean(
+    process.env.BACKEND_PUBLIC_URL || process.env.BACKEND_URL,
+  ).replace(/\/$/, "");
+  return backend
+    ? `${backend}/api/booking/${encodeURIComponent(ref)}/event-sheet/pdf`
+    : `${buildEventSheetUrl(ref)}?ro=1`;
+};
+
+export async function updateOrCreateBookingEvent({ booking, assignedMusicians = [] }) {
   if (!booking) throw new Error("Missing booking for calendar update");
 
   const cal = google.calendar({ version: "v3", auth: oauth2Client });
   const calendarId = "primary";
 
   const eventId = booking.calendarEventId || null;
+  const summaryName = clean(
+    booking.actName || firstAct(booking)?.actName || firstAct(booking)?.tscName || "Band",
+  );
+  const ref = bookingRefOf(booking);
+  const times = eventTimes(booking);
+  if (!times.dateISO) throw new Error("Booking has no event date for calendar update");
+  const lineup = lineupFor(booking, assignedMusicians);
 
-  const summary = `Confirmed Booking: ${booking.actName}`;
-  const description = `
-Booking Reference: ${booking.bookingRef}
-Act: ${booking.actName}
-Date: ${booking.eventDateISO}
-Venue: ${booking.venueAddress || booking.venue}
-  `.trim();
-
-  const start = `${booking.eventDateISO}T17:00:00`;
-  const end = `${booking.eventDateISO}T23:59:00`;
+  const summary = `Confirmed Booking: ${summaryName}`;
+  const description = [
+    `Booking Reference: ${ref}`,
+    `Act: ${summaryName}`,
+    `Date: ${times.dateISO}`,
+    `Venue: ${clean(booking.venueAddress || booking.venue) || "TBC"}`,
+    "",
+    "BAND MEMBERS & ROLES:",
+    ...(lineup.length ? lineup.map((entry) => `• ${entry}`) : ["• Awaiting confirmations"]),
+    "",
+    `EVENT SHEET: ${eventSheetLink(booking)}`,
+  ].join("\n");
 
   const eventPayload = {
     summary,
     description,
-    start: { dateTime: start, timeZone: "Europe/London" },
-    end:   { dateTime: end, timeZone: "Europe/London" },
+    location: clean(booking.venueAddress || booking.venue),
+    start: { dateTime: times.start, timeZone: "Europe/London" },
+    end: { dateTime: times.end, timeZone: "Europe/London" },
     extendedProperties: {
       private: {
-        bookingRef: booking.bookingRef,
-        actId: booking.actId || "",
-        eventDateISO: booking.eventDateISO,
+        bookingRef: ref,
+        actId: booking.actId || firstAct(booking)?.actId || booking.act || "",
+        eventDateISO: times.dateISO,
       },
     },
   };
@@ -54,9 +155,9 @@ Venue: ${booking.venueAddress || booking.venue}
 
   const newEventId = created.data.id;
 
-  await Booking.updateOne(
+  await Booking.collection.updateOne(
     { _id: booking._id },
-    { $set: { calendarEventId: newEventId } }
+    { $set: { calendarEventId: newEventId } },
   );
 
   return newEventId;

@@ -16,6 +16,8 @@ import {
 } from "../controllers/bookingController.js";
 import Booking from "../models/bookingModel.js";
 import Act from "../models/actModel.js";
+import BookingBoardItem from "../models/bookingBoardItem.js";
+import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
 import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
@@ -1423,6 +1425,30 @@ const buildEventSheetPdfBuffer = async (booking, act = null) => {
   return done;
 };
 
+router.get("/:id/event-sheet/pdf", async (req, res) => {
+  try {
+    const id = String(req.params?.id || "").trim();
+    const conditions = [{ bookingId: id }, { bookingRef: id }];
+    if (mongoose.isValidObjectId(id)) conditions.unshift({ _id: id });
+    const booking = await Booking.findOne({ $or: conditions }).lean();
+    if (!booking) return res.status(404).send("Event sheet not found");
+
+    const actId = booking?.actsSummary?.[0]?.actId || booking?.act || null;
+    const act = actId ? await Act.findById(actId).lean() : null;
+    const pdf = await buildEventSheetPdfBuffer(booking, act);
+    const safeRef = String(booking.bookingId || booking._id).replace(/[^a-z0-9-_]+/gi, "-");
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="event-sheet-${safeRef}.pdf"`,
+      "Cache-Control": "no-store",
+    });
+    return res.send(pdf);
+  } catch (error) {
+    console.error("event-sheet PDF route failed", error);
+    return res.status(500).send("Could not generate event sheet PDF");
+  }
+});
+
 router.post("/notify-band", async (req, res) => {
   console.log(
     `✅ (routes/bookingRoutes.js) POST /api/booking/notify-band called at`,
@@ -1577,6 +1603,25 @@ router.post("/notify-band", async (req, res) => {
     });
 
     await booking.save();
+
+    try {
+      const board = await BookingBoardItem.findOne({
+        $or: [
+          { bookingId: booking._id },
+          { sourceBookingId: booking._id },
+          { bookingRef: booking.bookingId },
+        ],
+      }).lean();
+      await updateOrCreateBookingEvent({
+        booking: booking.toObject({ virtuals: true }),
+        assignedMusicians: board?.assignedMusicians || [],
+      });
+    } catch (calendarError) {
+      console.warn("Could not replace calendar event-sheet link with PDF", {
+        bookingId: ref,
+        message: calendarError?.message,
+      });
+    }
 
     console.log("✅ notify-band email sent", {
       bookingId: ref,

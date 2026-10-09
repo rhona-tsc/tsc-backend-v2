@@ -5189,6 +5189,18 @@ export const twilioInbound = async (req, res) => {
     return null;
   };
 
+  const sendAutomatedReplyInstruction = async (phone) => {
+    if (!phone) return;
+    try {
+      await sendWhatsAppText(
+        phone,
+        "This is an automated messaging service. Please use the quick reply buttons to answer this message. If you have additional questions about this gig, please message +44 7594 223200.",
+      );
+    } catch (error) {
+      console.error("Failed to send automated reply instruction:", error?.message || error);
+    }
+  };
+
   const classifyBookingReply = (s = "") => {
     const t = String(s || "").trim().toLowerCase();
     if (!t) return null;
@@ -5379,6 +5391,10 @@ export const twilioInbound = async (req, res) => {
             "ListResponse[Id]",
             "Interactive[ButtonReply][Id]"
           ) || "";
+        const inboundIsWhatsApp =
+          /^whatsapp:/i.test(String(bodyObj?.From || "")) ||
+          Boolean(bodyObj?.WaId);
+        const usedQuickReply = Boolean(btnId || btnText);
 
         // Deterministic join to the exact outbound message we sent
         const repliedSid =
@@ -5457,7 +5473,7 @@ export const twilioInbound = async (req, res) => {
      const deputyAllocationReply =
   classifyDeputyAllocationReply(btnText) ||
   classifyDeputyAllocationReply(btnId) ||
-  classifyDeputyAllocationReply(bodyText) ||
+  (!inboundIsWhatsApp ? classifyDeputyAllocationReply(bodyText) : null) ||
   null;
 
 let deputyAllocationJob = null;
@@ -5497,6 +5513,11 @@ if (deputyAllocationReply && deputyAllocationJob) {
     buildNoopRes()
   );
 
+  return;
+}
+
+if (deputyAllocationJob && !deputyAllocationReply) {
+  await sendAutomatedReplyInstruction(sender);
   return;
 }
 
@@ -5568,6 +5589,11 @@ if (deputyAllocationReply && deputyAllocationJob) {
             .lean();
         }
 
+        if (bookingMsg && inboundIsWhatsApp && !usedQuickReply) {
+          await sendAutomatedReplyInstruction(sender);
+          return;
+        }
+
         if (bookingMsg || bookingLooksExplicit) {
           console.log(
             "🎟️ [twilioInbound] routing inbound reply to booking flow",
@@ -5619,12 +5645,18 @@ if (deputyAllocationReply && deputyAllocationJob) {
           return;
         }
 
+        if (inboundIsWhatsApp && !usedQuickReply) {
+          await sendAutomatedReplyInstruction(sender);
+          return;
+        }
+
         if (!reply) {
-          console.log("ℹ️ Unclassified inbound message — ignoring", {
+          console.log("ℹ️ Unclassified inbound message — sending button instruction", {
             bodyText,
             btnText,
             btnId,
           });
+          await sendAutomatedReplyInstruction(sender);
           return;
         }
 

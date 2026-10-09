@@ -18,6 +18,7 @@ import bookingBoardItemModel from "../models/bookingBoardItem.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import crypto from "crypto";
 import { ensureBookingEvent, addAttendeeToEvent } from "./googleController.js";
+import { promptForProfileAfterAcceptance } from "../services/onboardingAcceptancePrompt.js";
 
 const DEPUTY_JOB_BCC_EMAIL =
   process.env.DEPUTY_JOB_BCC_EMAIL || "hello@thesupremecollective.co.uk";
@@ -5610,7 +5611,7 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
         try {
           await sendWhatsAppText(
             musicianPhone,
-            "Wonderful! Please consider yourself booked. We’ll let the band know, and you should hear from them shortly.",
+            "Thanks, we’ve received your reply. Please consider yourself booked. We’ll send your diary invitation to confirm the booking and let the band know.",
           );
         } catch (whatsAppError) {
           console.error(
@@ -5619,6 +5620,11 @@ export const twilioInboundDeputyAllocation = async (req, res) => {
           );
         }
       }
+
+      await promptForProfileAfterAcceptance({
+        musicianId: musician._id,
+        phone: musicianPhone,
+      });
 
       // Email the musician full details
       if (musicianEmail) {
@@ -6150,6 +6156,19 @@ export const twilioInboundDeputyJob = async (req, res) => {
 
       await job.save();
 
+      await sendWhatsAppText(
+        musician.phone || musician.phoneNumber || application?.phone || fromRaw,
+        "Thanks, we’ve received your reply. Please consider yourself booked. We’ll send your diary invitation to confirm the booking.",
+      ).catch((error) =>
+        console.error("Failed to send deputy acceptance acknowledgement:", error?.message || error),
+      );
+
+      await promptForProfileAfterAcceptance({
+        musicianId: musician._id,
+        phone:
+          musician.phone || musician.phoneNumber || application?.phone || fromRaw,
+      });
+
       console.log("✅ Deputy job accepted via WhatsApp", {
         jobId: String(job._id),
         musicianId: String(musician._id),
@@ -6171,6 +6190,13 @@ export const twilioInboundDeputyJob = async (req, res) => {
     });
 
     await job.save();
+
+    await sendWhatsAppText(
+      musician.phone || musician.phoneNumber || application?.phone || fromRaw,
+      "Thanks for letting us know. We’ve received your reply and updated the job.",
+    ).catch((error) =>
+      console.error("Failed to send deputy decline acknowledgement:", error?.message || error),
+    );
 
     console.log("↩️ Deputy job declined via WhatsApp and reopened", {
       jobId: String(job._id),
