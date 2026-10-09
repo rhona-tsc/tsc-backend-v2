@@ -3047,8 +3047,32 @@ export const ensureEmergencyContact = async (req, res) => {
         .json({ success: false, message: "Booking not found" });
     }
 
+    const boardConditions = [];
+    if (book.bookingId || book.bookingRef) {
+      boardConditions.push({ bookingRef: book.bookingId || book.bookingRef });
+    }
+    if (book?._id) {
+      boardConditions.push({ bookingId: book._id }, { sourceBookingId: book._id });
+    }
+    const board = boardConditions.length
+      ? await BookingBoardItem.findOne({ $or: boardConditions }).lean()
+      : null;
+    const savedAssignments = [
+      board?.assignedMusicians,
+      board?.bookingMusicians,
+      board?.bandLineup,
+    ].find((items) => Array.isArray(items) && items.length) || [];
+    const confirmedAssignments = savedAssignments.filter((member) =>
+      ["accepted", "confirmed"].includes(
+        String(member?.status || "").trim().toLowerCase(),
+      ),
+    );
     const assignedMusicians = await resolveAssignedMusiciansFromBooking(
-      book.toObject ? book.toObject() : book,
+      savedAssignments.length
+        ? { assignedMusicians: confirmedAssignments }
+        : book.toObject
+          ? book.toObject()
+          : book,
     );
     const targets = assignedMusicians
       .map((member, index) => {
@@ -3066,9 +3090,10 @@ export const ensureEmergencyContact = async (req, res) => {
       })
       .filter(Boolean);
 
-    // If already present, just mirror to eventSheet
+    // If already present, refresh the routing targets from the current
+    // confirmed allocation and mirror it to the event sheet.
     if (book?.contactRouting?.ivrCode && book?.contactRouting?.proxyNumber) {
-      if (!book.contactRouting.targets?.length && targets.length) {
+      if (targets.length) {
         book.contactRouting.targets = targets;
       }
       book.eventSheet = book.eventSheet || {};
