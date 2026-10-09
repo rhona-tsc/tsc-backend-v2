@@ -151,10 +151,41 @@ const resolveBoardItem = async (rawId) => {
 };
 
 const getActLineupContext = async (board) => {
-  const actId = board?.actId || board?.actsSummary?.[0]?.actId || board?.actsSummary?.[0]?._id;
+  let linkedBooking = null;
+  const boardActId =
+    board?.actId || board?.actsSummary?.[0]?.actId || board?.actsSummary?.[0]?._id;
+
+  // Some legacy/synchronised board rows were created without copying the act
+  // linkage from their source booking. Resolve through that booking so role
+  // offers still work, rather than presenting an unhelpful "not linked" error.
+  if (!boardActId) {
+    const bookingConditions = [];
+    for (const value of [board?.bookingId, board?.sourceBookingId]) {
+      if (value && mongoose.isValidObjectId(String(value))) {
+        bookingConditions.push({ _id: value });
+      }
+    }
+    if (board?.bookingRef) bookingConditions.push({ bookingRef: board.bookingRef });
+    if (bookingConditions.length) {
+      linkedBooking = await Booking.findOne({ $or: bookingConditions })
+        .select("act actId lineupId actsSummary")
+        .lean();
+    }
+  }
+
+  const actId =
+    boardActId ||
+    linkedBooking?.act ||
+    linkedBooking?.actId ||
+    linkedBooking?.actsSummary?.[0]?.actId ||
+    linkedBooking?.actsSummary?.[0]?._id;
   const act = actId ? await Act.findById(actId).lean() : null;
   const requestedLineup = String(
-    board?.actsSummary?.[0]?.lineupId || board?.lineupId || "",
+    board?.actsSummary?.[0]?.lineupId ||
+      board?.lineupId ||
+      linkedBooking?.actsSummary?.[0]?.lineupId ||
+      linkedBooking?.lineupId ||
+      "",
   );
   const lineup =
     act?.lineups?.find(
