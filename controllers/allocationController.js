@@ -313,9 +313,14 @@ const updateBoardRoleSlot = async (msg, changes = {}) => {
         ? { ...(entry.toObject?.() || entry), ...changes }
         : entry,
     );
-  board.assignedMusicians = apply(board.assignedMusicians || []);
-  board.bookingMusicians = apply(board.bookingMusicians || []);
-  board.bandLineup = apply(board.bandLineup || []);
+  const updatedAssignments = apply(board.assignedMusicians || []);
+  board.assignedMusicians = updatedAssignments;
+  board.bookingMusicians = updatedAssignments;
+  board.bandLineup = updatedAssignments;
+  board.bookingDetails = {
+    ...(board.bookingDetails?.toObject?.() || board.bookingDetails || {}),
+    assignedMusicians: updatedAssignments,
+  };
   const acceptedCount = board.assignedMusicians.filter((item) =>
     ["accepted", "confirmed"].includes(item?.status),
   ).length;
@@ -329,6 +334,59 @@ const updateBoardRoleSlot = async (msg, changes = {}) => {
   };
   await board.save();
   return board;
+};
+
+export const reconcilePendingRoleOffer = async (msg) => {
+  if (!msg?.roleSlotId) return null;
+  const board = msg.bookingBoardItemId
+    ? await bookingBoardItem.findById(msg.bookingBoardItemId)
+    : await resolveBoardItem(msg.bookingRef);
+  if (!board) return null;
+  const slot = (board.assignedMusicians || []).find(
+    (entry) => String(entry?.roleSlotId || "") === String(msg.roleSlotId),
+  );
+  if (["accepted", "confirmed"].includes(String(slot?.status || "").toLowerCase())) {
+    return board;
+  }
+  const musician = msg.musicianId
+    ? await Musician.findById(msg.musicianId).lean()
+    : null;
+  const contact = candidateContact(musician || {});
+  return updateBoardRoleSlot(msg, {
+    musicianId: msg.musicianId,
+    name: musicianDisplayName(musician || {}),
+    firstName: musician?.firstName || musician?.basicInfo?.firstName || "",
+    lastName: musician?.lastName || musician?.basicInfo?.lastName || "",
+    email: msg.calendar?.attendeeEmail || contact.email,
+    phone: msg.phone || contact.phone,
+    status: "offered",
+    offerRequestId: msg.enquiryId,
+    offeredAt: msg.createdAt || new Date(),
+  });
+};
+
+const closeCompetingRoleOffers = async (winner) => {
+  if (!winner?.bookingRef || !winner?.roleSlotId) return;
+  const pending = await EnquiryMessage.find({
+    ...(winner._id ? { _id: { $ne: winner._id } } : {}),
+    bookingRef: winner.bookingRef,
+    roleSlotId: winner.roleSlotId,
+    ...(winner.musicianId ? { musicianId: { $ne: winner.musicianId } } : {}),
+    "meta.kind": "booking",
+    $or: [{ reply: null }, { reply: { $exists: false } }],
+  });
+
+  for (const other of pending) {
+    await EnquiryMessage.updateOne(
+      { _id: other._id, $or: [{ reply: null }, { reply: { $exists: false } }] },
+      { $set: { reply: "unavailable", repliedAt: new Date(), status: "read" } },
+    );
+    await sendInboundAcknowledgement({
+      to: other.phone,
+      body: "This role has now been allocated, so you no longer need to respond. Thank you. 🤍 TSC",
+      isWhatsApp: true,
+    });
+  }
 };
 
 const musicianMatchesAssignment = (entry = {}, user = {}) => {
@@ -869,6 +927,10 @@ export const offerBookingRole = async (req, res) => {
       board.assignedMusicians = current;
       board.bookingMusicians = current;
       board.bandLineup = current;
+      board.bookingDetails = {
+        ...(board.bookingDetails?.toObject?.() || board.bookingDetails || {}),
+        assignedMusicians: current,
+      };
       board.allocation = { ...(board.allocation?.toObject?.() || board.allocation || {}), status: "in_progress", lastCheckedAt: new Date() };
       await board.save();
     }
@@ -952,6 +1014,11 @@ export const confirmBookingRole = async (req, res) => {
       lastCheckedAt: new Date(),
     };
     await board.save();
+    await closeCompetingRoleOffers({
+      bookingRef: board.bookingRef,
+      roleSlotId,
+      musicianId: musician._id,
+    });
     const confirmation = await completeAcceptedAssignment({ board, assignment: candidate, musician });
     if (confirmation.eventId && confirmation.email) {
       candidate.calendarInviteSentAt = new Date();
@@ -1500,99 +1567,74 @@ export const twilioInboundBooking = async (req, res) => {
     // 3️⃣ Fetch the pending EnquiryMessage row
     // ---------------------------------------------------------
     const repliedSid = String(req.body?.OriginalRepliedMessageSid || "");
-let msg = null;
-
-if (requestId) {
-  msg = await EnquiryMessage.findOneAndUpdate(
-    { enquiryId: requestId },
-    {
-      $set: {
-        reply: replyType,
-        repliedAt: new Date(),
-        deliveryStatus: "read",
-        status: "read",
-        "calendar.calendarStatus": "needsAction",
-      },
-    },
-    { new: true }
-  );
-}
-
-if (!msg && repliedSid) {
-  msg = await EnquiryMessage.findOneAndUpdate(
-    { messageSid: repliedSid },
-    {
-      $set: {
-        reply: replyType,
-        repliedAt: new Date(),
-        deliveryStatus: "read",
-        status: "read",
-        "calendar.calendarStatus": "needsAction",
-      },
-    },
-    { new: true }
-  );
-}
-
-
-    if (requestId) {
-      msg = await EnquiryMessage.findOneAndUpdate(
-        { enquiryId: requestId },
-        {
-          $set: {
-            reply: replyType,
-            repliedAt: new Date(),
-            deliveryStatus: "read",
-            status: "read",
-            "calendar.calendarStatus": "needsAction",
-          },
-        },
-        { new: true }
-      );
-    }
+    let msg = requestId
+      ? await EnquiryMessage.findOne({ enquiryId: requestId })
+      : null;
 
     if (!msg && repliedSid) {
-      msg = await EnquiryMessage.findOneAndUpdate(
-        { messageSid: repliedSid },
-        {
-          $set: {
-            reply: replyType,
-            repliedAt: new Date(),
-            deliveryStatus: "read",
-            status: "read",
-            "calendar.calendarStatus": "needsAction",
-          },
-        },
-        { new: true }
-      );
+      msg = await EnquiryMessage.findOne({ messageSid: repliedSid });
     }
 
     if (!msg) {
       const variants = normalizeFrom(fromRaw);
 
-      msg = await EnquiryMessage.findOneAndUpdate(
+      msg = await EnquiryMessage.findOne(
         {
           phone: { $in: variants },
           "meta.kind": "booking",
           $or: [{ reply: null }, { reply: { $exists: false } }],
         },
-        {
-          $set: {
-            reply: replyType,
-            repliedAt: new Date(),
-            deliveryStatus: "read",
-            status: "read",
-            "calendar.calendarStatus": "needsAction",
-          },
-        },
-        { new: true, sort: { createdAt: -1 } }
-      );
+      ).sort({ createdAt: -1 });
     }
 
     if (!msg) {
       console.warn("🦚 No matching EnquiryMessage found for this reply");
       return res.status(200).send("<Response/>");
     }
+
+    // A late acceptance is valid only while this role has not already been won.
+    // Check before changing the message so an old quick reply cannot overwrite
+    // a confirmed musician on the booking board.
+    if (replyType === "YES") {
+      const currentBoard = msg.bookingBoardItemId
+        ? await bookingBoardItem.findById(msg.bookingBoardItemId)
+        : await resolveBoardItem(msg.bookingRef);
+      const currentSlot = (currentBoard?.assignedMusicians || []).find(
+        (entry) =>
+          String(entry?.roleSlotId || "") === String(msg.roleSlotId || "") ||
+          String(entry?.offerRequestId || "") === String(msg.enquiryId || ""),
+      );
+      const isWonByAnother =
+        currentSlot &&
+        ["accepted", "confirmed"].includes(String(currentSlot.status || "").toLowerCase()) &&
+        String(currentSlot.musicianId || "") !== String(msg.musicianId || "");
+
+      if (isWonByAnother) {
+        await EnquiryMessage.updateOne(
+          { _id: msg._id },
+          { $set: { reply: "unavailable", repliedAt: new Date(), deliveryStatus: "read", status: "read" } },
+        );
+        await sendInboundAcknowledgement({
+          to: msg.phone || fromRaw,
+          body: "Sorry, this role has already been allocated now. Thank you for getting back to us. 🤍 TSC",
+          isWhatsApp: /^whatsapp:/i.test(fromRaw) || Boolean(req.body?.WaId),
+        });
+        return res.status(200).send("<Response/>");
+      }
+    }
+
+    await EnquiryMessage.updateOne(
+      { _id: msg._id },
+      {
+        $set: {
+          reply: replyType === "YES" ? "yes" : replyType === "NO_LOC" ? "no" : "unavailable",
+          repliedAt: new Date(),
+          deliveryStatus: "read",
+          status: "read",
+          "calendar.calendarStatus": "needsAction",
+        },
+      },
+    );
 
     console.log("🦚 matched EnquiryMessage:", msg._id);
 
@@ -1677,12 +1719,25 @@ const booking = msg?.bookingRef
     { upsert: true, new: true }
   );
 
+  const acceptingMusician = msg.musicianId
+    ? await Musician.findById(msg.musicianId).lean()
+    : null;
+  const acceptingContact = candidateContact(acceptingMusician || {});
   const updatedBoard = await updateBoardRoleSlot(msg, {
+    musicianId: msg.musicianId,
+    name: musicianDisplayName(acceptingMusician || {}),
+    firstName: acceptingMusician?.firstName || acceptingMusician?.basicInfo?.firstName || "",
+    lastName: acceptingMusician?.lastName || acceptingMusician?.basicInfo?.lastName || "",
+    email: email || acceptingContact.email,
+    phone: msg.phone || acceptingContact.phone,
+    offerRequestId: msg.enquiryId,
     status: "accepted",
     respondedAt: new Date(),
     acceptedAt: new Date(),
     calendarInviteSentAt: eventId && email ? new Date() : null,
   });
+
+  await closeCompetingRoleOffers(msg);
 
   if (updatedBoard) {
     const acceptedAssignment = (updatedBoard.assignedMusicians || []).find(
@@ -1691,9 +1746,7 @@ const booking = msg?.bookingRef
         entry?.offerRequestId === msg.enquiryId ||
         String(entry?.musicianId || "") === String(msg.musicianId || ""),
     );
-    const acceptedMusician = msg.musicianId
-      ? await Musician.findById(msg.musicianId).lean()
-      : null;
+    const acceptedMusician = acceptingMusician;
     await completeAcceptedAssignment({
       board: updatedBoard,
       assignment: acceptedAssignment || {
@@ -1879,6 +1932,7 @@ export async function escalateToNextDeputy(msg) {
       actId: msg.actId,
       lineupId: msg.lineupId,
       "meta.MetaISODate": msg.meta?.MetaISODate,
+      ...(msg.roleSlotId ? { roleSlotId: msg.roleSlotId } : {}),
     });
 
     let nextDep = deputies.find((d) => {
@@ -1996,6 +2050,7 @@ export async function escalateToNextDeputy(msg) {
         "4": sanitizeFee(msg.fee),
         "5": msg.duties || "performance",
         "6": msg.meta?.actName || "the band",
+        "7": newBookingId,
       },
       smsBody,
     });

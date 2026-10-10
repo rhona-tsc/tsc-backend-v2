@@ -1,125 +1,99 @@
 // cron/chaseAndEscalate.js
 import EnquiryMessage from "../models/EnquiryMessage.js";
-import { sendWhatsAppMessage, sendSMSMessage } from "../utils/twilioClient.js";
-import { escalateToNextDeputy } from "../controllers/allocationController.js";
-import { sanitizeFee } from "../controllers/allocationController.js";
+import Musician from "../models/musicianModel.js";
+import { sendWhatsAppMessage, sendWhatsAppText, sendSMSMessage } from "../utils/twilioClient.js";
+import {
+  escalateToNextDeputy,
+  reconcilePendingRoleOffer,
+  sanitizeFee,
+} from "../controllers/allocationController.js";
+
+const firstNameFor = async (msg) => {
+  const musician = msg.musicianId
+    ? await Musician.findById(msg.musicianId).select("firstName basicInfo.firstName").lean()
+    : null;
+  return musician?.firstName || musician?.basicInfo?.firstName || "there";
+};
+
+const sendTextWithFallback = async (phone, body) => {
+  try {
+    await sendWhatsAppText(phone, body);
+  } catch {
+    await sendSMSMessage(phone, body);
+  }
+};
+
+const sendRepeatRequest = async ({ msg, firstName }) => {
+  const smsBody =
+    `Hi ${firstName}, just following up from the above. Booking request for ` +
+    `${msg.formattedDate || msg.meta?.MetaISODate} at ` +
+    `${msg.formattedAddress || msg.meta?.MetaAddress} with ${msg.meta?.actName || "the band"}. ` +
+    `Role: ${msg.duties || "performance"}. Fee: £${sanitizeFee(msg.fee)}. ` +
+    `Reply YES (YESBOOK_${msg.enquiryId}) or NO (NOBOOK_${msg.enquiryId}). 🤍 TSC`;
+
+  await sendWhatsAppMessage({
+    to: String(msg.phone).startsWith("whatsapp:") ? msg.phone : `whatsapp:${msg.phone}`,
+    contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+    requestId: msg.enquiryId,
+    variables: {
+      "1": firstName,
+      "2": msg.formattedDate || msg.meta?.MetaISODate,
+      "3": msg.formattedAddress || msg.meta?.MetaAddress,
+      "4": sanitizeFee(msg.fee),
+      "5": msg.duties || "performance",
+      "6": msg.meta?.actName || "the band",
+      "7": msg.enquiryId,
+    },
+    smsBody,
+  });
+};
 
 export const runChaseAndEscalation = async () => {
   console.log("⏱️ Running chase + escalation cron", new Date().toISOString());
 
   const now = Date.now();
-
-  // Pull booking enquiries awaiting reply
   const messages = await EnquiryMessage.find({
     "meta.kind": "booking",
     $or: [{ reply: null }, { reply: { $exists: false } }],
-  }).lean();
-
-  if (!messages.length) {
-    console.log("⏱️ No pending enquiries to chase/escalate");
-    return;
-  }
+  }).sort({ createdAt: 1 }).lean();
 
   for (const msg of messages) {
-    const ageHours =
-      (now - new Date(msg.createdAt).getTime()) / (60 * 60 * 1000);
+    await reconcilePendingRoleOffer(msg);
+    const ageHours = (now - new Date(msg.createdAt).getTime()) / 3_600_000;
+    const firstName = await firstNameFor(msg);
+    try {
+      if (ageHours >= 72 && !msg.autoEscalatedAt) {
+        await sendTextWithFallback(
+          msg.phone,
+          `Hi ${firstName}, as we haven't heard back, we've now passed this role to another musician. ` +
+            `You're still welcome to accept in the meantime, but we can't guarantee it will still be available. 🤍 TSC`,
+        );
+        await EnquiryMessage.updateOne(
+          { _id: msg._id, autoEscalatedAt: null },
+          { $set: { autoEscalatedAt: new Date() } },
+        );
+        await escalateToNextDeputy(msg);
+        continue;
+      }
 
-    const phone = msg.phone;
-    const waTo = phone.startsWith("whatsapp:") 
-      ? phone 
-      : `whatsapp:${phone}`;
-
-    const formattedDate = msg.formattedDate || msg.meta?.MetaISODate;
-    const formattedAddress = msg.formattedAddress || msg.meta?.MetaAddress;
-    const actName = msg.meta?.actName || "the band";
-    const feeClean = sanitizeFee(msg.fee);
-    const duties = msg.duties || "performance";
-    const firstName = msg.musicianName || "there";
-
-    /* --------------------------------------------------------
-     * 1️⃣ SEND CHASE AT 24 HOURS
-     * --------------------------------------------------------*/
-    if (ageHours >= 24 && !msg.chaseSentAt) {
-      console.log("📣 Sending 24-hour chase →", phone);
-
-      const smsBody =
-        `Hi ${firstName}, just checking you saw the booking request for ` +
-        `${formattedDate} at ${formattedAddress} with ${actName}. ` +
-        `If you're available, reply YES. If you're already booked, reply NO. ` +
-        `If it's too far, reply NOLOC. 🤍 TSC`;
-
-      try {
-        // You can optionally configure a WA template
-        const chaseSid = process.env.TWILIO_DEPUTY_CHASE_SID;
-
-        if (chaseSid) {
-          await sendWhatsAppMessage({
-            to: waTo,
-            contentSid: chaseSid,
-            variables: {
-              1: firstName,
-              2: formattedDate,
-              3: formattedAddress,
-              4: feeClean,
-              5: duties,
-              6: actName,
-            },
-            smsBody,
-          });
-          console.log("📣 Chase WA sent");
-        } else {
-          // SMS-only version (works without a template)
-          await sendSMSMessage(phone, smsBody);
-          console.log("📣 Chase SMS sent");
-        }
-
+      if (ageHours >= 48 && !msg.secondChaseSentAt) {
+        await sendRepeatRequest({ msg, firstName });
         await EnquiryMessage.updateOne(
           { _id: msg._id },
-          { $set: { chaseSentAt: new Date() } }
+          { $set: { secondChaseSentAt: new Date() } },
         );
-      } catch (err) {
-        console.error("❌ Chase send failed:", err);
+        continue;
       }
 
-      continue; // prevent escalation same cycle
-    }
-
-    /* --------------------------------------------------------
-     * 2️⃣ AUTO-ESCALATE AT 72 HOURS
-     * --------------------------------------------------------*/
-    if (ageHours >= 72 && !msg.autoEscalatedAt) {
-      console.log("⚠️ Auto-escalating after 72h →", phone);
-
-      // A. Courtesy message to the original musician
-      const smsBody =
-        `No worries if you were busy — we've now passed the request for ` +
-        `${formattedDate} to the next musician. Thanks anyway! 🤍 TSC`;
-
-      try {
-        await sendSMSMessage(phone, smsBody);
-      } catch (err) {
-        console.warn("⚠️ Failed to send courtesy SMS", err);
+      if (ageHours >= 24 && !msg.chaseSentAt) {
+        await sendRepeatRequest({ msg, firstName });
+        await EnquiryMessage.updateOne(
+          { _id: msg._id },
+          { $set: { chaseSentAt: new Date() } },
+        );
       }
-
-      // B. Mark message as autoEscalated + "no_response"
-      await EnquiryMessage.updateOne(
-        { _id: msg._id },
-        {
-          $set: {
-            autoEscalatedAt: new Date(),
-            reply: "no_response",
-          },
-        }
-      );
-
-      // C. Escalate to next deputy (v2 logic)
-      try {
-        await escalateToNextDeputy(msg);
-      } catch (err) {
-        console.error("❌ Error auto-escalating to next deputy:", err);
-      }
-
-      continue;
+    } catch (error) {
+      console.error("❌ Chase/escalation failed", { messageId: msg._id, error: error?.message });
     }
   }
 
