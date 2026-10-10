@@ -487,6 +487,11 @@ const getRowAssignedMusicians = (row = {}) =>
     ].find((items) => Array.isArray(items) && items.length) || [],
   );
 
+const mergeAssignedMusicianLists = (...lists) =>
+  normaliseAssignedMusicians(
+    lists.flatMap((items) => (Array.isArray(items) ? items : [])),
+  );
+
 const toObjectIdString = (value) => {
   try {
     if (!value) return "";
@@ -1084,21 +1089,30 @@ const mergeRowData = (preferred, secondary) => {
       preferred.lineupComposition.length
         ? preferred.lineupComposition
         : secondary?.lineupComposition,
-    assignedMusicians:
-      Array.isArray(preferred?.assignedMusicians) && preferred.assignedMusicians.length
-        ? preferred.assignedMusicians
-        : secondary?.assignedMusicians,
-    bookingMusicians:
-      Array.isArray(preferred?.bookingMusicians) && preferred.bookingMusicians.length
-        ? preferred.bookingMusicians
-        : secondary?.bookingMusicians,
-    bandLineup:
-      Array.isArray(preferred?.bandLineup) && preferred.bandLineup.length
-        ? preferred.bandLineup
-        : secondary?.bandLineup,
+    assignedMusicians: mergeAssignedMusicianLists(
+      secondary?.assignedMusicians,
+      preferred?.assignedMusicians,
+    ),
+    bookingMusicians: mergeAssignedMusicianLists(
+      secondary?.bookingMusicians,
+      preferred?.bookingMusicians,
+    ),
+    bandLineup: mergeAssignedMusicianLists(
+      secondary?.bandLineup,
+      preferred?.bandLineup,
+    ),
     arrivalTime: preferred?.arrivalTime || secondary?.arrivalTime,
     finishTime: preferred?.finishTime || secondary?.finishTime,
-    bookingDetails: preferred?.bookingDetails || secondary?.bookingDetails,
+    bookingDetails: {
+      ...(secondary?.bookingDetails || {}),
+      ...(preferred?.bookingDetails || {}),
+      assignedMusicians: mergeAssignedMusicianLists(
+        secondary?.bookingDetails?.assignedMusicians,
+        secondary?.assignedMusicians,
+        preferred?.bookingDetails?.assignedMusicians,
+        preferred?.assignedMusicians,
+      ),
+    },
     payments:
       Array.isArray(preferred?.payments) && preferred.payments.length
         ? preferred.payments
