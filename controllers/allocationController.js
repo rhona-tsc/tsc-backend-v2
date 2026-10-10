@@ -307,12 +307,30 @@ const updateBoardRoleSlot = async (msg, changes = {}) => {
     : await resolveBoardItem(msg?.bookingRef);
   if (!board || !msg?.roleSlotId) return null;
 
-  const apply = (entries = []) =>
-    entries.map((entry) =>
-      entry?.roleSlotId === msg.roleSlotId || entry?.offerRequestId === msg.enquiryId
-        ? { ...(entry.toObject?.() || entry), ...changes }
-        : entry,
-    );
+  const apply = (entries = []) => {
+    let matched = false;
+    const updated = entries.map((entry) => {
+      if (entry?.roleSlotId === msg.roleSlotId || entry?.offerRequestId === msg.enquiryId) {
+        matched = true;
+        return { ...(entry.toObject?.() || entry), ...changes };
+      }
+      return entry;
+    });
+    if (!matched) {
+      const role = String(msg.meta?.role || msg.duties || "Musician").split(" · ")[0].trim();
+      updated.push({
+        role,
+        instrument: role,
+        roleSlotId: msg.roleSlotId,
+        offerRequestId: msg.enquiryId,
+        fee: Number(msg.fee || 0),
+        totalFee: Number(msg.fee || 0),
+        source: "booking_role_offer",
+        ...changes,
+      });
+    }
+    return updated;
+  };
   const updatedAssignments = apply(board.assignedMusicians || []);
   board.assignedMusicians = updatedAssignments;
   board.bookingMusicians = updatedAssignments;
@@ -896,7 +914,7 @@ export const offerBookingRole = async (req, res) => {
         meta: {
           actName: act.tscName || act.name || board.actName || "",
           MetaActId: String(act._id), MetaISODate: dateISO, MetaAddress: address,
-          kind: "booking", bookingRef: board.bookingRef || "", currency,
+          kind: "booking", bookingRef: board.bookingRef || "", currency, role,
         },
         calendar: { attendeeEmail: contact.email, calendarStatus: "needsAction" },
       });
@@ -1984,6 +2002,7 @@ export async function escalateToNextDeputy(msg) {
       formattedAddress: msg.formattedAddress,
       meta: {
         actName: msg.meta?.actName,
+        role: msg.meta?.role || String(msg.duties || "Musician").split(" · ")[0].trim(),
         MetaActId: msg.meta?.MetaActId,
         MetaISODate: msg.meta?.MetaISODate,
         MetaAddress: msg.meta?.MetaAddress,

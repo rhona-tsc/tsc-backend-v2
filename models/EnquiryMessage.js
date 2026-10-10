@@ -61,6 +61,7 @@ autoEscalatedAt: { type: Date, default: null },
       MetaAddress: String,
       kind: String,
       bookingRef: String,
+      role: String,
     },
 
     // 🗓️ Google Calendar integration
