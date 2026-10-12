@@ -2,6 +2,8 @@ import express from "express";
 import Venue from "../models/venueModel.js";
 import Booking from "../models/bookingModel.js";
 import authUser from "../middleware/auth.js";
+import multer from "multer";
+import { parseVenueEventSheet } from "../services/venueEventSheetParser.js";
 
 const router = express.Router();
 const clean = (v) => String(v ?? "").trim();
@@ -14,6 +16,11 @@ const normaliseKey = (name, address) => {
   return base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 };
 const uniqueStrings = (values) => [...new Set((values || []).map(clean).filter(Boolean))];
+const eventSheetUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: 50, fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, callback) => callback(null, file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || file.originalname.toLowerCase().endsWith(".docx")),
+});
 
 function extractAct(booking) {
   const candidates = [booking?.items?.[0], booking?.acts?.[0], booking?.lineup, booking?.bookingDetails];
@@ -165,6 +172,55 @@ router.get("/public/:id", async (req, res) => {
 });
 
 router.use(authUser);
+
+router.post("/imports/event-sheets/preview", eventSheetUpload.array("eventSheets", 50), async (req, res) => {
+  try {
+    if (!req.files?.length) return res.status(400).json({ success: false, message: "Choose at least one Word event sheet" });
+    const parsed = await Promise.all(req.files.map(parseVenueEventSheet));
+    const previews = [];
+    for (const item of parsed) {
+      const venue = item.venue;
+      const key = normaliseKey(venue.name, venue.address);
+      const possibleMatch = await Venue.findOne({ $or: [{ normalizedKey: key }, ...(venue.postcode ? [{ postcode: venue.postcode }] : [])] }).select("_id name address postcode rooms.name").lean();
+      previews.push({ ...item, possibleMatch: possibleMatch || null });
+    }
+    res.json({ success: true, previews });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+});
+
+router.post("/imports/event-sheets/confirm", async (req, res) => {
+  try {
+    const imports = Array.isArray(req.body?.imports) ? req.body.imports : [];
+    if (!imports.length) return res.status(400).json({ success: false, message: "There are no reviewed venues to import" });
+    const results = [];
+    for (const item of imports) {
+      const incoming = item?.venue || item;
+      if (!clean(incoming?.name)) { results.push({ fileName: item?.fileName, status: "skipped", message: "Venue name is missing" }); continue; }
+      const key = normaliseKey(incoming.name, incoming.address);
+      let venue = item?.matchVenueId ? await Venue.findById(item.matchVenueId) : await Venue.findOne({ normalizedKey: key });
+      const created = !venue;
+      if (!venue) venue = new Venue({ name: incoming.name, normalizedKey: key, rooms: [] });
+      for (const field of ["name", "address", "postcode", "county", "website", "googleMapsUrl", "what3wordsUrl", "loadingPinUrl", "parking", "parkingPinUrl", "generalDirections"]) {
+        if (!clean(venue[field]) && clean(incoming[field])) venue[field] = incoming[field];
+      }
+      const source = incoming.source || { kind: "event_sheet", sourceId: item.fileName, title: item.fileName };
+      if (!venue.sources.some((entry) => entry.kind === source.kind && entry.sourceId === source.sourceId)) venue.sources.push(source);
+      if (incoming.visit && !venue.visits.some((entry) => entry.bookingId === incoming.visit.bookingId)) venue.visits.push(incoming.visit);
+      for (const incomingRoom of incoming.rooms || []) {
+        let room = venue.rooms.find((entry) => clean(entry.name).toLowerCase() === clean(incomingRoom.name).toLowerCase());
+        if (!room) { venue.rooms.push({ ...incomingRoom, sources: [source] }); continue; }
+        for (const field of ["performanceArea", "accessAndLoading", "changingRoom", "soundLimitations", "soundLimiterDb", "curfewAndCloseTime", "paAndLighting", "powerAndStage", "capacity"]) {
+          if (!clean(room[field]) && clean(incomingRoom[field])) room[field] = incomingRoom[field];
+        }
+        if (!room.sources.some((entry) => entry.kind === source.kind && entry.sourceId === source.sourceId)) room.sources.push(source);
+      }
+      venue.reviewStatus = "review_needed";
+      await venue.save();
+      results.push({ fileName: item.fileName, status: created ? "created" : "merged", venueId: venue._id, venueName: venue.name });
+    }
+    res.json({ success: true, results });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+});
 
 router.get("/", async (req, res) => {
   try {
