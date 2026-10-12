@@ -2,6 +2,7 @@ import express from "express";
 import Stripe from "stripe";
 import multer from "multer";
 import mongoose from "mongoose";
+import nodemailer from "nodemailer";
 import { autosaveMusicianMedia, emailContract } from "../controllers/musicianController.js";
 import upload from "../middleware/multer.js";
 import agentAuth from "../middleware/agentAuth.js";
@@ -516,6 +517,84 @@ console.log("PATCH original_bands_performed_with:", req.body?.original_bands_per
     return res.status(500).json({ success: false, message: "Failed to save deputy" });
   }
 });
+
+router.post(
+  "/moderation/deputy/:id/request-video-resubmission",
+  verifyToken,
+  agentAuth,
+  async (req, res) => {
+    try {
+      const musician = await musicianModel.findById(req.params.id).lean();
+      if (!musician) {
+        return res.status(404).json({ success: false, message: "Musician not found" });
+      }
+
+      const email = String(musician.email || musician?.basicInfo?.email || "").trim();
+      if (!email) {
+        return res.status(400).json({ success: false, message: "This musician has no email address" });
+      }
+
+      const firstName = String(musician.firstName || musician?.basicInfo?.firstName || "there").trim();
+      const category = req.body?.category === "original" ? "original" : "function";
+      const submittedUrl = String(req.body?.url || "").trim();
+      const portalUrl = `${String(process.env.ADMIN_FRONTEND_URL || "https://admin.thesupremecollective.co.uk").replace(/\/$/, "")}/edit-deputy/${musician._id}`;
+      const smtpPort = Number(process.env.SMTP_PORT || 587);
+      const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER;
+      const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_PASS;
+      if (!smtpUser || !smtpPass) throw new Error("Email service is not configured");
+
+      const transporter = nodemailer.createTransport(
+        process.env.SMTP_HOST
+          ? {
+              host: process.env.SMTP_HOST,
+              port: smtpPort,
+              secure: smtpPort === 465,
+              auth: { user: smtpUser, pass: smtpPass },
+            }
+          : { service: "gmail", auth: { user: smtpUser, pass: smtpPass } },
+      );
+
+      const fromAddress = process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_FROM || smtpUser;
+      const adminEmail = process.env.AGENT_EMAIL || "hello@thesupremecollective.co.uk";
+      const typeLabel = category === "original" ? "original music" : "function-band";
+      const escapeHtml = (value) =>
+        String(value || "").replace(/[&<>"']/g, (character) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[character]);
+      const safeFirstName = escapeHtml(firstName);
+      const safeSubmittedUrl = escapeHtml(submittedUrl);
+
+      await transporter.sendMail({
+        from: `"The Supreme Collective" <${fromAddress}>`,
+        to: email,
+        bcc: adminEmail,
+        replyTo: process.env.SMTP_REPLY_TO || adminEmail,
+        subject: "Please resubmit your profile video",
+        text: `Hi ${firstName},\n\nThanks for submitting your ${typeLabel} video. The link supplied opens a webpage rather than a playable video, so we cannot add or approve it on your profile.\n\nPlease sign in and replace it with either a direct YouTube or Vimeo video link, or upload the original video file.\n\nUpdate your profile: ${portalUrl}\n\nIf the video comes from Instagram, TikTok or Facebook, please upload the original file or provide a direct downloadable file rather than the social profile/page link.\n\nThank you,\nThe Supreme Collective`,
+        html: `
+          <div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;max-width:640px;margin:auto">
+            <h2 style="color:#111827">A quick update to your profile video</h2>
+            <p>Hi ${safeFirstName},</p>
+            <p>Thanks for submitting your ${typeLabel} video. The link supplied opens a webpage rather than a playable video, so we cannot add or approve it on your profile.</p>
+            <p>Please replace it with either a <strong>direct YouTube or Vimeo video link</strong>, or upload the original video file.</p>
+            <p><a href="${portalUrl}" style="display:inline-block;background:#ff6667;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:bold">Update my profile video</a></p>
+            <p>If the video comes from Instagram, TikTok or Facebook, please upload the original file or provide a direct downloadable file rather than the social profile/page link.</p>
+            ${submittedUrl ? `<p style="font-size:12px;color:#6b7280">Link that needs replacing: ${safeSubmittedUrl}</p>` : ""}
+            <p>Thank you,<br>The Supreme Collective</p>
+          </div>`,
+      });
+
+      return res.json({ success: true, message: `Request sent to ${email}` });
+    } catch (error) {
+      console.error("❌ video resubmission request failed:", error);
+      return res.status(500).json({ success: false, message: error?.message || "Could not send request" });
+    }
+  },
+);
 
 router.post("/moderation/bios/backfill/start", verifyToken, async (req, res) => {
   try {
