@@ -16,6 +16,15 @@ const normaliseKey = (name, address) => {
   return base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 };
 const uniqueStrings = (values) => [...new Set((values || []).map(clean).filter(Boolean))];
+const COUNTY_CORRECTIONS = new Map([
+  ["berlshire", "Berkshire"], ["cambridegshire", "Cambridgeshire"], ["essec", "Essex"],
+  ["greater lodnon", "Greater London"], ["kents", "Kent"], ["ocfordshire", "Oxfordshire"],
+  ["london", "Greater London"], ["manchester", "Greater Manchester"],
+]);
+const normaliseCounty = (value) => {
+  const county = clean(value).replace(/\s+/g, " ");
+  return COUNTY_CORRECTIONS.get(county.toLowerCase()) || county;
+};
 const eventSheetUpload = multer({
   storage: multer.memoryStorage(),
   limits: { files: 50, fileSize: 15 * 1024 * 1024 },
@@ -99,7 +108,7 @@ async function mergeBooking(booking) {
   venue.name ||= data.name;
   venue.address ||= data.address;
   venue.postcode ||= data.postcode;
-  venue.county ||= data.county;
+  venue.county ||= normaliseCounty(data.county);
   venue.googleMapsUrl ||= data.googleMapsUrl;
   venue.what3wordsUrl ||= data.what3wordsUrl;
   venue.loadingPinUrl ||= data.loadingPinUrl;
@@ -200,6 +209,7 @@ router.post("/imports/event-sheets/confirm", async (req, res) => {
       let venue = item?.matchVenueId ? await Venue.findById(item.matchVenueId) : await Venue.findOne({ normalizedKey: key });
       const created = !venue;
       if (!venue) venue = new Venue({ name: incoming.name, normalizedKey: key, rooms: [] });
+      incoming.county = normaliseCounty(incoming.county);
       for (const field of ["name", "address", "postcode", "county", "website", "googleMapsUrl", "what3wordsUrl", "loadingPinUrl", "parking", "parkingPinUrl", "generalDirections"]) {
         if (!clean(venue[field]) && clean(incoming[field])) venue[field] = incoming[field];
       }
@@ -236,7 +246,7 @@ router.post("/", async (req, res) => {
     const body = req.body || {};
     const normalizedKey = normaliseKey(body.name, body.address);
     if (!body.name || !normalizedKey) return res.status(400).json({ success: false, message: "Venue name is required" });
-    const venue = await Venue.create({ ...body, normalizedKey });
+    const venue = await Venue.create({ ...body, county: normaliseCounty(body.county), normalizedKey });
     res.status(201).json({ success: true, venue });
   } catch (error) { res.status(error?.code === 11000 ? 409 : 500).json({ success: false, message: error.message }); }
 });
@@ -245,6 +255,7 @@ router.put("/:id", async (req, res) => {
   try {
     const update = { ...(req.body || {}) };
     delete update._id;
+    if (Object.hasOwn(update, "county")) update.county = normaliseCounty(update.county);
     if (update.name || update.address) {
       const current = await Venue.findById(req.params.id);
       update.normalizedKey = normaliseKey(update.name || current?.name, update.address || current?.address);
