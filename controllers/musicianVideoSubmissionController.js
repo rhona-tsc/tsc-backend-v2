@@ -108,7 +108,12 @@ export const listMyMusicianVideos = async (req, res) => {
     const musicianId = clean(req.params.id || requesterId(req));
     if (!mongoose.Types.ObjectId.isValid(musicianId) || !canAccessMusician(req, musicianId)) return res.status(403).json({ success: false, message: "Forbidden" });
     const submissions = await musicianVideoSubmissionModel.find({ musicianId }).sort({ createdAt: -1 });
-    return res.json({ success: true, submissions: submissions.map((item) => serialise(item)) });
+    return res.json({
+      success: true,
+      submissions: submissions.map((item) =>
+        serialise(item, { includeAccessUrl: isAgent(req) }),
+      ),
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Could not load video submissions" });
   }
