@@ -524,6 +524,13 @@ resetTokens: [
       payoutsEnabled: { type: Boolean, default: false },
       detailsSubmitted: { type: Boolean, default: false },
     },
+    stripeConnectHistory: [
+      {
+        accountId: { type: String, required: true },
+        resetAt: { type: Date, default: Date.now },
+        reason: { type: String, default: "user_requested_reset" },
+      },
+    ],
 
     dateRegistered: { type: Date, default: Date.now },
     profileLastEditedAt: { type: Date, default: null },

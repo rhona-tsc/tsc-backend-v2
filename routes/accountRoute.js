@@ -4,6 +4,7 @@ import {
   changeEmail,
   changePassword,
   createStripeConnectOnboardingLink,
+  resetStripeConnectAccount,
   syncStripeConnectAccount,
 } from "../controllers/account.js";
 
@@ -60,5 +61,7 @@ router.post(
   auth,
   syncStripeConnectAccount
 );
+
+router.post("/stripe-connect/reset", auth, resetStripeConnectAccount);
 
 export default router;

@@ -23,6 +23,7 @@ import bookingModel from "../models/bookingModel.js";
 import { autosaveMusicianForm, listAutosaveHistory } from "../controllers/musicianAutosave.controller.js";
 import bcrypt from "bcryptjs";
 import { getStripeConnectPayoutStatus } from "../controllers/deputyJobController.js";
+import { resetStripeConnectAccount } from "../controllers/account.js";
 import { generateAndPublishMusicianBio } from "../services/musicianBioService.js";
 import {
   getLatestMusicianBioBackfillJob,
@@ -388,6 +389,12 @@ router.post(
   "/account/stripe-connect/onboarding-link",
   verifyToken,
   createStripeConnectOnboardingLink
+);
+
+router.post(
+  "/account/stripe-connect/reset",
+  verifyToken,
+  resetStripeConnectAccount
 );
 
 router.get(

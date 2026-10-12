@@ -376,3 +376,73 @@ export const syncStripeConnectAccount = async (req, res) => {
     });
   }
 };
+
+export const resetStripeConnectAccount = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "User not authenticated." });
+    }
+
+    const musician = await Musician.findById(userId);
+    if (!musician) {
+      return res.status(404).json({ success: false, message: "Musician not found." });
+    }
+
+    const accountId = String(musician?.stripeConnect?.accountId || "").trim();
+    if (!accountId) {
+      return res.json({ success: true, stripeConnect: musician.stripeConnect });
+    }
+
+    // Never detach an active payout account through self-service. Those cases
+    // need an administrator to confirm that no money or payout details are lost.
+    let account;
+    try {
+      account = await stripe.accounts.retrieve(accountId);
+    } catch (error) {
+      if (error?.code !== "resource_missing") throw error;
+    }
+
+    const hasSubmittedDetails = Boolean(
+      account?.details_submitted ||
+      account?.charges_enabled ||
+      account?.payouts_enabled ||
+      musician?.stripeConnect?.detailsSubmitted ||
+      musician?.stripeConnect?.chargesEnabled ||
+      musician?.stripeConnect?.payoutsEnabled,
+    );
+
+    if (hasSubmittedDetails) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This Stripe account has submitted payout details and cannot be reset automatically. Please contact The Supreme Collective.",
+      });
+    }
+
+    musician.stripeConnectHistory = [
+      ...(Array.isArray(musician.stripeConnectHistory)
+        ? musician.stripeConnectHistory
+        : []),
+      { accountId, resetAt: new Date(), reason: "user_requested_reset" },
+    ];
+    musician.stripeConnect = {
+      accountId: "",
+      onboardingComplete: false,
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      detailsSubmitted: false,
+    };
+    musician.markModified("stripeConnect");
+    musician.markModified("stripeConnectHistory");
+    await musician.save();
+
+    return res.json({ success: true, stripeConnect: musician.stripeConnect });
+  } catch (error) {
+    console.error("❌ resetStripeConnectAccount error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to reset Stripe connection.",
+    });
+  }
+};
