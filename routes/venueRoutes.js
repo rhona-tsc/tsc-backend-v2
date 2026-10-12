@@ -255,6 +255,14 @@ router.put("/:id", async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, message: error.message }); }
 });
 
+router.delete("/:id", async (req, res) => {
+  try {
+    const venue = await Venue.findByIdAndDelete(req.params.id);
+    if (!venue) return res.status(404).json({ success: false, message: "Venue not found" });
+    res.json({ success: true, deletedVenue: { _id: venue._id, name: venue.name } });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+});
+
 router.post("/:id/feedback", async (req, res) => {
   try {
     const note = clean(req.body?.note);
