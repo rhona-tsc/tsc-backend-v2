@@ -496,6 +496,22 @@ BookingSchema.index({ paymentIntentId: 1 }, { sparse: true });
 BookingSchema.index({ "addonPayments.checkoutSessionId": 1 }, { sparse: true });
 BookingSchema.index({ "addonPayments.paymentIntentId": 1 }, { sparse: true });
 
+// Keep the venue knowledge base current whenever a booking or its event sheet
+// is saved. The dynamic import avoids making venue data a hard dependency of
+// checkout/booking startup, and venue sync failures never block a booking save.
+async function syncVenueKnowledge(booking) {
+  if (!booking) return;
+  try {
+    const { mergeBooking } = await import("../routes/venueRoutes.js");
+    await mergeBooking(typeof booking.toObject === "function" ? booking.toObject() : booking);
+  } catch (error) {
+    console.warn("Venue black book sync skipped:", error?.message || error);
+  }
+}
+
+BookingSchema.post("save", syncVenueKnowledge);
+BookingSchema.post("findOneAndUpdate", syncVenueKnowledge);
+
 const Booking =
   mongoose.models.Booking || mongoose.model("Booking", BookingSchema);
 

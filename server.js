@@ -74,6 +74,7 @@ import financeForecastRoutes from "./routes/financeForecastRoutes.js";
 import originalsRoutes from "./routes/originalsRoutes.js";
 import { runOriginalsAutomation } from "./services/originalsAutomationService.js";
 import regularDeputiesRoutes from "./routes/regularDeputiesRoutes.js";
+import venueRoutes from "./routes/venueRoutes.js";
 import {
   runVideoMigrationAutomation,
   sendVideoReviewDigest,
@@ -707,6 +708,7 @@ app.use("/api/deputy-opportunities", deputyOpportunityRoutes);
 app.use("/api/deputy-jobs", deputyJobRouter);
 app.use("/api/originals", originalsRoutes);
 app.use("/api/regular-deputies", regularDeputiesRoutes);
+app.use("/api/venues", venueRoutes);
 
 app.use("/api/cart", cartRouter);
 app.use("/api/booking", bookingRoutes);
