@@ -43,15 +43,21 @@ function sectionsFrom(text) {
   return sections;
 }
 
+const what3wordsPattern = /(?:\/\/\/)?[a-z]+(?:\.[a-z]+){2}/i;
+const isDirectionRatherThanRoom = (line) => what3wordsPattern.test(line)
+  || /(?:google maps?|what\s*3\s*words?|\bw3w\b|parking|entrance|station|load(?:ing)?|unload|spaces? available|postcode)/i.test(line)
+  || /https?:/i.test(line)
+  || line.length > 55;
+
 function roomNameFrom(locationLines, roomText) {
-  const extraLocation = locationLines.slice(1).find((line) => !/^(load in|load out|https?:|please (also )?provide)/i.test(line) && !postcodeFrom(line));
+  const extraLocation = locationLines.slice(1).find((line) => !/^(load in|load out|please (also )?provide)/i.test(line) && !postcodeFrom(line) && !isDirectionRatherThanRoom(line));
   if (extraLocation && extraLocation.length < 100) return extraLocation;
   const patterns = [
     /\b(Studio\s+\d+)\b/i,
     /\b(Aisled Barn)\b/i,
     /\b(Main Barn)\b/i,
     /\b(top floor)\b/i,
-    /\b([A-Z][\w' -]+(?:Barn|Ballroom|Suite|Hall|Room|Studio|Marquee))\b/,
+    /\b([A-Z][\w' -]+(?:Barn|Ballroom|Suite|Hall|Room|Studio|Marquee|Pavilion|Theatre|Conservatory))\b/,
   ];
   for (const pattern of patterns) { const match = roomText.match(pattern); if (match) return tidy(match[1]); }
   return "Main / unspecified room";
