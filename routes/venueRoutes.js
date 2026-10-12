@@ -114,6 +114,56 @@ async function mergeBooking(booking) {
   return { venue, skipped: false };
 }
 
+const publicVenue = (venue) => ({
+  _id: venue._id,
+  name: venue.name,
+  address: venue.address,
+  postcode: venue.postcode,
+  county: venue.county,
+  website: venue.website,
+  googleMapsUrl: venue.googleMapsUrl,
+  what3wordsUrl: venue.what3wordsUrl,
+  loadingPinUrl: venue.loadingPinUrl,
+  parking: venue.parking,
+  parkingPinUrl: venue.parkingPinUrl,
+  generalDirections: venue.generalDirections,
+  rooms: (venue.rooms || []).map((room) => ({
+    _id: room._id,
+    name: room.name,
+    performanceArea: room.performanceArea,
+    accessAndLoading: room.accessAndLoading,
+    changingRoom: room.changingRoom,
+    soundLimitations: room.soundLimitations,
+    soundLimiterDb: room.soundLimiterDb,
+    curfewAndCloseTime: room.curfewAndCloseTime,
+    paAndLighting: room.paAndLighting,
+    powerAndStage: room.powerAndStage,
+    capacity: room.capacity,
+  })),
+  actsPerformed: uniqueStrings((venue.visits || []).map((visit) => visit.actName)),
+  lastVerifiedAt: venue.lastVerifiedAt,
+  reviewStatus: venue.reviewStatus,
+  updatedAt: venue.updatedAt,
+});
+
+router.get("/public", async (req, res) => {
+  try {
+    const q = clean(req.query.q);
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const filter = q ? { $or: ["name", "aliases", "address", "postcode", "county", "rooms.name"].map((field) => ({ [field]: { $regex: escaped, $options: "i" } })) } : {};
+    const venues = await Venue.find(filter).sort({ name: 1 }).lean();
+    res.json({ success: true, venues: venues.map(publicVenue) });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+});
+
+router.get("/public/:id", async (req, res) => {
+  try {
+    const venue = await Venue.findById(req.params.id).lean();
+    if (!venue) return res.status(404).json({ success: false, message: "Venue not found" });
+    res.json({ success: true, venue: publicVenue(venue) });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+});
+
 router.use(authUser);
 
 router.get("/", async (req, res) => {
