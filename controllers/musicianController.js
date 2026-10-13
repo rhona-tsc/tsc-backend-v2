@@ -1357,7 +1357,10 @@ const registerDeputy = async (req, res) => {
           const title = String(item?.title || "").trim();
           const url = String(item?.url || "").trim();
           const previous = previousByUrl.get(url.toLowerCase()) || {};
-          return { ...previous, title, url };
+          const thumbnailUrl = String(
+            item?.thumbnailUrl || previous?.thumbnailUrl || "",
+          ).trim();
+          return { ...previous, title, url, thumbnailUrl };
         })
         .filter((item) => item.url);
     };
@@ -1374,6 +1377,7 @@ const registerDeputy = async (req, res) => {
       .map((x) => ({
         title: (x?.title || "").trim(),
         url: (x?.url || "").trim(),
+        thumbnailUrl: (x?.thumbnailUrl || "").trim(),
       }))
       .filter((x) => x.url);
 
@@ -1389,6 +1393,7 @@ const registerDeputy = async (req, res) => {
       .map((x) => ({
         title: (x?.title || "").trim(),
         url: (x?.url || "").trim(),
+        thumbnailUrl: (x?.thumbnailUrl || "").trim(),
       }))
       .filter((x) => x.url);
 

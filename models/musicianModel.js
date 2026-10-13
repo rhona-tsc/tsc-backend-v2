@@ -13,6 +13,7 @@ const videoModerationFlagSchema = new mongoose.Schema(
 const videoLinkSchema = new mongoose.Schema({
   title: { type: String, default: "" },
   url: { type: String, default: "" },
+  thumbnailUrl: { type: String, default: "" },
   provider: { type: String, default: "unknown" },
   accessStatus: { type: String, default: "unchecked" },
   moderationStatus: { type: String, default: "not_started" },
