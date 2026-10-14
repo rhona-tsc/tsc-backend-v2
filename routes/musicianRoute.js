@@ -34,6 +34,7 @@ import {
 import {
   listMyMusicianVideos,
   refreshMusicianVideoSubmission,
+  setPreferredMusicianVideo,
   uploadMusicianVideo,
 } from "../controllers/musicianVideoSubmissionController.js";
 
@@ -48,6 +49,7 @@ const stripe = stripeSecretKey
 router.post("/:id/video-submissions", verifyToken, upload.single("video"), uploadMusicianVideo);
 router.get("/:id/video-submissions", verifyToken, listMyMusicianVideos);
 router.post("/:id/video-submissions/:submissionId/refresh", verifyToken, refreshMusicianVideoSubmission);
+router.patch("/:id/video-submissions/:submissionId/preferred", verifyToken, setPreferredMusicianVideo);
 
 if (!stripeSecretKey) {
   console.warn("⚠️ STRIPE_SECRET_KEY missing — Stripe routes will be limited/disabled.");
@@ -90,6 +92,7 @@ const sanitizePublicMusician = (doc) => {
     "logistics",
     "functionBandVideoLinks",
     "originalBandVideoLinks",
+    "primaryVideoUrl",
     "tscApprovedFunctionBandVideoLinks",
     "tscApprovedOriginalBandVideoLinks",
     "socialHighlightPostLinks",

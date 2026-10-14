@@ -15,6 +15,7 @@ const musicianVideoSubmissionSchema = new mongoose.Schema(
     musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "musician", required: true, index: true },
     category: { type: String, enum: ["function", "original"], default: "function", index: true },
     suppliedTitle: { type: String, default: "" },
+    isPrimary: { type: Boolean, default: false },
     originalName: { type: String, default: "" },
     mimeType: { type: String, default: "" },
     bytes: { type: Number, default: 0 },

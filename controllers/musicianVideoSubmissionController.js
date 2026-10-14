@@ -47,6 +47,7 @@ const serialise = (submission, { includeAccessUrl = false } = {}) => ({
   musicianId: submission.musicianId,
   category: submission.category,
   suppliedTitle: submission.suppliedTitle,
+  isPrimary: Boolean(submission.isPrimary),
   originalName: submission.originalName,
   bytes: submission.bytes,
   status: submission.status,
@@ -71,10 +72,12 @@ export const uploadMusicianVideo = async (req, res) => {
     const musician = await musicianModel.findById(musicianId).select("_id firstName lastName");
     if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
     const uploaded = await uploadPrivateVideo(req.file, musicianId);
+    const hasExistingSubmission = await musicianVideoSubmissionModel.exists({ musicianId });
     const submission = await musicianVideoSubmissionModel.create({
       musicianId,
       category: req.body?.category === "original" ? "original" : "function",
       suppliedTitle: clean(req.body?.title).slice(0, 120),
+      isPrimary: !hasExistingSubmission,
       originalName: clean(req.file.originalname).slice(0, 240),
       mimeType: req.file.mimetype,
       bytes: req.file.size,
@@ -100,6 +103,61 @@ export const uploadMusicianVideo = async (req, res) => {
   } catch (error) {
     console.error("Musician video upload failed:", error);
     return res.status(500).json({ success: false, message: error.message || "Video upload failed" });
+  }
+};
+
+export const setPreferredMusicianVideo = async (req, res) => {
+  try {
+    const musicianId = clean(req.params.id || requesterId(req));
+    if (!mongoose.Types.ObjectId.isValid(musicianId)) {
+      return res.status(400).json({ success: false, message: "Invalid musician" });
+    }
+    const submission = await musicianVideoSubmissionModel.findById(req.params.submissionId);
+    if (!submission || String(submission.musicianId) !== musicianId) {
+      return res.status(404).json({ success: false, message: "Video submission not found" });
+    }
+    if (!canAccessMusician(req, musicianId)) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+    if (["rejected", "failed"].includes(submission.status)) {
+      return res.status(409).json({ success: false, message: "Choose a video that is still being reviewed or has been published" });
+    }
+
+    await musicianVideoSubmissionModel.updateMany(
+      { musicianId, _id: { $ne: submission._id } },
+      { $set: { isPrimary: false } },
+    );
+    submission.isPrimary = true;
+    await submission.save();
+
+    if (submission.status === "published" && submission.youtubeUrl) {
+      const musician = await musicianModel.findById(musicianId);
+      if (musician) {
+        const field = submission.category === "original"
+          ? "tscApprovedOriginalBandVideoLinks"
+          : "tscApprovedFunctionBandVideoLinks";
+        const selected = (musician[field] || []).find(
+          (video) => clean(video?.url) === clean(submission.youtubeUrl),
+        );
+        if (selected) {
+          musician[field] = [
+            selected,
+            ...(musician[field] || []).filter(
+              (video) => clean(video?.url) !== clean(submission.youtubeUrl),
+            ),
+          ];
+          musician.primaryVideoUrl = submission.youtubeUrl;
+          await musician.save();
+        }
+      }
+    }
+
+    return res.json({ success: true, submission: serialise(submission) });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Could not update the preferred video",
+    });
   }
 };
 
@@ -217,7 +275,12 @@ export const reviewMusicianVideoSubmission = async (req, res) => {
       submission.publishedAt = new Date();
       submission.moderationReason = "Approved and published to the TSC YouTube channel";
       const field = submission.category === "original" ? "tscApprovedOriginalBandVideoLinks" : "tscApprovedFunctionBandVideoLinks";
-      musician[field] = [...(musician[field] || []).filter((video) => video.url !== youtube.url), { title: metadata.title, url: youtube.url, provider: "youtube", accessStatus: "accessible", moderationStatus: "approved", moderationReason: "Approved from direct upload", manuallyReviewedAt: new Date() }];
+      const publishedVideo = { title: metadata.title, url: youtube.url, provider: "youtube", accessStatus: "accessible", moderationStatus: "approved", moderationReason: "Approved from direct upload", manuallyReviewedAt: new Date() };
+      const otherVideos = (musician[field] || []).filter((video) => video.url !== youtube.url);
+      musician[field] = submission.isPrimary
+        ? [publishedVideo, ...otherVideos]
+        : [...otherVideos, publishedVideo];
+      if (submission.isPrimary) musician.primaryVideoUrl = youtube.url;
       await musician.save();
       await submission.save();
       return res.json({ success: true, submission: serialise(submission) });

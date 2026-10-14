@@ -162,6 +162,7 @@ lastLoginAt: { type: Date, default: null, index: true },
 
     functionBandVideoLinks: [videoLinkSchema],
     originalBandVideoLinks: [videoLinkSchema],
+    primaryVideoUrl: { type: String, default: "" },
     socialHighlightPostLinks: [
       {
         title: { type: String, default: "" },
