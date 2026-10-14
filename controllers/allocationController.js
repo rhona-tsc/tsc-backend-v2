@@ -723,7 +723,35 @@ export const listRoleCandidates = async (req, res) => {
           a.name.localeCompare(b.name);
       });
 
-    return res.json({ success: true, role, dateISO, candidates });
+    const roleSlotId = String(req.query?.roleSlotId || "").trim();
+    const historyQuery = {
+      bookingBoardItemId: board._id,
+      "meta.kind": "booking",
+      ...(roleSlotId ? { roleSlotId } : { "meta.role": role }),
+    };
+    const offerHistory = await EnquiryMessage.find(historyQuery)
+      .sort({ createdAt: 1 })
+      .populate("musicianId", "firstName lastName basicInfo.firstName basicInfo.lastName")
+      .lean();
+
+    return res.json({
+      success: true,
+      role,
+      dateISO,
+      candidates,
+      offerHistory: offerHistory.map((item) => ({
+        requestId: item.enquiryId,
+        musicianId: item.musicianId?._id || item.musicianId,
+        name: musicianDisplayName(item.musicianId || {}),
+        status: item.reply || item.deliveryStatus || item.status || "sent",
+        reply: item.reply || "",
+        sentAt: item.createdAt,
+        repliedAt: item.repliedAt || null,
+        firstReminderAt: item.chaseSentAt || null,
+        secondReminderAt: item.secondChaseSentAt || null,
+        passedOnAt: item.autoEscalatedAt || null,
+      })),
+    });
   } catch (error) {
     console.error("listRoleCandidates error", error);
     return res.status(500).json({ success: false, message: error?.message || "Failed to load candidates" });
@@ -1749,7 +1777,7 @@ const booking = msg?.bookingRef
     email: email || acceptingContact.email,
     phone: msg.phone || acceptingContact.phone,
     offerRequestId: msg.enquiryId,
-    status: "accepted",
+    status: "confirmed",
     respondedAt: new Date(),
     acceptedAt: new Date(),
     calendarInviteSentAt: eventId && email ? new Date() : null,
