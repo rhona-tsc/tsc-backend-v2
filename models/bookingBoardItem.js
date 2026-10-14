@@ -267,6 +267,10 @@ const BookingBoardItemSchema = new mongoose.Schema(
     clientFirstNames: { type: String },
     bookingRef: { type: String, index: true, unique: false },
     eventSheetLink: { type: String },
+    whatsappGroupLink: { type: String, default: "", trim: true },
+    whatsappGroupSetUp: { type: Boolean, default: false },
+    whatsappGroupInviteSentAt: { type: Date, default: null },
+    whatsappGroupInviteDelivery: { type: mongoose.Schema.Types.Mixed, default: {} },
     contractUrl: { type: String }, // link to generated contract PDF/HTML
     eventDateISO: { type: String, index: true }, // "2025-09-20"
     enquiryDateISO: { type: String }, // "yyyy-mm-dd" — first contact

@@ -11,6 +11,8 @@ import { parse } from "csv-parse/sync";
 import financeForecastBookingModel from "../models/financeForecastBookingModel.js";
 import multer from "multer";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
+import { sendWhatsAppText, sendSMSMessage } from "../utils/twilioClient.js";
+import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1958,6 +1960,100 @@ router.patch("/:id/mark-paid", musicianAuth, async (req, res) => {
       success: false,
       message: error.message || "Could not mark booking paid.",
     });
+  }
+});
+
+router.post("/:id/whatsapp-group", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin only." });
+    }
+
+    const link = cleanString(req.body?.whatsappGroupLink);
+    if (!/^https:\/\/chat\.whatsapp\.com\/[A-Za-z0-9_-]+/i.test(link)) {
+      return res.status(400).json({
+        success: false,
+        message: "Paste a valid WhatsApp group invite link.",
+      });
+    }
+
+    const row = await BookingBoardItem.findById(req.params.id);
+    if (!row) {
+      return res.status(404).json({ success: false, message: "Booking not found." });
+    }
+
+    const assignments = [row.assignedMusicians, row.bookingMusicians, row.bandLineup]
+      .find((items) => Array.isArray(items) && items.length) || [];
+    const confirmed = assignments.filter((member) =>
+      ["accepted", "confirmed"].includes(cleanString(member?.status).toLowerCase()),
+    );
+    const expectedCount = Array.isArray(row.lineupComposition)
+      ? row.lineupComposition.filter(Boolean).length
+      : Number(row.bandSize || 0);
+    if (!confirmed.length || (expectedCount > 0 && confirmed.length < expectedCount)) {
+      return res.status(409).json({
+        success: false,
+        message: "The WhatsApp group can be shared once every lineup role is confirmed.",
+      });
+    }
+
+    const coreBooking = row.bookingId
+      ? await Booking.findById(row.bookingId).select("eventSheet.bandSheetToken").lean()
+      : await Booking.findOne({ bookingReference: row.bookingRef })
+          .select("eventSheet.bandSheetToken")
+          .lean();
+    const sheetToken = cleanString(coreBooking?.eventSheet?.bandSheetToken);
+    const pdfUrl = sheetToken ? buildBandSheetPdfUrl(sheetToken) : cleanString(row.eventSheetLink);
+    const actName = cleanString(row.actTscName || row.actName) || "your band";
+    const eventDate = cleanString(row.eventDateISO) || "the event date";
+
+    const seen = new Set();
+    const delivery = [];
+    for (const member of confirmed) {
+      const phone = cleanString(member?.phone);
+      const phoneKey = phone.replace(/\D/g, "");
+      if (!phoneKey || seen.has(phoneKey)) continue;
+      seen.add(phoneKey);
+      const firstName = cleanString(member?.firstName || member?.name).split(/\s+/)[0] || "there";
+      const body = [
+        `Hi ${firstName}, the WhatsApp group for ${actName} on ${eventDate} is ready:`,
+        link,
+        pdfUrl ? `Latest event sheet PDF: ${pdfUrl}` : "",
+        "Please join the group so the band can coordinate before the event. 🤍 TSC",
+      ].filter(Boolean).join("\n\n");
+      try {
+        const message = await sendWhatsAppText(phone, body);
+        delivery.push({ musicianId: member.musicianId, name: member.name, channel: "whatsapp", status: "sent", sid: message?.sid || "" });
+      } catch (whatsappError) {
+        try {
+          const message = await sendSMSMessage(phone, body);
+          delivery.push({ musicianId: member.musicianId, name: member.name, channel: "sms", status: "sent", sid: message?.sid || "" });
+        } catch (smsError) {
+          delivery.push({ musicianId: member.musicianId, name: member.name, channel: "none", status: "failed", error: smsError?.message || whatsappError?.message || "Delivery failed" });
+        }
+      }
+    }
+
+    const sentCount = delivery.filter((item) => item.status === "sent").length;
+    row.whatsappGroupLink = link;
+    row.whatsappGroupSetUp = true;
+    row.whatsappGroupInviteSentAt = sentCount ? new Date() : null;
+    row.whatsappGroupInviteDelivery = { attemptedAt: new Date(), results: delivery };
+    await row.save();
+
+    return res.json({
+      success: sentCount > 0,
+      message: sentCount
+        ? `Group link sent to ${sentCount} confirmed band member${sentCount === 1 ? "" : "s"}.`
+        : "The group link was saved, but no messages could be delivered.",
+      sentCount,
+      failedCount: delivery.filter((item) => item.status === "failed").length,
+      delivery,
+      row,
+    });
+  } catch (error) {
+    console.error("WhatsApp group invite failed", error);
+    return res.status(500).json({ success: false, message: error?.message || "Could not share the WhatsApp group." });
   }
 });
 
