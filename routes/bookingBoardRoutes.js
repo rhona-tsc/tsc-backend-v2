@@ -2042,7 +2042,7 @@ router.post("/:id/whatsapp-group", musicianAuth, async (req, res) => {
     await row.save();
 
     return res.json({
-      success: sentCount > 0,
+      success: true,
       message: sentCount
         ? `Group link sent to ${sentCount} confirmed band member${sentCount === 1 ? "" : "s"}.`
         : "The group link was saved, but no messages could be delivered.",
