@@ -20,8 +20,14 @@ const dateOf = (booking = {}) => {
     firstAct(booking)?.performance?.date ||
     "";
   if (!raw) return "";
-  if (raw instanceof Date) return raw.toISOString().slice(0, 10);
-  return clean(raw).slice(0, 10);
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+    return raw.toISOString().slice(0, 10);
+  }
+  const text = clean(raw);
+  const isoMatch = text.match(/\d{4}-\d{2}-\d{2}/);
+  if (isoMatch) return isoMatch[0];
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
 };
 
 const normaliseTime = (value, fallback) => {
@@ -136,7 +142,10 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
     ...(lineup.length ? lineup.map((entry) => `• ${entry}`) : ["• Awaiting confirmations"]),
     "",
     `EVENT SHEET: ${eventSheetLink(booking)}`,
-  ].join("\n");
+    clean(booking.whatsappGroupLink)
+      ? `WHATSAPP BAND GROUP: ${clean(booking.whatsappGroupLink)}`
+      : "",
+  ].filter((line, index, all) => line !== "" || all[index - 1] !== "").join("\n");
 
   const eventPayload = {
     summary,

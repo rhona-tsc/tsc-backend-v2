@@ -13,6 +13,7 @@ import multer from "multer";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { sendWhatsAppText, sendSMSMessage } from "../utils/twilioClient.js";
 import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
+import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1998,10 +1999,8 @@ router.post("/:id/whatsapp-group", musicianAuth, async (req, res) => {
     }
 
     const coreBooking = row.bookingId
-      ? await Booking.findById(row.bookingId).select("eventSheet.bandSheetToken").lean()
-      : await Booking.findOne({ bookingReference: row.bookingRef })
-          .select("eventSheet.bandSheetToken")
-          .lean();
+      ? await Booking.findById(row.bookingId).lean()
+      : await Booking.findOne({ bookingId: row.bookingRef }).lean();
     const sheetToken = cleanString(coreBooking?.eventSheet?.bandSheetToken);
     const pdfUrl = sheetToken ? buildBandSheetPdfUrl(sheetToken) : cleanString(row.eventSheetLink);
     const actName = cleanString(row.actTscName || row.actName) || "your band";
@@ -2040,6 +2039,24 @@ router.post("/:id/whatsapp-group", musicianAuth, async (req, res) => {
     row.whatsappGroupInviteSentAt = sentCount ? new Date() : null;
     row.whatsappGroupInviteDelivery = { attemptedAt: new Date(), results: delivery };
     await row.save();
+
+    if (coreBooking) {
+      await Booking.updateOne(
+        { _id: coreBooking._id },
+        { $set: { whatsappGroupLink: link } },
+      );
+      try {
+        await updateOrCreateBookingEvent({
+          booking: { ...coreBooking, whatsappGroupLink: link },
+          assignedMusicians: confirmed,
+        });
+      } catch (calendarError) {
+        console.warn("Could not add WhatsApp group link to calendar", {
+          bookingRef: row.bookingRef,
+          message: calendarError?.message,
+        });
+      }
+    }
 
     return res.json({
       success: true,
