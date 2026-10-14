@@ -510,6 +510,35 @@ const pickBookingValue = (booking, keys = []) => {
   return "";
 };
 
+const capitalisePdfNamePart = (value = "") => {
+  const clean = normalisePdfValue(value);
+  return clean ? `${clean.charAt(0).toUpperCase()}${clean.slice(1)}` : "";
+};
+
+const getBookerNamesForPdf = (answers, booking) => {
+  const booker = [
+    pickAnswer(answers, ["booker_first", "bookerFirst"]),
+    pickAnswer(answers, ["booker_last", "bookerLast"]),
+  ]
+    .map(capitalisePdfNamePart)
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  if (booker) return booker;
+
+  const addressBooker = [
+    pickBookingValue(booking, ["userAddress.firstName"]),
+    pickBookingValue(booking, ["userAddress.lastName"]),
+  ]
+    .map(capitalisePdfNamePart)
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  if (addressBooker) return addressBooker;
+
+  return pickBookingValue(booking, ["clientName", "customerName", "name"]);
+};
+
 const getCoupleNamesForPdf = (answers, booking) => {
   const introducedAs = pickAnswer(answers, ["introduced_as", "introducedAs"]);
   if (introducedAs) return introducedAs;
@@ -533,10 +562,14 @@ const getCoupleNamesForPdf = (answers, booking) => {
   if (partner1 && partner2) return `${partner1} & ${partner2}`;
   if (partner1 || partner2) return partner1 || partner2;
 
-  return (
-    pickBookingValue(booking, ["clientName", "customerName", "name"]) ||
-    "Event Sheet"
-  );
+  return getBookerNamesForPdf(answers, booking) || "Client";
+};
+
+const getEventTitleForPdf = ({ answers, booking, eventType, bookerNames }) => {
+  if (/wedding/i.test(eventType)) {
+    return `${getCoupleNamesForPdf(answers, booking)}'s ${eventType}`;
+  }
+  return [eventType, bookerNames].filter(Boolean).join(" - ") || "Event Sheet";
 };
 
 const getVenueForPdf = (answers, booking) =>
@@ -585,6 +618,12 @@ const getEventDateForPdf = (answers, booking) => {
 const getScheduleRowsForPdf = (answers) => {
   const rows = [];
 
+  const tableRows = Array.isArray(answers?.schedule_table_rows)
+    ? answers.schedule_table_rows
+    : Array.isArray(answers?.scheduleTableRows)
+      ? answers.scheduleTableRows
+      : [];
+
   const simpleRows = Array.isArray(answers?.schedule_simple_rows)
     ? answers.schedule_simple_rows
     : Array.isArray(answers?.scheduleSimpleRows)
@@ -604,6 +643,14 @@ const getScheduleRowsForPdf = (answers) => {
       });
     }
   };
+
+  // The editable schedule table is the current source of truth. Older event
+  // sheets used the fixed `schedule_simple_*` fields, so only fall back to
+  // those when no populated table rows exist.
+  tableRows.forEach((row) =>
+    addRow(row?.activity || row?.label || row?.title, row?.time || row?.value, row?.notes),
+  );
+  if (rows.length) return rows;
 
   const fixedRows = [
     ["Band arrival / load-in", answers?.schedule_simple_arrival || answers?.scheduleSimpleArrival, answers?.schedule_simple_arrival_notes],
@@ -919,10 +966,17 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
 
   const answers = getEventSheetAnswers(booking);
   const bandName = getBookingDisplayName(booking);
-  const coupleNames = getCoupleNamesForPdf(answers, booking);
   const eventType =
     pickBookingValue(booking, ["eventType", "type", "eventDetails.type"]) ||
     "Wedding";
+  const bookerNames = getBookerNamesForPdf(answers, booking) || "Client";
+  const coupleNames = getCoupleNamesForPdf(answers, booking);
+  const eventTitle = getEventTitleForPdf({
+    answers,
+    booking,
+    eventType,
+    bookerNames,
+  });
   const eventDate = getEventDateForPdf(answers, booking);
   const venue = getVenueForPdf(answers, booking);
   const ref = booking?.bookingId || String(booking?._id || "");
@@ -1086,7 +1140,7 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
     .font("Helvetica-Bold")
     .fontSize(22)
     .fillColor(dark)
-    .text(`${coupleNames}'s ${eventType}`, {
+    .text(eventTitle, {
       align: "center",
     });
   doc.moveDown(0.35);
@@ -1122,7 +1176,7 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
     ["Date", eventDate],
     ["Act", bandName],
     ["Lineup", lineupLabel],
-    ["Bookers", coupleNames],
+    ["Bookers", bookerNames],
     ["Phone", bookerPhone || noInfo],
     ["Booking ref", ref],
   ];
@@ -1148,7 +1202,7 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
   labelValue("Event type", eventType, { showFallback: true });
   labelValue("Band name", bandName, { showFallback: true });
   labelValue("Lineup", [lineupLabel, lineupDescription].filter(Boolean).join(" - "), { showFallback: true });
-  labelValue("Bookers", coupleNames, { showFallback: true });
+  labelValue("Bookers", bookerNames, { showFallback: true });
   labelValue("Booker phone", bookerPhone, { showFallback: true });
   labelValue("Venue address", venue, { showFallback: true });
   labelValue("Venue pin", pickAnswer(answers, ["venue_pin", "venuePin"]), {
