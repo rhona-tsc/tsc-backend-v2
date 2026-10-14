@@ -21,6 +21,7 @@ import DeputyJob from "../models/deputyJobModel.js";
 import mongoose from "mongoose";
 import { promptForProfileAfterAcceptance } from "../services/onboardingAcceptancePrompt.js";
 import nodemailer from "nodemailer";
+import { buildBandEventSheetEmailHtml } from "../utils/tscEmailBranding.js";
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper: firstNameOf                             */
@@ -128,7 +129,13 @@ const sendCompletedEventSheetToAcceptedMusician = async ({ booking, assignment, 
     replyTo: process.env.SMTP_FROM_EMAIL || process.env.EMAIL_FROM_ADDRESS || user,
     subject: `Event sheet: ${actName} — ${eventDate}`,
     text,
-    html: text.replace(/\n/g, "<br />"),
+    html: buildBandEventSheetEmailHtml({
+      firstName,
+      bandName: actName,
+      eventDate,
+      role,
+      eventSheetUrl: pdfUrl,
+    }),
   });
   return true;
 };
@@ -1048,6 +1055,7 @@ export const offerBookingRole = async (req, res) => {
         musicianId: musician._id, name, firstName: musician.firstName || musician.basicInfo?.firstName || "",
         lastName: musician.lastName || musician.basicInfo?.lastName || "", email: contact.email,
         phone: contact.phone, role, instrument: role, status: "offered", fee, totalFee: fee, currency,
+        dietaryRequirements: String(musician?.dietaryRequirements || "").trim(),
         duties,
         earlyArrivalMinutes, earlyArrivalTime,
         paymentStatus: "not_due", source: "booking_role_offer", roleSlotId,

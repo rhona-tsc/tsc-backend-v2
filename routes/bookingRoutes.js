@@ -23,6 +23,7 @@ import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
 import crypto from "crypto";
+import { buildBandEventSheetEmailHtml } from "../utils/tscEmailBranding.js";
 
 const router = express.Router();
 
@@ -703,6 +704,31 @@ const getLineupMembersForPdf = (booking, act) => {
   return lineup?.bandMembers || firstAct.bandMembers || firstAct.lineup?.bandMembers || [];
 };
 
+const getDietaryRequirementsForPdf = (booking) => {
+  const members = [
+    booking?.assignedMusicians,
+    booking?.bookingMusicians,
+    booking?.bandLineup,
+  ].find((items) => Array.isArray(items) && items.length) || [];
+  const confirmed = members.filter((member) =>
+    ["accepted", "confirmed"].includes(
+      String(member?.status || "").trim().toLowerCase(),
+    ),
+  );
+  if (!confirmed.length) return noInfo;
+  return confirmed
+    .map((member) => {
+      const name =
+        member?.name ||
+        [member?.firstName, member?.lastName].filter(Boolean).join(" ") ||
+        member?.role ||
+        "Band member";
+      const requirement = String(member?.dietaryRequirements || "").trim() || "TBC";
+      return `${name} — ${requirement}`;
+    })
+    .join("\n");
+};
+
 const isNonPerformerForPdf = (member = {}) =>
   member.isNonPerformer === true ||
   /manager|management/i.test(`${member.instrument || ""} ${(member.additionalRoles || []).map((role) => role?.role || role?.title).join(" ")}`);
@@ -1266,6 +1292,9 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
     getHotMealsRequiredForPdf(answers, booking, act),
     { showFallback: true },
   );
+  labelValue("Dietary requirements", getDietaryRequirementsForPdf(booking), {
+    showFallback: true,
+  });
   labelValue(
     "Meal timing / catering notes",
     pickAnswer(answers, [
@@ -1531,9 +1560,11 @@ router.get("/band-sheet/:token", async (req, res) => {
     }).lean();
     if (!booking) return res.status(404).send("Band event sheet not found");
 
-    const actId = booking?.actsSummary?.[0]?.actId || booking?.act || null;
+    const bookingForPdf = await withConfirmedAllocation(booking);
+
+    const actId = bookingForPdf?.actsSummary?.[0]?.actId || bookingForPdf?.act || null;
     const act = actId ? await Act.findById(actId).lean() : null;
-    const pdf = await buildEventSheetPdfBuffer(booking, act);
+    const pdf = await buildEventSheetPdfBuffer(bookingForPdf, act);
     const safeRef = String(booking.bookingId || booking._id).replace(/[^a-z0-9-_]+/gi, "-");
     res.set({
       "Content-Type": "application/pdf",
@@ -1556,9 +1587,11 @@ router.get("/:id/event-sheet/pdf", async (req, res) => {
     const booking = await Booking.findOne({ $or: conditions }).lean();
     if (!booking) return res.status(404).send("Event sheet not found");
 
-    const actId = booking?.actsSummary?.[0]?.actId || booking?.act || null;
+    const bookingForPdf = await withConfirmedAllocation(booking);
+
+    const actId = bookingForPdf?.actsSummary?.[0]?.actId || bookingForPdf?.act || null;
     const act = actId ? await Act.findById(actId).lean() : null;
-    const pdf = await buildEventSheetPdfBuffer(booking, act);
+    const pdf = await buildEventSheetPdfBuffer(bookingForPdf, act);
     const safeRef = String(booking.bookingId || booking._id).replace(/[^a-z0-9-_]+/gi, "-");
     res.set({
       "Content-Type": "application/pdf",
@@ -1691,11 +1724,11 @@ router.post("/notify-band", async (req, res) => {
       </div>
     `;
 
-    const bookingForPdf = booking.toObject({
+    const bookingForPdf = await withConfirmedAllocation(booking.toObject({
       virtuals: true,
       getters: true,
       depopulate: false,
-    });
+    }));
 
     const firstActId =
       bookingForPdf?.actsSummary?.[0]?.actId || bookingForPdf?.act || null;
@@ -1763,7 +1796,13 @@ router.post("/notify-band", async (req, res) => {
         replyTo: emailConfig.fromAddress || "hello@thesupremecollective.co.uk",
         subject,
         text: memberText,
-        html: memberText.replace(/\n/g, "<br />"),
+        html: buildBandEventSheetEmailHtml({
+          firstName: recipient.name.split(/\s+/)[0] || "there",
+          bandName,
+          eventDate,
+          role: recipient.role,
+          eventSheetUrl,
+        }),
         attachments: [attachment],
       });
       bandMailResults.push({ email: recipient.email, messageId: result?.messageId || null });
