@@ -906,17 +906,42 @@ export const offerBookingRole = async (req, res) => {
     const requestId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const dateISO = String(board.eventDateISO || req.body?.dateISO || "").slice(0, 10);
     const formattedDate = formatWithOrdinal(dateISO);
-    const fee = Number(req.body?.fee || 0) || 0;
+    const previousTerms = await EnquiryMessage.findOne({
+      bookingRef: board.bookingRef || "",
+      roleSlotId,
+      fee: { $nin: ["", null, "0"] },
+    })
+      .sort({ createdAt: -1 })
+      .select("fee duties")
+      .lean();
+    const fee =
+      Number(req.body?.fee || 0) || Number(previousTerms?.fee || 0) || 0;
     const currency = String(req.body?.currency || "GBP").trim().toUpperCase();
     const earlyArrivalMinutes = Math.max(
       0,
       Number(req.body?.earlyArrivalMinutes || 0) || 0,
     );
     const earlyArrivalTime = String(req.body?.earlyArrivalTime || "").trim();
+    const dutiesAlreadyAllocated = new Set(
+      (Array.isArray(board.assignedMusicians) ? board.assignedMusicians : [])
+        .filter(
+          (entry) =>
+            String(entry?.roleSlotId || "") !== roleSlotId &&
+            ["accepted", "confirmed"].includes(
+              String(entry?.status || "").trim().toLowerCase(),
+            ),
+        )
+        .flatMap((entry) => (Array.isArray(entry?.duties) ? entry.duties : []))
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean),
+    );
     const duties = Array.from(new Set(
       (Array.isArray(req.body?.duties) ? req.body.duties : [])
         .map((value) => String(value || "").trim())
-        .filter(Boolean),
+        .filter(
+          (value) =>
+            value && !dutiesAlreadyAllocated.has(value.toLowerCase()),
+        ),
     ));
     const roleWithArrival = [
       role,
