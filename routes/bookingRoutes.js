@@ -22,6 +22,7 @@ import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.
 import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
+import crypto from "crypto";
 
 const router = express.Router();
 
@@ -403,6 +404,53 @@ const createNotifyBandTransporter = () => {
     connectionTimeout: 30000,
     greetingTimeout: 30000,
     socketTimeout: 30000,
+  });
+};
+
+const confirmedBandRecipients = async (booking) => {
+  const board = await BookingBoardItem.findOne({
+    $or: [
+      { bookingId: booking._id },
+      { sourceBookingId: booking._id },
+      { bookingRef: booking.bookingId },
+    ],
+  }).lean();
+  const assignments = [
+    board?.assignedMusicians,
+    board?.bookingMusicians,
+    board?.bandLineup,
+  ].find((items) => Array.isArray(items) && items.length) || [];
+  const confirmed = assignments.filter((member) =>
+    ["accepted", "confirmed"].includes(
+      String(member?.status || "").trim().toLowerCase(),
+    ),
+  );
+  const ids = confirmed
+    .map((member) => member?.musicianId)
+    .filter((id) => mongoose.isValidObjectId(String(id || "")));
+  const profiles = ids.length
+    ? await Musician.find({ _id: { $in: ids } })
+        .select("email firstName lastName basicInfo.email basicInfo.firstName basicInfo.lastName")
+        .lean()
+    : [];
+  const profileById = new Map(profiles.map((profile) => [String(profile._id), profile]));
+  const seen = new Set();
+  return confirmed.flatMap((member) => {
+    const profile = profileById.get(String(member?.musicianId || ""));
+    const email = String(
+      member?.email || profile?.email || profile?.basicInfo?.email || "",
+    ).trim().toLowerCase();
+    if (!email || seen.has(email)) return [];
+    seen.add(email);
+    const name = String(
+      member?.name ||
+        [member?.firstName, member?.lastName].filter(Boolean).join(" ") ||
+        [profile?.firstName || profile?.basicInfo?.firstName, profile?.lastName || profile?.basicInfo?.lastName]
+          .filter(Boolean)
+          .join(" ") ||
+        email,
+    ).trim();
+    return [{ email, name, role: member?.role || member?.instrument || "Band member" }];
   });
 };
 
@@ -1599,8 +1647,22 @@ router.post("/notify-band", async (req, res) => {
     const transporter = createNotifyBandTransporter();
     const bandName = getBookingDisplayName(booking);
     const eventDate = getBookingEventDate(booking);
-    const eventSheetUrl = getEventSheetUrl(req, booking);
     const ref = booking.bookingId || String(booking._id);
+
+    if (!booking.eventSheet?.bandSheetToken) {
+      booking.eventSheet = {
+        ...(booking.eventSheet || {}),
+        bandSheetToken: crypto.randomBytes(18).toString("base64url"),
+      };
+    }
+    const backendBase = String(
+      process.env.BACKEND_PUBLIC_URL ||
+        process.env.BACKEND_URL ||
+        `${req.protocol}://${req.get("host")}`,
+    ).replace(/\/$/, "");
+    const eventSheetUrl = `${backendBase}/api/booking/band-sheet/${encodeURIComponent(
+      booking.eventSheet.bandSheetToken,
+    )}`;
 
     const subject = `Event sheet ready: ${bandName} — ${eventDate}`;
 
@@ -1661,23 +1723,51 @@ router.post("/notify-band", async (req, res) => {
     const pdfBuffer = await buildEventSheetPdfBuffer(bookingForPdf, actForPdf);
     const safeRef = String(ref || "event-sheet").replace(/[^a-z0-9-_]+/gi, "-");
 
-    const mailResult = await transporter.sendMail({
+    booking.eventSheet.bandPdfUrl = eventSheetUrl;
+    booking.eventSheet.bandPdfGeneratedAt = new Date();
+    await booking.save();
+
+    const recipients = await confirmedBandRecipients(booking);
+    const attachment = {
+      filename: `event-sheet-${safeRef}.pdf`,
+      content: pdfBuffer,
+      contentType: "application/pdf",
+    };
+    const internalMail = await transporter.sendMail({
       from: `${emailConfig.fromName} <${emailConfig.fromAddress}>`,
       to: emailConfig.notifyTo,
       replyTo: emailConfig.fromAddress || "hello@thesupremecollective.co.uk",
       subject,
       text,
       html,
-      attachments: [
-        {
-          filename: `event-sheet-${safeRef}.pdf`,
-          content: pdfBuffer,
-          contentType: "application/pdf",
-        },
-      ],
+      attachments: [attachment],
     });
 
-    await booking.save();
+    const bandMailResults = [];
+    for (const recipient of recipients) {
+      const memberText = [
+        `Hi ${recipient.name.split(/\s+/)[0] || "there"},`,
+        "",
+        `The completed event sheet for ${bandName} on ${eventDate} is attached.`,
+        `Your role: ${recipient.role}.`,
+        "",
+        `You can always open the latest PDF here: ${eventSheetUrl}`,
+        "",
+        "Please read it before the event and let Rhona know if anything is unclear.",
+        "",
+        "The Supreme Collective",
+      ].join("\n");
+      const result = await transporter.sendMail({
+        from: `${emailConfig.fromName} <${emailConfig.fromAddress}>`,
+        to: recipient.email,
+        replyTo: emailConfig.fromAddress || "hello@thesupremecollective.co.uk",
+        subject,
+        text: memberText,
+        html: memberText.replace(/\n/g, "<br />"),
+        attachments: [attachment],
+      });
+      bandMailResults.push({ email: recipient.email, messageId: result?.messageId || null });
+    }
 
     try {
       const board = await BookingBoardItem.findOne({
@@ -1703,14 +1793,17 @@ router.post("/notify-band", async (req, res) => {
       to: emailConfig.notifyTo,
       from: emailConfig.fromAddress,
       smtpUser: emailConfig.user,
-      messageId: mailResult?.messageId,
+      messageId: internalMail?.messageId,
+      bandRecipients: recipients.map((recipient) => recipient.email),
     });
 
     return res.json({
       success: true,
-      message: "Band notification email sent",
+      message: `Completed event sheet sent to ${recipients.length} confirmed band member${recipients.length === 1 ? "" : "s"}`,
       sentTo: emailConfig.notifyTo,
-      messageId: mailResult?.messageId || null,
+      messageId: internalMail?.messageId || null,
+      bandRecipients: bandMailResults,
+      eventSheetPdfUrl: eventSheetUrl,
       booking,
     });
   } catch (err) {

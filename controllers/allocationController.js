@@ -20,6 +20,7 @@ import Booking from "../models/bookingModel.js";
 import DeputyJob from "../models/deputyJobModel.js";
 import mongoose from "mongoose";
 import { promptForProfileAfterAcceptance } from "../services/onboardingAcceptancePrompt.js";
+import nodemailer from "nodemailer";
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper: firstNameOf                             */
@@ -82,6 +83,54 @@ const normalizePhone = (raw = "") => {
   if (v.startsWith("07")) return v.replace(/^0/, "+44");
   if (v.startsWith("44")) return `+${v}`;
   return v;
+};
+
+const sendCompletedEventSheetToAcceptedMusician = async ({ booking, assignment, musician, email }) => {
+  if (!booking?.eventSheet?.submitted || !email) return false;
+  const token = String(booking?.eventSheet?.bandSheetToken || "").trim();
+  if (!token) return false;
+  const backend = String(
+    process.env.BACKEND_PUBLIC_URL ||
+      process.env.BACKEND_URL ||
+      "https://tsc-backend-v2.onrender.com",
+  ).replace(/\/$/, "");
+  const pdfUrl = `${backend}/api/booking/band-sheet/${encodeURIComponent(token)}`;
+  const user = process.env.SMTP_USER || process.env.EMAIL_USER || process.env.GMAIL_USER || process.env.MAIL_USER || process.env.AGENT_EMAIL;
+  const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS || process.env.GMAIL_APP_PASSWORD || process.env.GMAIL_PASS || process.env.MAIL_PASS || process.env.AGENT_PASSWORD;
+  if (!user || !pass) throw new Error("Missing SMTP credentials for event-sheet delivery");
+  const port = Number(process.env.SMTP_PORT || 465);
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || "smtp.gmail.com",
+    port,
+    secure: process.env.SMTP_SECURE != null
+      ? String(process.env.SMTP_SECURE).toLowerCase() === "true"
+      : port === 465,
+    auth: { user, pass },
+  });
+  const firstName = assignment?.firstName || musician?.firstName || musician?.basicInfo?.firstName || "there";
+  const actName = booking?.actName || booking?.actsSummary?.[0]?.actName || "the band";
+  const eventDate = formatWithOrdinal(booking?.eventDateISO || booking?.eventDate || booking?.date || "");
+  const role = assignment?.role || assignment?.instrument || "Band member";
+  const text = [
+    `Hi ${firstName},`,
+    "",
+    `As the event sheet for ${actName} on ${eventDate} has already been completed, here is your PDF copy:`,
+    pdfUrl,
+    "",
+    `Your role: ${role}.`,
+    "Please read the event sheet before the event and let Rhona know if anything is unclear.",
+    "",
+    "The Supreme Collective",
+  ].join("\n");
+  await transporter.sendMail({
+    from: `${process.env.SMTP_FROM_NAME || process.env.EMAIL_FROM_NAME || "The Supreme Collective"} <${process.env.SMTP_FROM_EMAIL || process.env.EMAIL_FROM_ADDRESS || user}>`,
+    to: email,
+    replyTo: process.env.SMTP_FROM_EMAIL || process.env.EMAIL_FROM_ADDRESS || user,
+    subject: `Event sheet: ${actName} — ${eventDate}`,
+    text,
+    html: text.replace(/\n/g, "<br />"),
+  });
+  return true;
 };
 
 const buildBookingSMS = ({ firstName, formattedDate, formattedAddress, fee, currency = "GBP", duties, actName, requestId }) => {
@@ -258,6 +307,20 @@ const completeAcceptedAssignment = async ({ board, assignment, musician = null }
         assignedMusicians: board?.assignedMusicians || [],
       });
       if (eventId && email) await addAttendeeToEvent({ eventId, email });
+      try {
+        await sendCompletedEventSheetToAcceptedMusician({
+          booking,
+          assignment,
+          musician,
+          email,
+        });
+      } catch (eventSheetError) {
+        console.warn("Could not email completed event sheet to accepted musician", {
+          bookingRef: board?.bookingRef,
+          email,
+          message: eventSheetError?.message,
+        });
+      }
     }
   } catch (calendarError) {
     console.warn("Could not sync accepted musician to shared calendar", {
