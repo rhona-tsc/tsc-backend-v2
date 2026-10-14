@@ -2,6 +2,7 @@ import { google } from "googleapis";
 import crypto from "crypto";
 import Booking from "../models/bookingModel.js";
 import { oauth2Client } from "../controllers/googleController.js";
+import { buildBandSheetPdfUrl, getBandSheetOrigin } from "./bandSheetUrl.js";
 
 const clean = (value = "") => String(value || "").trim();
 
@@ -84,20 +85,15 @@ const lineupFor = (booking = {}, assignedMusicians = []) => {
 
 const eventSheetLink = (booking = {}) => {
   const token = clean(booking?.eventSheet?.bandSheetToken);
-  const backend = clean(
-    process.env.BACKEND_PUBLIC_URL ||
-      process.env.BACKEND_URL ||
-      "https://tsc-backend-v2.onrender.com",
-  ).replace(/\/$/, "");
   if (token) {
-    return `${backend}/api/booking/band-sheet/${encodeURIComponent(token)}`;
+    return buildBandSheetPdfUrl(token);
   }
   const hostedPdf = clean(
     booking?.eventSheet?.bandPdfUrl || booking?.eventSheet?.pdfUrl,
   );
   if (hostedPdf) return hostedPdf;
   const ref = bookingRefOf(booking);
-  return `${backend}/api/booking/${encodeURIComponent(ref)}/event-sheet/pdf`;
+  return `${getBandSheetOrigin()}/api/booking/${encodeURIComponent(ref)}/event-sheet/pdf`;
 };
 
 export async function updateOrCreateBookingEvent({ booking, assignedMusicians = [] }) {

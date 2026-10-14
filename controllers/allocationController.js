@@ -22,6 +22,7 @@ import mongoose from "mongoose";
 import { promptForProfileAfterAcceptance } from "../services/onboardingAcceptancePrompt.js";
 import nodemailer from "nodemailer";
 import { buildBandEventSheetEmailHtml } from "../utils/tscEmailBranding.js";
+import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper: firstNameOf                             */
@@ -90,12 +91,7 @@ const sendCompletedEventSheetToAcceptedMusician = async ({ booking, assignment, 
   if (!booking?.eventSheet?.submitted || !email) return false;
   const token = String(booking?.eventSheet?.bandSheetToken || "").trim();
   if (!token) return false;
-  const backend = String(
-    process.env.BACKEND_PUBLIC_URL ||
-      process.env.BACKEND_URL ||
-      "https://tsc-backend-v2.onrender.com",
-  ).replace(/\/$/, "");
-  const pdfUrl = `${backend}/api/booking/band-sheet/${encodeURIComponent(token)}`;
+  const pdfUrl = buildBandSheetPdfUrl(token);
   const user = process.env.SMTP_USER || process.env.EMAIL_USER || process.env.GMAIL_USER || process.env.MAIL_USER || process.env.AGENT_EMAIL;
   const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS || process.env.GMAIL_APP_PASSWORD || process.env.GMAIL_PASS || process.env.MAIL_PASS || process.env.AGENT_PASSWORD;
   if (!user || !pass) throw new Error("Missing SMTP credentials for event-sheet delivery");

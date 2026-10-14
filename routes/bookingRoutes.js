@@ -24,6 +24,7 @@ import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
 import crypto from "crypto";
 import { buildBandEventSheetEmailHtml } from "../utils/tscEmailBranding.js";
+import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
 
 const router = express.Router();
 
@@ -318,6 +319,7 @@ const getBookingDisplayName = (booking) => {
 
 const getBookingEventDate = (booking) => {
   const raw =
+    booking?.eventDateISO ||
     booking?.eventDate ||
     booking?.date ||
     booking?.bookingDate ||
@@ -326,9 +328,22 @@ const getBookingEventDate = (booking) => {
     booking?.eventSheet?.answers?.event_date ||
     "";
 
-  if (!raw) return "Date TBC";
+  const refMatch = String(booking?.bookingId || booking?.bookingRef || "").match(
+    /^(\d{2})(\d{2})(\d{2})-/,
+  );
+  const refDate = refMatch
+    ? new Date(
+        Date.UTC(
+          2000 + Number(refMatch[1]),
+          Number(refMatch[2]) - 1,
+          Number(refMatch[3]),
+        ),
+      )
+    : null;
 
-  const date = new Date(raw);
+  if (!raw && !refDate) return "Date TBC";
+
+  const date = raw ? new Date(raw) : refDate;
   if (Number.isNaN(date.getTime())) return String(raw);
 
   return date.toLocaleDateString("en-GB", {
@@ -1730,10 +1745,15 @@ router.post("/notify-band", async (req, res) => {
       };
     }
 
+    const bookingData = booking.toObject({
+      virtuals: true,
+      getters: true,
+      depopulate: false,
+    });
     const emailConfig = getEmailConfig();
     const transporter = createNotifyBandTransporter();
-    const bandName = getBookingDisplayName(booking);
-    const eventDate = getBookingEventDate(booking);
+    const bandName = getBookingDisplayName(bookingData);
+    const eventDate = getBookingEventDate(bookingData);
     const ref = booking.bookingId || String(booking._id);
 
     if (!booking.eventSheet?.bandSheetToken) {
@@ -1742,14 +1762,9 @@ router.post("/notify-band", async (req, res) => {
         bandSheetToken: crypto.randomBytes(18).toString("base64url"),
       };
     }
-    const backendBase = String(
-      process.env.BACKEND_PUBLIC_URL ||
-        process.env.BACKEND_URL ||
-        `${req.protocol}://${req.get("host")}`,
-    ).replace(/\/$/, "");
-    const eventSheetUrl = `${backendBase}/api/booking/band-sheet/${encodeURIComponent(
+    const eventSheetUrl = buildBandSheetPdfUrl(
       booking.eventSheet.bandSheetToken,
-    )}`;
+    );
 
     const subject = `Event sheet ready: ${bandName} — ${eventDate}`;
 
