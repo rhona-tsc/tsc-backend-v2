@@ -231,12 +231,21 @@ try {
   );
   const mergedDesc = Array.from(lines).join("\n");
 
-  // 🧩 Ensure attendee list (single vocalist)
-  const attendees = [{ email: email.toLowerCase() }];
+  // Keep existing guests when an accepted musician is added to a shared event.
+  const attendees = Array.from(
+    new Map(
+      [...(ev.attendees || []), { email: email.toLowerCase() }]
+        .filter((attendee) => attendee?.email)
+        .map((attendee) => [attendee.email.toLowerCase(), attendee]),
+    ).values(),
+  );
 
   const patchBody = {
-    summary: ev.summary || summary,
+    summary: summary || ev.summary,
     description: mergedDesc,
+    location: address || ev.location,
+    start: { dateTime: start, timeZone: "Europe/London" },
+    end: { dateTime: end, timeZone: "Europe/London" },
     attendees,
     extendedProperties: {
       private: { ...(ev.extendedProperties?.private || {}), ...privateProps },

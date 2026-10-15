@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import crypto from "crypto";
 import Booking from "../models/bookingModel.js";
+import BookingBoardItem from "../models/bookingBoardItem.js";
 import { oauth2Client } from "../controllers/googleController.js";
 import { buildBandSheetPdfUrl, getBandSheetOrigin } from "./bandSheetUrl.js";
 
@@ -122,41 +123,74 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
   const cal = google.calendar({ version: "v3", auth: oauth2Client });
   const calendarId = "primary";
 
+  const ref = bookingRefOf(booking);
+  const boardBooking = await BookingBoardItem.findOne({
+    $or: [
+      ...(booking._id ? [{ bookingId: booking._id }, { sourceBookingId: booking._id }] : []),
+      ...(ref ? [{ bookingRef: ref }] : []),
+    ],
+  }).lean();
+  const calendarBooking = {
+    ...(booking.toObject ? booking.toObject() : booking),
+    ...(boardBooking || {}),
+    eventSheet: booking.eventSheet,
+    calendarEventId: booking.calendarEventId,
+  };
+
   const eventId = booking.calendarEventId || null;
   const summaryName = clean(
-    booking.actName || firstAct(booking)?.actName || firstAct(booking)?.tscName || "Band",
+    calendarBooking.actTscName ||
+      calendarBooking.actName ||
+      firstAct(calendarBooking)?.actName ||
+      firstAct(calendarBooking)?.tscName ||
+      "Band",
   );
-  const ref = bookingRefOf(booking);
-  const times = eventTimes(booking);
+  const times = eventTimes(calendarBooking);
   if (!times.dateISO) throw new Error("Booking has no event date for calendar update");
-  const lineup = lineupFor(booking, assignedMusicians);
+  const lineup = lineupFor(calendarBooking, assignedMusicians);
 
-  const summary = `Confirmed Booking: ${summaryName}`;
+  const clientName = clean(
+    calendarBooking.clientFirstNames ||
+      calendarBooking.bookerName ||
+      calendarBooking.clientName ||
+      "Client",
+  );
+  const possessiveClient = /s$/i.test(clientName)
+    ? `${clientName}'`
+    : `${clientName}'s`;
+  const eventType = clean(calendarBooking.eventType || "Event");
+  const summary = `${possessiveClient} ${eventType} | ${summaryName}`;
   const description = [
     `Booking Reference: ${ref}`,
     `Act: ${summaryName}`,
     `Date: ${times.dateISO}`,
-    `Venue: ${clean(booking.venueAddress || booking.venue) || "TBC"}`,
+    `Venue: ${clean(calendarBooking.address || calendarBooking.venueAddress || calendarBooking.venue) || "TBC"}`,
     "",
     "BAND MEMBERS & ROLES:",
     ...(lineup.length ? lineup.map((entry) => `• ${entry}`) : ["• Awaiting confirmations"]),
     "",
     `EVENT SHEET: ${eventSheetLink(booking)}`,
-    clean(booking.whatsappGroupLink)
-      ? `WHATSAPP BAND GROUP: ${clean(booking.whatsappGroupLink)}`
+    clean(calendarBooking.whatsappGroupLink)
+      ? `WHATSAPP BAND GROUP: ${clean(calendarBooking.whatsappGroupLink)}`
       : "",
   ].filter((line, index, all) => line !== "" || all[index - 1] !== "").join("\n");
 
   const eventPayload = {
     summary,
     description,
-    location: clean(booking.venueAddress || booking.venue),
+    location: clean(
+      calendarBooking.address || calendarBooking.venueAddress || calendarBooking.venue,
+    ),
     start: { dateTime: times.start, timeZone: "Europe/London" },
     end: { dateTime: times.end, timeZone: "Europe/London" },
     extendedProperties: {
       private: {
         bookingRef: ref,
-        actId: booking.actId || firstAct(booking)?.actId || booking.act || "",
+        actId:
+          calendarBooking.actId ||
+          firstAct(calendarBooking)?.actId ||
+          calendarBooking.act ||
+          "",
         eventDateISO: times.dateISO,
       },
     },

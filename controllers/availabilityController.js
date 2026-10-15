@@ -11,6 +11,7 @@ import userModel from "../models/userModel.js";
 import { makeShortId } from "../utils/makeShortId.js";
 import crypto from "crypto"; // at top of file if not already
 import EnquiryMessage from "../models/EnquiryMessage.js";
+import BookingBoardItem from "../models/bookingBoardItem.js";
 
 const isValid24 = (v) =>
   typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
@@ -4783,6 +4784,40 @@ export const processAvailabilityReplyFlow = async ({
         null;
 
       try {
+        const bookingRef = String(updated?.bookingId || "").trim();
+        const boardBooking = bookingRef
+          ? await BookingBoardItem.findOne({ bookingRef }).lean()
+          : null;
+
+        const clientName = String(
+          boardBooking?.clientFirstNames ||
+            boardBooking?.bookerName ||
+            updated?.clientName ||
+            "Client",
+        ).trim();
+        const possessiveClient = /s$/i.test(clientName)
+          ? `${clientName}'`
+          : `${clientName}'s`;
+        const eventType = String(
+          boardBooking?.eventType || "Event",
+        ).trim();
+        const calendarActName = String(
+          boardBooking?.actTscName ||
+            boardBooking?.actName ||
+            act.tscName ||
+            act.name ||
+            "Band",
+        ).trim();
+        const arrivalTime = String(
+          boardBooking?.arrivalTime || "17:00",
+        ).trim();
+        const finishTime = String(
+          boardBooking?.finishTime || "23:59",
+        ).trim();
+        const endDate = new Date(`${dateISO}T12:00:00Z`);
+        if (finishTime <= arrivalTime) endDate.setUTCDate(endDate.getUTCDate() + 1);
+        const endDateISO = endDate.toISOString().slice(0, 10);
+
         if (updated?.calendarEventId && emailForInvite) {
           try {
             await cancelCalendarInvite({
@@ -4804,7 +4839,7 @@ export const processAvailabilityReplyFlow = async ({
           actId,
           dateISO,
           email: emailForInvite,
-          summary: `TSC: ${act.tscName || act.name} enquiry`,
+          summary: `${possessiveClient} ${eventType} | ${calendarActName}`,
           description: [
             `Event Date: ${formattedDateString}`,
             `Act: ${act.tscName || act.name}`,
@@ -4812,8 +4847,9 @@ export const processAvailabilityReplyFlow = async ({
             `Address: ${updated.formattedAddress || "TBC"}`,
             `Fee: £${fee || "TBC"}`,
           ].join("\n"),
-          startTime: `${dateISO}T17:00:00Z`,
-          endTime: `${dateISO}T23:59:00Z`,
+          startTime: `${dateISO}T${arrivalTime}:00`,
+          endTime: `${endDateISO}T${finishTime}:00`,
+          address: boardBooking?.address || updated.formattedAddress || "TBC",
           fee,
         });
 
