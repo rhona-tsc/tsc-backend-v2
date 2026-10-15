@@ -686,7 +686,37 @@ export const listRoleCandidates = async (req, res) => {
     const query = String(req.query?.query || "").trim();
     const roleRegex = new RegExp(escapeRegex(role), "i");
     const textRegex = query ? new RegExp(escapeRegex(query), "i") : null;
-    const filters = [{ "instrumentation.instrument": roleRegex }, { other_skills: roleRegex }];
+    const { lineup } = await getActLineupContext(board);
+    const roleMembers = (lineup?.bandMembers || []).filter((member) =>
+      roleRegex.test(String(member?.instrument || member?.role || "")),
+    );
+    const primaryIds = new Set(roleMembers.map((member) => String(member?.musicianId || member?._id || "")));
+    const primaryEmails = new Set(
+      roleMembers
+        .map((member) => String(member?.email || "").trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const primaryPhones = new Set(
+      roleMembers
+        .flatMap((member) => normalizeFrom(member?.phoneNormalized || member?.phoneNumber || member?.phone || ""))
+        .filter(Boolean),
+    );
+    const primaryLookupFilters = [
+      ...(primaryEmails.size ? [{ email: { $in: [...primaryEmails] } }, { "basicInfo.email": { $in: [...primaryEmails] } }] : []),
+      ...(primaryPhones.size
+        ? [
+            { phone: { $in: [...primaryPhones] } },
+            { phoneNumber: { $in: [...primaryPhones] } },
+            { phoneNormalized: { $in: [...primaryPhones] } },
+            { "basicInfo.phone": { $in: [...primaryPhones] } },
+          ]
+        : []),
+    ];
+    const filters = [
+      { "instrumentation.instrument": roleRegex },
+      { other_skills: roleRegex },
+      ...primaryLookupFilters,
+    ];
     const textFilters = textRegex
       ? [
           { firstName: textRegex },
@@ -752,11 +782,6 @@ export const listRoleCandidates = async (req, res) => {
       });
     });
 
-    const { lineup } = await getActLineupContext(board);
-    const roleMembers = (lineup?.bandMembers || []).filter((member) =>
-      roleRegex.test(String(member?.instrument || member?.role || "")),
-    );
-    const primaryIds = new Set(roleMembers.map((member) => String(member?.musicianId || member?._id || "")));
     const deputyIds = new Set(
       roleMembers.flatMap((member) =>
         (member?.deputies || []).map((deputy) => String(deputy?.musicianId || deputy?._id || "")),
@@ -766,6 +791,27 @@ export const listRoleCandidates = async (req, res) => {
     const candidates = musicians
       .map((musician) => {
         const id = String(musician._id);
+        const contact = candidateContact(musician);
+        const isPrimary =
+          primaryIds.has(id) ||
+          primaryEmails.has(String(contact.email || "").trim().toLowerCase()) ||
+          normalizeFrom(contact.phone || "").some((phone) => primaryPhones.has(phone));
+        const matchedPrimaryMember = isPrimary
+          ? roleMembers.find((member) => {
+              const memberId = String(member?.musicianId || member?._id || "");
+              const memberEmail = String(member?.email || "").trim().toLowerCase();
+              const memberPhones = normalizeFrom(
+                member?.phoneNormalized || member?.phoneNumber || member?.phone || "",
+              );
+              return memberId === id ||
+                (memberEmail && memberEmail === String(contact.email || "").trim().toLowerCase()) ||
+                memberPhones.some((phone) => normalizeFrom(contact.phone || "").includes(phone));
+            })
+          : null;
+        const lineupName = [
+          matchedPrimaryMember?.firstName,
+          matchedPrimaryMember?.lastName,
+        ].filter(Boolean).join(" ").trim();
         const bookingConflict = conflictById.get(id) || "";
         const isUnavailable = unavailableIds.has(id) || Boolean(bookingConflict);
         const roleMatch = [
@@ -778,11 +824,11 @@ export const listRoleCandidates = async (req, res) => {
         ].some((value) => roleRegex.test(String(value || "")));
         return {
           _id: musician._id,
-          name: musicianDisplayName(musician),
-          ...candidateContact(musician),
+          name: lineupName || musicianDisplayName(musician),
+          ...contact,
           instrumentation: musician.instrumentation || [],
           profilePhoto: musician.profilePhoto || "",
-          source: primaryIds.has(id) ? "primary" : deputyIds.has(id) ? "act_deputy" : "search",
+          source: isPrimary ? "primary" : deputyIds.has(id) ? "act_deputy" : "search",
           roleMatch,
           available: !isUnavailable,
           unavailableReason: bookingConflict
