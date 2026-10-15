@@ -78,6 +78,17 @@ const formatWithOrdinal = (dateLike) => {
   return `${weekday}, ${day}${suffix} ${month} ${year}`;
 };
 
+const formatBookingClock = (value = "") => {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return raw;
+  const hour = Number(match[1]);
+  const minute = match[2];
+  if (!Number.isFinite(hour) || hour > 23) return raw;
+  const hour12 = hour % 12 || 12;
+  return `${hour12}.${minute}${hour < 12 ? "am" : "pm"}`;
+};
+
 const normalizePhone = (raw = "") => {
   let v = String(raw || "").replace(/^whatsapp:/i, "").replace(/\s+/g, "");
   if (!v) return "";
@@ -925,6 +936,20 @@ export const offerBookingRole = async (req, res) => {
       Number(req.body?.earlyArrivalMinutes || 0) || 0,
     );
     const earlyArrivalTime = String(req.body?.earlyArrivalTime || "").trim();
+    const arrivalTime = String(
+      req.body?.arrivalTime ||
+        board?.performanceTimes?.arrivalTime ||
+        board?.arrivalTime ||
+        board?.eventSheet?.answers?.schedule_simple_arrival ||
+        "",
+    ).trim();
+    const finishTime = String(
+      req.body?.finishTime ||
+        board?.performanceTimes?.finishTime ||
+        board?.finishTime ||
+        board?.eventSheet?.answers?.schedule_simple_finish_time ||
+        "",
+    ).trim();
     const dutiesAlreadyAllocated = new Set(
       (Array.isArray(board.assignedMusicians) ? board.assignedMusicians : [])
         .filter(
@@ -949,11 +974,14 @@ export const offerBookingRole = async (req, res) => {
     const roleWithArrival = [
       role,
       ...duties,
-      earlyArrivalMinutes
-        ? `${earlyArrivalMinutes}-minute early arrival`
-        : earlyArrivalTime
-          ? `early arrival at ${earlyArrivalTime}`
-          : "",
+      arrivalTime
+        ? `arrival ${formatBookingClock(arrivalTime)}`
+        : earlyArrivalMinutes
+          ? `${earlyArrivalMinutes}-minute early arrival`
+          : earlyArrivalTime
+            ? `early arrival at ${formatBookingClock(earlyArrivalTime)}`
+            : "",
+      finishTime ? `finish ${formatBookingClock(finishTime)}` : "",
     ]
       .filter(Boolean)
       .join(" · ");
