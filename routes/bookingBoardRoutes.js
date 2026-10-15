@@ -2391,6 +2391,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
           body.bookingMusicians || normalized?.bookingMusicians || [],
         bandLineup: body.bandLineup || normalized?.bandLineup || [],
         accounting: savedBooking?.accounting || body.accounting || {},
+        ...(body.payments && isPlainObject(body.payments)
+          ? { payments: body.payments }
+          : {}),
         invoiceCompany:
           savedBooking?.invoiceCompany ||
           savedBooking?.accounting?.invoiceCompany ||
@@ -2459,7 +2462,10 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
       return res.json({
         success: true,
-        row: normalized,
+        row:
+          body.payments && isPlainObject(body.payments)
+            ? { ...normalized, payments: body.payments }
+            : normalized,
         source: "booking",
       });
     }
@@ -2498,6 +2504,23 @@ router.patch("/:id", musicianAuth, async (req, res) => {
     }
 
     const { bookingDetails: bodyBookingDetails, ...bodyWithoutBookingDetails } = body;
+
+    if (bodyWithoutBookingDetails.depositAmount !== undefined) {
+      const depositAmount = Number(bodyWithoutBookingDetails.depositAmount || 0) || 0;
+      bodyWithoutBookingDetails.payments = {
+        ...(isPlainObject(bodyWithoutBookingDetails.payments)
+          ? bodyWithoutBookingDetails.payments
+          : {}),
+        depositAmount,
+        depositChargedAmount: depositAmount,
+      };
+      delete bodyWithoutBookingDetails.depositAmount;
+    }
+
+    // BookingBoardItem stores the deposit under payments, not totals. Keeping
+    // totals in the request is useful for core bookings, but it must not be the
+    // only place a manual board row tries to persist the value.
+    delete bodyWithoutBookingDetails.totals;
 
     const bookingDetailsPatch = {
       ...(bodyBookingDetails || {}),
