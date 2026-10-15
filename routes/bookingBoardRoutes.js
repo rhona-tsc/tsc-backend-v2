@@ -83,12 +83,17 @@ const buildIntroEmail = (row) => {
         { day: "numeric", month: "long", year: "numeric" },
       )
     : "your event date";
-  const eventSheetLink = cleanString(row?.eventSheetLink);
+  const publicSiteBase = cleanString(
+    process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "https://thesupremecollective.co.uk",
+  ).replace(/\/$/, "");
+  const eventSheetLink = row?.bookingRef
+    ? `${publicSiteBase}/event-sheet/${encodeURIComponent(row.bookingRef)}`
+    : cleanString(row?.eventSheetLink);
   const subject = `${actName} & your ${eventType} on ${date}`;
   const eventSheetHtml = eventSheetLink
     ? `<p style="margin:0 0 20px;"><strong>EVENT SHEET:</strong> <a href="${escapeEmailHtml(eventSheetLink)}" style="color:#ff6667;font-weight:700;">Open your event sheet</a></p>`
     : "";
-  const text = [
+  let text = [
     `Hi ${firstName},`,
     "",
     `Allow me to introduce myself, my name is Rhona, and I am the band manager for ${actName}. Thank you for booking the band — we're honoured to be delivering the entertainment for your ${eventType}, and I'm very much looking forward to sorting out the fine details in the run-up.`,
@@ -99,7 +104,7 @@ const buildIntroEmail = (row) => {
     "Warmest wishes,",
     "Rhona ✨",
   ].filter(Boolean).join("\n");
-  const html = `
+  let html = `
     <div style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111;">
       <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:24px;padding:30px;">
         <p style="margin:0 0 18px;font-size:16px;line-height:1.7;">Hi ${escapeEmailHtml(firstName)},</p>
@@ -110,6 +115,49 @@ const buildIntroEmail = (row) => {
         ${buildTscEmailFooter()}
       </div>
     </div>`;
+  if (row?.contactRole === "agent") {
+    const eventDate = row?.eventDateISO ? new Date(`${row.eventDateISO}T12:00:00Z`) : null;
+    const bookingDate = row?.bookingDateISO ? new Date(`${row.bookingDateISO}T12:00:00Z`) : null;
+    const songDue = eventDate && bookingDate
+      ? new Date(bookingDate.getTime() + Math.ceil((eventDate - bookingDate) / 2))
+      : null;
+    const formatDate = (value) => value && !Number.isNaN(value.getTime())
+      ? value.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
+      : "the agreed date";
+    const invoiceDue = row?.invoiceDueDateISO
+      ? new Date(`${row.invoiceDueDateISO}T12:00:00Z`)
+      : null;
+    const specialRequestLabel = /wedding/i.test(eventType)
+      ? "First Dance"
+      : "Off Repertoire Request";
+    const paragraphs = [
+      `Many thanks for sending over the deposit and for signing the contract. I've sent through a receipt for the deposit separately for your records. I'm pleased to say that is the band secure for your client's ${eventType}. :) Thank you for booking the band! They are very much looking forward to performing for your clients and their guests, and I'm very much looking forward to sorting out the fine details for the entertainment in the run-up to the big day.`,
+      "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and kindly fill in the blanks directly into the document. The event sheet will auto-save, you can tick off each section when you're done, and then 'Notify Band' when complete. At this point I'll check over the details and see if I or the band have any questions for you or vice versa.",
+      "Also please feel free to email or WhatsApp if you've any urgent questions or requests. Or alternatively, you can schedule a call with me directly in my calendar: https://calendly.com/thesupremecollective/call",
+      "Please also find linked below the invoice for the balance, which is due around a week before the performance. The BACS details are on the footer of the invoice: Invoice attached",
+      `Key dates include:\n- Song suggestions and ${specialRequestLabel} request due on the ${formatDate(songDue)}\n- Completed event sheet (including playlists) due on the ${formatDate(invoiceDue)}`,
+      "You'll also receive a few emails from me in the run up to the performance date as reminders to submit certain bits of information to the event sheet just to keep everything on track.",
+      "Hopefully, everything makes sense, but any questions, don't hesitate!",
+    ];
+    text = [
+      `Hi ${firstName},`, "", paragraphs[0], "", paragraphs[1], "",
+      `EVENT SHEET: ${eventSheetLink}`, "", paragraphs[2], "", paragraphs[3], "",
+      paragraphs[4], "", paragraphs[5], "", paragraphs[6], "",
+      "Warmest wishes,", "Rhona ✨",
+    ].join("\n");
+    const p = (value) => `<p style="margin:0 0 18px;font-size:15px;line-height:1.8;">${escapeEmailHtml(value).replace(/\n/g, "<br />")}</p>`;
+    html = `
+      <div style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111;">
+        <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:24px;padding:30px;">
+          ${p(`Hi ${firstName},`)}
+          ${p(paragraphs[0])}${p(paragraphs[1])}
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.8;"><strong>EVENT SHEET:</strong> <a href="${escapeEmailHtml(eventSheetLink)}" style="color:#ff6667;font-weight:700;">Open your editable event sheet</a></p>
+          ${p(paragraphs[2])}${p(paragraphs[3])}${p(paragraphs[4])}${p(paragraphs[5])}${p(paragraphs[6])}
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.7;">Warmest wishes,<br />Rhona ✨</p>
+          ${buildTscEmailFooter()}
+        </div>
+      </div>`;
+  }
   const invoiceUrl = cleanString(
     row?.invoicePdfUrl || row?.invoiceUrl || row?.payments?.boardInvoicePdfUrl,
   );
@@ -347,10 +395,12 @@ export const parseBookingContract = (contractText, invoiceText = "") => {
     lineupComposition,
     bandSize: Number(lineup.match(/(\d+)\s*[- ]piece/i)?.[1] || 0),
     arrivalTime: parseTime(captureLine(contractText, "Artist Arrival Time")),
+    startTime: parseTime(captureLine(contractText, "Artist Start Time")),
     finishTime: parseTime(captureLine(contractText, "Artist Finish Time")),
     setupTime: captureLine(contractText, "Artist Setup Time"),
     changeTime: captureLine(contractText, "Artist Change Time"),
     performancePlan: captureLine(contractText, "Performance Plan"),
+    performanceArea: captureLine(contractText, "Performance Area Required"),
     accounting: {
       invoiceCompany: "BMM",
       paymentStage: "deposit",
@@ -1845,6 +1895,13 @@ router.post("/", musicianAuth, async (req, res) => {
         .json({ success: false, message: "bookingRef is required" });
     }
 
+    const [existingBoardRow, existingBooking] = await Promise.all([
+      BookingBoardItem.findOne({ bookingRef }).lean(),
+      Booking.findOne({ bookingId: bookingRef }).lean(),
+    ]);
+    const isContractReimport =
+      payload?.importMetadata?.source === "contract_pdf" && Boolean(existingBoardRow);
+
     const eventDateISO = String(payload.eventDateISO || "").slice(0, 10);
     const eventDate = /^\d{4}-\d{2}-\d{2}$/.test(eventDateISO)
       ? new Date(`${eventDateISO}T00:00:00.000Z`)
@@ -1917,6 +1974,22 @@ router.post("/", musicianAuth, async (req, res) => {
         assignedMusicians,
       },
     };
+
+    // A signed contract is useful for filling performance details, but a later
+    // written agreement and the live payment record are authoritative. Re-imports
+    // must therefore never replace the established contact or financial state.
+    if (isContractReimport) {
+      bookingPatch.clientName = existingBooking?.clientName || bookingPatch.clientName;
+      bookingPatch.clientEmail = existingBooking?.clientEmail || bookingPatch.clientEmail;
+      bookingPatch.userEmail = existingBooking?.userEmail || bookingPatch.userEmail;
+      bookingPatch.amount = existingBooking?.amount ?? bookingPatch.amount;
+      bookingPatch.fee = existingBooking?.fee ?? bookingPatch.fee;
+      bookingPatch.accounting = existingBooking?.accounting || bookingPatch.accounting;
+      bookingPatch.paymentLink = existingBooking?.paymentLink || bookingPatch.paymentLink;
+      bookingPatch.invoicePdfUrl = existingBooking?.invoicePdfUrl || bookingPatch.invoicePdfUrl;
+      bookingPatch.balanceInvoiceUrl = existingBooking?.balanceInvoiceUrl || bookingPatch.balanceInvoiceUrl;
+      bookingPatch.balanceInvoicePdfUrl = existingBooking?.balanceInvoicePdfUrl || bookingPatch.balanceInvoicePdfUrl;
+    }
 
     // remove undefined so we don’t stomp fields
     Object.keys(bookingPatch).forEach(
@@ -1995,9 +2068,21 @@ router.post("/", musicianAuth, async (req, res) => {
       updatedAt: new Date(),
     };
 
-    const existingBoardRow = await BookingBoardItem.findOne({ bookingRef })
-      .select("_id")
-      .lean();
+    if (isContractReimport) {
+      const preserve = (key) => {
+        if (existingBoardRow?.[key] !== undefined && existingBoardRow?.[key] !== null) {
+          boardPatch[key] = existingBoardRow[key];
+        }
+      };
+      [
+        "bookerName", "clientFirstNames", "clientEmail", "clientEmails",
+        "clientPhone", "clientAddress", "contactRole", "agent", "eventType",
+        "grossValue", "netCommission", "accounting", "depositInvoice",
+        "paymentInstructions", "invoiceDateISO", "invoiceDueDateISO",
+        "invoiceUrl", "invoicePdfUrl", "balanceAmountPence", "balanceStatus",
+        "payments",
+      ].forEach(preserve);
+    }
 
     const boardRow = await BookingBoardItem.findOneAndUpdate(
       { bookingRef },
@@ -2186,7 +2271,7 @@ router.get("/:id/intro-email/preview", musicianAuth, async (req, res) => {
       !cleanString(row.actTscName || row.actName) && "act name",
       !cleanString(row.eventType) && "event type",
       !cleanString(row.eventDateISO) && "event date",
-      !cleanString(row.eventSheetLink) && "event sheet link",
+      !cleanString(row.bookingRef || row.eventSheetLink) && "event sheet link",
     ].filter(Boolean);
     return res.json({
       success: true,
@@ -2227,7 +2312,7 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
       !cleanString(row.actTscName || row.actName) && "act name",
       !cleanString(row.eventType) && "event type",
       !cleanString(row.eventDateISO) && "event date",
-      !cleanString(row.eventSheetLink) && "event sheet link",
+      !cleanString(row.bookingRef || row.eventSheetLink) && "event sheet link",
     ].filter(Boolean);
     if (missing.length) {
       return res.status(400).json({
