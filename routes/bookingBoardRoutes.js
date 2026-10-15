@@ -14,6 +14,7 @@ import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { sendWhatsAppText, sendSMSMessage } from "../utils/twilioClient.js";
 import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
+import { normalizeEventType } from "../utils/eventTypes.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1795,7 +1796,7 @@ router.post("/", musicianAuth, async (req, res) => {
       ).trim(),
       clientEmail: clientEmail || undefined,
       userEmail: clientEmail || undefined,
-      eventType: String(payload.eventType || "").trim(),
+      eventType: normalizeEventType(payload.eventType),
 
       // money
       amount: Number(payload.grossValue || 0) || 0,
@@ -1818,7 +1819,7 @@ router.post("/", musicianAuth, async (req, res) => {
       bandLineup: assignedMusicians,
       bookingDetails: {
         ...(payload.bookingDetails || {}),
-        eventType: String(payload.eventType || "").trim(),
+        eventType: normalizeEventType(payload.eventType),
         assignedMusicians,
       },
     };
@@ -1864,7 +1865,7 @@ router.post("/", musicianAuth, async (req, res) => {
       clientPhone: String(payload.clientPhone || "").trim(),
       clientAddress: String(payload.clientAddress || "").trim(),
       accounting: payload.accounting || undefined,
-      eventType: String(payload.eventType || "").trim(),
+      eventType: normalizeEventType(payload.eventType),
       actName: String(payload.actName || "").trim(),
       actTscName: String(payload.actTscName || payload.actName || "").trim(),
       address: String(payload.address || "").trim(),
@@ -2213,6 +2214,15 @@ router.patch("/:id", musicianAuth, async (req, res) => {
   try {
     const rawBody = { ...req.body };
     const body = { ...rawBody, updatedAt: new Date() };
+    if (Object.prototype.hasOwnProperty.call(body, "eventType")) {
+      body.eventType = normalizeEventType(body.eventType);
+    }
+    if (body.bookingDetails?.eventType) {
+      body.bookingDetails = {
+        ...body.bookingDetails,
+        eventType: normalizeEventType(body.bookingDetails.eventType),
+      };
+    }
     if (body.invoiceCompany || body.accounting?.invoiceCompany) {
       const invoiceCompany =
         String(body.invoiceCompany || body.accounting?.invoiceCompany || "TSC")
