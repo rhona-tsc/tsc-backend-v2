@@ -4,6 +4,11 @@ const EmailSchema = new mongoose.Schema(
   {
     label: { type: String }, // e.g. "Bride", "Planner"
     email: { type: String, required: true },
+    role: {
+      type: String,
+      enum: ["", "direct_client", "agent", "end_client_via_agent"],
+      default: "",
+    },
   },
   { _id: false },
 );
@@ -205,6 +210,11 @@ const BookingDetailsSchema = new mongoose.Schema(
       notes: String,
     },
     djServicesBooked: { type: Boolean, default: false },
+    playlistService: {
+      type: String,
+      enum: ["", "spotify_playlist", "manned_playlist", "pro_dj"],
+      default: "",
+    },
     extras: [BookingExtraSchema],
     assignedMusicians: [AssignedMusicianSchema],
     manualAdjustment: ManualAdjustmentSchema,
@@ -267,6 +277,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
     clientFirstNames: { type: String },
     bookingRef: { type: String, index: true, unique: false },
     eventSheetLink: { type: String },
+    draftSetlistLink: { type: String, default: "", trim: true },
     whatsappGroupLink: { type: String, default: "", trim: true },
     whatsappGroupSetUp: { type: Boolean, default: false },
     whatsappGroupInviteSentAt: { type: Date, default: null },
@@ -281,6 +292,12 @@ const BookingBoardItemSchema = new mongoose.Schema(
     grossValue: { type: Number, default: 0 },
     netCommission: { type: Number, default: 0 }, // agency commission amount £
     agent: { type: String }, // e.g. "Encore", "TSC Direct", "Other Agent"
+    contactRole: {
+      type: String,
+      enum: ["direct_client", "agent", "end_client_via_agent"],
+      default: "direct_client",
+      index: true,
+    },
     clientEmails: [EmailSchema],
     clientEmail: { type: String },
     clientPhone: { type: String, default: "" },
