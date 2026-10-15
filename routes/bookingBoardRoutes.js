@@ -42,6 +42,30 @@ const toNumber = (value) => {
 };
 
 const cleanString = (value) => String(value || "").trim();
+const AGENT_NAMES = [
+  "Alive Network", "Direct", "Encore", "Entertainment Nation", "Freak Music",
+  "Fully Funktional", "Function Central", "LMM", "Poptop", "Scarlettte",
+  "Silk Street", "Soul Eras", "St Barts", "Staar Productions", "Stormont",
+  "The Supreme Collective", "UKBride", "UKBride Lead", "Warble", "Wedding Fair",
+  "Wedding Jam",
+];
+const AGENT_ALIASES = new Map([
+  ["encore", "Encore"],
+  ["entertainment nation", "Entertainment Nation"],
+  ["potop", "Poptop"],
+  ["poptop", "Poptop"],
+  ["tsc direct", "The Supreme Collective"],
+  ["tsc", "The Supreme Collective"],
+  ["the supreme collective", "The Supreme Collective"],
+  ["weddingjam", "Wedding Jam"],
+]);
+const normaliseAgent = (value = "") => {
+  const cleaned = cleanString(value).replace(/\s+/g, " ");
+  if (!cleaned) return "Direct";
+  return AGENT_ALIASES.get(cleaned.toLowerCase())
+    || AGENT_NAMES.find((name) => name.toLowerCase() === cleaned.toLowerCase())
+    || cleaned;
+};
 
 const buildIntroEmail = (row) => {
   const recipient = cleanString(
@@ -626,7 +650,7 @@ const normaliseImportRow = (item = {}) => {
       0,
       10,
     ),
-    agent: cleanString(item.agent || "Direct"),
+    agent: normaliseAgent(item.agent),
     clientEmails: item.clientEmail
       ? [{ email: cleanString(item.clientEmail) }]
       : Array.isArray(item.clientEmails)
@@ -1380,7 +1404,7 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     bookingDateISO: isoDateOnly(doc?.createdAt || doc?.updatedAt),
     grossValue,
     netCommission: Number(doc?.netCommission || 0) || 0,
-    agent: doc?.agent || "Direct",
+    agent: normaliseAgent(doc?.agent),
     eventType:
       doc?.eventType ||
       doc?.eventSheet?.answers?.event_type ||
@@ -1914,7 +1938,7 @@ router.post("/", musicianAuth, async (req, res) => {
       grossValue: Number(payload.grossValue || 0) || 0,
       netCommission: Number(payload.netCommission || 0) || 0,
 
-      agent: String(payload.agent || "Direct").trim(),
+      agent: normaliseAgent(payload.agent),
 
       clientEmails: clientEmail ? [{ email: clientEmail }] : [],
       clientEmail,
@@ -2521,7 +2545,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         ...(body.enquiryDateISO !== undefined
           ? { enquiryDateISO: String(body.enquiryDateISO || "").slice(0, 10) }
           : {}),
-        ...(body.agent !== undefined ? { agent: body.agent } : {}),
+        ...(body.agent !== undefined ? { agent: normaliseAgent(body.agent) } : {}),
         ...(body.actName !== undefined ? { actName: body.actName } : {}),
         ...(body.actTscName !== undefined ? { actTscName: body.actTscName } : {}),
         ...(body.address !== undefined ? { address: body.address } : {}),
@@ -2899,7 +2923,7 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
           ).slice(0, 10),
 
           grossValue,
-          agent: String(row.agent || row["Agent"] || "Direct").trim(),
+          agent: normaliseAgent(row.agent || row["Agent"]),
 
           eventType: String(row.eventType || row["Event Type"] || "").trim(),
           actName: String(row.actName || row["Act"] || "").trim(),
@@ -3075,7 +3099,7 @@ for (const [index, row] of usableRecords.entries()) {
       bookingDateISO: normaliseDate(row.bookingDateISO),
       enquiryDateISO: normaliseDate(row.enquiryDateISO),
 
-      agent: cleanString(row.agent || "Direct"),
+    agent: normaliseAgent(row.agent),
       eventType: cleanString(row.eventType),
       actName: cleanString(row.actName),
       county: cleanString(row.county),
