@@ -68,6 +68,13 @@ const withConfirmedAllocation = async (booking) => {
       member?.dietaryRequirements || dietById.get(String(member?.musicianId || "")) || "",
   }));
   const boardActName = board?.actTscName || board?.actName || "";
+  const boardBookingTotal = Number(board?.grossValue || 0);
+  const boardDepositPaid = Number(
+    board?.payments?.depositChargedAmount ?? board?.payments?.depositAmount ?? 0,
+  );
+  const boardBalance = board?.balanceAmountPence != null
+    ? Number(board.balanceAmountPence) / 100
+    : Math.max(0, boardBookingTotal - boardDepositPaid);
   const coreFirstAct = Array.isArray(plain?.actsSummary) ? plain.actsSummary[0] : null;
   const mergedFirstAct = {
     ...(coreFirstAct || {}),
@@ -113,6 +120,23 @@ const withConfirmedAllocation = async (booking) => {
     ...(board?.finishTime ? { finishTime: board.finishTime } : {}),
     ...(board?.performancePlan ? { performancePlan: board.performancePlan } : {}),
     ...(board?.performanceArea ? { performanceArea: board.performanceArea } : {}),
+    ...(boardBookingTotal > 0
+      ? {
+          currency: board?.accounting?.currency || plain?.currency || "GBP",
+          totals: {
+            ...(plain?.totals || {}),
+            bookingTotal: boardBookingTotal,
+            contractTotal: boardBookingTotal,
+            fullAmount: boardBookingTotal,
+            addOnsPostBooking: 0,
+            depositAmount: boardDepositPaid,
+            chargedAmount: boardDepositPaid,
+            remainingAmount: boardBalance,
+            outstandingBalance: boardBalance,
+          },
+          balanceAmountPence: Math.round(boardBalance * 100),
+        }
+      : {}),
     actsSummary: Object.keys(mergedFirstAct).length
       ? [mergedFirstAct, ...(plain?.actsSummary || []).slice(1)]
       : plain?.actsSummary,
