@@ -133,6 +133,16 @@ const withConfirmedAllocation = async (booking) => {
       : {}),
     ...(board?.clientEmails?.[0]?.email ? { clientEmail: board.clientEmails[0].email } : {}),
     ...(board?.contactRole ? { contactRole: board.contactRole } : {}),
+    ...(board?.bookingDetails
+      ? {
+          bookingDetails: {
+            ...(plain?.bookingDetails || {}),
+            ...board.bookingDetails,
+          },
+          djServicesBooked: Boolean(board.bookingDetails.djServicesBooked),
+          playlistService: board.bookingDetails.playlistService || "",
+        }
+      : {}),
     ...(board?.eventDateISO ? { eventDateISO: board.eventDateISO, eventDate: board.eventDateISO } : {}),
     ...(board?.eventType ? { eventType: board.eventType } : {}),
     ...(boardActName ? { actName: boardActName, actTscName: boardActName, tscName: boardActName } : {}),
