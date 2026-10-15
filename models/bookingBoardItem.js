@@ -345,8 +345,10 @@ const BookingBoardItemSchema = new mongoose.Schema(
     bookingMusicians: [AssignedMusicianSchema],
     bandLineup: [AssignedMusicianSchema],
     arrivalTime: { type: String }, // “17:30”
+    startTime: { type: String }, // contracted performance start
     finishTime: { type: String }, // “23:30”
     performancePlan: { type: String, default: "" },
+    performanceArea: { type: String, default: "" },
     setupTime: { type: String, default: "" },
     changeTime: { type: String, default: "" },
     paymentInstructions: { type: mongoose.Schema.Types.Mixed, default: {} },

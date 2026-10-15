@@ -1975,8 +1975,10 @@ router.post("/", musicianAuth, async (req, res) => {
       bandLineup: assignedMusicians,
 
       arrivalTime: String(payload.arrivalTime || "").trim(),
+      startTime: String(payload.startTime || "").trim(),
       finishTime: String(payload.finishTime || "").trim(),
       performancePlan: String(payload.performancePlan || "").trim(),
+      performanceArea: String(payload.performanceArea || "").trim(),
       setupTime: String(payload.setupTime || "").trim(),
       changeTime: String(payload.changeTime || "").trim(),
       paymentInstructions: payload.paymentInstructions || {},
@@ -2567,7 +2569,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         ...(body.lineupSelected !== undefined ? { lineupSelected: body.lineupSelected } : {}),
         ...(body.bandSize !== undefined ? { bandSize: Number(body.bandSize || 0) || 0 } : {}),
         ...(body.arrivalTime !== undefined ? { arrivalTime: body.arrivalTime } : {}),
+        ...(body.startTime !== undefined ? { startTime: body.startTime } : {}),
         ...(body.finishTime !== undefined ? { finishTime: body.finishTime } : {}),
+        ...(body.performanceArea !== undefined ? { performanceArea: body.performanceArea } : {}),
         ...(body.clientFirstNames !== undefined
           ? { clientFirstNames: String(body.clientFirstNames || "").trim() }
           : {}),

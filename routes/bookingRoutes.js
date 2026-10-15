@@ -74,6 +74,16 @@ const withConfirmedAllocation = async (booking) => {
     ...(board?.actId ? { actId: board.actId } : {}),
     ...(boardActName ? { actName: boardActName, tscName: boardActName, name: boardActName } : {}),
     ...(board?.lineupSelected ? { lineupLabel: board.lineupSelected } : {}),
+    ...((board?.arrivalTime || board?.startTime || board?.finishTime)
+      ? {
+          performance: {
+            ...(coreFirstAct?.performance || {}),
+            ...(board?.arrivalTime ? { arrivalTime: board.arrivalTime } : {}),
+            ...(board?.startTime ? { startTime: board.startTime } : {}),
+            ...(board?.finishTime ? { finishTime: board.finishTime } : {}),
+          },
+        }
+      : {}),
   };
   return {
     ...plain,
@@ -97,9 +107,12 @@ const withConfirmedAllocation = async (booking) => {
       ? { lineupSelected: board.lineupSelected, lineupLabel: board.lineupSelected }
       : {}),
     ...(board?.arrivalTime ? { arrivalTime: board.arrivalTime } : {}),
+    ...(board?.startTime ? { startTime: board.startTime } : {}),
     ...(board?.setupTime ? { setupTime: board.setupTime } : {}),
+    ...(board?.changeTime ? { changeTime: board.changeTime } : {}),
     ...(board?.finishTime ? { finishTime: board.finishTime } : {}),
     ...(board?.performancePlan ? { performancePlan: board.performancePlan } : {}),
+    ...(board?.performanceArea ? { performanceArea: board.performanceArea } : {}),
     actsSummary: Object.keys(mergedFirstAct).length
       ? [mergedFirstAct, ...(plain?.actsSummary || []).slice(1)]
       : plain?.actsSummary,
