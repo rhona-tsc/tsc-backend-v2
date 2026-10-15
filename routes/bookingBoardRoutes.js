@@ -991,7 +991,9 @@ const getCanonicalBookingKey = (row) => {
     .toLowerCase();
   if (sessionId) return `session:${sessionId}`;
 
-  const bookingId = String(row?.bookingId || row?.bookingRef || "")
+  // Board rows store the core Mongo id in bookingId, while core bookings use
+  // the human booking reference there. Prefer bookingRef so both sources merge.
+  const bookingId = String(row?.bookingRef || row?.bookingId || "")
     .trim()
     .toLowerCase();
   if (bookingId) return `booking:${bookingId}`;
