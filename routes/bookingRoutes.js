@@ -68,6 +68,29 @@ const withConfirmedAllocation = async (booking) => {
       member?.dietaryRequirements || dietById.get(String(member?.musicianId || "")) || "",
   }));
   const boardActName = board?.actTscName || board?.actName || "";
+  const boardActId =
+    board?.actId ||
+    (Array.isArray(board?.actsSummary) ? board.actsSummary[0]?.actId : null) ||
+    plain?.actsSummary?.[0]?.actId ||
+    plain?.act ||
+    null;
+  let actProfile = null;
+  if (mongoose.isValidObjectId(String(boardActId || ""))) {
+    actProfile = await Act.findById(boardActId)
+      .select("name tscName images coverImage profileImage videos tscVideos")
+      .lean();
+  }
+  if (!actProfile && boardActName) {
+    const escapedName = boardActName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    actProfile = await Act.findOne({
+      $or: [
+        { tscName: { $regex: `^${escapedName}$`, $options: "i" } },
+        { name: { $regex: `^${escapedName}$`, $options: "i" } },
+      ],
+    })
+      .select("name tscName images coverImage profileImage videos tscVideos")
+      .lean();
+  }
   const boardBookingTotal = Number(board?.grossValue || 0);
   const boardDepositPaid = Number(
     board?.payments?.depositChargedAmount ?? board?.payments?.depositAmount ?? 0,
@@ -78,8 +101,18 @@ const withConfirmedAllocation = async (booking) => {
   const coreFirstAct = Array.isArray(plain?.actsSummary) ? plain.actsSummary[0] : null;
   const mergedFirstAct = {
     ...(coreFirstAct || {}),
-    ...(board?.actId ? { actId: board.actId } : {}),
+    ...(actProfile?._id || boardActId ? { actId: actProfile?._id || boardActId } : {}),
     ...(boardActName ? { actName: boardActName, tscName: boardActName, name: boardActName } : {}),
+    ...(actProfile
+      ? {
+          act: actProfile,
+          images: actProfile.images || [],
+          coverImage: actProfile.coverImage || [],
+          profileImage: actProfile.profileImage || [],
+          videos: actProfile.videos || [],
+          tscVideos: actProfile.tscVideos || [],
+        }
+      : {}),
     ...(board?.lineupSelected ? { lineupLabel: board.lineupSelected } : {}),
     ...((board?.arrivalTime || board?.startTime || board?.finishTime)
       ? {
