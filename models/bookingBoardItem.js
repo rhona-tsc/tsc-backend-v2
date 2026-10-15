@@ -364,6 +364,9 @@ const BookingBoardItemSchema = new mongoose.Schema(
     manualAdjustmentAmount: { type: Number, default: 0 },
     allocation: AllocationSchema,
     review: ReviewSchema,
+    introEmailSentAt: { type: Date, default: null },
+    introEmailSentTo: { type: String, default: "" },
+    introEmailMessageId: { type: String, default: "" },
 
     // access control helpers
     actOwnerMusicianId: { type: mongoose.Types.ObjectId }, // so act owners see only their rows

@@ -15,6 +15,11 @@ import { sendWhatsAppText, sendSMSMessage } from "../utils/twilioClient.js";
 import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
 import { normalizeEventType } from "../utils/eventTypes.js";
+import sendEmail from "../utils/sendEmail.js";
+import {
+  buildTscEmailFooter,
+  escapeEmailHtml,
+} from "../utils/tscEmailBranding.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -37,6 +42,55 @@ const toNumber = (value) => {
 };
 
 const cleanString = (value) => String(value || "").trim();
+
+const buildIntroEmail = (row) => {
+  const recipient = cleanString(
+    row?.clientEmail || row?.clientEmails?.find?.((entry) => entry?.email)?.email,
+  ).toLowerCase();
+  const clientNames = cleanString(
+    row?.clientFirstNames || row?.bookerName || "there",
+  );
+  const firstName = clientNames.split(/\s+|&/)[0] || "there";
+  const actName = cleanString(row?.actTscName || row?.actName || "the band");
+  const eventType = normalizeEventType(row?.eventType) || "event";
+  const date = row?.eventDateISO
+    ? new Date(`${String(row.eventDateISO).slice(0, 10)}T12:00:00`).toLocaleDateString(
+        "en-GB",
+        { day: "numeric", month: "long", year: "numeric" },
+      )
+    : "your event date";
+  const eventSheetLink = cleanString(row?.eventSheetLink);
+  const subject = `${actName} & your ${eventType} on ${date}`;
+  const eventSheetHtml = eventSheetLink
+    ? `<p style="margin:0 0 20px;"><strong>EVENT SHEET:</strong> <a href="${escapeEmailHtml(eventSheetLink)}" style="color:#ff6667;font-weight:700;">Open your event sheet</a></p>`
+    : "";
+  const text = [
+    `Hi ${firstName},`,
+    "",
+    `Allow me to introduce myself, my name is Rhona, and I am the band manager for ${actName}. Thank you for booking the band — we're honoured to be delivering the entertainment for your ${eventType}, and I'm very much looking forward to sorting out the fine details in the run-up.`,
+    "",
+    "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and fill in the blanks directly in the document. It auto-saves, so you can simply close it when you're done. I'll review it closer to the time and be in touch if either of us has any questions.",
+    eventSheetLink ? `\nEVENT SHEET: ${eventSheetLink}` : "",
+    "",
+    "Warmest wishes,",
+    "Rhona ✨",
+  ].filter(Boolean).join("\n");
+  const html = `
+    <div style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111;">
+      <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:24px;padding:30px;">
+        <p style="margin:0 0 18px;font-size:16px;line-height:1.7;">Hi ${escapeEmailHtml(firstName)},</p>
+        <p style="margin:0 0 18px;font-size:15px;line-height:1.8;">Allow me to introduce myself, my name is Rhona, and I am the band manager for <strong>${escapeEmailHtml(actName)}</strong>. Thank you for booking the band — we're honoured to be delivering the entertainment for your ${escapeEmailHtml(eventType)}, and I'm very much looking forward to sorting out the fine details in the run-up.</p>
+        <p style="margin:0 0 18px;font-size:15px;line-height:1.8;">I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and fill in the blanks directly in the document. It auto-saves, so you can simply close it when you're done. I'll review it closer to the time and be in touch if either of us has any questions.</p>
+        ${eventSheetHtml}
+        <p style="margin:0 0 18px;font-size:15px;line-height:1.7;">Warmest wishes,<br />Rhona ✨</p>
+        ${buildTscEmailFooter()}
+      </div>
+    </div>`;
+  const invoiceUrl = cleanString(
+    row?.invoicePdfUrl || row?.invoiceUrl || row?.payments?.boardInvoicePdfUrl,
+  );
+  return { recipient, subject, text, html, invoiceUrl };
+};
 
 const captureLine = (text, label) => {
   const match = String(text || "").match(
@@ -2074,6 +2128,103 @@ router.post("/:id/whatsapp-group", musicianAuth, async (req, res) => {
   } catch (error) {
     console.error("WhatsApp group invite failed", error);
     return res.status(500).json({ success: false, message: error?.message || "Could not share the WhatsApp group." });
+  }
+});
+
+router.get("/:id/intro-email/preview", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin only." });
+    }
+    const row = await BookingBoardItem.findById(req.params.id).lean();
+    if (!row) {
+      return res.status(404).json({ success: false, message: "Booking not found." });
+    }
+    const email = buildIntroEmail(row);
+    const missing = [
+      !email.recipient && "client email",
+      !cleanString(row.actTscName || row.actName) && "act name",
+      !cleanString(row.eventType) && "event type",
+      !cleanString(row.eventDateISO) && "event date",
+      !cleanString(row.eventSheetLink) && "event sheet link",
+    ].filter(Boolean);
+    return res.json({
+      success: true,
+      preview: {
+        to: email.recipient,
+        subject: email.subject,
+        html: email.html,
+        text: email.text,
+        invoiceAttached: Boolean(email.invoiceUrl),
+        missing,
+        sentAt: row.introEmailSentAt || null,
+        sentTo: row.introEmailSentTo || "",
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin only." });
+    }
+    const row = await BookingBoardItem.findById(req.params.id);
+    if (!row) {
+      return res.status(404).json({ success: false, message: "Booking not found." });
+    }
+    if (row.introEmailSentAt) {
+      return res.status(409).json({
+        success: false,
+        message: `The intro email was already sent to ${row.introEmailSentTo || "this client"}.`,
+      });
+    }
+    const email = buildIntroEmail(row.toObject());
+    const missing = [
+      !email.recipient && "client email",
+      !cleanString(row.actTscName || row.actName) && "act name",
+      !cleanString(row.eventType) && "event type",
+      !cleanString(row.eventDateISO) && "event date",
+      !cleanString(row.eventSheetLink) && "event sheet link",
+    ].filter(Boolean);
+    if (missing.length) {
+      return res.status(400).json({
+        success: false,
+        message: `Complete the following booking fields first: ${missing.join(", ")}.`,
+      });
+    }
+    const attachments = email.invoiceUrl
+      ? [{
+          filename: `${cleanString(row.bookingRef) || "booking"}-invoice.pdf`,
+          path: email.invoiceUrl,
+          contentType: "application/pdf",
+        }]
+      : [];
+    const result = await sendEmail({
+      to: email.recipient,
+      bcc: "hello@thesupremecollective.co.uk",
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
+      attachments,
+    });
+    if (!result?.ok) {
+      throw new Error(result?.error || "The intro email could not be sent.");
+    }
+    row.introEmailSentAt = new Date();
+    row.introEmailSentTo = email.recipient;
+    row.introEmailMessageId = result.messageId || "";
+    await row.save();
+    return res.json({
+      success: true,
+      message: `Intro email sent to ${email.recipient}.`,
+      sentAt: row.introEmailSentAt,
+      sentTo: row.introEmailSentTo,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 });
 
