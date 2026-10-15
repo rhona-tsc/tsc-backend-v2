@@ -34,6 +34,8 @@ const ReviewSchema = new mongoose.Schema(
     requestedCount: { type: Number, default: 0 },
     lastRequestedAt: { type: Date },
     received: { type: Boolean, default: false },
+    doNotRequest: { type: Boolean, default: false, index: true },
+    doNotRequestReason: { type: String, default: "" },
     link: { type: String }, // internal review URL or Trustpilot/Google
     source: {
       type: String,
