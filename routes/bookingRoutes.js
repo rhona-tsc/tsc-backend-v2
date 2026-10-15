@@ -67,11 +67,46 @@ const withConfirmedAllocation = async (booking) => {
     dietaryRequirements:
       member?.dietaryRequirements || dietById.get(String(member?.musicianId || "")) || "",
   }));
+  const boardActName = board?.actTscName || board?.actName || "";
+  const coreFirstAct = Array.isArray(plain?.actsSummary) ? plain.actsSummary[0] : null;
+  const mergedFirstAct = {
+    ...(coreFirstAct || {}),
+    ...(board?.actId ? { actId: board.actId } : {}),
+    ...(boardActName ? { actName: boardActName, tscName: boardActName, name: boardActName } : {}),
+    ...(board?.lineupSelected ? { lineupLabel: board.lineupSelected } : {}),
+  };
   return {
     ...plain,
+    ...(board?.bookingRef ? { bookingRef: board.bookingRef } : {}),
+    ...(board?.clientFirstNames
+      ? { clientFirstNames: board.clientFirstNames, clientName: board.clientFirstNames }
+      : {}),
+    ...(board?.clientEmails?.[0]?.email ? { clientEmail: board.clientEmails[0].email } : {}),
+    ...(board?.contactRole ? { contactRole: board.contactRole } : {}),
+    ...(board?.eventDateISO ? { eventDateISO: board.eventDateISO, eventDate: board.eventDateISO } : {}),
+    ...(board?.eventType ? { eventType: board.eventType } : {}),
+    ...(boardActName ? { actName: boardActName, actTscName: boardActName, tscName: boardActName } : {}),
+    ...(board?.address || board?.venueAddress || board?.venue
+      ? {
+          address: board.address || board.venueAddress || board.venue,
+          venueAddress: board.venueAddress || board.address || board.venue,
+          venue: board.venue || board.address || board.venueAddress,
+        }
+      : {}),
+    ...(board?.lineupSelected
+      ? { lineupSelected: board.lineupSelected, lineupLabel: board.lineupSelected }
+      : {}),
+    ...(board?.arrivalTime ? { arrivalTime: board.arrivalTime } : {}),
+    ...(board?.setupTime ? { setupTime: board.setupTime } : {}),
+    ...(board?.finishTime ? { finishTime: board.finishTime } : {}),
+    ...(board?.performancePlan ? { performancePlan: board.performancePlan } : {}),
+    actsSummary: Object.keys(mergedFirstAct).length
+      ? [mergedFirstAct, ...(plain?.actsSummary || []).slice(1)]
+      : plain?.actsSummary,
     assignedMusicians: enriched,
     bookingMusicians: enriched,
     bandLineup: enriched,
+    plannedMusicians: assignments,
   };
 };
 
@@ -551,7 +586,13 @@ const getBookerNamesForPdf = (answers, booking) => {
     .trim();
   if (addressBooker) return addressBooker;
 
-  return pickBookingValue(booking, ["clientName", "customerName", "name"]);
+  return pickBookingValue(booking, [
+    "clientFirstNames",
+    "clientName",
+    "bookerName",
+    "customerName",
+    "name",
+  ]);
 };
 
 const getCoupleNamesForPdf = (answers, booking) => {
@@ -598,6 +639,7 @@ const getVenueForPdf = (answers, booking) =>
   pickBookingValue(booking, [
     "venue",
     "venueAddress",
+    "address",
     "eventDetails.venue",
     "eventDetails.location",
   ]) ||
@@ -607,13 +649,14 @@ const getEventDateForPdf = (answers, booking) => {
   const raw =
     pickAnswer(answers, ["event_date", "eventDate", "date"]) ||
     pickBookingValue(booking, [
+      "eventDateISO",
       "eventDate",
       "date",
       "bookingDate",
       "eventDetails.date",
     ]);
 
-  const refMatch = String(booking?.bookingId || "").match(/^(\d{2})(\d{2})(\d{2})-/);
+  const refMatch = String(booking?.bookingRef || booking?.bookingId || "").match(/^(\d{2})(\d{2})(\d{2})-/);
   const fallback = refMatch
     ? new Date(2000 + Number(refMatch[1]), Number(refMatch[2]) - 1, Number(refMatch[3]))
     : null;
@@ -630,7 +673,7 @@ const getEventDateForPdf = (answers, booking) => {
   });
 };
 
-const getScheduleRowsForPdf = (answers) => {
+const getScheduleRowsForPdf = (answers, booking = {}) => {
   const rows = [];
 
   const tableRows = Array.isArray(answers?.schedule_table_rows)
@@ -668,14 +711,14 @@ const getScheduleRowsForPdf = (answers) => {
   if (rows.length) return rows;
 
   const fixedRows = [
-    ["Band arrival / load-in", answers?.schedule_simple_arrival || answers?.scheduleSimpleArrival, answers?.schedule_simple_arrival_notes],
-    ["Setup", answers?.schedule_simple_setup || answers?.scheduleSimpleSetup, answers?.schedule_simple_setup_notes],
+    ["Band arrival / load-in", answers?.schedule_simple_arrival || answers?.scheduleSimpleArrival || booking?.arrivalTime || booking?.performanceTimes?.arrivalTime, answers?.schedule_simple_arrival_notes],
+    ["Setup", answers?.schedule_simple_setup || answers?.scheduleSimpleSetup || booking?.setupTime || booking?.performanceTimes?.setupTime, answers?.schedule_simple_setup_notes],
     ["Soundcheck", answers?.schedule_simple_soundcheck || answers?.scheduleSimpleSoundcheck, answers?.schedule_simple_soundcheck_notes],
-    ["Start time", answers?.schedule_simple_start || answers?.scheduleSimpleStart, answers?.schedule_simple_start_notes],
+    ["Start time", answers?.schedule_simple_start || answers?.scheduleSimpleStart || booking?.performanceTimes?.startTime, answers?.schedule_simple_start_notes],
     ["Live set 1", answers?.schedule_simple_set1 || answers?.scheduleSimpleSet1, answers?.schedule_simple_set1_notes],
     ["Intermission", answers?.schedule_simple_between1 || answers?.scheduleSimpleBetween1, answers?.schedule_simple_between1_notes],
     ["Live set 2", answers?.schedule_simple_set2 || answers?.scheduleSimpleSet2, answers?.schedule_simple_set2_notes],
-    ["Band finish", answers?.schedule_simple_finish_time || answers?.scheduleSimpleFinishTime || answers?.schedule_time_finish || answers?.scheduleTimeFinish, answers?.schedule_simple_finish_notes],
+    ["Band finish", answers?.schedule_simple_finish_time || answers?.scheduleSimpleFinishTime || answers?.schedule_time_finish || answers?.scheduleTimeFinish || booking?.finishTime || booking?.performanceTimes?.finishTime, answers?.schedule_simple_finish_notes],
   ];
 
   const addCustomRowsForSlot = (slot) => simpleRows
@@ -746,7 +789,7 @@ const getLineupLabelForPdf = (booking, act) => {
   const firstAct = getFirstActSummary(booking);
   const lineup = resolveActLineupForPdf(booking, act);
 
-  return (
+  const explicit = (
     firstAct?.lineupLabel ||
     firstAct?.lineupName ||
     lineup?.actSize ||
@@ -755,15 +798,32 @@ const getLineupLabelForPdf = (booking, act) => {
     firstAct?.actSize ||
     booking?.lineupLabel ||
     booking?.lineupName ||
+    booking?.lineupSelected ||
     booking?.lineup?.actSize ||
-    noInfo
+    ""
   );
+  if (explicit) return explicit;
+  const count = getLineupMembersForPdf(booking, act).filter(
+    (member) => !isNonPerformerForPdf(member),
+  ).length;
+  return count ? `${count}-piece lineup` : noInfo;
 };
 
 const getLineupMembersForPdf = (booking, act) => {
   const firstAct = getFirstActSummary(booking) || {};
   const lineup = resolveActLineupForPdf(booking, act);
-  return lineup?.bandMembers || firstAct.bandMembers || firstAct.lineup?.bandMembers || [];
+  const configured = lineup?.bandMembers || firstAct.bandMembers || firstAct.lineup?.bandMembers || [];
+  if (configured.length) return configured;
+  const allocated = [
+    booking?.plannedMusicians,
+    booking?.assignedMusicians,
+    booking?.bookingMusicians,
+    booking?.bandLineup,
+  ].find((members) => Array.isArray(members) && members.length) || [];
+  return allocated.map((member) => ({
+    ...member,
+    instrument: member?.instrument || member?.role || member?.position || "Band member",
+  }));
 };
 
 const getDietaryRequirementsForPdf = (booking) => {
@@ -1252,7 +1312,7 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
   sectionTitle("Schedule");
   drawTable(
     ["Activity", "Time", "Notes"],
-    getScheduleRowsForPdf(answers).map((row) => [
+    getScheduleRowsForPdf(answers, booking).map((row) => [
       row.activity,
       row.time,
       row.notes || noInfo,
