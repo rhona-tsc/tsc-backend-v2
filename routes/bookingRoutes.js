@@ -1128,8 +1128,9 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
   const answers = getEventSheetAnswers(booking);
   const bandName = getBookingDisplayName(booking);
   const eventType =
-    pickBookingValue(booking, ["eventType", "type", "eventDetails.type"]) ||
-    "Wedding";
+    pickAnswer(answers, ["event_type", "eventType"]) ||
+    pickBookingValue(booking, ["eventType", "type", "eventDetails.type"]) || "";
+  const asksForEventPurpose = !/wedding|birthday/i.test(String(eventType));
   const bookerNames = getBookerNamesForPdf(answers, booking) || "Client";
   const coupleNames = getCoupleNamesForPdf(answers, booking);
   const eventTitle = getEventTitleForPdf({
@@ -1361,6 +1362,13 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
 
   sectionTitle("Event overview");
   labelValue("Event type", eventType, { showFallback: true });
+  if (asksForEventPurpose) {
+    labelValue(
+      "Event / occasion",
+      pickAnswer(answers, ["event_purpose", "eventPurpose"]),
+      { showFallback: true },
+    );
+  }
   labelValue("Band name", bandName, { showFallback: true });
   labelValue("Lineup", [lineupLabel, lineupDescription].filter(Boolean).join(" - "), { showFallback: true });
   labelValue("Bookers", bookerNames, { showFallback: true });
