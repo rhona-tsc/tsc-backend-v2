@@ -132,6 +132,7 @@ const withConfirmedAllocation = async (booking) => {
   };
   return {
     ...plain,
+    ...(board?._id ? { bookingBoardId: String(board._id) } : {}),
     ...(board?.bookingRef ? { bookingRef: board.bookingRef } : {}),
     ...(board?.clientFirstNames
       ? { clientFirstNames: board.clientFirstNames, clientName: board.clientFirstNames }
