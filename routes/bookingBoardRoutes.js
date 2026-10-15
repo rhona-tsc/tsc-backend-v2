@@ -1125,6 +1125,19 @@ const mergeRowData = (preferred, secondary) => {
   if (!preferred) return secondary;
   if (!secondary) return preferred;
 
+  // When the same booking exists in the core bookings collection and on the
+  // board, keep the deliberately selected automation recipient. A board row
+  // marked as the agent/planner is authoritative over the end-client details
+  // retained on the original booking.
+  const preferredRole = cleanString(preferred?.contactRole);
+  const secondaryRole = cleanString(secondary?.contactRole);
+  const contactSource = preferredRole === "agent"
+    ? preferred
+    : secondaryRole === "agent"
+      ? secondary
+      : preferred;
+  const contactFallback = contactSource === preferred ? secondary : preferred;
+
   return {
     ...secondary,
     ...preferred,
@@ -1139,16 +1152,17 @@ const mergeRowData = (preferred, secondary) => {
       secondary?.accounting?.invoiceCompany ||
       "TSC",
     sessionId: preferred?.sessionId || secondary?.sessionId,
+    contactRole: contactSource?.contactRole || contactFallback?.contactRole || "direct_client",
     clientFirstNames:
-      preferred?.clientFirstNames || secondary?.clientFirstNames,
-    clientName: preferred?.clientName || secondary?.clientName,
+      contactSource?.clientFirstNames || contactFallback?.clientFirstNames,
+    clientName: contactSource?.clientName || contactFallback?.clientName,
     clientEmails:
-      Array.isArray(preferred?.clientEmails) && preferred.clientEmails.length
-        ? preferred.clientEmails
-        : secondary?.clientEmails,
-    clientEmail: preferred?.clientEmail || secondary?.clientEmail,
-    clientAddress: preferred?.clientAddress || secondary?.clientAddress,
-    userEmail: preferred?.userEmail || secondary?.userEmail,
+      Array.isArray(contactSource?.clientEmails) && contactSource.clientEmails.length
+        ? contactSource.clientEmails
+        : contactFallback?.clientEmails,
+    clientEmail: contactSource?.clientEmail || contactFallback?.clientEmail,
+    clientAddress: contactSource?.clientAddress || contactFallback?.clientAddress,
+    userEmail: contactSource?.userEmail || contactFallback?.userEmail,
     eventDateISO: preferred?.eventDateISO || secondary?.eventDateISO,
     enquiryDateISO: preferred?.enquiryDateISO || secondary?.enquiryDateISO,
     bookingDateISO: preferred?.bookingDateISO || secondary?.bookingDateISO,
