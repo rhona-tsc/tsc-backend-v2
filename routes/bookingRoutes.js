@@ -99,8 +99,13 @@ const withConfirmedAllocation = async (booking) => {
     ? Number(board.balanceAmountPence) / 100
     : Math.max(0, boardBookingTotal - boardDepositPaid);
   const coreFirstAct = Array.isArray(plain?.actsSummary) ? plain.actsSummary[0] : null;
-  const mergedFirstAct = {
+  const boardFirstAct = Array.isArray(board?.actsSummary) ? board.actsSummary[0] : null;
+  const bookingFirstAct = {
     ...(coreFirstAct || {}),
+    ...(boardFirstAct || {}),
+  };
+  const mergedFirstAct = {
+    ...bookingFirstAct,
     ...(actProfile?._id || boardActId ? { actId: actProfile?._id || boardActId } : {}),
     ...(boardActName ? { actName: boardActName, tscName: boardActName, name: boardActName } : {}),
     ...(actProfile
@@ -117,7 +122,7 @@ const withConfirmedAllocation = async (booking) => {
     ...((board?.arrivalTime || board?.startTime || board?.finishTime)
       ? {
           performance: {
-            ...(coreFirstAct?.performance || {}),
+            ...(bookingFirstAct?.performance || {}),
             ...(board?.arrivalTime ? { arrivalTime: board.arrivalTime } : {}),
             ...(board?.startTime ? { startTime: board.startTime } : {}),
             ...(board?.finishTime ? { finishTime: board.finishTime } : {}),
