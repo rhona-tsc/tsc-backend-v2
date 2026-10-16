@@ -15,7 +15,7 @@ const ClientAutomationDeliverySchema = new mongoose.Schema(
     scheduledForISO: { type: String, default: "" },
     status: {
       type: String,
-      enum: ["sending", "sent", "failed"],
+      enum: ["sending", "sent", "failed", "blocked"],
       default: "sending",
       index: true,
     },
@@ -25,6 +25,9 @@ const ClientAutomationDeliverySchema = new mongoose.Schema(
     messageId: { type: String, default: "" },
     invoiceAttached: { type: Boolean, default: false },
     error: { type: String, default: "" },
+    missingPrerequisites: { type: [String], default: [] },
+    blockSignature: { type: String, default: "" },
+    blockedNotifiedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
