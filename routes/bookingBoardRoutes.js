@@ -942,6 +942,16 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
     }
   });
 
+  if (patch.songSuggestionsDueDateISO !== undefined) {
+    const songSuggestionsDueDateISO = String(
+      patch.songSuggestionsDueDateISO || "",
+    ).slice(0, 10);
+    bookingDoc.songSuggestionsDueDateISO = songSuggestionsDueDateISO;
+    bookingDoc.bookingDetails = mergeDeep(bookingDoc.bookingDetails || {}, {
+      songSuggestionsDueDateISO,
+    });
+  }
+
   if (patch.clientEmail !== undefined || patch.userEmail !== undefined) {
     const email = String(patch.clientEmail || patch.userEmail || "").trim();
     bookingDoc.clientEmail = email;
@@ -1492,7 +1502,10 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     eventDateISO,
     enquiryDateISO: isoDateOnly(doc?.createdAt || doc?.updatedAt),
     bookingDateISO: isoDateOnly(doc?.createdAt || doc?.updatedAt),
-    songSuggestionsDueDateISO: cleanString(doc?.songSuggestionsDueDateISO).slice(0, 10),
+    songSuggestionsDueDateISO: cleanString(
+      doc?.songSuggestionsDueDateISO ||
+        doc?.bookingDetails?.songSuggestionsDueDateISO,
+    ).slice(0, 10),
     grossValue,
     netCommission: Number(doc?.netCommission || 0) || 0,
     agent: normaliseAgent(doc?.agent),
@@ -2001,6 +2014,9 @@ router.post("/", musicianAuth, async (req, res) => {
       bookingDetails: {
         ...(payload.bookingDetails || {}),
         eventType: normalizeEventType(payload.eventType),
+        songSuggestionsDueDateISO: String(
+          payload.songSuggestionsDueDateISO || "",
+        ).slice(0, 10),
         assignedMusicians,
       },
     };
@@ -2891,8 +2907,27 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         success: true,
         row:
           body.payments && isPlainObject(body.payments)
-            ? { ...normalized, payments: body.payments }
-            : normalized,
+            ? {
+                ...normalized,
+                payments: body.payments,
+                ...(body.songSuggestionsDueDateISO !== undefined
+                  ? {
+                      songSuggestionsDueDateISO: String(
+                        body.songSuggestionsDueDateISO || "",
+                      ).slice(0, 10),
+                    }
+                  : {}),
+              }
+            : {
+                ...normalized,
+                ...(body.songSuggestionsDueDateISO !== undefined
+                  ? {
+                      songSuggestionsDueDateISO: String(
+                        body.songSuggestionsDueDateISO || "",
+                      ).slice(0, 10),
+                    }
+                  : {}),
+              },
         source: "booking",
       });
     }
