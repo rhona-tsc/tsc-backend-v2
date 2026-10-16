@@ -79,6 +79,7 @@ import {
   runVideoMigrationAutomation,
   sendVideoReviewDigest,
 } from "./services/videoMigrationAutomationService.js";
+import { runClientAutomations } from "./services/clientAutomationService.js";
 
 /* -------------------------------------------------------------------------- */
 /*                               Boot + env log                               */
@@ -961,6 +962,23 @@ cron.schedule("0 3 * * *", async () => {
     isRegistering = false;
   }
 });
+
+// Client email automations use server-side recipient and booking allowlists
+// during the staged rollout. Re-check during business hours so a restart or a
+// temporary provider failure cannot miss the day; the delivery ledger prevents
+// duplicate sends.
+cron.schedule(
+  "5 9-17 * * *",
+  async () => {
+    try {
+      const result = await runClientAutomations();
+      console.log("📨 Client automation run complete", result);
+    } catch (error) {
+      console.error("❌ Client automation run failed", error?.message || error);
+    }
+  },
+  { timezone: "Europe/London" },
+);
 
 console.log(
   "🕒 Cron job scheduled: Google Calendar webhook will refresh daily at 03:00 UTC"
