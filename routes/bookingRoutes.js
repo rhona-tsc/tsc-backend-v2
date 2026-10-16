@@ -25,6 +25,10 @@ import PDFDocument from "pdfkit";
 import crypto from "crypto";
 import { buildBandEventSheetEmailHtml } from "../utils/tscEmailBranding.js";
 import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
+import {
+  didSongSectionBecomeComplete,
+  sendSongSuggestionsCompletedNotification,
+} from "../services/eventSheetSectionNotificationService.js";
 
 const router = express.Router();
 
@@ -2114,21 +2118,58 @@ router.post(
           .status(400)
           .json({ success: false, message: "Provide _id or bookingId" });
 
-      const doc = await Booking.findOneAndUpdate(
+      const previousDoc = await Booking.findOneAndUpdate(
         filter,
         {
           $set: {
             eventSheet: { ...(eventSheet || {}), updatedAt: new Date() },
           },
         },
-        { new: true },
+        // Returning the pre-update document lets this endpoint detect the
+        // false -> true transition atomically, preventing duplicate alerts
+        // when autosave requests arrive close together.
+        { new: false },
       ).lean();
 
-      if (!doc)
+      if (!previousDoc)
         return res
           .status(404)
           .json({ success: false, message: "Booking not found" });
-      return res.json({ success: true, bookingId: doc.bookingId });
+
+      let songSuggestionsNotificationSent = false;
+      if (didSongSectionBecomeComplete(previousDoc.eventSheet, eventSheet)) {
+        const savedBooking = {
+          ...previousDoc,
+          eventSheet: { ...(eventSheet || {}), updatedAt: new Date() },
+        };
+        try {
+          const board = await BookingBoardItem.findOne({
+            $or: [
+              { bookingId: previousDoc._id },
+              { sourceBookingId: previousDoc._id },
+              { bookingRef: previousDoc.bookingId },
+            ],
+          }).lean();
+          await sendSongSuggestionsCompletedNotification({
+            booking: savedBooking,
+            board: board || {},
+          });
+          songSuggestionsNotificationSent = true;
+        } catch (notificationError) {
+          // The client's completion must remain saved even when SMTP is
+          // temporarily unavailable. The error is visible in the server log.
+          console.error("❌ Song Suggestions completion notification failed", {
+            bookingId: previousDoc.bookingId,
+            message: notificationError?.message,
+          });
+        }
+      }
+
+      return res.json({
+        success: true,
+        bookingId: previousDoc.bookingId,
+        songSuggestionsNotificationSent,
+      });
     } catch (e) {
       console.error("❌ update-event-sheet error:", e);
       return res.status(500).json({ success: false, message: "Server error" });
