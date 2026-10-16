@@ -1,6 +1,8 @@
 const GOOGLE_REVIEWS_URL = "https://g.page/r/CesVpcolTfSxEB0/review";
 const SIGNATURE_GIF_URL =
   "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777045559/TSC_Signature_2026_svgxr5.gif";
+const GOOGLE_FIVE_STAR_IMAGE_URL =
+  "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1792148397/email/google-5-star-reviews.png";
 const WHATSAPP_URL =
   "https://api.whatsapp.com/send/?phone=447594223200&text&type=phone_number&app_absent=0";
 const INSTAGRAM_URL = "https://instagram.com/thesupremecollective";
@@ -22,10 +24,13 @@ export const escapeEmailHtml = (value = "") =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-export const buildTscEmailFooter = () => `
+export const buildTscEmailFooter = ({ audience = "client" } = {}) => `
   <div style="margin:24px 0 0;padding:22px;background:#fafafa;border:1px solid #ececec;border-radius:22px;text-align:center;">
     <a href="${GOOGLE_REVIEWS_URL}" style="display:block;text-decoration:none;">
       <img src="${SIGNATURE_GIF_URL}" width="600" alt="The Supreme Collective" style="display:block;width:100%;max-width:600px;height:auto;border:0;margin:0 auto;" />
+    </a>
+    <a href="${GOOGLE_REVIEWS_URL}" style="display:inline-block;margin-top:14px;text-decoration:none;">
+      <img src="${GOOGLE_FIVE_STAR_IMAGE_URL}" width="150" height="65" alt="Rated five stars on Google — read our reviews" style="display:block;width:150px;max-width:100%;height:auto;border:0;margin:0 auto;" />
     </a>
     <a href="${WHATSAPP_URL}" style="display:inline-block;margin-top:16px;padding:12px 24px;border-radius:999px;background:#25D366;color:#ffffff;text-decoration:none;font-size:17px;font-weight:700;">Chat on WhatsApp</a>
     <div style="margin-top:22px;padding-top:20px;border-top:1px solid #e3e3e3;text-align:left;">
@@ -35,7 +40,7 @@ export const buildTscEmailFooter = () => `
         <a href="${YOUTUBE_URL}" style="display:inline-block;margin-right:12px;text-decoration:none;"><img src="${YOUTUBE_ICON_URL}" width="32" height="32" alt="YouTube" style="border:0;" /></a>
         <a href="${WEBSITE_URL}" style="display:inline-block;text-decoration:none;"><img src="${WEBSITE_ICON_URL}" width="32" height="32" alt="The Supreme Collective website" style="border:0;" /></a>
       </p>
-      <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#555555;">Keep your profile up to date at <a href="https://admin.thesupremecollective.co.uk" style="color:#ff6667;text-decoration:none;font-weight:700;">admin.thesupremecollective.co.uk</a></p>
+      ${audience === "musician" ? '<p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#555555;">Keep your profile up to date at <a href="https://admin.thesupremecollective.co.uk" style="color:#ff6667;text-decoration:none;font-weight:700;">admin.thesupremecollective.co.uk</a></p>' : ""}
       <p style="margin:0 0 8px;font-size:12px;line-height:1.7;color:#777777;">Copyright © ${new Date().getFullYear()} The Supreme Collective Ltd. All rights reserved.</p>
       <p style="margin:0;font-size:12px;line-height:1.7;color:#777777;">Registered Office: 71-75 Shelton Street, Covent Garden, London, WC2H 9JQ, United Kingdom | Company Number: 16883956</p>
     </div>
@@ -62,7 +67,7 @@ export const buildBandEventSheetEmailHtml = ({
         <p style="margin:0 0 12px;text-align:center;"><a href="${escapeEmailHtml(eventSheetUrl)}" style="display:inline-block;padding:14px 24px;border-radius:999px;background:#ff6667;color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;">Open the latest event sheet PDF</a></p>
         <p style="margin:0 0 24px;color:#666666;font-size:13px;text-align:center;">Please read it before the event and let Rhona know if anything is unclear.</p>
         <p style="margin:0 0 18px;font-size:15px;line-height:1.7;color:#444444;">Warmest wishes,<br /><strong>The Supreme Collective</strong></p>
-        ${buildTscEmailFooter()}
+        ${buildTscEmailFooter({ audience: "musician" })}
       </div>
     </div>
   </div>
