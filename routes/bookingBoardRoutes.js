@@ -25,6 +25,7 @@ import {
   buildTscEmailFooter,
   escapeEmailHtml,
 } from "../utils/tscEmailBranding.js";
+import { automationBodyToHtml } from "../utils/automationEmailTemplate.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -2579,10 +2580,7 @@ router.post("/automation-email/test", musicianAuth, async (req, res) => {
       });
     }
 
-    const bodyHtml = escapeEmailHtml(body)
-      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#ff6667;font-weight:700;">$1</a>')
-      .replace(/\n\n+/g, '</p><p style="margin:0 0 20px;font-size:16px;line-height:1.7;">')
-      .replace(/\n/g, "<br />");
+    const bodyHtml = automationBodyToHtml(body);
     const html = `
       <div style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#111111;">
         <div style="max-width:720px;margin:0;padding:0;background:#ffffff;">
