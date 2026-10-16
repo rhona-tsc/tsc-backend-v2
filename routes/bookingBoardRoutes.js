@@ -33,6 +33,7 @@ const upload = multer({
 });
 
 const router = express.Router();
+const INTRO_EMAIL_TEST_RECIPIENT = "rhona@thesupremecollective.co.uk";
 
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 
@@ -2288,6 +2289,67 @@ router.get("/:id/intro-email/preview", musicianAuth, async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post("/:id/intro-email/test", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin only." });
+    }
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid booking ID." });
+    }
+    const row = await BookingBoardItem.findById(req.params.id).lean();
+    if (!row) {
+      return res.status(404).json({ success: false, message: "Booking not found." });
+    }
+    const email = buildIntroEmail(row);
+    const missing = [
+      !email.recipient && "client email",
+      !cleanString(row.actTscName || row.actName) && "act name",
+      !cleanString(row.eventType) && "event type",
+      !cleanString(row.eventDateISO) && "event date",
+      !cleanString(row.bookingRef || row.eventSheetLink) && "event sheet link",
+    ].filter(Boolean);
+    if (missing.length) {
+      return res.status(400).json({
+        success: false,
+        message: `Complete the following booking fields first: ${missing.join(", ")}.`,
+      });
+    }
+    const attachments = email.invoiceUrl
+      ? [{
+          filename: `${cleanString(row.bookingRef) || "booking"}-invoice.pdf`,
+          path: email.invoiceUrl,
+          contentType: "application/pdf",
+        }]
+      : [];
+    const result = await sendEmail({
+      to: INTRO_EMAIL_TEST_RECIPIENT,
+      subject: email.subject,
+      subjectPrefix: "[TEST PREVIEW]",
+      html: email.html,
+      text: email.text,
+      attachments,
+    });
+    if (!result?.ok) {
+      throw new Error(result?.error || "The intro email test could not be sent.");
+    }
+    return res.json({
+      success: true,
+      message: `Intro email test sent to ${INTRO_EMAIL_TEST_RECIPIENT}.`,
+      sentTo: INTRO_EMAIL_TEST_RECIPIENT,
+      messageId: result.messageId || "",
+      invoiceAttached: Boolean(email.invoiceUrl),
+      bookingSendStateChanged: false,
+    });
+  } catch (error) {
+    console.error("❌ intro email test failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "The intro email test could not be sent.",
+    });
   }
 });
 
