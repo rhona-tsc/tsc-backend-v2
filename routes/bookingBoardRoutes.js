@@ -111,8 +111,8 @@ const buildIntroEmail = (row) => {
     "Rhona ✨",
   ].filter(Boolean).join("\n");
   let html = `
-    <div style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111;">
-      <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:24px;padding:30px;">
+    <div style="margin:0;padding:0;background:#fff;font-family:Arial,Helvetica,sans-serif;color:#111;">
+      <div style="max-width:720px;margin:0;background:#fff;padding:0;">
         <p style="margin:0 0 18px;font-size:16px;line-height:1.7;">Hi ${escapeEmailHtml(firstName)},</p>
         <p style="margin:0 0 18px;font-size:15px;line-height:1.8;">Allow me to introduce myself, my name is Rhona, and I am the band manager for <strong>${escapeEmailHtml(actName)}</strong>. Thank you for booking the band — we're honoured to be delivering the entertainment for your ${escapeEmailHtml(eventType)}, and I'm very much looking forward to sorting out the fine details in the run-up.</p>
         <p style="margin:0 0 18px;font-size:15px;line-height:1.8;">I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and fill in the blanks directly in the document. It auto-saves, so you can simply close it when you're done. I'll review it closer to the time and be in touch if either of us has any questions.</p>
@@ -153,8 +153,8 @@ const buildIntroEmail = (row) => {
     ].join("\n");
     const p = (value) => `<p style="margin:0 0 18px;font-size:15px;line-height:1.8;">${escapeEmailHtml(value).replace(/\n/g, "<br />")}</p>`;
     html = `
-      <div style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111;">
-        <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:24px;padding:30px;">
+      <div style="margin:0;padding:0;background:#fff;font-family:Arial,Helvetica,sans-serif;color:#111;">
+        <div style="max-width:720px;margin:0;background:#fff;padding:0;">
           ${p(`Hi ${firstName},`)}
           ${p(paragraphs[0])}${p(paragraphs[1])}
           <p style="margin:0 0 18px;font-size:15px;line-height:1.8;"><strong>EVENT SHEET:</strong> <a href="${escapeEmailHtml(eventSheetLink)}" style="color:#ff6667;font-weight:700;">Open your editable event sheet</a></p>
