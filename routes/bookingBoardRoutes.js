@@ -2311,6 +2311,54 @@ router.get("/:id/intro-email/preview", musicianAuth, async (req, res) => {
   }
 });
 
+router.post("/automation-email/test", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin only." });
+    }
+
+    const subject = cleanString(req.body?.subject);
+    const body = cleanString(req.body?.body);
+    if (!subject || !body) {
+      return res.status(400).json({
+        success: false,
+        message: "A subject and email body are required.",
+      });
+    }
+
+    const bodyHtml = escapeEmailHtml(body)
+      .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#ff6667;font-weight:700;">$1</a>')
+      .replace(/\n\n+/g, '</p><p style="margin:0 0 20px;font-size:16px;line-height:1.7;">')
+      .replace(/\n/g, "<br />");
+    const html = `
+      <div style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#111111;">
+        <div style="max-width:720px;margin:0;padding:0;background:#ffffff;">
+          <p style="margin:0 0 20px;font-size:16px;line-height:1.7;">${bodyHtml}</p>
+          ${buildTscEmailFooter({ audience: req.body?.audience === "musician" ? "musician" : "client" })}
+        </div>
+      </div>`;
+
+    await sendEmail({
+      to: INTRO_EMAIL_TEST_RECIPIENT,
+      subject: `[TEST PREVIEW] ${subject}`,
+      html,
+      text: body,
+      forceTo: INTRO_EMAIL_TEST_RECIPIENT,
+      forceCc: [],
+      forceBcc: [],
+    });
+
+    return res.json({
+      success: true,
+      message: `Automation preview sent to ${INTRO_EMAIL_TEST_RECIPIENT}.`,
+      sentTo: INTRO_EMAIL_TEST_RECIPIENT,
+      subject: `[TEST PREVIEW] ${subject}`,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 router.post("/:id/intro-email/test", musicianAuth, async (req, res) => {
   try {
     if (!isTSCAdmin(req.user)) {
