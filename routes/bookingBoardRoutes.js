@@ -92,7 +92,7 @@ const normaliseAgent = (value = "") => {
     || cleaned;
 };
 
-const buildIntroEmail = (row) => {
+export const buildIntroEmail = (row) => {
   const recipient = cleanString(
     row?.clientEmail || row?.clientEmails?.find?.((entry) => entry?.email)?.email,
   ).toLowerCase();
@@ -152,14 +152,14 @@ const buildIntroEmail = (row) => {
       ? new Date(`${row.invoiceDueDateISO}T12:00:00Z`)
       : null;
     const specialRequestLabel = /wedding/i.test(eventType)
-      ? "First Dance"
+      ? "First Dance request"
       : "Off Repertoire Request";
     const paragraphs = [
       `Many thanks for sending over the deposit and for signing the contract. I've sent through a receipt for the deposit separately for your records. I'm pleased to say that is the band secure for your client's ${eventType}. :) Thank you for booking the band! They are very much looking forward to performing for your clients and their guests, and I'm very much looking forward to sorting out the fine details for the entertainment in the run-up to the big day.`,
       "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and kindly fill in the blanks directly into the document. The event sheet will auto-save, you can tick off each section when you're done, and then 'Notify Band' when complete. At this point I'll check over the details and see if I or the band have any questions for you or vice versa.",
       "Also please feel free to email or WhatsApp if you've any urgent questions or requests. Or alternatively, you can schedule a call with me directly in my calendar: https://calendly.com/thesupremecollective/call",
       "Please also find linked below the invoice for the balance, which is due around a week before the performance. The BACS details are on the footer of the invoice: Invoice attached",
-      `Key dates include:\n- Song suggestions and ${specialRequestLabel} request due on the ${formatDate(songDue)}\n- Completed event sheet (including playlists) due on the ${formatDate(invoiceDue)}`,
+      `Key dates include:\n- Song suggestions and ${specialRequestLabel} due on the ${formatDate(songDue)}\n- Completed event sheet (including playlists) due on the ${formatDate(invoiceDue)}`,
       "You'll also receive a few emails from me in the run up to the performance date as reminders to submit certain bits of information to the event sheet just to keep everything on track.",
       "Hopefully, everything makes sense, but any questions, don't hesitate!",
     ];
