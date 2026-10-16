@@ -369,6 +369,7 @@ const claimDelivery = async ({
     existing.recipient = recipient;
     existing.missingPrerequisites = [];
     existing.blockSignature = "";
+    existing.blockedNotifiedAt = null;
     await existing.save();
     return existing;
   }
