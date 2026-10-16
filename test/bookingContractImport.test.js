@@ -113,3 +113,48 @@ Your earnings£1591.00
   assert.equal(draft.bandSize, 4);
   assert.equal(draft.arrivalTime, "19:00");
 });
+
+test("Entertainment Nation artist-copy contracts import supplier-labelled fields", () => {
+  const contractText = `
+Entertainment Nation Booking Contract
+Issued by the 'Agent' (Entertainment Nation) on behalf of the 'Client' (James Kemp) and the 'Supplier' (Rhythm Mystique)
+Contract Ref : 260927276335
+Date of Issue : 02/10/2026
+Contact Name : James Kemp
+Contact Telephone : 07801285488
+Contact Address : Tubslake, Water Lane, Cranbrook, TN18 5AP
+Contact Email : james@tlfservices.co.uk
+Event Type : Party
+Event Date : 21/11/26
+Venue Address : The Winemakers Pub, Cranbrook Road, Goudhurst, Kent, TN17 1XP
+Supplier Line-up : 5 Piece Band: Female Lead Vocals, Guitar, Keys, Bass and Drums
+Supplier Arrival Time : 17:00 or later
+Supplier Setup Time : 60-90 minutes
+Supplier Change Time : 15 minutes to get changed
+Supplier Start Time : TBC
+Supplier Finish Time : 00:00
+Performance Area Required : 3m x 4m (shape a little flexible)
+Performance Plan : 2x60 or 3x40 minute sets plus Playlist DJ Service before, between and after sets until curfew
+Supplier Fees to pay : £2172 Payable to the Supplier
+`;
+
+  const draft = parseBookingContract(contractText);
+
+  assert.equal(draft.bookingRef, "260927276335");
+  assert.equal(draft.eventDateISO, "2026-11-21");
+  assert.equal(draft.bookingDateISO, "2026-10-02");
+  assert.equal(draft.agent, "Entertainment Nation");
+  assert.equal(draft.actName, "Rhythm Mystique");
+  assert.equal(draft.clientEmail, "james@tlfservices.co.uk");
+  assert.equal(draft.eventType, "Party");
+  assert.equal(draft.grossValue, 2172);
+  assert.equal(draft.passThroughGross, 2172);
+  assert.equal(draft.bandSize, 5);
+  assert.equal(draft.arrivalTime, "17:00");
+  assert.equal(draft.startTime, "");
+  assert.equal(draft.finishTime, "00:00");
+  assert.deepEqual(draft.lineupComposition, [
+    "Female Lead Vocals", "Guitar", "Keys", "Bass", "Drums",
+  ]);
+  assert.ok(draft.importMetadata.incompleteFields.includes("startTime"));
+});

@@ -196,6 +196,20 @@ const captureLine = (text, label) => {
 const parseContractDate = (value) => {
   const cleaned = cleanString(value).replace(/(\d)(st|nd|rd|th)\b/gi, "$1");
   if (!cleaned) return "";
+  const ukNumeric = cleaned.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+  if (ukNumeric) {
+    const [, day, month, rawYear] = ukNumeric;
+    const year = rawYear.length === 2 ? 2000 + Number(rawYear) : Number(rawYear);
+    const parsed = new Date(Date.UTC(year, Number(month) - 1, Number(day), 12));
+    if (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === Number(month) - 1 &&
+      parsed.getUTCDate() === Number(day)
+    ) {
+      return parsed.toISOString().slice(0, 10);
+    }
+    return "";
+  }
   const parsed = new Date(`${cleaned} 12:00:00 UTC`);
   return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
 };
@@ -355,9 +369,88 @@ const parseEncoreBooking = (bookingText, acceptedEmailText = "") => {
   };
 };
 
+const parseEntertainmentNationBooking = (contractText) => {
+  const text = String(contractText || "");
+  const supplierName = cleanString(
+    captureLine(text, "Supplier Name") ||
+      text.match(/['‘]Supplier['’]\s*\(([^)]+)\)/i)?.[1],
+  ).replace(/\s+/g, " ");
+  const lineup = captureLine(text, "Supplier Line-up");
+  const supplierFee = Number(
+    text.match(/Supplier Fees? to pay\s*:\s*£\s*([\d,.]+)/i)?.[1]?.replace(/,/g, ""),
+  ) || 0;
+  const clientName = captureLine(text, "Contact Name");
+  const startTimeRaw = captureLine(text, "Supplier Start Time");
+  const finishTimeRaw = captureLine(text, "Supplier Finish Time");
+
+  return {
+    bookerName: clientName,
+    clientFirstNames: clientName.split(/\s+/)[0] || "",
+    clientEmail: captureLine(text, "Contact Email"),
+    clientPhone: captureLine(text, "Contact Telephone"),
+    clientAddress: captureLine(text, "Contact Address"),
+    bookingRef: captureLine(text, "Contract Ref"),
+    eventDateISO: parseContractDate(captureLine(text, "Event Date")),
+    bookingDateISO: parseContractDate(captureLine(text, "Date of Issue")),
+    eventType: captureLine(text, "Event Type"),
+    agent: "Entertainment Nation",
+    actName: supplierName,
+    actTscName: supplierName,
+    address: captureLine(text, "Venue Address"),
+    grossValue: supplierFee,
+    commissionGross: 0,
+    passThroughGross: supplierFee,
+    vatRate: 0,
+    invoiceCompany: "TSC",
+    currency: "GBP",
+    lineupSelected: lineup,
+    lineupComposition: lineup
+      .replace(/^\d+\s*[- ]?piece\s*(?:band)?\s*:?\s*/i, "")
+      .split(/,|\band\b/i)
+      .map(cleanString)
+      .filter(Boolean),
+    bandSize: Number(lineup.match(/(\d+)\s*[- ]?piece/i)?.[1] || 0),
+    arrivalTime: parseTime(captureLine(text, "Supplier Arrival Time")),
+    startTime: parseTime(startTimeRaw),
+    finishTime: parseTime(finishTimeRaw),
+    setupTime: captureLine(text, "Supplier Setup Time"),
+    changeTime: captureLine(text, "Supplier Change Time"),
+    performancePlan: captureLine(text, "Performance Plan"),
+    performanceArea: captureLine(text, "Performance Area Required"),
+    accounting: {
+      invoiceCompany: "TSC",
+      paymentStage: "",
+      vatRate: 0,
+      commissionGross: 0,
+      commissionVat: 0,
+      commissionNet: 0,
+      passThroughGross: supplierFee,
+      currency: "GBP",
+    },
+    importMetadata: {
+      source: "entertainment_nation_pdf",
+      contractFilename: "",
+      invoiceFilename: "",
+      importedAt: new Date().toISOString(),
+      incompleteFields: [
+        !captureLine(text, "Contact Address") && "clientAddress",
+        !captureLine(text, "Venue Address") && "venueAddress",
+        startTimeRaw.toLowerCase() === "tbc" && "startTime",
+        finishTimeRaw.toLowerCase() === "tbc" && "finishTime",
+      ].filter(Boolean),
+    },
+  };
+};
+
 export const parseBookingContract = (contractText, invoiceText = "") => {
   if (/Job reference\s*:|Encore Pay|encoremusicians\.com/i.test(`${contractText}\n${invoiceText}`)) {
     return parseEncoreBooking(contractText, invoiceText);
+  }
+  if (
+    /Entertainment Nation Booking Contract/i.test(contractText) &&
+    /Supplier (?:Line-up|Fees? to pay)\s*:/i.test(contractText)
+  ) {
+    return parseEntertainmentNationBooking(contractText);
   }
 
   const total = parseMoneyLine(contractText, "Total");
