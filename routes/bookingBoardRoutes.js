@@ -48,6 +48,25 @@ const toNumber = (value) => {
 };
 
 const cleanString = (value) => String(value || "").trim();
+
+const formatEmailSubjectDate = (value) => {
+  const date = new Date(`${String(value || "").slice(0, 10)}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "your event date";
+
+  const day = date.getUTCDate();
+  const lastTwoDigits = day % 100;
+  const suffix = lastTwoDigits >= 11 && lastTwoDigits <= 13
+    ? "th"
+    : ({ 1: "st", 2: "nd", 3: "rd" }[day % 10] || "th");
+  const monthAndYear = date.toLocaleDateString("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+  return `${day}${suffix} of ${monthAndYear}`;
+};
+
 const AGENT_NAMES = [
   "Alive Network", "Direct", "Encore", "Entertainment Nation", "Freak Music",
   "Fully Funktional", "Function Central", "LMM", "Poptop", "Scarlettte",
@@ -84,10 +103,7 @@ const buildIntroEmail = (row) => {
   const actName = cleanString(row?.actTscName || row?.actName || "the band");
   const eventType = normalizeEventType(row?.eventType) || "event";
   const date = row?.eventDateISO
-    ? new Date(`${String(row.eventDateISO).slice(0, 10)}T12:00:00`).toLocaleDateString(
-        "en-GB",
-        { day: "numeric", month: "long", year: "numeric" },
-      )
+    ? formatEmailSubjectDate(row.eventDateISO)
     : "your event date";
   const publicSiteBase = cleanString(
     process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "https://thesupremecollective.co.uk",
