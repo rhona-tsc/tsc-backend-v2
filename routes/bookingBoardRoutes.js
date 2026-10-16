@@ -26,6 +26,11 @@ import {
   escapeEmailHtml,
 } from "../utils/tscEmailBranding.js";
 import { automationBodyToHtml } from "../utils/automationEmailTemplate.js";
+import {
+  actReferenceCandidates,
+  attachActProfileData,
+  buildActProfileLookup,
+} from "../utils/bookingActData.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1553,6 +1558,7 @@ const mergeRowData = (preferred, secondary) => {
     actOwnerMusicianId:
       preferred?.actOwnerMusicianId || secondary?.actOwnerMusicianId,
     actId: preferred?.actId || secondary?.actId,
+    actData: preferred?.actData || secondary?.actData || null,
     actsSummary:
       Array.isArray(preferred?.actsSummary) && preferred.actsSummary.length
         ? preferred.actsSummary
@@ -2040,17 +2046,39 @@ const skip = (page - 1) * limit;
   .limit(limit)
   .lean();
 
+    const actReferences = [...boardRowsRaw, ...bookingDocs]
+      .map((row) => actReferenceCandidates(row));
+    const actIds = [...new Set(actReferences.flatMap((item) => item.ids))]
+      .filter((id) => mongoose.isValidObjectId(id));
+    const actNames = [...new Set(actReferences.flatMap((item) => item.names))];
+    const actClauses = [];
+    if (actIds.length) actClauses.push({ _id: { $in: actIds } });
+    if (actNames.length) {
+      actClauses.push({ name: { $in: actNames } }, { tscName: { $in: actNames } });
+    }
+    const linkedActs = actClauses.length
+      ? await actModel
+          .find({ $or: actClauses })
+          .select("_id name tscName extras paSystem lightingSystem")
+          .lean()
+      : [];
+    const actProfileLookup = buildActProfileLookup(linkedActs);
+
     // Dedupe/merge rows across both sources
     const dedupeMap = new Map();
 
-    for (const row of boardRowsRaw) {
+    for (const rawRow of boardRowsRaw) {
+      const row = attachActProfileData(rawRow, actProfileLookup);
       const key = getCanonicalBookingKey(row);
       const existing = dedupeMap.get(key);
       dedupeMap.set(key, choosePreferredRow(existing, row));
     }
 
     for (const booking of bookingDocs) {
-      const normalized = normalizeBookingToBoardRow(booking);
+      const normalized = attachActProfileData(
+        normalizeBookingToBoardRow(booking),
+        actProfileLookup,
+      );
       if (!normalized) continue;
       const key = getCanonicalBookingKey(normalized);
       const existing = dedupeMap.get(key);
