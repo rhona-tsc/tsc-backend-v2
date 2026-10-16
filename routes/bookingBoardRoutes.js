@@ -2591,21 +2591,43 @@ router.post("/automation-email/test", musicianAuth, async (req, res) => {
         </div>
       </div>`;
 
-    await sendEmail({
+    let attachments = [];
+    if (req.body?.attachInvoice === true) {
+      if (!mongoose.isValidObjectId(req.body?.bookingId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Select a valid booking before testing an invoice attachment.",
+        });
+      }
+      const row = await BookingBoardItem.findById(req.body.bookingId).lean();
+      if (!row) {
+        return res.status(404).json({ success: false, message: "Booking not found." });
+      }
+      attachments = await buildIntroInvoiceAttachments(row, {
+        cloudinaryClient: cloudinary,
+      });
+    }
+
+    const result = await sendEmail({
       to: INTRO_EMAIL_TEST_RECIPIENT,
       subject: `[TEST PREVIEW] ${subject}`,
       html,
       text: body,
+      attachments,
       forceTo: INTRO_EMAIL_TEST_RECIPIENT,
       forceCc: [],
       forceBcc: [],
     });
+    if (!result?.ok) {
+      throw new Error(result?.error || "The automation preview could not be sent.");
+    }
 
     return res.json({
       success: true,
-      message: `Automation preview sent to ${INTRO_EMAIL_TEST_RECIPIENT}.`,
+      message: `Automation preview sent to ${INTRO_EMAIL_TEST_RECIPIENT}${attachments.length ? " with the issued invoice attached" : ""}.`,
       sentTo: INTRO_EMAIL_TEST_RECIPIENT,
       subject: `[TEST PREVIEW] ${subject}`,
+      invoiceAttached: attachments.length > 0,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
