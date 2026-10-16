@@ -16,6 +16,11 @@ import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
 import { normalizeEventType } from "../utils/eventTypes.js";
 import sendEmail from "../utils/sendEmail.js";
+import cloudinary from "../config/cloudinary.js";
+import {
+  buildIntroInvoiceAttachments,
+  getIntroInvoiceUrl,
+} from "../utils/introInvoiceAttachment.js";
 import {
   buildTscEmailFooter,
   escapeEmailHtml,
@@ -159,9 +164,7 @@ const buildIntroEmail = (row) => {
         </div>
       </div>`;
   }
-  const invoiceUrl = cleanString(
-    row?.invoicePdfUrl || row?.invoiceUrl || row?.payments?.boardInvoicePdfUrl,
-  );
+  const invoiceUrl = getIntroInvoiceUrl(row);
   return { recipient, subject, text, html, invoiceUrl };
 };
 
@@ -2318,13 +2321,9 @@ router.post("/:id/intro-email/test", musicianAuth, async (req, res) => {
         message: `Complete the following booking fields first: ${missing.join(", ")}.`,
       });
     }
-    const attachments = email.invoiceUrl
-      ? [{
-          filename: `${cleanString(row.bookingRef) || "booking"}-invoice.pdf`,
-          path: email.invoiceUrl,
-          contentType: "application/pdf",
-        }]
-      : [];
+    const attachments = await buildIntroInvoiceAttachments(row, {
+      cloudinaryClient: cloudinary,
+    });
     const result = await sendEmail({
       to: INTRO_EMAIL_TEST_RECIPIENT,
       subject: email.subject,
@@ -2368,7 +2367,8 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
         message: `The intro email was already sent to ${row.introEmailSentTo || "this client"}.`,
       });
     }
-    const email = buildIntroEmail(row.toObject());
+    const rowData = row.toObject();
+    const email = buildIntroEmail(rowData);
     const missing = [
       !email.recipient && "client email",
       !cleanString(row.actTscName || row.actName) && "act name",
@@ -2382,13 +2382,10 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
         message: `Complete the following booking fields first: ${missing.join(", ")}.`,
       });
     }
-    const attachments = email.invoiceUrl
-      ? [{
-          filename: `${cleanString(row.bookingRef) || "booking"}-invoice.pdf`,
-          path: email.invoiceUrl,
-          contentType: "application/pdf",
-        }]
-      : [];
+    const attachments = await buildIntroInvoiceAttachments(
+      rowData,
+      { cloudinaryClient: cloudinary },
+    );
     const result = await sendEmail({
       to: email.recipient,
       bcc: "hello@thesupremecollective.co.uk",
