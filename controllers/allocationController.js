@@ -432,22 +432,53 @@ const updateBoardRoleSlot = async (msg, changes = {}) => {
 };
 
 export const reconcilePendingRoleOffer = async (msg) => {
-  if (!msg?.roleSlotId) return null;
   const board = msg.bookingBoardItemId
     ? await bookingBoardItem.findById(msg.bookingBoardItemId)
     : await resolveBoardItem(msg.bookingRef);
-  if (!board) return null;
-  const slot = (board.assignedMusicians || []).find(
-    (entry) => String(entry?.roleSlotId || "") === String(msg.roleSlotId),
-  );
+  if (!board) return { board: null, resolved: false };
+  const messageRole = String(msg?.meta?.role || msg?.duties || "")
+    .split("·")[0]
+    .trim()
+    .toLowerCase();
+  const messagePhone = normalizePhone(msg?.phone);
+  const assignments = [
+    ...(board.assignedMusicians || []),
+    ...(board.bookingMusicians || []),
+    ...(board.bandLineup || []),
+    ...(board.bookingDetails?.assignedMusicians || []),
+  ];
+  const slot = assignments.find((entry) => {
+    const entryRole = String(entry?.role || entry?.instrument || "").trim().toLowerCase();
+    const sameRole = !messageRole || !entryRole || entryRole === messageRole;
+    const sameIdentity =
+      (msg?.musicianId && String(entry?.musicianId || "") === String(msg.musicianId)) ||
+      (messagePhone && normalizePhone(entry?.phone) === messagePhone);
+    return (
+      (msg?.roleSlotId && String(entry?.roleSlotId || "") === String(msg.roleSlotId)) ||
+      String(entry?.offerRequestId || "") === String(msg?.enquiryId || "") ||
+      (sameIdentity && sameRole)
+    );
+  });
   if (["accepted", "confirmed"].includes(String(slot?.status || "").toLowerCase())) {
-    return board;
+    await EnquiryMessage.updateOne(
+      { _id: msg._id, $or: [{ reply: null }, { reply: { $exists: false } }] },
+      {
+        $set: {
+          reply: "yes",
+          repliedAt: slot?.respondedAt || slot?.acceptedAt || new Date(),
+          status: "read",
+          reconciledFromAllocationAt: new Date(),
+        },
+      },
+    );
+    return { board, resolved: true, slot };
   }
+  if (!msg?.roleSlotId) return { board, resolved: false, slot: null };
   const musician = msg.musicianId
     ? await Musician.findById(msg.musicianId).lean()
     : null;
   const contact = candidateContact(musician || {});
-  return updateBoardRoleSlot(msg, {
+  const updatedBoard = await updateBoardRoleSlot(msg, {
     musicianId: msg.musicianId,
     name: musicianDisplayName(musician || {}),
     firstName: musician?.firstName || musician?.basicInfo?.firstName || "",
@@ -458,29 +489,40 @@ export const reconcilePendingRoleOffer = async (msg) => {
     offerRequestId: msg.enquiryId,
     offeredAt: msg.createdAt || new Date(),
   });
+  return { board: updatedBoard, resolved: false, slot: null };
 };
 
 const closeCompetingRoleOffers = async (winner) => {
   if (!winner?.bookingRef || !winner?.roleSlotId) return;
   const pending = await EnquiryMessage.find({
-    ...(winner._id ? { _id: { $ne: winner._id } } : {}),
     bookingRef: winner.bookingRef,
     roleSlotId: winner.roleSlotId,
-    ...(winner.musicianId ? { musicianId: { $ne: winner.musicianId } } : {}),
     "meta.kind": "booking",
     $or: [{ reply: null }, { reply: { $exists: false } }],
   });
 
   for (const other of pending) {
+    const isWinner =
+      (winner.offerRequestId && String(other.enquiryId || "") === String(winner.offerRequestId)) ||
+      (winner.musicianId && String(other.musicianId || "") === String(winner.musicianId));
     await EnquiryMessage.updateOne(
       { _id: other._id, $or: [{ reply: null }, { reply: { $exists: false } }] },
-      { $set: { reply: "unavailable", repliedAt: new Date(), status: "read" } },
+      {
+        $set: {
+          reply: isWinner ? "yes" : "unavailable",
+          repliedAt: new Date(),
+          status: "read",
+          reconciledFromAllocationAt: new Date(),
+        },
+      },
     );
-    await sendInboundAcknowledgement({
-      to: other.phone,
-      body: "This role has now been allocated, so you no longer need to respond. Thank you. 🤍 TSC",
-      isWhatsApp: true,
-    });
+    if (!isWinner) {
+      await sendInboundAcknowledgement({
+        to: other.phone,
+        body: "This role has now been allocated, so you no longer need to respond. Thank you. 🤍 TSC",
+        isWhatsApp: true,
+      });
+    }
   }
 };
 

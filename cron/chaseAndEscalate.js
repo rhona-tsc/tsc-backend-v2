@@ -58,7 +58,16 @@ export const runChaseAndEscalation = async () => {
   }).sort({ createdAt: 1 }).lean();
 
   for (const msg of messages) {
-    await reconcilePendingRoleOffer(msg);
+    const reconciliation = await reconcilePendingRoleOffer(msg);
+    if (reconciliation?.resolved) {
+      console.log("✅ Skipping chase: booking role is already allocated", {
+        messageId: msg._id,
+        bookingRef: msg.bookingRef,
+        roleSlotId: msg.roleSlotId,
+        musicianId: msg.musicianId,
+      });
+      continue;
+    }
     const ageHours = (now - new Date(msg.createdAt).getTime()) / 3_600_000;
     const firstName = await firstNameFor(msg);
     try {

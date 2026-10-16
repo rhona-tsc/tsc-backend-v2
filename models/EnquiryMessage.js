@@ -53,6 +53,7 @@ const enquiryMessageSchema = new mongoose.Schema(
 chaseSentAt: { type: Date, default: null },
 secondChaseSentAt: { type: Date, default: null },
 autoEscalatedAt: { type: Date, default: null },
+reconciledFromAllocationAt: { type: Date, default: null },
     // Metadata for matching / diagnostics
     meta: {
       actName: String,
