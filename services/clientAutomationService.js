@@ -1,5 +1,6 @@
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import ClientAutomationDelivery from "../models/clientAutomationDeliveryModel.js";
+import Act from "../models/actModel.js";
 import cloudinary from "../config/cloudinary.js";
 import sendEmail from "../utils/sendEmail.js";
 import { buildIntroInvoiceAttachments } from "../utils/introInvoiceAttachment.js";
@@ -9,11 +10,22 @@ export const AUTOMATION_10_KEY = "automation-10-balance-coming-due";
 export const AUTOMATION_10_NUMBER = 10;
 export const AUTOMATION_4_KEY = "automation-4-vocalists-finalise-setlist";
 export const AUTOMATION_4_NUMBER = 4;
+export const AUTOMATION_11_KEY = "automation-11-balance-now-due";
+export const AUTOMATION_11_NUMBER = 11;
+export const AUTOMATION_14_KEY = "automation-14-song-requests-due-today";
+export const AUTOMATION_14_NUMBER = 14;
+export const AUTOMATION_16_KEY = "automation-16-song-requests-due-soon";
+export const AUTOMATION_16_NUMBER = 16;
+export const AUTOMATION_21_KEY = "automation-21-act-add-ons";
+export const AUTOMATION_21_NUMBER = 21;
 
 const clean = (value) => String(value || "").trim();
 const lower = (value) => clean(value).toLowerCase();
 
 const isoDate = (value) => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
   const match = clean(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
   return match ? `${match[1]}-${match[2]}-${match[3]}` : "";
 };
@@ -72,6 +84,13 @@ const ordinalDate = (value) => {
     timeZone: "UTC",
   });
   return `${day}${suffix} ${monthYear}`;
+};
+
+const ordinalEventDate = (value) => {
+  const source = isoDate(value);
+  if (!source) return "the event date";
+  const [dayWithSuffix, ...monthYear] = ordinalDate(source).split(" ");
+  return `${dayWithSuffix} of ${monthYear.join(" ")}`;
 };
 
 const rowEmails = (row = {}) => [
@@ -147,6 +166,63 @@ export const automation4Schedule = (row, todayISO) => {
   };
 };
 
+const scheduledWindow = ({ plannedISO, todayISO, lastISO, allowLastDay = true }) => {
+  const today = isoDate(todayISO);
+  if (!plannedISO || !today) return { eligible: false, reason: "missing_date", plannedISO: plannedISO || "" };
+  if (today < plannedISO) return { eligible: false, reason: "not_due", plannedISO };
+  if (lastISO && (allowLastDay ? today > lastISO : today >= lastISO)) {
+    return { eligible: false, reason: "deadline_reached", plannedISO };
+  }
+  return {
+    eligible: true,
+    reason: today === plannedISO ? "planned_date" : "catch_up",
+    plannedISO,
+    sendISO: today,
+  };
+};
+
+export const automation16Schedule = (row, todayISO) => {
+  const dueISO = songRequestDueISO(row);
+  return scheduledWindow({
+    plannedISO: shiftISODate(dueISO, -7),
+    todayISO,
+    lastISO: dueISO,
+    allowLastDay: false,
+  });
+};
+
+export const automation14Schedule = (row, todayISO) => {
+  const dueISO = songRequestDueISO(row);
+  return scheduledWindow({ plannedISO: dueISO, todayISO, lastISO: dueISO });
+};
+
+const midpointISO = (startValue, endValue) => {
+  const startISO = isoDate(startValue);
+  const endISO = isoDate(endValue);
+  if (!startISO || !endISO) return "";
+  const start = new Date(`${startISO}T12:00:00.000Z`).getTime();
+  const end = new Date(`${endISO}T12:00:00.000Z`).getTime();
+  if (end <= start) return "";
+  return new Date(start + ((end - start) / 2)).toISOString().slice(0, 10);
+};
+
+export const automation21Schedule = (row, todayISO) => {
+  const dueISO = isoDate(row?.invoiceDueDateISO);
+  return scheduledWindow({
+    plannedISO: midpointISO(row?.introEmailSentAt, dueISO),
+    todayISO,
+    lastISO: dueISO,
+    allowLastDay: false,
+  });
+};
+
+export const automation11Schedule = (row, todayISO) => scheduledWindow({
+  plannedISO: isoDate(row?.invoiceDueDateISO),
+  todayISO,
+  lastISO: isoDate(row?.eventDateISO || row?.eventDate || row?.date),
+  allowLastDay: false,
+});
+
 const publicEventSheetUrl = (row) => {
   const base = clean(
     process.env.PUBLIC_SITE_URL ||
@@ -156,6 +232,234 @@ const publicEventSheetUrl = (row) => {
   return row?.bookingRef
     ? `${base}/event-sheet/${encodeURIComponent(row.bookingRef)}`
     : clean(row?.eventSheetLink);
+};
+
+const clientNames = (row = {}) => clean(
+  row.clientFirstNames || row.clientName || row.bookerName || "there",
+);
+
+const hasDjService = (row = {}) => Boolean(
+  row?.bookingDetails?.djServicesBooked || row?.bookedDj || row?.djBooked,
+);
+
+const specialRequestLabel = (row = {}) => {
+  const isWedding = /wedding/i.test(`${row?.weddingStatus || ""} ${row?.eventType || ""}`);
+  if (isWedding) return "First Dance";
+  const count = Number(row?.offRepertoireRequestCount || row?.actData?.offRepertoireRequestCount || 1);
+  const actName = clean(row?.actTscName || row?.actName || row?.bandName);
+  return /r\s*&?\s*b knights/i.test(actName) || count > 1
+    ? "Off Repertoire Requests"
+    : "Off Repertoire Request";
+};
+
+const emailShell = (content) => `
+  <div style="margin:0;padding:0;background:#fff;font-family:Arial,Helvetica,sans-serif;color:#111;">
+    <div style="max-width:720px;margin:0;background:#fff;padding:0;">
+      ${content}
+      ${buildTscEmailFooter()}
+    </div>
+  </div>`;
+
+const emailParagraph = (value) => `<p style="margin:0 0 18px;font-size:15px;line-height:1.8;">${escapeEmailHtml(value)}</p>`;
+const emailLink = (label, url) => `<p style="margin:0 0 18px;font-size:15px;line-height:1.8;"><a href="${escapeEmailHtml(url)}" style="color:#ff6667;font-weight:700;">${escapeEmailHtml(label)}</a></p>`;
+
+export const buildAutomation16Email = (row) => {
+  const names = clientNames(row);
+  const requestLabel = specialRequestLabel(row);
+  const dueDate = ordinalDate(songRequestDueISO(row));
+  const eventSheetUrl = publicEventSheetUrl(row);
+  const subject = `Automated Reminder: Song Suggestions & ${requestLabel} Request Due Soon`;
+  const text = [
+    `Hi ${names},`, "", "I hope you are doing well.", "",
+    `This is a gentle automated reminder that Song Suggestions and the ${requestLabel} are due on the ${dueDate}.`, "",
+    `Follow This Link to your Event Sheet: ${eventSheetUrl}`, "",
+    `If you have already submitted your Song Suggestions and ${requestLabel} on the Event Sheet please disregard this automated email reminder.`, "",
+    "Also, if you would like to run through your Event Sheet with me over the phone, please feel free to book a slot directly in my calendar: https://calendly.com/thesupremecollective/call", "",
+    "Warmest wishes,", "Rhona ✨",
+  ].join("\n");
+  const html = emailShell([
+    emailParagraph(`Hi ${names},`), emailParagraph("I hope you are doing well."),
+    emailParagraph(`This is a gentle automated reminder that Song Suggestions and the ${requestLabel} are due on the ${dueDate}.`),
+    emailLink("Follow This Link to your Event Sheet", eventSheetUrl),
+    emailParagraph(`If you have already submitted your Song Suggestions and ${requestLabel} on the Event Sheet please disregard this automated email reminder.`),
+    `<p style="margin:0 0 18px;font-size:15px;line-height:1.8;">Also, if you would like to run through your Event Sheet with me over the phone, please feel free to <a href="https://calendly.com/thesupremecollective/call" style="color:#ff6667;font-weight:700;">book a slot directly in my calendar</a>.</p>`,
+    emailParagraph("Warmest wishes,\nRhona ✨").replace("\n", "<br />"),
+  ].join(""));
+  return { subject, text, html };
+};
+
+export const buildAutomation14Email = (row) => {
+  const names = clientNames(row);
+  const requestLabel = specialRequestLabel(row);
+  const eventSheetUrl = publicEventSheetUrl(row);
+  const subject = `Automated Reminder: Song Suggestions & ${requestLabel} Request Due Today`;
+  const text = [
+    `Hi ${names},`, "", `Your song suggestions and ${requestLabel} are due today. Please add them to the Event Sheet if you have not already done so.`, "",
+    `Follow This Link to your Event Sheet: ${eventSheetUrl}`, "",
+    `If you have already submitted your Song Suggestions and ${requestLabel} on the Event Sheet please disregard this automated email reminder.`, "",
+    "Thank you!", "", "Warmest wishes,", "Rhona ✨",
+  ].join("\n");
+  const html = emailShell([
+    emailParagraph(`Hi ${names},`),
+    emailParagraph(`Your song suggestions and ${requestLabel} are due today. Please add them to the Event Sheet if you have not already done so.`),
+    emailLink("Follow This Link to your Event Sheet", eventSheetUrl),
+    emailParagraph(`If you have already submitted your Song Suggestions and ${requestLabel} on the Event Sheet please disregard this automated email reminder.`),
+    emailParagraph("Thank you!"),
+    emailParagraph("Warmest wishes,\nRhona ✨").replace("\n", "<br />"),
+  ].join(""));
+  return { subject, text, html };
+};
+
+export const buildAutomation11Email = (row) => {
+  const name = firstName(clientNames(row)) || "there";
+  const eventSheetUrl = publicEventSheetUrl(row);
+  const subject = "Automated Reminder: Playlist(s), Event Sheet & Balance Now Due";
+  const djText = "If you have booked a band member DJing, please note that the Advanced DJ requests are also due today.";
+  const text = [
+    `Hi ${name},`, "", "I hope you are doing well.", "",
+    "This is an automated reminder to flag that the Spotify Playlist section is now due.",
+    ...(hasDjService(row) ? ["", djText] : []), "",
+    "The Event Sheet should also be completed by today, to ensure the band has everything they need to carry out a successful performance.", "",
+    `Follow This Link to your Event Sheet: ${eventSheetUrl}`, "",
+    "And finally, the balance should also be settled today. Please kindly find your invoice attached.", "",
+    "If you have already submitted your playlist link(s), completed the Event Sheet, and paid the balance, please disregard this automated email.", "",
+    "If you would like to run through your Event Sheet with me over the phone, please feel free to book a slot to do that directly in my calendar: https://calendly.com/thesupremecollective/call", "",
+    "Warmest wishes,", "Rhona ✨",
+  ].join("\n");
+  const html = emailShell([
+    emailParagraph(`Hi ${name},`), emailParagraph("I hope you are doing well."),
+    emailParagraph("This is an automated reminder to flag that the Spotify Playlist section is now due."),
+    hasDjService(row) ? emailParagraph(djText) : "",
+    emailParagraph("The Event Sheet should also be completed by today, to ensure the band has everything they need to carry out a successful performance."),
+    emailLink("Follow This Link to your Event Sheet", eventSheetUrl),
+    emailParagraph("And finally, the balance should also be settled today. Please kindly find your invoice attached."),
+    emailParagraph("If you have already submitted your playlist link(s), completed the Event Sheet, and paid the balance, please disregard this automated email."),
+    `<p style="margin:0 0 18px;font-size:15px;line-height:1.8;">If you would like to run through your Event Sheet with me over the phone, please feel free to <a href="https://calendly.com/thesupremecollective/call" style="color:#ff6667;font-weight:700;">book a slot directly in my calendar</a>.</p>`,
+    emailParagraph("Warmest wishes,\nRhona ✨").replace("\n", "<br />"),
+  ].join(""));
+  return { subject, text, html };
+};
+
+const CLIENT_PRICE_MULTIPLIER = 1.33;
+const normalizeExtraKey = (value) => lower(value)
+  .replace(/[^a-z0-9]+/g, "_")
+  .replace(/^_+|_+$/g, "");
+const formatPounds = (value) => `£${Math.round(Number(value || 0)).toLocaleString("en-GB")}`;
+const canonicalCountyKey = (value) => {
+  const county = normalizeExtraKey(value);
+  return ["london", "central_london"].includes(county) ? "greater_london" : county;
+};
+const countyTravelFee = (row = {}) => {
+  const county = canonicalCountyKey(
+    row.county || row.userAddress?.county || row.eventSheet?.answers?.venue_county || row.bookingDetails?.county,
+  );
+  if (!county) return 0;
+  const sources = [row.actData, row.act, row.selectedAct, row.actsSummary?.[0]?.actData].filter(Boolean);
+  for (const source of sources) {
+    for (const collection of [source.countyTravelSettings, source.countyFees]) {
+      if (!collection || typeof collection !== "object") continue;
+      const entries = collection instanceof Map ? [...collection.entries()] : Object.entries(collection);
+      const match = entries.find(([key]) => canonicalCountyKey(key) === county)?.[1];
+      if (match && typeof match === "object" && match.available === false) continue;
+      const fee = Number(typeof match === "object" ? match?.fee : match || 0);
+      if (fee > 0) return fee;
+    }
+  }
+  return 0;
+};
+const bookedPerformerCount = (row = {}) => {
+  const lineupCount = Array.isArray(row.lineupComposition)
+    ? row.lineupComposition.filter(Boolean).length
+    : 0;
+  if (lineupCount) return lineupCount;
+  const selectedCount = Number(clean(row.lineupSelected).match(/\d+/)?.[0] || 0);
+  if (selectedCount) return selectedCount;
+  return assignedMusicians(row).length;
+};
+
+export const actAddOnOptions = (row = {}) => {
+  const rawExtras = row?.actData?.extras || {};
+  const entries = rawExtras instanceof Map ? [...rawExtras.entries()] : Object.entries(rawExtras);
+  const extras = new Map(entries.map(([key, value]) => [normalizeExtraKey(key), {
+    price: Number(value?.price || 0),
+    complimentary: value?.complimentary === true,
+  }]));
+  const find = (...keys) => keys.map(normalizeExtraKey).map((key) => extras.get(key)).find(Boolean);
+  const used = new Set(["max_dj_hours", "background_music_playlist"]);
+  const lines = [];
+  const record = (keys) => keys.forEach((key) => used.add(normalizeExtraKey(key)));
+  const addSimple = (label, ...keys) => {
+    const extra = find(...keys); record(keys);
+    if (extra && !extra.complimentary && extra.price > 0) lines.push(`- ${label}: ${formatPounds(extra.price * CLIENT_PRICE_MULTIPLIER)}`);
+  };
+  const addLineup = (label, ...keys) => {
+    const extra = find(...keys); record(keys); const performers = bookedPerformerCount(row);
+    if (extra && !extra.complimentary && extra.price > 0 && performers) lines.push(`- ${label} (${performers}-piece): ${formatPounds(extra.price * performers * CLIENT_PRICE_MULTIPLIER)}`);
+  };
+  const addPerMember = (label, unit, ...keys) => {
+    const extra = find(...keys); record(keys);
+    if (extra && !extra.complimentary && extra.price > 0) lines.push(`- ${label}: ${formatPounds(extra.price * CLIENT_PRICE_MULTIPLIER)} per band member${unit ? ` ${unit}` : ""}`);
+  };
+  addLineup("Additional 30-minute performance", "extra_30min_performance_per_band_member");
+  addLineup("Additional 40-minute performance", "extra_40min_performance_per_band_member");
+  addLineup("Additional 45-minute performance", "extra_45min_performance_per_band_member");
+  addLineup("Additional 60-minute performance", "extra_60min_performance_per_band_member");
+  addPerMember("Early arrival", "per hour", "early_arrival_60min_per_band_member");
+  addPerMember("Late stay", "per hour", "late_stay_60min_per_band_member");
+  addPerMember("Additional song request", "", "extra_song_request_per_band_member");
+  addPerMember("Israeli dancing (20 minutes)", "", "israeli_dancing_20mins_per_band_member");
+  addSimple("Up to 3 hours of manned playlist service", "up_to_3_hours_manned_playlist");
+  addSimple("Up to 3 hours of band-member DJing", "up_to_3_hours_band_member_dj");
+  addSimple("Additional DJing per 30 minutes", "extra_djing_per_30_mins", "extra_djing_per_30_min");
+  addSimple("DJ with live sax (3 x 30 minutes)", "dj_live_sax_3x30mins");
+  addSimple("PA and sound engineering for another act", "sound_engineering_for_another_act_with_your_acts_pa");
+  {
+    const keys = ["speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member"];
+    const extra = find(...keys); record(keys);
+    if (extra && !extra.complimentary && extra.price > 0) lines.push(`- Speedy 60-minute setup and soundcheck: ${formatPounds((extra.price + countyTravelFee(row)) * CLIENT_PRICE_MULTIPLIER)}`);
+  }
+  addSimple("Wired microphone hire for speeches", "wired_mic_for_speeches");
+  {
+    const keys = ["wireless_mic_for_speeches"];
+    const extra = find(...keys); record(keys);
+    if (extra && !extra.complimentary) lines.push(`- Wireless microphone hire for speeches: ${formatPounds(100 * CLIENT_PRICE_MULTIPLIER)}`);
+  }
+  entries.forEach(([originalKey, value]) => {
+    const key = normalizeExtraKey(originalKey);
+    if (used.has(key) || value?.complimentary === true || Number(value?.price || 0) <= 0) return;
+    const label = clean(originalKey).replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+    lines.push(`- ${label}: ${formatPounds(Number(value.price) * CLIENT_PRICE_MULTIPLIER)}`);
+  });
+  const actName = clean(row.actTscName || row.actName || row.bandName || "the act");
+  return lines.length
+    ? `Add-ons available for ${actName}:\n${lines.join("\n")}`
+    : `Please ask me if you would like a tailored add-on quote for ${actName}.`;
+};
+
+export const buildAutomation21Email = (row) => {
+  const names = clientNames(row);
+  const actName = clean(row.actTscName || row.actName || row.bandName || "the band");
+  const eventType = clean(row.eventType || "event");
+  const options = actAddOnOptions(row);
+  const subject = `${names}, Take Your Event to the Next Level with these Options! 🎉`;
+  const text = [
+    `Hello ${names},`, "",
+    `Thank you for choosing ${actName} for your upcoming ${eventType}! We’re looking forward to delivering an unforgettable performance. As you continue planning, we’d like to share some additional services that can add an extra touch to your event:`, "",
+    options, "",
+    "These options are designed to enhance your event and create an unforgettable experience for your client and their guests. Let me know if you’d like to explore any of these add-ons further!", "",
+    "Warmest wishes,", "Rhona ✨",
+  ].join("\n");
+  const optionsHtml = options.split("\n").map((line, index) => index === 0
+    ? `<p style="margin:0 0 10px;font-size:15px;line-height:1.8;"><strong>${escapeEmailHtml(line)}</strong></p>`
+    : `<div style="margin:0 0 6px;font-size:15px;line-height:1.6;">${escapeEmailHtml(line)}</div>`).join("");
+  const html = emailShell([
+    emailParagraph(`Hello ${names},`),
+    emailParagraph(`Thank you for choosing ${actName} for your upcoming ${eventType}! We’re looking forward to delivering an unforgettable performance. As you continue planning, we’d like to share some additional services that can add an extra touch to your event:`),
+    `<div style="margin:0 0 18px;">${optionsHtml}</div>`,
+    emailParagraph("These options are designed to enhance your event and create an unforgettable experience for your client and their guests. Let me know if you’d like to explore any of these add-ons further!"),
+    emailParagraph("Warmest wishes,\nRhona ✨").replace("\n", "<br />"),
+  ].join(""));
+  return { subject, text, html };
 };
 
 export const buildAutomation10Email = (row) => {
@@ -469,6 +773,7 @@ export const runClientAutomations = async ({
   emailSender = sendEmail,
   attachmentBuilder = buildIntroInvoiceAttachments,
   cloudinaryClient = cloudinary,
+  actProfileModel = Act,
 } = {}) => {
   if (clean(process.env.CLIENT_AUTOMATIONS_ENABLED).toLowerCase() !== "true") {
     return { enabled: false, considered: 0, sent: 0, skipped: 0, failed: 0 };
@@ -503,49 +808,132 @@ export const runClientAutomations = async ({
     failed: 0,
   };
 
+  const loadActProfile = async (row) => {
+    if (row?.actData?.extras && Object.keys(row.actData.extras).length) return row;
+    const actName = clean(row?.actTscName || row?.actName || row?.bandName);
+    if (!actName || !actProfileModel?.findOne) return row;
+    const query = actProfileModel.findOne({ $or: [{ tscName: actName }, { name: actName }] });
+    const profile = typeof query?.lean === "function" ? await query.lean() : await query;
+    if (!profile) return row;
+    return {
+      ...row,
+      actData: {
+        ...profile,
+        extras: profile.extras || {},
+        countyFees: profile.countyFees || {},
+        countyTravelSettings: profile.countyTravelSettings || {},
+      },
+    };
+  };
+
   for (const row of rows) {
     const recipient = rowEmails(row).find((email) => allowlist.has(email));
-    const schedule = automation10Schedule(row, todayISO);
-    if (!recipient || !schedule.eligible || isBalancePaid(row)) {
-      summary.skipped += 1;
-    } else {
-      const email = buildAutomation10Email(row);
+    const sendClientAutomation = async ({
+      automationKey,
+      automationNumber,
+      schedule,
+      email,
+      attachInvoice = false,
+    }) => {
+      if (!recipient || !schedule.eligible) {
+        summary.skipped += 1;
+        return;
+      }
       const delivery = await claimDelivery({
         deliveryModel,
         row,
         recipient,
         scheduledForISO: schedule.sendISO,
         subject: email.subject,
+        automationKey,
+        automationNumber,
       });
       if (!delivery) {
         summary.skipped += 1;
-      } else {
-        try {
-          const attachments = await attachmentBuilder(row, { cloudinaryClient });
-          if (!attachments.length) throw new Error("No issued invoice PDF is recorded for this booking.");
-          const result = await emailSender({
-            to: recipient,
-            bcc: "hello@thesupremecollective.co.uk",
-            subject: email.subject,
-            html: email.html,
-            text: email.text,
-            attachments,
-          });
-          if (!result?.ok) throw new Error(result?.error || "Email provider rejected the message.");
-          delivery.status = "sent";
-          delivery.sentAt = new Date();
-          delivery.messageId = result.messageId || "";
-          delivery.invoiceAttached = true;
-          await delivery.save();
-          summary.sent += 1;
-        } catch (error) {
-          delivery.status = "failed";
-          delivery.error = clean(error?.message).slice(0, 1000);
-          await delivery.save();
-          summary.failed += 1;
-        }
+        return;
       }
+      try {
+        const attachments = attachInvoice
+          ? await attachmentBuilder(row, { cloudinaryClient })
+          : [];
+        if (attachInvoice && !attachments.length) {
+          throw new Error("No issued invoice PDF is recorded for this booking.");
+        }
+        const result = await emailSender({
+          to: recipient,
+          bcc: "hello@thesupremecollective.co.uk",
+          subject: email.subject,
+          html: email.html,
+          text: email.text,
+          ...(attachments.length ? { attachments } : {}),
+        });
+        if (!result?.ok) throw new Error(result?.error || "Email provider rejected the message.");
+        delivery.status = "sent";
+        delivery.sentAt = new Date();
+        delivery.messageId = result.messageId || "";
+        delivery.invoiceAttached = attachInvoice;
+        await delivery.save();
+        summary.sent += 1;
+      } catch (error) {
+        delivery.status = "failed";
+        delivery.error = clean(error?.message).slice(0, 1000);
+        await delivery.save();
+        summary.failed += 1;
+      }
+    };
+
+    if (isBalancePaid(row)) summary.skipped += 1;
+    else await sendClientAutomation({
+      automationKey: AUTOMATION_10_KEY,
+      automationNumber: AUTOMATION_10_NUMBER,
+      schedule: automation10Schedule(row, todayISO),
+      email: buildAutomation10Email(row),
+      attachInvoice: true,
+    });
+
+    await sendClientAutomation({
+      automationKey: AUTOMATION_16_KEY,
+      automationNumber: AUTOMATION_16_NUMBER,
+      schedule: automation16Schedule(row, todayISO),
+      email: buildAutomation16Email(row),
+    });
+
+    await sendClientAutomation({
+      automationKey: AUTOMATION_14_KEY,
+      automationNumber: AUTOMATION_14_NUMBER,
+      schedule: automation14Schedule(row, todayISO),
+      email: buildAutomation14Email(row),
+    });
+
+    const addOnSchedule = automation21Schedule(row, todayISO);
+    if (addOnSchedule.eligible) {
+      try {
+        const enrichedRow = await loadActProfile(row);
+        const options = actAddOnOptions(enrichedRow);
+        if (/^Please ask me/i.test(options)) {
+          throw new Error("No act add-on pricing is available for this booking.");
+        }
+        await sendClientAutomation({
+          automationKey: AUTOMATION_21_KEY,
+          automationNumber: AUTOMATION_21_NUMBER,
+          schedule: addOnSchedule,
+          email: buildAutomation21Email(enrichedRow),
+        });
+      } catch {
+        summary.failed += 1;
+      }
+    } else {
+      summary.skipped += 1;
     }
+
+    if (isBalancePaid(row)) summary.skipped += 1;
+    else await sendClientAutomation({
+      automationKey: AUTOMATION_11_KEY,
+      automationNumber: AUTOMATION_11_NUMBER,
+      schedule: automation11Schedule(row, todayISO),
+      email: buildAutomation11Email(row),
+      attachInvoice: true,
+    });
 
     const vocalistSchedule = automation4Schedule(row, todayISO);
     if (!vocalistSchedule.eligible) {

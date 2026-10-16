@@ -3,13 +3,66 @@ import assert from "node:assert/strict";
 
 import {
   AUTOMATION_4_KEY,
+  AUTOMATION_10_KEY,
+  AUTOMATION_11_KEY,
+  AUTOMATION_14_KEY,
+  AUTOMATION_16_KEY,
+  AUTOMATION_21_KEY,
+  actAddOnOptions,
   automation4Schedule,
   automation10Schedule,
+  automation11Schedule,
+  automation14Schedule,
+  automation16Schedule,
+  automation21Schedule,
   buildAutomation4Email,
   buildAutomation10Email,
+  buildAutomation11Email,
   londonTodayISO,
   runClientAutomations,
 } from "../services/clientAutomationService.js";
+
+test("Susie's reviewed automation dates resolve to the staged live schedule", () => {
+  const row = {
+    songSuggestionsDueDateISO: "2026-10-18",
+    invoiceDueDateISO: "2026-10-22",
+    eventDateISO: "2026-10-29",
+    introEmailSentAt: new Date("2026-10-16T12:00:00.000Z"),
+  };
+  assert.equal(automation16Schedule(row, "2026-10-17").sendISO, "2026-10-17");
+  assert.equal(automation14Schedule(row, "2026-10-18").sendISO, "2026-10-18");
+  assert.equal(automation21Schedule(row, "2026-10-19").sendISO, "2026-10-19");
+  assert.equal(automation11Schedule(row, "2026-10-22").sendISO, "2026-10-22");
+});
+
+test("the due-now balance email omits DJ requests when no DJ was booked", () => {
+  const email = buildAutomation11Email({
+    bookingRef: "BBM 497 DESIGN",
+    clientFirstNames: "Susie",
+    bookingDetails: { djServicesBooked: false },
+  });
+  assert.doesNotMatch(email.text, /Advanced DJ requests/);
+  assert.match(email.text, /invoice attached/);
+});
+
+test("act add-on options apply lineup, county travel and commission pricing", () => {
+  const options = actAddOnOptions({
+    actTscName: "Committed to Kisstory",
+    county: "Greater London",
+    lineupComposition: ["Vocal", "Vocal", "Bass", "Guitar", "Keys", "Drums"],
+    actData: {
+      countyFees: { greater_london: 60 },
+      extras: {
+        extra_60min_performance_per_band_member: { price: 100 },
+        speedy_setup_60mins_roadie_and_engineer_duties_only_travel_added_on_top_later_for_additional_team_member: { price: 200 },
+        wireless_mic_for_speeches: { price: 75 },
+      },
+    },
+  });
+  assert.match(options, /Additional 60-minute performance \(6-piece\): £798/);
+  assert.match(options, /Speedy 60-minute setup and soundcheck: £346/);
+  assert.match(options, /Wireless microphone hire for speeches: £133/);
+});
 
 test("Automation 10 catches up before the invoice deadline", () => {
   const result = automation10Schedule(
@@ -165,6 +218,83 @@ test("the staged runner sends Automation 10 only to the allowlisted booking with
     }[key];
     if (value === undefined) delete process.env[envKey];
     else process.env[envKey] = value;
+  });
+});
+
+test("the staged runner sends Susie's six live rules once on their reviewed dates", async () => {
+  const previous = {
+    enabled: process.env.CLIENT_AUTOMATIONS_ENABLED,
+    emails: process.env.CLIENT_AUTOMATION_EMAIL_ALLOWLIST,
+    refs: process.env.CLIENT_AUTOMATION_BOOKING_REF_ALLOWLIST,
+    notBefore: process.env.CLIENT_AUTOMATIONS_NOT_BEFORE,
+  };
+  process.env.CLIENT_AUTOMATIONS_ENABLED = "true";
+  process.env.CLIENT_AUTOMATION_EMAIL_ALLOWLIST = "susie@tigproductions.co.uk";
+  process.env.CLIENT_AUTOMATION_BOOKING_REF_ALLOWLIST = "BBM 497 DESIGN";
+  process.env.CLIENT_AUTOMATIONS_NOT_BEFORE = "2026-10-17";
+
+  const row = {
+    _id: "susie-booking",
+    bookingRef: "BBM 497 DESIGN",
+    clientFirstNames: "Susie",
+    clientEmail: "susie@tigproductions.co.uk",
+    actTscName: "Committed to Kisstory",
+    eventType: "Corporate Event",
+    eventDateISO: "2026-10-29",
+    songSuggestionsDueDateISO: "2026-10-18",
+    invoiceDueDateISO: "2026-10-22",
+    introEmailSentAt: new Date("2026-10-16T12:00:00.000Z"),
+    siteAutomationsEnabled: true,
+    balancePaid: false,
+    lineupComposition: ["Vocal", "Vocal", "Bass", "Guitar", "Keys", "Drums"],
+    actData: { extras: { wireless_mic_for_speeches: { price: 100 } } },
+  };
+  const bookingModel = { find: () => ({ lean: async () => [row] }) };
+  const records = new Map();
+  const deliveryModel = {
+    findOne: async ({ automationKey, bookingId }) => records.get(`${automationKey}|${bookingId}`) || null,
+    create: async (value) => {
+      const record = { ...value, save: async () => {} };
+      records.set(`${value.automationKey}|${value.bookingId}`, record);
+      return record;
+    },
+  };
+  const sent = [];
+  const options = {
+    bookingModel,
+    deliveryModel,
+    attachmentBuilder: async () => [{ filename: "invoice.pdf", content: Buffer.from("pdf") }],
+    emailSender: async (message) => {
+      sent.push(message);
+      return { ok: true, messageId: `message-${sent.length}` };
+    },
+  };
+
+  await runClientAutomations({ ...options, now: new Date("2026-10-17T09:05:00.000Z") });
+  await runClientAutomations({ ...options, now: new Date("2026-10-18T09:05:00.000Z") });
+  await runClientAutomations({ ...options, now: new Date("2026-10-19T09:05:00.000Z") });
+  await runClientAutomations({ ...options, now: new Date("2026-10-22T09:05:00.000Z") });
+
+  assert.deepEqual([...records.keys()].sort(), [
+    `${AUTOMATION_10_KEY}|susie-booking`,
+    `${AUTOMATION_11_KEY}|susie-booking`,
+    `${AUTOMATION_14_KEY}|susie-booking`,
+    `${AUTOMATION_16_KEY}|susie-booking`,
+    `${AUTOMATION_21_KEY}|susie-booking`,
+  ].sort());
+  assert.equal(sent.length, 5);
+  assert.equal(sent.filter((message) => message.attachments?.length).length, 2);
+  assert.ok(sent.every((message) => message.to === "susie@tigproductions.co.uk"));
+
+  const envKeys = {
+    enabled: "CLIENT_AUTOMATIONS_ENABLED",
+    emails: "CLIENT_AUTOMATION_EMAIL_ALLOWLIST",
+    refs: "CLIENT_AUTOMATION_BOOKING_REF_ALLOWLIST",
+    notBefore: "CLIENT_AUTOMATIONS_NOT_BEFORE",
+  };
+  Object.entries(previous).forEach(([key, value]) => {
+    if (value === undefined) delete process.env[envKeys[key]];
+    else process.env[envKeys[key]] = value;
   });
 });
 
