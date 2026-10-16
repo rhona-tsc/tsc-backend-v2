@@ -367,6 +367,10 @@ const BookingBoardItemSchema = new mongoose.Schema(
     manualAdjustmentAmount: { type: Number, default: 0 },
     allocation: AllocationSchema,
     review: ReviewSchema,
+    // Booking-level kill switch for the client email automations managed by
+    // this site. Legacy rows without the field remain eligible; only an
+    // explicit false suppresses them.
+    siteAutomationsEnabled: { type: Boolean, default: true, index: true },
     introEmailSentAt: { type: Date, default: null },
     introEmailSentTo: { type: String, default: "" },
     introEmailMessageId: { type: String, default: "" },

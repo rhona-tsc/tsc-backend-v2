@@ -432,6 +432,9 @@ const BookingSchema = new mongoose.Schema(
     // previously written by the route but silently discarded by Mongoose.
     eventType: { type: String, default: "" },
     bookingDetails: { type: mongoose.Schema.Types.Mixed, default: {} },
+    // Mirrored to BookingBoardItem so either side of the merged booking-board
+    // row honours an explicit client-automation opt-out.
+    siteAutomationsEnabled: { type: Boolean, default: true, index: true },
 
     // Manual booking helpers
     lineup: mongoose.Schema.Types.Mixed,

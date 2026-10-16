@@ -677,6 +677,101 @@ const getThursdayWeekBefore = (eventDateISO) => {
   return d.toISOString().slice(0, 10);
 };
 
+const SITE_AUTOMATIONS_ENABLED_KEYS = [
+  "siteAutomationsEnabled",
+  "site_automations_enabled",
+  "Site Automations Enabled",
+  "Site automations enabled",
+  "Website Automations Enabled",
+];
+
+export const parseSiteAutomationsEnabled = (value) => {
+  if (value === true || value === false) return value;
+  if (value === null || value === undefined) return undefined;
+
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return undefined;
+
+  if (["false", "0", "no", "off", "disabled"].includes(normalized)) {
+    return false;
+  }
+  if (["true", "1", "yes", "on", "enabled"].includes(normalized)) {
+    return true;
+  }
+
+  return undefined;
+};
+
+export const readSiteAutomationsEnabled = (source = {}) => {
+  for (const key of SITE_AUTOMATIONS_ENABLED_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    const parsed = parseSiteAutomationsEnabled(source[key]);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+};
+
+export const resolveSiteAutomationsEnabled = ({
+  requestedValue,
+  existingBooking,
+  existingBoardRow,
+} = {}) => {
+  if (
+    existingBooking?.siteAutomationsEnabled === false ||
+    existingBoardRow?.siteAutomationsEnabled === false
+  ) {
+    return false;
+  }
+  return parseSiteAutomationsEnabled(requestedValue);
+};
+
+export const isSiteAutomationEnabled = (row) =>
+  row?.siteAutomationsEnabled !== false;
+
+export const mergeSiteAutomationsEnabled = (...rows) =>
+  rows.every(isSiteAutomationEnabled);
+
+export const buildLinkedBookingAutomationConditions = (row = {}) => {
+  const linkedBookingIds = Array.from(
+    new Set(
+      [row.bookingId, row.sourceBookingId]
+        .map(toObjectIdString)
+        .filter(isValidObjectId),
+    ),
+  );
+
+  return [
+    ...(linkedBookingIds.length
+      ? [{ _id: { $in: linkedBookingIds } }]
+      : []),
+    ...(cleanString(row.bookingRef)
+      ? [{ bookingId: cleanString(row.bookingRef) }]
+      : []),
+    ...(cleanString(row.sessionId)
+      ? [{ sessionId: cleanString(row.sessionId) }]
+      : []),
+  ];
+};
+
+export const buildLinkedBookingAutomationUpdate = (row, value) => {
+  const siteAutomationsEnabled = parseSiteAutomationsEnabled(value);
+  if (siteAutomationsEnabled === undefined) return null;
+
+  const conditions = buildLinkedBookingAutomationConditions(row);
+  if (!conditions.length) return null;
+
+  return {
+    filter: { $or: conditions },
+    update: { $set: { siteAutomationsEnabled } },
+  };
+};
+
+const mirrorSiteAutomationSettingToLinkedBookings = async (row, value) => {
+  const operation = buildLinkedBookingAutomationUpdate(row, value);
+  if (!operation) return null;
+  return Booking.updateMany(operation.filter, operation.update);
+};
+
 
 const normaliseImportRow = (item = {}) => {
   const grossValue = toNumber(
@@ -703,6 +798,7 @@ const normaliseImportRow = (item = {}) => {
   const assignedMusicians = normaliseAssignedMusicians(
     item.assignedMusicians || item.bookingMusicians || item.bandLineup || item.musicians,
   );
+  const siteAutomationsEnabled = readSiteAutomationsEnabled(item);
 
   return {
     bookingRef,
@@ -772,6 +868,9 @@ const normaliseImportRow = (item = {}) => {
       djServicesBooked: Boolean(item.djServicesBooked),
       assignedMusicians,
     },
+    ...(siteAutomationsEnabled !== undefined
+      ? { siteAutomationsEnabled }
+      : {}),
     allocation: { status: "in_progress" },
     review: { requestedCount: 0, received: false },
     source: "bulk_import",
@@ -821,6 +920,17 @@ const sanitizeBookingPatch = (body = {}) => {
   delete patch.boardRowId;
   delete patch.bookingRef;
   delete patch.sessionId;
+
+  if (Object.prototype.hasOwnProperty.call(patch, "siteAutomationsEnabled")) {
+    const siteAutomationsEnabled = parseSiteAutomationsEnabled(
+      patch.siteAutomationsEnabled,
+    );
+    if (siteAutomationsEnabled === undefined) {
+      delete patch.siteAutomationsEnabled;
+    } else {
+      patch.siteAutomationsEnabled = siteAutomationsEnabled;
+    }
+  }
 
   if (patch.totals && isPlainObject(patch.totals)) {
     patch.totals = {
@@ -932,6 +1042,7 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
     "actName",
     "actTscName",
     "songSuggestionsDueDateISO",
+    "siteAutomationsEnabled",
   ];
   scalarFields.forEach((field) => {
     if (
@@ -1147,17 +1258,22 @@ const getRowEventDateKey = (row) => {
   ).slice(0, 10);
 };
 
-const getCanonicalBookingKey = (row) => {
+export const getCanonicalBookingKey = (row) => {
+  // Prefer the normalized human reference. Core and board copies can have
+  // different session ids, but they share this booking reference.
+  const bookingRef = String(row?.bookingRef || "")
+    .trim()
+    .toLowerCase();
+  if (bookingRef) return `booking:${bookingRef}`;
+
   const sessionId = String(row?.sessionId || "")
     .trim()
     .toLowerCase();
   if (sessionId) return `session:${sessionId}`;
 
-  // Board rows store the core Mongo id in bookingId, while core bookings use
-  // the human booking reference there. Prefer bookingRef so both sources merge.
-  const bookingId = String(row?.bookingRef || row?.bookingId || "")
-    .trim()
-    .toLowerCase();
+  // As a final identifier fallback, core bookings may still expose their
+  // human reference as bookingId. Board rows normally expose an ObjectId here.
+  const bookingId = String(row?.bookingId || "").trim().toLowerCase();
   if (bookingId) return `booking:${bookingId}`;
 
   const email = getRowClientEmail(row);
@@ -1229,6 +1345,10 @@ const mergeRowData = (preferred, secondary) => {
     sourceBookingId: preferred?.sourceBookingId || secondary?.sourceBookingId,
     bookingRef: preferred?.bookingRef || secondary?.bookingRef,
     bookingId: preferred?.bookingId || secondary?.bookingId,
+    // Either source may be the richer/preferred record. An explicit false on
+    // either copy must survive the merge so an opted-out booking never appears
+    // eligible because the other (possibly legacy) copy omitted the field.
+    siteAutomationsEnabled: mergeSiteAutomationsEnabled(preferred, secondary),
     invoiceCompany:
       preferred?.invoiceCompany ||
       preferred?.accounting?.invoiceCompany ||
@@ -1495,6 +1615,7 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     sourceBookingId: doc?._id,
     bookingRef: doc?.bookingRef || doc?.bookingId || "",
     bookingId: doc?.bookingId || doc?.bookingRef || "",
+    siteAutomationsEnabled: isSiteAutomationEnabled(doc),
     invoiceCompany: doc?.invoiceCompany || doc?.accounting?.invoiceCompany || "TSC",
     sessionId: doc?.sessionId || "",
     clientFirstNames,
@@ -1939,6 +2060,12 @@ router.post("/", musicianAuth, async (req, res) => {
       BookingBoardItem.findOne({ bookingRef }).lean(),
       Booking.findOne({ bookingId: bookingRef }).lean(),
     ]);
+    const requestedSiteAutomationsEnabled = readSiteAutomationsEnabled(payload);
+    const siteAutomationsEnabled = resolveSiteAutomationsEnabled({
+      requestedValue: requestedSiteAutomationsEnabled,
+      existingBooking,
+      existingBoardRow,
+    });
     const isContractReimport =
       payload?.importMetadata?.source === "contract_pdf" && Boolean(existingBoardRow);
 
@@ -1974,6 +2101,9 @@ router.post("/", musicianAuth, async (req, res) => {
           ? "BMM"
           : "TSC",
       createdManually: true,
+      ...(siteAutomationsEnabled !== undefined
+        ? { siteAutomationsEnabled }
+        : {}),
 
       // keep both; lots of older code still queries booking.date
       eventDate: eventDate || undefined,
@@ -2051,6 +2181,9 @@ router.post("/", musicianAuth, async (req, res) => {
     // --------- 2) Upsert BookingBoardItem (UI row) ----------
     const boardPatch = {
       bookingId: booking._id, // ObjectId ref to Booking
+      ...(siteAutomationsEnabled !== undefined
+        ? { siteAutomationsEnabled }
+        : {}),
       invoiceCompany:
         String(payload.invoiceCompany || payload.accounting?.invoiceCompany || "TSC")
           .trim()
@@ -2642,6 +2775,16 @@ router.patch("/:id", musicianAuth, async (req, res) => {
   try {
     const rawBody = { ...req.body };
     const body = { ...rawBody, updatedAt: new Date() };
+    if (Object.prototype.hasOwnProperty.call(body, "siteAutomationsEnabled")) {
+      const siteAutomationsEnabled = parseSiteAutomationsEnabled(
+        body.siteAutomationsEnabled,
+      );
+      if (siteAutomationsEnabled === undefined) {
+        delete body.siteAutomationsEnabled;
+      } else {
+        body.siteAutomationsEnabled = siteAutomationsEnabled;
+      }
+    }
     if (Object.prototype.hasOwnProperty.call(body, "eventType")) {
       body.eventType = normalizeEventType(body.eventType);
     }
@@ -2724,6 +2867,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       delete body.assignedMusicians;
       delete body.bookingMusicians;
       delete body.bandLineup;
+      delete body.siteAutomationsEnabled;
     }
 
     // First try: treat :id as a real Booking _id
@@ -2787,6 +2931,11 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
       const mirrorPatch = {
         updatedAt: new Date(),
+        ...(body.siteAutomationsEnabled !== undefined
+          ? {
+              siteAutomationsEnabled: body.siteAutomationsEnabled,
+            }
+          : {}),
         ...(body.eventDateISO !== undefined || body.eventDate !== undefined || body.date !== undefined
           ? { eventDateISO: isoDateOnly(savedBooking?.eventDate || savedBooking?.date) }
           : {}),
@@ -3012,6 +3161,18 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       });
     }
 
+    if (
+      Object.prototype.hasOwnProperty.call(
+        bodyWithoutBookingDetails,
+        "siteAutomationsEnabled",
+      )
+    ) {
+      await mirrorSiteAutomationSettingToLinkedBookings(
+        row,
+        bodyWithoutBookingDetails.siteAutomationsEnabled,
+      );
+    }
+
     return res.json({
       success: true,
       row,
@@ -3165,9 +3326,13 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
         const email = String(
           row.clientEmail || row["Client Email"] || row.email || "",
         ).trim();
+        const siteAutomationsEnabled = readSiteAutomationsEnabled(row);
 
         const boardPatch = {
           bookingRef,
+          ...(siteAutomationsEnabled !== undefined
+            ? { siteAutomationsEnabled }
+            : {}),
 
           invoiceCompany:
             String(row.invoiceCompany || row["Invoice Company"] || "TSC")
@@ -3273,6 +3438,10 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
           { new: true, upsert: true },
         );
 
+        if (siteAutomationsEnabled === false) {
+          await mirrorSiteAutomationSettingToLinkedBookings(saved, false);
+        }
+
         const forecast = await syncBoardRowToFinance(
           saved.toObject ? saved.toObject() : saved,
         );
@@ -3360,9 +3529,13 @@ for (const [index, row] of usableRecords.entries()) {
     const vatRate = 0.2;
     const { vat: commissionVat, net: commissionNet } =
       calcVatFromVatInclusiveGross(commissionGross, vatRate);
+    const siteAutomationsEnabled = readSiteAutomationsEnabled(row);
 
     const boardPatch = {
       bookingRef,
+      ...(siteAutomationsEnabled !== undefined
+        ? { siteAutomationsEnabled }
+        : {}),
       invoiceCompany:
         String(row.invoiceCompany || row["Invoice Company"] || "TSC")
           .trim()
@@ -3426,6 +3599,10 @@ for (const [index, row] of usableRecords.entries()) {
       { $set: boardPatch, $setOnInsert: { createdAt: new Date() } },
       { new: true, upsert: true }
     );
+
+    if (siteAutomationsEnabled === false) {
+      await mirrorSiteAutomationSettingToLinkedBookings(saved, false);
+    }
 
     const forecast = await syncBoardRowToFinance(
       saved.toObject ? saved.toObject() : saved
@@ -3498,6 +3675,10 @@ router.post("/bulk-import", musicianAuth, async (req, res) => {
           },
           { new: true, upsert: true },
         );
+
+        if (row.siteAutomationsEnabled === false) {
+          await mirrorSiteAutomationSettingToLinkedBookings(saved, false);
+        }
 
         results.push(saved);
       } catch (error) {
