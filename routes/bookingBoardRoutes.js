@@ -140,9 +140,11 @@ const buildIntroEmail = (row) => {
   if (row?.contactRole === "agent") {
     const eventDate = row?.eventDateISO ? new Date(`${row.eventDateISO}T12:00:00Z`) : null;
     const bookingDate = row?.bookingDateISO ? new Date(`${row.bookingDateISO}T12:00:00Z`) : null;
-    const songDue = eventDate && bookingDate
-      ? new Date(bookingDate.getTime() + Math.ceil((eventDate - bookingDate) / 2))
-      : null;
+    const songDue = row?.songSuggestionsDueDateISO
+      ? new Date(`${row.songSuggestionsDueDateISO}T12:00:00Z`)
+      : eventDate && bookingDate
+        ? new Date(bookingDate.getTime() + Math.ceil((eventDate - bookingDate) / 2))
+        : null;
     const formatDate = (value) => value && !Number.isNaN(value.getTime())
       ? value.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
       : "the agreed date";
@@ -720,6 +722,7 @@ const normaliseImportRow = (item = {}) => {
       0,
       10,
     ),
+    songSuggestionsDueDateISO: cleanString(item.songSuggestionsDueDateISO).slice(0, 10),
     agent: normaliseAgent(item.agent),
     clientEmails: item.clientEmail
       ? [{ email: cleanString(item.clientEmail) }]
@@ -928,6 +931,7 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
     "finishTime",
     "actName",
     "actTscName",
+    "songSuggestionsDueDateISO",
   ];
   scalarFields.forEach((field) => {
     if (
@@ -1236,6 +1240,8 @@ const mergeRowData = (preferred, secondary) => {
     eventDateISO: preferred?.eventDateISO || secondary?.eventDateISO,
     enquiryDateISO: preferred?.enquiryDateISO || secondary?.enquiryDateISO,
     bookingDateISO: preferred?.bookingDateISO || secondary?.bookingDateISO,
+    songSuggestionsDueDateISO:
+      preferred?.songSuggestionsDueDateISO || secondary?.songSuggestionsDueDateISO,
     grossValue:
       Number(preferred?.grossValue || 0) ||
       Number(secondary?.grossValue || 0) ||
@@ -1486,6 +1492,7 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     eventDateISO,
     enquiryDateISO: isoDateOnly(doc?.createdAt || doc?.updatedAt),
     bookingDateISO: isoDateOnly(doc?.createdAt || doc?.updatedAt),
+    songSuggestionsDueDateISO: cleanString(doc?.songSuggestionsDueDateISO).slice(0, 10),
     grossValue,
     netCommission: Number(doc?.netCommission || 0) || 0,
     agent: normaliseAgent(doc?.agent),
@@ -1958,6 +1965,9 @@ router.post("/", musicianAuth, async (req, res) => {
       // keep both; lots of older code still queries booking.date
       eventDate: eventDate || undefined,
       date: eventDate || undefined,
+      songSuggestionsDueDateISO: String(
+        payload.songSuggestionsDueDateISO || "",
+      ).slice(0, 10),
 
       clientName: String(
         payload.bookerName ||
@@ -2041,6 +2051,7 @@ router.post("/", musicianAuth, async (req, res) => {
       eventDateISO: eventDateISO || "",
       enquiryDateISO: String(payload.enquiryDateISO || "").slice(0, 10),
       bookingDateISO: String(payload.bookingDateISO || "").slice(0, 10),
+      songSuggestionsDueDateISO: String(payload.songSuggestionsDueDateISO || "").slice(0, 10),
 
       grossValue: Number(payload.grossValue || 0) || 0,
       netCommission: Number(payload.netCommission || 0) || 0,
@@ -2098,7 +2109,7 @@ router.post("/", musicianAuth, async (req, res) => {
         "bookerName", "clientFirstNames", "clientEmail", "clientEmails",
         "clientPhone", "clientAddress", "contactRole", "agent", "eventType",
         "grossValue", "netCommission", "accounting", "depositInvoice",
-        "paymentInstructions", "invoiceDateISO", "invoiceDueDateISO",
+        "paymentInstructions", "invoiceDateISO", "invoiceDueDateISO", "songSuggestionsDueDateISO",
         "invoiceUrl", "invoicePdfUrl", "balanceAmountPence", "balanceStatus",
         "payments",
       ].forEach(preserve);
@@ -2765,6 +2776,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
           : {}),
         ...(body.bookingDateISO !== undefined
           ? { bookingDateISO: String(body.bookingDateISO || "").slice(0, 10) }
+          : {}),
+        ...(body.songSuggestionsDueDateISO !== undefined
+          ? { songSuggestionsDueDateISO: String(body.songSuggestionsDueDateISO || "").slice(0, 10) }
           : {}),
         ...(body.enquiryDateISO !== undefined
           ? { enquiryDateISO: String(body.enquiryDateISO || "").slice(0, 10) }

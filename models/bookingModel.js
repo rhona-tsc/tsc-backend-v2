@@ -436,6 +436,7 @@ const BookingSchema = new mongoose.Schema(
     // Manual booking helpers
     lineup: mongoose.Schema.Types.Mixed,
     eventDate: { type: Date },
+    songSuggestionsDueDateISO: { type: String, default: "" },
     clientName: { type: String },
     clientEmail: { type: String },
     clientPhone: { type: String },

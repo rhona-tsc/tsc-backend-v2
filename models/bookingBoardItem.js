@@ -289,6 +289,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
     enquiryDateISO: { type: String }, // "yyyy-mm-dd" — first contact
     bookingDateISO: { type: String }, // "yyyy-mm-dd" — when confirmed/paid
     invoiceDateISO: { type: String }, // when invoice was generated
+    songSuggestionsDueDateISO: { type: String }, // authoritative song/request deadline
 
     invoiceDueDateISO: { type: String }, // payment due date
     grossValue: { type: Number, default: 0 },
