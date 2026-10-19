@@ -1505,7 +1505,10 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
     );
   }
   labelValue("Band name", bandName, { showFallback: true });
-  labelValue("Lineup", [lineupLabel, lineupDescription].filter(Boolean).join(" - "), { showFallback: true });
+  const lineupOverview = /\([^)]*\)/.test(String(lineupLabel || ""))
+    ? lineupLabel
+    : [lineupLabel, lineupDescription].filter(Boolean).join(" - ");
+  labelValue("Lineup", lineupOverview, { showFallback: true });
   labelValue("Bookers", bookerNames, { showFallback: true });
   labelValue("Booker phone", bookerPhone, { showFallback: true });
   labelValue("Venue address", venue, { showFallback: true });
