@@ -12,6 +12,9 @@ import { makeShortId } from "../utils/makeShortId.js";
 import crypto from "crypto"; // at top of file if not already
 import EnquiryMessage from "../models/EnquiryMessage.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
+import {
+  resolveBookingReplyIntent,
+} from "../utils/bookingReplyIntent.js";
 
 const isValid24 = (v) =>
   typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
@@ -5237,42 +5240,6 @@ export const twilioInbound = async (req, res) => {
     }
   };
 
-  const classifyBookingReply = (s = "") => {
-    const t = String(s || "").trim().toLowerCase();
-    if (!t) return null;
-
-    if (
-      t === "yes" ||
-      t === "yes, book me in!" ||
-      t.includes("book me in") ||
-      t === "yesbook" ||
-      t.startsWith("yesbook_") ||
-      t === "yesbook_"
-    ) return "YES";
-
-    if (
-      t === "no" ||
-      t === "i'm already booked!" ||
-      t === "im already booked!" ||
-      t.includes("already booked") ||
-      t === "nobook" ||
-      t.startsWith("nobook_") ||
-      t === "nobook_"
-    ) return "NO_BOOKED";
-
-    if (
-      t === "noloc" ||
-      t === "no thanks" ||
-      t === "no thanks!" ||
-      t.includes("can't do this location") ||
-      t.includes("cant do this location")
-    ) return "NO_LOC";
-
-    return null;
-  };
-
-  
-
   const classifyDeputyAllocationReply = (s = "") => {
     const t = String(s || "").trim().toLowerCase();
     if (!t) return null;
@@ -5570,20 +5537,15 @@ if (deputyAllocationJob && !deputyAllocationReply) {
           rawBodyText.match(/^YESBOOK_(\S+)$/i) ||
           rawBodyText.match(/^NOBOOK_(\S+)$/i);
 
-        const bookingLooksExplicit =
-          /^YESBOOK_/i.test(rawBtnId) ||
-          /^NOBOOK_/i.test(rawBtnId) ||
-          /^YESBOOK_/i.test(rawBodyText) ||
-          /^NOBOOK_/i.test(rawBodyText);
-
-        const bookingReply = bookingLooksExplicit
-          ? (
-              classifyBookingReply(rawBtnText) ||
-              classifyBookingReply(rawBtnId) ||
-              classifyBookingReply(rawBodyText) ||
-              null
-            )
-          : null;
+        const {
+          looksExplicit: bookingLooksExplicit,
+          reply: bookingReply,
+        } = resolveBookingReplyIntent({
+          buttonText: rawBtnText,
+          buttonPayload: rawBtnId,
+          bodyText: rawBodyText,
+          usedQuickReply,
+        });
 
         let bookingMsg = null;
 

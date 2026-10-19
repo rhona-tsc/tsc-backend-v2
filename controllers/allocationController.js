@@ -524,6 +524,23 @@ const closeCompetingRoleOffers = async (winner) => {
       });
     }
   }
+
+  // A late acceptance can arrive after escalation has opened a public deputy
+  // job. Close that fallback immediately so the filled role cannot keep taking
+  // applications.
+  await DeputyJob.updateMany(
+    {
+      "automation.bookingRef": winner.bookingRef,
+      "automation.roleSlotId": winner.roleSlotId,
+      status: "open",
+    },
+    {
+      $set: {
+        status: "cancelled",
+        workflowStage: "closed",
+      },
+    },
+  );
 };
 
 const musicianMatchesAssignment = (entry = {}, user = {}) => {
