@@ -166,6 +166,9 @@ const withConfirmedAllocation = async (booking) => {
     ...(board?.lineupSelected
       ? { lineupSelected: board.lineupSelected, lineupLabel: board.lineupSelected }
       : {}),
+    ...(Array.isArray(board?.lineupComposition) && board.lineupComposition.length
+      ? { lineupComposition: board.lineupComposition }
+      : {}),
     ...(board?.arrivalTime ? { arrivalTime: board.arrivalTime } : {}),
     ...(board?.startTime ? { startTime: board.startTime } : {}),
     ...(board?.setupTime ? { setupTime: board.setupTime } : {}),
@@ -864,15 +867,84 @@ const getFirstActSummary = (booking) => {
   return null;
 };
 
+const normalisePdfRole = (value = "") =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+const getWantedLineupRolesForPdf = (booking) => {
+  const firstAct = getFirstActSummary(booking) || {};
+  const explicit = [
+    ...(Array.isArray(booking?.lineupComposition) ? booking.lineupComposition : []),
+    ...(Array.isArray(firstAct?.lineupComposition) ? firstAct.lineupComposition : []),
+  ];
+  if (explicit.length) return explicit.map(normalisePdfRole).filter(Boolean);
+
+  const allocated = [
+    booking?.plannedMusicians,
+    booking?.assignedMusicians,
+    booking?.bookingMusicians,
+    booking?.bandLineup,
+  ].find((members) => Array.isArray(members) && members.length) || [];
+  return allocated
+    .map((member) => member?.role || member?.instrument || member?.position)
+    .map(normalisePdfRole)
+    .filter(Boolean);
+};
+
 const resolveActLineupForPdf = (booking, act) => {
   const firstAct = getFirstActSummary(booking) || {};
   const wantedId = String(firstAct.lineupId || booking?.lineupId || "");
-  const wantedLabel = String(firstAct.lineupLabel || firstAct.lineup?.actSize || "").trim().toLowerCase();
-  return (act?.lineups || []).find((lineup) =>
+  const wantedLabel = String(
+    firstAct.lineupLabel ||
+    firstAct.lineup?.actSize ||
+    booking?.lineupSelected ||
+    booking?.lineupLabel ||
+    "",
+  ).trim().toLowerCase();
+  const lineups = act?.lineups || [];
+  const wantedCount = Number.parseInt(wantedLabel.match(/(\d+)\s*[- ]?\s*piece/i)?.[1], 10);
+  const byId = lineups.find((lineup) =>
     [lineup?._id, lineup?.lineupId, lineup?.id].some((id) => String(id || "") === wantedId),
-  ) || (act?.lineups || []).find((lineup) =>
+  );
+  const byIdCount = Number.parseInt(String(byId?.actSize || "").match(/\d+/)?.[0], 10);
+  if (byId && (!Number.isFinite(wantedCount) || byIdCount === wantedCount)) return byId;
+
+  const exactLabel = lineups.find((lineup) =>
     wantedLabel && String(lineup?.actSize || "").trim().toLowerCase() === wantedLabel,
-  ) || firstAct.lineup || null;
+  );
+  if (exactLabel) return exactLabel;
+
+  if (Number.isFinite(wantedCount)) {
+    const sameSize = lineups.filter(
+      (lineup) => Number.parseInt(String(lineup?.actSize || "").match(/\d+/)?.[0], 10) === wantedCount,
+    );
+    if (sameSize.length === 1) return sameSize[0];
+    if (sameSize.length > 1) {
+      const wantedRoles = getWantedLineupRolesForPdf(booking);
+      if (wantedRoles.length) {
+        return sameSize
+          .map((lineup) => {
+            const roles = (lineup?.bandMembers || [])
+              .map((member) => normalisePdfRole(member?.instrument || member?.role))
+              .filter(Boolean);
+            const unmatched = [...roles];
+            const score = wantedRoles.reduce((total, role) => {
+              const index = unmatched.indexOf(role);
+              if (index < 0) return total;
+              unmatched.splice(index, 1);
+              return total + 1;
+            }, 0);
+            return { lineup, score };
+          })
+          .sort((a, b) => b.score - a.score)[0]?.lineup;
+      }
+      return sameSize[0];
+    }
+  }
+
+  return firstAct.lineup || null;
 };
 
 const getLineupLabelForPdf = (booking, act) => {
@@ -1045,12 +1117,6 @@ const getActImageUrlsForPdf = (booking, act) => {
 };
 
 const getHotMealsRequiredForPdf = (answers, booking, act) => {
-  const explicit = pickAnswer(answers, [
-    "hot_meals_required",
-    "hotMealsRequired",
-  ]);
-  if (explicit) return explicit;
-
   const firstAct = getFirstActSummary(booking);
   const lineup = resolveActLineupForPdf(booking, act);
   const candidates = [
@@ -1066,15 +1132,54 @@ const getHotMealsRequiredForPdf = (answers, booking, act) => {
     if (formatted) return formatted;
   }
 
+  const explicit = pickAnswer(answers, [
+    "hot_meals_required",
+    "hotMealsRequired",
+  ]);
+  if (explicit) return explicit;
+
   const performerCount = getLineupMembersForPdf(booking, act).filter(
-    (member) => !isNonPerformerForPdf(member),
+    (member) =>
+      !isNonPerformerForPdf(member) &&
+      Boolean(normalisePdfValue(member?.instrument || member?.role)),
   ).length;
   const count = performerCount || Number(String(firstAct?.lineupLabel || "").match(/\d+/)?.[0]) || 1;
   return `${count} hot meal${count === 1 ? "" : "s"} and refreshments required`;
 };
 
-const getPaidParkingSummaryForPdf = (answers) => {
-  const totalCarsRaw = pickAnswer(answers, [
+const getParkingRequiredForPdf = (answers, booking, act) => {
+  const firstAct = getFirstActSummary(booking);
+  const lineup = resolveActLineupForPdf(booking, act);
+  const candidates = [
+    lineup?.parking,
+    firstAct?.lineup?.parking,
+    firstAct?.parking,
+    booking?.lineup?.parking,
+    booking?.parking,
+  ];
+  for (const value of candidates) {
+    const formatted = normalisePdfValue(value);
+    if (formatted) return formatted;
+  }
+
+  const explicit = pickAnswer(answers, ["parking_num_cars", "parkingNumCars"]);
+  if (explicit) return explicit;
+
+  const performerCount = getLineupMembersForPdf(booking, act).filter(
+    (member) =>
+      !isNonPerformerForPdf(member) &&
+      Boolean(normalisePdfValue(member?.instrument || member?.role)),
+  ).length;
+  const labelCount = Number.parseInt(
+    String(getLineupLabelForPdf(booking, act) || "").match(/\d+/)?.[0],
+    10,
+  );
+  const count = performerCount || (Number.isFinite(labelCount) ? labelCount : null);
+  return count == null ? "" : String(count);
+};
+
+const getPaidParkingSummaryForPdf = (answers, totalCarsRequired = "") => {
+  const totalCarsRaw = totalCarsRequired || pickAnswer(answers, [
     "parking_num_cars",
     "parkingNumCars",
   ]);
@@ -1089,6 +1194,7 @@ const getPaidParkingSummaryForPdf = (answers) => {
 
   const totalCars = Number.parseInt(totalCarsRaw, 10);
   const onsiteSpaces = Number.parseInt(onsiteSpacesRaw, 10);
+  if (!Number.isFinite(onsiteSpaces)) return noInfo;
   const paidSpaces = Number.isFinite(totalCars)
     ? Math.max(
         totalCars - (Number.isFinite(onsiteSpaces) ? onsiteSpaces : 0),
@@ -1315,7 +1421,17 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
     .fontSize(12)
     .fillColor(coral)
     .text(bandName, { align: "center" });
-  doc.moveDown(1.1);
+  doc.moveDown(0.8);
+
+  if (booking?.eventSheet?.submitted !== true) {
+    boxedNote(
+      "Event sheet still being completed",
+      "The client has not completed the event sheet yet. This PDF will update as they add information, so please check back later for more details. You will be emailed when the client submits the completed event sheet.",
+      { showFallback: true },
+    );
+  } else {
+    doc.moveDown(0.3);
+  }
 
   if (actImageBuffers.length) {
     try {
@@ -1333,11 +1449,6 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
   }
 
   // At-a-glance summary
-  doc
-    .roundedRect(left, doc.y, contentWidth, 108, 8)
-    .fillAndStroke(pale, border);
-  const summaryY = doc.y + 14;
-  const col = contentWidth / 3;
   const summaryItems = [
     ["Date", eventDate],
     ["Act", bandName],
@@ -1346,11 +1457,28 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
     ["Phone", bookerPhone || noInfo],
     ["Booking ref", ref],
   ];
+  const col = contentWidth / 3;
+  const summaryRowHeights = [0, 0];
+  summaryItems.forEach(([, value], index) => {
+    const row = Math.floor(index / 3);
+    doc.font("Helvetica-Bold").fontSize(11);
+    const valueHeight = doc.heightOfString(value || noInfo, {
+      width: col - 24,
+      lineGap: 1,
+    });
+    summaryRowHeights[row] = Math.max(summaryRowHeights[row], valueHeight + 34, 46);
+  });
+  const summaryBoxHeight = 14 + summaryRowHeights[0] + summaryRowHeights[1] + 10;
+  const summaryTop = doc.y;
+  doc
+    .roundedRect(left, summaryTop, contentWidth, summaryBoxHeight, 8)
+    .fillAndStroke(pale, border);
+  const summaryY = summaryTop + 14;
   summaryItems.forEach(([label, value], index) => {
     const row = Math.floor(index / 3);
     const column = index % 3;
     const x = left + col * column + 12;
-    const y = summaryY + row * 46;
+    const y = summaryY + (row === 0 ? 0 : summaryRowHeights[0]);
     doc
       .font("Helvetica-Bold")
       .fontSize(8)
@@ -1360,9 +1488,12 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
       .font("Helvetica-Bold")
       .fontSize(11)
       .fillColor(dark)
-      .text(value || noInfo, x, y + 15, { width: col - 24 });
+      .text(value || noInfo, x, y + 15, {
+        width: col - 24,
+        lineGap: 1,
+      });
   });
-  doc.y += 126;
+  doc.y = summaryTop + summaryBoxHeight + 18;
 
   sectionTitle("Event overview");
   labelValue("Event type", eventType, { showFallback: true });
@@ -1420,6 +1551,7 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
 
   sectionTitle("Parking & load-in");
   const parkingAvailability = pickAnswer(answers, ["parking_available", "parkingAvailable"]);
+  const parkingRequired = getParkingRequiredForPdf(answers, booking, act);
   labelValue(
     "Parking availability",
     parkingAvailability,
@@ -1427,7 +1559,7 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
   );
   labelValue(
     "Total parking required",
-    pickAnswer(answers, ["parking_num_cars", "parkingNumCars"]),
+    parkingRequired,
     { showFallback: true },
   );
   if (String(parkingAvailability).toLowerCase() !== "yes") {
@@ -1436,7 +1568,7 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
       pickAnswer(answers, ["parking_spaces_on_site", "parkingSpacesOnSite"]),
       { showFallback: true },
     );
-    labelValue("Paid parking required", getPaidParkingSummaryForPdf(answers), {
+    labelValue("Paid parking required", getPaidParkingSummaryForPdf(answers, parkingRequired), {
       showFallback: true,
     });
   }
