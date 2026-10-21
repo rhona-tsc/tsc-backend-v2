@@ -11,6 +11,7 @@ import {
   normaliseStringList,
   validateOriginalProjectForModeration,
 } from "../services/originalsPolicyService.js";
+import { sendOriginalProjectApprovedNotifications } from "../services/originalsNotificationService.js";
 
 const clean = (value) => String(value || "").trim();
 const cleanEmail = (value) => clean(value).toLowerCase();
@@ -313,12 +314,70 @@ export const decideOriginalProjectModeration = async (req, res) => {
       metadata: round ? { roundId: String(round._id) } : {},
     });
 
-    return res.json({ success: true, project, round });
+    let notification = null;
+    if (decision === "approve") {
+      try {
+        notification = await sendOriginalProjectApprovedNotifications({ project });
+        await recordEvent({
+          projectId: project._id,
+          type: "project_launch_notifications_sent",
+          user: req.user,
+          fromState: project.state,
+          toState: project.state,
+          metadata: {
+            attempted: notification.attempted,
+            sent: notification.sent,
+            failed: notification.failed,
+          },
+        });
+      } catch (notificationError) {
+        console.error("❌ Originals approval notifications failed:", notificationError);
+        notification = {
+          attempted: 0,
+          sent: 0,
+          failed: 1,
+          error: notificationError?.message || "Notification send failed",
+        };
+      }
+    }
+
+    return res.json({ success: true, project, round, notification });
   } catch (error) {
     console.error("❌ decideOriginalProjectModeration error:", error);
     if (error?.code === 11000) {
       return res.status(409).json({ success: false, message: "This project has already been opened" });
     }
     return res.status(500).json({ success: false, message: "Failed to moderate Originals project" });
+  }
+};
+
+export const resendOriginalProjectLaunchNotifications = async (req, res) => {
+  try {
+    if (!canModerateOriginals(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin access required" });
+    }
+    const project = await originalProjectModel.findById(req.params.id);
+    if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
+    if (project.moderation?.status !== "approved") {
+      return res.status(409).json({ success: false, message: "Only approved projects can be announced" });
+    }
+
+    const notification = await sendOriginalProjectApprovedNotifications({ project });
+    await recordEvent({
+      projectId: project._id,
+      type: "project_launch_notifications_resent",
+      user: req.user,
+      fromState: project.state,
+      toState: project.state,
+      metadata: {
+        attempted: notification.attempted,
+        sent: notification.sent,
+        failed: notification.failed,
+      },
+    });
+    return res.json({ success: notification.sent > 0, notification });
+  } catch (error) {
+    console.error("❌ resendOriginalProjectLaunchNotifications error:", error);
+    return res.status(500).json({ success: false, message: "Failed to send Originals project notifications" });
   }
 };

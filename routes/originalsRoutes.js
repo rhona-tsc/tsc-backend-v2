@@ -7,6 +7,7 @@ import {
   listMyOriginalProjects,
   listOriginalProjects,
   listOriginalsModeration,
+  resendOriginalProjectLaunchNotifications,
   submitOriginalProjectForModeration,
   updateOriginalProject,
 } from "../controllers/originalsController.js";
@@ -94,5 +95,6 @@ router.get("/musicians/:musicianId/stats", getOriginalsMusicianStats);
 
 router.get("/moderation", listOriginalsModeration);
 router.post("/projects/:id/moderate", decideOriginalProjectModeration);
+router.post("/projects/:id/notify-launch", resendOriginalProjectLaunchNotifications);
 
 export default router;
