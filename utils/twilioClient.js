@@ -84,6 +84,58 @@ export const toE164 = (raw = "") => {
   return s;
 };
 
+/**
+ * Read the Twilio message history for one phone number. This is used by the
+ * admin Messages screen to recover older outbound messages which pre-date our
+ * local message logging.
+ */
+export async function fetchTwilioConversation(phone, { limit = 250 } = {}) {
+  const client = getTwilioClient();
+  if (!client) throw new Error("Twilio disabled");
+
+  const person = toE164(phone);
+  if (!person) return [];
+
+  const addresses = [person, `whatsapp:${person}`];
+  const queries = addresses.flatMap((address) => [
+    client.messages.list({ to: address, limit }),
+    client.messages.list({ from: address, limit }),
+  ]);
+
+  const results = await Promise.allSettled(queries);
+  const bySid = new Map();
+
+  for (const result of results) {
+    if (result.status !== "fulfilled") continue;
+    for (const message of result.value || []) {
+      if (!message?.sid || bySid.has(message.sid)) continue;
+
+      const from = String(message.from || "");
+      const to = String(message.to || "");
+      const fromPerson = toE164(from) === person;
+      const channel = /^whatsapp:/i.test(from) || /^whatsapp:/i.test(to)
+        ? "whatsapp"
+        : "sms";
+
+      bySid.set(message.sid, {
+        _id: `twilio-${message.sid}`,
+        sid: message.sid,
+        senderRole: fromPerson ? "musician" : "agent",
+        senderName: fromPerson ? "Musician" : "System",
+        body: String(message.body || "").trim() || "WhatsApp template message",
+        channel,
+        status: message.status || "",
+        createdAt: message.dateSent || message.dateCreated || new Date(),
+        source: "twilio-history",
+      });
+    }
+  }
+
+  return Array.from(bySid.values()).sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+}
+
 /** Only send status callbacks when we have an HTTPS public URL */
 const statusCallback =
   BACKEND_URL && /^https:\/\//i.test(BACKEND_URL)
@@ -592,5 +644,6 @@ export default {
   sendDeputyAllocationDeclinedWhatsApp,
   sendSMSMessage,
   sendWhatsAppText,
+  fetchTwilioConversation,
   toE164,
 };

@@ -6,6 +6,7 @@ import musicianAuth from "../middleware/musicianAuth.js";
 import Musician from "../models/musicianModel.js";
 import MessageConversation from "../models/messageConversationModel.js";
 import sendEmail from "../utils/sendEmail.js";
+import { fetchTwilioConversation } from "../utils/twilioClient.js";
 
 const router = express.Router();
 
@@ -226,6 +227,7 @@ const buildThreadsFromRows = (rows = []) => {
     channel: "whatsapp",
     createdAt: row.repliedAt || row.updatedAt || row.createdAt,
     source: "availability-inbound",
+    sid: row.inbound?.sid || null,
     rowId: String(row._id),
     requestId: row.requestId || "",
     slotIndex: Number(row.slotIndex ?? 0),
@@ -583,6 +585,57 @@ router.get("/mine", musicianAuth, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to load your messages",
+    });
+  }
+});
+
+/**
+ * GET /api/messages/:threadId/twilio-history
+ * Agent/admin-only, loaded on demand when a conversation is opened.
+ */
+router.get("/:threadId/twilio-history", musicianAuth, async (req, res) => {
+  try {
+    const { userRole } = getActorFromReq(req);
+    if (userRole !== "agent" && userRole !== "admin") {
+      return res.status(403).json({ success: false, message: "Not authorised" });
+    }
+
+    const threadId = String(req.params.threadId || "");
+    const separatorIndex = threadId.indexOf("__");
+    const threadType = separatorIndex >= 0 ? threadId.slice(0, separatorIndex) : "";
+    const threadValue = separatorIndex >= 0 ? threadId.slice(separatorIndex + 2) : "";
+    let phone = "";
+
+    if (threadType === "person" && isObjectId(threadValue)) {
+      const musician = await Musician.findById(threadValue)
+        .select("phone phoneNormalized")
+        .lean();
+      phone = musician?.phone || musician?.phoneNormalized || "";
+
+      if (!phone) {
+        const row = await Availability.findOne({ musicianId: threadValue })
+          .sort({ updatedAt: -1 })
+          .select("phone")
+          .lean();
+        phone = row?.phone || "";
+      }
+    } else if (threadType === "phone") {
+      phone = threadValue;
+    } else {
+      return res.status(400).json({ success: false, message: "Invalid thread id" });
+    }
+
+    if (!phone) {
+      return res.json({ success: true, messages: [] });
+    }
+
+    const messages = await fetchTwilioConversation(phone);
+    return res.json({ success: true, messages });
+  } catch (error) {
+    console.error("GET /api/messages/:threadId/twilio-history failed:", error);
+    return res.status(502).json({
+      success: false,
+      message: "Could not load Twilio message history",
     });
   }
 });
