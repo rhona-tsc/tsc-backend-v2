@@ -174,9 +174,16 @@ export async function parseVenueEventSheet(file) {
   const eventDateText = (sections.DATE || [""])[0];
   const actName = (sections["BAND NAME"] || [""])[0];
   const roomName = roomNameFrom(location, roomArea);
+  const reviewFlags = roomName === "Main / unspecified room"
+    ? [{
+        field: "roomName",
+        message: "No room or performance-space name was confidently detected. Review the performance-area wording before importing.",
+      }]
+    : [];
   return {
     fileName: file.originalname,
     warnings: messages.map((message) => message.message).filter(Boolean),
+    reviewFlags,
     venue: {
       name: venueName,
       address: locationLine,
