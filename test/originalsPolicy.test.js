@@ -25,6 +25,12 @@ test("Originals private preview is limited to Rhona's allowlisted identities", (
   assert.equal(canAccessOriginalsPreview({ role: "admin", id: "not-rhona" }), false);
   assert.equal(canAccessOriginalsPreview({ id: "693ac400ef2c3100595c0ed8" }), true);
   assert.equal(canAccessOriginalsPreview({ email: "HELLO@THESUPREMECOLLECTIVE.CO.UK" }), true);
+  assert.equal(canAccessOriginalsPreview({ email: "rhona@thesupremecollective.co.uk" }), true);
+  assert.equal(canAccessOriginalsPreview({ email: "ewanneilmcintosh@gmail.com" }), true);
+  assert.equal(canAccessOriginalsPreview({ email: "tsc.test.account@gmail.com" }), true);
+  assert.equal(canAccessOriginalsPreview({ email: "tscanything@gmail.com" }), true);
+  assert.equal(canAccessOriginalsPreview({ email: "someone.tsc@gmail.com" }), false);
+  assert.equal(canAccessOriginalsPreview({ email: "tsc.test.account@outlook.com" }), false);
 });
 
 test("reservations last 24 hours and allow no more than three extensions", () => {

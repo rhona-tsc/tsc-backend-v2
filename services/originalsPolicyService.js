@@ -24,12 +24,21 @@ export const canModerateOriginals = (user = {}) => {
 };
 
 const ORIGINALS_PREVIEW_USER_IDS = new Set(["693ac400ef2c3100595c0ed8"]);
-const ORIGINALS_PREVIEW_EMAILS = new Set(["hello@thesupremecollective.co.uk"]);
+const ORIGINALS_PREVIEW_EMAILS = new Set([
+  "hello@thesupremecollective.co.uk",
+  "rhona@thesupremecollective.co.uk",
+  "ewanneilmcintosh@gmail.com",
+]);
+const isOriginalsTestEmail = (email) => /^tsc[^@]*@gmail\.com$/i.test(email);
 
 export const canAccessOriginalsPreview = (user = {}) => {
   const userId = getOriginalsUserId(user);
   const email = normalise(user?.email || user?.useremail);
-  return ORIGINALS_PREVIEW_USER_IDS.has(userId) || ORIGINALS_PREVIEW_EMAILS.has(email);
+  return (
+    ORIGINALS_PREVIEW_USER_IDS.has(userId) ||
+    ORIGINALS_PREVIEW_EMAILS.has(email) ||
+    isOriginalsTestEmail(email)
+  );
 };
 
 export const getReservationExpiry = (from = new Date(), extensionHours = 0) =>
