@@ -188,6 +188,10 @@ const buildThreadsFromRows = (rows = []) => {
     buttonText: row.inbound?.buttonText || "",
     buttonPayload: row.inbound?.buttonPayload || "",
   });
+
+  if (!row.inbound?.readByAdmin) {
+    thread.unreadReplies += 1;
+  }
 }
 
     if (Array.isArray(row.websiteReplies)) {
@@ -797,6 +801,10 @@ router.post("/:threadId/mark-read", musicianAuth, async (req, res) => {
     }
 
     for (const row of rows) {
+      if (row.inbound?.body || row.reply) {
+        row.set("inbound.readByAdmin", isAgent ? true : row.inbound?.readByAdmin);
+        row.set("inbound.readByMusician", !isAgent ? true : row.inbound?.readByMusician);
+      }
       row.websiteReplies = (row.websiteReplies || []).map((reply) => ({
         ...(reply?.toObject ? reply.toObject() : reply),
         readByAdmin: isAgent ? true : reply.readByAdmin,

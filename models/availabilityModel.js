@@ -72,6 +72,8 @@ requestId: { type: String, index: true },
       body: { type: String },
       buttonText: { type: String },
       buttonPayload: { type: String },
+      readByAdmin: { type: Boolean, default: false },
+      readByMusician: { type: Boolean, default: true },
     },
 
     // 🔽 Google Calendar integration
