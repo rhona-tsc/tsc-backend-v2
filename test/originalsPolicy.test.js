@@ -12,8 +12,9 @@ import {
   validateOriginalProjectForModeration,
 } from "../services/originalsPolicyService.js";
 
-test("Originals remains disabled unless explicitly enabled", () => {
-  assert.equal(isOriginalsEnabled({}), false);
+test("Originals private preview is enabled by default with an explicit kill switch", () => {
+  assert.equal(isOriginalsEnabled({}), true);
+  assert.equal(isOriginalsEnabled({ ORIGINALS_ENABLED: "" }), true);
   assert.equal(isOriginalsEnabled({ ORIGINALS_ENABLED: "false" }), false);
   assert.equal(isOriginalsEnabled({ ORIGINALS_ENABLED: "1" }), false);
   assert.equal(isOriginalsEnabled({ ORIGINALS_ENABLED: " TRUE " }), true);

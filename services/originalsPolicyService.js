@@ -3,8 +3,13 @@ const normalise = (value) => String(value || "").trim().toLowerCase();
 export const ORIGINALS_OWNER_AGREEMENT_VERSION =
   "originals-owner-v0.1-legal-review";
 
-export const isOriginalsEnabled = (env = process.env) =>
-  normalise(env.ORIGINALS_ENABLED) === "true";
+export const isOriginalsEnabled = (env = process.env) => {
+  const configured = env.ORIGINALS_ENABLED;
+  if (configured === undefined || configured === null || String(configured).trim() === "") {
+    return true;
+  }
+  return normalise(configured) === "true";
+};
 
 export const getOriginalsUserId = (user = {}) =>
   String(user?._id || user?.id || user?.userId || "").trim();
