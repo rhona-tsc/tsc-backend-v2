@@ -2,7 +2,7 @@ import Act from '../models/actModel.js';
 import Musician from '../models/musicianModel.js';
 import Venue from '../models/venueModel.js';
 
-export const locationCounties = ['London', 'Kent', 'Essex', 'Surrey', 'Hertfordshire'];
+export const locationCounties = ['London', 'Kent', 'Essex', 'Surrey', 'Hertfordshire', 'West Sussex', 'Berkshire', 'Oxfordshire', 'Cambridgeshire', 'Buckinghamshire', 'East Sussex', 'North Yorkshire'];
 const clean = value => String(value || '').trim();
 const key = value => clean(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const emailKey = value => clean(value).toLowerCase();
@@ -69,7 +69,7 @@ export const buildLocationPages = (acts, musicians, venues) => {
       if (seen.has(signature) || /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(review.comment)) return false;
       seen.add(signature); return true;
     }).sort((a, b) => (b.eventDate || '').localeCompare(a.eventDate || '')).slice(0, 6);
-    return [county.toLowerCase(), { county, bands, venues: localVenues.map(venue => ({ id: String(venue._id), name: venue.name, county: venue.county })).sort((a, b) => a.name.localeCompare(b.name)), reviews }];
+    return [county.toLowerCase().replace(/\s+/g, '-'), { county, bands, venues: localVenues.map(venue => ({ id: String(venue._id), name: venue.name, county: venue.county })).sort((a, b) => a.name.localeCompare(b.name)), reviews }];
   }));
 };
 
