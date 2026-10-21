@@ -641,6 +641,34 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
     if (scheduleParts.length && !/\b(?:Arrival|Start|Finish):/i.test(existingDuties)) {
       msg.duties = [existingDuties, ...scheduleParts].join(" · ");
     }
+    const availabilityMatches = [
+      msg.phone && msg.actId && msg.meta?.MetaISODate
+        ? {
+            phone: msg.phone,
+            actId: msg.actId,
+            dateISO: msg.meta.MetaISODate,
+          }
+        : null,
+      assignment?.musicianId && board.bookingRef
+        ? {
+            musicianId: assignment.musicianId,
+            bookingId: board.bookingRef,
+          }
+        : null,
+    ].filter(Boolean);
+    if (availabilityMatches.length) {
+      await AvailabilityModel.updateMany(
+        { $or: availabilityMatches },
+        {
+          $set: {
+            reply: "no",
+            status: "withdrawn",
+            repliedAt: now,
+            updatedAt: now,
+          },
+        },
+      );
+    }
     await EnquiryMessage.updateOne(
       { _id: msg._id },
       {
