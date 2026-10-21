@@ -234,6 +234,10 @@ const publicEventSheetUrl = (row) => {
     : clean(row?.eventSheetLink);
 };
 
+const internalEventSheetUrl = (row) =>
+  clean(row?.eventSheetLink || row?.eventSheet?.url || row?.eventSheet?.link) ||
+  publicEventSheetUrl(row);
+
 const clientNames = (row = {}) => clean(
   row.clientFirstNames || row.clientName || row.bookerName || "there",
 );
@@ -543,7 +547,7 @@ export const buildAutomation4Email = (row) => {
   const clientName = clean(row?.clientFirstNames || row?.bookerName || "the client");
   const eventType = clean(row?.eventType || "event");
   const eventDate = friendlyDate(row?.eventDateISO || row?.eventDate);
-  const eventSheetUrl = publicEventSheetUrl(row);
+  const eventSheetUrl = internalEventSheetUrl(row);
   const draftSetlistUrl = clean(row?.draftSetlistLink);
   const whatsappUrl = clean(row?.whatsappGroupLink);
   const subject = `Time to Finalise The Setlist for ${clientName}'s ${eventType} on ${eventDate}`;
