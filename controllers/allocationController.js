@@ -1356,6 +1356,65 @@ export const confirmBookingRole = async (req, res) => {
       musicianId: musician._id,
     });
     const confirmation = await completeAcceptedAssignment({ board, assignment: candidate, musician });
+
+    // Manual confirmation is also used to reinstate someone who previously
+    // declined or withdrew. Keep their offer/availability history aligned with
+    // the confirmed board slot so the UI does not continue to show them as
+    // declined after an admin reallocates the role.
+    const selectedOffer = await EnquiryMessage.findOne({
+      bookingBoardItemId: board._id,
+      roleSlotId,
+      musicianId: musician._id,
+      "meta.kind": "booking",
+    }).sort({ createdAt: -1 });
+    if (selectedOffer) {
+      await EnquiryMessage.updateOne(
+        { _id: selectedOffer._id },
+        {
+          $set: {
+            reply: "yes",
+            status: "read",
+            repliedAt: candidate.respondedAt,
+            reconciledFromAllocationAt: new Date(),
+            "calendar.attendeeEmail": confirmation.email || contact.email || "",
+            "calendar.eventId": confirmation.eventId || "",
+            "calendar.calendarStatus": "accepted",
+            "calendar.confirmedBooking": true,
+          },
+        },
+      );
+    }
+
+    const dateISO = String(board.eventDateISO || "").slice(0, 10);
+    const availabilityFilter = {
+      musicianId: musician._id,
+      ...(dateISO ? { dateISO } : {}),
+      $or: [
+        { bookingId: board.bookingRef || String(board._id) },
+        { phone: contact.phone },
+      ],
+    };
+    await AvailabilityModel.findOneAndUpdate(
+      availabilityFilter,
+      {
+        $set: {
+          reply: "yes",
+          status: "accepted",
+          confirmedBooking: true,
+          repliedAt: candidate.respondedAt,
+          updatedAt: new Date(),
+          bookingId: board.bookingRef || String(board._id),
+          calendarEventId: confirmation.eventId || null,
+          calendarInviteEmail: confirmation.email || contact.email || "",
+          calendarInviteSentAt:
+            confirmation.eventId && (confirmation.email || contact.email)
+              ? new Date()
+              : null,
+          calendarStatus: "accepted",
+        },
+      },
+      { new: true },
+    );
     if (confirmation.eventId && confirmation.email) {
       candidate.calendarInviteSentAt = new Date();
       const applyInviteTimestamp = (entries = []) => entries.map((entry) =>
