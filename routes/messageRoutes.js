@@ -3,6 +3,9 @@ import mongoose from "mongoose";
 import Availability from "../models/availabilityModel.js";
 import { processAvailabilityReplyFlow } from "../controllers/availabilityController.js";
 import musicianAuth from "../middleware/musicianAuth.js";
+import Musician from "../models/musicianModel.js";
+import MessageConversation from "../models/messageConversationModel.js";
+import sendEmail from "../utils/sendEmail.js";
 
 const router = express.Router();
 
@@ -235,6 +238,205 @@ const buildThreadsFromRows = (rows = []) => {
   return threads;
 };
 
+const musicianDisplayName = (musician = {}) =>
+  [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim() ||
+  musician.stageName ||
+  musician.email ||
+  "Musician";
+
+const escapeHtml = (value = "") =>
+  String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+
+const notifyMusicianOfPortalMessage = async (musician) => {
+  if (!musician?.email) return false;
+  const portalUrl = `${String(
+    process.env.ADMIN_FRONTEND_URL ||
+      process.env.MUSICIAN_PORTAL_URL ||
+      "https://admin.thesupremecollective.co.uk",
+  ).replace(/\/$/, "")}/messages`;
+  const firstName = musician.firstName || "there";
+  const result = await sendEmail({
+    to: musician.email,
+    subject: "You have a new message from The Supreme Collective",
+    text: `Hi ${firstName},\n\nYou have a new message in your musician portal.\n\nView and reply: ${portalUrl}\n\nThe Supreme Collective`,
+    html: `<p>Hi ${escapeHtml(firstName)},</p><p>You have a new message in your musician portal.</p><p><a href="${escapeHtml(portalUrl)}">View and reply to your message</a></p><p>The Supreme Collective</p>`,
+  });
+  return Boolean(result?.ok || result?.accepted?.length);
+};
+
+const mergeConversationThreads = (
+  availabilityThreads = [],
+  conversations = [],
+  viewerIsAgent = false,
+) => {
+  const map = new Map(availabilityThreads.map((thread) => [thread._id, thread]));
+
+  for (const conversation of conversations) {
+    const threadId = `person__${conversation.musicianId}`;
+    const existing = map.get(threadId) || {
+      _id: threadId,
+      musicianId: conversation.musicianId,
+      recipientName: conversation.recipientName || "Musician",
+      recipientEmail: conversation.recipientEmail || "",
+      recipientPhone: conversation.recipientPhone || "",
+      actName: "",
+      reference: "Direct message",
+      eventDate: "",
+      formattedDate: "",
+      slotLabel: "",
+      channel: "website",
+      status: "sent",
+      unreadReplies: 0,
+      messages: [],
+      rows: [],
+      updatedAt: conversation.updatedAt || conversation.createdAt,
+    };
+
+    if (!existing.recipientName) existing.recipientName = conversation.recipientName;
+    if (!existing.recipientEmail) existing.recipientEmail = conversation.recipientEmail;
+    if (!existing.recipientPhone) existing.recipientPhone = conversation.recipientPhone;
+
+    for (const message of conversation.messages || []) {
+      existing.messages.push({
+        _id: `conversation-${message._id}`,
+        senderRole: message.senderRole,
+        senderName: message.senderName || message.senderRole,
+        body: message.body,
+        channel: message.channel || "website",
+        createdAt: message.createdAt,
+        source: "direct-conversation",
+      });
+      const unreadForViewer = viewerIsAgent
+        ? message.senderRole === "musician" && !message.readByAdmin
+        : message.senderRole === "agent" && !message.readByMusician;
+      if (unreadForViewer) {
+        existing.unreadReplies += 1;
+      }
+    }
+
+    existing.messages.sort(
+      (a, b) => toDateValue(a.createdAt) - toDateValue(b.createdAt),
+    );
+    existing.latestMessage = existing.messages.at(-1) || existing.latestMessage || null;
+    existing.messageCount = existing.messages.length;
+    existing.status = existing.messages.some((message) => message.senderRole === "musician")
+      ? "replied"
+      : existing.status || "sent";
+    existing.updatedAt = conversation.updatedAt || existing.updatedAt;
+    map.set(threadId, existing);
+  }
+
+  return Array.from(map.values()).sort(
+    (a, b) =>
+      toDateValue(b.latestMessage?.createdAt || b.updatedAt) -
+      toDateValue(a.latestMessage?.createdAt || a.updatedAt),
+  );
+};
+
+const addConversationMessage = async ({
+  musician,
+  senderRole,
+  senderName,
+  senderId,
+  body,
+}) => {
+  const message = {
+    body: String(body).trim(),
+    senderRole,
+    senderName,
+    senderId: isObjectId(senderId) ? senderId : null,
+    channel: "website",
+    readByAdmin: senderRole === "agent",
+    readByMusician: senderRole === "musician",
+    createdAt: new Date(),
+  };
+
+  return MessageConversation.findOneAndUpdate(
+    { musicianId: musician._id },
+    {
+      $set: {
+        recipientName: musicianDisplayName(musician),
+        recipientEmail: musician.email || "",
+        recipientPhone: musician.phone || musician.phoneNormalized || "",
+      },
+      $push: { messages: message },
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true },
+  );
+};
+
+router.get("/recipients", musicianAuth, async (req, res) => {
+  try {
+    const { userRole } = getActorFromReq(req);
+    if (userRole !== "agent" && userRole !== "admin") {
+      return res.status(403).json({ success: false, message: "Not authorised" });
+    }
+
+    const musicians = await Musician.find({ email: { $exists: true, $ne: "" } })
+      .select("_id firstName lastName stageName email phone phoneNormalized profilePhoto")
+      .sort({ firstName: 1, lastName: 1 })
+      .lean();
+
+    return res.json({
+      success: true,
+      recipients: musicians.map((musician) => ({
+        _id: musician._id,
+        name: musicianDisplayName(musician),
+        email: musician.email || "",
+        phone: musician.phone || musician.phoneNormalized || "",
+        profilePhoto: musician.profilePhoto || "",
+      })),
+    });
+  } catch (error) {
+    console.error("GET /api/messages/recipients failed:", error);
+    return res.status(500).json({ success: false, message: "Failed to load recipients" });
+  }
+});
+
+router.post("/start", musicianAuth, async (req, res) => {
+  try {
+    const { userRole, userId, firstName } = getActorFromReq(req);
+    if (userRole !== "agent" && userRole !== "admin") {
+      return res.status(403).json({ success: false, message: "Not authorised" });
+    }
+
+    const { musicianId, body } = req.body || {};
+    if (!isObjectId(musicianId) || !String(body || "").trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Choose a musician and enter a message",
+      });
+    }
+
+    const musician = await Musician.findById(musicianId)
+      .select("_id firstName lastName stageName email phone phoneNormalized")
+      .lean();
+    if (!musician) {
+      return res.status(404).json({ success: false, message: "Musician not found" });
+    }
+
+    await addConversationMessage({
+      musician,
+      senderRole: "agent",
+      senderName: firstName || "The Supreme Collective",
+      senderId: userId,
+      body,
+    });
+
+    const notificationSent = await notifyMusicianOfPortalMessage(musician);
+
+    return res.status(201).json({ success: true, notificationSent });
+  } catch (error) {
+    console.error("POST /api/messages/start failed:", error);
+    return res.status(500).json({ success: false, message: "Failed to start conversation" });
+  }
+});
+
 /**
  * GET /api/messages
  * Agent/admin view
@@ -250,19 +452,26 @@ router.get("/", musicianAuth, async (req, res) => {
       });
     }
 
-    const rows = await Availability.find({
-      $or: [
-        { messageSidOut: { $exists: true, $ne: null } },
-        { outboundMessage: { $exists: true, $ne: "" } },
-        { "inbound.body": { $exists: true, $ne: "" } },
-        { reply: { $in: ["yes", "no", "unavailable"] } },
-        { websiteReplies: { $exists: true, $ne: [] } },
-      ],
-    })
-      .sort({ updatedAt: -1 })
-      .lean();
+    const [rows, conversations] = await Promise.all([
+      Availability.find({
+        $or: [
+          { messageSidOut: { $exists: true, $ne: null } },
+          { outboundMessage: { $exists: true, $ne: "" } },
+          { "inbound.body": { $exists: true, $ne: "" } },
+          { reply: { $in: ["yes", "no", "unavailable"] } },
+          { websiteReplies: { $exists: true, $ne: [] } },
+        ],
+      })
+        .sort({ updatedAt: -1 })
+        .lean(),
+      MessageConversation.find({}).sort({ updatedAt: -1 }).lean(),
+    ]);
 
-    const threads = buildThreadsFromRows(rows);
+    const threads = mergeConversationThreads(
+      buildThreadsFromRows(rows),
+      conversations,
+      true,
+    );
 
     return res.json({
       success: true,
@@ -292,20 +501,27 @@ router.get("/mine", musicianAuth, async (req, res) => {
       });
     }
 
-    const rows = await Availability.find({
-      musicianId: userId,
-      $or: [
-        { messageSidOut: { $exists: true, $ne: null } },
-        { outboundMessage: { $exists: true, $ne: "" } },
-        { "inbound.body": { $exists: true, $ne: "" } },
-        { reply: { $in: ["yes", "no", "unavailable"] } },
-        { websiteReplies: { $exists: true, $ne: [] } },
-      ],
-    })
-      .sort({ updatedAt: -1 })
-      .lean();
+    const [rows, conversations] = await Promise.all([
+      Availability.find({
+        musicianId: userId,
+        $or: [
+          { messageSidOut: { $exists: true, $ne: null } },
+          { outboundMessage: { $exists: true, $ne: "" } },
+          { "inbound.body": { $exists: true, $ne: "" } },
+          { reply: { $in: ["yes", "no", "unavailable"] } },
+          { websiteReplies: { $exists: true, $ne: [] } },
+        ],
+      })
+        .sort({ updatedAt: -1 })
+        .lean(),
+      MessageConversation.find({ musicianId: userId }).lean(),
+    ]);
 
-    const threads = buildThreadsFromRows(rows);
+    const threads = mergeConversationThreads(
+      buildThreadsFromRows(rows),
+      conversations,
+      false,
+    );
 
     return res.json({
       success: true,
@@ -463,18 +679,19 @@ router.post("/:threadId/reply", musicianAuth, async (req, res) => {
     }
 
     const matchedRows = await Availability.find(query);
+    const musicianId =
+      threadType === "person"
+        ? threadValue
+        : matchedRows.find((row) => row.musicianId)?.musicianId;
 
-    if (!matchedRows.length) {
-      return res.status(404).json({
-        success: false,
-        message: "Message thread not found",
-      });
+    if (!isObjectId(musicianId)) {
+      return res.status(404).json({ success: false, message: "Message recipient not found" });
     }
 
     const isAgent = userRole === "agent" || userRole === "admin";
     const isOwnerMusician =
       isObjectId(userId) &&
-      matchedRows.some((row) => String(row.musicianId) === String(userId));
+      String(musicianId) === String(userId);
 
     if (!isAgent && !isOwnerMusician) {
       return res.status(403).json({
@@ -483,27 +700,33 @@ router.post("/:threadId/reply", musicianAuth, async (req, res) => {
       });
     }
 
-    const replyPayload = {
-      body: String(body).trim(),
-      senderRole: isAgent ? "agent" : "musician",
-      senderName: String(senderName || firstName || (isAgent ? "Agent" : "Musician")),
-      senderMusicianId: !isAgent && isObjectId(userId) ? userId : null,
-      readByAdmin: isAgent,
-      readByMusician: !isAgent,
-      createdAt: new Date(),
-    };
+    const musician = await Musician.findById(musicianId)
+      .select("_id firstName lastName stageName email phone phoneNormalized")
+      .lean();
+    if (!musician) {
+      return res.status(404).json({ success: false, message: "Musician not found" });
+    }
 
-    await Availability.updateMany(
-      { _id: { $in: matchedRows.map((row) => row._id) } },
-      {
-        $push: { websiteReplies: replyPayload },
-      }
-    );
+    const conversation = await addConversationMessage({
+      musician,
+      senderRole: isAgent ? "agent" : "musician",
+      senderName: isAgent
+        ? String(senderName || firstName || "The Supreme Collective")
+        : musicianDisplayName(musician),
+      senderId: userId,
+      body,
+    });
+
+    const replyPayload = conversation.messages.at(-1);
+    const notificationSent = isAgent
+      ? await notifyMusicianOfPortalMessage(musician)
+      : false;
 
     return res.json({
       success: true,
       message: "Reply saved",
       reply: replyPayload,
+      notificationSent,
     });
   } catch (err) {
     console.error("POST /api/messages/:threadId/reply failed:", err);
@@ -552,18 +775,19 @@ router.post("/:threadId/mark-read", musicianAuth, async (req, res) => {
     }
 
     const rows = await Availability.find(query);
+    const musicianId =
+      threadType === "person"
+        ? threadValue
+        : rows.find((row) => row.musicianId)?.musicianId;
 
-    if (!rows.length) {
-      return res.status(404).json({
-        success: false,
-        message: "Thread not found",
-      });
+    if (!isObjectId(musicianId)) {
+      return res.status(404).json({ success: false, message: "Thread not found" });
     }
 
     const isAgent = userRole === "agent" || userRole === "admin";
     const isOwnerMusician =
       isObjectId(userId) &&
-      rows.some((row) => String(row.musicianId) === String(userId));
+      String(musicianId) === String(userId);
 
     if (!isAgent && !isOwnerMusician) {
       return res.status(403).json({
@@ -580,6 +804,12 @@ router.post("/:threadId/mark-read", musicianAuth, async (req, res) => {
       }));
       await row.save();
     }
+
+    const readField = isAgent ? "messages.$[].readByAdmin" : "messages.$[].readByMusician";
+    await MessageConversation.updateOne(
+      { musicianId },
+      { $set: { [readField]: true } },
+    );
 
     return res.json({
       success: true,
