@@ -41,18 +41,16 @@ import {
 
 const router = express.Router();
 
-router.use((req, res, next) => {
-  if (isOriginalsEnabled()) return next();
-  return res.status(503).json({
-    success: false,
-    code: "ORIGINALS_DISABLED",
-    message: "TSC Originals is not available yet",
-  });
-});
-
 router.use(authUser);
 router.use((req, res, next) => {
   if (canAccessOriginalsPreview(req.user)) return next();
+  if (!isOriginalsEnabled()) {
+    return res.status(503).json({
+      success: false,
+      code: "ORIGINALS_DISABLED",
+      message: "TSC Originals is not available yet",
+    });
+  }
   return res.status(403).json({
     success: false,
     code: "ORIGINALS_PRIVATE_PREVIEW",
