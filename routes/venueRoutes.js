@@ -3,7 +3,7 @@ import Venue from "../models/venueModel.js";
 import Booking from "../models/bookingModel.js";
 import authUser from "../middleware/auth.js";
 import multer from "multer";
-import { parseVenueEventSheet } from "../services/venueEventSheetParser.js";
+import { countyFromAddress, parseVenueEventSheet, roomNameFrom } from "../services/venueEventSheetParser.js";
 
 const router = express.Router();
 const clean = (v) => String(v ?? "").trim();
@@ -59,7 +59,10 @@ function extractedVenue(booking) {
   const roomName = first(
     valueFrom(answers, ["venue_room", "room_name", "performance_room", "room"]),
     valueFrom(complete, ["venue_room", "room_name", "performance_room", "room"]),
-    "Main / unspecified room",
+    roomNameFrom([], first(
+      valueFrom(answers, ["room_area", "performance_area", "room_and_area", "venue_room_notes"]),
+      valueFrom(complete, ["room_area", "performance_area", "room_and_area", "venue_room_notes"]),
+    )),
   );
   const pin = valueFrom(answers, ["venue_pin", "venuePin", "google_maps_pin", "location_pin"]);
   const { actName, actId } = extractAct(booking);
@@ -67,7 +70,11 @@ function extractedVenue(booking) {
     name: name || address,
     address,
     postcode: postcodeFrom(address),
-    county: valueFrom(answers, ["venue_county", "county"]),
+    county: first(
+      valueFrom(answers, ["venue_county", "county"]),
+      valueFrom(complete, ["venue_county", "county"]),
+      countyFromAddress(address),
+    ),
     googleMapsUrl: /google\.(com|co\.uk)\/maps/i.test(pin) ? pin : "",
     what3wordsUrl: /what3words|w3w\.co/i.test(pin) ? pin : "",
     loadingPinUrl: pin,

@@ -1,9 +1,62 @@
 import mammoth from "mammoth";
+import { postcodes as POSTCODE_MAP_ARR } from "../utils/postcodes.js";
+
+const POSTCODE_MAP =
+  (Array.isArray(POSTCODE_MAP_ARR) && POSTCODE_MAP_ARR[0]) || {};
 
 const tidy = (value = "") => String(value).replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").trim();
 const unique = (values) => [...new Set(values.map(tidy).filter(Boolean))];
 const postcodeFrom = (value) => (tidy(value).toUpperCase().match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/) || [""])[0].replace(/\s+/g, " ");
 const urlsFrom = (value) => unique(String(value || "").match(/https?:\/\/[^\s]+/gi) || []).map((url) => url.replace(/[),.;]+$/, ""));
+const countyLabel = (key = "") => String(key)
+  .split("_")
+  .filter(Boolean)
+  .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+  .join(" ")
+  .replace(/^Durham$/, "County Durham");
+
+function countyFromAddress(value = "") {
+  const address = tidy(value);
+  const lowerAddress = address.toLowerCase();
+  const explicitCounty = Object.keys(POSTCODE_MAP)
+    .map((key) => ({ key, label: countyLabel(key) }))
+    .sort((a, b) => b.label.length - a.label.length)
+    .find(({ label }) => new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(lowerAddress));
+  if (explicitCounty?.label) return explicitCounty.label;
+
+  const postcode = postcodeFrom(address);
+  const outcode = postcode.split(" ")[0].toUpperCase();
+  if (!outcode) return "";
+  for (const [county, districts] of Object.entries(POSTCODE_MAP)) {
+    if ((districts || []).some((district) => String(district).toUpperCase() === outcode)) {
+      return countyLabel(county);
+    }
+  }
+  return "";
+}
+
+async function lookupCountyFromAddress(value = "") {
+  const address = tidy(value);
+  const explicitCounty = countyFromAddress(address);
+  const postcode = postcodeFrom(address);
+  if (!postcode || explicitCounty && new RegExp(`\\b${explicitCounty.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(address)) {
+    return explicitCounty;
+  }
+
+  try {
+    const response = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`, {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) return explicitCounty;
+    const result = (await response.json())?.result || {};
+    if (String(result.region || "").toLowerCase() === "london") return "Greater London";
+    const resolved = tidy(result.admin_county || result.admin_district || "")
+      .replace(/^(?:City of Bristol|Bristol, City of)$/i, "Bristol");
+    return resolved || explicitCounty;
+  } catch {
+    return explicitCounty;
+  }
+}
 
 const sectionNames = [
   "DATE", "BAND NAME", "BAND SIZE", "EVENT TYPE", "COUPLE'S NAMES", "COUPLE’S NAMES", "ATTIRE", "LOCATION", "PARKING",
@@ -52,12 +105,24 @@ const isDirectionRatherThanRoom = (line) => what3wordsPattern.test(line)
 function roomNameFrom(locationLines, roomText) {
   const extraLocation = locationLines.slice(1).find((line) => !/^(load in|load out|please (also )?provide)/i.test(line) && !postcodeFrom(line) && !isDirectionRatherThanRoom(line));
   if (extraLocation && extraLocation.length < 100) return extraLocation;
+  const sentencePatterns = [
+    /(?:band|musicians?|performance|music)\s+(?:will\s+)?(?:be\s+)?(?:perform(?:ing)?|play(?:ing)?|set(?:ting)?\s+up|take place)\s+(?:inside|within|in|at)\s+(?:the\s+)?([^,.;\n]{2,60})/i,
+    /(?:room|space|area)\s*(?:is|:|-)\s*(?:the\s+)?([^,.;\n]{2,60})/i,
+  ];
+  const roomType = /\b(?:barn|ballroom|suite|hall|room|studio|marquee|pavilion|theatre|conservatory|orangery|gallery|library|chapel|courtyard|terrace|garden|salon)\b/i;
+  for (const pattern of sentencePatterns) {
+    const match = roomText.match(pattern);
+    const candidate = tidy(match?.[1] || "").replace(/\s+(?:where|which|with|and)\b.*$/i, "");
+    if (candidate && roomType.test(candidate) && !isDirectionRatherThanRoom(candidate)) {
+      return candidate.replace(/^(.)/, (letter) => letter.toUpperCase());
+    }
+  }
   const patterns = [
     /\b(Studio\s+\d+)\b/i,
     /\b(Aisled Barn)\b/i,
     /\b(Main Barn)\b/i,
     /\b(top floor)\b/i,
-    /\b([A-Z][\w' -]+(?:Barn|Ballroom|Suite|Hall|Room|Studio|Marquee|Pavilion|Theatre|Conservatory))\b/,
+    /\b((?:[A-Z][\w'-]*\s+){0,3}(?:Barn|Ballroom|Suite|Hall|Room|Studio|Marquee|Pavilion|Theatre|Conservatory|Orangery|Gallery|Library|Chapel|Courtyard|Terrace|Garden|Salon))\b/,
   ];
   for (const pattern of patterns) { const match = roomText.match(pattern); if (match) return tidy(match[1]); }
   return "Main / unspecified room";
@@ -96,7 +161,7 @@ export async function parseVenueEventSheet(file) {
       name: venueName,
       address: locationLine,
       postcode: postcodeFrom(locationLine),
-      county: "",
+      county: await lookupCountyFromAddress(locationLine),
       website: allUrls.find((url) => !/google\.|maps\.app\.goo\.gl|spotify|facebook|instagram|linkedin|pinterest|youtu/i.test(url)) || "",
       googleMapsUrl: mapUrl,
       what3wordsUrl,
@@ -122,4 +187,4 @@ export async function parseVenueEventSheet(file) {
   };
 }
 
-export { postcodeFrom };
+export { countyFromAddress, lookupCountyFromAddress, postcodeFrom, roomNameFrom };
