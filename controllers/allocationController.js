@@ -1048,6 +1048,13 @@ export const offerBookingRole = async (req, res) => {
         board?.eventSheet?.answers?.schedule_simple_arrival ||
         "",
     ).trim();
+    const startTime = String(
+      req.body?.startTime ||
+        board?.performanceTimes?.startTime ||
+        board?.startTime ||
+        board?.eventSheet?.answers?.schedule_simple_start ||
+        "",
+    ).trim();
     const finishTime = String(
       req.body?.finishTime ||
         board?.performanceTimes?.finishTime ||
@@ -1076,17 +1083,18 @@ export const offerBookingRole = async (req, res) => {
             value && !dutiesAlreadyAllocated.has(value.toLowerCase()),
         ),
     ));
-    const roleWithArrival = [
+    const roleWithSchedule = [
       role,
       ...duties,
       arrivalTime
-        ? `arrival ${formatBookingClock(arrivalTime)}`
+        ? `Arrival: ${formatBookingClock(arrivalTime)}`
         : earlyArrivalMinutes
           ? `${earlyArrivalMinutes}-minute early arrival`
           : earlyArrivalTime
-            ? `early arrival at ${formatBookingClock(earlyArrivalTime)}`
+            ? `Early arrival: ${formatBookingClock(earlyArrivalTime)}`
             : "",
-      finishTime ? `finish ${formatBookingClock(finishTime)}` : "",
+      startTime ? `Start: ${formatBookingClock(startTime)}` : "",
+      finishTime ? `Finish: ${formatBookingClock(finishTime)}` : "",
     ]
       .filter(Boolean)
       .join(" · ");
@@ -1122,7 +1130,7 @@ export const offerBookingRole = async (req, res) => {
       formattedAddress: address,
       fee,
       currency,
-      duties: roleWithArrival,
+      duties: roleWithSchedule,
       actName: act.tscName || act.name || board.actName || "the band",
       requestId,
     });
@@ -1136,7 +1144,7 @@ export const offerBookingRole = async (req, res) => {
         requestId,
         variables: {
           "1": firstNameOf(musician), "2": formattedDate, "3": address,
-          "4": sanitizeFee(fee), "5": roleWithArrival,
+          "4": sanitizeFee(fee), "5": roleWithSchedule,
           "6": act.tscName || act.name || board.actName || "the band", "7": requestId,
         },
         smsBody,
@@ -1156,7 +1164,7 @@ export const offerBookingRole = async (req, res) => {
         originalBandMemberId,
         candidateSource: req.body?.candidateSource || "search",
         phone: contact.phone,
-        duties: roleWithArrival,
+        duties: roleWithSchedule,
         fee: fee ? String(fee) : "",
         formattedDate,
         formattedAddress: address,
@@ -1174,7 +1182,7 @@ export const offerBookingRole = async (req, res) => {
       await AvailabilityModel.findOneAndUpdate(
         { actId: act._id, lineupId: lineup?._id || lineup?.lineupId || null, dateISO, phone: contact.phone },
         {
-          $setOnInsert: { musicianId: musician._id, duties: roleWithArrival, fee: fee ? String(fee) : "", formattedDate, formattedAddress: address },
+          $setOnInsert: { musicianId: musician._id, duties: roleWithSchedule, fee: fee ? String(fee) : "", formattedDate, formattedAddress: address },
           $set: { status: "sent", reply: null, bookingId: board.bookingRef || String(board._id), updatedAt: new Date() },
         },
         { upsert: true, new: true },
