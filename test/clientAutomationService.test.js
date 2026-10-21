@@ -119,7 +119,7 @@ test("vocalist setlist automation catches up after the song-request deadline but
 test("vocalist setlist email uses the two operational links and vocalist first names", () => {
   const email = buildAutomation4Email({
     bookingRef: "BBM 497 DESIGN",
-    eventSheetLink: "https://docs.example.com/internal-event-sheet",
+    bandEventSheetUrl: "https://backend.example.com/api/booking/band-sheet/secure-token",
     clientFirstNames: "Susie",
     eventType: "Corporate Event",
     eventDateISO: "2026-10-29",
@@ -134,7 +134,7 @@ test("vocalist setlist email uses the two operational links and vocalist first n
   assert.match(email.text, /Hi Koko & Rya,/);
   assert.match(email.text, /https:\/\/example\.com\/setlist/);
   assert.match(email.text, /https:\/\/chat\.whatsapp\.com\/example/);
-  assert.match(email.text, /https:\/\/docs\.example\.com\/internal-event-sheet/);
+  assert.match(email.text, /https:\/\/backend\.example\.com\/api\/booking\/band-sheet\/secure-token/);
   assert.doesNotMatch(email.text, /event-sheet\/BBM%20497%20DESIGN/);
   assert.deepEqual(email.recipients, ["koko@example.com", "rya@example.com"]);
 });

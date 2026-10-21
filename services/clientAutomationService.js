@@ -1,10 +1,12 @@
 import BookingBoardItem from "../models/bookingBoardItem.js";
+import Booking from "../models/bookingModel.js";
 import ClientAutomationDelivery from "../models/clientAutomationDeliveryModel.js";
 import Act from "../models/actModel.js";
 import cloudinary from "../config/cloudinary.js";
 import sendEmail from "../utils/sendEmail.js";
 import { buildIntroInvoiceAttachments } from "../utils/introInvoiceAttachment.js";
 import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.js";
+import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
 
 export const AUTOMATION_10_KEY = "automation-10-balance-coming-due";
 export const AUTOMATION_10_NUMBER = 10;
@@ -235,8 +237,28 @@ const publicEventSheetUrl = (row) => {
 };
 
 const internalEventSheetUrl = (row) =>
-  clean(row?.eventSheetLink || row?.eventSheet?.url || row?.eventSheet?.link) ||
+  clean(
+    row?.bandEventSheetUrl ||
+      row?.eventSheetLink ||
+      row?.eventSheet?.url ||
+      row?.eventSheet?.link,
+  ) ||
   publicEventSheetUrl(row);
+
+const withBandEventSheetUrl = async (row = {}) => {
+  if (clean(row.bandEventSheetUrl || row.eventSheetLink)) return row;
+  try {
+    const coreBooking = row.bookingId
+      ? await Booking.findById(row.bookingId).select("eventSheet.bandSheetToken").lean()
+      : await Booking.findOne({ bookingId: clean(row.bookingRef) })
+        .select("eventSheet.bandSheetToken")
+        .lean();
+    const token = clean(coreBooking?.eventSheet?.bandSheetToken);
+    return token ? { ...row, bandEventSheetUrl: buildBandSheetPdfUrl(token) } : row;
+  } catch {
+    return row;
+  }
+};
 
 const clientNames = (row = {}) => clean(
   row.clientFirstNames || row.clientName || row.bookerName || "there",
@@ -944,7 +966,8 @@ export const runClientAutomations = async ({
       summary.skipped += 1;
       continue;
     }
-    const vocalistEmail = buildAutomation4Email(row);
+    const vocalistRow = await withBandEventSheetUrl(row);
+    const vocalistEmail = buildAutomation4Email(vocalistRow);
     if (!vocalistEmail.recipients.length) {
       summary.skipped += 1;
       continue;
