@@ -30,6 +30,8 @@ import {
   actReferenceCandidates,
   attachActProfileData,
   buildActProfileLookup,
+  findActLineup,
+  findBestActProfile,
 } from "../utils/bookingActData.js";
 
 const upload = multer({
@@ -2182,6 +2184,55 @@ router.post("/", musicianAuth, async (req, res) => {
       BookingBoardItem.findOne({ bookingRef }).lean(),
       Booking.findOne({ bookingId: bookingRef }).lean(),
     ]);
+
+    const actReference = {
+      ...existingBooking,
+      ...existingBoardRow,
+      ...payload,
+      actsSummary:
+        payload.actsSummary?.length
+          ? payload.actsSummary
+          : existingBoardRow?.actsSummary?.length
+            ? existingBoardRow.actsSummary
+            : existingBooking?.actsSummary,
+    };
+    const referencedActId = actReferenceCandidates(actReference).ids.find((id) => (
+      mongoose.isValidObjectId(id)
+    ));
+    let linkedAct = referencedActId
+      ? await actModel.findById(referencedActId).lean()
+      : null;
+    if (!linkedAct && actReferenceCandidates(actReference).names.length) {
+      const availableActs = await actModel
+        .find({})
+        .select("name tscName lineups")
+        .lean();
+      linkedAct = findBestActProfile(actReference, availableActs);
+    }
+    const linkedLineup = linkedAct ? findActLineup(linkedAct, actReference) : null;
+    const linkedLineupId = linkedLineup
+      ? String(linkedLineup.lineupId || linkedLineup._id || "")
+      : "";
+    const linkedActSummary = linkedAct && linkedLineup
+      ? {
+          actId: String(linkedAct._id),
+          actName: linkedAct.name || linkedAct.tscName || "",
+          name: linkedAct.name || "",
+          tscName: linkedAct.tscName || "",
+          lineupId: linkedLineupId,
+          lineupLabel:
+            String(payload.lineupSelected || "").trim()
+            || linkedLineup.actSize
+            || "",
+          bandSize:
+            Number(payload.bandSize)
+            || Number(String(linkedLineup.actSize || "").match(/\d+/)?.[0])
+            || linkedLineup.bandMembers?.length
+            || 0,
+          bandMembers: linkedLineup.bandMembers || [],
+          lineup: linkedLineup,
+        }
+      : null;
     const requestedSiteAutomationsEnabled = readSiteAutomationsEnabled(payload);
     const siteAutomationsEnabled = resolveSiteAutomationsEnabled({
       requestedValue: requestedSiteAutomationsEnabled,
@@ -2223,6 +2274,14 @@ router.post("/", musicianAuth, async (req, res) => {
           ? "BMM"
           : "TSC",
       createdManually: true,
+      ...(linkedAct
+        ? {
+            act: linkedAct._id,
+            actId: linkedAct._id,
+            lineupId: linkedLineupId,
+          }
+        : {}),
+      ...(linkedActSummary ? { actsSummary: [linkedActSummary] } : {}),
       ...(siteAutomationsEnabled !== undefined
         ? { siteAutomationsEnabled }
         : {}),
@@ -2303,6 +2362,8 @@ router.post("/", musicianAuth, async (req, res) => {
     // --------- 2) Upsert BookingBoardItem (UI row) ----------
     const boardPatch = {
       bookingId: booking._id, // ObjectId ref to Booking
+      ...(linkedAct ? { actId: linkedAct._id } : {}),
+      ...(linkedActSummary ? { actsSummary: [linkedActSummary] } : {}),
       ...(siteAutomationsEnabled !== undefined
         ? { siteAutomationsEnabled }
         : {}),
@@ -2336,11 +2397,16 @@ router.post("/", musicianAuth, async (req, res) => {
       accounting: payload.accounting || undefined,
       eventType: normalizeEventType(payload.eventType),
       actName: String(payload.actName || "").trim(),
-      actTscName: String(payload.actTscName || payload.actName || "").trim(),
+      actTscName: String(
+        linkedAct?.tscName || payload.actTscName || payload.actName || "",
+      ).trim(),
       address: String(payload.address || "").trim(),
       county: String(payload.county || "").trim(),
 
-      bandSize: Number(payload.bandSize || 0) || 0,
+      bandSize:
+        Number(payload.bandSize || 0)
+        || linkedActSummary?.bandSize
+        || 0,
       lineupSelected: String(payload.lineupSelected || "").trim(),
       lineupComposition: Array.isArray(payload.lineupComposition)
         ? payload.lineupComposition

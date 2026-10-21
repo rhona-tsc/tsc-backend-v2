@@ -176,6 +176,8 @@ const ActSummarySchema = new mongoose.Schema(
   {
     actId: { type: String, required: true },
     actName: String,
+    name: String,
+    tscName: String,
 
     lineupId: { type: String, required: true },
     lineupLabel: String,
@@ -309,6 +311,13 @@ const AddonPaymentSchema = new mongoose.Schema(
 const BookingSchema = new mongoose.Schema(
   {
     bookingId: { type: String, required: true },
+
+    // Act/lineup identity used by allocation, event sheets and notifications.
+    // Manual booking-board rows must retain the same links as website bookings.
+    act: { type: mongoose.Schema.Types.ObjectId, ref: "Act" },
+    actId: { type: mongoose.Schema.Types.ObjectId, ref: "Act" },
+    lineupId: { type: String, default: "" },
+    actsSummary: { type: [ActSummarySchema], default: [] },
 
     // User
     userId: { type: String, index: true },
