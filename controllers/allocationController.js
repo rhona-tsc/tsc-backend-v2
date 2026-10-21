@@ -963,7 +963,14 @@ export const listRoleCandidates = async (req, res) => {
     };
     const offerHistory = await EnquiryMessage.find(historyQuery)
       .sort({ createdAt: 1 })
-      .populate("musicianId", "firstName lastName basicInfo.firstName basicInfo.lastName")
+      // EnquiryMessage's legacy ref uses "Musician", while the live musician
+      // schema is registered as "musician". Supplying the imported model keeps
+      // the replacement chooser working without relying on the ref casing.
+      .populate({
+        path: "musicianId",
+        select: "firstName lastName basicInfo.firstName basicInfo.lastName",
+        model: Musician,
+      })
       .lean();
 
     return res.json({
