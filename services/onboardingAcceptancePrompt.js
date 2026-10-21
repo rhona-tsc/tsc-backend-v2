@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import musicianModel from "../models/musicianModel.js";
 import { sendWhatsAppText } from "../utils/twilioClient.js";
+import { NON_EXPIRING_INVITE_TOKEN_DATE } from "../utils/musicianInviteToken.js";
 
 const adminFrontendUrl = String(
   process.env.ADMIN_FRONTEND_URL || "https://admin.thesupremecollective.co.uk",
@@ -38,7 +39,7 @@ export async function promptForProfileAfterAcceptance({ musicianId, phone }) {
       const rawToken = crypto.randomBytes(32).toString("hex");
       const now = new Date();
       musician.inviteTokenHash = hashToken(rawToken);
-      musician.inviteTokenExpires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      musician.inviteTokenExpires = NON_EXPIRING_INVITE_TOKEN_DATE;
       musician.mustChangePassword = true;
       musician.onboardingInvitedAt = musician.onboardingInvitedAt || now;
       musician.onboardingStatus = "invited";

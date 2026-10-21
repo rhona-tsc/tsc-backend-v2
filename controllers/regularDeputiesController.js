@@ -7,6 +7,7 @@ import { canModerateOriginals } from "../services/originalsPolicyService.js";
 import actMemberDetailsRequestModel from "../models/actMemberDetailsRequestModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import deputyInviteSuppressionModel from "../models/deputyInviteSuppressionModel.js";
+import { NON_EXPIRING_INVITE_TOKEN_DATE } from "../utils/musicianInviteToken.js";
 
 const clean = (value) => String(value || "").trim();
 const normalise = (value) => clean(value).toLowerCase();
@@ -84,7 +85,7 @@ const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl, email, 
     "",
     setupUrl,
     "",
-    "This link expires in 24 hours.",
+    "This secure link can only be used once.",
     "",
     "Best wishes,",
     "The Supreme Collective",
@@ -110,7 +111,7 @@ const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl, email, 
           <p style="margin:0 0 18px;font-size:15px;line-height:1.8;color:#444444;">You have been invited to join <strong>${escapeHtml(actName)}</strong> as a regular deputy for <strong>${escapeHtml(roleName)}</strong>.</p>
           <p style="margin:0 0 22px;font-size:15px;line-height:1.8;color:#444444;">Create your secure Supreme Collective login and complete your musician profile using the button below.</p>
           <p style="margin:0 0 12px;text-align:center;"><a href="${escapeHtml(setupUrl)}" style="display:inline-block;padding:14px 24px;border-radius:999px;background:#ff6667;color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;">Accept invitation and create my profile</a></p>
-          <p style="margin:0 0 24px;color:#666666;font-size:13px;text-align:center;">This secure link expires in 24 hours.</p>
+          <p style="margin:0 0 24px;color:#666666;font-size:13px;text-align:center;">This secure link can only be used once.</p>
           <p style="margin:0 0 18px;font-size:15px;line-height:1.7;color:#444444;">Best wishes,<br /><strong>The Supreme Collective</strong></p>
           <div style="margin:22px 0 0;padding:22px;background:#fafafa;border:1px solid #ececec;border-radius:22px;text-align:center;">
             <a href="${GOOGLE_REVIEWS_URL}" style="display:block;text-decoration:none;">
@@ -322,7 +323,7 @@ export const inviteRegularDeputy = async (req, res) => {
     const rawToken = crypto.randomBytes(32).toString("hex");
     const now = new Date();
     musician.inviteTokenHash = hashToken(rawToken);
-    musician.inviteTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    musician.inviteTokenExpires = NON_EXPIRING_INVITE_TOKEN_DATE;
     musician.mustChangePassword = true;
     musician.onboardingInvitedAt = musician.onboardingInvitedAt || now;
     musician.onboardingStatus = "invited";

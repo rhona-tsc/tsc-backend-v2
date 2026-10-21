@@ -6,6 +6,10 @@ import nodemailer from "nodemailer";
 import mongoose from "mongoose";
 
 import musicianModel from "../models/musicianModel.js";
+import {
+  inviteTokenCanBeUsed,
+  NON_EXPIRING_INVITE_TOKEN_DATE,
+} from "../utils/musicianInviteToken.js";
 import { loginMusician, registerMusician } from "../controllers/musicianLoginController.js";
 
 const musicianLoginRouter = express.Router();
@@ -301,7 +305,7 @@ musicianLoginRouter.post("/invite", requireAdminAuth, async (req, res) => {
 
     const rawToken = crypto.randomBytes(32).toString("hex");
     user.inviteTokenHash = sha256(rawToken);
-    user.inviteTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+    user.inviteTokenExpires = NON_EXPIRING_INVITE_TOKEN_DATE;
 
     // Onboarding tracking
     if (!user.onboardingInvitedAt) user.onboardingInvitedAt = new Date();
@@ -373,7 +377,7 @@ style="display:inline-block;background:#ff6667;color:#ffffff;text-decoration:non
 </div>
 
           <p style="margin:0 0 10px 0;color:#333;font-size:13.5px;line-height:1.6;">
-            <strong>Heads up:</strong> this link expires in <strong>24 hours</strong>.
+            <strong>Security:</strong> this link can only be used once.
           </p>
 
           <p style="margin:0 0 0 0;color:#666;font-size:12.5px;line-height:1.6;">
@@ -429,16 +433,10 @@ musicianLoginRouter.post("/set-password", async (req, res) => {
         .status(404)
         .json({ success: false, message: "User not found" });
 
-    if (!user.inviteTokenHash || !user.inviteTokenExpires) {
+    if (!inviteTokenCanBeUsed(user)) {
       return res
         .status(400)
         .json({ success: false, message: "No active invite token." });
-    }
-
-    if (user.inviteTokenExpires.getTime() < Date.now()) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Invite link expired." });
     }
 
     const ok = sha256(token) === user.inviteTokenHash;
@@ -890,7 +888,7 @@ async function runBulkInvite(opts = {}) {
       if (needsSetPassword) {
         const rawToken = crypto.randomBytes(32).toString("hex");
         const tokenHash = sha256(rawToken);
-        const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const expires = NON_EXPIRING_INVITE_TOKEN_DATE;
 
         const link = `${FRONTEND_URL}/set-password?token=${rawToken}&email=${encodeURIComponent(
           email
@@ -907,7 +905,7 @@ async function runBulkInvite(opts = {}) {
               </p>
 
               <p style="margin:0 0 12px 0;color:#333;font-size:14.5px;line-height:1.7;">
-                First, please create your password using the button below (this link expires in <strong>24 hours</strong>):
+                First, please create your password using the button below. This secure link can only be used once:
               </p>
 
               <div style="text-align:center;margin:18px 0 18px 0;">

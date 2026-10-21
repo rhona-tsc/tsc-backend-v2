@@ -1,5 +1,6 @@
 // backend/cron/onboardingChase.js
 import crypto from "crypto";
+import { NON_EXPIRING_INVITE_TOKEN_DATE } from "../utils/musicianInviteToken.js";
 import nodemailer from "nodemailer";
 import musicianModel from "../models/musicianModel.js";
 
@@ -129,7 +130,6 @@ export async function runOnboardingChase({
       "repertoire",
       "password",
       "hasSetPassword",
-      "inviteTokenExpires",
       "inviteTokenHash",
       "onboardingInvitedAt",
       "lastLoginAt",
@@ -176,13 +176,10 @@ export async function runOnboardingChase({
       };
 
       if (setPw) {
-        // regenerate token if missing or expired
-        const expiresAt = u.inviteTokenExpires ? new Date(u.inviteTokenExpires) : null;
-        const expired = !expiresAt || expiresAt.getTime() < Date.now();
-
+        // Rotate the one-time token whenever a reminder is sent.
         const rawToken = crypto.randomBytes(32).toString("hex");
         const tokenHash = sha256(rawToken);
-        const newExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const newExpires = NON_EXPIRING_INVITE_TOKEN_DATE;
 
         const link = `${FRONTEND_URL}/set-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
 
@@ -192,7 +189,7 @@ export async function runOnboardingChase({
           <p>Quick reminder to finish setting up your Supreme Collective portal access.</p>
           <p><strong>Step 1:</strong> set your password here:</p>
           <p><a href="${link}">Set your password</a></p>
-          <p>This link expires in 24 hours.</p>
+          <p>This secure link can only be used once.</p>
           <hr/>
           <p><strong>Then please complete:</strong></p>
           <ul>
