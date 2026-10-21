@@ -132,6 +132,15 @@ slug: { type: String, default: "" },
       {
         title: { type: String, default: "" },
         url: { type: String, required: true },
+        locationCrop: {
+          type: new mongoose.Schema({
+            x: { type: Number, required: true, min: 0, max: 100000 },
+            y: { type: Number, required: true, min: 0, max: 100000 },
+            width: { type: Number, required: true, min: 1, max: 100000 },
+            height: { type: Number, required: true, min: 1, max: 100000 },
+          }, { _id: false }),
+          default: undefined,
+        },
       },
     ],
     coverImage: [

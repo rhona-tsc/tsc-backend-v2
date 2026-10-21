@@ -1,6 +1,7 @@
 import Act from '../models/actModel.js';
 import Musician from '../models/musicianModel.js';
 import Venue from '../models/venueModel.js';
+import { locationImageUrl } from './locationImage.js';
 
 export const locationCounties = ['London', 'Kent', 'Essex', 'Surrey', 'Hertfordshire', 'West Sussex', 'Berkshire', 'Oxfordshire', 'Cambridgeshire', 'Buckinghamshire', 'East Sussex', 'North Yorkshire'];
 const clean = value => String(value || '').trim();
@@ -52,7 +53,7 @@ export const buildLocationPages = (acts, musicians, venues) => {
     const performed = new Set(localVenues.flatMap(venue => (venue.visits || []).map(visit => key(visit.actName))));
     const bands = acts.filter(act => act.slug && !act.slug.startsWith('test-')).map(act => ({
       id: String(act._id), name: act.tscName || act.name, slug: act.slug,
-      image: act.images?.[0]?.url || act.coverImage?.[0]?.url || '',
+      image: locationImageUrl(act),
       description: clean(act.tscDescription || act.description).replace(/<[^>]*>/g, ''),
       genres: Array.isArray(act.genre) ? act.genre.filter(value => typeof value === 'string') : [],
       hasLocalOriginal: originals.get(String(act._id)).some(profile => canonicalCounty(profile.address?.county) === county),
@@ -78,7 +79,7 @@ let expires = 0;
 export const getLocationPages = async () => {
   if (cache && Date.now() < expires) return cache;
   const [acts, musicians, venues] = await Promise.all([
-    Act.find({ status: 'approved' }).select('tscName name slug tscDescription description genre images.url coverImage.url lineups.bandMembers.musicianId lineups.bandMembers.email lineups.bandMembers.firstName lineups.bandMembers.lastName reviews').lean(),
+    Act.find({ status: 'approved' }).select('tscName name slug tscDescription description genre images.url images.locationCrop coverImage.url lineups.bandMembers.musicianId lineups.bandMembers.email lineups.bandMembers.firstName lineups.bandMembers.lastName reviews').lean(),
     Musician.find({}).select('email firstName lastName basicInfo.firstName basicInfo.lastName address.county').lean(),
     Venue.find({}).select('name county visits.actName').lean(),
   ]);
