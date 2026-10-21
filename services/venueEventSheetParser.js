@@ -97,6 +97,26 @@ function sectionsFrom(text) {
 }
 
 const what3wordsPattern = /(?:\/\/\/)?[a-z]+(?:\.[a-z]+){2}/i;
+const isLocationPrompt = (line = "") =>
+  /^(?:please (?:also )?provide|google maps?|what\s*3\s*words?|loading point|load in|load out)/i.test(tidy(line));
+const isLocationPlaceholder = (line = "") =>
+  /^(?:venue\s+)?(?:tbc|tbd|to be confirmed)(?:\b|\s*[-–—])/i.test(tidy(line));
+
+function addressFromLocationLines(lines = []) {
+  const candidates = lines
+    .map(tidy)
+    .filter(Boolean)
+    .filter((line) => !isLocationPrompt(line) && !urlsFrom(line).length);
+
+  return (
+    candidates.find((line) => postcodeFrom(line)) ||
+    candidates.find((line) => !isLocationPlaceholder(line) && line.split(",").length >= 3) ||
+    candidates.find((line) => !isLocationPlaceholder(line)) ||
+    candidates[0] ||
+    ""
+  );
+}
+
 const isDirectionRatherThanRoom = (line) => what3wordsPattern.test(line)
   || /(?:google maps?|what\s*3\s*words?|\bw3w\b|parking|entrance|station|load(?:ing)?|unload|spaces? available|postcode)/i.test(line)
   || /https?:/i.test(line)
@@ -138,7 +158,7 @@ export async function parseVenueEventSheet(file) {
   const { value, messages } = await mammoth.extractRawText({ buffer: file.buffer });
   const sections = sectionsFrom(value);
   const location = sections.LOCATION || [];
-  const locationLine = location[0] || "";
+  const locationLine = addressFromLocationLines(location);
   const roomArea = (sections["ROOM & AREA"] || []).join("\n");
   const sound = (sections["SOUND LIMITATIONS"] || []).join("\n");
   const allUrls = urlsFrom(value);
@@ -187,4 +207,4 @@ export async function parseVenueEventSheet(file) {
   };
 }
 
-export { countyFromAddress, lookupCountyFromAddress, postcodeFrom, roomNameFrom };
+export { addressFromLocationLines, countyFromAddress, lookupCountyFromAddress, postcodeFrom, roomNameFrom };
