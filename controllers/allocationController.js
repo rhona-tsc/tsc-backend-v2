@@ -626,9 +626,31 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
         musicianId: assignment?.musicianId || undefined,
       }).sort({ createdAt: -1 });
   if (msg) {
+    const scheduleParts = [
+      board?.arrivalTime || board?.performanceTimes?.arrivalTime
+        ? `Arrival: ${formatBookingClock(board?.arrivalTime || board?.performanceTimes?.arrivalTime)}`
+        : "",
+      board?.startTime || board?.performanceTimes?.startTime
+        ? `Start: ${formatBookingClock(board?.startTime || board?.performanceTimes?.startTime)}`
+        : "",
+      board?.finishTime || board?.performanceTimes?.finishTime
+        ? `Finish: ${formatBookingClock(board?.finishTime || board?.performanceTimes?.finishTime)}`
+        : "",
+    ].filter(Boolean);
+    const existingDuties = String(msg.duties || role).trim();
+    if (scheduleParts.length && !/\b(?:Arrival|Start|Finish):/i.test(existingDuties)) {
+      msg.duties = [existingDuties, ...scheduleParts].join(" · ");
+    }
     await EnquiryMessage.updateOne(
       { _id: msg._id },
-      { $set: { reply: "withdrawn", repliedAt: now, status: "read" } },
+      {
+        $set: {
+          reply: "withdrawn",
+          repliedAt: now,
+          status: "read",
+          duties: msg.duties,
+        },
+      },
     );
     await escalateToNextDeputy(msg);
     return { route: "act_deputy_chain" };
