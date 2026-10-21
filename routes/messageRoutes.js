@@ -28,6 +28,51 @@ const pickRecipientName = (row) =>
 const pickRecipientEmail = (row) =>
   row.musicianEmail || row.calendarInviteEmail || "";
 
+const normalizePhone = (value = "") => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("44") && digits.length >= 12) return digits.slice(-10);
+  if (digits.startsWith("0") && digits.length >= 11) return digits.slice(-10);
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+};
+
+const enrichRowsWithMusicianProfiles = async (rows = []) => {
+  if (!rows.length) return rows;
+
+  const musicians = await Musician.find({
+    $or: [
+      { _id: { $in: rows.map((row) => row.musicianId).filter(Boolean) } },
+      { phone: { $exists: true, $ne: "" } },
+      { phoneNormalized: { $exists: true, $ne: "" } },
+    ],
+  })
+    .select("_id firstName lastName stageName email phone phoneNormalized")
+    .lean();
+
+  const byId = new Map(musicians.map((musician) => [String(musician._id), musician]));
+  const byPhone = new Map();
+  for (const musician of musicians) {
+    for (const value of [musician.phone, musician.phoneNormalized]) {
+      const key = normalizePhone(value);
+      if (key && !byPhone.has(key)) byPhone.set(key, musician);
+    }
+  }
+
+  return rows.map((row) => {
+    const musician =
+      (row.musicianId && byId.get(String(row.musicianId))) ||
+      byPhone.get(normalizePhone(row.phone));
+    if (!musician) return row;
+
+    return {
+      ...row,
+      musicianId: row.musicianId || musician._id,
+      musicianName: pickRecipientName(row) || musicianDisplayName(musician),
+      musicianEmail: row.musicianEmail || musician.email || "",
+    };
+  });
+};
+
 const buildFallbackOutboundBody = (row) => {
   const firstName = String(
     row.recipientName ||
@@ -471,8 +516,9 @@ router.get("/", musicianAuth, async (req, res) => {
       MessageConversation.find({}).sort({ updatedAt: -1 }).lean(),
     ]);
 
+    const enrichedRows = await enrichRowsWithMusicianProfiles(rows);
     const threads = mergeConversationThreads(
-      buildThreadsFromRows(rows),
+      buildThreadsFromRows(enrichedRows),
       conversations,
       true,
     );
@@ -521,8 +567,9 @@ router.get("/mine", musicianAuth, async (req, res) => {
       MessageConversation.find({ musicianId: userId }).lean(),
     ]);
 
+    const enrichedRows = await enrichRowsWithMusicianProfiles(rows);
     const threads = mergeConversationThreads(
-      buildThreadsFromRows(rows),
+      buildThreadsFromRows(enrichedRows),
       conversations,
       false,
     );
