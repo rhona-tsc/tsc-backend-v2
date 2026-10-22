@@ -62,3 +62,12 @@ test('five checked public examples are data-minimised and only attach to the mat
   assert.equal(result.histories['funk-royale'].examples.length, 1);
   assert.ok(!result.venueHistories.v.examples[0].rows.some(row=>/Soundcheck/.test(row[1])));
 });
+test('evening backgrounds use the matching band photo and saved crop, with a safe empty fallback', () => {
+  const bands = acts.map(act => act.slug === 'funk-royale' ? { ...act, images: [{ url: 'https://res.cloudinary.com/example/image/upload/v1/funk.jpg', locationCrop: { x: 10, y: 20, width: 600, height: 400 } }] } : act);
+  const venues = [{ _id: 'v', name: 'Allington Castle', county: 'Kent' }];
+  const result = buildPublicPerformanceHistory(bands, venues);
+  const example = result.venueHistories.v.examples[0];
+  assert.match(example.image, /c_crop,g_north_west,x_10,y_20,w_600,h_400\/c_limit,w_960,f_auto,q_auto/);
+  assert.equal(result.histories['funk-royale'].examples[0].image, example.image);
+  assert.equal(buildPublicPerformanceHistory(acts, venues).venueHistories.v.examples[0].image, '');
+});
