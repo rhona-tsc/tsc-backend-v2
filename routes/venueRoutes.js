@@ -5,6 +5,7 @@ import authUser from "../middleware/auth.js";
 import multer from "multer";
 import cloudinary from "../config/cloudinary.js";
 import { countyFromAddress, parseVenueEventSheet, roomNameFrom } from "../services/venueEventSheetParser.js";
+import { getPublicPerformanceHistory } from '../services/publicPerformanceHistory.js';
 
 const router = express.Router();
 const clean = (v) => String(v ?? "").trim();
@@ -201,7 +202,8 @@ router.get("/public", async (req, res) => {
     const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const filter = q ? { $or: ["name", "aliases", "address", "postcode", "county", "rooms.name"].map((field) => ({ [field]: { $regex: escaped, $options: "i" } })) } : {};
     const venues = await Venue.find(filter).sort({ name: 1 }).lean();
-    res.json({ success: true, venues: venues.map(publicVenue) });
+    const { venueHistories } = await getPublicPerformanceHistory();
+    res.json({ success: true, venues: venues.map(venue => ({ ...publicVenue(venue), ...(venueHistories[String(venue._id)] || { performances: [], examples: [] }), county: venue.county })) });
   } catch (error) { res.status(500).json({ success: false, message: error.message }); }
 });
 
@@ -209,7 +211,8 @@ router.get("/public/:id", async (req, res) => {
   try {
     const venue = await Venue.findById(req.params.id).lean();
     if (!venue) return res.status(404).json({ success: false, message: "Venue not found" });
-    res.json({ success: true, venue: publicVenue(venue) });
+    const { venueHistories } = await getPublicPerformanceHistory();
+    res.json({ success: true, venue: { ...publicVenue(venue), ...(venueHistories[String(venue._id)] || { performances: [], examples: [] }), county: venue.county } });
   } catch (error) { res.status(500).json({ success: false, message: error.message }); }
 });
 
