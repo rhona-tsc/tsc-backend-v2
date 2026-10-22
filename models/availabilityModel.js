@@ -47,6 +47,17 @@ bandMemberId: { type: mongoose.Schema.Types.ObjectId, index: true },
     outboundMessage: { type: String, default: "" },
     messageSidOut: { type: String, index: true },
     messageSid: { type: String, select: false },
+    deliveryErrorCode: { type: String, default: "" },
+    deliveryErrorMessage: { type: String, default: "" },
+    deliveryStatus: { type: String, default: "" },
+    deliveryReadAt: { type: Date, default: null },
+    smsFallbackStatus: {
+      type: String,
+      enum: ["pending", "sending", "sent", "failed", null],
+      default: null,
+    },
+    smsFallbackSid: { type: String, default: "" },
+    smsFallbackSentAt: { type: Date, default: null },
 
     status: {
       type: String,

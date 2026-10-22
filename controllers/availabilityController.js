@@ -1,7 +1,11 @@
 import AvailabilityModel from "../models/availabilityModel.js";
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
-import { sendWhatsAppText } from "../utils/twilioClient.js";
+import {
+  sendSMSMessage,
+  sendWhatsAppText,
+  WA_FALLBACK_CACHE,
+} from "../utils/twilioClient.js";
 import DeferredAvailability from "../models/deferredAvailabilityModel.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is correct in backend
@@ -12,6 +16,7 @@ import { makeShortId } from "../utils/makeShortId.js";
 import crypto from "crypto"; // at top of file if not already
 import EnquiryMessage from "../models/EnquiryMessage.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
+import TwilioMessageDelivery from "../models/twilioMessageDeliveryModel.js";
 import {
   resolveBookingReplyIntent,
 } from "../utils/bookingReplyIntent.js";
@@ -365,14 +370,15 @@ const normCountyKey = (s) =>
 
 
 const toE164 = (raw = "") => {
-  let s = String(raw || "")
+  if (typeof raw !== "string" && typeof raw !== "number") return "";
+  let s = String(raw)
     .replace(/^whatsapp:/i, "")
-    .replace(/\s+/g, "");
+    .replace(/[\s()-]+/g, "");
   if (!s) return "";
-  if (s.startsWith("+")) return s;
-  if (s.startsWith("07")) return s.replace(/^0/, "+44");
-  if (s.startsWith("44")) return `+${s}`;
-  return s;
+  if (s.startsWith("00")) s = `+${s.slice(2)}`;
+  if (s.startsWith("07")) s = s.replace(/^0/, "+44");
+  else if (s.startsWith("44")) s = `+${s}`;
+  return /^\+[1-9]\d{7,14}$/.test(s) ? s : "";
 };
 
 const normalize44 = (raw = "") =>
@@ -4548,24 +4554,148 @@ export const twilioStatus = async (req, res) => {
       errMsg: ErrorMessage || null,
     });
 
-    if (MessageSid) {
-      const update = {
-        $set: {
-          "outbound.status": status,
-          "outbound.lastEventAt": new Date(),
-        },
-      };
+    const sid = String(MessageSid || "").trim();
+    const errorCode = String(ErrorCode || "").trim();
+    const isWhatsApp = [To, From].some((value) =>
+      /^whatsapp:/i.test(String(value || "")),
+    );
+
+    if (sid) {
+      const update = { $set: { deliveryStatus: status } };
 
       if (status === "read") {
-        update.$set["outbound.readAt"] = new Date();
+        update.$set.deliveryReadAt = new Date();
       }
 
-      if (ErrorCode) {
-        update.$set["outbound.errorCode"] = String(ErrorCode);
-        update.$set["outbound.errorMessage"] = String(ErrorMessage || "");
+      if (errorCode) {
+        update.$set.deliveryErrorCode = errorCode;
+        update.$set.deliveryErrorMessage = String(ErrorMessage || "");
       }
 
-      await AvailabilityModel.updateOne({ messageSidOut: MessageSid }, update);
+      await AvailabilityModel.updateOne({ messageSidOut: sid }, update);
+      await TwilioMessageDelivery.updateOne(
+        { messageSid: sid },
+        {
+          $set: {
+            status,
+            errorCode,
+            errorMessage: String(ErrorMessage || ""),
+          },
+        },
+      );
+    }
+
+    const needsSmsFallback =
+      sid &&
+      isWhatsApp &&
+      ["failed", "undelivered"].includes(status) &&
+      ["63016", "63024"].includes(errorCode);
+
+    if (needsSmsFallback) {
+      let destination = "";
+      let fallbackBody = "";
+      let deliveryRecord = await TwilioMessageDelivery.findOneAndUpdate(
+        { messageSid: sid, smsFallbackStatus: "pending" },
+        { $set: { smsFallbackStatus: "sending" } },
+        { new: true },
+      ).lean();
+
+      if (!deliveryRecord) {
+        const knownDelivery = await TwilioMessageDelivery.findOne({
+          messageSid: sid,
+        })
+          .select("smsFallbackStatus")
+          .lean();
+        if (knownDelivery) {
+          return res.sendStatus(200);
+        }
+      }
+
+      if (deliveryRecord) {
+        destination = toE164(deliveryRecord.to);
+        fallbackBody = String(deliveryRecord.body || "").trim();
+      } else {
+        const cached = WA_FALLBACK_CACHE.get(sid);
+        destination = toE164(cached?.to || "");
+        fallbackBody = String(cached?.smsBody || "").trim();
+      }
+
+      let availabilityRecord = null;
+      if (!destination || !fallbackBody) {
+        availabilityRecord = await AvailabilityModel.findOneAndUpdate(
+          {
+            messageSidOut: sid,
+            smsFallbackStatus: { $in: [null, "pending"] },
+          },
+          { $set: { smsFallbackStatus: "sending" } },
+          { new: true },
+        ).lean();
+        destination = toE164(availabilityRecord?.phone || destination);
+        fallbackBody = String(
+          availabilityRecord?.outboundMessage || fallbackBody,
+        ).trim();
+      }
+
+      if (destination && fallbackBody) {
+        try {
+          const sms = await sendSMSMessage(destination, fallbackBody);
+          WA_FALLBACK_CACHE.delete(sid);
+          await Promise.all([
+            TwilioMessageDelivery.updateOne(
+              { messageSid: sid },
+              {
+                $set: {
+                  smsFallbackStatus: "sent",
+                  smsFallbackSid: String(sms?.sid || ""),
+                  smsFallbackSentAt: new Date(),
+                },
+              },
+            ),
+            AvailabilityModel.updateOne(
+              { messageSidOut: sid },
+              {
+                $set: {
+                  smsFallbackStatus: "sent",
+                  smsFallbackSid: String(sms?.sid || ""),
+                  smsFallbackSentAt: new Date(),
+                },
+              },
+            ),
+          ]);
+          console.log("WhatsApp delivery failed; SMS fallback sent", {
+            sid,
+            errorCode,
+            smsSid: sms?.sid || null,
+          });
+        } catch (smsError) {
+          await Promise.all([
+            TwilioMessageDelivery.updateOne(
+              { messageSid: sid },
+              { $set: { smsFallbackStatus: "failed" } },
+            ),
+            AvailabilityModel.updateOne(
+              { messageSidOut: sid },
+              { $set: { smsFallbackStatus: "failed" } },
+            ),
+          ]);
+          console.warn("WhatsApp SMS fallback failed:", smsError?.message || smsError);
+        }
+      } else if (deliveryRecord || availabilityRecord) {
+        await Promise.all([
+          TwilioMessageDelivery.updateOne(
+            { messageSid: sid },
+            { $set: { smsFallbackStatus: "failed" } },
+          ),
+          AvailabilityModel.updateOne(
+            { messageSidOut: sid },
+            { $set: { smsFallbackStatus: "failed" } },
+          ),
+        ]);
+        console.warn("WhatsApp SMS fallback had no valid recipient or message", {
+          sid,
+          errorCode,
+        });
+      }
     }
 
     return res.sendStatus(200);

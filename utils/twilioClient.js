@@ -2,6 +2,7 @@
 import "dotenv/config";
 import Twilio from "twilio";
 import AvailabilityModel from "../models/availabilityModel.js";
+import TwilioMessageDelivery from "../models/twilioMessageDeliveryModel.js";
 import {
   computeFinalFeeForMember,
   formatNiceDate,
@@ -74,14 +75,15 @@ const buildProfileUrl = (musicianLike) => {
 };
 /** Normalize to E.164 (+44…) and strip any whatsapp: prefix */
 export const toE164 = (raw = "") => {
+  if (typeof raw !== "string" && typeof raw !== "number") return "";
   let s = String(raw)
     .replace(/^whatsapp:/i, "")
-    .replace(/\s+/g, "");
+    .replace(/[\s()-]+/g, "");
   if (!s) return "";
-  if (s.startsWith("+")) return s;
-  if (s.startsWith("07")) return s.replace(/^0/, "+44");
-  if (s.startsWith("44")) return `+${s}`;
-  return s;
+  if (s.startsWith("00")) s = `+${s.slice(2)}`;
+  if (s.startsWith("07")) s = s.replace(/^0/, "+44");
+  else if (s.startsWith("44")) s = `+${s}`;
+  return /^\+[1-9]\d{7,14}$/.test(s) ? s : "";
 };
 
 /**
@@ -145,13 +147,64 @@ const statusCallback =
 // Short-lived cache so the status webhook can send SMS if WA is undelivered
 export const WA_FALLBACK_CACHE = new Map(); // sid -> { to, smsBody }
 
+async function rememberWhatsAppDelivery({
+  messageSid,
+  to,
+  smsBody,
+  status = "queued",
+  source = "",
+}) {
+  const sid = String(messageSid || "").trim();
+  const destination = toE164(to);
+  const fallbackBody = String(smsBody || "").trim();
+  if (!sid || !destination) return;
+
+  if (fallbackBody) {
+    WA_FALLBACK_CACHE.set(sid, { to: destination, smsBody: fallbackBody });
+    const expiryTimer = setTimeout(
+      () => WA_FALLBACK_CACHE.delete(sid),
+      24 * 60 * 60 * 1000,
+    );
+    expiryTimer.unref?.();
+  }
+
+  try {
+    await TwilioMessageDelivery.findOneAndUpdate(
+      { messageSid: sid },
+      {
+        $set: {
+          to: destination,
+          channel: "whatsapp",
+          body: fallbackBody,
+          source,
+          status: String(status || "queued"),
+          smsFallbackStatus: fallbackBody ? "pending" : "not_required",
+          expiresAt: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000),
+        },
+      },
+      { upsert: true, setDefaultsOnInsert: true },
+    );
+  } catch (error) {
+    // Delivery logging must never turn a successful Twilio send into a failure.
+    console.warn("Twilio delivery record could not be stored:", error?.message || error);
+  }
+}
+
 export async function sendWhatsAppMessage(opts = {}) {
   const client = getTwilioClient();
   if (!client) throw new Error("Twilio disabled");
 
-  const statusCallback =
-    process.env.TWILIO_STATUS_CALLBACK_URL ||
-    `${process.env.BACKEND_PUBLIC_URL || process.env.BACKEND_URL}/api/twilio/status`;
+  const callbackBase = String(
+    process.env.BACKEND_PUBLIC_URL || process.env.BACKEND_URL || "",
+  ).replace(/\/$/, "");
+  const configuredCallback = String(
+    process.env.TWILIO_STATUS_CALLBACK_URL || "",
+  ).trim();
+  const deliveryStatusCallback = /^https:\/\//i.test(configuredCallback)
+    ? configuredCallback
+    : /^https:\/\//i.test(callbackBase)
+      ? `${callbackBase}/api/twilio/status`
+      : statusCallback;
 
   const {
     to,
@@ -401,7 +454,7 @@ const memberNames = firstLast(memberDisplayName);
         from: `whatsapp:${fromE}`,
         contentSid: selectedContentSid,
         contentVariables: JSON.stringify(contentVariables),
-        statusCallback,
+        ...(deliveryStatusCallback ? { statusCallback: deliveryStatusCallback } : {}),
       });
     } else {
       // Fallback plain text (no template)
@@ -413,12 +466,20 @@ const memberNames = firstLast(memberDisplayName);
         to: `whatsapp:${toE}`,
         from: `whatsapp:${fromE}`,
         body: defaultBody,
-        statusCallback,
+        ...(deliveryStatusCallback ? { statusCallback: deliveryStatusCallback } : {}),
       });
     }
 
     const sid = result?.sid;
     console.log("✅ [sendWhatsAppMessage] Twilio sent", { sid, useContent });
+
+    await rememberWhatsAppDelivery({
+      messageSid: sid,
+      to: toE,
+      smsBody,
+      status: result?.status,
+      source: useContent ? "content-template" : "plain-text",
+    });
 
     // ⛳️ PERSIST THE OUTBOUND SID FOR DETERMINISTIC INBOUND MATCHING
     if (sid && requestId) {
@@ -590,22 +651,23 @@ export const sendSMSMessage = async (to, body) => {
   const client = getTwilioClient();
   if (!client) throw new Error("Twilio disabled");
 
-  let dest = String(to || "")
-    .replace(/^whatsapp:/i, "")
-    .replace(/\s+/g, "");
-  if (!dest.startsWith("+")) {
-    if (dest.startsWith("07")) dest = dest.replace(/^0/, "+44");
-    else if (dest.startsWith("44")) dest = `+${dest}`;
-  }
+  const dest = toE164(to);
+  const messageBody = String(body || "").trim();
+  if (!dest) throw new Error("Invalid SMS recipient");
+  if (!messageBody) throw new Error("SMS message body is empty");
 
   const payload = {
     to: dest,
-    body: String(body || ""),
+    body: messageBody,
     ...(statusCallback ? { statusCallback } : {}),
     ...(process.env.TWILIO_MESSAGING_SERVICE_SID
       ? { messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID }
       : { from: toE164(process.env.TWILIO_SMS_FROM || "") }),
   };
+
+  if (!payload.messagingServiceSid && !payload.from) {
+    throw new Error("Missing or invalid Twilio SMS sender");
+  }
 
   console.log("📤 Twilio SMS create()", {
     to: payload.to,
@@ -626,16 +688,27 @@ export async function sendWhatsAppText(to, body) {
 
   const toE = toE164(to);
   const fromE = toE164(TWILIO_WA_SENDER || "");
-  if (!toE || !fromE) throw new Error("Missing WA to/from");
+  const messageBody = String(body || "").trim();
+  if (!toE) throw new Error("Invalid WhatsApp recipient");
+  if (!fromE) throw new Error("Missing WhatsApp sender");
+  if (!messageBody) throw new Error("WhatsApp message body is empty");
 
   const payload = {
     from: `whatsapp:${fromE}`,
     to: `whatsapp:${toE}`,
-    body: String(body || ""),
+    body: messageBody,
     ...(statusCallback ? { statusCallback } : {}),
   };
 
-  return client.messages.create(payload);
+  const result = await client.messages.create(payload);
+  await rememberWhatsAppDelivery({
+    messageSid: result?.sid,
+    to: toE,
+    smsBody: messageBody,
+    status: result?.status,
+    source: "plain-text",
+  });
+  return result;
 }
 
 export default {
