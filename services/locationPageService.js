@@ -70,7 +70,13 @@ export const buildLocationPages = (acts, musicians, venues) => {
       if (seen.has(signature) || /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(review.comment)) return false;
       seen.add(signature); return true;
     }).sort((a, b) => (b.eventDate || '').localeCompare(a.eventDate || '')).slice(0, 6);
-    return [county.toLowerCase().replace(/\s+/g, '-'), { county, bands, venues: localVenues.map(venue => ({ id: String(venue._id), name: venue.name, county: venue.county })).sort((a, b) => a.name.localeCompare(b.name)), reviews }];
+    return [county.toLowerCase().replace(/\s+/g, '-'), { county, bands, venues: localVenues.map(venue => ({
+      id: String(venue._id),
+      name: venue.name,
+      county: venue.county,
+      photoUrl: clean(venue.photoUrl),
+      photoAlt: clean(venue.photoAlt) || `${venue.name} wedding venue`,
+    })).sort((a, b) => a.name.localeCompare(b.name)), reviews }];
   }));
 };
 
@@ -81,7 +87,7 @@ export const getLocationPages = async () => {
   const [acts, musicians, venues] = await Promise.all([
     Act.find({ status: 'approved' }).select('tscName name slug tscDescription description genre images.url images.locationCrop coverImage.url lineups.bandMembers.musicianId lineups.bandMembers.email lineups.bandMembers.firstName lineups.bandMembers.lastName reviews').lean(),
     Musician.find({}).select('email firstName lastName basicInfo.firstName basicInfo.lastName address.county').lean(),
-    Venue.find({}).select('name county visits.actName').lean(),
+    Venue.find({}).select('name county photoUrl photoAlt visits.actName').lean(),
   ]);
   cache = buildLocationPages(acts, musicians, venues);
   expires = Date.now() + 60000;

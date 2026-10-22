@@ -3,6 +3,7 @@ import Venue from "../models/venueModel.js";
 import Booking from "../models/bookingModel.js";
 import authUser from "../middleware/auth.js";
 import multer from "multer";
+import cloudinary from "../config/cloudinary.js";
 import { countyFromAddress, parseVenueEventSheet, roomNameFrom } from "../services/venueEventSheetParser.js";
 
 const router = express.Router();
@@ -30,6 +31,29 @@ const eventSheetUpload = multer({
   limits: { files: 50, fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => callback(null, file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || file.originalname.toLowerCase().endsWith(".docx")),
 });
+const venuePhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: 1, fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, callback) =>
+    callback(null, /^image\/(?:jpeg|png|webp|avif)$/i.test(file.mimetype)),
+});
+
+const uploadVenuePhoto = (file, venueId) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "tsc/venues",
+        public_id: `venue-${venueId}-${Date.now()}`,
+        resource_type: "image",
+        transformation: [
+          { width: 1600, height: 1000, crop: "fill", gravity: "auto" },
+          { quality: "auto", fetch_format: "auto" },
+        ],
+      },
+      (error, result) => (error ? reject(error) : resolve(result)),
+    );
+    stream.end(file.buffer);
+  });
 
 function extractAct(booking) {
   const candidates = [booking?.items?.[0], booking?.acts?.[0], booking?.lineup, booking?.bookingDetails];
@@ -144,6 +168,8 @@ const publicVenue = (venue) => ({
   postcode: venue.postcode,
   county: venue.county,
   website: venue.website,
+  photoUrl: venue.photoUrl,
+  photoAlt: venue.photoAlt || (venue.name ? `${venue.name} wedding venue` : "Wedding venue"),
   googleMapsUrl: venue.googleMapsUrl,
   what3wordsUrl: venue.what3wordsUrl,
   loadingPinUrl: venue.loadingPinUrl,
@@ -188,6 +214,52 @@ router.get("/public/:id", async (req, res) => {
 });
 
 router.use(authUser);
+
+router.post("/:id/photo", venuePhotoUpload.single("photo"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "Choose a JPG, PNG, WebP or AVIF image up to 8MB" });
+    }
+    const venue = await Venue.findById(req.params.id);
+    if (!venue) return res.status(404).json({ success: false, message: "Venue not found" });
+
+    const previousPublicId = clean(venue.photoPublicId);
+    const uploaded = await uploadVenuePhoto(req.file, venue._id);
+    venue.photoUrl = uploaded.secure_url || uploaded.url || "";
+    venue.photoPublicId = uploaded.public_id || "";
+    venue.photoAlt = clean(req.body?.photoAlt) || `${venue.name} wedding venue`;
+    await venue.save();
+
+    if (previousPublicId && previousPublicId !== venue.photoPublicId) {
+      cloudinary.uploader.destroy(previousPublicId).catch((error) =>
+        console.warn("Could not remove replaced venue photo", error?.message || error),
+      );
+    }
+    return res.json({ success: true, venue });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || "Could not upload venue photo" });
+  }
+});
+
+router.delete("/:id/photo", async (req, res) => {
+  try {
+    const venue = await Venue.findById(req.params.id);
+    if (!venue) return res.status(404).json({ success: false, message: "Venue not found" });
+    const publicId = clean(venue.photoPublicId);
+    venue.photoUrl = "";
+    venue.photoPublicId = "";
+    venue.photoAlt = "";
+    await venue.save();
+    if (publicId) {
+      cloudinary.uploader.destroy(publicId).catch((error) =>
+        console.warn("Could not remove venue photo", error?.message || error),
+      );
+    }
+    return res.json({ success: true, venue });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || "Could not remove venue photo" });
+  }
+});
 
 router.post("/imports/event-sheets/preview", eventSheetUpload.array("eventSheets", 50), async (req, res) => {
   try {
@@ -277,6 +349,11 @@ router.delete("/:id", async (req, res) => {
   try {
     const venue = await Venue.findByIdAndDelete(req.params.id);
     if (!venue) return res.status(404).json({ success: false, message: "Venue not found" });
+    if (clean(venue.photoPublicId)) {
+      cloudinary.uploader.destroy(venue.photoPublicId).catch((error) =>
+        console.warn("Could not remove deleted venue photo", error?.message || error),
+      );
+    }
     res.json({ success: true, deletedVenue: { _id: venue._id, name: venue.name } });
   } catch (error) { res.status(500).json({ success: false, message: error.message }); }
 });

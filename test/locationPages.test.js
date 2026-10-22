@@ -11,11 +11,13 @@ test('county aliases combine London without guessing missing locations', () => {
   assert.equal(reviewCounty('London Road, Essex'), '');
 });
 test('priority counties use URL-safe keys and keep Sussex counties separate', () => {
-  const data = buildLocationPages([], [], [{ _id: 'e', name: 'East Hall', county: 'East Sussex' }, { _id: 'w', name: 'West Hall', county: 'West Sussex' }]);
+  const data = buildLocationPages([], [], [{ _id: 'e', name: 'East Hall', county: 'East Sussex', photoUrl: 'https://images.example/east-hall.jpg', photoAlt: 'East Hall exterior' }, { _id: 'w', name: 'West Hall', county: 'West Sussex' }]);
   assert.equal(Object.keys(data).length, 12);
   assert.equal(data['north-yorkshire'].county, 'North Yorkshire');
   assert.equal(data['west-sussex'].venues[0].name, 'West Hall');
   assert.equal(data['east-sussex'].venues[0].name, 'East Hall');
+  assert.equal(data['east-sussex'].venues[0].photoUrl, 'https://images.example/east-hall.jpg');
+  assert.equal(data['east-sussex'].venues[0].photoAlt, 'East Hall exterior');
 });
 test('only confirmed originals affect ranking, not deputies or shared admin contacts', () => {
   const musicians = [{ _id: 'm1', email: 'a@example.test', firstName: 'Alice', lastName: 'Smith', address: { county: 'Essex', postcode: 'PRIVATE' } }];
