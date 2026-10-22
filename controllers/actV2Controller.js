@@ -984,6 +984,8 @@ export const getAllActsV2 = async (req, res) => {
         "coverImage.url": 1,
         "images.url": 1,
         "profileImage.url": 1,
+        "lineups._id": 1,
+        "lineups.lineupId": 1,
         "lineups.base_fee": 1,
         genre: 1,          // singular field
         genres: 1,         // ← plural (present in some docs)
