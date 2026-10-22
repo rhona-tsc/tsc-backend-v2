@@ -81,6 +81,8 @@ import {
   sendVideoReviewDigest,
 } from "./services/videoMigrationAutomationService.js";
 import { runClientAutomations } from "./services/clientAutomationService.js";
+import seoKeywordRoutes from "./routes/seoKeywordRoutes.js";
+import { runSeoMonthlyReport } from "./services/seoKeywordService.js";
 
 /* -------------------------------------------------------------------------- */
 /*                               Boot + env log                               */
@@ -722,6 +724,7 @@ app.use("/api/board/bookings", bookingBoardRoutes);
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/noticeboard", noticeRoutes);
 app.use("/api/feedback", feedbackRoutes);
+app.use("/api/seo-keywords", seoKeywordRoutes);
 
 app.use("/api/upload", uploadRoutes);
 
@@ -977,6 +980,23 @@ cron.schedule(
       console.log("📨 Client automation run complete", result);
     } catch (error) {
       console.error("❌ Client automation run failed", error?.message || error);
+    }
+  },
+  { timezone: "Europe/London" },
+);
+
+// Search Console final data normally lags by a few days, so report on the 4th.
+cron.schedule(
+  "15 9 4 * *",
+  async () => {
+    try {
+      const result = await runSeoMonthlyReport({ sendEmailReport: true, skipIfEmailed: true });
+      console.log("🔎 Monthly SEO keyword report sent", {
+        periodStart: result.periodStart,
+        periodEnd: result.periodEnd,
+      });
+    } catch (error) {
+      console.error("❌ Monthly SEO keyword report failed", error?.message || error);
     }
   },
   { timezone: "Europe/London" },
