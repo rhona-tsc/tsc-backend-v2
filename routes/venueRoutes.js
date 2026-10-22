@@ -247,19 +247,17 @@ router.get("/claim/:token", async (req, res) => {
   try {
     const claim = await VenueClaim.findOne({ tokenHash: claimTokenHash(req.params.token) }).populate("venueId");
     if (!claim || !claim.venueId) return res.status(404).json({ success: false, message: "This editing link is not valid" });
-    if (claim.expiresAt && claim.expiresAt < new Date() && claim.status === "invited") {
-      claim.status = "expired"; await claim.save();
-    }
-    if (claim.status !== "invited") return res.status(410).json({ success: false, message: claim.status === "submitted" ? "These updates have already been submitted for review" : "This editing link has expired or has already been used" });
+    if (claim.status === "expired") { claim.status = "invited"; claim.expiresAt = undefined; await claim.save(); }
+    if (!["invited", "approved", "rejected"].includes(claim.status)) return res.status(409).json({ success: false, message: claim.status === "submitted" ? "These updates have already been submitted for review" : "This editing link is not currently available" });
     return res.json({ success: true, venue: { _id: claim.venueId._id, ...publicClaimSnapshot(claim.venueId.toObject()), photoUrl: claim.venueId.photoUrl }, contactName: claim.contactName, contactEmail: claim.contactEmail, partnershipInterest: claim.partnershipInterest, partnershipMessage: claim.partnershipMessage });
   } catch (error) { return res.status(500).json({ success: false, message: error.message }); }
 });
 
 router.post("/claim/:token", venuePhotoUpload.single("photo"), async (req, res) => {
   try {
-    const claim = await VenueClaim.findOne({ tokenHash: claimTokenHash(req.params.token), status: "invited" }).populate("venueId");
+    const claim = await VenueClaim.findOne({ tokenHash: claimTokenHash(req.params.token), status: { $in: ["invited", "approved", "rejected", "expired"] } }).populate("venueId");
     if (!claim || !claim.venueId) return res.status(404).json({ success: false, message: "This editing link is not valid" });
-    if (claim.expiresAt && claim.expiresAt < new Date()) { claim.status = "expired"; await claim.save(); return res.status(410).json({ success: false, message: "This editing link has expired" }); }
+    if (claim.status === "expired") claim.status = "invited";
     let rawChanges = req.body?.changes || req.body || {};
     if (typeof rawChanges === "string") rawChanges = JSON.parse(rawChanges);
     const proposed = sanitiseClaimChanges(rawChanges);
@@ -322,7 +320,7 @@ router.post("/:id/claim-invite", async (req, res) => {
     target.contactName = clean(req.body?.contactName) || target.contactName;
     target.contactEmail = contactEmail;
     target.tokenHash = claimTokenHash(rawToken);
-    target.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    target.expiresAt = undefined;
     target.status = "invited";
     await target.save();
     venue.partnershipStatus = venue.partnershipStatus === "not_contacted" ? "invited" : venue.partnershipStatus;
@@ -333,8 +331,8 @@ router.post("/:id/claim-invite", async (req, res) => {
     const emailResult = await sendEmail({
       to: contactEmail,
       subject: `Review ${venue.name} on The Supreme Collective`,
-      text: `${greeting}\n\nWe have performed at ${venue.name} and would love you to review its listing in our Venue Guide. Use this secure link to suggest updates, add an official photo and let us know if you would like to discuss a recommended-supplier partnership:\n\n${claimLink}\n\nNothing is published until our team reviews it. The link expires in 30 days.\n\nThe Supreme Collective`,
-      html: `<p>${escapeHtml(greeting)}</p><p>We have performed at <strong>${escapeHtml(venue.name)}</strong> and would love you to review its listing in our Venue Guide.</p><p><a href="${claimLink}">Review and update the venue listing</a></p><p>You can suggest public details, add an official photo and let us know if you would like to discuss a recommended-supplier partnership. Nothing is published until our team reviews it. This secure link expires in 30 days.</p><p>The Supreme Collective</p>`,
+      text: `${greeting}\n\nWe have performed at ${venue.name} and would love you to review its listing in our Venue Guide. Use this secure link to suggest updates, add an official photo and let us know if you would like to discuss a recommended-supplier partnership:\n\n${claimLink}\n\nNothing is published until our team reviews it. You can keep this link and return whenever the listing needs updating.\n\nThe Supreme Collective`,
+      html: `<p>${escapeHtml(greeting)}</p><p>We have performed at <strong>${escapeHtml(venue.name)}</strong> and would love you to review its listing in our Venue Guide.</p><p><a href="${claimLink}">Review and update the venue listing</a></p><p>You can suggest public details, add an official photo and let us know if you would like to discuss a recommended-supplier partnership. Nothing is published until our team reviews it. You can keep this link and return whenever the listing needs updating.</p><p>The Supreme Collective</p>`,
       replyTo: process.env.SMTP_REPLY_TO || "hello@thesupremecollective.co.uk",
     });
     return res.json({ success: true, claim: target, claimLink, emailSent: Boolean(emailResult?.ok), emailError: emailResult?.ok ? "" : (emailResult?.error || emailResult?.reason || "Email could not be sent") });
