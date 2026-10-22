@@ -1,11 +1,15 @@
 import express from "express";
 import Venue from "../models/venueModel.js";
+import VenueClaim from "../models/venueClaimModel.js";
 import Booking from "../models/bookingModel.js";
 import authUser from "../middleware/auth.js";
 import multer from "multer";
 import cloudinary from "../config/cloudinary.js";
 import { countyFromAddress, parseVenueEventSheet, roomNameFrom } from "../services/venueEventSheetParser.js";
 import { getPublicPerformanceHistory } from '../services/publicPerformanceHistory.js';
+import crypto from "crypto";
+import validator from "validator";
+import { sendEmail } from "../utils/sendEmail.js";
 
 const router = express.Router();
 const clean = (v) => String(v ?? "").trim();
@@ -18,6 +22,20 @@ const normaliseKey = (name, address) => {
   return base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 };
 const uniqueStrings = (values) => [...new Set((values || []).map(clean).filter(Boolean))];
+const publicSiteBase = clean(process.env.FRONTEND_URL || "https://thesupremecollective.co.uk").replace(/\/+$/, "");
+const claimTokenHash = (token) => crypto.createHash("sha256").update(clean(token)).digest("hex");
+const escapeHtml = (value) => clean(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
+const publicEditableFields = ["name", "address", "postcode", "county", "website", "publicDescription", "publicEmail", "publicPhone", "enquiryUrl", "googleMapsUrl", "what3wordsUrl", "photoAlt", "photoSourceUrl"];
+const publicRoomFields = ["name", "performanceArea", "changingRoom", "soundLimitations", "soundLimiterDb", "curfewAndCloseTime", "paAndLighting", "powerAndStage", "capacity"];
+const sanitiseClaimChanges = (input = {}) => {
+  const changes = {};
+  for (const field of publicEditableFields) changes[field] = clean(input[field]).slice(0, field === "publicDescription" ? 3000 : 500);
+  changes.rooms = (Array.isArray(input.rooms) ? input.rooms : []).slice(0, 20).map((room) => ({
+    _id: clean(room?._id),
+    ...Object.fromEntries(publicRoomFields.map((field) => [field, clean(room?.[field]).slice(0, 1500)])),
+  }));
+  return changes;
+};
 const COUNTY_CORRECTIONS = new Map([
   ["berlshire", "Berkshire"], ["cambridegshire", "Cambridgeshire"], ["essec", "Essex"],
   ["greater lodnon", "Greater London"], ["kents", "Kent"], ["ocfordshire", "Oxfordshire"],
@@ -169,19 +187,19 @@ const publicVenue = (venue) => ({
   postcode: venue.postcode,
   county: venue.county,
   website: venue.website,
+  publicDescription: venue.publicDescription,
+  publicEmail: venue.publicEmail,
+  publicPhone: venue.publicPhone,
+  enquiryUrl: venue.enquiryUrl,
   photoUrl: venue.photoUrl,
   photoAlt: venue.photoAlt || (venue.name ? `${venue.name} wedding venue` : "Wedding venue"),
   googleMapsUrl: venue.googleMapsUrl,
   what3wordsUrl: venue.what3wordsUrl,
-  loadingPinUrl: venue.loadingPinUrl,
   parking: venue.parking,
-  parkingPinUrl: venue.parkingPinUrl,
-  generalDirections: venue.generalDirections,
   rooms: (venue.rooms || []).map((room) => ({
     _id: room._id,
     name: room.name,
     performanceArea: room.performanceArea,
-    accessAndLoading: room.accessAndLoading,
     changingRoom: room.changingRoom,
     soundLimitations: room.soundLimitations,
     soundLimiterDb: room.soundLimiterDb,
@@ -193,7 +211,72 @@ const publicVenue = (venue) => ({
   actsPerformed: uniqueStrings((venue.visits || []).map((visit) => visit.actName)),
   lastVerifiedAt: venue.lastVerifiedAt,
   reviewStatus: venue.reviewStatus,
+  claimedAt: venue.claimedAt,
+  venueVerified: Boolean(venue.claimedAt),
+  partnershipStatus: ["recommended", "preferred"].includes(venue.partnershipStatus) ? venue.partnershipStatus : "",
   updatedAt: venue.updatedAt,
+});
+
+const publicClaimSnapshot = (venue) => sanitiseClaimChanges({
+  ...venue,
+  rooms: venue.rooms || [],
+});
+
+router.post("/public/:id/claim-request", async (req, res) => {
+  try {
+    const venue = await Venue.findById(req.params.id).select("_id name").lean();
+    if (!venue) return res.status(404).json({ success: false, message: "Venue not found" });
+    const contactEmail = clean(req.body?.contactEmail).toLowerCase();
+    const contactName = clean(req.body?.contactName);
+    if (!validator.isEmail(contactEmail)) return res.status(400).json({ success: false, message: "Enter a valid work email address" });
+    const existing = await VenueClaim.findOne({ venueId: venue._id, contactEmail, status: { $in: ["requested", "invited", "submitted"] } });
+    if (existing) return res.json({ success: true, message: "Your request is already waiting for review" });
+    await VenueClaim.create({
+      venueId: venue._id,
+      contactName,
+      contactEmail,
+      contactRole: clean(req.body?.contactRole).slice(0, 150),
+      requestMessage: clean(req.body?.requestMessage).slice(0, 2000),
+      partnershipInterest: Boolean(req.body?.partnershipInterest),
+    });
+    return res.status(201).json({ success: true, message: "Thanks — we will verify your request and email a secure editing link" });
+  } catch (error) { return res.status(500).json({ success: false, message: error.message }); }
+});
+
+router.get("/claim/:token", async (req, res) => {
+  try {
+    const claim = await VenueClaim.findOne({ tokenHash: claimTokenHash(req.params.token) }).populate("venueId");
+    if (!claim || !claim.venueId) return res.status(404).json({ success: false, message: "This editing link is not valid" });
+    if (claim.expiresAt && claim.expiresAt < new Date() && claim.status === "invited") {
+      claim.status = "expired"; await claim.save();
+    }
+    if (claim.status !== "invited") return res.status(410).json({ success: false, message: claim.status === "submitted" ? "These updates have already been submitted for review" : "This editing link has expired or has already been used" });
+    return res.json({ success: true, venue: { _id: claim.venueId._id, ...publicClaimSnapshot(claim.venueId.toObject()), photoUrl: claim.venueId.photoUrl }, contactName: claim.contactName, contactEmail: claim.contactEmail, partnershipInterest: claim.partnershipInterest, partnershipMessage: claim.partnershipMessage });
+  } catch (error) { return res.status(500).json({ success: false, message: error.message }); }
+});
+
+router.post("/claim/:token", venuePhotoUpload.single("photo"), async (req, res) => {
+  try {
+    const claim = await VenueClaim.findOne({ tokenHash: claimTokenHash(req.params.token), status: "invited" }).populate("venueId");
+    if (!claim || !claim.venueId) return res.status(404).json({ success: false, message: "This editing link is not valid" });
+    if (claim.expiresAt && claim.expiresAt < new Date()) { claim.status = "expired"; await claim.save(); return res.status(410).json({ success: false, message: "This editing link has expired" }); }
+    let rawChanges = req.body?.changes || req.body || {};
+    if (typeof rawChanges === "string") rawChanges = JSON.parse(rawChanges);
+    const proposed = sanitiseClaimChanges(rawChanges);
+    if (proposed.publicEmail && !validator.isEmail(proposed.publicEmail)) return res.status(400).json({ success: false, message: "Enter a valid public email address or leave it blank" });
+    if (req.file) {
+      const uploaded = await uploadVenuePhoto(req.file, `claim-${claim._id}`);
+      claim.proposedPhotoUrl = uploaded.secure_url || uploaded.url || "";
+      claim.proposedPhotoPublicId = uploaded.public_id || "";
+    }
+    claim.proposed = proposed;
+    claim.partnershipInterest = Boolean(rawChanges.partnershipInterest);
+    claim.partnershipMessage = clean(rawChanges.partnershipMessage).slice(0, 2000);
+    claim.submittedAt = new Date();
+    claim.status = "submitted";
+    await claim.save();
+    return res.json({ success: true, message: "Your changes have been sent to The Supreme Collective for review" });
+  } catch (error) { return res.status(400).json({ success: false, message: error.message || "Could not submit these changes" }); }
 });
 
 router.get("/public", async (req, res) => {
@@ -217,6 +300,91 @@ router.get("/public/:id", async (req, res) => {
 });
 
 router.use(authUser);
+
+router.get("/claims", async (req, res) => {
+  try {
+    const status = clean(req.query.status);
+    const claims = await VenueClaim.find(status ? { status } : {}).populate("venueId", "name address photoUrl partnershipStatus").sort({ updatedAt: -1 }).lean();
+    return res.json({ success: true, claims });
+  } catch (error) { return res.status(500).json({ success: false, message: error.message }); }
+});
+
+router.post("/:id/claim-invite", async (req, res) => {
+  try {
+    const venue = await Venue.findById(req.params.id);
+    if (!venue) return res.status(404).json({ success: false, message: "Venue not found" });
+    const contactEmail = clean(req.body?.contactEmail).toLowerCase();
+    if (!validator.isEmail(contactEmail)) return res.status(400).json({ success: false, message: "Enter a valid venue email address" });
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const claim = req.body?.claimId ? await VenueClaim.findById(req.body.claimId) : null;
+    const target = claim || new VenueClaim({ venueId: venue._id, contactEmail });
+    if (String(target.venueId) !== String(venue._id)) return res.status(400).json({ success: false, message: "That claim request belongs to a different venue" });
+    target.contactName = clean(req.body?.contactName) || target.contactName;
+    target.contactEmail = contactEmail;
+    target.tokenHash = claimTokenHash(rawToken);
+    target.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    target.status = "invited";
+    await target.save();
+    venue.partnershipStatus = venue.partnershipStatus === "not_contacted" ? "invited" : venue.partnershipStatus;
+    venue.partnershipLastContactedAt = new Date();
+    await venue.save();
+    const claimLink = `${publicSiteBase}/venues/claim/${rawToken}/`;
+    const greeting = target.contactName ? `Hi ${target.contactName},` : "Hello,";
+    const emailResult = await sendEmail({
+      to: contactEmail,
+      subject: `Review ${venue.name} on The Supreme Collective`,
+      text: `${greeting}\n\nWe have performed at ${venue.name} and would love you to review its listing in our Venue Guide. Use this secure link to suggest updates, add an official photo and let us know if you would like to discuss a recommended-supplier partnership:\n\n${claimLink}\n\nNothing is published until our team reviews it. The link expires in 30 days.\n\nThe Supreme Collective`,
+      html: `<p>${escapeHtml(greeting)}</p><p>We have performed at <strong>${escapeHtml(venue.name)}</strong> and would love you to review its listing in our Venue Guide.</p><p><a href="${claimLink}">Review and update the venue listing</a></p><p>You can suggest public details, add an official photo and let us know if you would like to discuss a recommended-supplier partnership. Nothing is published until our team reviews it. This secure link expires in 30 days.</p><p>The Supreme Collective</p>`,
+      replyTo: process.env.SMTP_REPLY_TO || "hello@thesupremecollective.co.uk",
+    });
+    return res.json({ success: true, claim: target, claimLink, emailSent: Boolean(emailResult?.ok), emailError: emailResult?.ok ? "" : (emailResult?.error || emailResult?.reason || "Email could not be sent") });
+  } catch (error) { return res.status(500).json({ success: false, message: error.message }); }
+});
+
+router.post("/claims/:id/approve", async (req, res) => {
+  try {
+    const claim = await VenueClaim.findById(req.params.id);
+    if (!claim || claim.status !== "submitted") return res.status(404).json({ success: false, message: "Submitted venue update not found" });
+    const venue = await Venue.findById(claim.venueId);
+    if (!venue) return res.status(404).json({ success: false, message: "Venue not found" });
+    const changes = sanitiseClaimChanges(claim.proposed || {});
+    for (const field of publicEditableFields) if (Object.hasOwn(changes, field)) venue[field] = changes[field];
+    venue.normalizedKey = normaliseKey(venue.name, venue.address);
+    for (const proposedRoom of changes.rooms) {
+      const existingRoom = (proposedRoom._id && venue.rooms.id(proposedRoom._id))
+        || venue.rooms.find((room) => clean(room.name).toLowerCase() === clean(proposedRoom.name).toLowerCase());
+      if (existingRoom) {
+        for (const field of publicRoomFields) existingRoom[field] = proposedRoom[field];
+      } else if (clean(proposedRoom.name)) {
+        venue.rooms.push(Object.fromEntries(publicRoomFields.map((field) => [field, proposedRoom[field]])));
+      }
+    }
+    if (claim.proposedPhotoUrl) {
+      const previousPublicId = clean(venue.photoPublicId);
+      venue.photoUrl = claim.proposedPhotoUrl;
+      venue.photoPublicId = claim.proposedPhotoPublicId;
+      if (previousPublicId && previousPublicId !== venue.photoPublicId) cloudinary.uploader.destroy(previousPublicId).catch(() => {});
+    }
+    venue.reviewStatus = "reviewed";
+    venue.lastVerifiedAt = new Date();
+    venue.claimedAt = new Date();
+    venue.claimedByEmail = claim.contactEmail;
+    venue.partnershipStatus = claim.partnershipInterest ? "conversation" : "claimed";
+    await venue.save();
+    claim.status = "approved"; claim.reviewedAt = new Date(); claim.reviewedBy = clean(req.user?.email || req.user?.id); await claim.save();
+    return res.json({ success: true, venue, claim });
+  } catch (error) { return res.status(500).json({ success: false, message: error.message }); }
+});
+
+router.post("/claims/:id/reject", async (req, res) => {
+  try {
+    const claim = await VenueClaim.findById(req.params.id);
+    if (!claim) return res.status(404).json({ success: false, message: "Venue update not found" });
+    claim.status = "rejected"; claim.reviewedAt = new Date(); claim.reviewedBy = clean(req.user?.email || req.user?.id); await claim.save();
+    if (claim.proposedPhotoPublicId) cloudinary.uploader.destroy(claim.proposedPhotoPublicId).catch(() => {});
+    return res.json({ success: true, claim });
+  } catch (error) { return res.status(500).json({ success: false, message: error.message }); }
+});
 
 router.post("/:id/photo", venuePhotoUpload.single("photo"), async (req, res) => {
   try {
