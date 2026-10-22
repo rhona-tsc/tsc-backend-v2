@@ -70,6 +70,7 @@ const VenueSchema = new mongoose.Schema(
     photoUrl: { type: String, default: "" },
     photoPublicId: { type: String, default: "" },
     photoAlt: { type: String, default: "" },
+    photoSourceUrl: { type: String, default: "" },
     googleMapsUrl: { type: String, default: "" },
     what3wordsUrl: { type: String, default: "" },
     loadingPinUrl: { type: String, default: "" },

@@ -228,6 +228,7 @@ router.post("/:id/photo", venuePhotoUpload.single("photo"), async (req, res) => 
     venue.photoUrl = uploaded.secure_url || uploaded.url || "";
     venue.photoPublicId = uploaded.public_id || "";
     venue.photoAlt = clean(req.body?.photoAlt) || `${venue.name} wedding venue`;
+    venue.photoSourceUrl = clean(req.body?.photoSourceUrl) || clean(venue.website);
     await venue.save();
 
     if (previousPublicId && previousPublicId !== venue.photoPublicId) {
@@ -249,6 +250,7 @@ router.delete("/:id/photo", async (req, res) => {
     venue.photoUrl = "";
     venue.photoPublicId = "";
     venue.photoAlt = "";
+    venue.photoSourceUrl = "";
     await venue.save();
     if (publicId) {
       cloudinary.uploader.destroy(publicId).catch((error) =>
