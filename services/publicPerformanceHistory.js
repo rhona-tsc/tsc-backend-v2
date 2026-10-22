@@ -3,10 +3,12 @@ import Venue from '../models/venueModel.js';
 import { createActNameResolver } from './actNameMatching.js';
 import { canonicalCounty, countySlug, isPublicVenue, countyForReview } from './locationMatching.js';
 import { venueEveningExamples } from '../data/venueEveningExamples.js';
+import { locationImageUrl } from './locationImage.js';
 
 const nameKey = value => String(value || '').replace(/^for\s+(?:the\s+)?address\s+we\s+have\s*:\s*/i, '').trim().toLowerCase();
 export function buildPublicPerformanceHistory(acts, venues, now = new Date()) {
   const resolve = createActNameResolver(acts);
+  const images = Object.fromEntries(acts.filter(act => act.slug).map(act => [act.slug, locationImageUrl(act)]));
   const eligible = venues.filter(isPublicVenue);
   const histories = Object.fromEntries(acts.filter(act => act.slug).map(act => [act.slug, {
     slug: act.slug, name: act.tscName || act.name, venues: [], examples: [],
@@ -34,6 +36,7 @@ export function buildPublicPerformanceHistory(acts, venues, now = new Date()) {
     const examples = venueEveningExamples.filter(example => nameKey(example.venueName) === nameKey(venue.name) && canonicalCounty(example.county) === county && histories[example.actSlug]).map(example => ({
       ...example, venueId: String(venue._id), venueCounty: venue.county,
       actName: histories[example.actSlug].name, countySlug: countySlug(county),
+      image: images[example.actSlug] || '',
     }));
     venueHistories[String(venue._id)] = { performances, examples, county, countySlug: countySlug(county) };
     for (const performance of performances) histories[performance.slug].venues.push({
@@ -51,7 +54,7 @@ let expires = 0;
 export async function getPublicPerformanceHistory() {
   if (cached && Date.now() < expires) return cached;
   const [acts, venues] = await Promise.all([
-    Act.find({ status: 'approved' }).select('name tscName slug reviews._id reviews.reviewId reviews.eventLocation reviews.comment').lean(),
+    Act.find({ status: 'approved' }).select('name tscName slug images.url images.locationCrop coverImage.url reviews._id reviews.reviewId reviews.eventLocation reviews.comment').lean(),
     Venue.find({}).select('name aliases county visits.actName visits.actId visits.eventDate').lean(),
   ]);
   cached = buildPublicPerformanceHistory(acts, venues);
