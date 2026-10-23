@@ -1,6 +1,7 @@
 // backend/controllers/helpersForCorrectFee.js
 import fetch from "node-fetch";
 import { postcodes } from "../utils/postcodes.js";
+import { getMemberCountyTravelFee } from "../utils/memberCountyTravel.js";
 
 const normalizeCounty = (c) => String(c || "").toLowerCase().trim();
 
@@ -199,7 +200,11 @@ const essentialExtras = (fullMember?.additionalRoles || [])
   if (act?.useCountyTravelFee) {
     const outcode = extractOutcode(address);
     const county = countyFromOutcode(outcode);
-    const perMember = getCountyFeeFromMap(act?.countyFees, county);
+    const perMember = getMemberCountyTravelFee(
+      fullMember,
+      county,
+      getCountyFeeFromMap(act?.countyFees, county),
+    );
     if (perMember > 0) {
       travel = perMember;
       console.log(`💰 computeMemberMessageFee county travel`, { county, travel });

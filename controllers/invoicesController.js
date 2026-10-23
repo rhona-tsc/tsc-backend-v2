@@ -10,6 +10,7 @@ import path from "path";
 import fs from "fs";
 import sendEmail from "../utils/sendEmail.js";
 import { getDepositPaidToInvoiceCompany } from "../utils/invoiceDeposit.js";
+import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
 
 const STRIPE_API_VERSION = "2024-06-20";
 
@@ -154,7 +155,10 @@ export const scheduleBalance = async (req, res) => {
         .json({ success: false, message: "Invalid eventDateISO." });
     }
 
-    const computedDue = startOfDay(subDays(eventDate, 14));
+    const computedDue = parseISO(finalDetailsDueISO({
+      eventDateISO,
+      bookingDateISO: metadata?.bookingDateISO || new Date().toISOString(),
+    }));
     const dueAt = dueAtISO ? parseISO(dueAtISO) : computedDue;
     if (!isValid(dueAt)) {
       return res
@@ -904,42 +908,7 @@ const getDueDateThursdayWeekBefore = (eventDateValue) => {
 };
 
 const getSafeInvoiceDueDate = (row, eventDateValue) => {
-  const calculatedDueDate =
-    getDueDateThursdayWeekBefore(eventDateValue);
-
-  const storedDueDate = firstNonEmpty(
-    row?.invoiceDueDateISO,
-    row?.invoiceDueDate,
-    row?.dueDateISO,
-    row?.dueDate,
-  );
-
-  if (!storedDueDate) return calculatedDueDate;
-
-  const stored = /^\d{4}-\d{2}-\d{2}$/.test(String(storedDueDate))
-    ? new Date(`${storedDueDate}T12:00:00`)
-    : new Date(storedDueDate);
-
-  const event = /^\d{4}-\d{2}-\d{2}$/.test(String(eventDateValue))
-    ? new Date(`${eventDateValue}T12:00:00`)
-    : new Date(eventDateValue);
-
-  if (
-    Number.isNaN(stored.getTime()) ||
-    Number.isNaN(event.getTime())
-  ) {
-    return calculatedDueDate;
-  }
-
-  const differenceInDays =
-    (event.getTime() - stored.getTime()) / 86400000;
-
-  // A due date must precede the event and be reasonably close to it.
-  if (differenceInDays < 0 || differenceInDays > 370) {
-    return calculatedDueDate;
-  }
-
-  return storedDueDate;
+  return finalDetailsDueISO({ ...row, eventDateISO: eventDateValue });
 };
 
 const firstNonEmpty = (...values) =>

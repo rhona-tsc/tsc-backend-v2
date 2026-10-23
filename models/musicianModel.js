@@ -110,6 +110,7 @@ const musicianSchema = new mongoose.Schema(
     phoneNormalized: { type: String, index: true },
     dietaryRequirements: { type: String, default: "" },
     whatsappOptIn: { type: Boolean, default: false },
+    countyTravelFees: { type: Map, of: Number, default: undefined },
     password: { type: String },
     profilePhoto: { type: String, default: null },
     coverHeroImage: { type: String, default: null },

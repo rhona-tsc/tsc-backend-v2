@@ -2,6 +2,7 @@
 import OutboundQueue from "../models/outboundQueue.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import { sendWhatsAppMessage, sendSMSMessage, toE164 } from "../utils/twilioClient.js";
+import { getMemberCountyTravelFee } from "../utils/memberCountyTravel.js";
 
 // In-process per-phone locks (sufficient for single instance / dev)
 const phoneLocks = new Map(); // phone -> boolean (locked)
@@ -405,7 +406,11 @@ if (isTestAct) {
         console.log("📊 County travel fee per member:", feePerMember);
 
     if (feePerMember > 0 && travelEligibleCount > 0) {
-      travelFee = feePerMember * travelEligibleCount;
+      travelFee = travelEligibleMembers.reduce(
+        (sum, member) =>
+          sum + getMemberCountyTravelFee(member, derivedCounty, feePerMember),
+        0,
+      );
       travelCalculated = true;
           console.log("🚗 Travel fee (county):", travelFee);
 

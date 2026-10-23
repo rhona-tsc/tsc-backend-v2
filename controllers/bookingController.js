@@ -27,12 +27,13 @@ import {
 } from "../controllers/googleController.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import axios from "axios";
-import { differenceInCalendarDays, startOfDay, subDays } from "date-fns";
+import { differenceInCalendarDays, startOfDay } from "date-fns";
 import { logStart } from "../utils/logger.js";
 import { setSharedIVR } from "../utils/proxySetup.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
 import userModel from "../models/userModel.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
+import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
 import { normalize } from "../utils/phoneUtils.js";
 import chromium from "@sparticuz/chromium";
 import { sendContractEmail } from "./helpers/sendContractEmail.js";
@@ -2484,7 +2485,10 @@ export const createBooking = async (req, res) => {
 
     // If deposit flow, compute balance fields now (stored on booking for boards/ops)
     if (!requiresFullPayment) {
-      const balanceDueAt = startOfDay(subDays(eventDate, 14)); // 00:00 local day 14 days before
+      const balanceDueAt = startOfDay(new Date(`${finalDetailsDueISO({
+        eventDateISO: selectedDate,
+        bookingDateISO: new Date().toISOString(),
+      })}T12:00:00.000Z`));
       const balanceAmountPence = Math.max(
         0,
         Math.round((safeTotals.fullAmount - safeTotals.chargedAmount) * 100),

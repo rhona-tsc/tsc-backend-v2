@@ -11,6 +11,7 @@ import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 import { postcodes } from "../utils/postcodes.js"; // <-- ensure this path is correct in backend
 import mongoose from "mongoose";
 import calculateActPricing from "../utils/calculateActPricing.js";
+import { getMemberCountyTravelFee } from "../utils/memberCountyTravel.js";
 import userModel from "../models/userModel.js";
 import { makeShortId } from "../utils/makeShortId.js";
 import crypto from "crypto"; // at top of file if not already
@@ -488,7 +489,11 @@ export async function computeFinalFeeForMember(
   let usedCountyRate = false;
 
   if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
-    const raw = getCountyFeeValue(act.countyFees, selectedCounty);
+    const raw = getMemberCountyTravelFee(
+      member,
+      selectedCounty,
+      getCountyFeeValue(act.countyFees, selectedCounty),
+    );
     const val = Number(raw);
     if (Number.isFinite(val) && val > 0) {
       usedCountyRate = true;
@@ -2101,8 +2106,11 @@ const computeMemberTravelFee = async ({
   // 🧩 5️⃣ Branch 1 — County fee per member
   if (act.useCountyTravelFee && act.countyFees) {
     const key = String(selectedCounty || "").toLowerCase();
-    const feePerMember =
-      Number(act.countyFees?.[key] ?? act.countyFees?.get?.(key) ?? 0) || 0;
+    const feePerMember = getMemberCountyTravelFee(
+      member,
+      selectedCounty,
+      Number(act.countyFees?.[key] ?? act.countyFees?.get?.(key) ?? 0) || 0,
+    );
     console.log(`📍 County-based travel fee (${key}): £${feePerMember}`);
     return feePerMember;
   }
@@ -3414,7 +3422,11 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       let travelSource = "none";
 
       if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
-        const raw = getCountyFeeValue(act.countyFees, selectedCounty);
+        const raw = getMemberCountyTravelFee(
+          member,
+          selectedCounty,
+          getCountyFeeValue(act.countyFees, selectedCounty),
+        );
         const val = Number(raw);
         if (Number.isFinite(val) && val > 0) {
           travelFee = Math.ceil(val);
@@ -4302,7 +4314,11 @@ if (!isDeputy && shouldAlwaysSkip) {
         const selectedDate = dateISO;
 
         if (act?.useCountyTravelFee && act?.countyFees && selectedCounty) {
-          const raw = getCountyFeeValue(act.countyFees, selectedCounty);
+          const raw = getMemberCountyTravelFee(
+            targetMember,
+            selectedCounty,
+            getCountyFeeValue(act.countyFees, selectedCounty),
+          );
           const val = Number(raw);
           if (Number.isFinite(val) && val > 0) {
             travelFee = Math.ceil(val);
@@ -7045,7 +7061,11 @@ const findExtra = (extrasMap, ...aliases) => {
       countyFromAddress(selectedAddress || "") || {};
 
     if (actDoc?.useCountyTravelFee && actDoc?.countyFees && selectedCounty) {
-      const raw = getCountyFeeValue(actDoc.countyFees, selectedCounty);
+      const raw = getMemberCountyTravelFee(
+        member,
+        selectedCounty,
+        getCountyFeeValue(actDoc.countyFees, selectedCounty),
+      );
       const val = Number(raw);
       if (Number.isFinite(val) && val > 0) {
         return { fee: Math.ceil(val), source: "county" };

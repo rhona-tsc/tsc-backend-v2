@@ -1,7 +1,55 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { parseBookingContract } from "../routes/bookingBoardRoutes.js";
+import {
+  parseBookingContract,
+  resolveBookingAssignmentsForUpsert,
+} from "../routes/bookingBoardRoutes.js";
+
+test("manual edits and PDF re-imports preserve existing accepted musicians", () => {
+  const accepted = {
+    musicianId: "69442f43a034dd3ebd6a0487",
+    name: "Ione Townsend",
+    email: "info@ioneofficial.com",
+    role: "Lead Female Vocal",
+    roleSlotId: "lead-female-vocal-1",
+    status: "accepted",
+  };
+
+  const resolved = resolveBookingAssignmentsForUpsert({
+    payload: {
+      bookingRef: "261018278454",
+      importMetadata: { source: "entertainment_nation_pdf" },
+    },
+    existingBooking: { assignedMusicians: [accepted] },
+    existingBoardRow: {},
+  });
+
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0].name, "Ione Townsend");
+  assert.equal(resolved[0].status, "accepted");
+});
+
+test("clearing musicians requires the explicit replacement flag", () => {
+  const existing = {
+    assignedMusicians: [{ name: "Existing Musician", role: "Drums" }],
+  };
+
+  assert.equal(
+    resolveBookingAssignmentsForUpsert({
+      payload: { assignedMusicians: [] },
+      existingBooking: existing,
+    }).length,
+    1,
+  );
+  assert.deepEqual(
+    resolveBookingAssignmentsForUpsert({
+      payload: { assignedMusicians: [], replaceAssignedMusicians: true },
+      existingBooking: existing,
+    }),
+    [],
+  );
+});
 
 test("contract import recognises pound-symbol totals and creates a deposit invoice draft", () => {
   const contractText = `

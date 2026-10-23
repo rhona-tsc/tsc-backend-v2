@@ -7,6 +7,7 @@ import sendEmail from "../utils/sendEmail.js";
 import { buildIntroInvoiceAttachments } from "../utils/introInvoiceAttachment.js";
 import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.js";
 import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
+import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
 
 export const AUTOMATION_10_KEY = "automation-10-balance-coming-due";
 export const AUTOMATION_10_NUMBER = 10;
@@ -39,6 +40,9 @@ const shiftISODate = (value, days) => {
   date.setUTCDate(date.getUTCDate() + Number(days || 0));
   return date.toISOString().slice(0, 10);
 };
+
+const finalDueISO = (row = {}) =>
+  finalDetailsDueISO(row) || isoDate(row?.invoiceDueDateISO);
 
 const firstName = (value) => clean(value).split(/\s+/)[0] || "";
 
@@ -101,7 +105,7 @@ const rowEmails = (row = {}) => [
 ].map(lower).filter(Boolean);
 
 export const automation10Schedule = (row, todayISO) => {
-  const invoiceDueISO = isoDate(row?.invoiceDueDateISO);
+  const invoiceDueISO = finalDueISO(row);
   const today = isoDate(todayISO);
   if (!invoiceDueISO || !today) {
     return { eligible: false, reason: "missing_date", plannedISO: "" };
@@ -209,7 +213,7 @@ const midpointISO = (startValue, endValue) => {
 };
 
 export const automation21Schedule = (row, todayISO) => {
-  const dueISO = isoDate(row?.invoiceDueDateISO);
+  const dueISO = finalDueISO(row);
   return scheduledWindow({
     plannedISO: midpointISO(row?.introEmailSentAt, dueISO),
     todayISO,
@@ -219,7 +223,7 @@ export const automation21Schedule = (row, todayISO) => {
 };
 
 export const automation11Schedule = (row, todayISO) => scheduledWindow({
-  plannedISO: isoDate(row?.invoiceDueDateISO),
+  plannedISO: finalDueISO(row),
   todayISO,
   lastISO: isoDate(row?.eventDateISO || row?.eventDate || row?.date),
   allowLastDay: false,
@@ -490,7 +494,7 @@ export const buildAutomation21Email = (row) => {
 
 export const buildAutomation10Email = (row) => {
   const name = clean(row?.clientFirstNames || row?.bookerName || "there").split(/\s+|&/)[0];
-  const dueDate = ordinalDate(row?.invoiceDueDateISO);
+  const dueDate = ordinalDate(finalDueISO(row));
   const eventSheetUrl = publicEventSheetUrl(row);
   const hasDj = Boolean(
     row?.bookingDetails?.djServicesBooked || row?.bookedDj || row?.djBooked,

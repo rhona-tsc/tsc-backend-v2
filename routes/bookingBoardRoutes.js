@@ -26,6 +26,7 @@ import {
   escapeEmailHtml,
 } from "../utils/tscEmailBranding.js";
 import { automationBodyToHtml } from "../utils/automationEmailTemplate.js";
+import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
 import {
   actReferenceCandidates,
   attachActProfileData,
@@ -75,6 +76,20 @@ const formatEmailSubjectDate = (value) => {
   return `${day}${suffix} of ${monthAndYear}`;
 };
 
+const formatEmailBodyDate = (value) => {
+  const iso = String(value || "").slice(0, 10);
+  if (!iso) return "the agreed date";
+  const date = new Date(`${iso}T12:00:00Z`);
+  return Number.isNaN(date.getTime())
+    ? "the agreed date"
+    : date.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+      });
+};
+
 const AGENT_NAMES = [
   "Alive Network", "Direct", "Encore", "Entertainment Nation", "Freak Music",
   "Fully Funktional", "Function Central", "LMM", "Poptop", "Scarlettte",
@@ -120,28 +135,41 @@ export const buildIntroEmail = (row) => {
     ? `${publicSiteBase}/event-sheet/${encodeURIComponent(row.bookingRef)}`
     : cleanString(row?.eventSheetLink);
   const subject = `${actName} & your ${eventType} on ${date}`;
-  const eventSheetHtml = eventSheetLink
-    ? `<p style="margin:0 0 20px;"><strong>EVENT SHEET:</strong> <a href="${escapeEmailHtml(eventSheetLink)}" style="color:#ff6667;font-weight:700;">Open your event sheet</a></p>`
-    : "";
+  const songDue = formatEmailBodyDate(row?.songSuggestionsDueDateISO);
+  const finalDetailsDue = formatEmailBodyDate(finalDetailsDueISO(row));
+  const specialRequestLabel = /wedding/i.test(eventType)
+    ? "First Dance"
+    : "Off Repertoire";
+  const paragraphs = [
+    `Allow me to introduce myself, my name is Rhona, I am the band manager for ${actName}. Thank you for booking the band - we're excited to be delivering the entertainment for you at your ${eventType}, and I'm very much looking forward to sorting out the fine details for the entertainment in the run-up.`,
+    "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and kindly fill in the blanks directly into the document. The event sheet will auto-save, so you can just close it when you're done. I'll review the details you provide, and I'll be back in touch if I've any questions for you or vice versa.",
+    "Also please feel free to email or WhatsApp if you've any urgent questions or requests. Or alternatively, you can schedule a call with me directly in my calendar: https://calendly.com/thesupremecollective/call",
+    "Please also find linked below the invoice for the balance, which is due around a week before the performance. The BACS details are on the footer of the attached invoice.",
+    `Key dates include:\n- Song suggestions and ${specialRequestLabel} request due on the ${songDue}\n- Completed event sheet (including playlists), and balance due on the ${finalDetailsDue}`,
+    "You'll also receive a few emails from me in the run up to the performance date as reminders to submit certain bits of information to the event sheet just to keep everything on track.",
+    "Hopefully, everything makes sense, but any questions, don't hesitate!",
+  ];
   let text = [
     `Hi ${firstName},`,
     "",
-    `Allow me to introduce myself, my name is Rhona, and I am the band manager for ${actName}. Thank you for booking the band — we're honoured to be delivering the entertainment for your ${eventType}, and I'm very much looking forward to sorting out the fine details in the run-up.`,
-    "",
-    "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and fill in the blanks directly in the document. It auto-saves, so you can simply close it when you're done. I'll review it closer to the time and be in touch if either of us has any questions.",
-    eventSheetLink ? `\nEVENT SHEET: ${eventSheetLink}` : "",
-    "",
+    paragraphs[0], "", paragraphs[1], "",
+    eventSheetLink ? `Follow This Link to your Event Sheet: ${eventSheetLink}` : "", "",
+    paragraphs[2], "", paragraphs[3], "", paragraphs[4], "", paragraphs[5], "", paragraphs[6], "",
     "Warmest wishes,",
     "Rhona ✨",
+    "",
+    "—",
   ].filter(Boolean).join("\n");
+  const p = (value) => `<p style="margin:0 0 18px;font-size:15px;line-height:1.8;">${escapeEmailHtml(value).replace(/\n/g, "<br />")}</p>`;
   let html = `
     <div style="margin:0;padding:0;background:#fff;font-family:Arial,Helvetica,sans-serif;color:#111;">
       <div style="max-width:720px;margin:0;background:#fff;padding:0;">
-        <p style="margin:0 0 18px;font-size:16px;line-height:1.7;">Hi ${escapeEmailHtml(firstName)},</p>
-        <p style="margin:0 0 18px;font-size:15px;line-height:1.8;">Allow me to introduce myself, my name is Rhona, and I am the band manager for <strong>${escapeEmailHtml(actName)}</strong>. Thank you for booking the band — we're honoured to be delivering the entertainment for your ${escapeEmailHtml(eventType)}, and I'm very much looking forward to sorting out the fine details in the run-up.</p>
-        <p style="margin:0 0 18px;font-size:15px;line-height:1.8;">I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and fill in the blanks directly in the document. It auto-saves, so you can simply close it when you're done. I'll review it closer to the time and be in touch if either of us has any questions.</p>
-        ${eventSheetHtml}
+        ${p(`Hi ${firstName},`)}
+        ${p(paragraphs[0])}${p(paragraphs[1])}
+        ${eventSheetLink ? `<p style="margin:0 0 18px;font-size:15px;line-height:1.8;"><a href="${escapeEmailHtml(eventSheetLink)}" style="color:#ff6667;font-weight:700;">Follow This Link to your Event Sheet</a></p>` : ""}
+        ${p(paragraphs[2])}${p(paragraphs[3])}${p(paragraphs[4])}${p(paragraphs[5])}${p(paragraphs[6])}
         <p style="margin:0 0 18px;font-size:15px;line-height:1.7;">Warmest wishes,<br />Rhona ✨</p>
+        <p style="margin:0 0 18px;font-size:15px;line-height:1.7;">—</p>
         ${buildTscEmailFooter()}
       </div>
     </div>`;
@@ -741,6 +769,30 @@ const getRowAssignedMusicians = (row = {}) =>
       row.actsSummary?.[0]?.assignedMusicians,
     ].find((items) => Array.isArray(items) && items.length) || [],
   );
+
+export const resolveBookingAssignmentsForUpsert = ({
+  payload = {},
+  existingBooking = {},
+  existingBoardRow = {},
+} = {}) => {
+  const incoming = [
+    payload.assignedMusicians,
+    payload.bookingMusicians,
+    payload.bandLineup,
+    payload.bookingDetails?.assignedMusicians,
+  ].find((items) => Array.isArray(items) && items.length);
+
+  if (incoming) return normaliseAssignedMusicians(incoming);
+
+  // Clearing an accepted lineup is destructive and must be an explicit action,
+  // never a side effect of a manual edit or contract/PDF re-import.
+  if (payload.replaceAssignedMusicians === true) return [];
+
+  return mergeAssignedMusicianLists(
+    getRowAssignedMusicians(existingBooking),
+    getRowAssignedMusicians(existingBoardRow),
+  );
+};
 
 const mergeAssignedMusicianLists = (...lists) =>
   normaliseAssignedMusicians(
@@ -2240,7 +2292,8 @@ router.post("/", musicianAuth, async (req, res) => {
       existingBoardRow,
     });
     const isContractReimport =
-      payload?.importMetadata?.source === "contract_pdf" && Boolean(existingBoardRow);
+      /_pdf$/i.test(String(payload?.importMetadata?.source || "")) &&
+      Boolean(existingBoardRow);
 
     const eventDateISO = String(payload.eventDateISO || "").slice(0, 10);
     const eventDate = /^\d{4}-\d{2}-\d{2}$/.test(eventDateISO)
@@ -2257,12 +2310,11 @@ router.post("/", musicianAuth, async (req, res) => {
       .trim()
       .toLowerCase();
 
-    const assignedMusicians = normaliseAssignedMusicians(
-      payload.assignedMusicians ||
-        payload.bookingMusicians ||
-        payload.bandLineup ||
-        payload.bookingDetails?.assignedMusicians,
-    );
+    const assignedMusicians = resolveBookingAssignmentsForUpsert({
+      payload,
+      existingBooking,
+      existingBoardRow,
+    });
 
     // --------- 1) Upsert Booking (source of truth) ----------
     const bookingPatch = {

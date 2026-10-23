@@ -1,4 +1,4 @@
-
+import { getMemberCountyTravelFee } from "./memberCountyTravel.js";
 
 /* ===================== outcodeToCounty + helpers + calculateActPricing ===================== */
 
@@ -507,7 +507,11 @@ const calculateActPricing = async (
       const feePerMember = Number(getCountyFeeFromMap(countyFees, derivedCounty)) || 0;
       console.log("📊 County travel fee/member:", feePerMember, "(county:", derivedCounty, ")");
       if (feePerMember > 0 && travelEligibleCount > 0) {
-        travelFee = feePerMember * travelEligibleCount;
+        travelFee = travelEligibleMembers.reduce(
+          (sum, member) =>
+            sum + getMemberCountyTravelFee(member, derivedCounty, feePerMember),
+          0,
+        );
         travelCalculated = true;
         console.log(`🚗 County travel total: £${travelFee} for ${travelEligibleCount} members`);
       } else {

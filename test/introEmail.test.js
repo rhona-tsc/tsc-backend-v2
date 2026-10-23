@@ -37,3 +37,25 @@ test("agent intro email uses complete request labels without duplicating 'reques
     assert.doesNotMatch(email.html, /\brequest\s+request\b/i);
   }
 });
+
+test("direct-client Booking Board preview uses the complete intro template and calculated final-details date", () => {
+  const email = buildIntroEmail({
+    clientEmail: "james@example.com",
+    clientFirstNames: "James",
+    bookingRef: "260927276335",
+    actTscName: "Rhythm Mystique",
+    eventType: "Private Party",
+    eventDateISO: "2026-11-21",
+    bookingDateISO: "2026-10-21",
+    songSuggestionsDueDateISO: "2026-10-30",
+    invoiceDueDateISO: "2026-11-05",
+    contactRole: "direct_client",
+  });
+
+  assert.match(email.text, /schedule a call with me directly in my calendar/);
+  assert.match(email.text, /Song suggestions and Off Repertoire request due on the 30 October 2026/);
+  assert.doesNotMatch(email.text, /\brequest\s+request\b/i);
+  assert.match(email.text, /balance due on the 12 November 2026/);
+  assert.match(email.html, /Follow This Link to your Event Sheet/);
+  assert.match(email.html, /12 November 2026/);
+});

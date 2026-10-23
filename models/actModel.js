@@ -352,6 +352,7 @@ minDisplayPrice: { type: Number, default: null },
             email: { type: String },
             instrument: { type: String },
             useMURatesForFees: { type: Boolean },
+            countyTravelFees: { type: Map, of: Number, default: undefined },
             fee: { type: Number },
             additionalPerformanceRates: [
               {

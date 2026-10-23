@@ -69,7 +69,7 @@ const withConfirmedAllocation = async (booking) => {
   const enriched = confirmed.map((member) => ({
     ...member,
     dietaryRequirements:
-      member?.dietaryRequirements || dietById.get(String(member?.musicianId || "")) || "",
+      dietById.get(String(member?.musicianId || "")) || member?.dietaryRequirements || "",
   }));
   const boardActName = board?.actTscName || board?.actName || "";
   const boardActId =
@@ -81,7 +81,7 @@ const withConfirmedAllocation = async (booking) => {
   let actProfile = null;
   if (mongoose.isValidObjectId(String(boardActId || ""))) {
     actProfile = await Act.findById(boardActId)
-      .select("name tscName images coverImage profileImage videos tscVideos")
+      .select("name tscName images coverImage profileImage videos tscVideos lineups")
       .lean();
   }
   if (!actProfile && boardActName) {
@@ -92,7 +92,7 @@ const withConfirmedAllocation = async (booking) => {
         { name: { $regex: `^${escapedName}$`, $options: "i" } },
       ],
     })
-      .select("name tscName images coverImage profileImage videos tscVideos")
+      .select("name tscName images coverImage profileImage videos tscVideos lineups")
       .lean();
   }
   const boardBookingTotal = Number(board?.grossValue || 0);
@@ -120,6 +120,7 @@ const withConfirmedAllocation = async (booking) => {
           profileImage: actProfile.profileImage || [],
           videos: actProfile.videos || [],
           tscVideos: actProfile.tscVideos || [],
+          lineups: actProfile.lineups || [],
         }
       : {}),
     ...(board?.lineupSelected ? { lineupLabel: board.lineupSelected } : {}),
@@ -138,8 +139,14 @@ const withConfirmedAllocation = async (booking) => {
     ...plain,
     ...(board?._id ? { bookingBoardId: String(board._id) } : {}),
     ...(board?.bookingRef ? { bookingRef: board.bookingRef } : {}),
-    ...(board?.clientFirstNames
-      ? { clientFirstNames: board.clientFirstNames, clientName: board.clientFirstNames }
+    ...(board?.clientFirstNames || board?.bookerName
+      ? {
+          clientFirstNames: board.clientFirstNames || board.bookerName,
+          clientName: board.bookerName || board.clientFirstNames,
+          clientLastName:
+            board.clientLastName ||
+            String(board.bookerName || "").trim().split(/\s+/).slice(1).join(" "),
+        }
       : {}),
     ...(board?.clientEmails?.[0]?.email ? { clientEmail: board.clientEmails[0].email } : {}),
     ...(board?.contactRole ? { contactRole: board.contactRole } : {}),

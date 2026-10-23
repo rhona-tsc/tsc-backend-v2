@@ -238,7 +238,7 @@ export const postcodes = [
     ],
     lancashire: [
       "BB1", "BB2", "BB3", "BB4", "BB5", "BB6", "BB7", "BB8", "BB9", "BB10", "BB11", "BB12",
-      "BB18", "BD23", "BL0", "BL6", "BL7", "FY1", "FY2", "FY3", "FY4", "FY5", "FY6", "FY7", "FY8",
+      "BB18", "BL0", "BL6", "BL7", "FY1", "FY2", "FY3", "FY4", "FY5", "FY6", "FY7", "FY8",
       "L37", "L39", "L40", "LA1", "LA2", "LA3", "LA4", "LA5", "LA6", "OL12", "OL13",
       "PR1", "PR2", "PR3", "PR4", "PR5", "PR6", "PR7", "PR8", "PR9", "WN6", "WN8"
     ],
