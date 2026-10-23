@@ -1315,7 +1315,7 @@ end();
 export const updateActStatus = async (req, res) => {
   try {
     const { id, status } = req.body;
-    console.log("🔧 Updating act status:", { id, status, body: req.body });
+    console.log("🔧 Updating act status:", { id, status });
 
     if (!id || !status) {
       return res.status(400).json({

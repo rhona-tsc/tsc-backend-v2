@@ -567,6 +567,12 @@ if (paymentStage === "full" || paymentStage === "balance") {
 );
 
 // JSON/body parsing (after webhook)
+// Reject private finance/maintenance requests before parsing their bodies.
+app.use("/debug", requireStaffAuth);
+app.use("/api/debug", requireStaffAuth);
+app.use("/api/admin", requireStaffAuth);
+app.use("/api/finance", requireStaffAuth);
+
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
@@ -624,11 +630,6 @@ app.use((req, res, next) => {
 /* -------------------------------------------------------------------------- */
 /*                                   Debug                                    */
 /* -------------------------------------------------------------------------- */
-
-app.use("/debug", requireStaffAuth);
-app.use("/api/debug", requireStaffAuth);
-app.use("/api/admin", requireStaffAuth);
-app.use("/api/finance", requireStaffAuth);
 
 app.get("/debug/base", (_req, res) => {
   res.json({

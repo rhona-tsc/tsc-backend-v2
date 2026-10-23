@@ -63,6 +63,7 @@ test("all finance, admin and debug prefixes are guarded before handlers", async 
   }
   assert.ok(source.indexOf('app.use("/api/finance", requireStaffAuth)') < source.indexOf('app.use("/api/finance/bookings",'));
   assert.ok(source.indexOf('app.use("/api/admin", requireStaffAuth)') < source.indexOf('app.post("/api/admin/'));
+  assert.ok(source.indexOf('app.use("/api/finance", requireStaffAuth)') < source.indexOf('app.use(express.json('));
 });
 
 test("Google OAuth and refresh handlers do not log credential values", async () => {

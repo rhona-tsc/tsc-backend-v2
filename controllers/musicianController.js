@@ -2781,7 +2781,7 @@ const emailContract = async (req, res) => {
         .json({ success: false, message: "Missing form data" });
     }
 
-    const browser = await puppeteer.launch({ headless: "new" });
+    const browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
 
     await page.setContent(

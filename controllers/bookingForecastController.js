@@ -1,7 +1,7 @@
 import BookingForecast from "../models/bookingForecastModel.js";
 import ForecastEvent from "../models/forecastEventModel.js";
 import generateForecastEventsFromBooking from "../utils/generateForecastEventsFromBooking.js";
-import XLSX from "xlsx";
+import { readSpreadsheetRows, spreadsheetSerialDate } from "../utils/spreadsheetImport.js";
 import getExpectedBalanceDateForSource from "../utils/paymentRules.js";
 
 
@@ -172,9 +172,7 @@ const toDate = (value) => {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
 
   if (typeof value === "number") {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    if (!parsed) return undefined;
-    return new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+    return spreadsheetSerialDate(value);
   }
 
   const d = new Date(value);
@@ -348,19 +346,7 @@ export const importMondayBookingForecasts = async (req, res) => {
       });
     }
 
-    const workbook = XLSX.read(req.file.buffer, {
-      type: "buffer",
-      cellDates: true,
-    });
-
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-
-    const rows = XLSX.utils.sheet_to_json(sheet, {
-      header: 1,
-      defval: "",
-      raw: true,
-    });
+    const rows = await readSpreadsheetRows(req.file.buffer);
 
     let currentGroup = "";
     let headerMap = null;
@@ -574,19 +560,7 @@ export const importGigForecastBookings = async (req, res) => {
       });
     }
 
-    const workbook = XLSX.read(req.file.buffer, {
-      type: "buffer",
-      cellDates: true,
-    });
-
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-
-    const rows = XLSX.utils.sheet_to_json(sheet, {
-      header: 1,
-      defval: "",
-      raw: true,
-    });
+    const rows = await readSpreadsheetRows(req.file.buffer);
 
     let headerMap = null;
 

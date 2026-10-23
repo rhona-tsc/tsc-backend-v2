@@ -1,5 +1,5 @@
 import express from "express";
-import multer from "multer";
+import financeUpload from "../middleware/financeUpload.js";
 
 import {
   createBookingForecast,
@@ -11,7 +11,7 @@ import {
   importGigForecastBookings,
 } from "../controllers/bookingForecastController.js";
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 20, parts: 21 } });
+const upload = financeUpload(".xlsx");
 
 const bookingForecastRouter = express.Router();
 
