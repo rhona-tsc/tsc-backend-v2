@@ -201,6 +201,19 @@ const buildMemberFee = ({ perMemberFee, member }) => {
   return Number.isFinite(memberFee) && memberFee > 0 ? Math.ceil(memberFee) : 0;
 };
 
+const hasPositiveAllocationFee = (value) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0;
+};
+
+const allocationFeeRequiredResponse = (res) =>
+  res.status(400).json({
+    success: false,
+    code: "ALLOCATION_FEE_REQUIRED",
+    message:
+      "Enter a fee above £0 before sending or manually accepting an allocation.",
+  });
+
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -1062,6 +1075,14 @@ export const offerBookingRole = async (req, res) => {
       return res.status(400).json({ success: false, message: "Role is required" });
     }
 
+    const roleSlotId = String(
+      req.body?.roleSlotId || buildRoleSlotId(role, Number(req.body?.slotIndex || 0)),
+    );
+    const fee = Number(req.body?.fee || 0) || 0;
+    if (!hasPositiveAllocationFee(fee)) {
+      return allocationFeeRequiredResponse(res);
+    }
+
     let musician = mongoose.isValidObjectId(musicianId)
       ? await Musician.findById(musicianId).lean()
       : null;
@@ -1129,20 +1150,9 @@ export const offerBookingRole = async (req, res) => {
       return res.status(400).json({ success: false, message: "This musician has no mobile number for an availability request" });
     }
 
-    const roleSlotId = String(req.body?.roleSlotId || buildRoleSlotId(role, Number(req.body?.slotIndex || 0)));
     const requestId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const dateISO = String(board.eventDateISO || req.body?.dateISO || "").slice(0, 10);
     const formattedDate = formatWithOrdinal(dateISO);
-    const previousTerms = await EnquiryMessage.findOne({
-      bookingRef: board.bookingRef || "",
-      roleSlotId,
-      fee: { $nin: ["", null, "0"] },
-    })
-      .sort({ createdAt: -1 })
-      .select("fee duties")
-      .lean();
-    const fee =
-      Number(req.body?.fee || 0) || Number(previousTerms?.fee || 0) || 0;
     const currency = String(req.body?.currency || "GBP").trim().toUpperCase();
     const earlyArrivalMinutes = Math.max(
       0,
@@ -1358,6 +1368,9 @@ export const confirmBookingRole = async (req, res) => {
         .filter(Boolean),
     ));
     const fee = Number(req.body?.fee || 0) || 0;
+    if (!hasPositiveAllocationFee(fee)) {
+      return allocationFeeRequiredResponse(res);
+    }
     const contact = candidateContact(musician);
     const current = Array.isArray(board.assignedMusicians) ? board.assignedMusicians : [];
     const index = current.findIndex((entry) => entry.roleSlotId === roleSlotId);
@@ -1545,11 +1558,6 @@ export const triggerBookingRequests = async (req, res) => {
       "🟡 Skipping badge clear in triggerBookingRequests; badge structure is date-keyed or embedded"
     );
 
-    // Ensure booking event exists unless dry run
-    const event = dryRun
-      ? { id: `dryrun_${actId}_${dateISO}` }
-      : (await ensureBookingEvent({ actId, dateISO, address })).event;
-
     // Resolve lineup
     const allLineups = Array.isArray(act.lineups) ? act.lineups : [];
     const lineup = lineupId
@@ -1571,6 +1579,29 @@ export const triggerBookingRequests = async (req, res) => {
         message: "No bandMembers in lineup",
       });
     }
+
+    const performers = members.filter((member) => {
+      const role = String(member?.instrument || "").trim().toLowerCase();
+      return role && role !== "manager" && role !== "admin";
+    });
+    const zeroFeeMembers = performers.filter(
+      (member) => !hasPositiveAllocationFee(buildMemberFee({ perMemberFee, member })),
+    );
+    if (zeroFeeMembers.length) {
+      return res.status(400).json({
+        success: false,
+        code: "ALLOCATION_FEE_REQUIRED",
+        message:
+          "No allocation requests were sent. Enter a fee above £0 for every performer first.",
+        roles: zeroFeeMembers.map((member) => member?.instrument || "Performer"),
+      });
+    }
+
+    // Only create/update the shared event after all performer fees pass the
+    // preflight check, so a blocked request has no external side effects.
+    const event = dryRun
+      ? { id: `dryrun_${actId}_${dateISO}` }
+      : (await ensureBookingEvent({ actId, dateISO, address })).event;
 
     console.log(
       `🦚 triggerBookingRequests: sending to ${members.length} members`,
@@ -2588,6 +2619,27 @@ export async function sendBookingRequestToLineup({ actId, lineupId, date, addres
   const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
   const contentSid = process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID; // HXcd99249…
 
+  // Resolve every performer fee before sending anything. This makes the
+  // operation all-or-nothing and prevents partial requests containing £0/TBC.
+  const resolvedFees = new Map();
+  for (const member of members) {
+    const role = String(member?.instrument || "").trim().toLowerCase();
+    if (!role || role === "manager" || role === "admin") continue;
+    const finalFee = await _finalFeeForMember({
+      act, lineup, members, member, address, dateISO,
+    });
+    if (!hasPositiveAllocationFee(finalFee)) {
+      return {
+        success: false,
+        sent: 0,
+        error: "ALLOCATION_FEE_REQUIRED",
+        message:
+          "No allocation requests were sent. Enter a fee above £0 for every performer first.",
+      };
+    }
+    resolvedFees.set(member, finalFee);
+  }
+
   let sent = 0;
 
   for (const m of members) {
@@ -2608,9 +2660,7 @@ export async function sendBookingRequestToLineup({ actId, lineupId, date, addres
     else if (!phone.startsWith("+")) phone = `+${phone}`;
 
     // fee = SAME logic as enquiry
-    const finalFee = await _finalFeeForMember({
-      act, lineup, members, member: m, address, dateISO
-    });
+    const finalFee = resolvedFees.get(m);
 
     // Build SMS fallback using your enquiry copy builder (so WA+SMS match)
     const smsBody = buildAvailabilitySMS({

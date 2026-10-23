@@ -93,6 +93,14 @@ const getDeputyNetFeeText = (job = {}) => {
   return `${formatMoney(netAmount, job?.currency || "GBP")} ${basis}`;
 };
 
+const allocationFeeRequiredResponse = (res) =>
+  res.status(400).json({
+    success: false,
+    code: "ALLOCATION_FEE_REQUIRED",
+    message:
+      "Enter a deputy fee above £0 before sending or manually accepting an allocation.",
+  });
+
 const asObjectIdString = (value) => {
   if (!value) return "";
   if (typeof value === "string") return value;
@@ -3863,6 +3871,10 @@ export const sendDeputyJobNotifications = async (req, res) => {
       });
     }
 
+    if (getDeputyNetFeeAmount(job) <= 0) {
+      return allocationFeeRequiredResponse(res);
+    }
+
     const requesterEmail = normaliseEmail(
       req.user?.email || req.user?.useremail || "",
     );
@@ -4707,6 +4719,10 @@ export const confirmDeputyAllocation = async (req, res) => {
         .json({ success: false, message: "Deputy job not found" });
     }
 
+    if (getDeputyNetFeeAmount(job) <= 0) {
+      return allocationFeeRequiredResponse(res);
+    }
+
     if (!musicianId) {
       return res
         .status(400)
@@ -5037,6 +5053,10 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
         success: false,
         message: "Deputy job not found",
       });
+    }
+
+    if (getDeputyNetFeeAmount(job) <= 0) {
+      return allocationFeeRequiredResponse(res);
     }
 
     const requesterEmail = normaliseEmail(
@@ -6780,6 +6800,10 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
       });
     }
 
+    if (getDeputyNetFeeAmount(job) <= 0) {
+      return allocationFeeRequiredResponse(res);
+    }
+
     const requesterEmail = normaliseEmail(
       req.user?.email || req.user?.useremail || "",
     );
@@ -7433,6 +7457,10 @@ export const manualAllocateDeputyJob = async (req, res) => {
       });
     }
 
+    if (getDeputyNetFeeAmount(job) <= 0) {
+      return allocationFeeRequiredResponse(res);
+    }
+
     const isEnquiryJob = String(job?.jobType || "").toLowerCase() === "enquiry";
 
     const requiredRoles = normaliseList(
@@ -7763,6 +7791,10 @@ export const retryFailedDeputyJobNotifications = async (req, res) => {
         success: false,
         message: "Deputy job not found",
       });
+    }
+
+    if (getDeputyNetFeeAmount(job) <= 0) {
+      return allocationFeeRequiredResponse(res);
     }
 
     const failedNotifications = Array.isArray(job.notifications)
