@@ -58,6 +58,37 @@ const toNumber = (value) => {
 
 const cleanString = (value) => String(value || "").trim();
 
+const findBookingBoardRow = async (identifier, { lean = true } = {}) => {
+  const value = cleanString(identifier);
+  if (!value) return null;
+
+  const objectId = mongoose.isValidObjectId(value)
+    ? new mongoose.Types.ObjectId(value)
+    : null;
+  const directMatches = [
+    ...(objectId ? [{ _id: objectId }, { bookingId: objectId }, { sourceBookingId: objectId }] : []),
+    { bookingRef: value },
+  ];
+  let query = BookingBoardItem.findOne({ $or: directMatches });
+  let row = lean ? await query.lean() : await query;
+  if (row || !objectId) return row;
+
+  const booking = await Booking.findById(objectId)
+    .select("_id bookingId sessionId")
+    .lean();
+  if (!booking) return null;
+
+  const linkedMatches = [
+    { bookingId: booking._id },
+    { sourceBookingId: booking._id },
+    ...(cleanString(booking.bookingId) ? [{ bookingRef: cleanString(booking.bookingId) }] : []),
+    ...(cleanString(booking.sessionId) ? [{ bookingRef: cleanString(booking.sessionId) }] : []),
+  ];
+  query = BookingBoardItem.findOne({ $or: linkedMatches });
+  row = lean ? await query.lean() : await query;
+  return row;
+};
+
 const formatEmailSubjectDate = (value) => {
   const date = new Date(`${String(value || "").slice(0, 10)}T12:00:00Z`);
   if (Number.isNaN(date.getTime())) return "your event date";
@@ -1062,8 +1093,30 @@ const mergeDeep = (target, source) => {
   return out;
 };
 
+export const protectBookingAssignmentPatch = (body = {}) => {
+  const patch = {
+    ...body,
+    ...(isPlainObject(body.bookingDetails)
+      ? { bookingDetails: { ...body.bookingDetails } }
+      : {}),
+  };
+  if (patch.replaceAssignedMusicians === true) return patch;
+
+  ["assignedMusicians", "bookingMusicians", "bandLineup"].forEach((field) => {
+    if (Array.isArray(patch[field]) && patch[field].length === 0) delete patch[field];
+  });
+  if (
+    isPlainObject(patch.bookingDetails) &&
+    Array.isArray(patch.bookingDetails.assignedMusicians) &&
+    patch.bookingDetails.assignedMusicians.length === 0
+  ) {
+    delete patch.bookingDetails.assignedMusicians;
+  }
+  return patch;
+};
+
 const sanitizeBookingPatch = (body = {}) => {
-  const patch = { ...body };
+  const patch = protectBookingAssignmentPatch(body);
 
   delete patch._id;
   delete patch.createdAt;
@@ -1073,6 +1126,7 @@ const sanitizeBookingPatch = (body = {}) => {
   delete patch.boardRowId;
   delete patch.bookingRef;
   delete patch.sessionId;
+  delete patch.replaceAssignedMusicians;
 
   if (Object.prototype.hasOwnProperty.call(patch, "siteAutomationsEnabled")) {
     const siteAutomationsEnabled = parseSiteAutomationsEnabled(
@@ -2681,7 +2735,7 @@ router.get("/:id/intro-email/preview", musicianAuth, async (req, res) => {
     if (!isTSCAdmin(req.user)) {
       return res.status(403).json({ success: false, message: "Admin only." });
     }
-    const row = await BookingBoardItem.findById(req.params.id).lean();
+    const row = await findBookingBoardRow(req.params.id);
     if (!row) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
@@ -2783,10 +2837,7 @@ router.post("/:id/intro-email/test", musicianAuth, async (req, res) => {
     if (!isTSCAdmin(req.user)) {
       return res.status(403).json({ success: false, message: "Admin only." });
     }
-    if (!mongoose.isValidObjectId(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid booking ID." });
-    }
-    const row = await BookingBoardItem.findById(req.params.id).lean();
+    const row = await findBookingBoardRow(req.params.id);
     if (!row) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
@@ -2840,7 +2891,7 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
     if (!isTSCAdmin(req.user)) {
       return res.status(403).json({ success: false, message: "Admin only." });
     }
-    const row = await BookingBoardItem.findById(req.params.id);
+    const row = await findBookingBoardRow(req.params.id, { lean: false });
     if (!row) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
@@ -3033,7 +3084,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
   });
   try {
     const rawBody = { ...req.body };
-    const body = { ...rawBody, updatedAt: new Date() };
+    const body = { ...protectBookingAssignmentPatch(rawBody), updatedAt: new Date() };
     if (Object.prototype.hasOwnProperty.call(body, "siteAutomationsEnabled")) {
       const siteAutomationsEnabled = parseSiteAutomationsEnabled(
         body.siteAutomationsEnabled,
@@ -3188,6 +3239,20 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         new Map(savedAct ? [[String(savedAct._id), savedAct]] : []),
       );
 
+      const mirrorQuery = {
+        $or: [
+          { sourceBookingId: savedBooking._id },
+          { bookingRef: savedBooking.bookingId },
+          ...(savedBooking.sessionId ? [{ sessionId: savedBooking.sessionId }] : []),
+        ],
+      };
+      const existingMirrorRow = await BookingBoardItem.findOne(mirrorQuery).lean();
+      const mirrorAssignments = resolveBookingAssignmentsForUpsert({
+        payload: body,
+        existingBooking: savedBookingDoc,
+        existingBoardRow: existingMirrorRow,
+      });
+
       const mirrorPatch = {
         updatedAt: new Date(),
         ...(body.siteAutomationsEnabled !== undefined
@@ -3236,11 +3301,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         clientAddress: body.clientAddress || savedBooking?.clientAddress || "",
         clientEmail: body.clientEmail || savedBooking?.clientEmail || "",
         clientEmails: body.clientEmails || [],
-        assignedMusicians:
-          body.assignedMusicians || normalized?.assignedMusicians || [],
-        bookingMusicians:
-          body.bookingMusicians || normalized?.bookingMusicians || [],
-        bandLineup: body.bandLineup || normalized?.bandLineup || [],
+        assignedMusicians: mirrorAssignments,
+        bookingMusicians: mirrorAssignments,
+        bandLineup: mirrorAssignments,
         accounting: savedBooking?.accounting || body.accounting || {},
         ...(body.payments && isPlainObject(body.payments)
           ? { payments: body.payments }
@@ -3256,9 +3319,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
           ...(normalized?.bookingDetails || savedBooking?.bookingDetails || {}),
           ...(Array.isArray(body.extras) ? { extras: body.extras } : {}),
           ...(body.manualAdjustment ? { manualAdjustment: body.manualAdjustment } : {}),
-          ...(body.assignedMusicians
-            ? { assignedMusicians: body.assignedMusicians }
-            : {}),
+          assignedMusicians: mirrorAssignments,
         },
         extras: Array.isArray(body.extras)
           ? body.extras
@@ -3297,15 +3358,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       };
 
       const mirrorResult = await BookingBoardItem.updateMany(
-        {
-          $or: [
-            { sourceBookingId: savedBooking._id },
-            { bookingRef: savedBooking.bookingId },
-            ...(savedBooking.sessionId
-              ? [{ sessionId: savedBooking.sessionId }]
-              : []),
-          ],
-        },
+        mirrorQuery,
         { $set: mirrorPatch },
       );
 
@@ -3374,6 +3427,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
     }
 
     const { bookingDetails: bodyBookingDetails, ...bodyWithoutBookingDetails } = body;
+    delete bodyWithoutBookingDetails.replaceAssignedMusicians;
 
     if (bodyWithoutBookingDetails.depositAmount !== undefined) {
       const depositAmount = Number(bodyWithoutBookingDetails.depositAmount || 0) || 0;

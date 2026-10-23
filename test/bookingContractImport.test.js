@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   parseBookingContract,
+  protectBookingAssignmentPatch,
   resolveBookingAssignmentsForUpsert,
 } from "../routes/bookingBoardRoutes.js";
 
@@ -49,6 +50,32 @@ test("clearing musicians requires the explicit replacement flag", () => {
     }),
     [],
   );
+});
+
+test("ordinary booking updates cannot silently submit empty musician arrays", () => {
+  const protectedPatch = protectBookingAssignmentPatch({
+    clientFirstNames: "James",
+    assignedMusicians: [],
+    bookingMusicians: [],
+    bandLineup: [],
+    bookingDetails: { eventType: "Private Party", assignedMusicians: [] },
+  });
+
+  assert.equal(protectedPatch.clientFirstNames, "James");
+  assert.equal(protectedPatch.assignedMusicians, undefined);
+  assert.equal(protectedPatch.bookingMusicians, undefined);
+  assert.equal(protectedPatch.bandLineup, undefined);
+  assert.equal(protectedPatch.bookingDetails.assignedMusicians, undefined);
+});
+
+test("an explicit lineup-clear action is still honoured", () => {
+  const protectedPatch = protectBookingAssignmentPatch({
+    replaceAssignedMusicians: true,
+    assignedMusicians: [],
+  });
+
+  assert.equal(protectedPatch.replaceAssignedMusicians, true);
+  assert.deepEqual(protectedPatch.assignedMusicians, []);
 });
 
 test("contract import recognises pound-symbol totals and creates a deposit invoice draft", () => {

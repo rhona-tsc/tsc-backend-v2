@@ -652,12 +652,18 @@ const buildBlockedAutomation4Alert = (row, missing) => {
   return { subject, text, html };
 };
 
-const configuredAllowlist = () => new Set(
-  clean(process.env.CLIENT_AUTOMATION_EMAIL_ALLOWLIST)
+const APPROVED_CLIENT_AUTOMATION_EMAILS = [
+  "susie@tigproductions.co.uk",
+  "james@tlfservices.co.uk",
+];
+
+const configuredAllowlist = () => new Set([
+  ...APPROVED_CLIENT_AUTOMATION_EMAILS,
+  ...clean(process.env.CLIENT_AUTOMATION_EMAIL_ALLOWLIST)
     .split(",")
     .map(lower)
     .filter(Boolean),
-);
+]);
 
 const configuredBookingRefs = () => new Set(
   clean(process.env.CLIENT_AUTOMATION_BOOKING_REF_ALLOWLIST)
