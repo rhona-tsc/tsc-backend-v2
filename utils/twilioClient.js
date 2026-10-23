@@ -151,6 +151,8 @@ async function rememberWhatsAppDelivery({
   messageSid,
   to,
   smsBody,
+  allowSmsFallback = true,
+  failureEmail = null,
   status = "queued",
   source = "",
 }) {
@@ -159,7 +161,10 @@ async function rememberWhatsAppDelivery({
   const fallbackBody = String(smsBody || "").trim();
   if (!sid || !destination) return;
 
-  if (fallbackBody) {
+  const failureEmailTo = String(failureEmail?.to || "").trim();
+  const smsFallbackRequired = Boolean(allowSmsFallback && fallbackBody);
+
+  if (smsFallbackRequired) {
     WA_FALLBACK_CACHE.set(sid, { to: destination, smsBody: fallbackBody });
     const expiryTimer = setTimeout(
       () => WA_FALLBACK_CACHE.delete(sid),
@@ -178,7 +183,11 @@ async function rememberWhatsAppDelivery({
           body: fallbackBody,
           source,
           status: String(status || "queued"),
-          smsFallbackStatus: fallbackBody ? "pending" : "not_required",
+          smsFallbackStatus: smsFallbackRequired ? "pending" : "not_required",
+          failureEmailTo,
+          failureEmailSubject: String(failureEmail?.subject || "").trim(),
+          failureEmailText: String(failureEmail?.text || "").trim(),
+          failureEmailStatus: failureEmailTo ? "pending" : "not_required",
           expiresAt: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000),
         },
       },
@@ -682,7 +691,7 @@ export const sendSMSMessage = async (to, body) => {
 /**
  * Send a plain WhatsApp text (no template/content).
  */
-export async function sendWhatsAppText(to, body) {
+export async function sendWhatsAppText(to, body, options = {}) {
   const client = getTwilioClient();
   if (!client) throw new Error("Twilio disabled");
 
@@ -705,8 +714,10 @@ export async function sendWhatsAppText(to, body) {
     messageSid: result?.sid,
     to: toE,
     smsBody: messageBody,
+    allowSmsFallback: options.allowSmsFallback !== false,
+    failureEmail: options.failureEmail || null,
     status: result?.status,
-    source: "plain-text",
+    source: String(options.source || "plain-text"),
   });
   return result;
 }

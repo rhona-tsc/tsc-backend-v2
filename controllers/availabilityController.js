@@ -21,6 +21,7 @@ import TwilioMessageDelivery from "../models/twilioMessageDeliveryModel.js";
 import {
   resolveBookingReplyIntent,
 } from "../utils/bookingReplyIntent.js";
+import sendEmail from "../utils/sendEmail.js";
 
 const isValid24 = (v) =>
   typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
@@ -4599,6 +4600,42 @@ export const twilioStatus = async (req, res) => {
           },
         },
       );
+    }
+
+    if (sid && isWhatsApp && ["failed", "undelivered"].includes(status)) {
+      const emailAlert = await TwilioMessageDelivery.findOneAndUpdate(
+        { messageSid: sid, failureEmailStatus: "pending" },
+        { $set: { failureEmailStatus: "sending" } },
+        { new: true },
+      ).lean();
+
+      if (emailAlert?.failureEmailTo) {
+        const errorSummary = [
+          errorCode ? `Twilio error code: ${errorCode}` : "",
+          ErrorMessage ? `Twilio message: ${ErrorMessage}` : "",
+        ].filter(Boolean).join("\n");
+        const emailResult = await sendEmail({
+          to: emailAlert.failureEmailTo,
+          subject:
+            emailAlert.failureEmailSubject ||
+            "WhatsApp delivery failed — no SMS was sent",
+          text: [
+            emailAlert.failureEmailText ||
+              "A WhatsApp message could not be delivered. No SMS fallback was sent.",
+            errorSummary,
+          ].filter(Boolean).join("\n\n"),
+        });
+
+        await TwilioMessageDelivery.updateOne(
+          { _id: emailAlert._id },
+          {
+            $set: {
+              failureEmailStatus: emailResult?.ok ? "sent" : "failed",
+              failureEmailSentAt: emailResult?.ok ? new Date() : null,
+            },
+          },
+        );
+      }
     }
 
     const needsSmsFallback =

@@ -23,6 +23,7 @@ import { promptForProfileAfterAcceptance } from "../services/onboardingAcceptanc
 import nodemailer from "nodemailer";
 import { buildBandEventSheetEmailHtml } from "../utils/tscEmailBranding.js";
 import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
+import sendEmail from "../utils/sendEmail.js";
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper: firstNameOf                             */
@@ -304,7 +305,12 @@ const getActLineupContext = async (board) => {
   return { act, lineup };
 };
 
-const completeAcceptedAssignment = async ({ board, assignment, musician = null }) => {
+const completeAcceptedAssignment = async ({
+  board,
+  assignment,
+  musician = null,
+  manualConfirmation = false,
+}) => {
   const booking = await resolveSourceBooking(board);
   const email = String(
     assignment?.email || musician?.email || musician?.basicInfo?.email || "",
@@ -360,17 +366,62 @@ const completeAcceptedAssignment = async ({ board, assignment, musician = null }
         : "Your calendar invitation will follow shortly.",
       "🤍 TSC",
     ].join("\n");
+    const failureEmailTo = String(
+      process.env.ALLOCATION_FAILURE_EMAIL ||
+        process.env.ADMIN_EMAIL ||
+        "rhona@thesupremecollective.co.uk",
+    ).trim();
+    const failureEmailSubject = `WhatsApp confirmation failed: ${assignment?.name || musicianDisplayName(musician || {})} — ${board?.bookingRef || "booking"}`;
+    const failureEmailText = [
+      "A manual musician confirmation could not be delivered by WhatsApp. No SMS fallback was sent.",
+      `Booking: ${board?.bookingRef || "Not recorded"}`,
+      `Act: ${actName}`,
+      `Musician: ${assignment?.name || musicianDisplayName(musician || {})}`,
+      `Role: ${roleAndDuties}`,
+      `Event date: ${date || "Not recorded"}`,
+      `Phone: ${phone}`,
+      "The musician remains confirmed on the booking. Please contact them manually if needed.",
+    ].join("\n");
     try {
-      await sendWhatsAppText(phone, body);
+      await sendWhatsAppText(phone, body, {
+        allowSmsFallback: !manualConfirmation,
+        source: manualConfirmation
+          ? "manual-booking-confirmation"
+          : "booking-acceptance-confirmation",
+        failureEmail: manualConfirmation
+          ? {
+              to: failureEmailTo,
+              subject: failureEmailSubject,
+              text: failureEmailText,
+            }
+          : null,
+      });
     } catch (whatsAppError) {
-      try {
-        await sendSMSMessage(phone, body);
-      } catch (messageError) {
-        console.warn("Could not send booking acceptance confirmation", {
-          phone,
-          whatsAppMessage: whatsAppError?.message,
-          smsMessage: messageError?.message,
+      if (manualConfirmation) {
+        const emailResult = await sendEmail({
+          to: failureEmailTo,
+          subject: failureEmailSubject,
+          text: [
+            failureEmailText,
+            `Immediate WhatsApp error: ${whatsAppError?.message || "Unknown error"}`,
+          ].join("\n\n"),
         });
+        if (!emailResult?.ok) {
+          console.warn("Could not email manual confirmation delivery failure", {
+            bookingRef: board?.bookingRef,
+            musicianId: String(assignment?.musicianId || musician?._id || ""),
+          });
+        }
+      } else {
+        try {
+          await sendSMSMessage(phone, body);
+        } catch (messageError) {
+          console.warn("Could not send booking acceptance confirmation", {
+            phone,
+            whatsAppMessage: whatsAppError?.message,
+            smsMessage: messageError?.message,
+          });
+        }
       }
     }
   }
@@ -1355,7 +1406,12 @@ export const confirmBookingRole = async (req, res) => {
       roleSlotId,
       musicianId: musician._id,
     });
-    const confirmation = await completeAcceptedAssignment({ board, assignment: candidate, musician });
+    const confirmation = await completeAcceptedAssignment({
+      board,
+      assignment: candidate,
+      musician,
+      manualConfirmation: true,
+    });
 
     // Manual confirmation is also used to reinstate someone who previously
     // declined or withdrew. Keep their offer/availability history aligned with

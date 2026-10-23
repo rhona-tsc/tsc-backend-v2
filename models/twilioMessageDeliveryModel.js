@@ -23,6 +23,16 @@ const twilioMessageDeliverySchema = new mongoose.Schema(
     },
     smsFallbackSid: { type: String, default: "" },
     smsFallbackSentAt: { type: Date, default: null },
+    failureEmailTo: { type: String, default: "" },
+    failureEmailSubject: { type: String, default: "" },
+    failureEmailText: { type: String, default: "" },
+    failureEmailStatus: {
+      type: String,
+      enum: ["not_required", "pending", "sending", "sent", "failed"],
+      default: "not_required",
+      index: true,
+    },
+    failureEmailSentAt: { type: Date, default: null },
     expiresAt: {
       type: Date,
       default: () => new Date(Date.now() + 45 * 24 * 60 * 60 * 1000),
