@@ -790,16 +790,19 @@ const normaliseAssignedMusicians = (value = []) => {
     });
 };
 
-const getRowAssignedMusicians = (row = {}) =>
-  normaliseAssignedMusicians(
+const getRowAssignedMusicians = (row = {}) => {
+  const source = row && typeof row === "object" ? row : {};
+
+  return normaliseAssignedMusicians(
     [
-      row.assignedMusicians,
-      row.bookingMusicians,
-      row.bandLineup,
-      row.bookingDetails?.assignedMusicians,
-      row.actsSummary?.[0]?.assignedMusicians,
+      source.assignedMusicians,
+      source.bookingMusicians,
+      source.bandLineup,
+      source.bookingDetails?.assignedMusicians,
+      source.actsSummary?.[0]?.assignedMusicians,
     ].find((items) => Array.isArray(items) && items.length) || [],
   );
+};
 
 export const resolveBookingAssignmentsForUpsert = ({
   payload = {},

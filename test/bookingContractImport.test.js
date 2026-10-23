@@ -52,6 +52,17 @@ test("clearing musicians requires the explicit replacement flag", () => {
   );
 });
 
+test("creating a new booking tolerates missing existing records", () => {
+  assert.deepEqual(
+    resolveBookingAssignmentsForUpsert({
+      payload: { bookingRef: "260915275050" },
+      existingBooking: null,
+      existingBoardRow: null,
+    }),
+    [],
+  );
+});
+
 test("ordinary booking updates cannot silently submit empty musician arrays", () => {
   const protectedPatch = protectBookingAssignmentPatch({
     clientFirstNames: "James",
