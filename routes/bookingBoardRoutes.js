@@ -1544,6 +1544,11 @@ const mergeRowData = (preferred, secondary) => {
       ? secondary
       : preferred;
   const contactFallback = contactSource === preferred ? secondary : preferred;
+  const boardSource = preferred?.bookingBoardItemId
+    ? preferred
+    : secondary?.bookingBoardItemId
+      ? secondary
+      : null;
 
   return {
     ...secondary,
@@ -1580,7 +1585,13 @@ const mergeRowData = (preferred, secondary) => {
     enquiryDateISO: preferred?.enquiryDateISO || secondary?.enquiryDateISO,
     bookingDateISO: preferred?.bookingDateISO || secondary?.bookingDateISO,
     songSuggestionsDueDateISO:
-      preferred?.songSuggestionsDueDateISO || secondary?.songSuggestionsDueDateISO,
+      boardSource
+        ? cleanString(boardSource.songSuggestionsDueDateISO)
+        : preferred?.songSuggestionsDueDateISO || secondary?.songSuggestionsDueDateISO,
+    invoiceDueDateISO:
+      boardSource
+        ? cleanString(boardSource.invoiceDueDateISO)
+        : preferred?.invoiceDueDateISO || secondary?.invoiceDueDateISO,
     grossValue:
       Number(preferred?.grossValue || 0) ||
       Number(secondary?.grossValue || 0) ||
@@ -3488,6 +3499,22 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       await mirrorSiteAutomationSettingToLinkedBookings(
         row,
         bodyWithoutBookingDetails.siteAutomationsEnabled,
+      );
+    }
+
+    if (row.bookingId && bodyWithoutBookingDetails.songSuggestionsDueDateISO !== undefined) {
+      await Booking.updateOne(
+        { _id: row.bookingId },
+        {
+          $set: {
+            songSuggestionsDueDateISO: String(
+              bodyWithoutBookingDetails.songSuggestionsDueDateISO || "",
+            ).slice(0, 10),
+            "bookingDetails.songSuggestionsDueDateISO": String(
+              bodyWithoutBookingDetails.songSuggestionsDueDateISO || "",
+            ).slice(0, 10),
+          },
+        },
       );
     }
 
