@@ -161,8 +161,6 @@ router.post("/webhook", async (req, res) => {
     bodyKeys: Object.keys(req.body || {}),
   });
 
-  console.log("📬 Google Calendar webhook headers:", req.headers);
-  console.log("📬 Google Calendar webhook body:", req.body);
 
   const resourceId = req.headers["x-goog-resource-id"];
   const channelId = req.headers["x-goog-channel-id"];

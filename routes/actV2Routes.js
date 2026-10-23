@@ -59,8 +59,6 @@ router.use((req, res, next) => {
   console.log(`\n🧭 [acts.v2][${req._rid}] ${req.method} ${req.originalUrl}`);
   if (Object.keys(req.query || {}).length)
     console.log("   ↳ query:", inspect(req.query));
-  if (req.method !== "GET" && Object.keys(req.body || {}).length)
-    console.log("   ↳ body :", inspect(req.body));
 
   res.on("finish", () => {
     const ms = Date.now() - (req._t0 || Date.now());

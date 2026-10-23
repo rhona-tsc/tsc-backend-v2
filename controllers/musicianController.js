@@ -2157,8 +2157,6 @@ const calculateTotalPerformanceFee = (lineup) => {
 const addAct = async (req, res) => {
   try {
     console.log("✅ Received request to add act");
-    console.log("🧾 Body:", req.body);
-    console.log("🔍 Parsed name field:", req.body.name);
 
     const videosParsed = safeJSONParse(req.body.videos, []);
 

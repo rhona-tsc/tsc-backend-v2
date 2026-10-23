@@ -2,6 +2,7 @@
 import express from "express";
 import cors from "cors";
 import "dotenv/config";
+import requireStaffAuth from "./middleware/requireStaffAuth.js";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import cron from "node-cron";
@@ -624,6 +625,11 @@ app.use((req, res, next) => {
 /*                                   Debug                                    */
 /* -------------------------------------------------------------------------- */
 
+app.use("/debug", requireStaffAuth);
+app.use("/api/debug", requireStaffAuth);
+app.use("/api/admin", requireStaffAuth);
+app.use("/api/finance", requireStaffAuth);
+
 app.get("/debug/base", (_req, res) => {
   res.json({
     INTERNAL_BASE_URL: process.env.INTERNAL_BASE_URL || null,
@@ -802,6 +808,11 @@ app.get("/", (_req, res) => {
 /* -------------------------------------------------------------------------- */
 
 app.use((err, req, res, next) => {
+  if (err?.name === "MulterError") {
+    return res.status(err.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({
+      success: false, message: err.code === "LIMIT_FILE_SIZE" ? "Uploaded file is too large." : "Invalid file upload.",
+    });
+  }
   console.error("🔥 Unhandled error:", err?.stack || err);
   if (res.headersSent) return;
   res.status(err.status || 500).json({

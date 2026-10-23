@@ -2139,7 +2139,7 @@ const updateStatus = async (req, res) => {
 // ---------------- manual creates & API create ----------------
 
 const manualCreateBooking = async (req, res) => {
-  console.log(`🐣 manualCreateBooking called`, { body: req.body });
+  console.log(`🐣 manualCreateBooking called`);
 
   try {
     const {

@@ -9,7 +9,7 @@ const router = express.Router();
 
 router.post("/refresh", async (req, res) => {
     const refreshToken = req.cookies?.refreshToken;
-    console.log("🔍 Refresh route hit. Cookie received:", refreshToken);
+    console.log("🔍 Refresh route hit. Cookie present:", Boolean(refreshToken));
   
     if (!refreshToken) {
       console.warn("⚠️ No refresh token in cookie");

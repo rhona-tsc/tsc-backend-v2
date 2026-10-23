@@ -52,7 +52,6 @@ export const getUserShortlist = async (req, res) => {
 export const updateShortlistItem = async (req, res) => {
   try {
     const { actId, userId, dateISO, selectedAddress } = req.body;
-    console.log("📦 [updateShortlistItem] Payload:", req.body);
 
     if (!actId || !userId)
       return res.status(400).json({ success: false, message: "Missing actId or userId" });

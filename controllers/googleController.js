@@ -48,9 +48,6 @@ export const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_REDIRECT_URI
 );
 
-const mask = (s = "", keep = 6) =>
-  s ? `${s.slice(0, keep)}…${s.slice(-keep)}` : "(empty)";
-
 export const debugGoogleAuth = async (label = "debug") => {
   console.log(`😈 (controllers/googleController.js) debugGoogleAuth called at`, new Date().toISOString(), { label });
 
@@ -60,9 +57,7 @@ export const debugGoogleAuth = async (label = "debug") => {
     const ruri = process.env.GOOGLE_REDIRECT_URI || "";
     const rtok = process.env.GOOGLE_REFRESH_TOKEN || "";
 
-    console.log(`🔧 [${label}] GOOGLE_REDIRECT_URI:`, ruri || "(missing)");
-    console.log(`🔧 [${label}] GOOGLE_CLIENT_ID:`, cid || "(missing)");
-    console.log(`🔧 [${label}] GOOGLE_REFRESH_TOKEN:`, mask(rtok, 10));
+    console.log(`🔧 [${label}] Google credentials configured:`, Boolean(cid && csec && ruri && rtok));
 
     if (!cid || !csec) {
       console.error(`❌ [${label}] Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET.`);
@@ -77,14 +72,8 @@ export const debugGoogleAuth = async (label = "debug") => {
       return false;
     }
 
-    console.log(`🔧 [${label}] oauth2Client.credentials (masked):`, {
-      refresh_token: mask(oauth2Client.credentials?.refresh_token, 10),
-      access_token:  mask(oauth2Client.credentials?.access_token, 10),
-      expiry_date:   oauth2Client.credentials?.expiry_date || null,
-    });
-
-    const accessToken = await oauth2Client.getAccessToken();
-    console.log(`✅ [${label}] getAccessToken() OK:`, mask(accessToken?.token || String(accessToken), 10));
+    await oauth2Client.getAccessToken();
+    console.log(`✅ [${label}] Google access token refreshed successfully`);
     return true;
   } catch (err) {
     console.error(`❌ (controllers/googleController.js) debugGoogleAuth error:`, err.message);
@@ -110,7 +99,7 @@ if (process.env.GOOGLE_REFRESH_TOKEN) {
 
 oauth2Client.on('tokens', (tokens) => {
   console.log(`😈 (controllers/googleController.js) oauth2Client.on('tokens') fired at`, new Date().toISOString());
-  if (tokens.refresh_token) console.log('🔁 Received new refresh_token (store this safely):', tokens.refresh_token);
+  if (tokens.refresh_token) console.log('🔁 Google refresh token updated');
   if (tokens.access_token) console.log('✅ Access token refreshed');
 });
 
@@ -132,7 +121,7 @@ export const oauth2Callback = async (req, res) => {
   try {
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
-    console.log('🔐 Tokens:', tokens);
+    console.log('🔐 Google authentication completed');
     res.send('Authentication successful! You can close this tab.');
   } catch (error) {
     console.error('❌ (controllers/googleController.js) oauth2Callback error:', error.message);

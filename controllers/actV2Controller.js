@@ -403,7 +403,7 @@ export const updateActV2 = async (req, res) => {
 
 export const createActV2 = async (req, res) => {
   try {
-    console.log("Creating Act V2 with data:", req.body);
+    console.log("Creating Act V2");
 
     const data = req.body || {};
 

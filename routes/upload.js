@@ -1,13 +1,14 @@
 // routes/upload.js
 import express from "express";
-import multer from "multer";
+import requireAnyAuth from "../middleware/requireAnyAuth.js";
+import documentUpload from "../middleware/documentUpload.js";
 import { v2 as cloudinary } from "cloudinary";
 import { Readable } from "stream";
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+router.use(requireAnyAuth);
 
-router.post("/menu", upload.single("file"), async (req, res) => {
+router.post("/menu", documentUpload, async (req, res) => {
   try {
     const file = req.file;
     if (!file) {
@@ -32,7 +33,7 @@ router.post("/menu", upload.single("file"), async (req, res) => {
   }
 });
 
-router.post("/doc", upload.single("file"), async (req, res) => {
+router.post("/doc", documentUpload, async (req, res) => {
   try {
     const file = req.file;
     if (!file) {
