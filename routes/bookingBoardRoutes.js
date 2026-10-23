@@ -1549,6 +1549,8 @@ const mergeRowData = (preferred, secondary) => {
     ...secondary,
     ...preferred,
     _id: preferred?._id || secondary?._id,
+    bookingBoardItemId:
+      preferred?.bookingBoardItemId || secondary?.bookingBoardItemId,
     sourceBookingId: preferred?.sourceBookingId || secondary?.sourceBookingId,
     bookingRef: preferred?.bookingRef || secondary?.bookingRef,
     bookingId: preferred?.bookingId || secondary?.bookingId,
@@ -2176,7 +2178,10 @@ const skip = (page - 1) * limit;
     const dedupeMap = new Map();
 
     for (const rawRow of boardRowsRaw) {
-      const row = attachActProfileData(rawRow, actProfileLookup);
+      const row = attachActProfileData(
+        { ...rawRow, bookingBoardItemId: rawRow._id },
+        actProfileLookup,
+      );
       const key = getCanonicalBookingKey(row);
       const existing = dedupeMap.get(key);
       dedupeMap.set(key, choosePreferredRow(existing, row));
