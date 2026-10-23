@@ -1592,6 +1592,19 @@ const mergeRowData = (preferred, secondary) => {
       boardSource
         ? cleanString(boardSource.invoiceDueDateISO)
         : preferred?.invoiceDueDateISO || secondary?.invoiceDueDateISO,
+    introEmailSentAt:
+      boardSource?.introEmailSentAt
+      || preferred?.introEmailSentAt
+      || secondary?.introEmailSentAt
+      || null,
+    introEmailSentTo:
+      cleanString(boardSource?.introEmailSentTo)
+      || cleanString(preferred?.introEmailSentTo)
+      || cleanString(secondary?.introEmailSentTo),
+    introEmailMessageId:
+      cleanString(boardSource?.introEmailMessageId)
+      || cleanString(preferred?.introEmailMessageId)
+      || cleanString(secondary?.introEmailMessageId),
     grossValue:
       Number(preferred?.grossValue || 0) ||
       Number(secondary?.grossValue || 0) ||
@@ -1602,7 +1615,10 @@ const mergeRowData = (preferred, secondary) => {
       0,
     eventType: preferred?.eventType || secondary?.eventType,
     actName: preferred?.actName || secondary?.actName,
-    actTscName: preferred?.actTscName || secondary?.actTscName,
+    actTscName:
+      (boardSource && cleanString(boardSource.actTscName))
+      || preferred?.actTscName
+      || secondary?.actTscName,
     address: preferred?.address || secondary?.address,
     county: preferred?.county || secondary?.county,
     venue: preferred?.venue || secondary?.venue,
