@@ -531,20 +531,9 @@ router.post("/", musicianAuth, async (req, res) => {
  * Render and deliver a Day 2 follow-up through the production mail path
  * without updating the enquiry's automation status.
  */
-const DAY_TWO_POSTMAN_TEST_KEY =
-  process.env.DAY_TWO_POSTMAN_TEST_KEY ||
-  "tsc-day-two-9a8c6371-7db7-4b03-8470-09a0868d317f";
-
-const dayTwoTestAuth = (req, res, next) => {
-  if (req.get("x-tsc-test-key") === DAY_TWO_POSTMAN_TEST_KEY) return next();
-  return musicianAuth(req, res, next);
-};
-
-router.post("/day-two-email/test", dayTwoTestAuth, async (req, res) => {
+router.post("/day-two-email/test", musicianAuth, async (req, res) => {
   try {
-    const usedPostmanTestKey =
-      req.get("x-tsc-test-key") === DAY_TWO_POSTMAN_TEST_KEY;
-    if (!usedPostmanTestKey && !isTSCAdmin(req.user) && !isAgent(req.user)) {
+    if (!isTSCAdmin(req.user) && !isAgent(req.user)) {
       return res.status(403).json({ success: false, message: "Admin-only" });
     }
 
