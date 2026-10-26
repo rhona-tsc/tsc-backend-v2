@@ -5128,32 +5128,37 @@ export const processAvailabilityReplyFlow = async ({
       addressKey(act?.formattedAddress || "") ||
       "tbc";
 
-    const identity = {
+    const musicianIdentityOptions = [
+      ...(updated?.musicianId ? [{ musicianId: updated.musicianId }] : []),
+      ...(toE164 ? [{ phone: toE164 }] : []),
+    ];
+    const musicianIdentityFilter = musicianIdentityOptions.length
+      ? { $or: musicianIdentityOptions }
+      : { _id: updated._id };
+    const enquiryIdentity = {
       actId: updated.actId?._id || updated.actId,
       dateISO: updated.dateISO,
       v2: true,
-      $or: [
-        ...(updated?.musicianId ? [{ musicianId: updated.musicianId }] : []),
-        ...(toE164 ? [{ phone: toE164 }] : []),
-        ...(emailForInvite
-          ? [{ musicianEmail: String(emailForInvite).toLowerCase() }]
-          : []),
-      ],
-    };
-
-    const previouslyConfirmedRow = await AvailabilityModel.findOne({
-      ...identity,
       ...(updated.formattedAddress
         ? { formattedAddress: updated.formattedAddress }
         : {}),
-      $or: [
-        { reply: "yes" },
-        { calendarEventId: { $exists: true, $ne: null } },
-        { calendarInviteSentAt: { $exists: true, $ne: null } },
+    };
+
+    const previouslyConfirmedRow = await AvailabilityModel.findOne({
+      ...enquiryIdentity,
+      $and: [
+        musicianIdentityFilter,
         {
-          calendarStatus: {
-            $in: ["needsAction", "accepted", "tentative"],
-          },
+          $or: [
+            { reply: "yes" },
+            { calendarEventId: { $exists: true, $ne: null } },
+            { calendarInviteSentAt: { $exists: true, $ne: null } },
+            {
+              calendarStatus: {
+                $in: ["needsAction", "accepted", "tentative"],
+              },
+            },
+          ],
         },
       ],
     })
@@ -5194,13 +5199,19 @@ export const processAvailabilityReplyFlow = async ({
     if (shouldSendCancellationEmail) {
       await AvailabilityModel.updateMany(
         {
-          musicianEmail: (emailForInvite || "").toLowerCase(),
-          dateISO: updated.dateISO,
-          $or: [
-            { calendarEventId: { $exists: true, $ne: null } },
-            { calendarInviteSentAt: { $exists: true, $ne: null } },
+          ...enquiryIdentity,
+          $and: [
+            musicianIdentityFilter,
             {
-              calendarStatus: { $in: ["needsAction", "accepted", "tentative"] },
+              $or: [
+                { calendarEventId: { $exists: true, $ne: null } },
+                { calendarInviteSentAt: { $exists: true, $ne: null } },
+                {
+                  calendarStatus: {
+                    $in: ["needsAction", "accepted", "tentative"],
+                  },
+                },
+              ],
             },
           ],
         },
