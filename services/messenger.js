@@ -1,5 +1,6 @@
 // services/messenger.ts
 import Twilio from "twilio";
+import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 
 const client = Twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const FROM_WHATSAPP = process.env.TWILIO_WA_SENDER
@@ -9,20 +10,33 @@ export async function sendBookingRequest({ to, useWhatsApp, vars }) {
       console.log(`🩵 (services/messenger.js) sendBookingRequest START at ${new Date().toISOString()}`, { });
 
   if (useWhatsApp) {
-    try {
-      // Template message (Interactive not shown here; you can also send with buttons)
-      await client.messages.create({
-        from: FROM_WHATSAPP,
-        to: `whatsapp:${to}`,
-        body: `Hi ${vars.name}, you’ve received a booking request for ${vars.date} in ${vars.location} for ${vars.role} (${vars.duties}) at £${vars.fee}. 
-Reply YES to confirm, or NO to decline.`
-      });
-      return { channel: "whatsapp", ok: true };
-    } catch (e) {
-      // fall through to SMS
-    }
+    const result = await sendWhatsAppMessage({
+      to,
+      contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+      allowDefaultContentSid: false,
+      variables: {
+        "1": vars.name,
+        "2": vars.date,
+        "3": vars.location,
+        "4": String(vars.fee || ""),
+        "5": vars.duties || vars.role,
+        "6": vars.actName,
+      },
+      allowSmsFallback: false,
+      source: "legacy-booking-request",
+      requireOpportunityDetails: true,
+      opportunityDetails: {
+        actName: vars.actName,
+        date: vars.date,
+        address: vars.location,
+        duties: vars.duties || vars.role,
+        fee: vars.fee,
+      },
+    });
+    return { channel: "whatsapp", ok: true, sid: result?.sid || "" };
   }
-  // SMS fallback
+  // Explicit SMS sends remain available when SMS was deliberately selected;
+  // this is not used as an automatic WhatsApp fallback.
   await client.messages.create({
     from: FROM_SMS,
     to,

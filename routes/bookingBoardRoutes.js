@@ -11,7 +11,7 @@ import { parse } from "csv-parse/sync";
 import financeForecastBookingModel from "../models/financeForecastBookingModel.js";
 import multer from "multer";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
-import { sendWhatsAppText, sendSMSMessage } from "../utils/twilioClient.js";
+import { sendWhatsAppMessage, sendWhatsAppText, sendSMSMessage } from "../utils/twilioClient.js";
 import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
 import { normalizeEventType } from "../utils/eventTypes.js";
@@ -252,6 +252,52 @@ export const buildIntroEmail = (row) => {
   const invoiceUrl = getIntroInvoiceUrl(row);
   return { recipient, subject, text, html, invoiceUrl };
 };
+
+export const buildMusicianCancellationEmail = (row, musician, cancellationFeeAmount = 0) => {
+  const firstName = cleanString(musician?.firstName || musician?.name?.split?.(/\s+/)?.[0] || "there");
+  const actName = cleanString(row?.actTscName || row?.actName || "the act");
+  const eventDate = formatEmailBodyDate(row?.eventDateISO);
+  const location = cleanString(row?.address || row?.county);
+  const bookingRef = cleanString(row?.bookingRef);
+  const fee = Math.max(0, toNumber(cancellationFeeAmount));
+  const details = [eventDate, location].filter(Boolean).join(" in ");
+  const feeText = fee > 0
+    ? `A cancellation payment of £${fee.toFixed(2)} is due to you. We’ll confirm the payment arrangements separately.`
+    : "As the booking was only confirmed very recently, no cancellation fee is due.";
+  const subject = `Booking cancelled – ${actName}, ${eventDate}`;
+  const referenceText = bookingRef ? ` (reference ${bookingRef})` : "";
+  const text = [
+    `Hi ${firstName},`,
+    "",
+    `Just to let you know that the client has cancelled the ${actName} booking for ${details}${referenceText}.`,
+    "",
+    `${feeText} The date is now released in your diary.`,
+    "",
+    "Sorry for the change, and thank you for confirming the booking so promptly.",
+    "",
+    "Best,",
+    "Rhona",
+    "The Supreme Collective",
+  ].join("\n");
+  const html = `
+    <div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:720px;">
+      <p>Hi ${escapeEmailHtml(firstName)},</p>
+      <p>Just to let you know that the client has cancelled the ${escapeEmailHtml(actName)} booking for ${escapeEmailHtml(details)}${escapeEmailHtml(referenceText)}.</p>
+      <p>${escapeEmailHtml(feeText)} The date is now released in your diary.</p>
+      <p>Sorry for the change, and thank you for confirming the booking so promptly.</p>
+      <p>Best,<br />Rhona<br />The Supreme Collective</p>
+      ${buildTscEmailFooter()}
+    </div>`;
+  return { subject, text, html };
+};
+
+export const buildMusicianCancellationWhatsAppVariables = (row, musician) => ({
+  "1": cleanString(musician?.firstName || musician?.name?.split?.(/\s+/)?.[0] || "there"),
+  "2": cleanString(row?.actTscName || row?.actName || "the act"),
+  "3": formatEmailBodyDate(row?.eventDateISO),
+  "4": cleanString(row?.address || row?.county || "the agreed venue"),
+  "5": cleanString(row?.bookingRef || "TSC booking"),
+});
 
 const captureLine = (text, label) => {
   const match = String(text || "").match(
@@ -2978,6 +3024,170 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post("/:id/cancel", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin only." });
+    }
+
+    const row = await findBookingBoardRow(req.params.id, { lean: false });
+    if (!row) {
+      return res.status(404).json({ success: false, message: "Booking not found." });
+    }
+    if (row.bookingStatus === "cancelled") {
+      return res.status(409).json({
+        success: false,
+        message: "This booking has already been cancelled.",
+      });
+    }
+
+    const cancellationFeeAmount = Math.max(0, toNumber(req.body?.cancellationFeeAmount));
+    const reason = cleanString(req.body?.reason);
+    const cancellationContentSid = cleanString(
+      process.env.TWILIO_BOOKING_CANCELLATION_SID ||
+        "HX2bf547f4a55a23d90adcd430d359076b",
+    );
+    if (!cancellationContentSid) {
+      return res.status(503).json({
+        success: false,
+        message: "The approved WhatsApp cancellation template is not configured yet.",
+      });
+    }
+    const activeStatuses = new Set(["accepted", "confirmed"]);
+    const assigned = [
+      ...(Array.isArray(row.assignedMusicians) ? row.assignedMusicians : []),
+      ...(Array.isArray(row.bookingMusicians) ? row.bookingMusicians : []),
+      ...(Array.isArray(row.bandLineup) ? row.bandLineup : []),
+    ];
+    const recipients = [...new Map(
+      assigned
+        .filter((member) => activeStatuses.has(cleanString(member?.status).toLowerCase()))
+        .filter((member) => cleanString(member?.phone))
+        .map((member) => [cleanString(member.phone).replace(/\D/g, ""), member]),
+    ).values()];
+
+    const notifiedMusicians = [];
+    for (const musician of recipients) {
+      try {
+        const result = await sendWhatsAppMessage({
+          to: cleanString(musician.phone),
+          contentSid: cancellationContentSid,
+          allowDefaultContentSid: false,
+          requireTemplate: true,
+          variables: buildMusicianCancellationWhatsAppVariables(row, musician),
+          smsBody: "",
+          allowSmsFallback: false,
+          source: "booking-cancellation",
+        });
+        notifiedMusicians.push({
+          name: cleanString(musician.name || `${musician.firstName || ""} ${musician.lastName || ""}`),
+          email: cleanString(musician.email).toLowerCase(),
+          phone: cleanString(musician.phone),
+          channel: "whatsapp",
+          messageId: cleanString(result?.sid),
+          status: "sent",
+          error: "",
+        });
+      } catch (error) {
+        notifiedMusicians.push({
+          name: cleanString(musician.name || `${musician.firstName || ""} ${musician.lastName || ""}`),
+          email: cleanString(musician.email).toLowerCase(),
+          phone: cleanString(musician.phone),
+          channel: "whatsapp",
+          messageId: "",
+          status: "failed",
+          error: cleanString(error?.message || "WhatsApp delivery failed"),
+        });
+      }
+    }
+
+    const now = new Date();
+    const cancelAssignments = (members = []) => members.map((member) => ({
+      ...(member?.toObject ? member.toObject() : member),
+      status: activeStatuses.has(cleanString(member?.status).toLowerCase())
+        ? "cancelled"
+        : member?.status,
+      paymentStatus: activeStatuses.has(cleanString(member?.status).toLowerCase())
+        ? (cancellationFeeAmount > 0 ? "pending" : "cancelled")
+        : member?.paymentStatus,
+      notes: activeStatuses.has(cleanString(member?.status).toLowerCase())
+        ? [cleanString(member?.notes), `Booking cancelled ${now.toISOString().slice(0, 10)}.`].filter(Boolean).join(" ")
+        : member?.notes,
+    }));
+
+    row.bookingStatus = "cancelled";
+    row.siteAutomationsEnabled = false;
+    row.cancellation = {
+      cancelledAt: now,
+      cancelledBy: cleanString(req.user?.email || req.user?.name || req.user?._id),
+      reason,
+      cancellationFeeAmount,
+      calendarCancelledAt: null,
+      musiciansNotifiedAt: recipients.length ? now : null,
+      notifiedMusicians,
+    };
+    row.assignedMusicians = cancelAssignments(row.assignedMusicians);
+    row.bookingMusicians = cancelAssignments(row.bookingMusicians);
+    row.bandLineup = cancelAssignments(row.bandLineup);
+    row.bookingDetails = {
+      ...(row.bookingDetails?.toObject ? row.bookingDetails.toObject() : row.bookingDetails || {}),
+      assignedMusicians: row.assignedMusicians,
+    };
+    await row.save();
+
+    const linkedBookingId = row.bookingId || row.sourceBookingId;
+    const linkedBooking = linkedBookingId && mongoose.isValidObjectId(linkedBookingId)
+      ? await Booking.findById(linkedBookingId).select("calendarEventId").lean()
+      : null;
+    const calendarEventId = cleanString(row.calendarEventId || linkedBooking?.calendarEventId);
+    if (calendarEventId) {
+      try {
+        const { cancelCalendarInvite } = await import("../controllers/googleController.js");
+        await cancelCalendarInvite({
+          eventId: calendarEventId,
+          dateISO: cleanString(row.eventDateISO),
+          email: cleanString(recipients[0]?.email),
+        });
+        row.cancellation.calendarCancelledAt = now;
+        await row.save();
+      } catch (calendarError) {
+        console.warn("⚠️ Booking cancelled but calendar event could not be cancelled:", calendarError?.message || calendarError);
+      }
+    }
+
+    if (linkedBookingId && mongoose.isValidObjectId(linkedBookingId)) {
+      await Booking.updateOne(
+        { _id: linkedBookingId },
+        {
+          $set: {
+            status: "cancelled",
+            balanceStatus: "cancelled",
+            siteAutomationsEnabled: false,
+            "bookingDetails.assignedMusicians": row.assignedMusicians,
+          },
+        },
+      );
+    }
+
+    const failed = notifiedMusicians.filter((entry) => entry.status === "failed");
+    return res.json({
+      success: true,
+      row: row.toObject(),
+      notifiedCount: notifiedMusicians.length - failed.length,
+      failedNotifications: failed,
+      message: failed.length
+        ? `Booking cancelled, but ${failed.length} musician notification${failed.length === 1 ? "" : "s"} failed.`
+        : `Booking cancelled and ${notifiedMusicians.length} musician${notifiedMusicians.length === 1 ? "" : "s"} notified.`,
+    });
+  } catch (error) {
+    console.error("❌ booking cancellation failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "The booking could not be cancelled.",
+    });
   }
 });
 

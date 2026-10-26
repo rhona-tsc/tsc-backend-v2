@@ -3,7 +3,7 @@ import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js"; // optional, used as fallback for email
 import AvailabilityModel from "../models/availabilityModel.js";
 import { enqueueUnique, kickQueue, releaseLockAndProcessNext } from "./helpers.js";
-import { sendSMSMessage, toE164, WA_FALLBACK_CACHE, sendWhatsAppText } from "../utils/twilioClient.js";
+import { toE164, sendWhatsAppText } from "../utils/twilioClient.js";
 import { computeMemberMessageFee } from "./helpersForCorrectFee.js";
 import { createCalendarInvite, updateCalendarEvent } from "../controllers/googleController.js";
 import { applyFeaturedBadgeOnYesV2 } from "./applyFeaturedBadgeOnYesV2.js";
@@ -209,65 +209,12 @@ export async function twilioStatusV2(req, res) {
 
     console.log("[V2] status:", { sid, status, channel });
 
-    // Only fallback for WhatsApp delivery failures
+    // Delivery failures are handled by the main Twilio status endpoint, which
+    // records the failure and emails the admin. Never change channel to SMS.
     const isWA =
       channel === "whatsapp" || (req.body?.From || "").toString().startsWith("whatsapp:");
-    const needsFallback = isWA && (status === "undelivered" || status === "failed");
-
-    if (!needsFallback || !sid) {
-      return res.status(200).send("<Response/>");
-    }
-
-    // 1) Try in-memory cache
-    let to = WA_FALLBACK_CACHE.get(sid)?.to || "";
-    let smsBody = WA_FALLBACK_CACHE.get(sid)?.smsBody || "";
-
-    // 2) Fall back to DB lookup
-    if (!to || !smsBody) {
-      const row = await AvailabilityModel.findOne({
-        $or: [{ messageSidOut: sid }, { "outbound.sid": sid }],
-        v2: true,
-      }).lean();
-
-      if (row) {
-        to = toE164(row.phone || "");
-        smsBody = row?.outbound?.smsBody || "";
-      }
-    }
-
-    if (!to || !smsBody) {
-      console.warn("[V2] WA fallback: no 'to' or 'smsBody' located for", sid);
-      return res.status(200).send("<Response/>");
-    }
-
-    // Idempotency: mark once
-    const mark = await AvailabilityModel.findOneAndUpdate(
-      {
-        $or: [{ messageSidOut: sid }, { "outbound.sid": sid }, { phone: to }],
-        v2: true,
-        "outbound.smsFallbackSentAt": { $exists: false },
-      },
-      {
-        $set: {
-          "outbound.smsFallbackSentAt": new Date(),
-          updatedAt: new Date(),
-          status: "sms_sent",
-        },
-      },
-      { new: true }
-    );
-
-    if (!mark) return res.status(200).send("<Response/>");
-
-    try {
-      await sendSMSMessage(to, smsBody);
-      console.log("[V2] WA fallback → SMS sent", { to });
-    } catch (smsErr) {
-      console.warn("[V2] WA fallback SMS failed:", smsErr?.message || smsErr);
-      await AvailabilityModel.updateOne(
-        { _id: mark._id },
-        { $set: { status: "sms_fallback_failed", updatedAt: new Date() } }
-      );
+    if (isWA && sid && (status === "undelivered" || status === "failed")) {
+      console.warn("[V2] WhatsApp delivery failed; no SMS fallback", { sid, status });
     }
   } catch (e) {
     console.warn("[V2] twilioStatusV2 error:", e?.message || e);

@@ -66,6 +66,7 @@ export async function sendBookingConfirmationToLeadVocalist(booking) {
     await sendWhatsAppMessage({
       to: phone,
       contentSid: process.env.TWILIO_BOOKING_CONFIRMATION_SID,
+      allowDefaultContentSid: false,
       variables: {
         1: musician.firstName || "Musician",
         2: new Date(booking.date).toLocaleDateString("en-GB", {
@@ -78,6 +79,16 @@ export async function sendBookingConfirmationToLeadVocalist(booking) {
         4: booking.totalFee?.toFixed(2) || "0.00",
         5: "performance",
         6: booking.actName || "The Band",
+      },
+      allowSmsFallback: false,
+      source: "lead-vocalist-booking-confirmation",
+      requireOpportunityDetails: true,
+      opportunityDetails: {
+        actName: booking.actName,
+        date: booking.date,
+        address: booking.venueAddress,
+        duties: "performance",
+        fee: booking.totalFee,
       },
     });
 
@@ -170,7 +181,7 @@ export async function sendBookingRequestsToLineup(booking) {
     year: "numeric",
   });
 
-  const address = booking.venueAddress || booking.venue || "Venue";
+  const address = booking.venueAddress || booking.venue || "";
 
   let sent = 0;
 
@@ -182,7 +193,7 @@ export async function sendBookingRequestsToLineup(booking) {
     const phone = normalize(musician.phone || musician.phoneNumber);
     if (!phone) continue;
 
-    const feeUsed = m.feeUsed || booking.feePerMember || "TBC";
+    const feeUsed = Number(m.feeUsed || booking.feePerMember || 0);
 
     // WhatsApp variables for your template
     const variables = {
@@ -199,7 +210,18 @@ export async function sendBookingRequestsToLineup(booking) {
       const waRes = await sendWhatsAppMessage({
         to: phone,
         contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+        allowDefaultContentSid: false,
         variables,
+        allowSmsFallback: false,
+        source: "booking-member-request",
+        requireOpportunityDetails: true,
+        opportunityDetails: {
+          actName: booking.actName || act.tscName || act.name,
+          date: formattedDate,
+          address,
+          duties: m.instrument,
+          fee: feeUsed,
+        },
       });
 
       // 4️⃣ Create/Update availability row

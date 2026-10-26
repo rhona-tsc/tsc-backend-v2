@@ -1,7 +1,7 @@
 // backend/controllers/helpers.js
 import OutboundQueue from "../models/outboundQueue.js";
 import AvailabilityModel from "../models/availabilityModel.js";
-import { sendWhatsAppMessage, sendSMSMessage, toE164 } from "../utils/twilioClient.js";
+import { sendWhatsAppMessage, toE164 } from "../utils/twilioClient.js";
 import { getMemberCountyTravelFee } from "../utils/memberCountyTravel.js";
 
 // In-process per-phone locks (sufficient for single instance / dev)
@@ -94,7 +94,8 @@ export async function enqueueUnique({ phone, kind, payload }) {
 /* -------------------------------------------------------------------------- */
 /**
  * Process next queued message for a phone (respects in-process lock).
- * Sends WA first, then SMS fallback, then removes the queue item.
+ * Sends the approved WhatsApp template and removes the queue item. Delivery
+ * failures are emailed to the admin; they never fall back to SMS.
  */
 export async function kickQueue(phone) {
   console.log(`🐔 (controllers/helpers.js) kickQueue called at`, new Date().toISOString(), { phone });
@@ -134,21 +135,23 @@ export async function kickQueue(phone) {
           to: e164,
           variables,
           contentSid,
+          allowDefaultContentSid: false,
           smsBody,
+          allowSmsFallback: false,
+          source: `queued-${kind || "availability"}`,
+          requireOpportunityDetails: kind === "availability",
+          opportunityDetails: kind === "availability" ? {
+            actName: variables?.["6"],
+            date: variables?.["2"] || payload?.dateISO,
+            address: payload?.address || variables?.["3"],
+            duties: variables?.["5"],
+            fee: variables?.["4"],
+          } : null,
         });
         waOk = true;
         console.log(`🐔 kickQueue WhatsApp sent`, { e164, kind });
       } catch (waErr) {
-        console.warn(`🐔 kickQueue WA send failed; fallback to SMS`, waErr?.message || waErr);
-      }
-
-      if (!waOk && smsBody) {
-        try {
-          await sendSMSMessage(e164, smsBody);
-          console.log(`🐔 kickQueue SMS fallback sent`, { e164 });
-        } catch (smsErr) {
-          console.warn(`🐔 kickQueue SMS fallback failed`, smsErr?.message || smsErr);
-        }
+        console.warn(`🐔 kickQueue WhatsApp send failed; no SMS fallback`, waErr?.message || waErr);
       }
 
       try {

@@ -4,7 +4,6 @@ import Musician from "../models/musicianModel.js";
 import {
   sendSMSMessage,
   sendWhatsAppText,
-  WA_FALLBACK_CACHE,
 } from "../utils/twilioClient.js";
 import DeferredAvailability from "../models/deferredAvailabilityModel.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js";
@@ -365,7 +364,6 @@ const normalizeNameBits = (nameLike) => {
 
 
 
-const SMS_FALLBACK_LOCK = new Set(); // key: WA MessageSid; prevents duplicate SMS fallbacks
 const normCountyKey = (s) =>
   String(s || "")
     .toLowerCase()
@@ -3868,9 +3866,9 @@ if (shouldAlwaysSkip) {
 
         // Build interactive buttons (carry requestId)
         const buttons = [
-          { id: `YES:${requestId}`, title: "Yes" },
-          { id: `NO:${requestId}`, title: "No" },
-          { id: `UNAVAILABLE:${requestId}`, title: "Unavailable" },
+          { id: `YES:${requestId}`, title: "I'm available!" },
+          { id: `NO:${requestId}`, title: "No thanks!" },
+          { id: `UNAVAILABLE:${requestId}`, title: "I'm already booked!" },
         ];
 
         const nameBits = normalizeNameBits(displayNameOf(vMember));
@@ -3884,6 +3882,8 @@ if (shouldAlwaysSkip) {
         // Send interactive WA
         const msg = await sendWhatsAppMessage({
           to: phone,
+          contentSid: process.env.TWILIO_ENQUIRY_SID,
+          allowDefaultContentSid: false,
           actData: act,
           lineup: lineup || {},
           member: vMember,
@@ -3901,6 +3901,16 @@ if (shouldAlwaysSkip) {
           requestId,
           buttons,
           smsBody: outboundMessage,
+          allowSmsFallback: false,
+          source: "availability-initial-request",
+          requireOpportunityDetails: true,
+          opportunityDetails: {
+            actName: act.tscName || act.name,
+            date: formattedDate,
+            address: shortAddress,
+            duties: vMember.instrument,
+            fee: finalFee,
+          },
         });
 
         // persist Twilio SID
@@ -4465,9 +4475,9 @@ if (!isDeputy && shouldAlwaysSkip) {
     });
 
     const buttons = [
-      { id: `YES:${requestId}`, title: "Yes" },
-      { id: `NO:${requestId}`, title: "No" },
-      { id: `UNAVAILABLE:${requestId}`, title: "Unavailable" },
+      { id: `YES:${requestId}`, title: "I'm available!" },
+      { id: `NO:${requestId}`, title: "No thanks!" },
+      { id: `UNAVAILABLE:${requestId}`, title: "I'm already booked!" },
     ];
 
     const outboundMessage = `Hi ${
@@ -4478,6 +4488,8 @@ if (!isDeputy && shouldAlwaysSkip) {
 
     const msg = await sendWhatsAppMessage({
       to: phone,
+      contentSid: process.env.TWILIO_ENQUIRY_SID,
+      allowDefaultContentSid: false,
       actData: act,
       lineup: lineup || {},
       member: person,
@@ -4495,6 +4507,16 @@ if (!isDeputy && shouldAlwaysSkip) {
       requestId,
       buttons,
       smsBody: outboundMessage,
+      allowSmsFallback: false,
+      source: "availability-initial-request",
+      requireOpportunityDetails: true,
+      opportunityDetails: {
+        actName: act.tscName || act.name,
+        date: formattedDate,
+        address: shortAddress,
+        duties: roleStr,
+        fee: finalFee,
+      },
     });
 
     // Persist Twilio SID
@@ -4592,6 +4614,7 @@ export const twilioStatus = async (req, res) => {
       }
 
       await AvailabilityModel.updateOne({ messageSidOut: sid }, update);
+      await EnquiryMessage.updateOne({ messageSid: sid }, update);
       await TwilioMessageDelivery.updateOne(
         { messageSid: sid },
         {
@@ -4637,119 +4660,6 @@ export const twilioStatus = async (req, res) => {
             },
           },
         );
-      }
-    }
-
-    const needsSmsFallback =
-      sid &&
-      isWhatsApp &&
-      ["failed", "undelivered"].includes(status) &&
-      ["63016", "63024"].includes(errorCode);
-
-    if (needsSmsFallback) {
-      let destination = "";
-      let fallbackBody = "";
-      let deliveryRecord = await TwilioMessageDelivery.findOneAndUpdate(
-        { messageSid: sid, smsFallbackStatus: "pending" },
-        { $set: { smsFallbackStatus: "sending" } },
-        { new: true },
-      ).lean();
-
-      if (!deliveryRecord) {
-        const knownDelivery = await TwilioMessageDelivery.findOne({
-          messageSid: sid,
-        })
-          .select("smsFallbackStatus")
-          .lean();
-        if (knownDelivery) {
-          return res.sendStatus(200);
-        }
-      }
-
-      if (deliveryRecord) {
-        destination = toE164(deliveryRecord.to);
-        fallbackBody = String(deliveryRecord.body || "").trim();
-      } else {
-        const cached = WA_FALLBACK_CACHE.get(sid);
-        destination = toE164(cached?.to || "");
-        fallbackBody = String(cached?.smsBody || "").trim();
-      }
-
-      let availabilityRecord = null;
-      if (!destination || !fallbackBody) {
-        availabilityRecord = await AvailabilityModel.findOneAndUpdate(
-          {
-            messageSidOut: sid,
-            smsFallbackStatus: { $in: [null, "pending"] },
-          },
-          { $set: { smsFallbackStatus: "sending" } },
-          { new: true },
-        ).lean();
-        destination = toE164(availabilityRecord?.phone || destination);
-        fallbackBody = String(
-          availabilityRecord?.outboundMessage || fallbackBody,
-        ).trim();
-      }
-
-      if (destination && fallbackBody) {
-        try {
-          const sms = await sendSMSMessage(destination, fallbackBody);
-          WA_FALLBACK_CACHE.delete(sid);
-          await Promise.all([
-            TwilioMessageDelivery.updateOne(
-              { messageSid: sid },
-              {
-                $set: {
-                  smsFallbackStatus: "sent",
-                  smsFallbackSid: String(sms?.sid || ""),
-                  smsFallbackSentAt: new Date(),
-                },
-              },
-            ),
-            AvailabilityModel.updateOne(
-              { messageSidOut: sid },
-              {
-                $set: {
-                  smsFallbackStatus: "sent",
-                  smsFallbackSid: String(sms?.sid || ""),
-                  smsFallbackSentAt: new Date(),
-                },
-              },
-            ),
-          ]);
-          console.log("WhatsApp delivery failed; SMS fallback sent", {
-            sid,
-            errorCode,
-            smsSid: sms?.sid || null,
-          });
-        } catch (smsError) {
-          await Promise.all([
-            TwilioMessageDelivery.updateOne(
-              { messageSid: sid },
-              { $set: { smsFallbackStatus: "failed" } },
-            ),
-            AvailabilityModel.updateOne(
-              { messageSidOut: sid },
-              { $set: { smsFallbackStatus: "failed" } },
-            ),
-          ]);
-          console.warn("WhatsApp SMS fallback failed:", smsError?.message || smsError);
-        }
-      } else if (deliveryRecord || availabilityRecord) {
-        await Promise.all([
-          TwilioMessageDelivery.updateOne(
-            { messageSid: sid },
-            { $set: { smsFallbackStatus: "failed" } },
-          ),
-          AvailabilityModel.updateOne(
-            { messageSidOut: sid },
-            { $set: { smsFallbackStatus: "failed" } },
-          ),
-        ]);
-        console.warn("WhatsApp SMS fallback had no valid recipient or message", {
-          sid,
-          errorCode,
-        });
       }
     }
 
@@ -5419,19 +5329,32 @@ export const twilioInbound = async (req, res) => {
       .trim()
       .toLowerCase();
     if (!t) return null;
-    if (/^y(es)?$/.test(t)) return "yes";
-    if (/^un/.test(t)) return "unavailable";
-    if (/^n(o)?$/.test(t)) return "no";
+    if (
+      /^y(es)?$/.test(t) ||
+      t.includes("i'm available") ||
+      t.includes("i’m available") ||
+      t.includes("im available")
+    ) return "yes";
+    if (/^un/.test(t) || t.includes("already booked")) return "unavailable";
+    if (/^n(o)?$/.test(t) || t.includes("no thanks")) return "no";
     return null;
   };
 
-  const sendAutomatedReplyInstruction = async (phone) => {
+  const sendAutomatedReplyInstruction = async (phone, { isWhatsApp = true } = {}) => {
     if (!phone) return;
     try {
-      await sendWhatsAppText(
-        phone,
-        "This is an automated messaging service. Please use the quick reply buttons to answer this message. If you have additional questions about this gig, please message +44 7594 223200.",
-      );
+      if (isWhatsApp) {
+        await sendWhatsAppText(
+          phone,
+          "This is an automated messaging service. Please use the quick reply buttons to answer this message. If you have additional questions about this gig, please message +44 7594 223200.",
+          { source: "whatsapp-inbound-instruction" },
+        );
+      } else {
+        await sendSMSMessage(
+          phone,
+          "This is an automated messaging service. Please reply YES if you are available, NO THANKS for this enquiry, or ALREADY BOOKED if you are unavailable that day.",
+        );
+      }
     } catch (error) {
       console.error("Failed to send automated reply instruction:", error?.message || error);
     }
@@ -5717,7 +5640,7 @@ if (deputyAllocationReply && deputyAllocationJob) {
 }
 
 if (deputyAllocationJob && !deputyAllocationReply) {
-  await sendAutomatedReplyInstruction(sender);
+  await sendAutomatedReplyInstruction(sender, { isWhatsApp: inboundIsWhatsApp });
   return;
 }
 
@@ -5846,12 +5769,17 @@ if (deputyAllocationJob && !deputyAllocationReply) {
         }
 
         if (!reply) {
-          console.log("ℹ️ Unclassified inbound message — sending button instruction", {
+          console.log("ℹ️ Unclassified inbound message", {
             bodyText,
             btnText,
             btnId,
+            inboundChannel: inboundIsWhatsApp ? "whatsapp" : "sms",
           });
-          await sendAutomatedReplyInstruction(sender);
+          // A reply on SMS does not open WhatsApp's 24-hour session. Keep the
+          // response on the channel the musician actually used.
+          await sendAutomatedReplyInstruction(sender, {
+            isWhatsApp: inboundIsWhatsApp,
+          });
           return;
         }
 

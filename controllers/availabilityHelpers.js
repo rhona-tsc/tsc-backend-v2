@@ -246,8 +246,28 @@ export const notifyDeputyOneShot = async ({
 
     const sendRes = await sendWhatsAppMessage({
       to: phoneE164,
-      templateParams: { FirstName: firstNameOf(deputy), FormattedDate: formattedDate },
+      contentSid: process.env.TWILIO_ENQUIRY_SID,
+      allowDefaultContentSid: false,
+      requestId: enquiryId,
+      variables: {
+        firstName: firstNameOf(deputy),
+        date: formattedDate,
+        location: shortAddress,
+        fee: String(finalFee),
+        role: duties,
+        actName: act?.tscName || act?.name || "",
+      },
       smsBody,
+      allowSmsFallback: false,
+      source: "availability-deputy-request",
+      requireOpportunityDetails: true,
+      opportunityDetails: {
+        actName: act?.tscName || act?.name,
+        date: formattedDate,
+        address: shortAddress,
+        duties,
+        fee: finalFee,
+      },
     });
 
     await AvailabilityModel.updateOne(

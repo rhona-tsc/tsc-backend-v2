@@ -2,6 +2,7 @@
 // utils/bookingNotifications.js
 import musicianModel from "../models/musicianModel.js";
 import sendEmail from "../utils/sendEmail.js";
+import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 
 
 const fmtDate = (dLike) => {
@@ -17,7 +18,8 @@ const fmtDate = (dLike) => {
 
 /**
  * Notify all musicians in a lineup that a booking is confirmed.
- * - Attempts WhatsApp first using your Twilio content sender; falls back to SMS automatically.
+ * - Uses the approved WhatsApp confirmation template. Failures are emailed to
+ *   the admin and never fall back to SMS.
  * - Sends a concise email using your nodemailer helper.
  */
 // helper: phone normaliser (kept simple – mirrors your other controllers)
@@ -127,12 +129,36 @@ const BookingNotifications = async (booking, act, lineup) => {
         ClientFirstName: clientFirstName, // in case your template wants to show it
       };
 
-      // --- Send WA→SMS (fallback) ---
+      // --- Send approved WhatsApp template (no SMS fallback) ---
       if (toPhone) {
         try {
-const res = await sendWhatsAppMessage({ to: toPhone, smsBody: smsBody });          messagesSent.push({ to: toPhone, channel: res?.channel || "unknown", sid: res?.sid });
+          const res = await sendWhatsAppMessage({
+            to: toPhone,
+            contentSid: process.env.TWILIO_BOOKING_CONFIRMATION_SID,
+            allowDefaultContentSid: false,
+            variables: {
+              "1": firstName,
+              "2": eventDateText,
+              "3": locationText,
+              "4": String(feeNum),
+              "5": duties,
+              "6": actName,
+            },
+            smsBody,
+            allowSmsFallback: false,
+            source: "lineup-booking-confirmation",
+            requireOpportunityDetails: true,
+            opportunityDetails: {
+              actName,
+              date: eventDateText,
+              address: locationText,
+              duties,
+              fee: feeNum,
+            },
+          });
+          messagesSent.push({ to: toPhone, channel: "whatsapp", sid: res?.sid });
         } catch (e) {
-          console.warn("⚠️ WA/SMS send failed for", toPhone, e?.message || e);
+          console.warn("⚠️ WhatsApp send failed; no SMS fallback for", toPhone, e?.message || e);
         }
       }
 

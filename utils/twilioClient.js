@@ -3,6 +3,8 @@ import "dotenv/config";
 import Twilio from "twilio";
 import AvailabilityModel from "../models/availabilityModel.js";
 import TwilioMessageDelivery from "../models/twilioMessageDeliveryModel.js";
+import sendEmail from "./sendEmail.js";
+import { validateOpportunityDetails } from "./outboundOpportunityValidation.js";
 import {
   computeFinalFeeForMember,
   formatNiceDate,
@@ -144,14 +146,47 @@ const statusCallback =
     ? `${BACKEND_URL.replace(/\/$/, "")}/api/availability/twilio/status`
     : undefined;
 
-// Short-lived cache so the status webhook can send SMS if WA is undelivered
-export const WA_FALLBACK_CACHE = new Map(); // sid -> { to, smsBody }
+const deliveryFailureEmail = () =>
+  String(
+    process.env.WHATSAPP_FAILURE_EMAIL ||
+      process.env.ALLOCATION_FAILURE_EMAIL ||
+      process.env.ADMIN_EMAIL ||
+      "rhona@thesupremecollective.co.uk",
+  ).trim();
+
+const defaultFailureEmail = ({ to, source = "whatsapp-message", body = "" } = {}) => ({
+  to: deliveryFailureEmail(),
+  subject: `WhatsApp delivery failed — ${source}`,
+  text: [
+    "A WhatsApp message could not be delivered. No SMS fallback was sent.",
+    `Recipient: ${toE164(to) || "Not recorded"}`,
+    `Message type: ${source}`,
+    body ? `Message: ${body}` : "",
+  ].filter(Boolean).join("\n"),
+});
+
+async function alertImmediateWhatsAppFailure({ failureEmail, error }) {
+  const alert = failureEmail || {};
+  if (!alert.to) return;
+  try {
+    await sendEmail({
+      to: alert.to,
+      subject: alert.subject || "WhatsApp send failed — no SMS was sent",
+      text: [
+        alert.text || "A WhatsApp message could not be sent. No SMS fallback was sent.",
+        `Immediate error: ${error?.message || error || "Unknown error"}`,
+      ].join("\n\n"),
+    });
+  } catch (emailError) {
+    console.warn("WhatsApp failure alert email could not be sent:", emailError?.message || emailError);
+  }
+}
 
 async function rememberWhatsAppDelivery({
   messageSid,
   to,
   smsBody,
-  allowSmsFallback = true,
+  allowSmsFallback: _allowSmsFallback = false,
   failureEmail = null,
   status = "queued",
   source = "",
@@ -162,16 +197,10 @@ async function rememberWhatsAppDelivery({
   if (!sid || !destination) return;
 
   const failureEmailTo = String(failureEmail?.to || "").trim();
-  const smsFallbackRequired = Boolean(allowSmsFallback && fallbackBody);
-
-  if (smsFallbackRequired) {
-    WA_FALLBACK_CACHE.set(sid, { to: destination, smsBody: fallbackBody });
-    const expiryTimer = setTimeout(
-      () => WA_FALLBACK_CACHE.delete(sid),
-      24 * 60 * 60 * 1000,
-    );
-    expiryTimer.unref?.();
-  }
+  // SMS fallbacks are deliberately disabled. A WhatsApp failure is recorded
+  // and emailed to the admin instead of sending different copy on another
+  // channel.
+  const smsFallbackRequired = false;
 
   try {
     await TwilioMessageDelivery.findOneAndUpdate(
@@ -229,6 +258,13 @@ export async function sendWhatsAppMessage(opts = {}) {
     smsBody = "",
     finalFee,                         // optional: pass a computed fee directly
     skipFeeCompute = false,
+    allowSmsFallback = false,
+    failureEmail = null,
+    source = "whatsapp-template",
+    requireTemplate = true,
+    allowDefaultContentSid = true,
+    requireOpportunityDetails = false,
+    opportunityDetails = null,
 
     // 🔗 Correlation + interactive buttons (NEW)
     requestId = null,                 // e.g. "7F3K9QX"
@@ -400,7 +436,39 @@ const memberNames = firstLast(memberDisplayName);
     enrichedVars["7"] = requestId;
   }
 
-  const selectedContentSid = contentSid || process.env.TWILIO_ENQUIRY_SID;
+  const selectedContentSid =
+    contentSid || (allowDefaultContentSid ? process.env.TWILIO_ENQUIRY_SID : "");
+  const resolvedFailureEmail =
+    failureEmail || defaultFailureEmail({ to: toE, source, body: smsBody });
+
+  if (requireOpportunityDetails) {
+    try {
+      validateOpportunityDetails(opportunityDetails || {
+        actName: enrichedVars.actName,
+        date: enrichedVars.date,
+        address: enrichedVars.location,
+        duties: enrichedVars.role,
+        fee: enrichedVars.fee,
+      });
+    } catch (validationError) {
+      await alertImmediateWhatsAppFailure({
+        failureEmail: resolvedFailureEmail,
+        error: validationError,
+      });
+      throw validationError;
+    }
+  }
+
+  if (requireTemplate && !selectedContentSid) {
+    const templateError = new Error(
+      "WhatsApp message blocked: no approved Content SID is configured. No message was sent.",
+    );
+    await alertImmediateWhatsAppFailure({
+      failureEmail: resolvedFailureEmail,
+      error: templateError,
+    });
+    throw templateError;
+  }
   const suppliedNumberedVars = Object.fromEntries(
     Object.entries(variables || {}).filter(([key]) => /^\d+$/.test(key)),
   );
@@ -450,10 +518,21 @@ const memberNames = firstLast(memberDisplayName);
    * ⬇️ SEND VIA TWILIO, THEN PERSIST outboundSid FOR INBOUND MATCHING
    * ──────────────────────────────────────────────────────────────────────────── */
   const useContent = !!(
-    (contentSid || process.env.TWILIO_ENQUIRY_SID) &&
+    selectedContentSid &&
     (!buttons || buttons.length === 0 || requestId)
   );
   let result = null;
+
+  if (requireTemplate && !useContent) {
+    const templateError = new Error(
+      "WhatsApp message blocked: the approved template could not be used safely. No message was sent.",
+    );
+    await alertImmediateWhatsAppFailure({
+      failureEmail: resolvedFailureEmail,
+      error: templateError,
+    });
+    throw templateError;
+  }
 
   try {
     if (useContent) {
@@ -486,8 +565,10 @@ const memberNames = firstLast(memberDisplayName);
       messageSid: sid,
       to: toE,
       smsBody,
+      allowSmsFallback,
+      failureEmail: resolvedFailureEmail,
       status: result?.status,
-      source: useContent ? "content-template" : "plain-text",
+      source: source || (useContent ? "content-template" : "plain-text"),
     });
 
     // ⛳️ PERSIST THE OUTBOUND SID FOR DETERMINISTIC INBOUND MATCHING
@@ -503,6 +584,10 @@ const memberNames = firstLast(memberDisplayName);
     }
   } catch (err) {
     console.error("❌ [sendWhatsAppMessage] Twilio send failed:", err?.message || err);
+    await alertImmediateWhatsAppFailure({
+      failureEmail: resolvedFailureEmail,
+      error: err,
+    });
     throw err;
   }
 
@@ -594,6 +679,17 @@ export const sendDeputyAllocationWhatsApp = async ({
     skipFeeCompute: true,
     smsBody: bookingSmsBody,
     contentSid: allocationContentSid,
+    allowDefaultContentSid: false,
+    allowSmsFallback: false,
+    source: "deputy-allocation-request",
+    requireOpportunityDetails: true,
+    opportunityDetails: {
+      actName,
+      date: formattedDate,
+      address: location,
+      duties: roleLabel,
+      fee: netFeeValue,
+    },
     variables: {
       "1": String(firstName || "there").trim() || "there",
       "2": formattedDate,
@@ -709,13 +805,26 @@ export async function sendWhatsAppText(to, body, options = {}) {
     ...(statusCallback ? { statusCallback } : {}),
   };
 
-  const result = await client.messages.create(payload);
+  const failureEmail =
+    options.failureEmail ||
+    defaultFailureEmail({
+      to: toE,
+      source: String(options.source || "whatsapp-session-message"),
+      body: messageBody,
+    });
+  let result;
+  try {
+    result = await client.messages.create(payload);
+  } catch (error) {
+    await alertImmediateWhatsAppFailure({ failureEmail, error });
+    throw error;
+  }
   await rememberWhatsAppDelivery({
     messageSid: result?.sid,
     to: toE,
     smsBody: messageBody,
-    allowSmsFallback: options.allowSmsFallback !== false,
-    failureEmail: options.failureEmail || null,
+    allowSmsFallback: false,
+    failureEmail,
     status: result?.status,
     source: String(options.source || "plain-text"),
   });

@@ -30,7 +30,7 @@ import axios from "axios";
 import { differenceInCalendarDays, startOfDay } from "date-fns";
 import { logStart } from "../utils/logger.js";
 import { setSharedIVR } from "../utils/proxySetup.js";
-import { sendWhatsAppMessage } from "../utils/twilioClient.js"; // WA → SMS fallback sender (used in Availability controller)
+import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 import userModel from "../models/userModel.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
 import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
@@ -474,18 +474,30 @@ async function sendClientBookingConfirmation({ booking, actName }) {
       `at ${venueName} at a rate of ${feeText} for ${duties} duties. Are you able to accept the booking? ` +
       `Reply YES or NO. Thanks!`;
 
-    // Template params for WA (kept in sync with the above)
-    const params = {
-      FirstName: firstName,
-      ClientFirstName: clientFirstName,
-      ActName: act,
-      FormattedDate: eventDateText,
-      FormattedAddress: venueName,
-      Fee: feeText,
-      Duties: duties,
-    };
-
-    await sendWhatsAppMessage({ to, templateParams: params, smsBody });
+    await sendWhatsAppMessage({
+      to,
+      contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+      allowDefaultContentSid: false,
+      variables: {
+        "1": firstName,
+        "2": eventDateText,
+        "3": venueName,
+        "4": String(fullAmount),
+        "5": duties,
+        "6": act,
+      },
+      smsBody,
+      allowSmsFallback: false,
+      source: "client-booking-request",
+      requireOpportunityDetails: true,
+      opportunityDetails: {
+        actName: act,
+        date: eventDateText,
+        address: venueName,
+        duties,
+        fee: fullAmount,
+      },
+    });
   } catch (e) {
     console.warn("⚠️ sendClientBookingConfirmation failed:", e?.message || e);
   }
@@ -3192,6 +3204,12 @@ async function confirmLeadVocalistForBooking(booking) {
     "Your Act";
 
   const venueAddress = booking.venueAddress || booking.venue || "Venue";
+  const confirmationFee = Number(
+    chosen?.fee || chosen?.totalFee || chosen?.agreedFee || 0,
+  );
+  const confirmationDuties = String(
+    chosen?.role || chosen?.instrument || "Lead Vocal",
+  ).trim();
 
   const eventDateISO = toDateISO(
     booking.date || booking.eventDate || booking.eventDateISO,
@@ -3214,11 +3232,24 @@ async function confirmLeadVocalistForBooking(booking) {
       await sendWhatsAppMessage({
         to: phone,
         contentSid,
+        allowDefaultContentSid: false,
         variables: {
           1: musician.firstName || "there",
           2: formattedDate,
           3: venueAddress,
-          4: actName,
+          4: String(confirmationFee),
+          5: confirmationDuties,
+          6: actName,
+        },
+        allowSmsFallback: false,
+        source: "vocalist-booking-confirmation",
+        requireOpportunityDetails: true,
+        opportunityDetails: {
+          actName,
+          date: formattedDate,
+          address: venueAddress,
+          duties: confirmationDuties,
+          fee: confirmationFee,
         },
       });
 

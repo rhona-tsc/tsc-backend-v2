@@ -33,6 +33,8 @@ const enquiryMessageSchema = new mongoose.Schema(
       default: "queued",
       index: true,
     },
+    deliveryErrorCode: { type: String, default: "" },
+    deliveryErrorMessage: { type: String, default: "" },
 
     /**
      * (Optional legacy) If other code still writes/reads `status`,

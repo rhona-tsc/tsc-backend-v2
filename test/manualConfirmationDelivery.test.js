@@ -21,14 +21,16 @@ test("delivery records support email alerts without an SMS fallback", () => {
   ]);
 });
 
-test("manual booking confirmation disables SMS fallback and requests an admin email", () => {
+test("every booking confirmation disables SMS fallback and requests an admin email", () => {
   const source = readFileSync(
     new URL("../controllers/allocationController.js", import.meta.url),
     "utf8",
   );
 
   assert.match(source, /manualConfirmation:\s*true/);
-  assert.match(source, /allowSmsFallback:\s*!manualConfirmation/);
+  assert.match(source, /allowSmsFallback:\s*false/);
+  assert.match(source, /TWILIO_BOOKING_CONFIRMATION_SID/);
+  assert.match(source, /allowDefaultContentSid:\s*false/);
   assert.match(source, /source:\s*manualConfirmation[\s\S]*manual-booking-confirmation/);
   assert.match(source, /No SMS fallback was sent/);
 });
@@ -42,4 +44,5 @@ test("delivery failure webhook claims each email alert once", () => {
   assert.match(source, /failureEmailStatus:\s*"pending"/);
   assert.match(source, /failureEmailStatus:\s*"sending"/);
   assert.match(source, /failureEmailStatus:\s*emailResult\?\.ok\s*\?\s*"sent"\s*:\s*"failed"/);
+  assert.doesNotMatch(source, /WhatsApp delivery failed; SMS fallback sent/);
 });

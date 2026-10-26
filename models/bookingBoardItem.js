@@ -372,6 +372,29 @@ const BookingBoardItemSchema = new mongoose.Schema(
     // this site. Legacy rows without the field remain eligible; only an
     // explicit false suppresses them.
     siteAutomationsEnabled: { type: Boolean, default: true, index: true },
+    bookingStatus: {
+      type: String,
+      enum: ["", "active", "cancelled"],
+      default: "active",
+      index: true,
+    },
+    cancellation: {
+      cancelledAt: { type: Date, default: null },
+      cancelledBy: { type: String, default: "" },
+      reason: { type: String, default: "" },
+      cancellationFeeAmount: { type: Number, default: 0 },
+      calendarCancelledAt: { type: Date, default: null },
+      musiciansNotifiedAt: { type: Date, default: null },
+      notifiedMusicians: [{
+        name: { type: String, default: "" },
+        email: { type: String, default: "", lowercase: true, trim: true },
+        phone: { type: String, default: "", trim: true },
+        channel: { type: String, enum: ["email", "whatsapp"], default: "whatsapp" },
+        messageId: { type: String, default: "" },
+        status: { type: String, enum: ["sent", "failed"], default: "sent" },
+        error: { type: String, default: "" },
+      }],
+    },
     introEmailSentAt: { type: Date, default: null },
     introEmailSentTo: { type: String, default: "" },
     introEmailMessageId: { type: String, default: "" },

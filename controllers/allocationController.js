@@ -371,14 +371,14 @@ const completeAcceptedAssignment = async ({
     ].filter(Boolean).join(" · ");
     const fee = Number(assignment?.fee || assignment?.totalFee || 0);
     const actName = board?.actName || booking?.actName || booking?.actsSummary?.[0]?.actName || "the band";
-    const body = [
-      `Hi ${assignment?.firstName || musician?.firstName || "there"}, thanks, we’ve received your reply. You're confirmed for ${actName} on ${date}.`,
-      `Role: ${roleAndDuties}. Fee: £${fee || "TBC"}.`,
-      eventId && email
-        ? `A shared calendar invitation has been sent to ${email}.`
-        : "Your calendar invitation will follow shortly.",
-      "🤍 TSC",
-    ].join("\n");
+    const address = String(
+      board?.address ||
+        board?.venueAddress ||
+        booking?.venueAddress ||
+        booking?.venue ||
+        booking?.address ||
+        "",
+    ).trim();
     const failureEmailTo = String(
       process.env.ALLOCATION_FAILURE_EMAIL ||
         process.env.ADMIN_EMAIL ||
@@ -386,55 +386,66 @@ const completeAcceptedAssignment = async ({
     ).trim();
     const failureEmailSubject = `WhatsApp confirmation failed: ${assignment?.name || musicianDisplayName(musician || {})} — ${board?.bookingRef || "booking"}`;
     const failureEmailText = [
-      "A manual musician confirmation could not be delivered by WhatsApp. No SMS fallback was sent.",
+      "A musician confirmation could not be delivered by WhatsApp. No SMS fallback was sent.",
       `Booking: ${board?.bookingRef || "Not recorded"}`,
       `Act: ${actName}`,
       `Musician: ${assignment?.name || musicianDisplayName(musician || {})}`,
       `Role: ${roleAndDuties}`,
       `Event date: ${date || "Not recorded"}`,
+      `Address: ${address || "Not recorded"}`,
       `Phone: ${phone}`,
       "The musician remains confirmed on the booking. Please contact them manually if needed.",
     ].join("\n");
-    try {
-      await sendWhatsAppText(phone, body, {
-        allowSmsFallback: !manualConfirmation,
-        source: manualConfirmation
-          ? "manual-booking-confirmation"
-          : "booking-acceptance-confirmation",
-        failureEmail: manualConfirmation
-          ? {
-              to: failureEmailTo,
-              subject: failureEmailSubject,
-              text: failureEmailText,
-            }
-          : null,
+    const confirmationSid = String(
+      process.env.TWILIO_VOCALIST_BOOKING_CONFIRMATION_SID ||
+        process.env.TWILIO_BOOKING_CONFIRMATION_SID ||
+        "",
+    ).trim();
+    const failureEmail = {
+      to: failureEmailTo,
+      subject: failureEmailSubject,
+      text: failureEmailText,
+    };
+
+    if (!confirmationSid) {
+      await sendEmail({
+        to: failureEmailTo,
+        subject: failureEmailSubject,
+        text: `${failureEmailText}\n\nImmediate error: No approved booking-confirmation Content SID is configured.`,
       });
-    } catch (whatsAppError) {
-      if (manualConfirmation) {
-        const emailResult = await sendEmail({
-          to: failureEmailTo,
-          subject: failureEmailSubject,
-          text: [
-            failureEmailText,
-            `Immediate WhatsApp error: ${whatsAppError?.message || "Unknown error"}`,
-          ].join("\n\n"),
+    } else {
+      try {
+        await sendWhatsAppMessage({
+          to: phone,
+          contentSid: confirmationSid,
+          allowDefaultContentSid: false,
+          variables: {
+            "1": assignment?.firstName || musician?.firstName || "there",
+            "2": date,
+            "3": address,
+            "4": String(fee),
+            "5": roleAndDuties,
+            "6": actName,
+          },
+          allowSmsFallback: false,
+          source: manualConfirmation
+            ? "manual-booking-confirmation"
+            : "booking-acceptance-confirmation",
+          requireOpportunityDetails: true,
+          opportunityDetails: {
+            actName,
+            date,
+            address,
+            duties: roleAndDuties,
+            fee,
+          },
+          failureEmail,
         });
-        if (!emailResult?.ok) {
-          console.warn("Could not email manual confirmation delivery failure", {
-            bookingRef: board?.bookingRef,
-            musicianId: String(assignment?.musicianId || musician?._id || ""),
-          });
-        }
-      } else {
-        try {
-          await sendSMSMessage(phone, body);
-        } catch (messageError) {
-          console.warn("Could not send booking acceptance confirmation", {
-            phone,
-            whatsAppMessage: whatsAppError?.message,
-            smsMessage: messageError?.message,
-          });
-        }
+      } catch (whatsAppError) {
+        console.warn("Could not send booking acceptance confirmation; no SMS fallback", {
+          phone,
+          message: whatsAppError?.message,
+        });
       }
     }
   }
@@ -1259,6 +1270,7 @@ export const offerBookingRole = async (req, res) => {
       const sent = await sendWhatsAppMessage({
         to: `whatsapp:${contact.phone}`,
         contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+        allowDefaultContentSid: false,
         requestId,
         variables: {
           "1": firstNameOf(musician), "2": formattedDate, "3": address,
@@ -1266,6 +1278,16 @@ export const offerBookingRole = async (req, res) => {
           "6": act.tscName || act.name || board.actName || "the band", "7": requestId,
         },
         smsBody,
+        allowSmsFallback: false,
+        source: "booking-allocation-request",
+        requireOpportunityDetails: true,
+        opportunityDetails: {
+          actName: act.tscName || act.name || board.actName,
+          date: formattedDate,
+          address,
+          duties: roleWithSchedule,
+          fee,
+        },
       });
       messageSid = sent?.sid || "";
     }
@@ -1790,6 +1812,8 @@ export const triggerBookingRequests = async (req, res) => {
   : await sendWhatsAppMessage({
       to: `whatsapp:${phone}`,
       contentSid: process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID,
+      allowDefaultContentSid: false,
+      allowDefaultContentSid: false,
       requestId,
       variables: {
         "1": firstNameOf(realMusician || m),
@@ -1809,6 +1833,16 @@ export const triggerBookingRequests = async (req, res) => {
         requestCode: `#${requestId}`,
       },
       smsBody,
+      allowSmsFallback: false,
+      source: "booking-lineup-request",
+      requireOpportunityDetails: true,
+      opportunityDetails: {
+        actName: act.tscName || act.name,
+        date: formattedDate,
+        address,
+        duties: m.instrument,
+        fee: memberFee,
+      },
     });
 
       if (!dryRun) {
@@ -2536,6 +2570,16 @@ export async function escalateToNextDeputy(msg) {
         "7": newBookingId,
       },
       smsBody,
+      allowSmsFallback: false,
+      source: "booking-deputy-request",
+      requireOpportunityDetails: true,
+      opportunityDetails: {
+        actName: msg.meta?.actName,
+        date: msg.formattedDate,
+        address: msg.formattedAddress,
+        duties: msg.duties,
+        fee: msg.fee,
+      },
     });
 
     await EnquiryMessage.updateOne(
@@ -2662,7 +2706,8 @@ export async function sendBookingRequestToLineup({ actId, lineupId, date, addres
     // fee = SAME logic as enquiry
     const finalFee = resolvedFees.get(m);
 
-    // Build SMS fallback using your enquiry copy builder (so WA+SMS match)
+    // Keep a copy of the request for the message history. It is never used as
+    // an automatic SMS fallback.
     const smsBody = buildAvailabilitySMS({
       firstName: m.firstName || m.name || "",
       formattedDate,
@@ -2686,12 +2731,23 @@ export async function sendBookingRequestToLineup({ actId, lineupId, date, addres
       const waRes = await sendWhatsAppMessage({
         to: `whatsapp:${phone}`,
         contentSid,           // your instrumentalist booking-request template SID
+        allowDefaultContentSid: false,
         variables: slots,     // <-- pass numbered slots here
-        smsBody,              // webhook can reuse this if WA undelivered
+        smsBody,
+        allowSmsFallback: false,
+        source: "booking-lineup-request",
+        requireOpportunityDetails: true,
+        opportunityDetails: {
+          actName: act.tscName || act.name,
+          date: formattedDate,
+          address: shortAddr,
+          duties: m.instrument,
+          fee: finalFee,
+        },
       });
 
 
-      // Store the outbound SID so /twilio/status can match and send SMS on 63024 etc.
+      // Store the outbound SID so delivery failures can be recorded and emailed.
       await AvailabilityModel.findOneAndUpdate(
         { actId, dateISO, phone },
         {
@@ -2725,15 +2781,10 @@ export async function sendBookingRequestToLineup({ actId, lineupId, date, addres
       sent++;
       console.log("📣 Booking request sent", { to: phone, duties: m.instrument, fee: finalFee });
     } catch (e) {
-      // WA failed immediately (e.g., bad variables) → send SMS now
-      console.warn("⚠️ WA send failed, SMS fallback now", { to: phone, err: e?.message || e });
-      try {
-        await sendSMSMessage(phone, smsBody);
-        sent++;
-        console.log("✅ SMS sent (direct fallback)", { to: phone });
-      } catch (smsErr) {
-        console.warn("❌ SMS failed", { to: phone, err: smsErr?.message || smsErr });
-      }
+      console.warn("⚠️ WhatsApp booking request failed; no SMS fallback", {
+        to: phone,
+        err: e?.message || e,
+      });
     }
   }
 
