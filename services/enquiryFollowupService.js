@@ -168,16 +168,23 @@ export const buildEnquiryDayTwoEmail = ({ enquiry, act, summary }) => {
     const label = summary.requiredSlots.length > 1 ? `Vocal slot ${slotIndex + 1}` : "Available vocalists";
     return `${label}: ${names.join(", ")}`;
   });
+  const hasMultipleVocalSlots = summary.requiredSlots.length > 1;
+  const availabilityIntro = hasMultipleVocalSlots
+    ? `For this ${actName} lineup, the vocalists currently available to front the band are shown below by vocal slot:`
+    : "We have now heard back from the band's other deputy vocalists below, who are currently available for your date:";
+  const selectionGuidance = hasMultipleVocalSlots
+    ? "If you would like to book these vocalists to front the band, you can do so by proceeding to checkout and selecting your preferred vocalist for each slot. You’re also welcome to progress your booking simply by replying to this email, if that’s easiest for you."
+    : "If you would like to book a particular vocalist to front the band, you can do so by proceeding to checkout and selecting your preferred deputy. You’re also welcome to progress your booking with a particular vocalist simply by replying to this email, if that’s easiest for you.";
   const subject = `A quick check-in about ${actName} for ${eventDate}`;
   const text = [
     `Hi ${clientFirstName},`,
     "",
     `I just wanted to check in personally to see whether you had any questions about ${actName}.`,
     "",
-    "We have now heard back from the band's other deputy vocalists below, who are currently available for your date:",
+    availabilityIntro,
     ...optionLines.map((line) => `- ${line}`),
     "",
-    "If you would like to book a particular vocalist to front the band, you can do so by proceeding to checkout and selecting your preferred deputy. You’re also welcome to progress your booking with a particular vocalist simply by replying to this email, if that’s easiest for you.",
+    selectionGuidance,
     "",
     "Please kindly note that availability can change because our vocalists also accept work through other avenues, so please let me know if you would like any help choosing the best fit.",
     "",
@@ -190,9 +197,9 @@ export const buildEnquiryDayTwoEmail = ({ enquiry, act, summary }) => {
     <div style="font-family:Arial,Helvetica,sans-serif;color:#111;line-height:1.7;max-width:720px;">
       <p>Hi ${escapeEmailHtml(clientFirstName)},</p>
       <p>I just wanted to check in personally to see whether you had any questions about <strong>${escapeEmailHtml(actName)}</strong>.</p>
-      <p>We have now heard back from the band's other deputy vocalists below, who are currently available for your date:</p>
+      <p>${escapeEmailHtml(availabilityIntro)}</p>
       ${vocalistProfileCardsHtml(summary)}
-      <p>If you would like to book a particular vocalist to front the band, you can do so by proceeding to checkout and selecting your preferred deputy. You’re also welcome to progress your booking with a particular vocalist simply by replying to this email, if that’s easiest for you.</p>
+      <p>${escapeEmailHtml(selectionGuidance)}</p>
       <p>Please kindly note that availability can change because our vocalists also accept work through other avenues, so please let me know if you would like any help choosing the best fit.</p>
       <p><a href="${escapeEmailHtml(bookUrl)}" style="display:inline-block;background:#ff6667;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:700;">View ${escapeEmailHtml(actName)} and book →</a></p>
       <p>Warmest wishes,<br />Rhona ✨</p>

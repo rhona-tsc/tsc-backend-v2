@@ -31,6 +31,34 @@ test("a two-vocalist lineup is held until both slots have a yes", () => {
   assert.equal(bothCovered.selected.length, 2);
 });
 
+test("Day 2 email presents a two-vocalist lineup by slot", () => {
+  const summary = availableVocalistsForLineup(
+    [
+      { slotIndex: 0, reply: "yes", musicianName: "Annie Afrilu", isDeputy: true },
+      { slotIndex: 1, reply: "yes", musicianName: "Rachel Francis" },
+    ],
+    twoVocalistLineup,
+  );
+  const email = buildEnquiryDayTwoEmail({
+    enquiry: {
+      clientName: "Narelle Beckley-Perry",
+      actTscName: "Motown Luxe",
+      eventDateISO: "2028-08-17",
+      address: "The Priests House",
+    },
+    act: { name: "Motown Luxe", slug: "motown-luxe" },
+    summary,
+  });
+
+  assert.match(email.html, /For this Motown Luxe lineup/);
+  assert.match(email.html, /Vocal slot 1/);
+  assert.match(email.html, /Introducing Annie A/);
+  assert.match(email.html, /Vocal slot 2/);
+  assert.match(email.html, /Introducing Rachel F/);
+  assert.match(email.html, /preferred vocalist for each slot/);
+  assert.doesNotMatch(email.html, /other deputy vocalists/);
+});
+
 test("Day 2 email includes the first vocalist and later available alternatives", () => {
   const lineup = { bandMembers: [{ instrument: "Lead Female Vocal" }] };
   const summary = availableVocalistsForLineup(
@@ -85,7 +113,7 @@ test("Day 2 email includes the first vocalist and later available alternatives",
   assert.match(email.html, /Introducing Shamyra A/);
   assert.match(email.html, /images\.example\.com\/rachel\.jpg/);
   assert.match(email.html, /youtu\.be\/shamyra/);
-  assert.match(email.html, /band's other deputy vocalists/);
+  assert.match(email.html, /band(?:'|&#39;)s other deputy vocalists/);
   assert.doesNotMatch(email.html, /<em>other deputy<\/em>/);
   assert.match(email.html, /selecting your preferred deputy/);
   assert.match(email.html, /simply by replying to this email/);
