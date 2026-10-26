@@ -35,9 +35,35 @@ test("Day 2 email includes the first vocalist and later available alternatives",
   const lineup = { bandMembers: [{ instrument: "Lead Female Vocal" }] };
   const summary = availableVocalistsForLineup(
     [
-      { slotIndex: 0, reply: "yes", musicianName: "Mari Songs", repliedAt: "2026-10-23T10:00:00Z" },
-      { slotIndex: 0, reply: "yes", musicianName: "Rachel Francis", repliedAt: "2026-10-23T11:00:00Z", isDeputy: true },
-      { slotIndex: 0, reply: "yes", musicianName: "Shamyra Abbott", repliedAt: "2026-10-24T12:00:00Z", isDeputy: true },
+      {
+        slotIndex: 0,
+        reply: "yes",
+        musicianName: "Mari Songs",
+        repliedAt: "2026-10-23T10:00:00Z",
+        profileUrl: "https://thesupremecollective.co.uk/musician/mari-s",
+        photoUrl: "https://images.example.com/mari.jpg",
+        videos: [{ title: "Mari live", url: "https://youtu.be/mari" }],
+      },
+      {
+        slotIndex: 0,
+        reply: "yes",
+        musicianName: "Rachel Francis",
+        repliedAt: "2026-10-23T11:00:00Z",
+        isDeputy: true,
+        profileUrl: "https://thesupremecollective.co.uk/musician/rachel-f",
+        photoUrl: "https://images.example.com/rachel.jpg",
+        videos: [{ title: "Rachel live", url: "https://youtu.be/rachel" }],
+      },
+      {
+        slotIndex: 0,
+        reply: "yes",
+        musicianName: "Shamyra Abbott",
+        repliedAt: "2026-10-24T12:00:00Z",
+        isDeputy: true,
+        profileUrl: "https://thesupremecollective.co.uk/musician/shamyra-a",
+        photoUrl: "https://images.example.com/shamyra.jpg",
+        videos: [{ title: "Shamyra live", url: "https://youtu.be/shamyra" }],
+      },
     ],
     lineup,
   );
@@ -54,6 +80,11 @@ test("Day 2 email includes the first vocalist and later available alternatives",
   assert.match(email.text, /Mari S/);
   assert.match(email.text, /Rachel F/);
   assert.match(email.text, /Shamyra A/);
+  assert.match(email.html, /Introducing Mari S/);
+  assert.match(email.html, /Introducing Rachel F/);
+  assert.match(email.html, /Introducing Shamyra A/);
+  assert.match(email.html, /images\.example\.com\/rachel\.jpg/);
+  assert.match(email.html, /youtu\.be\/shamyra/);
   assert.match(email.html, /TSC_Signature_2026/);
   assert.match(email.html, /google-5-star-reviews/);
   assert.match(email.html, /Company Number: 16883956/);
