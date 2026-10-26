@@ -7027,13 +7027,15 @@ const findExtra = (extrasMap, ...aliases) => {
     let profileUrl = fallbackProfileUrl || "";
     let name = String(fallbackName || "").trim();
     let videos = [];
+    let repertoireCount = 0;
 
     if (musicianId) {
       const m = await Musician.findById(musicianId)
         .select(
           "firstName lastName displayName preferredName name musicianSlug " +
             "profilePhoto profilePicture photoUrl tscProfileUrl " +
-            "tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks",
+            "tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks " +
+            "repertoire selectedSongs",
         )
         .lean();
 
@@ -7055,6 +7057,12 @@ const findExtra = (extrasMap, ...aliases) => {
         }
 
         videos = buildApprovedVideos(m);
+        repertoireCount =
+          Array.isArray(m.repertoire) && m.repertoire.length
+            ? m.repertoire.length
+            : Array.isArray(m.selectedSongs)
+              ? m.selectedSongs.length
+              : 0;
       }
     }
 
@@ -7063,6 +7071,7 @@ const findExtra = (extrasMap, ...aliases) => {
       photoUrl: isHttpUrl(photoUrl) ? photoUrl : "",
       profileUrl,
       videos,
+      repertoireCount,
     };
   };
 
@@ -7167,7 +7176,11 @@ const findExtra = (extrasMap, ...aliases) => {
     `;
   };
 
-const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
+const renderActExtrasHtml = async (
+  actLike = {},
+  selectedAddress = "",
+  selectedLineup = null,
+) => {
   const extras = getActExtrasForEmail(actLike).filter(
     (e) => !e.complimentary && e.price > 0,
   );
@@ -7183,7 +7196,10 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       : [];
 
   const findMemberAcrossLineups = (predicate) => {
-    for (const lineup of actDoc?.lineups || []) {
+    const lineups = selectedLineup
+      ? [selectedLineup]
+      : actDoc?.lineups || [];
+    for (const lineup of lineups) {
       for (const member of getLineupMembers(lineup)) {
         if (predicate(member)) return member;
       }
@@ -7195,7 +7211,11 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
     label,
     perMemberBasePrice,
   }) => {
-    const lineups = Array.isArray(actDoc?.lineups) ? actDoc.lineups : [];
+    const lineups = selectedLineup
+      ? [selectedLineup]
+      : Array.isArray(actDoc?.lineups)
+        ? actDoc.lineups
+        : [];
     if (!lineups.length) return "";
 
     const parts = lineups
@@ -7322,7 +7342,11 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
         saxTravel = travel.fee || 0;
       }
 
-      const lineups = Array.isArray(actDoc?.lineups) ? actDoc.lineups : [];
+      const lineups = selectedLineup
+        ? [selectedLineup]
+        : Array.isArray(actDoc?.lineups)
+          ? actDoc.lineups
+          : [];
       const hasSaxInSomeLineups = lineups.some((lineup) =>
         getLineupMembers(lineup).some((member) =>
           String(member?.instrument || "").toLowerCase().includes("sax"),
@@ -7612,6 +7636,12 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       selectedLineupCount,
     );
 
+    const lineupSizeCounts = (actDoc.lineups || []).reduce((counts, lineup) => {
+      const size = formatLineupSize(lineup);
+      counts.set(size, (counts.get(size) || 0) + 1);
+      return counts;
+    }, new Map());
+
     const availabilityRecord = contextRows
       .slice()
       .sort(
@@ -7726,8 +7756,13 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
             /&/g,
             "&amp;",
           );
+          const lineupSize = formatLineupSize(lu, memberCount);
+          const enquiryLabel =
+            (lineupSizeCounts.get(lineupSize) || 0) > 1
+              ? `Enquire about this ${lineupSize}`
+              : `Enquire about ${lineupSize}`;
           const enquiryButton = isLarger
-            ? `<div style="margin:8px 0 14px;"><a href="${enquiryUrl}" style="display:inline-block; background-color:#111; color:#fff; padding:9px 16px; text-decoration:none; border-radius:5px; font-weight:600; line-height:1.2;">Enquire about ${formatLineupSize(lu, memberCount)} →</a></div>`
+            ? `<div style="margin:8px 0 14px;"><a href="${enquiryUrl}" style="display:inline-block; background-color:#111; color:#fff; padding:9px 16px; text-decoration:none; border-radius:5px; font-weight:600; line-height:1.2;">${enquiryLabel} →</a></div>`
             : "";
 
           return {
@@ -8053,6 +8088,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
               const actExtrasHtml = await renderActExtrasHtml(
                 actDoc,
                 selectedAddress,
+                selectedLineup,
               );
 
               const emailResult = await sendClientEmail({
@@ -8254,6 +8290,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
               const actExtrasHtml = await renderActExtrasHtml(
                 actDoc,
                 selectedAddress,
+                selectedLineup,
               );
 
               const emailResult = await sendClientEmail({
@@ -8304,8 +8341,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
                           }
                           ${renderVideoList(deputyShort, deputyCard.videos)}
                           <p style="margin:8px 0 0; color:#555;">
-                            Please note: when a deputy vocalist is booked, the band will tailor the setlist to that vocalist’s repertoire.
-                            There’s a large overlap with ${actDoc.tscName || actDoc.name}’s core repertoire and ${deputyShort}’s repertoire, so you’ll still get the band’s signature crowd-pleasers.
+                            <strong>${deputyShort}</strong>${deputyCard.repertoireCount ? ` has <strong>${deputyCard.repertoireCount} songs</strong> in their repertoire` : " has an extensive repertoire"}, and you’re completely welcome to ${deputyCard.profileUrl ? `<a href="${deputyCard.profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">take a browse</a>` : "take a browse"} and suggest all your favourites for ${deputyShort} and the band to perform for you.
                           </p>
                         </div>
                       `
