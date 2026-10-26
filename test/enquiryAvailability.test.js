@@ -31,7 +31,7 @@ test("a two-vocalist lineup is held until both slots have a yes", () => {
   assert.equal(bothCovered.selected.length, 2);
 });
 
-test("Day 2 email presents a two-vocalist lineup by slot", () => {
+test("Day 2 email omits slot labels when exactly one vocalist is available per slot", () => {
   const summary = availableVocalistsForLineup(
     [
       { slotIndex: 0, reply: "yes", musicianName: "Annie Afrilu", isDeputy: true },
@@ -51,12 +51,38 @@ test("Day 2 email presents a two-vocalist lineup by slot", () => {
   });
 
   assert.match(email.html, /For this Motown Luxe lineup/);
-  assert.match(email.html, /Vocal slot 1/);
+  assert.doesNotMatch(email.html, /Vocal slot 1/);
   assert.match(email.html, /Introducing Annie A/);
-  assert.match(email.html, /Vocal slot 2/);
+  assert.doesNotMatch(email.html, /Vocal slot 2/);
   assert.match(email.html, /Introducing Rachel F/);
-  assert.match(email.html, /preferred vocalist for each slot/);
+  assert.match(email.html, /proceeding to checkout or you’re also welcome/);
+  assert.doesNotMatch(email.html, /preferred vocalist for each slot/);
   assert.doesNotMatch(email.html, /other deputy vocalists/);
+});
+
+test("Day 2 email keeps slot labels when a slot has multiple vocalist options", () => {
+  const summary = availableVocalistsForLineup(
+    [
+      { slotIndex: 0, reply: "yes", musicianName: "Annie Afrilu", isDeputy: true },
+      { slotIndex: 0, reply: "yes", musicianName: "Mari Songs", isDeputy: true },
+      { slotIndex: 1, reply: "yes", musicianName: "Rachel Francis" },
+    ],
+    twoVocalistLineup,
+  );
+  const email = buildEnquiryDayTwoEmail({
+    enquiry: {
+      clientName: "Narelle Beckley-Perry",
+      actTscName: "Motown Luxe",
+      eventDateISO: "2028-08-17",
+      address: "The Priests House",
+    },
+    act: { name: "Motown Luxe", slug: "motown-luxe" },
+    summary,
+  });
+
+  assert.match(email.html, /Vocal slot 1/);
+  assert.match(email.html, /Vocal slot 2/);
+  assert.match(email.html, /preferred vocalist for each slot/);
 });
 
 test("Day 2 email includes the first vocalist and later available alternatives", () => {

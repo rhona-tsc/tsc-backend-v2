@@ -43,12 +43,12 @@ const findLineup = (act, rows) => {
   );
 };
 
-const vocalistProfileCardsHtml = (summary) =>
+const vocalistProfileCardsHtml = (summary, { showSlotHeadings = true } = {}) =>
   summary.requiredSlots
     .map((slotIndex) => {
       const rows = summary.bySlot.get(slotIndex) || [];
       const slotHeading =
-        summary.requiredSlots.length > 1
+        showSlotHeadings && summary.requiredSlots.length > 1
           ? `<h3 style="margin:24px 0 4px;font-size:17px;color:#111;">Vocal slot ${slotIndex + 1}</h3>`
           : "";
       const cards = rows
@@ -161,18 +161,26 @@ export const buildEnquiryDayTwoEmail = ({ enquiry, act, summary }) => {
   const slug = clean(act?.slug || act?.tscSlug) || actName.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const address = clean(enquiry?.address || summary.all[0]?.formattedAddress);
   const bookUrl = `${site}/act/${encodeURIComponent(slug)}?date=${encodeURIComponent(enquiry?.eventDateISO || "")}&address=${encodeURIComponent(address)}`;
+  const hasMultipleVocalSlots = summary.requiredSlots.length > 1;
+  const hasOneVocalistPerSlot =
+    hasMultipleVocalSlots &&
+    summary.requiredSlots.every(
+      (slotIndex) => (summary.bySlot.get(slotIndex) || []).length === 1,
+    );
   const optionLines = summary.requiredSlots.map((slotIndex) => {
     const names = (summary.bySlot.get(slotIndex) || [])
       .map((row) => shortName(row.displayName || row.musicianName))
       .filter(Boolean);
-    const label = summary.requiredSlots.length > 1 ? `Vocal slot ${slotIndex + 1}` : "Available vocalists";
+    if (hasOneVocalistPerSlot) return names.join(", ");
+    const label = hasMultipleVocalSlots ? `Vocal slot ${slotIndex + 1}` : "Available vocalists";
     return `${label}: ${names.join(", ")}`;
   });
-  const hasMultipleVocalSlots = summary.requiredSlots.length > 1;
   const availabilityIntro = hasMultipleVocalSlots
     ? `For this ${actName} lineup, the vocalists currently available to front the band are shown below:`
     : "We have now heard back from the band's other deputy vocalists below, who are currently available for your date:";
-  const selectionGuidance = hasMultipleVocalSlots
+  const selectionGuidance = hasOneVocalistPerSlot
+    ? "If you would like to book these vocalists to front the band, you can do so by proceeding to checkout or you’re also welcome to progress your booking simply by replying to this email, if that’s easiest for you."
+    : hasMultipleVocalSlots
     ? "If you would like to book these vocalists to front the band, you can do so by proceeding to checkout and selecting your preferred vocalist for each slot. You’re also welcome to progress your booking simply by replying to this email, if that’s easiest for you."
     : "If you would like to book a particular vocalist to front the band, you can do so by proceeding to checkout and selecting your preferred deputy. You’re also welcome to progress your booking with a particular vocalist simply by replying to this email, if that’s easiest for you.";
   const subject = `A quick check-in about ${actName} for ${eventDate}`;
@@ -198,7 +206,7 @@ export const buildEnquiryDayTwoEmail = ({ enquiry, act, summary }) => {
       <p>Hi ${escapeEmailHtml(clientFirstName)},</p>
       <p>I just wanted to check in personally to see whether you had any questions about <strong>${escapeEmailHtml(actName)}</strong>.</p>
       <p>${escapeEmailHtml(availabilityIntro)}</p>
-      ${vocalistProfileCardsHtml(summary)}
+      ${vocalistProfileCardsHtml(summary, { showSlotHeadings: !hasOneVocalistPerSlot })}
       <p>${escapeEmailHtml(selectionGuidance)}</p>
       <p>Please kindly note that availability can change because our vocalists also accept work through other avenues, so please let me know if you would like any help choosing the best fit.</p>
       <p><a href="${escapeEmailHtml(bookUrl)}" style="display:inline-block;background:#ff6667;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:700;">View ${escapeEmailHtml(actName)} and book →</a></p>
