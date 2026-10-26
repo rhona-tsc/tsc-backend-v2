@@ -7029,6 +7029,7 @@ const findExtra = (extrasMap, ...aliases) => {
     let name = String(fallbackName || "").trim();
     let videos = [];
     let repertoireCount = 0;
+    let possessivePronoun = "their";
 
     if (musicianId) {
       const m = await Musician.findById(musicianId)
@@ -7036,7 +7037,7 @@ const findExtra = (extrasMap, ...aliases) => {
           "firstName lastName displayName preferredName name musicianSlug " +
             "profilePhoto profilePicture photoUrl tscProfileUrl " +
             "tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks " +
-            "repertoire selectedSongs",
+            "repertoire selectedSongs vocals.gender",
         )
         .lean();
 
@@ -7064,6 +7065,12 @@ const findExtra = (extrasMap, ...aliases) => {
             : Array.isArray(m.selectedSongs)
               ? m.selectedSongs.length
               : 0;
+        possessivePronoun =
+          String(m?.vocals?.gender || "").toLowerCase() === "female"
+            ? "her"
+            : String(m?.vocals?.gender || "").toLowerCase() === "male"
+              ? "his"
+              : "their";
       }
     }
 
@@ -7073,6 +7080,7 @@ const findExtra = (extrasMap, ...aliases) => {
       profileUrl,
       videos,
       repertoireCount,
+      possessivePronoun,
     };
   };
 
@@ -8343,7 +8351,7 @@ const renderActExtrasHtml = async (
                           }
                           ${renderVideoList(deputyShort, deputyCard.videos)}
                           <p style="margin:8px 0 0; color:#555;">
-                            <strong>${deputyShort}</strong>${deputyCard.repertoireCount ? ` has <strong>${deputyCard.repertoireCount} songs</strong> in their repertoire` : " has an extensive repertoire"}, and you’re completely welcome to ${deputyCard.profileUrl ? `<a href="${deputyCard.profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">take a browse</a>` : "take a browse"} and suggest all your favourites for ${deputyShort} and the band to perform for you.
+                            <strong>${deputyShort}</strong>${deputyCard.repertoireCount ? ` has <strong>${deputyCard.repertoireCount} songs</strong> in ${deputyCard.possessivePronoun} repertoire` : " has an extensive repertoire"}, and you’re completely welcome to ${deputyCard.profileUrl ? `<a href="${deputyCard.profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">take a browse</a>` : "take a browse"} and suggest all your favourites for ${deputyShort} and the band to perform for you.
                           </p>
                         </div>
                       `
