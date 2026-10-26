@@ -6,6 +6,11 @@ import {
   positiveFee,
   validateOpportunityDetails,
 } from "../utils/outboundOpportunityValidation.js";
+import {
+  automatedEnquiryEligible,
+  automatedEnquiryFollowupEligible,
+  validAvailabilityRecipientName,
+} from "../utils/enquiryAutomationEligibility.js";
 
 const valid = {
   actName: "Dancefloor Magic",
@@ -45,6 +50,66 @@ test("availability chasers use both approved-template SIDs and no SMS fallback",
   assert.match(source, /HXa063207c0b9e26192622293604b6dac3/);
   assert.match(source, /TWILIO_AVAILABILITY_REMINDERS_ENABLED/);
   assert.match(source, /allowSmsFallback:\s*false/);
+  assert.match(
+    source,
+    /!row\.firstAvailabilityReminderSentAt && ageHours >= 24[\s\S]*hoursSinceFirst >= 24[\s\S]*hoursSinceSecond >= 24/,
+  );
+});
+
+test("automated enquiry messaging excludes stale, past-date and test records", () => {
+  const now = new Date("2026-10-26T19:00:00Z").getTime();
+  const current = {
+    actName: "Motown Luxe",
+    dateISO: "2028-08-17",
+    createdAt: "2026-10-23T15:03:31Z",
+  };
+
+  assert.equal(automatedEnquiryEligible(current, now), true);
+  assert.equal(
+    automatedEnquiryEligible({ ...current, createdAt: "2026-05-11T16:48:10Z" }, now),
+    false,
+  );
+  assert.equal(
+    automatedEnquiryEligible({ ...current, dateISO: "2026-09-19" }, now),
+    false,
+  );
+  assert.equal(
+    automatedEnquiryEligible({ ...current, actName: "Test Soul Allegiance" }, now),
+    false,
+  );
+  assert.equal(
+    automatedEnquiryFollowupEligible(
+      { ...current, createdAt: "2026-10-14T19:00:00Z" },
+      now,
+    ),
+    true,
+  );
+  assert.equal(
+    automatedEnquiryFollowupEligible(
+      { ...current, createdAt: "2026-05-11T16:48:10Z" },
+      now,
+    ),
+    false,
+  );
+});
+
+test("client follow-ups stop when an enquiry has converted to a booking", () => {
+  const source = readFileSync(
+    new URL("../services/enquiryFollowupService.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /ACTIVE_ENQUIRY_STATUSES/);
+  assert.match(source, /BookingBoardItem\.exists/);
+  assert.match(source, /Booking\.exists/);
+  assert.ok((source.match(/enquiryHasConvertedToBooking\(\{ enquiry, rows \}\)/g) || []).length >= 3);
+  assert.match(source, /runEnquiryDaySixFollowups/);
+  assert.match(source, /clientDaySixEmailSentAt/);
+});
+
+test("availability reminders reject missing and placeholder recipient names", () => {
+  assert.equal(validAvailabilityRecipientName("Mari Songs"), true);
+  assert.equal(validAvailabilityRecipientName(""), false);
+  assert.equal(validAvailabilityRecipientName("TBC"), false);
 });
 
 test("an unclassified SMS reply stays on SMS instead of opening WhatsApp", () => {
@@ -54,5 +119,10 @@ test("an unclassified SMS reply stays on SMS instead of opening WhatsApp", () =>
   );
   assert.match(source, /isWhatsApp:\s*inboundIsWhatsApp/);
   assert.match(source, /await sendSMSMessage\(/);
+  assert.match(
+    source,
+    /bookingLooksExplicit && !inboundIsWhatsApp/,
+  );
+  assert.match(source, /if \(bookingMsg\) \{/);
 });
 

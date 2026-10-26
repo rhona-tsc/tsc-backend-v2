@@ -23,6 +23,7 @@ import {
 import sendEmail from "../utils/sendEmail.js";
 import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
 import { buildTscEmailFooter } from "../utils/tscEmailBranding.js";
+import { automatedEnquiryEligible } from "../utils/enquiryAutomationEligibility.js";
 
 const isValid24 = (v) =>
   typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
@@ -5696,7 +5697,11 @@ if (deputyAllocationJob && !deputyAllocationReply) {
             .lean();
         }
 
-        if (!bookingMsg && sender && bookingLooksExplicit) {
+        // Generic availability buttons (for example "No thanks!") overlap with
+        // booking buttons. On WhatsApp, only route to booking when the reply can
+        // be joined to an exact booking message above. A phone-only fallback can
+        // otherwise consume an availability reply for an unrelated old booking.
+        if (!bookingMsg && sender && bookingLooksExplicit && !inboundIsWhatsApp) {
           bookingMsg = await EnquiryMessage.findOne({
             phone: sender,
             "meta.kind": "booking",
@@ -5712,7 +5717,7 @@ if (deputyAllocationJob && !deputyAllocationReply) {
           return;
         }
 
-        if (bookingMsg || bookingLooksExplicit) {
+        if (bookingMsg) {
           console.log(
             "🎟️ [twilioInbound] routing inbound reply to booking flow",
             {
@@ -7546,6 +7551,19 @@ const renderActExtrasHtml = async (
       if (contextEnquiryId) return row.enquiryId === contextEnquiryId;
       return false;
     });
+
+    if (!contextRows.some((row) => automatedEnquiryEligible(row))) {
+      console.log("✉️ [rebuild] Client email suppressed for stale, past-date, or test enquiry", {
+        requestKey: contextRequestKey,
+        enquiryId: contextEnquiryId,
+      });
+      return {
+        success: true,
+        updated: true,
+        badge,
+        clientEmailSkipped: "ineligible_automation_record",
+      };
+    }
 
     const contextLineupId = contextRows.find((row) => row.lineupId)?.lineupId;
     const selectedLineup = (actDoc.lineups || []).find(

@@ -83,6 +83,7 @@ import {
 } from "./services/videoMigrationAutomationService.js";
 import { runClientAutomations } from "./services/clientAutomationService.js";
 import {
+  runEnquiryDaySixFollowups,
   runEnquiryDayFourFollowups,
   runEnquiryDayTwoFollowups,
 } from "./services/enquiryFollowupService.js";
@@ -998,6 +999,8 @@ cron.schedule(
       console.log("📨 Enquiry Day 2 follow-up run complete", enquiryResult);
       const enquiryDayFourResult = await runEnquiryDayFourFollowups();
       console.log("📨 Enquiry Day 4 follow-up run complete", enquiryDayFourResult);
+      const enquiryDaySixResult = await runEnquiryDaySixFollowups();
+      console.log("📨 Enquiry Day 6 follow-up run complete", enquiryDaySixResult);
     } catch (error) {
       console.error("❌ Client automation run failed", error?.message || error);
     }

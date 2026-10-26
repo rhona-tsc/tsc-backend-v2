@@ -1,15 +1,86 @@
 import AvailabilityModel from "../models/availabilityModel.js";
 import EnquiryBoardItem from "../models/enquiryBoardItem.js";
+import BookingBoardItem from "../models/bookingBoardItem.js";
+import Booking from "../models/bookingModel.js";
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.js";
 import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
+import { automatedEnquiryFollowupEligible } from "../utils/enquiryAutomationEligibility.js";
 
 const DAY_TWO_DELAY_MS = 48 * 60 * 60 * 1000;
 const DAY_FOUR_AFTER_DAY_TWO_DELAY_MS = 48 * 60 * 60 * 1000;
+const DAY_SIX_AFTER_DAY_FOUR_DELAY_MS = 48 * 60 * 60 * 1000;
 const clean = (value) => String(value || "").trim();
 const isHttpUrl = (value) => /^https?:\/\//i.test(clean(value));
+const ACTIVE_ENQUIRY_STATUSES = ["open", "contacted", "qualified"];
+
+const exactText = (value) =>
+  new RegExp(`^${clean(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
+
+const enquiryHasConvertedToBooking = async ({ enquiry, rows = [] }) => {
+  if (!enquiry || !ACTIVE_ENQUIRY_STATUSES.includes(clean(enquiry.status))) return true;
+  if (rows.some((row) => row.confirmedBooking)) return true;
+
+  const eventDateISO = clean(enquiry.eventDateISO).slice(0, 10);
+  const clientEmail = clean(enquiry.clientEmail).toLowerCase();
+  const actId = clean(enquiry.actId || rows.find((row) => row.actId)?.actId);
+  const actNames = [enquiry.actTscName, enquiry.actName, rows.find((row) => row.actName)?.actName]
+    .map(clean)
+    .filter(Boolean);
+  if (!eventDateISO || !clientEmail) return false;
+
+  const actMatch = actId
+    ? [{ actId }, { "actsSummary.actId": actId }]
+    : actNames.flatMap((name) => [
+        { actTscName: exactText(name) },
+        { actName: exactText(name) },
+      ]);
+  const boardBooking = await BookingBoardItem.exists({
+    eventDateISO,
+    $and: [
+      {
+        $or: [
+          { clientEmail: exactText(clientEmail) },
+          { "clientEmails.email": exactText(clientEmail) },
+        ],
+      },
+      {
+        $or: [
+          { bookingId: { $exists: true, $ne: null } },
+          { bookingDateISO: { $type: "string", $ne: "" } },
+        ],
+      },
+      ...(actMatch.length ? [{ $or: actMatch }] : []),
+    ],
+  });
+  if (boardBooking) return true;
+
+  const dateStart = new Date(`${eventDateISO}T00:00:00.000Z`);
+  const dateEnd = new Date(`${eventDateISO}T23:59:59.999Z`);
+  const coreActMatch = actId
+    ? [{ act: actId }, { actId }, { "actsSummary.actId": actId }]
+    : actNames.flatMap((name) => [
+        { "actsSummary.actName": exactText(name) },
+        { "actsSummary.name": exactText(name) },
+        { "actsSummary.tscName": exactText(name) },
+      ]);
+  return Boolean(
+    await Booking.exists({
+      eventDate: { $gte: dateStart, $lte: dateEnd },
+      $and: [
+        {
+          $or: [
+            { clientEmail: exactText(clientEmail) },
+            { userEmail: exactText(clientEmail) },
+          ],
+        },
+        ...(coreActMatch.length ? [{ $or: coreActMatch }] : []),
+      ],
+    }),
+  );
+};
 
 const publicSiteUrl = () =>
   clean(
@@ -311,6 +382,66 @@ export const buildEnquiryDayFourEmail = ({ enquiry, act, summary }) => {
   return { subject, text, html };
 };
 
+export const buildEnquiryDaySixEmail = ({ enquiry, act, summary }) => {
+  const clientFirstName = clean(enquiry?.clientName).split(/\s+/)[0] || "there";
+  const actName = clean(
+    enquiry?.actTscName || enquiry?.actName || act?.tscName || act?.name || "the band",
+  );
+  const eventDate = friendlyDate(enquiry?.eventDateISO);
+  const site = publicSiteUrl();
+  const slug =
+    clean(act?.slug || act?.tscSlug) ||
+    actName
+      .toLowerCase()
+      .replace(/&/g, "and")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  const address = clean(enquiry?.address || summary.all[0]?.formattedAddress);
+  const bookUrl = `${site}/act/${encodeURIComponent(slug)}?date=${encodeURIComponent(
+    enquiry?.eventDateISO || "",
+  )}&address=${encodeURIComponent(address)}`;
+  const subject = `Ideas for tailoring your ${actName} package on ${eventDate}`;
+  const extras = [
+    "a larger lineup or additional featured musicians",
+    "extra live performance time or a DJ service",
+    "an earlier arrival or later finish",
+    "special song requests and other personal touches",
+  ];
+  const text = [
+    `Hi ${clientFirstName},`,
+    "",
+    `I wanted to share one final idea while you’re considering ${actName} for ${eventDate}.`,
+    "",
+    "If you would like a fuller or more tailored package, depending on the lineup, options can include:",
+    ...extras.map((extra) => `- ${extra}`),
+    "",
+    "You do not need to decide everything now. If you tell me what you have in mind, I can help shape the most suitable package and confirm the options and pricing for you.",
+    "",
+    `Explore ${actName}: ${bookUrl}`,
+    "",
+    "You’re also very welcome to reply to this email and I’ll help you put the booking together personally.",
+    "",
+    "Warmest wishes,",
+    "Rhona ✨",
+  ].join("\n");
+  const extrasHtml = extras
+    .map((extra) => `<li style="margin:6px 0;">${escapeEmailHtml(extra)}</li>`)
+    .join("");
+  const html = `
+    <div style="font-family:Arial,Helvetica,sans-serif;color:#111;line-height:1.7;max-width:720px;">
+      <p>Hi ${escapeEmailHtml(clientFirstName)},</p>
+      <p>I wanted to share one final idea while you’re considering <strong>${escapeEmailHtml(actName)}</strong> for <strong>${escapeEmailHtml(eventDate)}</strong>.</p>
+      <p>If you would like a fuller or more tailored package, depending on the lineup, options can include:</p>
+      <ul style="padding-left:22px;">${extrasHtml}</ul>
+      <p>You do not need to decide everything now. If you tell me what you have in mind, I can help shape the most suitable package and confirm the options and pricing for you.</p>
+      <p><a href="${escapeEmailHtml(bookUrl)}" style="display:inline-block;background:#ff6667;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:700;">Explore ${escapeEmailHtml(actName)} and package options →</a></p>
+      <p>You’re also very welcome to reply to this email and I’ll help you put the booking together personally.</p>
+      <p>Warmest wishes,<br />Rhona ✨</p>
+      ${buildTscEmailFooter()}
+    </div>`;
+  return { subject, text, html };
+};
+
 export const sendEnquiryDayFourTestEmail = async ({ enquiryRef, to } = {}) => {
   const safeRef = clean(enquiryRef);
   const safeRecipient = clean(to).toLowerCase();
@@ -491,6 +622,7 @@ export const runEnquiryDayTwoFollowups = async ({ now = new Date() } = {}) => {
     const representative = rows.find((row) => row.clientAvailabilityEmailSentAt);
     if (
       !representative ||
+      !rows.some((row) => automatedEnquiryFollowupEligible(row, now.getTime())) ||
       rows.some((row) => row.clientDayTwoEmailSentAt || row.confirmedBooking)
     ) {
       result.skipped += 1;
@@ -498,9 +630,13 @@ export const runEnquiryDayTwoFollowups = async ({ now = new Date() } = {}) => {
     }
     const enquiry = await EnquiryBoardItem.findOne({
       enquiryRef: representative.enquiryId,
-      status: { $in: ["open", "contacted", "qualified"] },
+      status: { $in: ACTIVE_ENQUIRY_STATUSES },
     }).lean();
     if (!enquiry || !/\S+@\S+\.\S+/.test(clean(enquiry.clientEmail || representative.clientEmail))) {
+      result.skipped += 1;
+      continue;
+    }
+    if (await enquiryHasConvertedToBooking({ enquiry, rows })) {
       result.skipped += 1;
       continue;
     }
@@ -577,6 +713,7 @@ export const runEnquiryDayFourFollowups = async ({ now = new Date() } = {}) => {
     const representative = rows.find((row) => row.clientDayTwoEmailSentAt);
     if (
       !representative ||
+      !rows.some((row) => automatedEnquiryFollowupEligible(row, now.getTime())) ||
       rows.some((row) => row.clientDayFourEmailSentAt || row.confirmedBooking)
     ) {
       result.skipped += 1;
@@ -584,9 +721,13 @@ export const runEnquiryDayFourFollowups = async ({ now = new Date() } = {}) => {
     }
     const enquiry = await EnquiryBoardItem.findOne({
       enquiryRef: representative.enquiryId,
-      status: { $in: ["open", "contacted", "qualified"] },
+      status: { $in: ACTIVE_ENQUIRY_STATUSES },
     }).lean();
     if (!enquiry || !/\S+@\S+\.\S+/.test(clean(enquiry.clientEmail || representative.clientEmail))) {
+      result.skipped += 1;
+      continue;
+    }
+    if (await enquiryHasConvertedToBooking({ enquiry, rows })) {
       result.skipped += 1;
       continue;
     }
@@ -639,6 +780,97 @@ export const runEnquiryDayFourFollowups = async ({ now = new Date() } = {}) => {
         { $set: { clientDayFourEmailSentAt: null } },
       );
       console.error("❌ Enquiry Day 4 follow-up failed", requestKey, error?.message || error);
+      result.failed += 1;
+    }
+  }
+
+  return result;
+};
+
+export const runEnquiryDaySixFollowups = async ({ now = new Date() } = {}) => {
+  const cutoff = new Date(now.getTime() - DAY_SIX_AFTER_DAY_FOUR_DELAY_MS);
+  const dueRows = await AvailabilityModel.find({
+    clientDayFourEmailSentAt: { $ne: null, $lte: cutoff },
+    clientDaySixEmailSentAt: null,
+    requestKey: { $exists: true, $ne: "" },
+  })
+    .select("requestKey enquiryId")
+    .lean();
+  const requestKeys = [...new Set(dueRows.map((row) => row.requestKey).filter(Boolean))];
+  const result = { considered: requestKeys.length, sent: 0, skipped: 0, failed: 0 };
+
+  for (const requestKey of requestKeys) {
+    const rows = await AvailabilityModel.find({ requestKey }).lean();
+    const representative = rows.find((row) => row.clientDayFourEmailSentAt);
+    if (
+      !representative ||
+      !rows.some((row) => automatedEnquiryFollowupEligible(row, now.getTime())) ||
+      rows.some((row) => row.clientDaySixEmailSentAt || row.confirmedBooking)
+    ) {
+      result.skipped += 1;
+      continue;
+    }
+    const enquiry = await EnquiryBoardItem.findOne({
+      enquiryRef: representative.enquiryId,
+      status: { $in: ACTIVE_ENQUIRY_STATUSES },
+    }).lean();
+    if (!enquiry || !/\S+@\S+\.\S+/.test(clean(enquiry.clientEmail || representative.clientEmail))) {
+      result.skipped += 1;
+      continue;
+    }
+    if (await enquiryHasConvertedToBooking({ enquiry, rows })) {
+      result.skipped += 1;
+      continue;
+    }
+    const act = await Act.findById(representative.actId)
+      .select("tscName name slug tscSlug lineups")
+      .lean();
+    const lineup = findLineup(act, rows);
+    const summary = await enrichVocalistSummary(
+      availableVocalistsForLineup(rows, lineup),
+    );
+    if (!summary.complete) {
+      result.skipped += 1;
+      continue;
+    }
+
+    const claimed = await AvailabilityModel.findOneAndUpdate(
+      { _id: representative._id, clientDaySixEmailSentAt: null },
+      { $set: { clientDaySixEmailSentAt: now } },
+      { new: true },
+    );
+    if (!claimed) {
+      result.skipped += 1;
+      continue;
+    }
+
+    try {
+      const email = buildEnquiryDaySixEmail({ enquiry, act, summary });
+      const sent = await sendEmail({
+        to: clean(enquiry.clientEmail || representative.clientEmail),
+        bcc: "hello@thesupremecollective.co.uk",
+        subject: email.subject,
+        text: email.text,
+        html: email.html,
+        replyTo: "hello@thesupremecollective.co.uk",
+      });
+      if (!sent?.ok) throw new Error(sent?.error || "Email provider rejected the message");
+      await AvailabilityModel.updateMany(
+        { requestKey },
+        {
+          $set: {
+            clientDaySixEmailSentAt: now,
+            clientDaySixEmailMessageId: sent.messageId || "",
+          },
+        },
+      );
+      result.sent += 1;
+    } catch (error) {
+      await AvailabilityModel.updateOne(
+        { _id: representative._id },
+        { $set: { clientDaySixEmailSentAt: null } },
+      );
+      console.error("❌ Enquiry Day 6 follow-up failed", requestKey, error?.message || error);
       result.failed += 1;
     }
   }

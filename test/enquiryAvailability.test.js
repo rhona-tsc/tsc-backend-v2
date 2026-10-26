@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
 import {
+  buildEnquiryDaySixEmail,
   buildEnquiryDayFourEmail,
   buildEnquiryDayTwoEmail,
 } from "../services/enquiryFollowupService.js";
@@ -197,6 +198,31 @@ test("Day 4 email gives a clear availability reminder and booking action", () =>
   assert.match(email.html, /booked elsewhere/);
   assert.match(email.html, /avoid disappointment/);
   assert.match(email.html, /View Committed to Kisstory and book/);
+  assert.match(email.html, /TSC_Signature_2026/);
+});
+
+test("Day 6 email offers tailored package options without claiming fixed extras", () => {
+  const summary = availableVocalistsForLineup(
+    [{ slotIndex: 0, reply: "yes", musicianName: "Mari Songs" }],
+    { bandMembers: [{ instrument: "Lead Female Vocal" }] },
+  );
+  const email = buildEnquiryDaySixEmail({
+    enquiry: {
+      clientName: "Narelle Beckley-Perry",
+      actTscName: "Committed to Kisstory",
+      eventDateISO: "2028-08-17",
+      address: "The Priests House",
+    },
+    act: { name: "Committed to Kisstory", slug: "committed-to-kisstory" },
+    summary,
+  });
+
+  assert.match(email.subject, /tailoring your Committed to Kisstory package/i);
+  assert.match(email.html, /fuller or more tailored package/i);
+  assert.match(email.html, /larger lineup/i);
+  assert.match(email.html, /extra live performance time/i);
+  assert.match(email.html, /special song requests/i);
+  assert.match(email.html, /Explore Committed to Kisstory and package options/);
   assert.match(email.html, /TSC_Signature_2026/);
 });
 

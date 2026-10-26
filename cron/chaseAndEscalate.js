@@ -8,6 +8,10 @@ import {
   reconcilePendingRoleOffer,
   sanitizeFee,
 } from "../controllers/allocationController.js";
+import {
+  automatedEnquiryEligible,
+  validAvailabilityRecipientName,
+} from "../utils/enquiryAutomationEligibility.js";
 
 const firstNameFor = async (msg) => {
   const musician = msg.musicianId
@@ -96,6 +100,10 @@ const sendAvailabilityReminder = async ({ row, final = false }) => {
   const requestId = String(row.requestId || row.enquiryId || "").trim();
   const reminderLabel = final ? "final availability reminder" : "availability reminder";
 
+  if (!validAvailabilityRecipientName(firstName)) {
+    throw new Error("Availability reminder blocked: recipient name is missing or invalid");
+  }
+
   await sendWhatsAppMessage({
     to: row.phone,
     contentSid: final ? AVAILABILITY_FINAL_REMINDER_SID : AVAILABILITY_REMINDER_SID,
@@ -167,30 +175,77 @@ const runAvailabilityChasers = async (now = Date.now()) => {
     requestId: { $exists: true, $ne: "" },
     messageSidOut: { $exists: true, $ne: "" },
     deliveryStatus: { $nin: ["failed", "undelivered"] },
-  }).lean();
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const phonesMessagedThisRun = new Set();
 
   for (const row of rows) {
+    if (!automatedEnquiryEligible(row, now)) {
+      console.log("⏭️ Skipping stale, past-date, or test availability reminder", {
+        availabilityId: row._id,
+        enquiryId: row.enquiryId,
+        actName: row.actName,
+        dateISO: row.dateISO,
+      });
+      continue;
+    }
+    const reminderPhone = String(row.phone || "").replace(/^whatsapp:/i, "");
+    if (!reminderPhone || phonesMessagedThisRun.has(reminderPhone)) {
+      console.log("⏭️ Skipping duplicate availability reminder for this phone in the same run", {
+        availabilityId: row._id,
+        phone: reminderPhone,
+      });
+      continue;
+    }
     const startedAt = new Date(row.outboundSentAt || row.createdAt || 0).getTime();
     if (!Number.isFinite(startedAt) || startedAt <= 0) continue;
     const ageHours = (now - startedAt) / 3_600_000;
+    const firstReminderAt = row.firstAvailabilityReminderSentAt
+      ? new Date(row.firstAvailabilityReminderSentAt).getTime()
+      : 0;
+    const secondReminderAt = row.secondAvailabilityReminderSentAt
+      ? new Date(row.secondAvailabilityReminderSentAt).getTime()
+      : 0;
+    const hoursSinceFirst = firstReminderAt
+      ? (now - firstReminderAt) / 3_600_000
+      : 0;
+    const hoursSinceSecond = secondReminderAt
+      ? (now - secondReminderAt) / 3_600_000
+      : 0;
 
     try {
-      if (ageHours >= 72 && !row.finalAvailabilityReminderSentAt) {
-        await claimAndSendAvailabilityReminder({
+      // Always send the reminders in order. Older enquiries that pre-date this
+      // automation begin with reminder 1 rather than jumping straight to the
+      // final notice after deployment.
+      if (!row.firstAvailabilityReminderSentAt && ageHours >= 24) {
+        const sent = await claimAndSendAvailabilityReminder({
+          row,
+          field: "firstAvailabilityReminderSentAt",
+        });
+        if (sent) phonesMessagedThisRun.add(reminderPhone);
+      } else if (
+        row.firstAvailabilityReminderSentAt &&
+        !row.secondAvailabilityReminderSentAt &&
+        hoursSinceFirst >= 24
+      ) {
+        const sent = await claimAndSendAvailabilityReminder({
+          row,
+          field: "secondAvailabilityReminderSentAt",
+        });
+        if (sent) phonesMessagedThisRun.add(reminderPhone);
+      } else if (
+        row.secondAvailabilityReminderSentAt &&
+        !row.finalAvailabilityReminderSentAt &&
+        hoursSinceSecond >= 24
+      ) {
+        const sent = await claimAndSendAvailabilityReminder({
           row,
           field: "finalAvailabilityReminderSentAt",
           final: true,
         });
-      } else if (ageHours >= 48 && !row.secondAvailabilityReminderSentAt) {
-        await claimAndSendAvailabilityReminder({
-          row,
-          field: "secondAvailabilityReminderSentAt",
-        });
-      } else if (ageHours >= 24 && !row.firstAvailabilityReminderSentAt) {
-        await claimAndSendAvailabilityReminder({
-          row,
-          field: "firstAvailabilityReminderSentAt",
-        });
+        if (sent) phonesMessagedThisRun.add(reminderPhone);
       }
     } catch (error) {
       console.error("❌ Availability reminder failed", {
