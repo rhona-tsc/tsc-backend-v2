@@ -4,6 +4,7 @@ import EnquiryBoardItem from "../models/enquiryBoardItem.js";
 import Act from "../models/actModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 import { triggerAvailabilityRequest } from "../controllers/availabilityController.js";
+import { sendEnquiryDayTwoTestEmail } from "../services/enquiryFollowupService.js";
 
 const router = express.Router();
 
@@ -15,6 +16,10 @@ const EXCLUDED_CLIENT_EMAILS = new Set([
 ]);
 
 const EXCLUDED_CLIENT_NAMES = new Set(["rhona downie"]);
+const DAY_TWO_TEST_RECIPIENTS = new Set([
+  "rhona@thesupremecollective.co.uk",
+  "hello@thesupremecollective.co.uk",
+]);
 
 const AVAILABILITY_COLLECTION_CANDIDATES = [
   "availabilities",
@@ -518,6 +523,41 @@ router.post("/", musicianAuth, async (req, res) => {
   } catch (e) {
     console.error("Enquiry board POST error:", e);
     res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+/**
+ * POST /api/board/enquiries/day-two-email/test
+ * Render and deliver a Day 2 follow-up through the production mail path
+ * without updating the enquiry's automation status.
+ */
+router.post("/day-two-email/test", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user) && !isAgent(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin-only" });
+    }
+
+    const recipient = clean(
+      req.body?.to || "rhona@thesupremecollective.co.uk",
+    ).toLowerCase();
+    if (!DAY_TWO_TEST_RECIPIENTS.has(recipient)) {
+      return res.status(400).json({
+        success: false,
+        message: "Test emails may only be sent to an approved TSC inbox",
+      });
+    }
+
+    const result = await sendEnquiryDayTwoTestEmail({
+      enquiryRef: req.body?.enquiryRef,
+      to: recipient,
+    });
+    return res.json(result);
+  } catch (error) {
+    console.error("Enquiry Day 2 test email failed:", error);
+    return res.status(400).json({
+      success: false,
+      message: error?.message || "The Day 2 test email could not be sent",
+    });
   }
 });
 
