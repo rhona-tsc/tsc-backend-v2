@@ -29,10 +29,14 @@ export const buildTscEmailFooter = ({ audience = "client" } = {}) => `
     <a href="${GOOGLE_REVIEWS_URL}" style="display:block;text-decoration:none;">
       <img src="${SIGNATURE_GIF_URL}" width="600" alt="The Supreme Collective" style="display:block;width:100%;max-width:600px;height:auto;border:0;margin:0 auto;" />
     </a>
-    <a href="${GOOGLE_REVIEWS_URL}" style="display:inline-block;margin-top:14px;text-decoration:none;">
-      <img src="${GOOGLE_FIVE_STAR_IMAGE_URL}" width="150" height="65" alt="Rated five stars on Google — read our reviews" style="display:block;width:150px;max-width:100%;height:auto;border:0;margin:0 auto;" />
-    </a>
-    <a href="${WHATSAPP_URL}" style="display:inline-block;margin-top:16px;padding:12px 24px;border-radius:999px;background:#25D366;color:#ffffff;text-decoration:none;font-size:17px;font-weight:700;">Chat on WhatsApp</a>
+    <div style="margin-top:14px;text-align:center;">
+      <a href="${GOOGLE_REVIEWS_URL}" style="display:inline-block;text-decoration:none;">
+        <img src="${GOOGLE_FIVE_STAR_IMAGE_URL}" width="150" height="65" alt="Rated five stars on Google — read our reviews" style="display:block;width:150px;max-width:100%;height:auto;border:0;margin:0 auto;" />
+      </a>
+    </div>
+    <div style="margin-top:16px;text-align:center;">
+      <a href="${WHATSAPP_URL}" style="display:inline-block;padding:12px 24px;border-radius:999px;background:#25D366;color:#ffffff;text-decoration:none;font-size:17px;font-weight:700;">Chat on WhatsApp</a>
+    </div>
     <div style="margin-top:22px;padding-top:20px;border-top:1px solid #e3e3e3;text-align:left;">
       <h3 style="margin:0 0 14px;font-size:16px;color:#111111;">Find us online</h3>
       <p style="margin:0 0 18px;">

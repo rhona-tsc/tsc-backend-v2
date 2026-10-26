@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
 import { buildEnquiryDayTwoEmail } from "../services/enquiryFollowupService.js";
+import { buildTscEmailFooter } from "../utils/tscEmailBranding.js";
 
 const twoVocalistLineup = {
   bandMembers: [
@@ -57,5 +58,18 @@ test("Day 2 email includes the first vocalist and later available alternatives",
   assert.match(email.html, /google-5-star-reviews/);
   assert.match(email.html, /Company Number: 16883956/);
   assert.match(email.html, /instagram\.com\/thesupremecollective/);
+});
+
+test("email footer stacks the Google rating above the WhatsApp button", () => {
+  const footer = buildTscEmailFooter();
+  const googleRating = footer.indexOf("google-5-star-reviews.png");
+  const whatsappButton = footer.indexOf("Chat on WhatsApp");
+
+  assert.ok(googleRating >= 0);
+  assert.ok(whatsappButton > googleRating);
+  assert.match(
+    footer.slice(googleRating, whatsappButton),
+    /text-align:center;/,
+  );
 });
 
