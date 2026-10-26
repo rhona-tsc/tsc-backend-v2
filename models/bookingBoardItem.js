@@ -153,6 +153,7 @@ const AssignedMusicianSchema = new mongoose.Schema(
         "selected",
         "offered",
         "accepted",
+        "provisional",
         "proposed",
         "confirmed",
         "declined",
