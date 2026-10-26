@@ -170,7 +170,7 @@ export const buildEnquiryDayTwoEmail = ({ enquiry, act, summary }) => {
   });
   const hasMultipleVocalSlots = summary.requiredSlots.length > 1;
   const availabilityIntro = hasMultipleVocalSlots
-    ? `For this ${actName} lineup, the vocalists currently available to front the band are shown below by vocal slot:`
+    ? `For this ${actName} lineup, the vocalists currently available to front the band are shown below:`
     : "We have now heard back from the band's other deputy vocalists below, who are currently available for your date:";
   const selectionGuidance = hasMultipleVocalSlots
     ? "If you would like to book these vocalists to front the band, you can do so by proceeding to checkout and selecting your preferred vocalist for each slot. You’re also welcome to progress your booking simply by replying to this email, if that’s easiest for you."
