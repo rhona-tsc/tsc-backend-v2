@@ -2260,12 +2260,27 @@ router.post(
           .status(400)
           .json({ success: false, message: "Provide _id or bookingId" });
 
+      // Update individual event-sheet fields instead of replacing the entire
+      // object. Calendar invitations use bandSheetToken; replacing the object
+      // during autosave used to erase that token and break every existing link.
+      const incomingEventSheet = eventSheet || {};
+      const eventSheetSet = Object.fromEntries(
+        Object.entries(incomingEventSheet)
+          .filter(([key]) => key !== "bandSheetToken" && key !== "updatedAt")
+          .map(([key, value]) => [`eventSheet.${key}`, value]),
+      );
+      const suppliedBandSheetToken = String(
+        incomingEventSheet.bandSheetToken || "",
+      ).trim();
+      if (suppliedBandSheetToken) {
+        eventSheetSet["eventSheet.bandSheetToken"] = suppliedBandSheetToken;
+      }
+      eventSheetSet["eventSheet.updatedAt"] = new Date();
+
       const previousDoc = await Booking.findOneAndUpdate(
         filter,
         {
-          $set: {
-            eventSheet: { ...(eventSheet || {}), updatedAt: new Date() },
-          },
+          $set: eventSheetSet,
         },
         // Returning the pre-update document lets this endpoint detect the
         // false -> true transition atomically, preventing duplicate alerts
@@ -2282,7 +2297,15 @@ router.post(
       if (didSongSectionBecomeComplete(previousDoc.eventSheet, eventSheet)) {
         const savedBooking = {
           ...previousDoc,
-          eventSheet: { ...(eventSheet || {}), updatedAt: new Date() },
+          eventSheet: {
+            ...(previousDoc.eventSheet || {}),
+            ...(eventSheet || {}),
+            bandSheetToken:
+              suppliedBandSheetToken ||
+              previousDoc.eventSheet?.bandSheetToken ||
+              "",
+            updatedAt: new Date(),
+          },
         };
         try {
           const board = await BookingBoardItem.findOne({
