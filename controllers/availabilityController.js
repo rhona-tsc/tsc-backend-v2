@@ -7575,6 +7575,43 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       return false;
     });
 
+    const contextLineupId = contextRows.find((row) => row.lineupId)?.lineupId;
+    const selectedLineup = (actDoc.lineups || []).find(
+      (lineup) =>
+        String(lineup?._id || "") === String(contextLineupId || "") ||
+        String(lineup?.lineupId || "") === String(contextLineupId || ""),
+    );
+
+    const lineupMemberCount = (lineup) => {
+      const labelledSize = Number.parseInt(String(lineup?.actSize || ""), 10);
+      if (Number.isFinite(labelledSize) && labelledSize > 0) return labelledSize;
+
+      return (Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : []).filter(
+        (member) => {
+          if (member?.isEssential === false || member?.isNonPerformer === true)
+            return false;
+          const role = String(
+            member?.instrument || member?.role || member?.mainInstrument || "",
+          ).toLowerCase();
+          return !/manager|management|sound engineer|sound tech|audio engineer|\bfoh\b/.test(
+            role,
+          );
+        },
+      ).length;
+    };
+
+    const selectedLineupCount = lineupMemberCount(selectedLineup);
+    const formatLineupSize = (lineup, memberCount = lineupMemberCount(lineup)) =>
+      (
+        String(lineup?.actSize || "").trim() ||
+        (memberCount ? `${memberCount}-piece` : "selected lineup")
+      ).replace(/-piece\b/i, "-piece");
+
+    const selectedLineupSize = formatLineupSize(
+      selectedLineup,
+      selectedLineupCount,
+    );
+
     const availabilityRecord = contextRows
       .slice()
       .sort(
@@ -7615,9 +7652,18 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       : `${SITE}act/${actDoc._id}`;
 
     const profileUrl = actPath;
-    const cartUrl = `${actPath}?date=${encodeURIComponent(dateISO)}&address=${encodeURIComponent(
-      selectedAddress,
-    )}`;
+    const buildLineupUrl = (lineup, { enquire = false } = {}) => {
+      const params = new URLSearchParams({
+        date: String(dateISO || ""),
+        address: String(selectedAddress || ""),
+      });
+      const lineupId = lineup?._id || lineup?.lineupId;
+      if (lineupId) params.set("lineup", String(lineupId));
+      if (enquire) params.set("enquire", "1");
+      return `${actPath}?${params.toString()}`;
+    };
+
+    const cartUrl = buildLineupUrl(selectedLineup);
 
     const normKey = (s = "") =>
       s
@@ -7673,8 +7719,19 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
             );
           }
 
+          const memberCount = lineupMemberCount(lu);
+          const isLarger =
+            selectedLineupCount > 0 && memberCount > selectedLineupCount;
+          const enquiryUrl = buildLineupUrl(lu, { enquire: true }).replace(
+            /&/g,
+            "&amp;",
+          );
+          const enquiryButton = isLarger
+            ? `<div style="margin:8px 0 14px;"><a href="${enquiryUrl}" style="display:inline-block; background-color:#111; color:#fff; padding:9px 16px; text-decoration:none; border-radius:5px; font-weight:600; line-height:1.2;">Enquire about ${formatLineupSize(lu, memberCount)} →</a></div>`
+            : "";
+
           return {
-            html: `${description} — <strong>${travelTotal}</strong>`,
+            html: `${description} — <strong>${travelTotal}</strong>${enquiryButton}`,
           };
         } catch (err) {
           console.warn(
@@ -7798,12 +7855,6 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       return !!(primaryDeputyCover || yesDeputy);
     };
 
-    const contextLineupId = contextRows.find((row) => row.lineupId)?.lineupId;
-    const selectedLineup = (actDoc.lineups || []).find(
-      (lineup) =>
-        String(lineup?._id || "") === String(contextLineupId || "") ||
-        String(lineup?.lineupId || "") === String(contextLineupId || ""),
-    );
     const lineupAvailability = availableVocalistsForLineup(
       contextRows,
       selectedLineup,
@@ -8017,7 +8068,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
                   <p>Hi ${(clientName || "there").split(" ")[0]},</p>
                   <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
                   <p>
-                    We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with
+                    We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available as a <strong>${selectedLineupSize}</strong> with
                     <strong>${vocalistShort}</strong> on vocals, and they’d love to perform for you and your guests.
                   </p>
 
@@ -8197,8 +8248,8 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
                   : "The band's regular vocalist isn’t available for your date, but we’re delighted to confirm that";
               const deputyAvailabilityCopy =
                 lineupAvailability.selected.length > 1
-                  ? `${unavailableVocalistPrefix} <strong>${deputyShort}</strong> — trusted deputy vocalists for the band — are available to perform instead.`
-                  : `${unavailableVocalistPrefix} <strong>${deputyShort}</strong> — one of the band's trusted deputy vocalists — is available to perform instead.`;
+                  ? `${unavailableVocalistPrefix} <strong>${actDoc.tscName || actDoc.name}</strong> is available as a <strong>${selectedLineupSize}</strong> with <strong>${deputyShort}</strong> — trusted deputy vocalists for the band — available to perform.`
+                  : `${unavailableVocalistPrefix} <strong>${actDoc.tscName || actDoc.name}</strong> is available as a <strong>${selectedLineupSize}</strong> with <strong>${deputyShort}</strong> — one of the band's trusted deputy vocalists — available to perform.`;
 
               const actExtrasHtml = await renderActExtrasHtml(
                 actDoc,
