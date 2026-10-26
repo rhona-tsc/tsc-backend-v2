@@ -23,6 +23,7 @@ import {
 } from "../utils/bookingReplyIntent.js";
 import sendEmail from "../utils/sendEmail.js";
 import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
+import { buildTscEmailFooter } from "../utils/tscEmailBranding.js";
 
 const isValid24 = (v) =>
   typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
@@ -8183,6 +8184,7 @@ const renderActExtrasHtml = async (
                   <p style="margin-top:16px;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
                   <p>If you have any questions, just reply — we’re always happy to help.</p>
                   <p>Warmest wishes,<br/><strong>The Supreme Collective ✨</strong><br/><a href="https://www.thesupremecollective.co.uk" style="color:#888; text-decoration:none;">www.thesupremecollective.co.uk</a></p>
+                  ${buildTscEmailFooter()}
                 </div>
               `,
               });
@@ -8386,6 +8388,7 @@ const renderActExtrasHtml = async (
                   <p style="margin-top:16px;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
                   <p>If you have any questions, just reply — we’re always happy to help.</p>
                   <p>Warmest wishes,<br/><strong>The Supreme Collective ✨</strong><br/><a href="https://www.thesupremecollective.co.uk" style="color:#888; text-decoration:none;">www.thesupremecollective.co.uk</a></p>
+                  ${buildTscEmailFooter()}
                 </div>
               `,
               });

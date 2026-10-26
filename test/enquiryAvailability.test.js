@@ -53,5 +53,9 @@ test("Day 2 email includes the first vocalist and later available alternatives",
   assert.match(email.text, /Mari S/);
   assert.match(email.text, /Rachel F/);
   assert.match(email.text, /Shamyra A/);
+  assert.match(email.html, /TSC_Signature_2026/);
+  assert.match(email.html, /google-5-star-reviews/);
+  assert.match(email.html, /Company Number: 16883956/);
+  assert.match(email.html, /instagram\.com\/thesupremecollective/);
 });
 
