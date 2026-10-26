@@ -190,7 +190,7 @@ export const buildEnquiryDayTwoEmail = ({ enquiry, act, summary }) => {
     <div style="font-family:Arial,Helvetica,sans-serif;color:#111;line-height:1.7;max-width:720px;">
       <p>Hi ${escapeEmailHtml(clientFirstName)},</p>
       <p>I just wanted to check in personally to see whether you had any questions about <strong>${escapeEmailHtml(actName)}</strong>.</p>
-      <p>We have now heard back from the band's <em>other deputy</em> vocalists below, who are currently available for your date:</p>
+      <p>We have now heard back from the band's other deputy vocalists below, who are currently available for your date:</p>
       ${vocalistProfileCardsHtml(summary)}
       <p>If you would like to book a particular vocalist to front the band, you can do so by proceeding to checkout and selecting your preferred deputy. You’re also welcome to progress your booking with a particular vocalist simply by replying to this email, if that’s easiest for you.</p>
       <p>Please kindly note that availability can change because our vocalists also accept work through other avenues, so please let me know if you would like any help choosing the best fit.</p>

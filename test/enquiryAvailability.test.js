@@ -85,7 +85,8 @@ test("Day 2 email includes the first vocalist and later available alternatives",
   assert.match(email.html, /Introducing Shamyra A/);
   assert.match(email.html, /images\.example\.com\/rachel\.jpg/);
   assert.match(email.html, /youtu\.be\/shamyra/);
-  assert.match(email.html, /band's <em>other deputy<\/em> vocalists/);
+  assert.match(email.html, /band's other deputy vocalists/);
+  assert.doesNotMatch(email.html, /<em>other deputy<\/em>/);
   assert.match(email.html, /selecting your preferred deputy/);
   assert.match(email.html, /simply by replying to this email/);
   assert.match(email.text, /band's other deputy vocalists/);
