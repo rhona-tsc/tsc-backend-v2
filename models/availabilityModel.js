@@ -117,6 +117,8 @@ requestId: { type: String, index: true },
     clientAvailabilityEmailMessageId: { type: String, default: "" },
     clientDayTwoEmailSentAt: { type: Date, default: null, index: true },
     clientDayTwoEmailMessageId: { type: String, default: "" },
+    clientDayFourEmailSentAt: { type: Date, default: null, index: true },
+    clientDayFourEmailMessageId: { type: String, default: "" },
     websiteReplies: [
   {
     body: { type: String, required: true },

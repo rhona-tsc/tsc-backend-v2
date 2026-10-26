@@ -7,6 +7,7 @@ import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.
 import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
 
 const DAY_TWO_DELAY_MS = 48 * 60 * 60 * 1000;
+const DAY_FOUR_AFTER_DAY_TWO_DELAY_MS = 48 * 60 * 60 * 1000;
 const clean = (value) => String(value || "").trim();
 const isHttpUrl = (value) => /^https?:\/\//i.test(clean(value));
 
@@ -86,6 +87,35 @@ const vocalistProfileCardsHtml = (summary, { showSlotHeadings = true } = {}) =>
       return `${slotHeading}${cards}`;
     })
     .join("");
+
+const compactVocalistProfileCardsHtml = (summary) => {
+  const seen = new Set();
+  const rows = summary.all.filter((row) => {
+    const key = clean(row.musicianId || row.profileUrl || row.displayName || row.musicianName);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return `<div style="margin:18px 0 26px;text-align:center;">${rows
+    .map((row) => {
+      const name = shortName(row.displayName || row.musicianName);
+      const profileUrl = isHttpUrl(row.profileUrl) ? row.profileUrl : "";
+      const photoUrl = isHttpUrl(row.photoUrl) ? row.photoUrl : "";
+      return `<div style="display:inline-block;width:30%;min-width:170px;vertical-align:top;text-align:center;margin:0 1% 18px;">
+        ${
+          photoUrl
+            ? profileUrl
+              ? `<a href="${escapeEmailHtml(profileUrl)}" style="display:inline-block;text-decoration:none;"><img src="${escapeEmailHtml(photoUrl)}" width="140" height="140" alt="${escapeEmailHtml(name)}" style="display:block;width:140px;height:140px;border-radius:50%;object-fit:cover;border:0;margin:0 auto;" /></a>`
+              : `<img src="${escapeEmailHtml(photoUrl)}" width="140" height="140" alt="${escapeEmailHtml(name)}" style="display:block;width:140px;height:140px;border-radius:50%;object-fit:cover;border:0;margin:0 auto;" />`
+            : `<div style="width:140px;height:140px;border-radius:50%;background:#f3f3f3;margin:0 auto;"></div>`
+        }
+        <p style="margin:9px 0 0;font-weight:700;">${escapeEmailHtml(name)}</p>
+        ${profileUrl ? `<p style="margin:3px 0 0;"><a href="${escapeEmailHtml(profileUrl)}" style="color:#ff6667;font-weight:700;text-decoration:none;">View Profile →</a></p>` : ""}
+      </div>`;
+    })
+    .join("")}</div>`;
+};
 
 const enrichVocalistSummary = async (summary) => {
   const musicianIds = [
@@ -270,6 +300,7 @@ export const buildEnquiryDayFourEmail = ({ enquiry, act, summary }) => {
       <p>Hi ${escapeEmailHtml(clientFirstName)},</p>
       <p>I just wanted to share a quick availability update for <strong>${escapeEmailHtml(actName)}</strong> on <strong>${escapeEmailHtml(eventDate)}</strong>.</p>
       <p><strong>${escapeEmailHtml(namesText)}</strong> ${availabilityVerb} currently available to front the band for your event.</p>
+      ${compactVocalistProfileCardsHtml(summary)}
       <p>We receive a high number of enquiries, and our vocalists also accept work through other avenues. Availability can therefore change, and the longer you wait, the greater the chance that a vocalist who is currently available may be booked elsewhere.</p>
       <p>If you would like to secure the band and your preferred vocalist, we recommend progressing your booking as soon as you’re ready to avoid disappointment.</p>
       <p><a href="${escapeEmailHtml(bookUrl)}" style="display:inline-block;background:#ff6667;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:700;">View ${escapeEmailHtml(actName)} and book →</a></p>
@@ -522,6 +553,92 @@ export const runEnquiryDayTwoFollowups = async ({ now = new Date() } = {}) => {
         { $set: { clientDayTwoEmailSentAt: null } },
       );
       console.error("❌ Enquiry Day 2 follow-up failed", requestKey, error?.message || error);
+      result.failed += 1;
+    }
+  }
+
+  return result;
+};
+
+export const runEnquiryDayFourFollowups = async ({ now = new Date() } = {}) => {
+  const cutoff = new Date(now.getTime() - DAY_FOUR_AFTER_DAY_TWO_DELAY_MS);
+  const dueRows = await AvailabilityModel.find({
+    clientDayTwoEmailSentAt: { $ne: null, $lte: cutoff },
+    clientDayFourEmailSentAt: null,
+    requestKey: { $exists: true, $ne: "" },
+  })
+    .select("requestKey enquiryId")
+    .lean();
+  const requestKeys = [...new Set(dueRows.map((row) => row.requestKey).filter(Boolean))];
+  const result = { considered: requestKeys.length, sent: 0, skipped: 0, failed: 0 };
+
+  for (const requestKey of requestKeys) {
+    const rows = await AvailabilityModel.find({ requestKey }).lean();
+    const representative = rows.find((row) => row.clientDayTwoEmailSentAt);
+    if (
+      !representative ||
+      rows.some((row) => row.clientDayFourEmailSentAt || row.confirmedBooking)
+    ) {
+      result.skipped += 1;
+      continue;
+    }
+    const enquiry = await EnquiryBoardItem.findOne({
+      enquiryRef: representative.enquiryId,
+      status: { $in: ["open", "contacted", "qualified"] },
+    }).lean();
+    if (!enquiry || !/\S+@\S+\.\S+/.test(clean(enquiry.clientEmail || representative.clientEmail))) {
+      result.skipped += 1;
+      continue;
+    }
+    const act = await Act.findById(representative.actId)
+      .select("tscName name slug tscSlug lineups")
+      .lean();
+    const lineup = findLineup(act, rows);
+    const summary = await enrichVocalistSummary(
+      availableVocalistsForLineup(rows, lineup),
+    );
+    if (!summary.complete) {
+      result.skipped += 1;
+      continue;
+    }
+
+    const claimed = await AvailabilityModel.findOneAndUpdate(
+      { _id: representative._id, clientDayFourEmailSentAt: null },
+      { $set: { clientDayFourEmailSentAt: now } },
+      { new: true },
+    );
+    if (!claimed) {
+      result.skipped += 1;
+      continue;
+    }
+
+    try {
+      const email = buildEnquiryDayFourEmail({ enquiry, act, summary });
+      const sent = await sendEmail({
+        to: clean(enquiry.clientEmail || representative.clientEmail),
+        bcc: "hello@thesupremecollective.co.uk",
+        subject: email.subject,
+        text: email.text,
+        html: email.html,
+        replyTo: "hello@thesupremecollective.co.uk",
+      });
+      if (!sent?.ok) throw new Error(sent?.error || "Email provider rejected the message");
+      await AvailabilityModel.updateMany(
+        { requestKey },
+        {
+          $set: {
+            clientDayFourEmailSentAt: now,
+            clientDayFourEmailMessageId: sent.messageId || "",
+          },
+        },
+      );
+      result.sent += 1;
+    } catch (error) {
+      await AvailabilityModel.updateOne(
+        { _id: representative._id },
+        { $set: { clientDayFourEmailSentAt: null } },
+      );
+      console.error("❌ Enquiry Day 4 follow-up failed", requestKey, error?.message || error);
       result.failed += 1;
     }
   }

@@ -175,6 +175,10 @@ test("Day 4 email gives a clear availability reminder and booking action", () =>
     ],
     lineup,
   );
+  summary.all.forEach((row, index) => {
+    row.profileUrl = `https://thesupremecollective.co.uk/musician/test-${index + 1}`;
+    row.photoUrl = `https://res.cloudinary.com/example/test-${index + 1}.jpg`;
+  });
   const email = buildEnquiryDayFourEmail({
     enquiry: {
       clientName: "Narelle Beckley-Perry",
@@ -188,6 +192,7 @@ test("Day 4 email gives a clear availability reminder and booking action", () =>
 
   assert.match(email.subject, /availability update/i);
   assert.match(email.html, /Mari S and Rachel F/);
+  assert.match(email.html, /View Profile/);
   assert.match(email.html, /high number of enquiries/);
   assert.match(email.html, /booked elsewhere/);
   assert.match(email.html, /avoid disappointment/);
