@@ -82,6 +82,7 @@ import {
   sendVideoReviewDigest,
 } from "./services/videoMigrationAutomationService.js";
 import { runClientAutomations } from "./services/clientAutomationService.js";
+import { runEnquiryDayTwoFollowups } from "./services/enquiryFollowupService.js";
 import seoKeywordRoutes from "./routes/seoKeywordRoutes.js";
 import { runSeoMonthlyReport } from "./services/seoKeywordService.js";
 
@@ -990,6 +991,8 @@ cron.schedule(
     try {
       const result = await runClientAutomations();
       console.log("📨 Client automation run complete", result);
+      const enquiryResult = await runEnquiryDayTwoFollowups();
+      console.log("📨 Enquiry Day 2 follow-up run complete", enquiryResult);
     } catch (error) {
       console.error("❌ Client automation run failed", error?.message || error);
     }

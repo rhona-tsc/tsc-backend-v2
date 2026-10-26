@@ -113,6 +113,10 @@ requestId: { type: String, index: true },
     calendarSummary: { type: String },
     calendarDescription: { type: String },
     confirmedBooking: { type: Boolean, default: false },
+    clientAvailabilityEmailSentAt: { type: Date, default: null, index: true },
+    clientAvailabilityEmailMessageId: { type: String, default: "" },
+    clientDayTwoEmailSentAt: { type: Date, default: null, index: true },
+    clientDayTwoEmailMessageId: { type: String, default: "" },
     websiteReplies: [
   {
     body: { type: String, required: true },

@@ -22,6 +22,7 @@ import {
   resolveBookingReplyIntent,
 } from "../utils/bookingReplyIntent.js";
 import sendEmail from "../utils/sendEmail.js";
+import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
 
 const isValid24 = (v) =>
   typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
@@ -5079,7 +5080,8 @@ export const processAvailabilityReplyFlow = async ({
       badgeResult = await rebuildAndApplyAvailabilityBadge({
         actId,
         dateISO,
-        __fromYesFlow: true,
+        requestKey: updated.requestKey || null,
+        enquiryId: updated.enquiryId || null,
       });
     } catch (e) {
       console.warn("⚠️ Badge rebuild failed:", e?.message || e);
@@ -6803,7 +6805,12 @@ const generateLineupDescriptionForEmail = (lineup) => {
   return `${countLabel}: ${instrumentsStr}${rolesStr}`;
 };
 
-export async function rebuildAndApplyAvailabilityBadge({ actId, dateISO }) {
+export async function rebuildAndApplyAvailabilityBadge({
+  actId,
+  dateISO,
+  requestKey = null,
+  enquiryId = null,
+}) {
   console.log("🟦 [rebuildAndApplyAvailabilityBadge] START", {
     actId,
     dateISO,
@@ -6883,11 +6890,15 @@ const findExtra = (extrasMap, ...aliases) => {
   const reserveClientEmailSend = async ({ actId, dateISO, slotIdx, kind }) => {
     const path = `availabilityBadgesMeta.${dateISO}.clientEmailsSent.${slotIdx}.${kind}`;
     const cutoff = new Date(Date.now() - COOLDOWN_MS);
+    const reservationFilter =
+      kind === "lineup_ready"
+        ? { [path]: { $exists: false } }
+        : { $or: [{ [path]: { $exists: false } }, { [path]: { $lt: cutoff } }] };
 
     const updated = await Act.findOneAndUpdate(
       {
         _id: actId,
-        $or: [{ [path]: { $exists: false } }, { [path]: { $lt: cutoff } }],
+        ...reservationFilter,
       },
       { $set: { [path]: new Date() } },
       { new: false },
@@ -7551,21 +7562,33 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
   /* ===================== Client emails block ===================== */
   try {
     const allRows = Array.isArray(availRows) ? availRows : [];
+    const latestContextRow = allRows
+      .slice()
+      .sort(
+        (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0),
+      )[0];
+    const contextRequestKey = requestKey || latestContextRow?.requestKey || "";
+    const contextEnquiryId = enquiryId || latestContextRow?.enquiryId || "";
+    const contextRows = allRows.filter((row) => {
+      if (contextRequestKey) return row.requestKey === contextRequestKey;
+      if (contextEnquiryId) return row.enquiryId === contextEnquiryId;
+      return false;
+    });
 
-    const availabilityRecord = allRows
+    const availabilityRecord = contextRows
       .slice()
       .sort(
         (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0),
       )[0];
 
     let clientEmail =
-      allRows.find((r) => r.clientEmail && String(r.clientEmail).includes("@"))
+      contextRows.find((r) => r.clientEmail && String(r.clientEmail).includes("@"))
         ?.clientEmail || "hello@thesupremecollective.co.uk";
-    let clientName = allRows.find((r) => r.clientName)?.clientName || "there";
+    let clientName = contextRows.find((r) => r.clientName)?.clientName || "there";
 
     const selectedAddress =
-      badge?.address ||
       availabilityRecord?.formattedAddress ||
+      badge?.address ||
       actDoc?.formattedAddress ||
       actDoc?.venueAddress ||
       "TBC";
@@ -7740,8 +7763,8 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
     const clientUserId =
       availabilityRecord?.userId ||
       availabilityRecord?.clientUserId ||
-      allRows.find((r) => r?.userId)?.userId ||
-      allRows.find((r) => r?.clientUserId)?.clientUserId ||
+      contextRows.find((r) => r?.userId)?.userId ||
+      contextRows.find((r) => r?.clientUserId)?.clientUserId ||
       null;
 
     console.log("🧠 [rebuild] resolved client identity", {
@@ -7775,7 +7798,92 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
       return !!(primaryDeputyCover || yesDeputy);
     };
 
-    const slotsArr = Array.isArray(badge?.slots) ? badge.slots : [];
+    const contextLineupId = contextRows.find((row) => row.lineupId)?.lineupId;
+    const selectedLineup = (actDoc.lineups || []).find(
+      (lineup) =>
+        String(lineup?._id || "") === String(contextLineupId || "") ||
+        String(lineup?.lineupId || "") === String(contextLineupId || ""),
+    );
+    const lineupAvailability = availableVocalistsForLineup(
+      contextRows,
+      selectedLineup,
+    );
+
+    if (!lineupAvailability.complete) {
+      console.log("✉️ [rebuild] Client email held until every vocalist slot is covered", {
+        requestKey: contextRequestKey,
+        enquiryId: contextEnquiryId,
+        requiredSlots: lineupAvailability.requiredSlots,
+        coveredSlots: lineupAvailability.requiredSlots.filter(
+          (slotIndex) =>
+            (lineupAvailability.bySlot.get(slotIndex) || []).length > 0,
+        ),
+      });
+      return {
+        success: true,
+        updated: true,
+        badge,
+        clientEmailSkipped: "lineup_incomplete",
+      };
+    }
+
+    if (contextRows.some((row) => row.clientAvailabilityEmailSentAt)) {
+      console.log("✉️ [rebuild] Client availability email already sent for enquiry", {
+        requestKey: contextRequestKey,
+        enquiryId: contextEnquiryId,
+      });
+      return {
+        success: true,
+        updated: true,
+        badge,
+        clientEmailSkipped: "already_sent",
+      };
+    }
+
+    const joinDisplayNames = (names = []) => {
+      const unique = [...new Set(names.filter(Boolean))];
+      if (unique.length <= 1) return unique[0] || "our vocalist";
+      if (unique.length === 2) return `${unique[0]} & ${unique[1]}`;
+      return `${unique.slice(0, -1).join(", ")} & ${unique.at(-1)}`;
+    };
+    const selectedLineupNames = joinDisplayNames(
+      lineupAvailability.selected.map((row) =>
+        shortDisplayName(row.displayName || row.musicianName),
+      ),
+    );
+    const reservationSlotKey = `enquiry_${String(
+      contextRequestKey || contextEnquiryId || contextLineupId || "lineup",
+    ).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+
+    // Build an enquiry-scoped badge view. The public badge can contain rows from
+    // several enquiries for the same act/date, but client emails must never do so.
+    const slotsArr = lineupAvailability.selected.map((row) => ({
+      slotIndex: Number(row.slotIndex ?? 0),
+      state: "yes",
+      covering: row.isDeputy ? "deputy" : "lead",
+      available: true,
+      primary: {
+        musicianId: row.musicianId || null,
+        vocalistName: row.displayName || row.musicianName || "",
+        photoUrl: row.photoUrl || null,
+        profileUrl: row.profileUrl || "",
+        setAt: row.repliedAt || row.updatedAt || null,
+        isDeputy: Boolean(row.isDeputy),
+        available: true,
+      },
+      deputies: row.isDeputy
+        ? [
+            {
+              musicianId: row.musicianId || null,
+              vocalistName: row.displayName || row.musicianName || "",
+              photoUrl: row.photoUrl || null,
+              profileUrl: row.profileUrl || "",
+              state: "yes",
+              available: true,
+            },
+          ]
+        : [],
+    }));
     const anyLeadAvailable = slotsArr.some(slotIsLeadAvailable);
 
     const presentBadgePrimary = (slot = null) => {
@@ -7861,14 +7969,14 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
           const canSend = await reserveClientEmailSend({
             actId,
             dateISO,
-            slotIdx,
-            kind: "lead",
+            slotIdx: reservationSlotKey,
+            kind: "lineup_ready",
           });
 
           if (!canSend) {
             console.log(
-              "✉️ [rebuild] Skipping LEAD email (sent within 7 days)",
-              { slotIdx },
+              "✉️ [rebuild] Skipping client email (enquiry already presented)",
+              { requestKey: contextRequestKey },
             );
           } else {
             try {
@@ -7883,8 +7991,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
                 fallbackProfileUrl: leadInfo?.profileUrl || "",
               });
 
-              const vocalistShort =
-                shortDisplayName(vocalistCard.name) || "our lead vocalist";
+              const vocalistShort = selectedLineupNames;
 
               console.log("📧 Sending LEAD-available email (per slot)", {
                 slotIdx,
@@ -7897,21 +8004,21 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
                 selectedAddress,
               );
 
-              await sendClientEmail({
+              const emailResult = await sendClientEmail({
                 actId: String(actId),
                 userId: clientUserId,
                 to: clientEmail,
                 name: clientName,
                 allowHello: true,
                 bcc: ["hello@thesupremecollective.co.uk"],
-                subject: `Good news — ${actDoc.tscName || actDoc.name}'s Lead Vocalist is available for ${eventDatePretty}`,
+                subject: `Good news — ${actDoc.tscName || actDoc.name} is available for ${eventDatePretty}`,
                 html: `
                 <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
                   <p>Hi ${(clientName || "there").split(" ")[0]},</p>
                   <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
                   <p>
                     We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available with
-                    <strong>${vocalistShort}</strong> on lead vocals, and they’d love to perform for you and your guests.
+                    <strong>${vocalistShort}</strong> on vocals, and they’d love to perform for you and your guests.
                   </p>
 
                   ${
@@ -7993,6 +8100,21 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
               `,
               });
 
+              if (!emailResult?.success) {
+                throw new Error(emailResult?.error || emailResult?.reason || "Client email was not sent");
+              }
+              await AvailabilityModel.updateMany(
+                contextRequestKey
+                  ? { requestKey: contextRequestKey }
+                  : { enquiryId: contextEnquiryId },
+                {
+                  $set: {
+                    clientAvailabilityEmailSentAt: new Date(),
+                    clientAvailabilityEmailMessageId: emailResult.messageId || "",
+                  },
+                },
+              );
+
               console.log("✅ Client email sent (lead available, per slot).", {
                 slotIdx,
               });
@@ -8004,8 +8126,8 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
               await rollbackClientEmailReservation({
                 actId,
                 dateISO,
-                slotIdx,
-                kind: "lead",
+                slotIdx: reservationSlotKey,
+                kind: "lineup_ready",
               });
             }
           }
@@ -8021,14 +8143,14 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
           const canSend = await reserveClientEmailSend({
             actId,
             dateISO,
-            slotIdx,
-            kind: "deputy",
+            slotIdx: reservationSlotKey,
+            kind: "lineup_ready",
           });
 
           if (!canSend) {
             console.log(
-              "✉️ [rebuild] Skipping DEPUTY email (sent within 7 days)",
-              { slotIdx },
+              "✉️ [rebuild] Skipping client email (enquiry already presented)",
+              { requestKey: contextRequestKey },
             );
           } else {
             try {
@@ -8050,8 +8172,7 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
                 depInfo.firstName ||
                 "one of our vocalists";
 
-              const deputyShort =
-                shortDisplayName(deputyNameFull) || deputyNameFull;
+              const deputyShort = selectedLineupNames;
 
               console.log("📧 Sending DEPUTY-available email (per slot)", {
                 slotIdx,
@@ -8063,26 +8184,9 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
 
               const isVocalistMember = (m = {}) =>
                 /vocal|singer/i.test(String(m.instrument || m.role || ""));
-              const smallestLineup =
-                Array.isArray(actDoc?.lineups) && actDoc.lineups.length
-                  ? actDoc.lineups.slice().sort((a, b) => {
-                      const ca = Array.isArray(a?.bandMembers)
-                        ? a.bandMembers.filter(
-                            (x) => x && x.isEssential !== false,
-                          ).length
-                        : 0;
-                      const cb = Array.isArray(b?.bandMembers)
-                        ? b.bandMembers.filter(
-                            (x) => x && x.isEssential !== false,
-                          ).length
-                        : 0;
-                      return ca - cb;
-                    })[0]
-                  : null;
-
               const vocalistCount =
-                smallestLineup && Array.isArray(smallestLineup.bandMembers)
-                  ? smallestLineup.bandMembers.filter(
+                selectedLineup && Array.isArray(selectedLineup.bandMembers)
+                  ? selectedLineup.bandMembers.filter(
                       (m) => m?.isEssential !== false && isVocalistMember(m),
                     ).length
                   : 1;
@@ -8091,25 +8195,29 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
                 vocalistCount > 1
                   ? "One of the band's regular vocalists isn’t available for your date, but we’re delighted to confirm that"
                   : "The band's regular vocalist isn’t available for your date, but we’re delighted to confirm that";
+              const deputyAvailabilityCopy =
+                lineupAvailability.selected.length > 1
+                  ? `${unavailableVocalistPrefix} <strong>${deputyShort}</strong> — trusted deputy vocalists for the band — are available to perform instead.`
+                  : `${unavailableVocalistPrefix} <strong>${deputyShort}</strong> — one of the band's trusted deputy vocalists — is available to perform instead.`;
 
               const actExtrasHtml = await renderActExtrasHtml(
                 actDoc,
                 selectedAddress,
               );
 
-              await sendClientEmail({
+              const emailResult = await sendClientEmail({
                 actId: String(actId),
                 userId: clientUserId,
                 to: clientEmail,
                 name: clientName,
                 bcc: ["hello@thesupremecollective.co.uk"],
-                subject: `${deputyShort} is available to perform for you with ${actDoc.tscName || actDoc.name} on ${eventDatePretty}`,
+                subject: `${actDoc.tscName || actDoc.name} is available for ${eventDatePretty}`,
                 html: `
                 <div style="font-family: Arial, sans-serif; color:#333; line-height:1.6; max-width:700px; margin:0 auto;">
                   <p>Hi ${(clientName || "there").split(" ")[0]},</p>
                   <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
                   <p>
-                    ${unavailableVocalistPrefix} <strong>${deputyShort}</strong> — one of the band's trusted deputy vocalists — is available to perform instead.
+                    ${deputyAvailabilityCopy}
                   </p>
 
                   ${
@@ -8195,6 +8303,21 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
               `,
               });
 
+              if (!emailResult?.success) {
+                throw new Error(emailResult?.error || emailResult?.reason || "Client email was not sent");
+              }
+              await AvailabilityModel.updateMany(
+                contextRequestKey
+                  ? { requestKey: contextRequestKey }
+                  : { enquiryId: contextEnquiryId },
+                {
+                  $set: {
+                    clientAvailabilityEmailSentAt: new Date(),
+                    clientAvailabilityEmailMessageId: emailResult.messageId || "",
+                  },
+                },
+              );
+
               console.log("✅ Deputy-available client email sent (per slot).", {
                 slotIdx,
               });
@@ -8206,8 +8329,8 @@ const renderActExtrasHtml = async (actLike = {}, selectedAddress = "") => {
               await rollbackClientEmailReservation({
                 actId,
                 dateISO,
-                slotIdx,
-                kind: "deputy",
+                slotIdx: reservationSlotKey,
+                kind: "lineup_ready",
               });
             }
           }
