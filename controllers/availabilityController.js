@@ -7780,7 +7780,7 @@ const renderActExtrasHtml = async (
           const enquiryLabel =
             (lineupSizeCounts.get(lineupSize) || 0) > 1
               ? `Enquire about this ${lineupSize}`
-              : `Enquire about ${lineupSize}`;
+              : `Enquire about the ${lineupSize}`;
           const enquiryButton = isLarger
             ? `<div style="margin:8px 0 14px;"><a href="${enquiryUrl}" style="display:inline-block; background-color:#111; color:#fff; padding:9px 16px; text-decoration:none; border-radius:5px; font-weight:600; line-height:1.2;">${enquiryLabel} →</a></div>`
             : "";
@@ -8362,7 +8362,10 @@ const renderActExtrasHtml = async (
                           }
                           ${renderVideoList(deputyShort, deputyCard.videos)}
                           <p style="margin:8px 0 0; color:#555;">
-                            <strong>${deputyShort}</strong>${deputyCard.repertoireCount ? ` has <strong>${deputyCard.repertoireCount} songs</strong> in ${deputyCard.possessivePronoun} repertoire` : " has an extensive repertoire"}, and you’re completely welcome to ${deputyCard.profileUrl ? `<a href="${deputyCard.profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">take a browse</a>` : "take a browse"} and suggest all your favourites for ${deputyShort} and the band to perform for you.
+                            <strong>${deputyShort}</strong>${deputyCard.repertoireCount ? ` has <strong>${deputyCard.repertoireCount} songs</strong> in ${deputyCard.possessivePronoun} repertoire` : " has an extensive repertoire"}, and you’re very welcome to ${deputyCard.profileUrl ? `<a href="${deputyCard.profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">take a browse</a>` : "take a browse"} and suggest your favourites for ${deputyShort} and the band to perform.
+                          </p>
+                          <p style="margin:8px 0 0; color:#555;">
+                            ${deputyShort}’s repertoire will form the basis of the band’s setlist for your event. If there are particular songs from the band’s original repertoire that you were hoping to hear, please let us know—${deputyShort} will do ${deputyCard.possessivePronoun} very best to accommodate your favourites.
                           </p>
                         </div>
                       `
