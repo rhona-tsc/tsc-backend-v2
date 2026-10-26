@@ -5,6 +5,7 @@ import Act from "../models/actModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 import { triggerAvailabilityRequest } from "../controllers/availabilityController.js";
 import {
+  sendEnquiryDayFourTestEmail,
   sendEnquiryDayTwoEmailNow,
   sendEnquiryDayTwoTestEmail,
 } from "../services/enquiryFollowupService.js";
@@ -560,6 +561,36 @@ router.post("/day-two-email/test", musicianAuth, async (req, res) => {
     return res.status(400).json({
       success: false,
       message: error?.message || "The Day 2 test email could not be sent",
+    });
+  }
+});
+
+router.post("/day-four-email/test", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user) && !isAgent(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin-only" });
+    }
+
+    const recipient = clean(
+      req.body?.to || "rhona@thesupremecollective.co.uk",
+    ).toLowerCase();
+    if (!DAY_TWO_TEST_RECIPIENTS.has(recipient)) {
+      return res.status(400).json({
+        success: false,
+        message: "Test emails may only be sent to an approved TSC inbox",
+      });
+    }
+
+    const result = await sendEnquiryDayFourTestEmail({
+      enquiryRef: req.body?.enquiryRef,
+      to: recipient,
+    });
+    return res.json(result);
+  } catch (error) {
+    console.error("Enquiry Day 4 test email failed:", error);
+    return res.status(400).json({
+      success: false,
+      message: error?.message || "The Day 4 test email could not be sent",
     });
   }
 });

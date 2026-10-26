@@ -216,6 +216,118 @@ export const buildEnquiryDayTwoEmail = ({ enquiry, act, summary }) => {
   return { subject, text, html };
 };
 
+export const buildEnquiryDayFourEmail = ({ enquiry, act, summary }) => {
+  const clientFirstName = clean(enquiry?.clientName).split(/\s+/)[0] || "there";
+  const actName = clean(
+    enquiry?.actTscName || enquiry?.actName || act?.tscName || act?.name || "the band",
+  );
+  const eventDate = friendlyDate(enquiry?.eventDateISO);
+  const site = publicSiteUrl();
+  const slug =
+    clean(act?.slug || act?.tscSlug) ||
+    actName
+      .toLowerCase()
+      .replace(/&/g, "and")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  const address = clean(enquiry?.address || summary.all[0]?.formattedAddress);
+  const bookUrl = `${site}/act/${encodeURIComponent(slug)}?date=${encodeURIComponent(
+    enquiry?.eventDateISO || "",
+  )}&address=${encodeURIComponent(address)}`;
+  const vocalistNames = [
+    ...new Set(
+      summary.all
+        .map((row) => shortName(row.displayName || row.musicianName))
+        .filter(Boolean),
+    ),
+  ];
+  const namesText =
+    vocalistNames.length > 1
+      ? `${vocalistNames.slice(0, -1).join(", ")} and ${vocalistNames.at(-1)}`
+      : vocalistNames[0] || "The vocalist";
+  const availabilityVerb = vocalistNames.length === 1 ? "is" : "are";
+  const subject = `A quick availability update for ${actName} on ${eventDate}`;
+  const text = [
+    `Hi ${clientFirstName},`,
+    "",
+    `I just wanted to share a quick availability update for ${actName} on ${eventDate}.`,
+    "",
+    `${namesText} ${availabilityVerb} currently available to front the band for your event.`,
+    "",
+    "We receive a high number of enquiries, and our vocalists also accept work through other avenues. Availability can therefore change, and the longer you wait, the greater the chance that a vocalist who is currently available may be booked elsewhere.",
+    "",
+    "If you would like to secure the band and your preferred vocalist, we recommend progressing your booking as soon as you’re ready to avoid disappointment.",
+    "",
+    `View ${actName} and book: ${bookUrl}`,
+    "",
+    "If you have any questions or would like help putting the booking in place, simply reply to this email and I’ll be happy to help.",
+    "",
+    "Warmest wishes,",
+    "Rhona ✨",
+  ].join("\n");
+  const html = `
+    <div style="font-family:Arial,Helvetica,sans-serif;color:#111;line-height:1.7;max-width:720px;">
+      <p>Hi ${escapeEmailHtml(clientFirstName)},</p>
+      <p>I just wanted to share a quick availability update for <strong>${escapeEmailHtml(actName)}</strong> on <strong>${escapeEmailHtml(eventDate)}</strong>.</p>
+      <p><strong>${escapeEmailHtml(namesText)}</strong> ${availabilityVerb} currently available to front the band for your event.</p>
+      <p>We receive a high number of enquiries, and our vocalists also accept work through other avenues. Availability can therefore change, and the longer you wait, the greater the chance that a vocalist who is currently available may be booked elsewhere.</p>
+      <p>If you would like to secure the band and your preferred vocalist, we recommend progressing your booking as soon as you’re ready to avoid disappointment.</p>
+      <p><a href="${escapeEmailHtml(bookUrl)}" style="display:inline-block;background:#ff6667;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:700;">View ${escapeEmailHtml(actName)} and book →</a></p>
+      <p>If you have any questions or would like help putting the booking in place, simply reply to this email and I’ll be happy to help.</p>
+      <p>Warmest wishes,<br />Rhona ✨</p>
+      ${buildTscEmailFooter()}
+    </div>`;
+  return { subject, text, html };
+};
+
+export const sendEnquiryDayFourTestEmail = async ({ enquiryRef, to } = {}) => {
+  const safeRef = clean(enquiryRef);
+  const safeRecipient = clean(to).toLowerCase();
+  if (!safeRef) throw new Error("An enquiry reference is required");
+  if (!/^\S+@\S+\.\S+$/.test(safeRecipient)) {
+    throw new Error("A valid test recipient is required");
+  }
+
+  const enquiry = await EnquiryBoardItem.findOne({ enquiryRef: safeRef }).lean();
+  if (!enquiry) throw new Error("Enquiry not found");
+  const rows = await AvailabilityModel.find({ enquiryId: safeRef }).lean();
+  if (!rows.length) throw new Error("No availability responses found");
+  const act = await Act.findById(enquiry.actId)
+    .select("tscName name slug tscSlug lineups")
+    .lean();
+  if (!act) throw new Error("Act not found");
+
+  const lineup = findLineup(act, rows);
+  const summary = await enrichVocalistSummary(
+    availableVocalistsForLineup(rows, lineup),
+  );
+  if (!summary.complete) {
+    throw new Error(
+      "The requested lineup does not yet have an available vocalist for every required slot",
+    );
+  }
+
+  const email = buildEnquiryDayFourEmail({ enquiry, act, summary });
+  const sent = await sendEmail({
+    to: safeRecipient,
+    subject: `[TEST] ${email.subject}`,
+    text: email.text,
+    html: email.html,
+    replyTo: "hello@thesupremecollective.co.uk",
+  });
+  if (!sent?.ok) {
+    throw new Error(sent?.error || "The Day 4 test email could not be delivered");
+  }
+
+  return {
+    success: true,
+    recipient: safeRecipient,
+    subject: `[TEST] ${email.subject}`,
+    messageId: sent.messageId || "",
+    vocalistCount: summary.all.length,
+  };
+};
+
 export const sendEnquiryDayTwoTestEmail = async ({
   enquiryRef,
   to,

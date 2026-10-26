@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
-import { buildEnquiryDayTwoEmail } from "../services/enquiryFollowupService.js";
+import {
+  buildEnquiryDayFourEmail,
+  buildEnquiryDayTwoEmail,
+} from "../services/enquiryFollowupService.js";
 import { buildTscEmailFooter } from "../utils/tscEmailBranding.js";
 
 const twoVocalistLineup = {
@@ -161,5 +164,34 @@ test("email footer stacks the Google rating above the WhatsApp button", () => {
     footer.slice(googleRating, whatsappButton),
     /text-align:center;/,
   );
+});
+
+test("Day 4 email gives a clear availability reminder and booking action", () => {
+  const lineup = { bandMembers: [{ instrument: "Lead Female Vocal" }] };
+  const summary = availableVocalistsForLineup(
+    [
+      { slotIndex: 0, reply: "yes", musicianName: "Mari Songs" },
+      { slotIndex: 0, reply: "yes", musicianName: "Rachel Francis" },
+    ],
+    lineup,
+  );
+  const email = buildEnquiryDayFourEmail({
+    enquiry: {
+      clientName: "Narelle Beckley-Perry",
+      actTscName: "Committed to Kisstory",
+      eventDateISO: "2028-08-17",
+      address: "The Priests House",
+    },
+    act: { name: "Committed to Kisstory", slug: "committed-to-kisstory" },
+    summary,
+  });
+
+  assert.match(email.subject, /availability update/i);
+  assert.match(email.html, /Mari S and Rachel F/);
+  assert.match(email.html, /high number of enquiries/);
+  assert.match(email.html, /booked elsewhere/);
+  assert.match(email.html, /avoid disappointment/);
+  assert.match(email.html, /View Committed to Kisstory and book/);
+  assert.match(email.html, /TSC_Signature_2026/);
 });
 
