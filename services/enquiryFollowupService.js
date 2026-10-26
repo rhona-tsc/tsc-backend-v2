@@ -267,6 +267,70 @@ export const sendEnquiryDayTwoTestEmail = async ({
   };
 };
 
+export const sendEnquiryDayTwoEmailNow = async ({ enquiryRef } = {}) => {
+  const safeRef = clean(enquiryRef);
+  if (!safeRef) throw new Error("An enquiry reference is required");
+
+  const enquiry = await EnquiryBoardItem.findOne({ enquiryRef: safeRef }).lean();
+  if (!enquiry) throw new Error("Enquiry not found");
+
+  const recipient = clean(enquiry.clientEmail).toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(recipient)) {
+    throw new Error("The enquiry does not have a valid client email address");
+  }
+
+  const rows = await AvailabilityModel.find({ enquiryId: safeRef }).lean();
+  if (!rows.length) throw new Error("No availability responses found");
+
+  const act = await Act.findById(enquiry.actId)
+    .select("tscName name slug tscSlug lineups")
+    .lean();
+  if (!act) throw new Error("Act not found");
+
+  const lineup = findLineup(act, rows);
+  const summary = await enrichVocalistSummary(
+    availableVocalistsForLineup(rows, lineup),
+  );
+  if (!summary.complete) {
+    throw new Error(
+      "The requested lineup does not yet have an available vocalist for every required slot",
+    );
+  }
+
+  const email = buildEnquiryDayTwoEmail({ enquiry, act, summary });
+  const sent = await sendEmail({
+    to: recipient,
+    bcc: "hello@thesupremecollective.co.uk",
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    replyTo: "hello@thesupremecollective.co.uk",
+  });
+  if (!sent?.ok) {
+    throw new Error(sent?.error || "The Day 2 email could not be delivered");
+  }
+
+  const sentAt = new Date();
+  await AvailabilityModel.updateMany(
+    { enquiryId: safeRef },
+    {
+      $set: {
+        clientDayTwoEmailSentAt: sentAt,
+        clientDayTwoEmailMessageId: sent.messageId || "",
+      },
+    },
+  );
+
+  return {
+    success: true,
+    recipient,
+    subject: email.subject,
+    messageId: sent.messageId || "",
+    vocalistCount: summary.all.length,
+    sentAt,
+  };
+};
+
 export const runEnquiryDayTwoFollowups = async ({ now = new Date() } = {}) => {
   const cutoff = new Date(now.getTime() - DAY_TWO_DELAY_MS);
   const dueRows = await AvailabilityModel.find({

@@ -4,7 +4,10 @@ import EnquiryBoardItem from "../models/enquiryBoardItem.js";
 import Act from "../models/actModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 import { triggerAvailabilityRequest } from "../controllers/availabilityController.js";
-import { sendEnquiryDayTwoTestEmail } from "../services/enquiryFollowupService.js";
+import {
+  sendEnquiryDayTwoEmailNow,
+  sendEnquiryDayTwoTestEmail,
+} from "../services/enquiryFollowupService.js";
 
 const router = express.Router();
 
@@ -557,6 +560,30 @@ router.post("/day-two-email/test", musicianAuth, async (req, res) => {
     return res.status(400).json({
       success: false,
       message: error?.message || "The Day 2 test email could not be sent",
+    });
+  }
+});
+
+/**
+ * POST /api/board/enquiries/day-two-email/send
+ * Immediately deliver a live Day 2 follow-up to the enquiry client and
+ * record it as sent so the scheduled follow-up cannot duplicate it.
+ */
+router.post("/day-two-email/send", musicianAuth, async (req, res) => {
+  try {
+    if (!isTSCAdmin(req.user) && !isAgent(req.user)) {
+      return res.status(403).json({ success: false, message: "Admin-only" });
+    }
+
+    const result = await sendEnquiryDayTwoEmailNow({
+      enquiryRef: req.body?.enquiryRef,
+    });
+    return res.json(result);
+  } catch (error) {
+    console.error("Enquiry Day 2 live email failed:", error);
+    return res.status(400).json({
+      success: false,
+      message: error?.message || "The Day 2 email could not be sent",
     });
   }
 });
