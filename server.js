@@ -51,6 +51,7 @@ import financeAccountRouter from "./routes/financeAccountRoute.js";
 import financeTransactionRouter from "./routes/financeTransactionRoute.js";
 import forecastEventRouter from "./routes/forecastEventRoute.js";
 import recurringForecastRuleRouter from "./routes/recurringForecastRuleRoute.js";
+import automationConfigRoutes from "./routes/automationConfigRoutes.js";
 import {
   watchCalendar,
   handleGoogleWebhook,
@@ -692,6 +693,7 @@ app.use("/api/sitemap", sitemapRoutes);
 app.use("/api/social-oauth", socialOAuthRoutes);
 app.use("/api/v2", v2Routes);
 app.use("/api/agent-dashboard", agentDashboardRoutes);
+app.use("/api/automation-config", automationConfigRoutes);
 
 app.use("/api/user", userRouter);
 app.use("/api/auth", authRoutes);
