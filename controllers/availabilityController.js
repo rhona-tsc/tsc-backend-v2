@@ -24,6 +24,7 @@ import sendEmail from "../utils/sendEmail.js";
 import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
 import { buildTscEmailFooter } from "../utils/tscEmailBranding.js";
 import { automatedEnquiryEligible } from "../utils/enquiryAutomationEligibility.js";
+import { renderAvailabilityVocalistCards } from "../utils/availabilityEmailVocalistCards.js";
 
 const isValid24 = (v) =>
   typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
@@ -7903,6 +7904,24 @@ const renderActExtrasHtml = async (
         shortDisplayName(row.displayName || row.musicianName),
       ),
     );
+    const selectedVocalistCards = await Promise.all(
+      lineupAvailability.selected.map(async (row) => {
+        const card = await buildMusicianProfileCard({
+          musicianId: row.musicianId,
+          fallbackName: row.displayName || row.musicianName || "Vocalist",
+          fallbackPhotoUrl: row.photoUrl || "",
+          fallbackProfileUrl: row.profileUrl || "",
+        });
+
+        return {
+          ...card,
+          shortName: shortDisplayName(
+            card.name || row.displayName || row.musicianName || "Vocalist",
+          ),
+          isDeputy: Boolean(row.isDeputy),
+        };
+      }),
+    );
     const reservationSlotKey = `enquiry_${String(
       contextRequestKey || contextEnquiryId || contextLineupId || "lineup",
     ).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -8032,17 +8051,6 @@ const renderActExtrasHtml = async (
             );
           } else {
             try {
-              const vocalistCard = await buildMusicianProfileCard({
-                musicianId: leadInfo?.musicianId,
-                fallbackName:
-                  leadInfo?.vocalistDisplayName ||
-                  leadInfo?.displayName ||
-                  leadInfo?.firstName ||
-                  "Lead Vocalist",
-                fallbackPhotoUrl: leadInfo?.photoUrl || "",
-                fallbackProfileUrl: leadInfo?.profileUrl || "",
-              });
-
               const vocalistShort = selectedLineupNames;
 
               console.log("📧 Sending LEAD-available email (per slot)", {
@@ -8074,42 +8082,10 @@ const renderActExtrasHtml = async (
                     <strong>${vocalistShort}</strong> on vocals, and they’d love to perform for you and your guests.
                   </p>
 
-                  ${
-                    vocalistCard.profileUrl || vocalistCard.photoUrl
-                      ? `
-                        <div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
-                          <h3 style="color:#111; margin-bottom:10px;">Meet ${vocalistShort}</h3>
-                          ${
-                            vocalistCard.photoUrl
-                              ? vocalistCard.profileUrl
-                                ? `
-                                  <a href="${vocalistCard.profileUrl}" style="text-decoration:none;">
-                                    <img
-                                      src="${vocalistCard.photoUrl}"
-                                      alt="${vocalistCard.name}"
-                                      style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
-                                    />
-                                  </a>
-                                `
-                                : `
-                                  <img
-                                    src="${vocalistCard.photoUrl}"
-                                    alt="${vocalistCard.name}"
-                                    style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
-                                  />
-                                `
-                              : ""
-                          }
-                          ${
-                            vocalistCard.profileUrl
-                              ? `<p style="margin:6px 0 0;"><a href="${vocalistCard.profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View ${vocalistShort}'s profile →</a></p>`
-                              : ""
-                          }
-                          ${renderVideoList(vocalistShort, vocalistCard.videos)}
-                        </div>
-                      `
-                      : ""
-                  }
+                  ${renderAvailabilityVocalistCards({
+                    cards: selectedVocalistCards,
+                    heading: "Meet",
+                  })}
 
                   ${
                     heroImg
@@ -8275,48 +8251,11 @@ const renderActExtrasHtml = async (
                     ${deputyAvailabilityCopy}
                   </p>
 
-                  ${
-                    deputyCard.profileUrl || deputyCard.photoUrl
-                      ? `
-                        <div style="margin:20px 0; border-top:1px solid #eee; padding-top:15px;">
-                          <h3 style="color:#111; margin-bottom:10px;">Introducing ${deputyShort}</h3>
-                          ${
-                            deputyCard.photoUrl
-                              ? deputyCard.profileUrl
-                                ? `
-                                  <a href="${deputyCard.profileUrl}" style="text-decoration:none;">
-                                    <img
-                                      src="${deputyCard.photoUrl}"
-                                      alt="${deputyCard.name}"
-                                      style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
-                                    />
-                                  </a>
-                                `
-                                : `
-                                  <img
-                                    src="${deputyCard.photoUrl}"
-                                    alt="${deputyCard.name}"
-                                    style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
-                                  />
-                                `
-                              : ""
-                          }
-                          ${
-                            deputyCard.profileUrl
-                              ? `<p style="margin:6px 0 0;"><a href="${deputyCard.profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View ${deputyShort}'s profile →</a></p>`
-                              : ""
-                          }
-                          ${renderVideoList(deputyShort, deputyCard.videos)}
-                          <p style="margin:8px 0 0; color:#555;">
-                            <strong>${deputyShort}</strong>${deputyCard.repertoireCount ? ` has <strong>${deputyCard.repertoireCount} songs</strong> in ${deputyCard.possessivePronoun} repertoire` : " has an extensive repertoire"}, and you’re very welcome to ${deputyCard.profileUrl ? `<a href="${deputyCard.profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">take a browse</a>` : "take a browse"} and suggest your favourites for ${deputyShort} and the band to perform.
-                          </p>
-                          <p style="margin:8px 0 0; color:#555;">
-                            ${deputyShort}’s repertoire will form the basis of the band’s setlist for your event. If there are particular songs from the band’s original repertoire that you were hoping to hear, please let us know—${deputyShort} will do ${deputyCard.possessivePronoun} very best to accommodate your favourites.
-                          </p>
-                        </div>
-                      `
-                      : ""
-                  }
+                  ${renderAvailabilityVocalistCards({
+                    cards: selectedVocalistCards,
+                    heading: "Introducing",
+                    includeRepertoire: true,
+                  })}
 
                   ${
                     heroImg

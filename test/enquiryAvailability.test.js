@@ -7,6 +7,7 @@ import {
   buildEnquiryDayTwoEmail,
 } from "../services/enquiryFollowupService.js";
 import { buildTscEmailFooter } from "../utils/tscEmailBranding.js";
+import { renderAvailabilityVocalistCards } from "../utils/availabilityEmailVocalistCards.js";
 
 const twoVocalistLineup = {
   bandMembers: [
@@ -15,6 +16,36 @@ const twoVocalistLineup = {
     { instrument: "Drums", email: "c@example.com" },
   ],
 };
+
+test("availability email renders a separate photo and profile for every selected vocalist", () => {
+  const html = renderAvailabilityVocalistCards({
+    cards: [
+      {
+        name: "Annie Afrilu",
+        shortName: "Annie A",
+        photoUrl: "https://images.example.com/annie.jpg",
+        profileUrl: "https://thesupremecollective.co.uk/musician/annie-v",
+        videos: [{ title: "Annie live", url: "https://youtu.be/annie" }],
+      },
+      {
+        name: "Rachel Francis",
+        shortName: "Rachel F",
+        photoUrl: "https://images.example.com/rachel.jpg",
+        profileUrl: "https://thesupremecollective.co.uk/musician/rachel-f",
+        videos: [{ title: "Rachel live", url: "https://youtu.be/rachel" }],
+      },
+    ],
+    heading: "Meet",
+  });
+
+  assert.match(html, /Meet Annie A/);
+  assert.match(html, /images\.example\.com\/annie\.jpg/);
+  assert.match(html, /musician\/annie-v/);
+  assert.match(html, /Meet Rachel F/);
+  assert.match(html, /images\.example\.com\/rachel\.jpg/);
+  assert.match(html, /musician\/rachel-f/);
+  assert.doesNotMatch(html, /Meet Annie A &amp; Rachel F/);
+});
 
 test("a two-vocalist lineup is held until both slots have a yes", () => {
   const oneCovered = availableVocalistsForLineup(
