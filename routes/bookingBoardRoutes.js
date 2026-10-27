@@ -28,6 +28,7 @@ import {
 } from "../utils/tscEmailBranding.js";
 import { automationBodyToHtml } from "../utils/automationEmailTemplate.js";
 import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
+import { buildWeddingReferralCode, isWeddingBooking } from "../utils/referralDiscountCode.js";
 import {
   actReferenceCandidates,
   attachActProfileData,
@@ -1962,6 +1963,7 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
 
     allocation: doc?.allocation || { status: "in_progress" },
     review: doc?.review || { requestedCount: 0, received: false },
+    referralDiscountCode: doc?.referralDiscountCode || "",
     eventSheet: doc?.eventSheet || {},
     userEmail: doc?.userEmail || "",
     userAddress: doc?.userAddress || {},
@@ -2006,6 +2008,23 @@ const actOwnerProjection = {
   grossValue: 0,
   netCommission: 0,
   "visibility.grossAndCommissionVisibleToAdminOnly": 0,
+};
+
+const ensureWeddingReferralCodes = async (rows = []) => {
+  const updates = [];
+  rows.forEach((row) => {
+    if (!isWeddingBooking(row) || cleanString(row.referralDiscountCode)) return;
+    const code = buildWeddingReferralCode(row);
+    if (!code) return;
+    row.referralDiscountCode = code;
+    updates.push({
+      updateOne: {
+        filter: { _id: row._id, referralDiscountCode: { $in: [null, ""] } },
+        update: { $set: { referralDiscountCode: code } },
+      },
+    });
+  });
+  if (updates.length) await BookingBoardItem.bulkWrite(updates, { ordered: false });
 };
 
 const buildSearchClause = (q) => {
@@ -2204,6 +2223,8 @@ const skip = (page - 1) * limit;
   .skip(skip)
   .limit(limit)
   .lean();
+
+    await ensureWeddingReferralCodes(boardRowsRaw);
 
     // Also pull Bookings collection so manual + stripe bookings show up.
     const bookingQuery = {};
@@ -2685,6 +2706,11 @@ router.post("/", musicianAuth, async (req, res) => {
       { $set: boardPatch, $setOnInsert: { createdAt: new Date() } },
       { new: true, upsert: true },
     );
+
+    if (isWeddingBooking(boardRow) && !cleanString(boardRow.referralDiscountCode)) {
+      boardRow.referralDiscountCode = buildWeddingReferralCode(boardRow);
+      await boardRow.save();
+    }
 
     return res.json({
       success: true,

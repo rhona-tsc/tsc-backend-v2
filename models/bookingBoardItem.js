@@ -371,6 +371,12 @@ const BookingBoardItemSchema = new mongoose.Schema(
     manualAdjustmentAmount: { type: Number, default: 0 },
     allocation: AllocationSchema,
     review: ReviewSchema,
+    referralDiscountCode: {
+      type: String,
+      default: undefined,
+      trim: true,
+      uppercase: true,
+    },
     // Booking-level kill switch for the client email automations managed by
     // this site. Legacy rows without the field remain eligible; only an
     // explicit false suppresses them.
@@ -417,5 +423,9 @@ BookingBoardItemSchema.index({ "bookingMusicians.musicianId": 1, eventDateISO: 1
 BookingBoardItemSchema.index({ "bookingMusicians.email": 1, eventDateISO: 1 });
 BookingBoardItemSchema.index({ "bandLineup.musicianId": 1, eventDateISO: 1 });
 BookingBoardItemSchema.index({ "bandLineup.email": 1, eventDateISO: 1 });
+BookingBoardItemSchema.index(
+  { referralDiscountCode: 1 },
+  { unique: true, sparse: true },
+);
 
 export default mongoose.model("BookingBoardItem", BookingBoardItemSchema);
