@@ -23,6 +23,8 @@ export const AUTOMATION_21_KEY = "automation-21-act-add-ons";
 export const AUTOMATION_21_NUMBER = 21;
 export const AUTOMATION_30_KEY = "automation-30-non-google-review-followup";
 export const AUTOMATION_30_NUMBER = 30;
+export const AUTOMATION_26_KEY = "automation-26-google-review-reminder";
+export const AUTOMATION_26_NUMBER = 26;
 
 const clean = (value) => String(value || "").trim();
 const lower = (value) => clean(value).toLowerCase();
@@ -248,6 +250,31 @@ export const automation30Schedule = (row, todayISO) => {
     eligible: true,
     reason: today === receivedISO ? "review_received" : "catch_up",
     plannedISO: receivedISO,
+    sendISO: today,
+  };
+};
+
+export const automation26Schedule = (row, todayISO, automation30Delivery) => {
+  const review = row?.review || {};
+  const sentISO = isoDate(automation30Delivery?.sentAt);
+  const today = isoDate(todayISO);
+  const plannedISO = shiftISODate(sentISO, 5);
+  if (automation30Delivery?.status !== "sent" || !sentISO || !today) {
+    return { eligible: false, reason: "automation_30_not_sent", plannedISO: "" };
+  }
+  if (isoDate(review.googleReceivedAt) || review.source === "google") {
+    return { eligible: false, reason: "google_review_received", plannedISO };
+  }
+  if (!clean(review.comment)) {
+    return { eligible: false, reason: "missing_non_google_review", plannedISO };
+  }
+  if (today < plannedISO) {
+    return { eligible: false, reason: "not_due", plannedISO };
+  }
+  return {
+    eligible: true,
+    reason: today === plannedISO ? "planned_date" : "catch_up",
+    plannedISO,
     sendISO: today,
   };
 };
@@ -538,6 +565,36 @@ export const buildAutomation30Email = (row) => {
     emailLink("Leave your Google review", "https://g.page/r/CesVpcolTfSxEB0/review"),
     emailParagraph("We'll be sharing your review on Instagram in due course, and if you've provided social media details in your Event Sheet, we'll be sure to tag you. If you'd like to connect with us on Instagram you can find us at @thesupremecollective."),
     emailParagraph("If I can help with anything, please don't hesitate."),
+    emailParagraph(`Super warmest wishes,\nRhona & ${actName} x`).replace("\n", "<br />"),
+  ].join(""));
+  return { subject, text, html };
+};
+
+export const buildAutomation26Email = (row) => {
+  const names = clientNames(row);
+  const actName = clean(row.actTscName || row.actName || row.bandName || "the band");
+  const reviewText = clean(row?.review?.comment);
+  const subject = "Thank you so much for your review, one more ask! 💖";
+  const text = [
+    `Hi ${names},`, "",
+    "Thank you for the review that you recently sent! Reviews mean so much to us here at The Supreme Collective.", "",
+    "As you know, picking a band is tricky business, so we rely heavily on our clients letting other people know what their experience was like.", "",
+    "It would be utterly awesome if you could copy your fabulous review below, click through to our Google Review page, and make your review public.", "",
+    `“${reviewText}”`, "",
+    "https://g.page/r/CesVpcolTfSxEB0/review", "",
+    "We'll be sharing your review on Instagram in due course, and if you've provided social media details in your Event Sheet, we'll be sure to tag you. You can find us at @thesupremecollective.", "",
+    "I hope our paths cross again in the not-so-distant future. It's been a pleasure!", "",
+    "Super warmest wishes,", `Rhona & ${actName} x`,
+  ].join("\n");
+  const html = emailShell([
+    emailParagraph(`Hi ${names},`),
+    emailParagraph("Thank you for the review that you recently sent! Reviews mean so much to us here at The Supreme Collective."),
+    emailParagraph("As you know, picking a band is tricky business, so we rely heavily on our clients letting other people know what their experience was like."),
+    emailParagraph("It would be utterly awesome if you could copy your fabulous review below, click through to our Google Review page, and make your review public."),
+    `<blockquote style="margin:0 0 18px;padding:12px 16px;border-left:4px solid #ff6667;background:#fff7f7;font-size:15px;line-height:1.8;">${escapeEmailHtml(reviewText)}</blockquote>`,
+    emailLink("Leave your Google review", "https://g.page/r/CesVpcolTfSxEB0/review"),
+    emailParagraph("We'll be sharing your review on Instagram in due course, and if you've provided social media details in your Event Sheet, we'll be sure to tag you. You can find us at @thesupremecollective."),
+    emailParagraph("I hope our paths cross again in the not-so-distant future. It's been a pleasure!"),
     emailParagraph(`Super warmest wishes,\nRhona & ${actName} x`).replace("\n", "<br />"),
   ].join(""));
   return { subject, text, html };
@@ -997,6 +1054,17 @@ export const runClientAutomations = async ({
       automationNumber: AUTOMATION_30_NUMBER,
       schedule: automation30Schedule(row, todayISO),
       email: buildAutomation30Email(row),
+    });
+
+    const automation30Delivery = await deliveryModel.findOne({
+      automationKey: AUTOMATION_30_KEY,
+      bookingId: row._id,
+    });
+    await sendClientAutomation({
+      automationKey: AUTOMATION_26_KEY,
+      automationNumber: AUTOMATION_26_NUMBER,
+      schedule: automation26Schedule(row, todayISO, automation30Delivery),
+      email: buildAutomation26Email(row),
     });
 
     const addOnSchedule = automation21Schedule(row, todayISO);

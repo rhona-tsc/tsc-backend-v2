@@ -9,6 +9,7 @@ import {
   AUTOMATION_16_KEY,
   AUTOMATION_21_KEY,
   AUTOMATION_30_KEY,
+  AUTOMATION_26_KEY,
   actAddOnOptions,
   automation4Schedule,
   automation10Schedule,
@@ -17,10 +18,12 @@ import {
   automation16Schedule,
   automation21Schedule,
   automation30Schedule,
+  automation26Schedule,
   buildAutomation4Email,
   buildAutomation10Email,
   buildAutomation11Email,
   buildAutomation30Email,
+  buildAutomation26Email,
   londonTodayISO,
   runClientAutomations,
 } from "../services/clientAutomationService.js";
@@ -59,6 +62,50 @@ test("Automation 30 includes the saved review and booked act", () => {
   assert.match(email.text, /The band were brilliant\./);
   assert.match(email.text, /Google Review/);
   assert.equal(AUTOMATION_30_KEY, "automation-30-non-google-review-followup");
+});
+
+test("Automation 26 runs five days after Automation 30 unless a Google review arrives", () => {
+  const row = {
+    review: { source: "other", comment: "The band were brilliant." },
+  };
+  const automation30Delivery = {
+    status: "sent",
+    sentAt: "2026-10-27T10:15:00.000Z",
+  };
+  assert.equal(
+    automation26Schedule(row, "2026-10-31", automation30Delivery).reason,
+    "not_due",
+  );
+  assert.deepEqual(
+    automation26Schedule(row, "2026-11-01", automation30Delivery),
+    {
+      eligible: true,
+      reason: "planned_date",
+      plannedISO: "2026-11-01",
+      sendISO: "2026-11-01",
+    },
+  );
+  assert.equal(
+    automation26Schedule({
+      review: {
+        ...row.review,
+        googleReceivedAt: "2026-10-30T09:00:00.000Z",
+      },
+    }, "2026-11-01", automation30Delivery).reason,
+    "google_review_received",
+  );
+});
+
+test("Automation 26 repeats the saved review in its reminder", () => {
+  const email = buildAutomation26Email({
+    clientFirstNames: "Susie",
+    actTscName: "Committed to Kisstory",
+    review: { comment: "The band were brilliant." },
+  });
+  assert.match(email.text, /Hi Susie,/);
+  assert.match(email.text, /The band were brilliant\./);
+  assert.match(email.text, /Committed to Kisstory/);
+  assert.equal(AUTOMATION_26_KEY, "automation-26-google-review-reminder");
 });
 
 test("Susie's reviewed automation dates resolve to the staged live schedule", () => {
