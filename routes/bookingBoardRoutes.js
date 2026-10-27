@@ -3295,6 +3295,11 @@ router.put("/:id/review", musicianAuth, async (req, res) => {
     ].map((id) => new mongoose.Types.ObjectId(id));
 
     const rating = Number(req.body?.rating);
+    const requestedSource = cleanString(req.body?.source).toLowerCase();
+    const nonGoogleSource = ["internal", "trustpilot", "other"].includes(requestedSource)
+      ? requestedSource
+      : "other";
+    const receivedAt = new Date();
     const sharedReview = {
       reviewId,
       clientFirstName: cleanString(req.body?.clientFirstName),
@@ -3320,9 +3325,10 @@ router.put("/:id/review", musicianAuth, async (req, res) => {
       boardRow.review = {
         ...(boardRow.review?.toObject ? boardRow.review.toObject() : boardRow.review || {}),
         ...sharedReview,
-        source: "internal",
+        source: nonGoogleSource,
         received: true,
-        receivedAt: new Date(),
+        receivedAt,
+        nonGoogleReceivedAt: receivedAt,
         linkedActId: actId || undefined,
         linkedMusicianIds: musicianIds,
       };

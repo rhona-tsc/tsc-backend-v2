@@ -21,6 +21,8 @@ export const AUTOMATION_16_KEY = "automation-16-song-requests-due-soon";
 export const AUTOMATION_16_NUMBER = 16;
 export const AUTOMATION_21_KEY = "automation-21-act-add-ons";
 export const AUTOMATION_21_NUMBER = 21;
+export const AUTOMATION_30_KEY = "automation-30-non-google-review-followup";
+export const AUTOMATION_30_NUMBER = 30;
 
 const clean = (value) => String(value || "").trim();
 const lower = (value) => clean(value).toLowerCase();
@@ -228,6 +230,27 @@ export const automation11Schedule = (row, todayISO) => scheduledWindow({
   lastISO: isoDate(row?.eventDateISO || row?.eventDate || row?.date),
   allowLastDay: false,
 });
+
+export const automation30Schedule = (row, todayISO) => {
+  const review = row?.review || {};
+  const receivedISO = isoDate(review.nonGoogleReceivedAt || review.receivedAt);
+  const today = isoDate(todayISO);
+  if (!receivedISO || !today || review.source === "google" || !clean(review.comment)) {
+    return { eligible: false, reason: "missing_non_google_review", plannedISO: receivedISO };
+  }
+  if (isoDate(review.googleReceivedAt)) {
+    return { eligible: false, reason: "google_review_received", plannedISO: receivedISO };
+  }
+  if (today < receivedISO) {
+    return { eligible: false, reason: "not_due", plannedISO: receivedISO };
+  }
+  return {
+    eligible: true,
+    reason: today === receivedISO ? "review_received" : "catch_up",
+    plannedISO: receivedISO,
+    sendISO: today,
+  };
+};
 
 const publicEventSheetUrl = (row) => {
   const base = clean(
@@ -488,6 +511,34 @@ export const buildAutomation21Email = (row) => {
     `<div style="margin:0 0 18px;">${optionsHtml}</div>`,
     emailParagraph("These options are designed to enhance your event and create an unforgettable experience for your client and their guests. Let me know if you’d like to explore any of these add-ons further!"),
     emailParagraph("Warmest wishes,\nRhona ✨").replace("\n", "<br />"),
+  ].join(""));
+  return { subject, text, html };
+};
+
+export const buildAutomation30Email = (row) => {
+  const names = clientNames(row);
+  const actName = clean(row.actTscName || row.actName || row.bandName || "the band");
+  const reviewText = clean(row?.review?.comment);
+  const subject = "Three Shakes of a Lambs Tail! 💖";
+  const text = [
+    `Hi ${names},`, "",
+    `Thank you again for giving ${actName} a review!`, "",
+    `${actName} would absolutely love it if you could convert your fantastic review below into a Google Review. Simply copy your review, click the link below, and paste it into the box on the other end of that link.`, "",
+    `“${reviewText}”`, "",
+    "https://g.page/r/CesVpcolTfSxEB0/review", "",
+    "We'll be sharing your review on Instagram in due course, and if you've provided social media details in your Event Sheet, we'll be sure to tag you. If you'd like to connect with us on Instagram you can find us at @thesupremecollective.", "",
+    "If I can help with anything, please don't hesitate.", "",
+    "Super warmest wishes,", `Rhona & ${actName} x`,
+  ].join("\n");
+  const html = emailShell([
+    emailParagraph(`Hi ${names},`),
+    emailParagraph(`Thank you again for giving ${actName} a review!`),
+    emailParagraph(`${actName} would absolutely love it if you could convert your fantastic review below into a Google Review. Simply copy your review, click the link below, and paste it into the box on the other end of that link.`),
+    `<blockquote style="margin:0 0 18px;padding:12px 16px;border-left:4px solid #ff6667;background:#fff7f7;font-size:15px;line-height:1.8;">${escapeEmailHtml(reviewText)}</blockquote>`,
+    emailLink("Leave your Google review", "https://g.page/r/CesVpcolTfSxEB0/review"),
+    emailParagraph("We'll be sharing your review on Instagram in due course, and if you've provided social media details in your Event Sheet, we'll be sure to tag you. If you'd like to connect with us on Instagram you can find us at @thesupremecollective."),
+    emailParagraph("If I can help with anything, please don't hesitate."),
+    emailParagraph(`Super warmest wishes,\nRhona & ${actName} x`).replace("\n", "<br />"),
   ].join(""));
   return { subject, text, html };
 };
@@ -939,6 +990,13 @@ export const runClientAutomations = async ({
       automationNumber: AUTOMATION_14_NUMBER,
       schedule: automation14Schedule(row, todayISO),
       email: buildAutomation14Email(row),
+    });
+
+    await sendClientAutomation({
+      automationKey: AUTOMATION_30_KEY,
+      automationNumber: AUTOMATION_30_NUMBER,
+      schedule: automation30Schedule(row, todayISO),
+      email: buildAutomation30Email(row),
     });
 
     const addOnSchedule = automation21Schedule(row, todayISO);

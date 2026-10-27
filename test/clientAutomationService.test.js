@@ -8,6 +8,7 @@ import {
   AUTOMATION_14_KEY,
   AUTOMATION_16_KEY,
   AUTOMATION_21_KEY,
+  AUTOMATION_30_KEY,
   actAddOnOptions,
   automation4Schedule,
   automation10Schedule,
@@ -15,12 +16,50 @@ import {
   automation14Schedule,
   automation16Schedule,
   automation21Schedule,
+  automation30Schedule,
   buildAutomation4Email,
   buildAutomation10Email,
   buildAutomation11Email,
+  buildAutomation30Email,
   londonTodayISO,
   runClientAutomations,
 } from "../services/clientAutomationService.js";
+
+test("Automation 30 starts from a non-Google review and stops after a Google review", () => {
+  const pending = automation30Schedule({
+    review: {
+      source: "other",
+      comment: "The band were brilliant.",
+      nonGoogleReceivedAt: "2026-10-27T10:15:00.000Z",
+    },
+  }, "2026-10-27");
+  assert.equal(pending.eligible, true);
+  assert.equal(pending.sendISO, "2026-10-27");
+
+  const completed = automation30Schedule({
+    review: {
+      source: "other",
+      comment: "The band were brilliant.",
+      nonGoogleReceivedAt: "2026-10-27T10:15:00.000Z",
+      googleReceivedAt: "2026-10-27T11:00:00.000Z",
+    },
+  }, "2026-10-27");
+  assert.equal(completed.eligible, false);
+  assert.equal(completed.reason, "google_review_received");
+});
+
+test("Automation 30 includes the saved review and booked act", () => {
+  const email = buildAutomation30Email({
+    clientFirstNames: "Susie",
+    actTscName: "Committed to Kisstory",
+    review: { comment: "The band were brilliant." },
+  });
+  assert.match(email.text, /Hi Susie,/);
+  assert.match(email.text, /Committed to Kisstory/);
+  assert.match(email.text, /The band were brilliant\./);
+  assert.match(email.text, /Google Review/);
+  assert.equal(AUTOMATION_30_KEY, "automation-30-non-google-review-followup");
+});
 
 test("Susie's reviewed automation dates resolve to the staged live schedule", () => {
   const row = {
