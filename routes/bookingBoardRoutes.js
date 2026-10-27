@@ -4,6 +4,7 @@ import express from "express";
 import mongoose from "mongoose";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import Booking from "../models/bookingModel.js";
+import ClientAutomationDelivery from "../models/clientAutomationDeliveryModel.js";
 import actModel from "../models/actModel.js";
 import musicianModel from "../models/musicianModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
@@ -2275,6 +2276,46 @@ const skip = (page - 1) * limit;
     }
 
     const rows = [...dedupeMap.values()];
+
+    // The automation audit needs the persisted delivery history so messages
+    // sent outside the live runner (for example, from the booking board) are
+    // still excluded from future schedules and shown as already sent.
+    if (isAdmin && rows.length) {
+      const bookingIds = rows
+        .map((row) => row?.bookingBoardItemId || row?._id)
+        .filter((id) => mongoose.isValidObjectId(id));
+      const bookingRefs = rows
+        .map((row) => cleanString(row?.bookingRef || row?.bookingId || row?.sessionId))
+        .filter(Boolean);
+      const deliveryClauses = [];
+      if (bookingIds.length) deliveryClauses.push({ bookingId: { $in: bookingIds } });
+      if (bookingRefs.length) deliveryClauses.push({ bookingRef: { $in: bookingRefs } });
+
+      if (deliveryClauses.length) {
+        const deliveries = await ClientAutomationDelivery.find({
+          status: "sent",
+          $or: deliveryClauses,
+        })
+          .select("bookingId bookingRef automationKey automationNumber status sentAt messageId subject recipient")
+          .lean();
+        const deliveriesById = new Map();
+        const deliveriesByRef = new Map();
+        deliveries.forEach((delivery) => {
+          const id = String(delivery.bookingId || "");
+          const ref = cleanString(delivery.bookingRef).toLowerCase();
+          if (id) deliveriesById.set(id, [...(deliveriesById.get(id) || []), delivery]);
+          if (ref) deliveriesByRef.set(ref, [...(deliveriesByRef.get(ref) || []), delivery]);
+        });
+        rows.forEach((row) => {
+          const id = String(row?.bookingBoardItemId || row?._id || "");
+          const ref = cleanString(row?.bookingRef || row?.bookingId || row?.sessionId).toLowerCase();
+          const matched = [...(deliveriesById.get(id) || []), ...(deliveriesByRef.get(ref) || [])];
+          row.automationDeliveries = [...new Map(
+            matched.map((delivery) => [String(delivery._id), delivery]),
+          ).values()];
+        });
+      }
+    }
 
     // Sort
     const dir = String(sortDir).toLowerCase() === "desc" ? -1 : 1;
