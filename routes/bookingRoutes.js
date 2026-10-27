@@ -26,6 +26,10 @@ import crypto from "crypto";
 import { buildBandEventSheetEmailHtml } from "../utils/tscEmailBranding.js";
 import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
 import {
+  bandSheetTokenLookup,
+  cleanBandSheetToken,
+} from "../utils/bandSheetTokenRegistry.js";
+import {
   didSongSectionBecomeComplete,
   sendSongSuggestionsCompletedNotification,
 } from "../services/eventSheetSectionNotificationService.js";
@@ -1924,9 +1928,7 @@ router.get("/band-sheet/:token", async (req, res) => {
     const token = String(req.params?.token || "").trim();
     if (!token) return res.status(404).send("Band event sheet not found");
 
-    const booking = await Booking.findOne({
-      "eventSheet.bandSheetToken": token,
-    }).lean();
+    const booking = await Booking.findOne(bandSheetTokenLookup(token)).lean();
     if (!booking) return res.status(404).send("Band event sheet not found");
 
     const bookingForPdf = await withConfirmedAllocation(booking);
@@ -2061,6 +2063,18 @@ router.post("/notify-band", async (req, res) => {
         ...(booking.eventSheet || {}),
         bandSheetToken: crypto.randomBytes(18).toString("base64url"),
       };
+    }
+    const activeBandSheetToken = cleanBandSheetToken(
+      booking.eventSheet.bandSheetToken,
+    );
+    if (
+      activeBandSheetToken &&
+      !booking.bandSheetTokens?.includes(activeBandSheetToken)
+    ) {
+      booking.bandSheetTokens = [
+        ...(booking.bandSheetTokens || []),
+        activeBandSheetToken,
+      ];
     }
     const eventSheetUrl = buildBandSheetPdfUrl(
       booking.eventSheet.bandSheetToken,
@@ -2281,6 +2295,9 @@ router.post(
         filter,
         {
           $set: eventSheetSet,
+          ...(suppliedBandSheetToken
+            ? { $addToSet: { bandSheetTokens: suppliedBandSheetToken } }
+            : {}),
         },
         // Returning the pre-update document lets this endpoint detect the
         // false -> true transition atomically, preventing duplicate alerts

@@ -435,6 +435,10 @@ const BookingSchema = new mongoose.Schema(
 
     // Event sheet
     eventSheet: EventSheetSchema,
+    // Permanent registry of every band-sheet token issued for this booking.
+    // It deliberately lives outside eventSheet so an event-sheet replacement
+    // cannot invalidate links already sent to musicians or calendar guests.
+    bandSheetTokens: { type: [String], default: [], index: true },
     whatsappGroupLink: { type: String, default: "", trim: true },
     calendarEventId: { type: String, default: "", index: true },
     // Admin-editable booking metadata used by the Booking Board. These were
@@ -473,6 +477,15 @@ BookingSchema.index(
 
 // in bookingModel.js, after schema definition
 BookingSchema.pre("validate", function (next) {
+  const bandSheetToken = String(this.eventSheet?.bandSheetToken || "").trim();
+  if (bandSheetToken) {
+    const existingTokens = Array.isArray(this.bandSheetTokens)
+      ? this.bandSheetTokens.map((token) => String(token || "").trim())
+      : [];
+    if (!existingTokens.includes(bandSheetToken)) {
+      this.bandSheetTokens = [...existingTokens.filter(Boolean), bandSheetToken];
+    }
+  }
   if (!this.bookingId) {
     const last = this.clientName || this.userAddress?.lastName || "CLIENT";
     const d = this.date || this.eventDate || new Date();

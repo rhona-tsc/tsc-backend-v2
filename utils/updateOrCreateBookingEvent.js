@@ -4,6 +4,7 @@ import Booking from "../models/bookingModel.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import { oauth2Client } from "../controllers/googleController.js";
 import { buildBandSheetPdfUrl, getBandSheetOrigin } from "./bandSheetUrl.js";
+import { bandSheetTokenPersistenceUpdate } from "./bandSheetTokenRegistry.js";
 
 const clean = (value = "") => String(value || "").trim();
 
@@ -115,8 +116,17 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
     const identity = booking._id
       ? { _id: booking._id }
       : { bookingId: bookingRefOf(booking) };
+    await Booking.collection.updateOne(
+      identity,
+      bandSheetTokenPersistenceUpdate(bandSheetToken),
+    );
+  } else {
+    const bandSheetToken = clean(booking.eventSheet.bandSheetToken);
+    const identity = booking._id
+      ? { _id: booking._id }
+      : { bookingId: bookingRefOf(booking) };
     await Booking.collection.updateOne(identity, {
-      $set: { "eventSheet.bandSheetToken": bandSheetToken },
+      $addToSet: { bandSheetTokens: bandSheetToken },
     });
   }
 
