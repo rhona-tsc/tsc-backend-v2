@@ -59,3 +59,23 @@ test("direct-client Booking Board preview uses the complete intro template and c
   assert.match(email.html, /Follow This Link to your Event Sheet/);
   assert.match(email.html, /12 November 2026/);
 });
+
+test("intro email preview and send content prefers the booked act name over the public act name", () => {
+  const email = buildIntroEmail({
+    clientEmail: "georgia@example.com",
+    clientFirstNames: "Georgia",
+    bookingRef: "260915275050",
+    actName: "Rhythm Mystique",
+    actTscName: "Dancefloor Magic",
+    eventType: "Wedding",
+    eventDateISO: "2026-12-10",
+    contactRole: "direct_client",
+  });
+
+  assert.equal(email.subject, "Rhythm Mystique & your Wedding on 10th of December 2026");
+  assert.match(email.text, /band manager for Rhythm Mystique/);
+  assert.match(email.html, /band manager for Rhythm Mystique/);
+  assert.doesNotMatch(email.subject, /Dancefloor Magic/);
+  assert.doesNotMatch(email.text, /Dancefloor Magic/);
+  assert.doesNotMatch(email.html, /Dancefloor Magic/);
+});

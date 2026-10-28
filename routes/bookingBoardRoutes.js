@@ -36,6 +36,7 @@ import {
   findActLineup,
   findBestActProfile,
 } from "../utils/bookingActData.js";
+import { resolveBookedActName } from "../utils/bookingDisplayName.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -156,7 +157,7 @@ export const buildIntroEmail = (row) => {
     row?.clientFirstNames || row?.bookerName || "there",
   );
   const firstName = clientNames.split(/\s+|&/)[0] || "there";
-  const actName = cleanString(row?.actTscName || row?.actName || "the band");
+  const actName = resolveBookedActName({ board: row }) || "the band";
   const eventType = normalizeEventType(row?.eventType) || "event";
   const date = row?.eventDateISO
     ? formatEmailSubjectDate(row.eventDateISO)
@@ -2912,7 +2913,7 @@ router.get("/:id/intro-email/preview", musicianAuth, async (req, res) => {
     const email = buildIntroEmail(row);
     const missing = [
       !email.recipient && "client email",
-      !cleanString(row.actTscName || row.actName) && "act name",
+      !resolveBookedActName({ board: row }) && "act name",
       !cleanString(row.eventType) && "event type",
       !cleanString(row.eventDateISO) && "event date",
       !cleanString(row.bookingRef || row.eventSheetLink) && "event sheet link",
@@ -3014,7 +3015,7 @@ router.post("/:id/intro-email/test", musicianAuth, async (req, res) => {
     const email = buildIntroEmail(row);
     const missing = [
       !email.recipient && "client email",
-      !cleanString(row.actTscName || row.actName) && "act name",
+      !resolveBookedActName({ board: row }) && "act name",
       !cleanString(row.eventType) && "event type",
       !cleanString(row.eventDateISO) && "event date",
       !cleanString(row.bookingRef || row.eventSheetLink) && "event sheet link",
@@ -3075,7 +3076,7 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
     const email = buildIntroEmail(rowData);
     const missing = [
       !email.recipient && "client email",
-      !cleanString(row.actTscName || row.actName) && "act name",
+      !resolveBookedActName({ board: row }) && "act name",
       !cleanString(row.eventType) && "event type",
       !cleanString(row.eventDateISO) && "event date",
       !cleanString(row.bookingRef || row.eventSheetLink) && "event sheet link",
