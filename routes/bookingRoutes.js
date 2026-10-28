@@ -155,6 +155,9 @@ const withConfirmedAllocation = async (booking) => {
       : {}),
     ...(board?.clientEmails?.[0]?.email ? { clientEmail: board.clientEmails[0].email } : {}),
     ...(board?.contactRole ? { contactRole: board.contactRole } : {}),
+    ...(board?.agent
+      ? { agent: board.agent, bookingSource: board.agent }
+      : {}),
     ...(board?.bookingDetails
       ? {
           bookingDetails: {
