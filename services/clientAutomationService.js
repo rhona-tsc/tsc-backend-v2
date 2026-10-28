@@ -8,6 +8,7 @@ import { buildIntroInvoiceAttachments } from "../utils/introInvoiceAttachment.js
 import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.js";
 import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
 import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
+import { resolveBookedActName } from "../utils/bookingDisplayName.js";
 
 export const AUTOMATION_10_KEY = "automation-10-balance-coming-due";
 export const AUTOMATION_10_NUMBER = 10;
@@ -510,7 +511,7 @@ export const actAddOnOptions = (row = {}) => {
     const label = clean(originalKey).replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
     lines.push(`- ${label}: ${formatPounds(Number(value.price) * CLIENT_PRICE_MULTIPLIER)}`);
   });
-  const actName = clean(row.actTscName || row.actName || row.bandName || "the act");
+  const actName = resolveBookedActName({ board: row }) || clean(row.bandName) || "the act";
   return lines.length
     ? `Add-ons available for ${actName}:\n${lines.join("\n")}`
     : `Please ask me if you would like a tailored add-on quote for ${actName}.`;
@@ -518,7 +519,7 @@ export const actAddOnOptions = (row = {}) => {
 
 export const buildAutomation21Email = (row) => {
   const names = clientNames(row);
-  const actName = clean(row.actTscName || row.actName || row.bandName || "the band");
+  const actName = resolveBookedActName({ board: row }) || clean(row.bandName) || "the band";
   const eventType = clean(row.eventType || "event");
   const options = actAddOnOptions(row);
   const subject = `${names}, Take Your Event to the Next Level with these Options! 🎉`;

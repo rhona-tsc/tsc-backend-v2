@@ -22,6 +22,7 @@ import {
   buildAutomation4Email,
   buildAutomation10Email,
   buildAutomation11Email,
+  buildAutomation21Email,
   buildAutomation30Email,
   buildAutomation26Email,
   londonTodayISO,
@@ -119,6 +120,29 @@ test("Susie's reviewed automation dates resolve to the staged live schedule", ()
   assert.equal(automation14Schedule(row, "2026-10-18").sendISO, "2026-10-18");
   assert.equal(automation21Schedule(row, "2026-10-19").sendISO, "2026-10-19");
   assert.equal(automation11Schedule(row, "2026-10-22").sendISO, "2026-10-22");
+});
+
+test("Automation 21 names the booked act while using the linked act's add-on pricing", () => {
+  const row = {
+    clientFirstNames: "Georgia",
+    actName: "Rhythm Mystique",
+    actTscName: "Dancefloor Magic",
+    eventType: "Wedding",
+    lineupSelected: "6-Piece",
+    actData: {
+      tscName: "Dancefloor Magic",
+      extras: {
+        extra_30min_performance_per_band_member: { price: 50 },
+      },
+    },
+  };
+
+  const email = buildAutomation21Email(row);
+
+  assert.match(email.text, /choosing Rhythm Mystique/);
+  assert.match(email.text, /Add-ons available for Rhythm Mystique/);
+  assert.match(email.text, /Additional 30-minute performance \(6-piece\): £399/);
+  assert.doesNotMatch(email.text, /choosing Dancefloor Magic/);
 });
 
 test("the due-now balance email omits DJ requests when no DJ was booked", () => {
