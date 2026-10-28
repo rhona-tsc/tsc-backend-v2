@@ -7,6 +7,7 @@ import {
   buildLinkedBookingAutomationUpdate,
   getCanonicalBookingKey,
   isSiteAutomationEnabled,
+  mergeRowData,
   mergeSiteAutomationsEnabled,
   parseSiteAutomationsEnabled,
   readSiteAutomationsEnabled,
@@ -169,4 +170,24 @@ test("canonical booking keys prefer human references over differing sessions", (
     getCanonicalBookingKey({ sessionId: "session-only" }),
     "session:session-only",
   );
+});
+
+test("merged automation rows keep the Booking Board act name separate from the public act name", () => {
+  const websiteBooking = {
+    bookingRef: "260915275050",
+    actName: "Dancefloor Magic",
+    actTscName: "Dancefloor Magic",
+    grossValue: 5000,
+  };
+  const bookingBoardRow = {
+    bookingRef: "260915275050",
+    bookingBoardItemId: "board-row-id",
+    actName: "Rhythm Mystique",
+    actTscName: "Dancefloor Magic",
+  };
+
+  const merged = mergeRowData(websiteBooking, bookingBoardRow);
+
+  assert.equal(merged.actName, "Rhythm Mystique");
+  assert.equal(merged.actTscName, "Dancefloor Magic");
 });

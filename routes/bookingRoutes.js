@@ -33,6 +33,7 @@ import {
   didSongSectionBecomeComplete,
   sendSongSuggestionsCompletedNotification,
 } from "../services/eventSheetSectionNotificationService.js";
+import { resolveBookedActName } from "../utils/bookingDisplayName.js";
 
 const router = express.Router();
 
@@ -75,7 +76,7 @@ const withConfirmedAllocation = async (booking) => {
     dietaryRequirements:
       dietById.get(String(member?.musicianId || "")) || member?.dietaryRequirements || "",
   }));
-  const boardActName = board?.actTscName || board?.actName || "";
+  const boardActName = resolveBookedActName({ board, booking: plain });
   const boardActId =
     board?.actId ||
     (Array.isArray(board?.actsSummary) ? board.actsSummary[0]?.actId : null) ||

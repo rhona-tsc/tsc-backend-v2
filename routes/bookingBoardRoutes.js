@@ -1579,7 +1579,7 @@ const scoreRowCompleteness = (row) => {
   ].filter(Boolean).length;
 };
 
-const mergeRowData = (preferred, secondary) => {
+export const mergeRowData = (preferred, secondary) => {
   if (!preferred) return secondary;
   if (!secondary) return preferred;
 
@@ -1665,13 +1665,35 @@ const mergeRowData = (preferred, secondary) => {
       Number(secondary?.netCommission || 0) ||
       0,
     eventType: preferred?.eventType || secondary?.eventType,
-    actName: preferred?.actName || secondary?.actName,
+    // The Booking Board copy is authoritative for the manually selected
+    // booking source. Otherwise a legacy core booking with no stored agent
+    // can turn Entertainment Nation back into Direct after a refresh.
+    agent: normaliseAgent(
+      (boardSource && boardSource.agent) ||
+        preferred?.agent ||
+        secondary?.agent,
+    ),
+    // The Booking Board's ACT field is the contracted/booked band name. Keep
+    // it authoritative even when the richer website booking wins the merge.
+    actName:
+      (boardSource && cleanString(boardSource.actName))
+      || preferred?.actName
+      || secondary?.actName,
     actTscName:
       (boardSource && cleanString(boardSource.actTscName))
       || preferred?.actTscName
       || secondary?.actTscName,
-    address: preferred?.address || secondary?.address,
-    county: preferred?.county || secondary?.county,
+    // The board stores the contracted event venue. A core website booking may
+    // otherwise fall back to userAddress, which is the client's billing/home
+    // address and must never replace the venue on the Booking Board.
+    address:
+      (boardSource && cleanString(boardSource.address)) ||
+      preferred?.address ||
+      secondary?.address,
+    county:
+      (boardSource && cleanString(boardSource.county)) ||
+      preferred?.county ||
+      secondary?.county,
     venue: preferred?.venue || secondary?.venue,
     venueAddress: preferred?.venueAddress || secondary?.venueAddress,
     lineupSelected: preferred?.lineupSelected || secondary?.lineupSelected,
@@ -3416,6 +3438,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(body, "eventType")) {
       body.eventType = normalizeEventType(body.eventType);
     }
+    if (Object.prototype.hasOwnProperty.call(body, "agent")) {
+      body.agent = normaliseAgent(body.agent);
+    }
     if (body.bookingDetails?.eventType) {
       body.bookingDetails = {
         ...body.bookingDetails,
@@ -3682,31 +3707,46 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
       console.log("🟢 Board mirror update result:", mirrorResult);
 
+      // Return the same merged shape used by GET /board/bookings. Returning
+      // only the core Booking here used to replace the live row with its
+      // legacy act name, billing address and empty allocation arrays until a
+      // later refresh (and could make confirmed musicians appear deleted).
+      const updatedMirrorRow = existingMirrorRow
+        ? {
+            ...existingMirrorRow,
+            ...mirrorPatch,
+            _id: existingMirrorRow._id,
+            bookingBoardItemId: existingMirrorRow._id,
+          }
+        : null;
+      const mergedResponseRow = updatedMirrorRow
+        ? mergeRowData(normalized, updatedMirrorRow)
+        : {
+            ...normalized,
+            ...(body.agent !== undefined ? { agent: body.agent } : {}),
+            ...(body.actName !== undefined ? { actName: body.actName } : {}),
+            ...(body.actTscName !== undefined
+              ? { actTscName: body.actTscName }
+              : {}),
+            ...(body.address !== undefined ? { address: body.address } : {}),
+            ...(body.county !== undefined ? { county: body.county } : {}),
+          };
+
       return res.json({
         success: true,
-        row:
-          body.payments && isPlainObject(body.payments)
+        row: {
+          ...mergedResponseRow,
+          ...(body.payments && isPlainObject(body.payments)
+            ? { payments: body.payments }
+            : {}),
+          ...(body.songSuggestionsDueDateISO !== undefined
             ? {
-                ...normalized,
-                payments: body.payments,
-                ...(body.songSuggestionsDueDateISO !== undefined
-                  ? {
-                      songSuggestionsDueDateISO: String(
-                        body.songSuggestionsDueDateISO || "",
-                      ).slice(0, 10),
-                    }
-                  : {}),
+                songSuggestionsDueDateISO: String(
+                  body.songSuggestionsDueDateISO || "",
+                ).slice(0, 10),
               }
-            : {
-                ...normalized,
-                ...(body.songSuggestionsDueDateISO !== undefined
-                  ? {
-                      songSuggestionsDueDateISO: String(
-                        body.songSuggestionsDueDateISO || "",
-                      ).slice(0, 10),
-                    }
-                  : {}),
-              },
+            : {}),
+        },
         source: "booking",
       });
     }

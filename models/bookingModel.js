@@ -319,6 +319,12 @@ const BookingSchema = new mongoose.Schema(
     lineupId: { type: String, default: "" },
     actsSummary: { type: [ActSummarySchema], default: [] },
 
+    // Booking source selected on the Booking Board (for example,
+    // Entertainment Nation, Encore or Direct). Keeping it on the core
+    // booking prevents the board mirror and the checkout booking from
+    // disagreeing after an inline edit.
+    agent: { type: String, default: "Direct", trim: true },
+
     // User
     userId: { type: String, index: true },
     userEmail: { type: String, index: true },
