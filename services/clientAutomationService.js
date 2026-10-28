@@ -761,9 +761,16 @@ const buildBlockedAutomation4Alert = (row, missing) => {
   return { subject, text, html };
 };
 
-const APPROVED_CLIENT_AUTOMATION_EMAILS = [
+export const APPROVED_CLIENT_AUTOMATION_EMAILS = [
   "susie@tigproductions.co.uk",
   "james@tlfservices.co.uk",
+  "georgia.hyndman@ukimediaevents.com",
+];
+
+export const APPROVED_CLIENT_AUTOMATION_BOOKING_REFS = [
+  "BBM 497 DESIGN",
+  "260927276335",
+  "260915275050",
 ];
 
 const configuredAllowlist = () => new Set([
@@ -775,11 +782,18 @@ const configuredAllowlist = () => new Set([
 ]);
 
 const configuredBookingRefs = () => new Set(
-  clean(process.env.CLIENT_AUTOMATION_BOOKING_REF_ALLOWLIST)
-    .split(",")
+  [
+    ...APPROVED_CLIENT_AUTOMATION_BOOKING_REFS,
+    ...clean(process.env.CLIENT_AUTOMATION_BOOKING_REF_ALLOWLIST).split(","),
+  ]
     .map((value) => clean(value).toUpperCase())
     .filter(Boolean),
 );
+
+export const clientAutomationAllowlistSnapshot = () => ({
+  emails: configuredAllowlist(),
+  bookingRefs: configuredBookingRefs(),
+});
 
 const isBalancePaid = (row = {}) => Boolean(
   row.balancePaid ||

@@ -83,6 +83,7 @@ import {
   sendVideoReviewDigest,
 } from "./services/videoMigrationAutomationService.js";
 import { runClientAutomations } from "./services/clientAutomationService.js";
+import { sendClientAutomationDigest } from "./services/clientAutomationDigestService.js";
 import {
   runEnquiryDaySixFollowups,
   runEnquiryDayFourFollowups,
@@ -1005,6 +1006,21 @@ cron.schedule(
       console.log("📨 Enquiry Day 6 follow-up run complete", enquiryDaySixResult);
     } catch (error) {
       console.error("❌ Client automation run failed", error?.message || error);
+    }
+  },
+  { timezone: "Europe/London" },
+);
+
+// Daily internal safety report. It shows every upcoming booking alongside the
+// live allowlist state, planned client automations and the delivery ledger.
+cron.schedule(
+  process.env.CLIENT_AUTOMATION_DIGEST_CRON || "0 8 * * *",
+  async () => {
+    try {
+      const result = await sendClientAutomationDigest();
+      console.log("📋 Client automation safety digest complete", result);
+    } catch (error) {
+      console.error("❌ Client automation safety digest failed", error?.message || error);
     }
   },
   { timezone: "Europe/London" },
