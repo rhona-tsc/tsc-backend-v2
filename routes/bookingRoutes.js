@@ -65,17 +65,21 @@ const withConfirmedAllocation = async (booking) => {
     .filter((id) => mongoose.isValidObjectId(String(id || "")));
   const profiles = musicianIds.length
     ? await Musician.find({ _id: { $in: musicianIds } })
-        .select("dietaryRequirements")
+        .select("dietaryRequirements musicianSlug firstName lastName")
         .lean()
     : [];
-  const dietById = new Map(
-    profiles.map((profile) => [String(profile._id), profile.dietaryRequirements || ""]),
+  const profileById = new Map(
+    profiles.map((profile) => [String(profile._id), profile]),
   );
-  const enriched = confirmed.map((member) => ({
-    ...member,
-    dietaryRequirements:
-      dietById.get(String(member?.musicianId || "")) || member?.dietaryRequirements || "",
-  }));
+  const enriched = confirmed.map((member) => {
+    const profile = profileById.get(String(member?.musicianId || ""));
+    return {
+      ...member,
+      dietaryRequirements:
+        profile?.dietaryRequirements || member?.dietaryRequirements || "",
+      musicianSlug: profile?.musicianSlug || member?.musicianSlug || "",
+    };
+  });
   const boardActName = resolveBookedActName({ board, booking: plain });
   const boardActId =
     board?.actId ||
