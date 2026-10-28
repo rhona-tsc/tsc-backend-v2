@@ -51,6 +51,8 @@ const upload = multer({
 
 const router = express.Router();
 const INTRO_EMAIL_TEST_RECIPIENT = "rhona@thesupremecollective.co.uk";
+const INTRO_EMAIL_AUTOMATION_KEY = "automation-1-intro-email";
+const INTRO_EMAIL_AUTOMATION_NUMBER = 1;
 
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 
@@ -110,18 +112,27 @@ const formatEmailSubjectDate = (value) => {
   return `${day}${suffix} of ${monthAndYear}`;
 };
 
+const ordinalDay = (day) => {
+  const lastTwoDigits = day % 100;
+  const suffix = lastTwoDigits >= 11 && lastTwoDigits <= 13
+    ? "th"
+    : ({ 1: "st", 2: "nd", 3: "rd" }[day % 10] || "th");
+  return `${day}${suffix}`;
+};
+
 const formatEmailBodyDate = (value) => {
-  const iso = String(value || "").slice(0, 10);
-  if (!iso) return "the agreed date";
-  const date = new Date(`${iso}T12:00:00Z`);
-  return Number.isNaN(date.getTime())
-    ? "the agreed date"
-    : date.toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-        timeZone: "UTC",
-      });
+  if (!value) return "the agreed date";
+  const date = value instanceof Date
+    ? value
+    : new Date(`${String(value).slice(0, 10)}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "the agreed date";
+
+  const monthAndYear = date.toLocaleDateString("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  return `${ordinalDay(date.getUTCDate())} ${monthAndYear}`;
 };
 
 const AGENT_NAMES = [
@@ -215,9 +226,7 @@ export const buildIntroEmail = (row) => {
       : eventDate && bookingDate
         ? new Date(bookingDate.getTime() + Math.ceil((eventDate - bookingDate) / 2))
         : null;
-    const formatDate = (value) => value && !Number.isNaN(value.getTime())
-      ? value.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
-      : "the agreed date";
+    const formatDate = (value) => formatEmailBodyDate(value);
     const invoiceDue = row?.invoiceDueDateISO
       ? new Date(`${row.invoiceDueDateISO}T12:00:00Z`)
       : null;
@@ -3106,6 +3115,38 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
     row.introEmailSentTo = email.recipient;
     row.introEmailMessageId = result.messageId || "";
     await row.save();
+    try {
+      await ClientAutomationDelivery.findOneAndUpdate(
+        {
+          automationKey: INTRO_EMAIL_AUTOMATION_KEY,
+          bookingId: row._id,
+        },
+        {
+          $set: {
+            automationNumber: INTRO_EMAIL_AUTOMATION_NUMBER,
+            bookingRef: cleanString(row.bookingRef),
+            recipient: email.recipient,
+            subject: email.subject,
+            status: "sent",
+            attempts: 1,
+            attemptedAt: row.introEmailSentAt,
+            sentAt: row.introEmailSentAt,
+            messageId: row.introEmailMessageId,
+            invoiceAttached: attachments.length > 0,
+            error: "",
+            missingPrerequisites: [],
+          },
+        },
+        { upsert: true, setDefaultsOnInsert: true },
+      );
+    } catch (deliveryError) {
+      // The email has already been delivered, so preserve the successful send
+      // and let introEmailSentAt continue to suppress Automation 1.
+      console.error("Could not record manual intro email as Automation 1", {
+        bookingId: String(row._id),
+        message: deliveryError?.message,
+      });
+    }
     return res.json({
       success: true,
       message: `Intro email sent to ${email.recipient}.`,

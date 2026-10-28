@@ -20,11 +20,11 @@ test("agent intro email uses complete request labels without duplicating 'reques
   const cases = [
     {
       eventType: "Corporate Event",
-      expected: "Song suggestions and Off Repertoire Request due on the 18 October 2026",
+      expected: "Song suggestions and Off Repertoire Request due on the 18th October 2026",
     },
     {
       eventType: "Wedding",
-      expected: "Song suggestions and First Dance request due on the 18 October 2026",
+      expected: "Song suggestions and First Dance request due on the 18th October 2026",
     },
   ];
 
@@ -53,11 +53,11 @@ test("direct-client Booking Board preview uses the complete intro template and c
   });
 
   assert.match(email.text, /schedule a call with me directly in my calendar/);
-  assert.match(email.text, /Song suggestions and Off Repertoire request due on the 30 October 2026/);
+  assert.match(email.text, /Song suggestions and Off Repertoire request due on the 30th October 2026/);
   assert.doesNotMatch(email.text, /\brequest\s+request\b/i);
-  assert.match(email.text, /balance due on the 12 November 2026/);
+  assert.match(email.text, /balance due on the 12th November 2026/);
   assert.match(email.html, /Follow This Link to your Event Sheet/);
-  assert.match(email.html, /12 November 2026/);
+  assert.match(email.html, /12th November 2026/);
 });
 
 test("intro email preview and send content prefers the booked act name over the public act name", () => {
@@ -69,12 +69,15 @@ test("intro email preview and send content prefers the booked act name over the 
     actTscName: "Dancefloor Magic",
     eventType: "Wedding",
     eventDateISO: "2026-12-10",
+    songSuggestionsDueDateISO: "2026-11-10",
     contactRole: "direct_client",
   });
 
   assert.equal(email.subject, "Rhythm Mystique & your Wedding on 10th of December 2026");
   assert.match(email.text, /band manager for Rhythm Mystique/);
   assert.match(email.html, /band manager for Rhythm Mystique/);
+  assert.match(email.text, /due on the 10th November 2026/);
+  assert.match(email.text, /balance due on the 3rd December 2026/);
   assert.doesNotMatch(email.subject, /Dancefloor Magic/);
   assert.doesNotMatch(email.text, /Dancefloor Magic/);
   assert.doesNotMatch(email.html, /Dancefloor Magic/);

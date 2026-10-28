@@ -36,6 +36,23 @@ const getStripeClientForCompany = (invoiceCompany) => {
 const looksLikeObjectId = (v) =>
   typeof v === "string" && /^[0-9a-f]{24}$/i.test(v);
 
+const findBookingBoardItem = async (identifier) => {
+  const value = String(identifier || "").trim();
+  if (!value) return null;
+
+  if (looksLikeObjectId(value)) {
+    const direct = await BookingBoardItem.findById(value).lean();
+    if (direct) return direct;
+
+    const linked = await BookingBoardItem.findOne({
+      $or: [{ bookingId: value }, { sourceBookingId: value }],
+    }).lean();
+    if (linked) return linked;
+  }
+
+  return BookingBoardItem.findOne({ bookingRef: value }).lean();
+};
+
 const BMM_VAT_ENROLMENT_DATE_ISO =
   process.env.BMM_VAT_ENROLMENT_DATE_ISO || "2026-02-07";
 
@@ -2151,7 +2168,7 @@ export const createBoardInvoice = async (req, res) => {
       });
     }
 
-    const row = await BookingBoardItem.findById(bookingId).lean();
+    const row = await findBookingBoardItem(bookingId);
 
     if (!row) {
       return res.status(404).json({
@@ -2712,7 +2729,7 @@ export const createBoardInvoice = async (req, res) => {
 
 export const serveBoardReceiptPdf = async (req, res) => {
   try {
-    const row = await BookingBoardItem.findById(req.params.id).lean();
+    const row = await findBookingBoardItem(req.params.id);
 
     if (!row) return res.status(404).send("Receipt not found");
 
@@ -2756,7 +2773,7 @@ export const serveBoardReceiptPdf = async (req, res) => {
 
 export const serveBoardInvoicePdf = async (req, res) => {
   try {
-    const row = await BookingBoardItem.findById(req.params.id).lean();
+    const row = await findBookingBoardItem(req.params.id);
 
     if (!row) return res.status(404).send("Invoice not found");
 
