@@ -131,7 +131,7 @@ export const buildClientAutomationDigest = ({ rows = [], deliveries = [], todayI
       allowlisted,
       automations,
     };
-  });
+  }).sort((left, right) => Number(right.allowlisted) - Number(left.allowlisted));
 
   const subject = `Daily automation safety digest — ${bookings.length} upcoming gig${bookings.length === 1 ? "" : "s"} — ${friendlyDate(todayISO)}`;
   const text = [

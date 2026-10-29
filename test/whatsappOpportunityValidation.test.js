@@ -9,6 +9,7 @@ import {
 import {
   automatedEnquiryEligible,
   automatedEnquiryFollowupEligible,
+  eventDateIsCurrentOrFuture,
   validAvailabilityRecipientName,
 } from "../utils/enquiryAutomationEligibility.js";
 
@@ -91,6 +92,19 @@ test("automated enquiry messaging excludes stale, past-date and test records", (
     ),
     false,
   );
+});
+
+test("the send boundary recognises past event dates", () => {
+  const now = new Date("2026-10-29T14:00:00Z").getTime();
+  assert.equal(eventDateIsCurrentOrFuture("2026-06-19", now), false);
+  assert.equal(eventDateIsCurrentOrFuture("2026-10-29", now), true);
+  assert.equal(eventDateIsCurrentOrFuture("2028-08-17", now), true);
+
+  const source = readFileSync(
+    new URL("../controllers/availabilityController.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /skipped:\s*"past-event-date"/);
 });
 
 test("client follow-ups stop when an enquiry has converted to a booking", () => {

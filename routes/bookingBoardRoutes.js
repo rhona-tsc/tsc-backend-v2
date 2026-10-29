@@ -3902,6 +3902,34 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       );
     }
 
+    // The public event sheet reads from the linked Booking, not the board row.
+    // Keep the booking's structural event type authoritative while preserving
+    // every other client-supplied event-sheet answer.
+    if (bodyWithoutBookingDetails.eventType !== undefined) {
+      const eventType = normalizeEventType(bodyWithoutBookingDetails.eventType);
+      const linkedBookingIds = [row.sourceBookingId, row.bookingId].filter((id) =>
+        mongoose.isValidObjectId(id),
+      );
+      const linkedBookingFilters = [
+        ...linkedBookingIds.map((id) => ({ _id: id })),
+        ...(row.bookingRef ? [{ bookingId: row.bookingRef }] : []),
+      ];
+
+      if (linkedBookingFilters.length) {
+        await Booking.updateOne(
+          { $or: linkedBookingFilters },
+          {
+            $set: {
+              eventType,
+              "bookingDetails.eventType": eventType,
+              "eventSheet.answers.event_type": eventType,
+              updatedAt: new Date(),
+            },
+          },
+        );
+      }
+    }
+
     return res.json({
       success: true,
       row,

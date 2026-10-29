@@ -320,7 +320,7 @@ test("the staged runner sends Automation 10 only to the allowlisted booking with
   assert.equal(sent[0].to, "susie@tigproductions.co.uk");
   assert.equal(sent[0].attachments[0].filename, "invoice.pdf");
   assert.deepEqual(query.bookingRef, {
-    $in: ["BBM 497 DESIGN", "260927276335", "260915275050"],
+    $in: ["BBM 497 DESIGN", "260927276335"],
   });
   assert.equal(deliveryRecord.status, "sent");
 

@@ -1257,8 +1257,8 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
   const answers = getEventSheetAnswers(booking);
   const bandName = getBookingDisplayName(booking);
   const eventType =
-    pickAnswer(answers, ["event_type", "eventType"]) ||
-    pickBookingValue(booking, ["eventType", "type", "eventDetails.type"]) || "";
+    pickBookingValue(booking, ["eventType", "bookingDetails.eventType", "type", "eventDetails.type"]) ||
+    pickAnswer(answers, ["event_type", "eventType"]) || "";
   const asksForEventPurpose = !/wedding|birthday/i.test(String(eventType));
   const bookerNames = getBookerNamesForPdf(answers, booking) || "Client";
   const coupleNames = getCoupleNamesForPdf(answers, booking);

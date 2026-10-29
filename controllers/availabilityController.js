@@ -23,8 +23,12 @@ import {
 import sendEmail from "../utils/sendEmail.js";
 import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
 import { buildTscEmailFooter } from "../utils/tscEmailBranding.js";
-import { automatedEnquiryEligible } from "../utils/enquiryAutomationEligibility.js";
+import {
+  automatedEnquiryEligible,
+  eventDateIsCurrentOrFuture,
+} from "../utils/enquiryAutomationEligibility.js";
 import { renderAvailabilityVocalistCards } from "../utils/availabilityEmailVocalistCards.js";
+import { validateDeputyCanonicalIdentity } from "../utils/deputyIdentity.js";
 
 const isValid24 = (v) =>
   typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
@@ -1755,45 +1759,60 @@ export async function notifyDeputies({
         inheritedFee,
       });
 
-      await triggerAvailabilityRequest({
-        inheritedFee,
-        inheritedFeeIncludesTravel: false,
-        actId,
-        lineupId,
-        dateISO,
-        slotIndex,
-        formattedAddress,
+      try {
+        await triggerAvailabilityRequest({
+          inheritedFee,
+          inheritedFeeIncludesTravel: false,
+          actId,
+          lineupId,
+          dateISO,
+          slotIndex,
+          formattedAddress,
 
-        // ✅ ALWAYS pass client context to deputy rows
-        clientName: inheritedClientName,
-        clientEmail: inheritedClientEmail,
+          // ✅ ALWAYS pass client context to deputy rows
+          clientName: inheritedClientName,
+          clientEmail: inheritedClientEmail,
 
-        // ✅ Ensure deputy rows get linked to the same enquiry/slot thread
-        enquiryId: inheritedEnquiryId,
+          // ✅ Ensure deputy rows get linked to the same enquiry/slot thread
+          enquiryId: inheritedEnquiryId,
 
-        // ✅ Helps triggerAvailabilityRequest enrichment if email missing
-        userId: inheritedClientUserId,
+          // ✅ Helps triggerAvailabilityRequest enrichment if email missing
+          userId: inheritedClientUserId,
 
-        isDeputy: true,
-        selectedVocalistName: deputyDisplayName || vocalistDisplayName || "",
-        vocalistName: vocalistDisplayName || "",
+          isDeputy: true,
+          selectedVocalistName: deputyDisplayName || vocalistDisplayName || "",
+          vocalistName: vocalistDisplayName || "",
 
-        deputy: {
-          id: deputy.id || deputy.musicianId || deputy._id || null,
-          musicianId: deputy.musicianId || deputy.id || deputy._id || null,
-          firstName: deputy.firstName || deputy.name || "",
-          lastName: deputy.lastName || "",
-          phone: cleanPhone,
-          email: deputy.email || "",
-          imageUrl:
-            deputy.imageUrl || deputy.photoUrl || pickPic(deputy) || null,
-          displayName: deputyDisplayName || "",
-        },
+          deputy: {
+            id: deputy.id || deputy.musicianId || deputy._id || null,
+            musicianId: deputy.musicianId || deputy.id || deputy._id || null,
+            firstName: deputy.firstName || deputy.name || "",
+            lastName: deputy.lastName || "",
+            phone: cleanPhone,
+            email: deputy.email || "",
+            imageUrl:
+              deputy.imageUrl || deputy.photoUrl || pickPic(deputy) || null,
+            displayName: deputyDisplayName || "",
+          },
 
-        
-        inheritedDuties: vocalist.instrument || "Vocalist",
-        skipDuplicateCheck,
-      });
+          inheritedDuties: vocalist.instrument || "Vocalist",
+          skipDuplicateCheck,
+        });
+      } catch (error) {
+        if (error?.code === "DEPUTY_IDENTITY_MISMATCH") {
+          console.error(
+            "🛑 [notifyDeputies] Skipping deputy with mismatched contact identity",
+            {
+              deputy: deputyDisplayName,
+              phone: cleanPhone,
+              actId: String(actId || ""),
+              lineupId: String(lineupId || ""),
+            },
+          );
+          continue;
+        }
+        throw error;
+      }
 
       existingSet.add(cleanPhone);
       totalSent++;
@@ -3272,6 +3291,20 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       dISO || (date ? new Date(date).toISOString().slice(0, 10) : null);
     if (!actId || !dateISO) throw new Error("Missing actId or dateISO");
 
+    // This is the final send boundary for both manual and automated requests.
+    // Never contact a musician about an event date that has already passed,
+    // even if an old enquiry is accidentally re-queued or imported again.
+    if (!eventDateIsCurrentOrFuture(dateISO)) {
+      console.warn(
+        "🛑 [triggerAvailabilityRequest] Past event date — blocking availability request",
+        { actId: String(actId), lineupId: String(lineupId || ""), dateISO },
+      );
+      if (res) {
+        return res.json({ success: true, sent: 0, skipped: "past-event-date" });
+      }
+      return { success: true, sent: 0, skipped: "past-event-date" };
+    }
+
     const act = await Act.findById(actId).lean();
     if (!act) throw new Error("Act not found");
 
@@ -4039,6 +4072,31 @@ if (shouldAlwaysSkip) {
             "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl",
           )
           .lean();
+      }
+    }
+
+    if (isDeputy && canonical) {
+      const identityCheck = validateDeputyCanonicalIdentity(
+        deputy || targetMember,
+        canonical,
+      );
+
+      if (!identityCheck.ok) {
+        console.error(
+          "🛑 [triggerAvailabilityRequest] Deputy phone belongs to a different musician — blocking send",
+          {
+            actId: String(actId || ""),
+            lineupId: String(lineupKey || ""),
+            phone,
+            ...identityCheck,
+          },
+        );
+
+        const identityError = new Error(
+          "Deputy contact details do not match the musician who owns this phone number",
+        );
+        identityError.code = "DEPUTY_IDENTITY_MISMATCH";
+        throw identityError;
       }
     }
 

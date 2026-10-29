@@ -9,7 +9,7 @@ const maxAgeHours = () => {
     : DEFAULT_MAX_AGE_HOURS;
 };
 
-const eventDateIsCurrentOrFuture = (value, now) => {
+export const eventDateIsCurrentOrFuture = (value, now = Date.now()) => {
   const isoDay = clean(value).slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDay)) return false;
   const today = new Date(now).toISOString().slice(0, 10);
