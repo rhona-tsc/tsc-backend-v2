@@ -3360,9 +3360,34 @@ router.put("/:id/review", musicianAuth, async (req, res) => {
         bookingData?.actsSummary?.[0]?.actId ||
         bookingData?.act,
     );
-    const actId = mongoose.isValidObjectId(actIdCandidate)
+    let actId = mongoose.isValidObjectId(actIdCandidate)
       ? new mongoose.Types.ObjectId(actIdCandidate)
       : null;
+    if (!actId) {
+      const actNames = [
+        boardRow?.actTscName,
+        boardRow?.actName,
+        boardRow?.actsSummary?.[0]?.tscName,
+        boardRow?.actsSummary?.[0]?.name,
+        bookingData?.actTscName,
+        bookingData?.actName,
+        bookingData?.actsSummary?.[0]?.tscName,
+        bookingData?.actsSummary?.[0]?.name,
+      ]
+        .map(cleanString)
+        .filter(Boolean);
+      for (const actName of actNames) {
+        const exactName = new RegExp(`^${escapeRegex(actName)}$`, "i");
+        const matchedAct = await actModel
+          .findOne({ $or: [{ tscName: exactName }, { name: exactName }] })
+          .select("_id")
+          .lean();
+        if (matchedAct?._id) {
+          actId = matchedAct._id;
+          break;
+        }
+      }
+    }
 
     const allocationSources = [
       boardRow?.assignedMusicians,
@@ -3386,7 +3411,7 @@ router.put("/:id/review", musicianAuth, async (req, res) => {
 
     const rating = Number(req.body?.rating);
     const requestedSource = cleanString(req.body?.source).toLowerCase();
-    const nonGoogleSource = ["internal", "trustpilot", "other"].includes(requestedSource)
+    const reviewSource = ["google", "internal", "trustpilot", "other"].includes(requestedSource)
       ? requestedSource
       : "other";
     const receivedAt = new Date();
@@ -3415,10 +3440,13 @@ router.put("/:id/review", musicianAuth, async (req, res) => {
       boardRow.review = {
         ...(boardRow.review?.toObject ? boardRow.review.toObject() : boardRow.review || {}),
         ...sharedReview,
-        source: nonGoogleSource,
+        source: reviewSource,
         received: true,
         receivedAt,
-        nonGoogleReceivedAt: receivedAt,
+        nonGoogleReceivedAt:
+          reviewSource === "google" ? boardRow?.review?.nonGoogleReceivedAt : receivedAt,
+        googleReceivedAt:
+          reviewSource === "google" ? receivedAt : boardRow?.review?.googleReceivedAt,
         linkedActId: actId || undefined,
         linkedMusicianIds: musicianIds,
       };
