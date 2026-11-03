@@ -318,6 +318,15 @@ const captureLine = (text, label) => {
   return cleanString(match?.[1]);
 };
 
+const splitImportedClientName = (value) => {
+  const primaryContact = cleanString(value).split(/\s*(?:\/|&|\band\b)\s*/i)[0] || "";
+  const parts = primaryContact.split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts[0] || "",
+    lastName: parts.slice(1).join(" "),
+  };
+};
+
 const parseContractDate = (value) => {
   const cleaned = cleanString(value).replace(/(\d)(st|nd|rd|th)\b/gi, "$1");
   if (!cleaned) return "";
@@ -435,7 +444,8 @@ const parseEncoreBooking = (bookingText, acceptedEmailText = "") => {
 
   return {
     bookerName: clientName,
-    clientFirstNames: clientName.split(/\s+/)[0] || "",
+    clientFirstNames: splitImportedClientName(clientName).firstName,
+    clientLastName: splitImportedClientName(clientName).lastName,
     clientEmail: email,
     clientPhone: phone,
     clientAddress: "",
@@ -510,7 +520,8 @@ const parseEntertainmentNationBooking = (contractText) => {
 
   return {
     bookerName: clientName,
-    clientFirstNames: clientName.split(/\s+/)[0] || "",
+    clientFirstNames: splitImportedClientName(clientName).firstName,
+    clientLastName: splitImportedClientName(clientName).lastName,
     clientEmail: captureLine(text, "Contact Email"),
     clientPhone: captureLine(text, "Contact Telephone"),
     clientAddress: captureLine(text, "Contact Address"),
@@ -607,9 +618,12 @@ export const parseBookingContract = (contractText, invoiceText = "") => {
     invoiceDueDateISO ||
     (depositDueDays > 0 ? addCalendarDays(issueDateISO, depositDueDays) : "");
 
+  const clientName = captureLine(contractText, "Contact Name");
+
   return {
-    bookerName: captureLine(contractText, "Contact Name"),
-    clientFirstNames: captureLine(contractText, "Contact Name").split(/\s+/)[0] || "",
+    bookerName: clientName,
+    clientFirstNames: splitImportedClientName(clientName).firstName,
+    clientLastName: splitImportedClientName(clientName).lastName,
     clientEmail: captureLine(contractText, "Contact Email"),
     clientPhone: captureLine(contractText, "Contact Telephone"),
     clientAddress: captureLine(contractText, "Contact Address"),
@@ -2658,6 +2672,11 @@ router.post("/", musicianAuth, async (req, res) => {
       bookerName: String(payload.bookerName || "").trim(),
       clientFirstNames: String(
         payload.clientFirstNames || payload.bookerName || "",
+      ).trim(),
+      clientLastName: String(
+        payload.clientLastName ||
+          splitImportedClientName(payload.bookerName).lastName ||
+          "",
       ).trim(),
       bookingRef,
 

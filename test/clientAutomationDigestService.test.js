@@ -33,7 +33,7 @@ const susie = {
   bookingStatus: "active",
 };
 
-test("daily digest keeps Georgia in preview and puts live bookings first", () => {
+test("daily digest recognises Georgia and Susie as live allowlisted bookings", () => {
   const digest = buildClientAutomationDigest({
     rows: [georgia, susie],
     deliveries: [{
@@ -47,15 +47,15 @@ test("daily digest keeps Georgia in preview and puts live bookings first", () =>
 
   assert.equal(digest.bookingCount, 2);
   assert.equal(digest.bookings[0].allowlisted, true);
-  assert.equal(digest.bookings[0].bookingRef, "BBM 497 DESIGN");
-  assert.equal(digest.bookings[1].allowlisted, false);
-  assert.equal(digest.bookings[1].bookingRef, "260915275050");
+  assert.equal(digest.bookings[0].bookingRef, "260915275050");
+  assert.equal(digest.bookings[1].allowlisted, true);
+  assert.equal(digest.bookings[1].bookingRef, "BBM 497 DESIGN");
   assert.match(digest.subject, /2 upcoming gigs/);
   assert.match(digest.text, /Rhythm Mystique/);
   assert.match(digest.text, /260915275050/);
   assert.match(digest.text, /Automation 16.*Sent 3rd November 2026/);
-  assert.ok(digest.text.indexOf("LIVE allowlist") < digest.text.indexOf("Preview only"));
-  assert.ok(digest.html.indexOf("LIVE allowlist") < digest.html.indexOf("Preview only"));
+  assert.doesNotMatch(digest.text, /Preview only/);
+  assert.doesNotMatch(digest.html, /Preview only/);
 });
 
 test("daily digest sends once per London calendar day", async () => {

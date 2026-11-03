@@ -231,6 +231,8 @@ Supplier Fees to pay : £2172 Payable to the Supplier
   assert.equal(draft.bookingDateISO, "2026-10-02");
   assert.equal(draft.agent, "Entertainment Nation");
   assert.equal(draft.actName, "Rhythm Mystique");
+  assert.equal(draft.clientFirstNames, "James");
+  assert.equal(draft.clientLastName, "Kemp");
   assert.equal(draft.clientEmail, "james@tlfservices.co.uk");
   assert.equal(draft.eventType, "Party");
   assert.equal(draft.grossValue, 2172);
@@ -243,4 +245,24 @@ Supplier Fees to pay : £2172 Payable to the Supplier
     "Female Lead Vocals", "Guitar", "Keys", "Bass", "Drums",
   ]);
   assert.ok(draft.importMetadata.incompleteFields.includes("startTime"));
+});
+
+test("contract import stores the first contact's surname when multiple contacts are listed", () => {
+  const contractText = `
+Entertainment Nation Booking Contract
+Contract Ref : 260922275836
+Date of Issue : 01/10/2026
+Contact Name : Nicki Hiscox / Beth Ford
+Contact Email : reception@fireangeltech.com
+Event Date : 17/12/2026
+Supplier Name : Rhythm Mystique
+Supplier Line-up : 5 Piece Band: Female Lead Vocals, Guitar, Keys, Bass and Drums
+Supplier Fees to pay : £2068 Payable to the Supplier
+`;
+
+  const draft = parseBookingContract(contractText);
+
+  assert.equal(draft.bookerName, "Nicki Hiscox / Beth Ford");
+  assert.equal(draft.clientFirstNames, "Nicki");
+  assert.equal(draft.clientLastName, "Hiscox");
 });

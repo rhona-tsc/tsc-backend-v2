@@ -281,6 +281,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
     // visible columns
     bookerName: { type: String },
     clientFirstNames: { type: String },
+    clientLastName: { type: String, default: "" },
     bookingRef: { type: String, index: true, unique: false },
     eventSheetLink: { type: String },
     draftSetlistLink: { type: String, default: "", trim: true },

@@ -32,3 +32,23 @@ test("a legacy booking without an agent can retain its charged deposit", () => {
   assert.equal(isExternalAgencyBooking(booking), false);
   assert.equal(getDepositPaidToInvoiceCompany(booking), 250);
 });
+
+test("a paid deposit invoice overrides a stale charged-deposit field", () => {
+  const booking = {
+    agent: "Direct",
+    payments: { depositChargedAmount: 140 },
+    depositInvoice: { gross: 500, status: "paid" },
+  };
+
+  assert.equal(getDepositPaidToInvoiceCompany(booking), 500);
+});
+
+test("an unpaid deposit invoice does not override the amount actually charged", () => {
+  const booking = {
+    agent: "Direct",
+    payments: { depositChargedAmount: 140 },
+    depositInvoice: { gross: 500, status: "issued" },
+  };
+
+  assert.equal(getDepositPaidToInvoiceCompany(booking), 140);
+});
