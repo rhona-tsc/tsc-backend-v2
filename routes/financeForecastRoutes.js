@@ -3,6 +3,7 @@ import BookingBoardItem from "../models/bookingBoardItem.js";
 import FinanceForecastBooking from "../models/financeForecastBookingModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 import Booking from "../models/bookingModel.js";
+import { thursdayInWeekBeforeISO } from "../utils/finalDetailsDueDate.js";
 
 const router = express.Router();
 
@@ -12,19 +13,6 @@ const isoDateOnly = (value) => {
   if (!value) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toISOString().slice(0, 10);
-};
-
-const getThursdayWeekBefore = (eventDateISO) => {
-  const d = new Date(`${eventDateISO}T00:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) return "";
-
-  d.setUTCDate(d.getUTCDate() - 7);
-
-  while (d.getUTCDay() !== 4) {
-    d.setUTCDate(d.getUTCDate() - 1);
-  }
-
   return d.toISOString().slice(0, 10);
 };
 
@@ -137,7 +125,7 @@ router.post("/bookings/sync-from-board/:boardRowId", musicianAuth, async (req, r
 
     const split = getAccountingSplit(row, grossValue, depositPaid);
 
-    const expectedBalanceDueDateISO = getThursdayWeekBefore(eventDateISO);
+    const expectedBalanceDueDateISO = thursdayInWeekBeforeISO(eventDateISO);
 
     const status =
       row?.payments?.balancePaymentReceived || row?.balancePaid
@@ -390,7 +378,7 @@ router.post("/bookings/sync-all-from-board", musicianAuth, async (req, res) => {
         const depositPaid = getDepositPaid(row);
         const balanceDue = round2(Math.max(grossValue - depositPaid, 0));
         const split = getAccountingSplit(row, grossValue, depositPaid);
-        const expectedBalanceDueDateISO = getThursdayWeekBefore(eventDateISO);
+        const expectedBalanceDueDateISO = thursdayInWeekBeforeISO(eventDateISO);
 
         const status =
           row?.payments?.balancePaymentReceived || row?.balancePaid

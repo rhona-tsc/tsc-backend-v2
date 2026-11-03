@@ -27,7 +27,10 @@ import {
   escapeEmailHtml,
 } from "../utils/tscEmailBranding.js";
 import { automationBodyToHtml } from "../utils/automationEmailTemplate.js";
-import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
+import {
+  finalDetailsDueISO,
+  thursdayInWeekBeforeISO,
+} from "../utils/finalDetailsDueDate.js";
 import { buildWeddingReferralCode, isWeddingBooking } from "../utils/referralDiscountCode.js";
 import {
   actReferenceCandidates,
@@ -920,19 +923,6 @@ const isoDateOnly = (value) => {
   if (!value) return "";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toISOString().slice(0, 10);
-};
-
-const getThursdayWeekBefore = (eventDateISO) => {
-  const d = new Date(`${eventDateISO}T00:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) return "";
-
-  d.setUTCDate(d.getUTCDate() - 7);
-
-  while (d.getUTCDay() !== 4) {
-    d.setUTCDate(d.getUTCDate() - 1);
-  }
-
   return d.toISOString().slice(0, 10);
 };
 
@@ -2663,6 +2653,13 @@ router.post("/", musicianAuth, async (req, res) => {
     );
 
     // --------- 2) Upsert BookingBoardItem (UI row) ----------
+    const calculatedInvoiceDueDateISO = finalDetailsDueISO({
+      eventDateISO,
+      bookingDateISO: payload.bookingDateISO,
+      enquiryDateISO: payload.enquiryDateISO,
+      createdAt: existingBoardRow?.createdAt || new Date(),
+    });
+
     const boardPatch = {
       bookingId: booking._id, // ObjectId ref to Booking
       ...(linkedAct ? { actId: linkedAct._id } : {}),
@@ -2691,6 +2688,9 @@ router.post("/", musicianAuth, async (req, res) => {
       eventDateISO: eventDateISO || "",
       enquiryDateISO: String(payload.enquiryDateISO || "").slice(0, 10),
       bookingDateISO: String(payload.bookingDateISO || "").slice(0, 10),
+      invoiceDueDateISO:
+        calculatedInvoiceDueDateISO ||
+        String(payload.invoiceDueDateISO || "").slice(0, 10),
       songSuggestionsDueDateISO: String(payload.songSuggestionsDueDateISO || "").slice(0, 10),
 
       grossValue: Number(payload.grossValue || 0) || 0,
@@ -2754,10 +2754,21 @@ router.post("/", musicianAuth, async (req, res) => {
         "bookerName", "clientFirstNames", "clientEmail", "clientEmails",
         "clientPhone", "clientAddress", "contactRole", "agent", "eventType",
         "grossValue", "netCommission", "accounting", "depositInvoice",
-        "paymentInstructions", "invoiceDateISO", "invoiceDueDateISO", "songSuggestionsDueDateISO",
+        "paymentInstructions", "invoiceDateISO", "songSuggestionsDueDateISO",
         "invoiceUrl", "invoicePdfUrl", "balanceAmountPence", "balanceStatus",
         "payments",
       ].forEach(preserve);
+
+      // Keep a deliberate manual deadline when the event date has not changed.
+      // If the contract changes the date, recalculate it using the central
+      // working-day rule instead of carrying the old deadline forward.
+      if (
+        String(existingBoardRow?.eventDateISO || "").slice(0, 10) ===
+          String(eventDateISO || "").slice(0, 10) &&
+        existingBoardRow?.invoiceDueDateISO
+      ) {
+        preserve("invoiceDueDateISO");
+      }
     }
 
     const boardRow = await BookingBoardItem.findOneAndUpdate(
@@ -3692,6 +3703,33 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         existingBooking: savedBookingDoc,
         existingBoardRow: existingMirrorRow,
       });
+      const deadlineInputsChanged =
+        body.eventDateISO !== undefined ||
+        body.eventDate !== undefined ||
+        body.date !== undefined ||
+        body.bookingDateISO !== undefined ||
+        body.enquiryDateISO !== undefined;
+      const mirrorInvoiceDueDateISO =
+        body.invoiceDueDateISO !== undefined
+          ? String(body.invoiceDueDateISO || "").slice(0, 10)
+          : deadlineInputsChanged
+            ? finalDetailsDueISO({
+                eventDateISO: isoDateOnly(
+                  savedBooking?.eventDate ||
+                    savedBooking?.date ||
+                    body.eventDateISO ||
+                    existingMirrorRow?.eventDateISO,
+                ),
+                bookingDateISO:
+                  String(body.bookingDateISO || "").slice(0, 10) ||
+                  isoDateOnly(savedBooking?.bookingDate) ||
+                  existingMirrorRow?.bookingDateISO,
+                enquiryDateISO:
+                  String(body.enquiryDateISO || "").slice(0, 10) ||
+                  existingMirrorRow?.enquiryDateISO,
+                createdAt: existingMirrorRow?.createdAt || savedBooking?.createdAt,
+              })
+            : undefined;
 
       const mirrorPatch = {
         updatedAt: new Date(),
@@ -3708,6 +3746,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
           : {}),
         ...(body.songSuggestionsDueDateISO !== undefined
           ? { songSuggestionsDueDateISO: String(body.songSuggestionsDueDateISO || "").slice(0, 10) }
+          : {}),
+        ...(mirrorInvoiceDueDateISO !== undefined
+          ? { invoiceDueDateISO: mirrorInvoiceDueDateISO }
           : {}),
         ...(body.enquiryDateISO !== undefined
           ? { enquiryDateISO: String(body.enquiryDateISO || "").slice(0, 10) }
@@ -3887,6 +3928,31 @@ router.patch("/:id", musicianAuth, async (req, res) => {
     const { bookingDetails: bodyBookingDetails, ...bodyWithoutBookingDetails } = body;
     delete bodyWithoutBookingDetails.replaceAssignedMusicians;
 
+    const deadlineInputsChanged =
+      bodyWithoutBookingDetails.eventDateISO !== undefined ||
+      bodyWithoutBookingDetails.eventDate !== undefined ||
+      bodyWithoutBookingDetails.date !== undefined ||
+      bodyWithoutBookingDetails.bookingDateISO !== undefined ||
+      bodyWithoutBookingDetails.enquiryDateISO !== undefined;
+    if (
+      deadlineInputsChanged &&
+      bodyWithoutBookingDetails.invoiceDueDateISO === undefined
+    ) {
+      const existingDeadlineRow = await BookingBoardItem.findById(req.params.id)
+        .select(
+          "eventDateISO bookingDateISO enquiryDateISO invoiceDueDateISO createdAt",
+        )
+        .lean();
+      const recalculatedInvoiceDueDateISO = finalDetailsDueISO({
+        ...existingDeadlineRow,
+        ...bodyWithoutBookingDetails,
+      });
+      if (recalculatedInvoiceDueDateISO) {
+        bodyWithoutBookingDetails.invoiceDueDateISO =
+          recalculatedInvoiceDueDateISO;
+      }
+    }
+
     if (bodyWithoutBookingDetails.depositAmount !== undefined) {
       const depositAmount = Number(bodyWithoutBookingDetails.depositAmount || 0) || 0;
       bodyWithoutBookingDetails.payments = {
@@ -4026,7 +4092,7 @@ const syncBoardRowToFinance = async (row) => {
   );
 
   const balanceDue = round2(Math.max(grossValue - depositPaid, 0));
-  const expectedBalanceDueDateISO = getThursdayWeekBefore(eventDateISO);
+  const expectedBalanceDueDateISO = thursdayInWeekBeforeISO(eventDateISO);
 
   const payload = {
     boardRowId: row._id,

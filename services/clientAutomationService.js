@@ -766,6 +766,7 @@ export const APPROVED_CLIENT_AUTOMATION_EMAILS = [
   "james@tlfservices.co.uk",
   "georgia.hyndman@ukimediaevents.com",
   "reception@fireangeltech.com",
+  "meganltompkins2716@hotmail.com",
 ];
 
 export const APPROVED_CLIENT_AUTOMATION_BOOKING_REFS = [
@@ -773,6 +774,7 @@ export const APPROVED_CLIENT_AUTOMATION_BOOKING_REFS = [
   "260927276335",
   "260915275050",
   "260922275836",
+  "260115241436",
 ];
 
 const configuredAllowlist = () => new Set([

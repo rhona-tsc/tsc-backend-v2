@@ -42,6 +42,12 @@ test("FireAngel is included in both live automation allowlists", () => {
   assert.equal(allowlist.bookingRefs.has("260922275836"), true);
 });
 
+test("Megan is included in both live automation allowlists", () => {
+  const allowlist = clientAutomationAllowlistSnapshot();
+  assert.equal(allowlist.emails.has("meganltompkins2716@hotmail.com"), true);
+  assert.equal(allowlist.bookingRefs.has("260115241436"), true);
+});
+
 test("daily digest recognises Georgia and Susie as live allowlisted bookings", () => {
   const digest = buildClientAutomationDigest({
     rows: [georgia, susie],
