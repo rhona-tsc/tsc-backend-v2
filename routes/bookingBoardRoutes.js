@@ -13,7 +13,7 @@ import financeForecastBookingModel from "../models/financeForecastBookingModel.j
 import multer from "multer";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { sendWhatsAppMessage, sendWhatsAppText, sendSMSMessage } from "../utils/twilioClient.js";
-import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
+import { buildBandSheetShareUrl } from "../utils/bandSheetUrl.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
 import { normalizeEventType } from "../utils/eventTypes.js";
 import sendEmail from "../utils/sendEmail.js";
@@ -1319,6 +1319,8 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
     "clientAddress",
     "county",
     "lineupSelected",
+    "lineupId",
+    "bandSize",
     "arrivalTime",
     "finishTime",
     "actName",
@@ -1334,6 +1336,12 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
       bookingDoc[field] = patch[field];
     }
   });
+
+  if (Array.isArray(patch.lineupComposition)) {
+    bookingDoc.lineupComposition = patch.lineupComposition
+      .map((role) => String(role || "").trim())
+      .filter(Boolean);
+  }
 
   if (patch.songSuggestionsDueDateISO !== undefined) {
     const songSuggestionsDueDateISO = String(
@@ -2857,7 +2865,7 @@ router.post("/:id/whatsapp-group", musicianAuth, async (req, res) => {
       ? await Booking.findById(row.bookingId).lean()
       : await Booking.findOne({ bookingId: row.bookingRef }).lean();
     const sheetToken = cleanString(coreBooking?.eventSheet?.bandSheetToken);
-    const pdfUrl = sheetToken ? buildBandSheetPdfUrl(sheetToken) : cleanString(row.eventSheetLink);
+    const pdfUrl = sheetToken ? buildBandSheetShareUrl(sheetToken) : cleanString(row.eventSheetLink);
     const actName = cleanString(row.actTscName || row.actName) || "your band";
     const eventDate = cleanString(row.eventDateISO) || "the event date";
 
@@ -3710,6 +3718,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         ...(body.address !== undefined ? { address: body.address } : {}),
         ...(body.county !== undefined ? { county: body.county } : {}),
         ...(body.lineupSelected !== undefined ? { lineupSelected: body.lineupSelected } : {}),
+        ...(Array.isArray(body.lineupComposition)
+          ? { lineupComposition: body.lineupComposition }
+          : {}),
         ...(body.bandSize !== undefined ? { bandSize: Number(body.bandSize || 0) || 0 } : {}),
         ...(body.arrivalTime !== undefined ? { arrivalTime: body.arrivalTime } : {}),
         ...(body.startTime !== undefined ? { startTime: body.startTime } : {}),

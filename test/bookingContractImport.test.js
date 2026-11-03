@@ -247,6 +247,34 @@ Supplier Fees to pay : £2172 Payable to the Supplier
   assert.ok(draft.importMetadata.incompleteFields.includes("startTime"));
 });
 
+test("Entertainment Nation imports preserve a one-off trumpet lineup", () => {
+  const contractText = `
+Entertainment Nation Booking Contract
+Issued by the 'Agent' (Entertainment Nation) on behalf of the 'Client' (Megan Tompkins) and the 'Supplier' (Rhythm Mystique)
+Contract Ref : 260115241436
+Date of Issue : 15/01/2026
+Contact Name : Megan Tompkins
+Contact Email : megan@example.com
+Event Date : 31/12/2026
+Supplier Name : Rhythm Mystique
+Supplier Line-up : 6 Piece Band: Female Lead Vocals, Guitar, Keys, Trumpet, Bass and Drums
+Supplier Fees to pay : £3000 Payable to the Supplier
+`;
+
+  const draft = parseBookingContract(contractText);
+
+  assert.equal(draft.bandSize, 6);
+  assert.deepEqual(draft.lineupComposition, [
+    "Female Lead Vocals",
+    "Guitar",
+    "Keys",
+    "Trumpet",
+    "Bass",
+    "Drums",
+  ]);
+  assert.equal(draft.lineupComposition.includes("Saxophone"), false);
+});
+
 test("contract import stores the first contact's surname when multiple contacts are listed", () => {
   const contractText = `
 Entertainment Nation Booking Contract

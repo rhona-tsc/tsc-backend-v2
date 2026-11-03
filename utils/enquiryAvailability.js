@@ -27,6 +27,33 @@ export const sortedVocalContacts = (lineup = {}) =>
 export const requiredVocalistSlotIndexes = (lineup = {}) =>
   sortedVocalContacts(lineup).map((_, index) => index);
 
+const leadVocalPattern = /\blead\b.*\b(vocal|vocalist|singer)\b|\b(vocal|vocalist|singer)\b.*\blead\b/i;
+
+export const musicianCanFrontVocalSlot = (musician = {}, slot = {}) => {
+  if (!/^approved\b/i.test(clean(musician?.status))) return false;
+
+  const declaredRoles = [
+    ...(Array.isArray(musician?.vocals?.type) ? musician.vocals.type : []),
+    ...(Array.isArray(musician?.instrumentation)
+      ? musician.instrumentation.map((item) => item?.instrument)
+      : []),
+  ]
+    .map(clean)
+    .filter(Boolean);
+  if (!declaredRoles.some((role) => leadVocalPattern.test(role))) return false;
+
+  const slotRole = clean(slot?.instrument || slot?.role || slot?.duties).toLowerCase();
+  const profileGender = clean(musician?.vocals?.gender).toLowerCase();
+  if (/\bfemale\b/.test(slotRole) && profileGender && profileGender !== "female") {
+    return false;
+  }
+  if (/\bmale\b/.test(slotRole) && profileGender && profileGender !== "male") {
+    return false;
+  }
+
+  return true;
+};
+
 const replyTime = (row = {}) =>
   new Date(row.repliedAt || row.updatedAt || row.createdAt || 0).getTime();
 
@@ -39,7 +66,11 @@ const displayName = (row = {}) =>
   );
 
 export const availableVocalistsForLineup = (rows = [], lineup = {}) => {
-  const requiredSlots = requiredVocalistSlotIndexes(lineup);
+  const vocalContacts = sortedVocalContacts(lineup);
+  const requiredSlots = vocalContacts.map((_, index) => index);
+  const slotContacts = new Map(
+    vocalContacts.map((member, index) => [index, member]),
+  );
   const bySlot = new Map();
 
   requiredSlots.forEach((slotIndex) => {
@@ -62,6 +93,7 @@ export const availableVocalistsForLineup = (rows = [], lineup = {}) => {
 
   return {
     requiredSlots,
+    slotContacts,
     bySlot,
     complete:
       requiredSlots.length > 0 &&

@@ -3,7 +3,7 @@ import crypto from "crypto";
 import Booking from "../models/bookingModel.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import { oauth2Client } from "../controllers/googleController.js";
-import { buildBandSheetPdfUrl, getBandSheetOrigin } from "./bandSheetUrl.js";
+import { buildBandSheetShareUrl, getBandSheetOrigin } from "./bandSheetUrl.js";
 import { bandSheetTokenPersistenceUpdate } from "./bandSheetTokenRegistry.js";
 
 const clean = (value = "") => String(value || "").trim();
@@ -94,7 +94,7 @@ const lineupFor = (booking = {}, assignedMusicians = []) => {
 const eventSheetLink = (booking = {}) => {
   const token = clean(booking?.eventSheet?.bandSheetToken);
   if (token) {
-    return buildBandSheetPdfUrl(token);
+    return buildBandSheetShareUrl(token);
   }
   const hostedPdf = clean(
     booking?.eventSheet?.bandPdfUrl || booking?.eventSheet?.pdfUrl,

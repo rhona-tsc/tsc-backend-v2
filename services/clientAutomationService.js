@@ -6,7 +6,7 @@ import cloudinary from "../config/cloudinary.js";
 import sendEmail from "../utils/sendEmail.js";
 import { buildIntroInvoiceAttachments } from "../utils/introInvoiceAttachment.js";
 import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.js";
-import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
+import { buildBandSheetShareUrl } from "../utils/bandSheetUrl.js";
 import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
 import { resolveBookedActName } from "../utils/bookingDisplayName.js";
 
@@ -309,7 +309,7 @@ const withBandEventSheetUrl = async (row = {}) => {
         .select("eventSheet.bandSheetToken")
         .lean();
     const token = clean(coreBooking?.eventSheet?.bandSheetToken);
-    return token ? { ...row, bandEventSheetUrl: buildBandSheetPdfUrl(token) } : row;
+    return token ? { ...row, bandEventSheetUrl: buildBandSheetShareUrl(token) } : row;
   } catch {
     return row;
   }

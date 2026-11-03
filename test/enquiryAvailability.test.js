@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
+import {
+  availableVocalistsForLineup,
+  musicianCanFrontVocalSlot,
+} from "../utils/enquiryAvailability.js";
 import {
   buildEnquiryDaySixEmail,
   buildEnquiryDayFourEmail,
@@ -16,6 +19,47 @@ const twoVocalistLineup = {
     { instrument: "Drums", email: "c@example.com" },
   ],
 };
+
+test("only approved lead vocalists can front a deputy vocal slot", () => {
+  const femaleLeadSlot = { instrument: "Lead Female Vocal" };
+
+  assert.equal(
+    musicianCanFrontVocalSlot(
+      {
+        status: "approved",
+        vocals: { type: ["Lead Vocalist"], gender: "Female" },
+        instrumentation: [],
+      },
+      femaleLeadSlot,
+    ),
+    true,
+  );
+  assert.equal(
+    musicianCanFrontVocalSlot(
+      {
+        status: "pending",
+        vocals: {
+          type: ["Backing Vocalist-Instrumentalist"],
+          gender: "Male",
+        },
+        instrumentation: [{ instrument: "Electric Bass Guitar" }],
+      },
+      femaleLeadSlot,
+    ),
+    false,
+  );
+  assert.equal(
+    musicianCanFrontVocalSlot(
+      {
+        status: "approved",
+        vocals: { type: ["Lead Vocalist"], gender: "Male" },
+        instrumentation: [],
+      },
+      femaleLeadSlot,
+    ),
+    false,
+  );
+});
 
 test("availability email renders a separate photo and profile for every selected vocalist", () => {
   const html = renderAvailabilityVocalistCards({

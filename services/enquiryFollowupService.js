@@ -6,7 +6,10 @@ import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.js";
-import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
+import {
+  availableVocalistsForLineup,
+  musicianCanFrontVocalSlot,
+} from "../utils/enquiryAvailability.js";
 import { automatedEnquiryFollowupEligible } from "../utils/enquiryAutomationEligibility.js";
 
 const DAY_TWO_DELAY_MS = 48 * 60 * 60 * 1000;
@@ -201,7 +204,8 @@ const enrichVocalistSummary = async (summary) => {
   const musicians = await Musician.find({ _id: { $in: musicianIds } })
     .select(
       "firstName lastName displayName preferredName name musicianSlug profilePhoto " +
-        "tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks",
+        "tscApprovedFunctionBandVideoLinks tscApprovedOriginalBandVideoLinks " +
+        "status vocals instrumentation",
     )
     .lean();
   const byId = new Map(musicians.map((musician) => [String(musician._id), musician]));
@@ -239,12 +243,23 @@ const enrichVocalistSummary = async (summary) => {
   const bySlot = new Map(
     summary.requiredSlots.map((slotIndex) => [
       slotIndex,
-      (summary.bySlot.get(slotIndex) || []).map(enrichRow),
+      (summary.bySlot.get(slotIndex) || [])
+        .filter((row) => {
+          const musician = byId.get(String(row?.musicianId || ""));
+          const slot = summary.slotContacts?.get(slotIndex) || {};
+          return musicianCanFrontVocalSlot(musician, slot);
+        })
+        .map(enrichRow),
     ]),
   );
   return {
     ...summary,
     bySlot,
+    complete:
+      summary.requiredSlots.length > 0 &&
+      summary.requiredSlots.every(
+        (slotIndex) => (bySlot.get(slotIndex) || []).length > 0,
+      ),
     selected: summary.requiredSlots
       .map((slotIndex) => (bySlot.get(slotIndex) || [])[0])
       .filter(Boolean),

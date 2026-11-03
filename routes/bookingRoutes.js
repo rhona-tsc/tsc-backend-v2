@@ -24,7 +24,10 @@ import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
 import crypto from "crypto";
 import { buildBandEventSheetEmailHtml } from "../utils/tscEmailBranding.js";
-import { buildBandSheetPdfUrl } from "../utils/bandSheetUrl.js";
+import {
+  buildBandSheetPdfUrl,
+  buildBandSheetShareUrl,
+} from "../utils/bandSheetUrl.js";
 import {
   bandSheetTokenLookup,
   cleanBandSheetToken,
@@ -920,12 +923,18 @@ const normalisePdfRole = (value = "") =>
     .toLowerCase()
     .replace(/\s+/g, " ");
 
-const getWantedLineupRolesForPdf = (booking) => {
+const getExplicitLineupRolesForPdf = (booking) => {
   const firstAct = getFirstActSummary(booking) || {};
-  const explicit = [
-    ...(Array.isArray(booking?.lineupComposition) ? booking.lineupComposition : []),
-    ...(Array.isArray(firstAct?.lineupComposition) ? firstAct.lineupComposition : []),
-  ];
+  const explicit = Array.isArray(booking?.lineupComposition) && booking.lineupComposition.length
+    ? booking.lineupComposition
+    : Array.isArray(firstAct?.lineupComposition)
+      ? firstAct.lineupComposition
+      : [];
+  return explicit.map((role) => String(role || "").trim()).filter(Boolean);
+};
+
+const getWantedLineupRolesForPdf = (booking) => {
+  const explicit = getExplicitLineupRolesForPdf(booking);
   if (explicit.length) return explicit.map(normalisePdfRole).filter(Boolean);
 
   const allocated = [
@@ -1022,6 +1031,21 @@ const getLineupMembersForPdf = (booking, act) => {
   const firstAct = getFirstActSummary(booking) || {};
   const lineup = resolveActLineupForPdf(booking, act);
   const configured = lineup?.bandMembers || firstAct.bandMembers || firstAct.lineup?.bandMembers || [];
+  const explicitRoles = getExplicitLineupRolesForPdf(booking);
+  if (explicitRoles.length) {
+    const unmatched = configured
+      .filter((member) => !isNonPerformerForPdf(member))
+      .map((member) => ({ ...member }));
+    const overriddenPerformers = explicitRoles.map((role) => {
+      const matchIndex = unmatched.findIndex(
+        (member) => normalisePdfRole(member?.instrument || member?.role) === normalisePdfRole(role),
+      );
+      const matched = matchIndex >= 0 ? unmatched.splice(matchIndex, 1)[0] : {};
+      return { ...matched, instrument: role };
+    });
+    const nonPerformers = configured.filter((member) => isNonPerformerForPdf(member));
+    return [...overriddenPerformers, ...nonPerformers];
+  }
   if (configured.length) return configured;
   const allocated = [
     booking?.plannedMusicians,
@@ -2115,7 +2139,10 @@ router.post("/notify-band", async (req, res) => {
         activeBandSheetToken,
       ];
     }
-    const eventSheetUrl = buildBandSheetPdfUrl(
+    const eventSheetPdfUrl = buildBandSheetPdfUrl(
+      booking.eventSheet.bandSheetToken,
+    );
+    const eventSheetUrl = buildBandSheetShareUrl(
       booking.eventSheet.bandSheetToken,
     );
 
@@ -2178,7 +2205,8 @@ router.post("/notify-band", async (req, res) => {
     const pdfBuffer = await buildEventSheetPdfBuffer(bookingForPdf, actForPdf);
     const safeRef = String(ref || "event-sheet").replace(/[^a-z0-9-_]+/gi, "-");
 
-    booking.eventSheet.bandPdfUrl = eventSheetUrl;
+    booking.eventSheet.bandPdfUrl = eventSheetPdfUrl;
+    booking.eventSheet.bandShareUrl = eventSheetUrl;
     booking.eventSheet.bandPdfGeneratedAt = new Date();
     await booking.save();
 
@@ -2264,7 +2292,8 @@ router.post("/notify-band", async (req, res) => {
       sentTo: emailConfig.notifyTo,
       messageId: internalMail?.messageId || null,
       bandRecipients: bandMailResults,
-      eventSheetPdfUrl: eventSheetUrl,
+      eventSheetPdfUrl,
+      eventSheetUrl,
       booking,
     });
   } catch (err) {
@@ -2442,5 +2471,10 @@ router.put(
     }
   },
 );
+
+export {
+  getLineupDescriptionForPdf,
+  getLineupMembersForPdf,
+};
 
 export default router;

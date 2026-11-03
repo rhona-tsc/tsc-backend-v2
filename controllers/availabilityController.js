@@ -21,7 +21,10 @@ import {
   resolveBookingReplyIntent,
 } from "../utils/bookingReplyIntent.js";
 import sendEmail from "../utils/sendEmail.js";
-import { availableVocalistsForLineup } from "../utils/enquiryAvailability.js";
+import {
+  availableVocalistsForLineup,
+  musicianCanFrontVocalSlot,
+} from "../utils/enquiryAvailability.js";
 import { buildTscEmailFooter } from "../utils/tscEmailBranding.js";
 import {
   automatedEnquiryEligible,
@@ -416,7 +419,7 @@ export async function findCanonicalMusicianByPhone(phoneLike) {
     ],
   })
     .select(
-      "_id firstName lastName email musicianSlug profilePhoto profilePicture musicianProfileImage profileImage photoUrl imageUrl phoneNormalized",
+      "_id firstName lastName email musicianSlug profilePhoto profilePicture musicianProfileImage profileImage photoUrl imageUrl phoneNormalized status vocals instrumentation",
     )
     .lean();
 
@@ -1799,7 +1802,10 @@ export async function notifyDeputies({
           skipDuplicateCheck,
         });
       } catch (error) {
-        if (error?.code === "DEPUTY_IDENTITY_MISMATCH") {
+        if (
+          error?.code === "DEPUTY_IDENTITY_MISMATCH" ||
+          error?.code === "DEPUTY_NOT_ELIGIBLE_FOR_VOCAL_SLOT"
+        ) {
           console.error(
             "🛑 [notifyDeputies] Skipping deputy with mismatched contact identity",
             {
@@ -4069,7 +4075,7 @@ if (shouldAlwaysSkip) {
       if (email) {
         canonical = await Musician.findOne({ email })
           .select(
-            "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl",
+            "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl status vocals instrumentation",
           )
           .lean();
       }
@@ -4097,6 +4103,24 @@ if (shouldAlwaysSkip) {
         );
         identityError.code = "DEPUTY_IDENTITY_MISMATCH";
         throw identityError;
+      }
+
+      const vocalSlot = vocalists[singleSlotIndex] || vocalists[0] || {};
+      if (!musicianCanFrontVocalSlot(canonical, vocalSlot)) {
+        console.error(
+          "🛑 [triggerAvailabilityRequest] Musician is not eligible to front this vocal slot — blocking send",
+          {
+            actId: String(actId || ""),
+            lineupId: String(lineupKey || ""),
+            musicianId: String(canonical?._id || ""),
+            slotRole: String(vocalSlot?.instrument || ""),
+          },
+        );
+        const eligibilityError = new Error(
+          "Deputy profile is not eligible to front this lead-vocal slot",
+        );
+        eligibilityError.code = "DEPUTY_NOT_ELIGIBLE_FOR_VOCAL_SLOT";
+        throw eligibilityError;
       }
     }
 

@@ -227,6 +227,7 @@ const EventSheetSchema = new mongoose.Schema(
     submitted: { type: Boolean, default: false },
     updatedAt: { type: Date, default: Date.now },
     bandPdfUrl: { type: String, default: "" },
+    bandShareUrl: { type: String, default: "" },
     bandPdfGeneratedAt: { type: Date, default: null },
     bandSheetToken: { type: String, default: "", index: true },
     emergencyContact: {
@@ -317,6 +318,9 @@ const BookingSchema = new mongoose.Schema(
     act: { type: mongoose.Schema.Types.ObjectId, ref: "Act" },
     actId: { type: mongoose.Schema.Types.ObjectId, ref: "Act" },
     lineupId: { type: String, default: "" },
+    lineupSelected: { type: String, default: "" },
+    lineupComposition: { type: [String], default: [] },
+    bandSize: { type: Number, default: 0 },
     actsSummary: { type: [ActSummarySchema], default: [] },
 
     // Booking source selected on the Booking Board (for example,
