@@ -479,6 +479,9 @@ export function buildCard(act) {
     lineupSizes: lineup_sizes,
     smallestLineupSize: smallestLineupSize(act),
     instruments: canonicalInstruments(act),
+    setlist: ["smallTailoring", "mediumTailoring", "largeTailoring"].includes(act?.setlist)
+      ? act.setlist
+      : "",
     wirelessByInstrument,
     wirelessInstruments,
 

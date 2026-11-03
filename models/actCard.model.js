@@ -36,6 +36,12 @@ minDisplayPrice: { type: Number, default: null, index: true },
     lineupSizes: { type: [String], default: [], index: true }, // e.g. ["4-Piece","6-Piece"]
     smallestLineupSize: { type: Number, default: null, index: true }, // e.g. 4
     instruments: { type: [String], default: [], index: true }, // normalized instruments
+    setlist: {
+      type: String,
+      enum: ["", "smallTailoring", "mediumTailoring", "largeTailoring"],
+      default: "",
+      index: true,
+    },
     wirelessByInstrument: { type: Map, of: Boolean, default: {} },
     wirelessInstruments: { type: [String], default: [], index: true }, // derived keys with true
 

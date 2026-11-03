@@ -989,6 +989,7 @@ export const getAllActsV2 = async (req, res) => {
         "lineups.base_fee": 1,
         genre: 1,          // singular field
         genres: 1,         // ← plural (present in some docs)
+        setlist: 1,
         // --- review summary fields
         averageRating: 1,
         reviewCount: 1,
