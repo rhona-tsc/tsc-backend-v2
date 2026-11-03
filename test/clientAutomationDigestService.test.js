@@ -4,7 +4,10 @@ import {
   buildClientAutomationDigest,
   sendClientAutomationDigest,
 } from "../services/clientAutomationDigestService.js";
-import { AUTOMATION_16_KEY } from "../services/clientAutomationService.js";
+import {
+  AUTOMATION_16_KEY,
+  clientAutomationAllowlistSnapshot,
+} from "../services/clientAutomationService.js";
 
 const georgia = {
   _id: "georgia-booking",
@@ -32,6 +35,12 @@ const susie = {
   siteAutomationsEnabled: true,
   bookingStatus: "active",
 };
+
+test("FireAngel is included in both live automation allowlists", () => {
+  const allowlist = clientAutomationAllowlistSnapshot();
+  assert.equal(allowlist.emails.has("reception@fireangeltech.com"), true);
+  assert.equal(allowlist.bookingRefs.has("260922275836"), true);
+});
 
 test("daily digest recognises Georgia and Susie as live allowlisted bookings", () => {
   const digest = buildClientAutomationDigest({

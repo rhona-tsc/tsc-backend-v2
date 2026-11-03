@@ -765,12 +765,14 @@ export const APPROVED_CLIENT_AUTOMATION_EMAILS = [
   "susie@tigproductions.co.uk",
   "james@tlfservices.co.uk",
   "georgia.hyndman@ukimediaevents.com",
+  "reception@fireangeltech.com",
 ];
 
 export const APPROVED_CLIENT_AUTOMATION_BOOKING_REFS = [
   "BBM 497 DESIGN",
   "260927276335",
   "260915275050",
+  "260922275836",
 ];
 
 const configuredAllowlist = () => new Set([

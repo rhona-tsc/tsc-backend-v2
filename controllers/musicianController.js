@@ -1621,6 +1621,11 @@ const registerDeputy = async (req, res) => {
     musician.role = body.role || musician.role || "musician";
     musician.status = musician.status || "pending";
     musician.bio = body.bio ?? musician.bio ?? "";
+    if (Object.prototype.hasOwnProperty.call(body, "dietaryRequirements")) {
+      musician.dietaryRequirements = String(
+        body.dietaryRequirements || "",
+      ).trim();
+    }
     const previousApprovedBio = String(musician.tscApprovedBio || "").trim();
     musician.tscApprovedBio =
       body.tscApprovedBio ?? musician.tscApprovedBio ?? "";

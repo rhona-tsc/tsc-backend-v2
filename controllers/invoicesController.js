@@ -845,7 +845,7 @@ const getInvoiceCompany = (row) => {
 
     return {
       name: "Bamboo Music Management Ltd",
-      address: "Cramond, Reeves Lane, Roydon, CM19 5LE",
+      address: "71-75 Shelton Street, Covent Garden, London, WC2H 9JQ",
       email: "bamboomusicmgmt@gmail.com",
       companyNumber: "09318270",
       vatNumber: vatRate > 0 ? "517 6408 85" : "",
@@ -863,7 +863,7 @@ const getInvoiceCompany = (row) => {
 
   return {
     name: "The Supreme Collective Ltd",
-    address: "Cramond, Reeves Lane, Roydon, CM19 5LE",
+    address: "71-75 Shelton Street, Covent Garden, London, WC2H 9JQ",
     email: "hello@thesupremecollective.co.uk",
     companyNumber: "",
     vatNumber: "",
