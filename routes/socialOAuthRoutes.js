@@ -8,6 +8,8 @@ import {
   encryptSocialToken,
 } from "../utils/socialTokenCrypto.js";
 
+import cloudinary from "../config/cloudinary.js";
+import { buildInstagramHighlights } from "../services/instagramHighlightService.js";
 import { resolveMetaAccount } from "../services/metaAccountService.js";
 
 const router = express.Router();
@@ -316,17 +318,10 @@ router.post("/:provider/sync", musicianAuth, async (req, res) => {
       url.searchParams.set("limit", "12");
       url.searchParams.set("access_token", token);
       const data = await getJson(url);
-      posts = (data.data || []).map((media) => ({
-        title: "",
-        tag: "Performance highlight",
-        url: media.permalink || "",
-        mediaUrl: media.media_url || "",
-        thumbnailUrl: media.thumbnail_url || "",
-        mediaType: String(media.media_type || "").toLowerCase() === "video" ? "video" : "image",
-        platform: "instagram",
-        visible: true,
-        importedAt: new Date(),
-      }));
+      posts = await buildInstagramHighlights(data.data || [], {
+        musicianId: req.userId,
+        upload: (source, options) => cloudinary.uploader.upload(source, options),
+      });
     }
 
     await saveImportedPosts(req.userId, provider, posts);
