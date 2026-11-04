@@ -1,3 +1,4 @@
+import { cloudinaryImage } from "./cloudinaryImage.js";
 const GOOGLE_REVIEWS_URL = "https://g.page/r/CesVpcolTfSxEB0/review";
 const SIGNATURE_GIF_URL =
   "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777045559/TSC_Signature_2026_svgxr5.gif";
@@ -27,11 +28,11 @@ export const escapeEmailHtml = (value = "") =>
 export const buildTscEmailFooter = ({ audience = "client" } = {}) => `
   <div style="margin:24px 0 0;padding:22px;background:#fafafa;border:1px solid #ececec;border-radius:22px;text-align:center;">
     <a href="${GOOGLE_REVIEWS_URL}" style="display:block;text-decoration:none;">
-      <img src="${SIGNATURE_GIF_URL}" width="600" alt="The Supreme Collective" style="display:block;width:100%;max-width:600px;height:auto;border:0;margin:0 auto;" />
+      <img src="${cloudinaryImage(SIGNATURE_GIF_URL, 1200)}" width="600" alt="The Supreme Collective" style="display:block;width:100%;max-width:600px;height:auto;border:0;margin:0 auto;" />
     </a>
     <div style="margin-top:14px;text-align:center;">
       <a href="${GOOGLE_REVIEWS_URL}" style="display:inline-block;text-decoration:none;">
-        <img src="${GOOGLE_FIVE_STAR_IMAGE_URL}" width="150" height="65" alt="Rated five stars on Google — read our reviews" style="display:block;width:150px;max-width:100%;height:auto;border:0;margin:0 auto;" />
+        <img src="${cloudinaryImage(GOOGLE_FIVE_STAR_IMAGE_URL, 300)}" width="150" height="65" alt="Rated five stars on Google — read our reviews" style="display:block;width:150px;max-width:100%;height:auto;border:0;margin:0 auto;" />
       </a>
     </div>
     <div style="margin-top:16px;text-align:center;">
@@ -40,9 +41,9 @@ export const buildTscEmailFooter = ({ audience = "client" } = {}) => `
     <div style="margin-top:22px;padding-top:20px;border-top:1px solid #e3e3e3;text-align:left;">
       <h3 style="margin:0 0 14px;font-size:16px;color:#111111;">Find us online</h3>
       <p style="margin:0 0 18px;">
-        <a href="${INSTAGRAM_URL}" style="display:inline-block;margin-right:12px;text-decoration:none;"><img src="${INSTAGRAM_ICON_URL}" width="32" height="32" alt="Instagram" style="border:0;" /></a>
-        <a href="${YOUTUBE_URL}" style="display:inline-block;margin-right:12px;text-decoration:none;"><img src="${YOUTUBE_ICON_URL}" width="32" height="32" alt="YouTube" style="border:0;" /></a>
-        <a href="${WEBSITE_URL}" style="display:inline-block;text-decoration:none;"><img src="${WEBSITE_ICON_URL}" width="32" height="32" alt="The Supreme Collective website" style="border:0;" /></a>
+        <a href="${INSTAGRAM_URL}" style="display:inline-block;margin-right:12px;text-decoration:none;"><img src="${cloudinaryImage(INSTAGRAM_ICON_URL, 64)}" width="32" height="32" alt="Instagram" style="border:0;" /></a>
+        <a href="${YOUTUBE_URL}" style="display:inline-block;margin-right:12px;text-decoration:none;"><img src="${cloudinaryImage(YOUTUBE_ICON_URL, 64)}" width="32" height="32" alt="YouTube" style="border:0;" /></a>
+        <a href="${WEBSITE_URL}" style="display:inline-block;text-decoration:none;"><img src="${cloudinaryImage(WEBSITE_ICON_URL, 64)}" width="32" height="32" alt="The Supreme Collective website" style="border:0;" /></a>
       </p>
       ${audience === "musician" ? '<p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#555555;">Keep your profile up to date at <a href="https://admin.thesupremecollective.co.uk" style="color:#ff6667;text-decoration:none;font-weight:700;">admin.thesupremecollective.co.uk</a></p>' : ""}
       <p style="margin:0 0 8px;font-size:12px;line-height:1.7;color:#777777;">Copyright © ${new Date().getFullYear()} The Supreme Collective Ltd. All rights reserved.</p>

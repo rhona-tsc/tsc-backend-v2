@@ -1,3 +1,4 @@
+import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
@@ -8171,7 +8172,7 @@ const renderActExtrasHtml = async (
 
                   ${
                     heroImg
-                      ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />`
+                      ? `<img src="${cloudinaryImage(heroImg, 1200)}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />`
                       : ""
                   }
 
@@ -8341,7 +8342,7 @@ const renderActExtrasHtml = async (
 
                   ${
                     heroImg
-                      ? `<img src="${heroImg}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />`
+                      ? `<img src="${cloudinaryImage(heroImg, 1200)}" alt="${actDoc.tscName || actDoc.name}" style="width:100%; height:auto; border-radius:8px; margin:20px 0;" />`
                       : ""
                   }
 

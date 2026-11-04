@@ -1,3 +1,4 @@
+import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import EnquiryBoardItem from "../models/enquiryBoardItem.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
@@ -140,8 +141,8 @@ const vocalistProfileCardsHtml = (summary, { showSlotHeadings = true } = {}) =>
               ${
                 photoUrl
                   ? profileUrl
-                    ? `<a href="${escapeEmailHtml(profileUrl)}" style="display:inline-block;text-decoration:none;"><img src="${escapeEmailHtml(photoUrl)}" width="160" height="160" alt="${escapeEmailHtml(name)}" style="display:block;width:160px;height:160px;border-radius:50%;object-fit:cover;border:0;" /></a>`
-                    : `<img src="${escapeEmailHtml(photoUrl)}" width="160" height="160" alt="${escapeEmailHtml(name)}" style="display:block;width:160px;height:160px;border-radius:50%;object-fit:cover;border:0;" />`
+                    ? `<a href="${escapeEmailHtml(profileUrl)}" style="display:inline-block;text-decoration:none;"><img src="${escapeEmailHtml(cloudinaryImage(photoUrl, 320))}" width="160" height="160" alt="${escapeEmailHtml(name)}" style="display:block;width:160px;height:160px;border-radius:50%;object-fit:cover;border:0;" /></a>`
+                    : `<img src="${escapeEmailHtml(cloudinaryImage(photoUrl, 320))}" width="160" height="160" alt="${escapeEmailHtml(name)}" style="display:block;width:160px;height:160px;border-radius:50%;object-fit:cover;border:0;" />`
                   : ""
               }
               ${profileUrl ? `<p style="margin:10px 0 0;"><a href="${escapeEmailHtml(profileUrl)}" style="color:#ff6667;font-weight:700;text-decoration:none;">View ${escapeEmailHtml(name)}'s profile →</a></p>` : ""}
@@ -180,8 +181,8 @@ const compactVocalistProfileCardsHtml = (summary) => {
         ${
           photoUrl
             ? profileUrl
-              ? `<a href="${escapeEmailHtml(profileUrl)}" style="display:inline-block;text-decoration:none;"><img src="${escapeEmailHtml(photoUrl)}" width="140" height="140" alt="${escapeEmailHtml(name)}" style="display:block;width:140px;height:140px;border-radius:50%;object-fit:cover;border:0;margin:0 auto;" /></a>`
-              : `<img src="${escapeEmailHtml(photoUrl)}" width="140" height="140" alt="${escapeEmailHtml(name)}" style="display:block;width:140px;height:140px;border-radius:50%;object-fit:cover;border:0;margin:0 auto;" />`
+              ? `<a href="${escapeEmailHtml(profileUrl)}" style="display:inline-block;text-decoration:none;"><img src="${escapeEmailHtml(cloudinaryImage(photoUrl, 320))}" width="140" height="140" alt="${escapeEmailHtml(name)}" style="display:block;width:140px;height:140px;border-radius:50%;object-fit:cover;border:0;margin:0 auto;" /></a>`
+              : `<img src="${escapeEmailHtml(cloudinaryImage(photoUrl, 320))}" width="140" height="140" alt="${escapeEmailHtml(name)}" style="display:block;width:140px;height:140px;border-radius:50%;object-fit:cover;border:0;margin:0 auto;" />`
             : `<div style="width:140px;height:140px;border-radius:50%;background:#f3f3f3;margin:0 auto;"></div>`
         }
         <p style="margin:9px 0 0;font-weight:700;">${escapeEmailHtml(name)}</p>

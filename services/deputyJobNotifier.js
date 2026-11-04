@@ -1,3 +1,4 @@
+import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 // services/deputyJobNotifier.js
 import nodemailer from "nodemailer";
 
@@ -386,7 +387,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                 <td valign="top" width="50%" style="padding-right:10px;">
                   <a href="${ADMIN_URL}" style="text-decoration:none; display:block;">
                     <img
-                      src="${POST_JOB_IMAGE_URL}"
+                      src="${cloudinaryImage(POST_JOB_IMAGE_URL, 656)}"
                       alt="Post your own deputy jobs"
                       style="display:block; width:100%; max-width:328px; border:0; border-radius:20px;"
                     />
@@ -395,7 +396,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                 <td valign="top" width="50%" style="padding-left:10px;">
                   <a href="${ADMIN_URL}" style="text-decoration:none; display:block;">
                     <img
-                      src="${LIST_ACT_IMAGE_URL}"
+                      src="${cloudinaryImage(LIST_ACT_IMAGE_URL, 656)}"
                       alt="Wanna list your act?"
                       style="display:block; width:100%; max-width:328px; border:0; border-radius:20px;"
                     />
@@ -440,7 +441,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                 <td style="vertical-align:middle; text-align:right; white-space:nowrap; padding-left:24px;">
                   <a href="${GOOGLE_REVIEWS_URL}" style="text-decoration:none; display:inline-block; margin-left:auto;">
                     <img
-                      src="${GOOGLE_REVIEWS_ICON_URL}"
+                      src="${cloudinaryImage(GOOGLE_REVIEWS_ICON_URL, 128)}"
                       alt="Google reviews"
                       style="display:block; width:192px; height:48px; border:0; object-fit:contain; margin-left:auto;"
                     />
@@ -454,7 +455,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                 <td style="padding:0 14px 10px 0; vertical-align:middle;">
                   <a href="${INSTAGRAM_URL}" style="text-decoration:none; display:inline-block;">
                     <img
-                      src="${INSTAGRAM_ICON_URL}"
+                      src="${cloudinaryImage(INSTAGRAM_ICON_URL, 64)}"
                       alt="Instagram"
                       style="display:block; width:32px; height:32px; border:0;"
                     />
@@ -463,7 +464,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                 <td style="padding:0 14px 10px 0; vertical-align:middle;">
                   <a href="${YOUTUBE_URL}" style="text-decoration:none; display:inline-block;">
                     <img
-                      src="${YOUTUBE_ICON_URL}"
+                      src="${cloudinaryImage(YOUTUBE_ICON_URL, 64)}"
                       alt="YouTube"
                       style="display:block; width:32px; height:32px; border:0;"
                     />
@@ -472,7 +473,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                 <td style="padding:0 14px 10px 0; vertical-align:middle;">
                   <a href="${WEBSITE_URL}" style="text-decoration:none; display:inline-block;">
                     <img
-                      src="${WEBSITE_ICON_URL}"
+                      src="${cloudinaryImage(WEBSITE_ICON_URL, 64)}"
                       alt="Website"
                       style="display:block; width:32px; height:32px; border:0;"
                     />

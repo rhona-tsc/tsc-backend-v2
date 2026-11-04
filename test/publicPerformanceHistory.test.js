@@ -67,7 +67,7 @@ test('evening backgrounds use the matching band photo and saved crop, with a saf
   const venues = [{ _id: 'v', name: 'Allington Castle', county: 'Kent' }];
   const result = buildPublicPerformanceHistory(bands, venues);
   const example = result.venueHistories.v.examples[0];
-  assert.match(example.image, /c_crop,g_north_west,x_10,y_20,w_600,h_400\/c_limit,w_960,f_auto,q_auto/);
+  assert.match(example.image, /c_crop,g_north_west,x_10,y_20,w_600,h_400\/c_limit,w_960\/q_auto\/f_auto/);
   assert.equal(result.histories['funk-royale'].examples[0].image, example.image);
   assert.equal(buildPublicPerformanceHistory(acts, venues).venueHistories.v.examples[0].image, '');
 });

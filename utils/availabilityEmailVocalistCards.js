@@ -1,3 +1,4 @@
+import { cloudinaryImage } from "./cloudinaryImage.js";
 const escapeHtml = (value = "") =>
   String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -53,7 +54,7 @@ export const renderAvailabilityVocalistCards = ({
                 ? `
                   <a href="${escapeHtml(card.profileUrl)}" style="text-decoration:none;">
                     <img
-                      src="${escapeHtml(card.photoUrl)}"
+                      src="${escapeHtml(cloudinaryImage(card.photoUrl, 320))}"
                       alt="${escapeHtml(fullName)}"
                       style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
                     />
@@ -61,7 +62,7 @@ export const renderAvailabilityVocalistCards = ({
                 `
                 : `
                   <img
-                    src="${escapeHtml(card.photoUrl)}"
+                    src="${escapeHtml(cloudinaryImage(card.photoUrl, 320))}"
                     alt="${escapeHtml(fullName)}"
                     style="width:160px; height:160px; border-radius:50%; object-fit:cover; margin-bottom:10px; display:block;"
                   />

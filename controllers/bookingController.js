@@ -1,3 +1,4 @@
+import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 import mongoose from "mongoose";
 // controllers/bookingController.js
 import Stripe from "stripe";
@@ -322,7 +323,7 @@ const signature =
 
         <div style="margin:8px 0">
           <a href="${GOOGLE_REVIEW_URL}" style="text-decoration:none;">
-            <img src="https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/google_5star_badge.png" alt="Google 5.0 ★★★★★" width="180" style="border:0;display:block" />
+            <img src="${cloudinaryImage("https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/google_5star_badge.png", 360)}" alt="Google 5.0 ★★★★★" width="180" style="border:0;display:block" />
           </a>
         </div>
 
