@@ -1,3 +1,4 @@
+import { browseOriginalMusicians } from '../services/originalsMusicianDirectoryService.js';
 import validator from 'validator';
 import mongoose from 'mongoose';
 import Referral from '../models/originalReferralModel.js';
@@ -13,12 +14,8 @@ const key = value => clean(value).toLowerCase();
 
 export async function searchOriginalReferralMusicians(req, res) {
   try {
-    const query = clean(req.query.q);
-    if (query.length < 2 || query.length > 80) return res.json({ success: true, musicians: [] });
-    const terms = query.split(/\s+/).slice(0, 4).map(term => new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
-    const records = await Musician.find({ $and: terms.map(pattern => ({ $or: [{ firstName: pattern }, { lastName: pattern }] })) }).select('firstName lastName instrument instruments instrumentation').limit(15).lean();
-    return res.json({ success: true, musicians: records.map(item => ({ _id: item._id, displayName: chatDisplayName([item.firstName, item.lastName].filter(Boolean).join(' ')), instruments: [...new Set([item.instrument, ...(Array.isArray(item.instruments) ? item.instruments : []), ...(item.instrumentation || []).map(role => role.instrument)].filter(Boolean))] })) });
-  } catch { return res.status(500).json({ success: false, message: 'Could not search musicians' }); }
+    return res.json(await browseOriginalMusicians(req.query));
+  } catch (error) { return res.status(error.status || 500).json({ success: false, message: error.status ? error.message : 'Could not search musicians' }); }
 }
 
 export async function recommendOriginalMusician(req, res) {

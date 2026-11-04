@@ -8,13 +8,19 @@ The specification explicitly marks **all contract text as placeholder content pe
 
 ## Current flow
 
-Both current-round and advance-role reservation buttons open the same in-page review dialog. The server supplies the contributor, mix-producer or mastering-engineer terms as appropriate. The participant must enter their full name and actively tick consent; neither is prefilled as consent. Cancel/Close/Escape creates no reservation and starts no clock. Version conflicts clear consent and require reloading the current wording.
+Both current-round and advance-role reservation buttons open the same in-page review dialog. The server supplies the contributor, mix-producer or mastering-engineer terms as appropriate. Version 0.2 removes the participant-facing review-status/version banner at the user’s request. The internal researched-draft status remains documented; this does not represent solicitor approval. The displayed clauses and exact electronic-signature acknowledgement are included in the accepted text/hash. See [the detailed review](originals-agreement-review-2026-11-04.md) for remaining commercial decisions and code-policy mismatches.
 
-The backend validates explicit consent and the current version/hash, then saves a new `originalagreementacceptance` document with the server's exact text, SHA-256 hash, version, agreement type, full-name acknowledgement, account ID, project ID, role and timestamp. Evidence fields are immutable through the model. Legal names are not returned in workspace data or substituted for public artistic credits. The reservation stores the acceptance ID. A rejected reservation attempt may leave a truthful standalone acceptance record, but no seat or countdown.
+The participant must enter their full name and actively tick consent; neither is prefilled as consent. Cancel/Close/Escape creates no reservation and starts no clock. Version conflicts clear consent and require reloading the current wording.
+
+The backend validates explicit consent, the current version/hash and the exact displayed acknowledgement, then saves a new `originalagreementacceptance` document with the server's exact text, SHA-256 hash, version, agreement type, full-name acknowledgement, account ID, project ID, role and timestamp. Evidence fields are immutable through the model. Legal names are not returned in workspace data or substituted for public artistic credits. The reservation stores the acceptance ID. A rejected reservation attempt may leave a truthful standalone acceptance record, but no seat or countdown.
 
 The shared seat allocator verifies that acceptance belongs to the same musician, project, role and contract type, with current exact wording, before creating a timed reservation. An advance reservation carries its existing acceptance into activation; the worker never manufactures fresh consent. Missing or outdated acceptance leaves the advance place waiting, flags a review action in the workspace and queues one review email per place/round/text hash. The email explains that the round is open and the recording countdown has not started. Delivery rechecks participation, round and reservation state; released or already-renewed places do not receive stale review emails.
 
 Renewal records a new acceptance and updates only the waiting place's reference. Earlier evidence is retained. If the matching round is open, normal activation can then start the recording reservation and send the ordinary deadline email.
+
+## Confirmed entity and no-deductions policy
+
+Version 0.3 identifies The Supreme Collective Ltd (company 16883956), records TSC’s intended collection/accounting role for royalties it is authorised to collect, and funds TSC/project costs from TSC’s 20% instead of deducting them from the pool. The recommended March/September payment cycle remains a proposal in the review notes, not an accepted deadline. This change does not implement a royalty ledger or payout service.
 
 ## Scope and deployment
 
@@ -25,3 +31,7 @@ This is a private-pilot implementation. The existing owner agreement implementat
 ## Validation
 
 Tests cover missing/unchecked consent, empty names, stale versions, forged hashes, identity/project/role/type mismatches, exact evidence, no early clocks, advance activation/recovery, retained renewal history and review-email delivery. Browser checks exercise the real workspace components at mobile width: current and advance reservations, initially unchecked consent, full-name requirement, cancellation, expired wording/reload, matching mix terms and successful request payloads. Existing Originals membership, chat, royalties, notifications and workflow tests remain part of regression validation.
+
+## Listening mix for each stem
+
+Contributor version 0.4 changes only the deliverables paragraph: each submitted stem or alternative take has its own listening mix with the authorised project track/approved stems where available. Other submitted alternatives must be left out of that mix. An optional effects reference belongs to its paired stem and counts towards the three-stem limit. Mix/master terms remain version 0.3. Earlier acceptance evidence remains intact; waiting contributors with outdated terms must review the current wording before activation. Existing timed reservations are not retrospectively signed. See [the per-stem listening workflow](originals-per-stem-listening-mixes.md).

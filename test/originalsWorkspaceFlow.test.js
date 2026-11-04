@@ -1,3 +1,5 @@
+import ChatRead from '../models/originalChatReadModel.js';
+import ChatMessage from '../models/originalMessageModel.js';
 import { beforeEach } from "node:test";
 import Future from "../models/originalRoleReservationModel.js";
 beforeEach(t => { t.mock.method(Future, "find", () => ({ select: () => ({ lean: async () => [] }), sort: () => ({ lean: async () => [] }) })); });
@@ -38,10 +40,10 @@ test('optional effects recording is a distinct, validated stem and does not repl
  assert.equal(originalTakeKindsValid([{...take,wetStemAssetId:'mix'}],assets),false);
  assert.equal(originalTakeKindsValid([{stemAssetId:'clean',mixdownAssetId:'mix'}],assets),true);
 });
-test('recommendation search only returns display names and instruments, not email or phone',async t=>{
- t.mock.method(Musician,'find',()=>({select:()=>({limit:()=>({lean:async()=>[{_id:player,firstName:'John',lastName:'Smith',email:'private@example.test',phone:'private',instrument:'Bass'}]})})}));
+test('recommendation search returns public profile details without email or phone',async t=>{
+ t.mock.method(Musician,'find',()=>({select:()=>({sort:()=>({skip:()=>({limit:()=>({lean:async()=>[{_id:player,firstName:'John',lastName:'Smith',email:'private@example.test',phone:'private',instrument:'Bass'}]})})})})}));
  const res=response();await searchOriginalReferralMusicians({query:{q:'John Smith'}},res);
- assert.deepEqual(res.body.musicians,[{_id:player,displayName:'John S.',instruments:['Bass']}]);
+ assert.deepEqual(res.body.musicians,[{_id:player,displayName:'John S.',instruments:['Bass'],genres:[],profilePath:`/musician/${player}`}]);
 });
 test('new contacts are saved with their referral, with a validated role and no account created for them',async t=>{
  setup(t);t.mock.method(Referral,'findOne',async()=>null);t.mock.method(Referral,'countDocuments',async()=>0);
@@ -90,9 +92,24 @@ test('take submission validates ownership of all three files and saves the optio
  assert.equal(res.code,201);assert.deepEqual(ids,[stem,mix,wet]);assert.equal(saved.takes[0].wetStemAssetId,wet);assert.equal(saved.songwritingChoice,'songwriting_claim');
 });
 
+test('three individual stem/mix pairs remain separate review options after submission',async t=>{
+ const stems=['444444444444444444444441','444444444444444444444442','444444444444444444444443'];
+ const mixes=['555555555555555555555551','555555555555555555555552','555555555555555555555553'];
+ const booking='777777777777777777777777';let saved,reservationSaved=0;
+ t.mock.method(Reservation,'findOne',async()=>({_id:booking,projectId,roundId:'round',musicianId:player,roleName:'Vocal',save:async()=>{reservationSaved++;}}));
+ t.mock.method(Asset,'find',query=>{assert.equal(query.ownerId,player);assert.equal(query.reservationId,booking);assert.equal(query.state,'active');assert.deepEqual(new Set(query._id.$in),new Set([...stems,...mixes]));return{lean:async()=>[...stems.map(_id=>({_id,kind:'take_stem'})),...mixes.map(_id=>({_id,kind:'take_mixdown'}))]};});
+ t.mock.method(Submission,'create',async record=>{saved=record;return{_id:'submission',...record};});t.mock.method(Event,'create',async()=>({}));
+ const takes=stems.map((stemAssetId,index)=>({label:`Vocal option ${index+1}`,stemAssetId,stemAssetIds:[stemAssetId],mixdownAssetId:mixes[index]}));
+ const res=response();await submitOriginalTakes({params:{reservationId:booking},user:{id:player},body:{songwritingChoice:'master_only',takes}},res);
+ assert.equal(res.code,201);assert.equal(reservationSaved,1);assert.equal(saved.takes.length,3);
+ assert.deepEqual(saved.takes.map(take=>[take.stemAssetIds,take.mixdownAssetId]),stems.map((id,index)=>[[id],mixes[index]]));
+ assert.equal(saved.takes[1].label,'Vocal option 2');
+});
+
 test('real API invitation flow grants only its project and still revokes access after rejection',async t=>{
  const {default:express}=await import('express');const {default:jwt}=await import('jsonwebtoken');const {default:router}=await import('../routes/originalsRoutes.js');
  setup(t);let claimed=false,removed=false;
+ t.mock.method(Project,'exists',async()=>true);t.mock.method(ChatRead,'findOne',()=>({select:()=>({lean:async()=>null})}));let readWrites=0;t.mock.method(ChatRead,'updateOne',async query=>{assert.equal(query.musicianId,player);readWrites++;});t.mock.method(ChatMessage,'countDocuments',async()=>2);t.mock.method(ChatMessage,'findOne',query=>({select:()=>({lean:async()=>({_id:query._id,createdAt:new Date('2026-11-04T20:00:00Z')})})}));
  t.mock.method(Musician,'findById',()=>({select:()=>({lean:async()=>({email:'outside@example.test'})})}));
  t.mock.method(Submission,'find',()=>({select:()=>({lean:async()=>removed?[{musicianId:player,roundId:'round',roleName:'Keys',state:'rejected'}]:[]})}));
  t.mock.method(Referral,'exists',async query=>query.tokenHash?query.email==='outside@example.test'&&query.tokenHash===referralHash('a'.repeat(64)):claimed);
@@ -107,7 +124,9 @@ test('real API invitation flow grants only its project and still revokes access 
  assert.equal((await fetch(`${url}/projects/${projectId}/referrals/claim`,{method:'POST',headers,body:JSON.stringify({token:'b'.repeat(64)})})).status,403);
  const accepted=await fetch(`${url}/projects/${projectId}/referrals/claim`,{method:'POST',headers,body:JSON.stringify({token:'a'.repeat(64)})});assert.equal(accepted.status,200);assert.equal(claimed,true);
  assert.equal((await fetch(`${url}/projects/${projectId}/access`,{headers})).status,200);
+ const unread=await fetch(`${url}/projects/${projectId}/messages/unread`,{headers});assert.equal(unread.status,200);assert.equal((await unread.json()).unreadCount,2);const marked=await fetch(`${url}/projects/${projectId}/messages/read`,{method:'POST',headers,body:JSON.stringify({messageId:'777777777777777777777777',musicianId:owner})});assert.equal(marked.status,200);assert.equal(readWrites,1);
  assert.equal((await fetch(`${url}/projects/444444444444444444444444/access`,{headers})).status,403);
  const board=await(await fetch(`${url}/projects`,{headers})).json();assert.deepEqual(board.projects.map(item=>String(item._id)),[projectId]);
  removed=true;const ended=await fetch(`${url}/projects/${projectId}/access`,{headers});assert.equal(ended.status,403);assert.equal((await ended.json()).code,'ORIGINALS_PARTICIPATION_ENDED');
+ assert.equal((await fetch(`${url}/projects/${projectId}/messages/unread`,{headers})).status,403);assert.equal((await fetch(`${url}/projects/${projectId}/messages/read`,{method:'POST',headers,body:JSON.stringify({messageId:'777777777777777777777777'})})).status,403);assert.equal(readWrites,1);
 });

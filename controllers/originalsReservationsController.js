@@ -26,9 +26,12 @@ export async function reserveFutureOriginalRole(req, res) {
     for (let seatNumber = 1; seatNumber <= 3; seatNumber++) {
       try {
         const reservation = await Future.create({ projectId: project._id, musicianId, roleName: role.name, roleKey: roleKey(role.name), seatNumber, anonymous, creditName, agreementAcceptanceId: agreement._id, agreementVersion: agreement.version, agreementTextHash: agreement.textHash });
-        if (!await Project.exists({ _id: project._id, currentRoundId: project.currentRoundId })) {
+        // Share the plan version with role edits: either this hold protects
+        // the role from removal, or a concurrent removal cancels this hold.
+        const plan = await Project.updateOne({ _id: project._id, currentRoundId: project.currentRoundId, state: project.state, 'requestedRoles.name': role.name }, { $inc: { __v: 1 } });
+        if (!plan.matchedCount) {
           await Future.updateOne({ _id: reservation._id, state: 'waiting' }, { $set: { state: 'cancelled' } });
-          return res.status(409).json({ success: false, message: 'The project has just moved to a new round. Refresh before reserving.' });
+          return res.status(409).json({ success: false, message: 'The project round or parts have changed. Refresh before reserving.' });
         }
         return res.status(201).json({ success: true, reservation });
       } catch (error) { if (error.code !== 11000) throw error; }

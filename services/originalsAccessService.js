@@ -1,4 +1,5 @@
 import { getOriginalAgreement } from "./originalsAgreementService.js";
+import { originalRoleManagement } from './originalsRoleManagementService.js';
 import { originalTakeAssetIds } from "./originalsTakeFilesService.js";
 import { originalRoleProgress } from "./originalsRoleProgressService.js";
 import { sharedChatAssetIds } from "./originalsChatService.js";
@@ -18,6 +19,7 @@ export const originalReferenceKinds = new Set(['initial_stem', 'guide_track', 'd
 export function presentOriginalWorkspace({ project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages, futureReservations = [] }, user) {
   const viewerId = getOriginalsUserId(user);
   const canManage = canManageOriginalProject(project, user);
+  const roleManagement = canManage ? originalRoleManagement({ project, rounds, reservations, submissions, futureReservations, invitations }) : null;
   const chatAssetIds = sharedChatAssetIds(messages);
   const acceptedAssetIds = new Set(submissions.filter(item => item.state === 'accepted').flatMap(item => [String(item.outputAssetId || ''), ...originalTakeAssetIds(item.takes || []).map(String)]));
   const visibleSubmissions = canManage ? submissions : submissions.filter(item => String(item.musicianId) === viewerId || item.state === 'accepted');
@@ -28,9 +30,10 @@ export function presentOriginalWorkspace({ project, rounds, reservations, submis
     if (project.ownerAnonymous) visibleProject.ownerId = null;
   }
   return {
-    roleProgress: originalRoleProgress({ project, rounds, reservations, submissions, futureReservations }),
+    roleProgress: originalRoleProgress({ project, rounds, reservations, submissions, futureReservations }).map(role => ({ ...role, ...(roleManagement?.roles.find(rule => rule.name === role.name) || {}) })),
+    ...(roleManagement ? { roleManagement: { canEdit: roleManagement.canEdit, reason: roleManagement.reason } } : {}),
     futureReservations: (canManage ? futureReservations : futureReservations.filter(item => String(item.musicianId) === viewerId)).map(item => ({ ...item, agreementNeedsReview: !item.agreementAcceptanceId || item.agreementVersion !== getOriginalAgreement().version || item.agreementTextHash !== getOriginalAgreement().textHash })),
-    success: true, viewerId, permissions: { canManage }, project: visibleProject, rounds,
+    success: true, viewerId, permissions: { canManage, canIllustrateTscShare: String(user?.email || user?.useremail || '').trim().toLowerCase() === 'hello@thesupremecollective.co.uk' }, project: visibleProject, rounds,
     activeSlotCount: reservations.filter(item => String(item.roundId) === String(project.currentRoundId) && (item.state === 'active' && new Date(item.expiresAt) > new Date() || item.state === 'submitted') && item.slotHeld !== false && !submissions.some(sub => String(sub.reservationId) === String(item._id) && ['rejected','withdrawn','retracted'].includes(sub.state))).length,
     reservations: canManage ? reservations : reservations.filter(item => String(item.musicianId) === viewerId),
     submissions: visibleSubmissions,

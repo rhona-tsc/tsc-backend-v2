@@ -1,3 +1,4 @@
+import { browseOriginalMusicians } from "../services/originalsMusicianDirectoryService.js";
 import { recordOriginalAgreement, originalAgreementType } from "../services/originalsAgreementService.js";
 import Future from "../models/originalRoleReservationModel.js";
 import { createOriginalRecordingReservation, activateOriginalRoleReservations } from "../services/originalsReservationService.js";
@@ -565,7 +566,13 @@ export const reopenOriginalRound = async (req, res) => {
   try {
     const round = await originalRoundModel.findById(req.params.roundId);
     if (!round) return res.status(404).json({ success: false, message: "Round not found" });
-    if (!await requireOriginalProjectManager(req, res, round.projectId)) return;
+    const project = await requireOriginalProjectManager(req, res, round.projectId);
+    if (!project) return;
+    if (['foundation', 'instrument'].includes(round.type)) {
+      const planned = new Set((project.requestedRoles || []).map(role => clean(role.name).toLowerCase()));
+      const roundRoles = round.type === 'foundation' ? round.eligibleRoles || [] : [round.roleName];
+      if (roundRoles.some(name => !planned.has(clean(name).toLowerCase()))) return res.status(409).json({ success: false, message: 'This round includes a part removed from the project. Add it again or open a stage for a current part.' });
+    }
     if (["open", "reopened"].includes(round.state)) return res.status(409).json({ success: false, message: "Round is already open" });
     round.state = "reopened";
     round.openedAt = new Date();
@@ -680,21 +687,9 @@ export const searchOriginalMusicians = async (req, res) => {
   try {
     if (!objectId(req.query?.projectId)) return res.status(400).json({ success: false, message: "Choose a project before searching musicians" });
     if (!await requireOriginalProjectManager(req, res, req.query.projectId)) return;
-    const query = clean(req.query?.q);
-    if (query.length < 2) return res.json({ success: true, musicians: [] });
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(escaped, "i");
-    const musicians = await musicianModel.find({
-      $or: [
-        { firstName: pattern },
-        { lastName: pattern },
-        { email: pattern },
-        { instrument: pattern },
-        { instruments: pattern },
-      ],
-    }).select("firstName lastName email instrument instruments").limit(20).lean();
-    return res.json({ success: true, musicians });
+    return res.json(await browseOriginalMusicians(req.query, { allowEmail: true }));
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message });
     console.error("❌ searchOriginalMusicians error:", error);
     return res.status(500).json({ success: false, message: "Failed to search musicians" });
   }

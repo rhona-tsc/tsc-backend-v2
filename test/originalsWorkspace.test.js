@@ -135,7 +135,7 @@ test('a failed reservation never starts the round clock; a successful one keeps 
   const terms = getOriginalAgreement(); let agreement;
   t.mock.method(Acceptance, 'create', async data => (agreement = { _id: '666666666666666666666666', ...data }));
   t.mock.method(Acceptance, 'findById', () => ({ lean: async () => agreement }));
-  const req = { params: { roundId: round._id }, body: { roleName: 'Keys', agreement: { accepted: true, fullName: 'Test Musician', version: terms.version, textHash: terms.textHash } }, user: { id: participant } };
+  const req = { params: { roundId: round._id }, body: { roleName: 'Keys', agreement: { accepted: true, fullName: 'Test Musician', version: terms.version, textHash: terms.textHash, acknowledgement: terms.acknowledgement } }, user: { id: participant } };
   const failed = response(); await reserveOriginalRound(req, failed);
   assert.equal(failed.code, 409); assert.equal(start.mock.callCount(), 0);
   fail = false;
@@ -144,4 +144,18 @@ test('a failed reservation never starts the round clock; a successful one keeps 
   assert.equal(start.mock.callCount(), 1);
   assert.equal(success.body.reservation.expiresAt - success.body.reservation.reservedAt, 24 * 3600000);
   assert.equal(success.body.round.closesAt - success.body.reservation.reservedAt, 7 * 24 * 3600000);
+});
+
+
+test('only the signed-in hello account may illustrate TSC earnings, regardless of ownership or admin role', () => {
+  const input = { project: { ...project, ownerEmail: 'hello@thesupremecollective.co.uk' }, rounds: [], reservations: [], submissions: [], assets: [], notifications: [], invitations: [], creditVersions: [], issues: [], messages: [] };
+  for (const [user, allowed] of [
+    [{ id: participant, email: 'hello@thesupremecollective.co.uk' }, true],
+    [{ id: participant, email: ' HELLO@THESUPREMECOLLECTIVE.CO.UK ' }, true],
+    [{ id: participant, useremail: 'hello@thesupremecollective.co.uk' }, true],
+    [{ id: owner, role: 'admin', email: 'rhona@thesupremecollective.co.uk' }, false],
+    [{ id: participant, role: 'superadmin', email: 'other@example.test' }, false],
+    [{ id: owner }, false],
+    [{ id: participant, email: 'hello@thesupremecollective.co.uk.example.test' }, false],
+  ]) assert.equal(presentOriginalWorkspace(input, user).permissions.canIllustrateTscShare, allowed);
 });

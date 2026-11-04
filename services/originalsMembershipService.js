@@ -41,7 +41,7 @@ export function originalParticipation(snapshot, musicianId, now = new Date()) {
 export async function loadOriginalMembership(project) {
   const projectId = project._id;
   const [rounds, reservations, submissions, invitations, futureReservations] = await Promise.all([
-    Round.find({ projectId }).select('_id state').lean(),
+    Round.find({ projectId }).select('_id state type roleName eligibleRoles').lean(),
     Reservation.find({ projectId }).select('_id musicianId roundId roleName state expiresAt anonymous creditName createdAt updatedAt').lean(),
     Submission.find({ projectId }).select('musicianId roundId reservationId roleName state selectionMode decidedAt createdAt updatedAt').lean(),
     Invitation.find({ projectId }).select('invitedMusicianId roundId roleName state expiresAt createdAt').lean(),

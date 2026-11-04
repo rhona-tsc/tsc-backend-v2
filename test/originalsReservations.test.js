@@ -19,7 +19,7 @@ const owner='111111111111111111111111',player='222222222222222222222222',project
 const project={_id:projectId,ownerId:owner,currentRoundId:'round',state:'role_round_open',title:'Soul song',requestedRoles:[{name:'Vocal'},{name:'Bass'}]};
 const round={_id:'round',projectId,type:'instrument',roleName:'Bass',state:'open',slotLimit:3,clockStartedAt:null,closesAt:null};
 const terms=getOriginalAgreement();
-const agreementInput={accepted:true,fullName:'Test Musician',version:terms.version,textHash:terms.textHash};
+const agreementInput={accepted:true,fullName:'Test Musician',version:terms.version,textHash:terms.textHash,acknowledgement:terms.acknowledgement};
 let acceptances;
 test.beforeEach(t=>{
  acceptances=new Map();
@@ -29,7 +29,7 @@ test.beforeEach(t=>{
 });
 async function acceptedFor(musicianId=player,roleName='Bass',type='contributor') {
  const current=getOriginalAgreement(type);
- return recordOriginalAgreement({projectId,musicianId,roleName,type,input:{...agreementInput,version:current.version,textHash:current.textHash},now});
+ return recordOriginalAgreement({projectId,musicianId,roleName,type,input:{...agreementInput,version:current.version,textHash:current.textHash,acknowledgement:current.acknowledgement},now});
 }
 async function createOriginalRecordingReservation(options) {
  const agreement=await acceptedFor(options.musicianId,options.roleName);
@@ -68,7 +68,7 @@ test('closing while a new reservation is created releases its held seat',async t
  await assert.rejects(createOriginalRecordingReservation({round,musicianId:player,roleName:'Bass',now}),/closed/);assert.equal(rows[0].slotHeld,false);assert.equal(rows[0].state,'cancelled');
 });
 test('advance places do not have a round deadline and never start the round clock',async t=>{
- t.mock.method(Project,'findById',()=>({lean:async()=>project}));t.mock.method(Project,'exists',async()=>true);t.mock.method(Round,'findById',()=>({lean:async()=>({...round,roleName:'Vocal'})}));t.mock.method(Submission,'exists',async()=>false);t.mock.method(Future,'findOne',()=>({lean:async()=>null}));let saved;
+ t.mock.method(Project,'findById',()=>({lean:async()=>project}));t.mock.method(Project,'updateOne',async(query,update)=>{assert.equal(query['requestedRoles.name'],'Bass');assert.equal(query.state,project.state);assert.equal(update.$inc.__v,1);return{matchedCount:1};});t.mock.method(Round,'findById',()=>({lean:async()=>({...round,roleName:'Vocal'})}));t.mock.method(Submission,'exists',async()=>false);t.mock.method(Future,'findOne',()=>({lean:async()=>null}));let saved;
  t.mock.method(Future,'create',async data=>{saved=data;return{_id:'future',state:'waiting',...data};});
  const clock=t.mock.method(Round,'findOneAndUpdate',()=>assert.fail('future reservation cannot start a clock'));
  const res=response();await reserveFutureOriginalRole({params:{id:projectId},user:{id:player},body:{roleName:'Bass',agreement:agreementInput}},res);
@@ -79,6 +79,15 @@ test('advance reservations are limited to three places and refused once their ro
  t.mock.method(Future,'create',async()=>{attempts++;throw Object.assign(new Error('seat occupied'),{code:11000});});
  const req={params:{id:projectId},user:{id:player},body:{roleName:'Bass',agreement:agreementInput}};const full=response();await reserveFutureOriginalRole(req,full);assert.equal(full.code,409);assert.equal(attempts,3);
  t.mock.method(Round,'findById',()=>({lean:async()=>round}));const current=response();await reserveFutureOriginalRole(req,current);assert.equal(current.code,409);assert.equal(attempts,3);
+});
+test('a concurrent part removal cancels the new advance hold while retaining agreement evidence',async t=>{
+ t.mock.method(Project,'findById',()=>({lean:async()=>project}));t.mock.method(Round,'findById',()=>({lean:async()=>({...round,roleName:'Vocal'})}));t.mock.method(Submission,'exists',async()=>false);t.mock.method(Future,'findOne',()=>({lean:async()=>null}));
+ let saved,cancelled;
+ t.mock.method(Future,'create',async data=>{saved=data;return{_id:'future',state:'waiting',...data};});
+ t.mock.method(Project,'updateOne',async(query,update)=>{assert.equal(query['requestedRoles.name'],'Bass');assert.equal(update.$inc.__v,1);return{matchedCount:0};});
+ t.mock.method(Future,'updateOne',async(query,update)=>{assert.equal(query._id,'future');cancelled=update.$set.state;});
+ const res=response();await reserveFutureOriginalRole({params:{id:projectId},user:{id:player},body:{roleName:'Bass',agreement:agreementInput}},res);
+ assert.equal(res.code,409);assert.equal(cancelled,'cancelled');assert.match(res.body.message,/parts have changed/);assert.ok(acceptances.has(saved.agreementAcceptanceId));
 });
 test('opening a role activates its future place once, starts a real 24-hour clock and preserves anonymity',async t=>{
  const rows=slotStore(t);const agreement=await acceptedFor();const item={agreementAcceptanceId:agreement._id,_id:'future',musicianId:player,roleName:'Bass',projectId,state:'waiting',anonymous:true,creditName:'Stage Name'};futureSnapshot(t,[item]);
@@ -148,7 +157,7 @@ test('reservation service refuses absent consent evidence before allocating a se
 });
 test('acceptance requires explicit consent, a name, exact current version and text hash',async()=>{
  const options={projectId,musicianId:player,roleName:'Bass'};
- for(const input of [undefined,{...agreementInput,accepted:false},{...agreementInput,accepted:'true'},{...agreementInput,version:'old'},{...agreementInput,textHash:'forged'},{...agreementInput,fullName:'   '},{...agreementInput,fullName:'a'.repeat(161)}]) await assert.rejects(recordOriginalAgreement({...options,input}));
+ for(const input of [undefined,{...agreementInput,accepted:false},{...agreementInput,accepted:'true'},{...agreementInput,version:'old'},{...agreementInput,textHash:'forged'},{...agreementInput,acknowledgement:undefined},{...agreementInput,acknowledgement:'I agree to different terms'},{...agreementInput,fullName:'   '},{...agreementInput,fullName:'a'.repeat(161)}]) await assert.rejects(recordOriginalAgreement({...options,input}));
  assert.equal(acceptances.size,0);
  const saved=await recordOriginalAgreement({...options,input:agreementInput,now});
  assert.equal(saved.text,terms.text);assert.equal(saved.textHash,terms.textHash);assert.equal(saved.acceptedAt,now);assert.equal(saved.fullName,'Test Musician');

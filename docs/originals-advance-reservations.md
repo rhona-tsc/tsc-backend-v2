@@ -16,7 +16,7 @@ Timed reservation allocation accounts for submitted recordings as well as active
 
 ## Files and playback
 
-A submitted take can now contain one to three separate stem files and one mixdown of those musical parts together. `stemAssetIds` groups the stems under one selected take; legacy `stemAssetId` remains the primary stem for backwards compatibility. Optional effects references count towards the three-file limit and remain alternatives, rather than automatically doubling the approved parts. A group is still one contribution for royalty allocation.
+Earlier submissions could group one to three separate stem files under one shared mixdown. New submissions now pair each stem/alternative take with its own listening mix; see [the current per-stem listening workflow](originals-per-stem-listening-mixes.md). The legacy grouped format is still supported for existing records. `stemAssetIds` groups the stems under one selected take; legacy `stemAssetId` remains the primary stem for backwards compatibility. Optional effects references count towards the three-file limit and remain alternatives, rather than automatically doubling the approved parts. A group is still one contribution for royalty allocation.
 
 Ownership, reservation and file-kind checks apply to all grouped files. Whole-take approval includes all of that take's grouped stems. Selected time windows apply to every stem in the approved group. Replacement, rejection and retraction hide all of the grouped files together. Legacy alternative takes are not automatically merged into the project player.
 
