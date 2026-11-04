@@ -1,3 +1,4 @@
+import { runOriginalRoundNotifications } from "./services/originalsRoundNotificationService.js";
 import { deliverOriginalReferrals } from "./services/originalsReferralService.js";
 import { deliverOriginalChatNotifications } from "./services/originalsChatNotificationService.js";
 // backend/server.js
@@ -881,7 +882,10 @@ cron.schedule("*/5 * * * *", async () => {
 
 // Chat email retries are independent of the optional workflow-state automation.
 cron.schedule("* * * * *", async () => {
-  try { await deliverOriginalChatNotifications(); await deliverOriginalReferrals(); }
+  try {
+    const results = await Promise.allSettled([deliverOriginalChatNotifications(), deliverOriginalReferrals(), runOriginalRoundNotifications()]);
+    for (const result of results) if (result.status === "rejected") console.error("Originals notification worker failed:", result.reason?.message || result.reason);
+  }
   catch (error) { console.error("Originals chat notification retry failed:", error?.message || error); }
 });
 

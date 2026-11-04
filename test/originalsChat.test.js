@@ -1,3 +1,6 @@
+import { beforeEach } from "node:test";
+import Future from "../models/originalRoleReservationModel.js";
+beforeEach(t => { t.mock.method(Future, "find", () => ({ select: () => ({ lean: async () => [] }), sort: () => ({ lean: async () => [] }) })); });
 import test from 'node:test';
 import { v2 as cloudinary } from 'cloudinary';
 import assert from 'node:assert/strict';

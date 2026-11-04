@@ -1,3 +1,6 @@
+import { recordOriginalAgreement, originalAgreementType } from "../services/originalsAgreementService.js";
+import Future from "../models/originalRoleReservationModel.js";
+import { createOriginalRecordingReservation, activateOriginalRoleReservations } from "../services/originalsReservationService.js";
 import { originalTakeAssetIds, originalTakeKindsValid } from "../services/originalsTakeFilesService.js";
 import { queueOriginalChatNotifications, deliverOriginalChatNotifications } from "../services/originalsChatNotificationService.js";
 import { randomUUID } from "node:crypto";
@@ -22,10 +25,9 @@ import {
   canManageOriginalProject,
   isOriginalRoundExpired,
   getOriginalsUserId,
-  getReservationExpiry,
 } from "../services/originalsPolicyService.js";
 
-import { prepareOriginalRoundClock, startOriginalRoundClock } from "../services/originalsRoundClockService.js";
+import { prepareOriginalRoundClock } from "../services/originalsRoundClockService.js";
 
 cloudinary.config({
   cloud_name: process.env.REACT_APP_CLOUDINARY_NAME,
@@ -76,7 +78,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
     const project = await originalProjectModel.findById(req.params.id).lean();
     if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
     const canManage = canManageOriginalProject(project, req.user);
-    const [rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages] = await Promise.all([
+    const [rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages, futureReservations] = await Promise.all([
       originalRoundModel.find({ projectId: project._id }).sort({ sequence: 1 }).lean(),
       originalReservationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).lean(),
       originalSubmissionModel.find({ projectId: project._id }).sort({ submittedAt: -1 }).lean(),
@@ -90,6 +92,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
       originalCreditVersionModel.find({ projectId: project._id }).sort({ version: -1 }).lean(),
       originalIssueModel.find({ projectId: project._id }).sort({ createdAt: -1 }).lean(),
       originalMessageModel.find({ projectId: project._id }).sort({ createdAt: -1, _id: -1 }).limit(500).populate("attachmentIds", "kind originalName mimeType bytes state").lean(),
+      Future.find({ projectId: project._id }).sort({ createdAt: 1 }).lean(),
     ]);
     const currentIndex = rounds.findIndex(round => String(round._id) === String(project.currentRoundId));
     if (currentIndex >= 0) {
@@ -99,7 +102,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
         project.state = { foundation: "foundation_open", instrument: "role_round_open", mix: "mix_open", master: "master_open" }[rounds[currentIndex].type];
       }
     }
-    return res.json(presentOriginalWorkspace({ project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages: messages.reverse() }, req.user));
+    return res.json(presentOriginalWorkspace({ project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages: messages.reverse(), futureReservations }, req.user));
   } catch (error) {
     console.error("❌ getOriginalProjectWorkspace error:", error);
     return res.status(500).json({ success: false, message: "Failed to load project workspace" });
@@ -264,7 +267,7 @@ export const replaceOriginalSubmission = async (req, res) => {
     if (!originalTakeKindsValid(takes, assets)) return res.status(400).json({ success: false, message: "Each replacement needs a stem and mixdown" });
     const oldAssetIds = originalTakeAssetIds(submission.takes);
     await originalAssetModel.updateMany({ _id: { $in: oldAssetIds } }, { $set: { state: "hidden" } });
-    submission.takes = takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId, wetStemAssetId: take.wetStemAssetId || null, notes: clean(take.notes) }));
+    submission.takes = takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId, stemAssetIds: take.stemAssetIds || [take.stemAssetId], wetStemAssetId: take.wetStemAssetId || null, notes: clean(take.notes) }));
     submission.revision += 1;
     submission.notes = clean(req.body?.notes);
     await submission.save();
@@ -332,7 +335,7 @@ export const accessOriginalAsset = async (req, res) => {
     const asset = await originalAssetModel.findById(req.params.assetId).lean();
     if (!asset || asset.state !== "active") return res.status(404).json({ success: false, message: "Asset not found" });
     const project = await originalProjectModel.findById(asset.projectId).lean();
-    const visible = project && (canManageOriginalProject(project, req.user) || String(asset.ownerId) === getOriginalsUserId(req.user) || originalReferenceKinds.has(asset.kind) || (project.initialAssetIds || []).some(id => String(id) === String(asset._id)) || await originalMessageModel.exists({ projectId: project._id, $or: [{ voiceAssetId: asset._id }, { attachmentIds: asset._id }] }) || await originalSubmissionModel.exists({ projectId: project._id, state: "accepted", $or: [{ outputAssetId: asset._id }, { "takes.stemAssetId": asset._id }, { "takes.mixdownAssetId": asset._id }, { "takes.wetStemAssetId": asset._id }] }));
+    const visible = project && (canManageOriginalProject(project, req.user) || String(asset.ownerId) === getOriginalsUserId(req.user) || originalReferenceKinds.has(asset.kind) || (project.initialAssetIds || []).some(id => String(id) === String(asset._id)) || await originalMessageModel.exists({ projectId: project._id, $or: [{ voiceAssetId: asset._id }, { attachmentIds: asset._id }] }) || await originalSubmissionModel.exists({ projectId: project._id, state: "accepted", $or: [{ outputAssetId: asset._id }, { "takes.stemAssetId": asset._id }, { "takes.stemAssetIds": asset._id }, { "takes.mixdownAssetId": asset._id }, { "takes.wetStemAssetId": asset._id }] }));
     if (!visible) return res.status(403).json({ success: false, message: "This file is private to its contributor and the project owner" });
     const url = cloudinary.utils.private_download_url(
       asset.cloudinaryPublicId,
@@ -343,7 +346,10 @@ export const accessOriginalAsset = async (req, res) => {
         expires_at: Math.floor(Date.now() / 1000) + 5 * 60,
       },
     );
-    return res.json({ success: true, url, expiresInSeconds: 300 });
+    const downloadUrl = cloudinary.utils.private_download_url(asset.cloudinaryPublicId, asset.cloudinaryFormat || null, {
+      resource_type: asset.cloudinaryResourceType, type: "authenticated", expires_at: Math.floor(Date.now() / 1000) + 300, attachment: true,
+    });
+    return res.json({ success: true, url, downloadUrl, expiresInSeconds: 300 });
   } catch (error) {
     console.error("❌ accessOriginalAsset error:", error);
     return res.status(500).json({ success: false, message: "Failed to grant asset access" });
@@ -359,12 +365,6 @@ export const reserveOriginalRound = async (req, res) => {
     if (!round || !["open", "reopened"].includes(round.state) || isOriginalRoundExpired(round)) return res.status(409).json({ success: false, message: "This round is closed" });
     const musicianId = objectId(getOriginalsUserId(req.user));
     const now = new Date();
-    await originalReservationModel.updateMany(
-      { roundId: round._id, state: "active", expiresAt: { $lte: now } },
-      { $set: { state: "expired" } },
-    );
-    const activeCount = await originalReservationModel.countDocuments({ roundId: round._id, state: "active", expiresAt: { $gt: now } });
-    if (activeCount >= round.slotLimit) return res.status(409).json({ success: false, message: "All three slots are currently reserved" });
     const roleName = clean(req.body?.roleName || round.roleName);
     const eligible = round.type === "foundation" ? round.eligibleRoles : [round.roleName];
     if (!roleName || !eligible.some((role) => role.toLowerCase() === roleName.toLowerCase())) {
@@ -373,20 +373,14 @@ export const reserveOriginalRound = async (req, res) => {
     const anonymous = req.body?.anonymous === true;
     const creditName = clean(req.body?.creditName);
     if (anonymous && !creditName) return res.status(400).json({ success: false, message: "Anonymous contributors need an artistic name" });
-    const reservation = await originalReservationModel.create({
-      projectId: round.projectId, roundId: round._id, musicianId, roleName, anonymous, creditName,
-      reservedAt: now, expiresAt: getReservationExpiry(now),
-    });
-    const timedRound = await startOriginalRoundClock(round._id, now);
-    if (!timedRound) {
-      reservation.state = "cancelled";
-      await reservation.save();
-      return res.status(409).json({ success: false, message: "This round has just closed. Please refresh the workspace." });
-    }
+    const agreement = await recordOriginalAgreement({ input: req.body.agreement, projectId: project._id, musicianId, roleName, type: originalAgreementType(round), now });
+    await activateOriginalRoleReservations({ project, round, now });
+    const { reservation, round: timedRound } = await createOriginalRecordingReservation({ round, musicianId, roleName, anonymous, creditName, agreementAcceptanceId: agreement._id, now });
     await audit({ projectId: round.projectId, roundId: round._id, reservationId: reservation._id, type: "reservation_created", user: req.user, metadata: { roleName } });
     return res.status(201).json({ success: true, reservation, round: timedRound });
   } catch (error) {
     if (error?.code === 11000) return res.status(409).json({ success: false, message: "You already hold an active slot in this round" });
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message, code: error.code });
     console.error("❌ reserveOriginalRound error:", error);
     return res.status(500).json({ success: false, message: "Failed to reserve a slot" });
   }
@@ -454,7 +448,7 @@ export const submitOriginalTakes = async (req, res) => {
       projectId: reservation.projectId, roundId: reservation.roundId, reservationId: reservation._id,
       musicianId, roleName: reservation.roleName, songwritingChoice,
       anonymous: reservation.anonymous, creditName: reservation.creditName,
-      takes: takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId, wetStemAssetId: take.wetStemAssetId || null, notes: clean(take.notes) })),
+      takes: takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId, stemAssetIds: take.stemAssetIds || [take.stemAssetId], wetStemAssetId: take.wetStemAssetId || null, notes: clean(take.notes) })),
       notes: clean(req.body?.notes),
     });
     reservation.state = "submitted";
@@ -547,6 +541,7 @@ export const decideOriginalSubmission = async (req, res) => {
     submission.decidedAt = new Date();
     submission.decidedBy = objectId(getOriginalsUserId(req.user)) || null;
     await submission.save();
+    if (submission.state === "rejected") await originalReservationModel.updateOne({ _id: submission.reservationId }, { $set: { slotHeld: false, state: "released" } });
     try {
       await originalNotificationModel.create({
         projectId: submission.projectId,
@@ -633,6 +628,7 @@ export const openNextOriginalRound = async (req, res) => {
     project.currentRoundId = round._id;
     project.state = type === "instrument" ? "role_round_open" : type === "mix" ? "mix_open" : "master_open";
     await project.save();
+    await activateOriginalRoleReservations({ project, round });
     await audit({ projectId: project._id, roundId: round._id, type: "round_opened", user: req.user, metadata: { roundType: type, roleName } });
     return res.status(201).json({ success: true, round, project });
   } catch (error) {

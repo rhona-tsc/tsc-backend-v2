@@ -1,3 +1,4 @@
+import { getOriginalReservationAgreements, renewFutureOriginalAgreement, reserveFutureOriginalRole, releaseFutureOriginalRole, releaseOriginalReservation } from "../controllers/originalsReservationsController.js";
 import { allowOriginalReferralRequest } from "../services/originalsReferralService.js";
 import { searchOriginalReferralMusicians, recommendOriginalMusician, claimOriginalReferral } from "../controllers/originalsReferralController.js";
 import { requireOriginalParticipation } from "../services/originalsMembershipService.js";
@@ -103,6 +104,11 @@ router.get("/projects/:id/access", (_req, res) => { res.set("Cache-Control", "no
 router.get("/projects/:id/musicians", searchOriginalReferralMusicians);
 router.post("/projects/:id/referrals", recommendOriginalMusician);
 router.post("/projects/:id/referrals/claim", claimOriginalReferral);
+router.get("/projects/:id/reservation-agreements", getOriginalReservationAgreements);
+router.post("/projects/:id/role-reservations/:futureId/agreement", renewFutureOriginalAgreement);
+router.post("/projects/:id/role-reservations", reserveFutureOriginalRole);
+router.post("/projects/:id/role-reservations/:futureId/release", releaseFutureOriginalRole);
+router.post("/reservations/:reservationId/release", releaseOriginalReservation);
 router.get("/projects/:id/workspace", getOriginalProjectWorkspace);
 router.post("/projects/:id/assets", upload.single("file"), uploadOriginalAsset);
 router.get("/assets/:assetId/access", accessOriginalAsset);

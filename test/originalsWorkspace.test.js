@@ -1,3 +1,8 @@
+import Acceptance from '../models/originalAgreementAcceptanceModel.js';
+import { getOriginalAgreement } from '../services/originalsAgreementService.js';
+import { beforeEach } from "node:test";
+import Future from "../models/originalRoleReservationModel.js";
+beforeEach(t => { t.mock.method(Future, "find", () => ({ select: () => ({ lean: async () => [] }), sort: () => ({ lean: async () => [] }) })); });
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { canManageOriginalProject, getOriginalRoundDeadline, isOriginalRoundExpired } from '../services/originalsPolicyService.js';
@@ -120,12 +125,17 @@ test('a failed reservation never starts the round clock; a successful one keeps 
   t.mock.method(Submission, 'exists', async () => false);
   t.mock.method(Reservation, 'updateMany', async () => ({}));
   t.mock.method(Reservation, 'countDocuments', async () => 0);
+  t.mock.method(Reservation, 'find', () => ({ select: () => ({ lean: async () => [] }) }));
+  t.mock.method(Submission, 'find', () => ({ select: () => ({ lean: async () => [] }) }));
   let fail = true;
   t.mock.method(Reservation, 'create', async data => { if (fail) throw Object.assign(new Error('duplicate'), { code: 11000 }); return { _id: '555555555555555555555555', ...data }; });
   const start = t.mock.method(Round, 'findOneAndUpdate', async (_query, update) => ({ ...round, ...update.$set }));
   t.mock.method(Invitation, 'updateMany', async () => ({}));
   t.mock.method(Event, 'create', async () => ({}));
-  const req = { params: { roundId: round._id }, body: { roleName: 'Keys' }, user: { id: participant } };
+  const terms = getOriginalAgreement(); let agreement;
+  t.mock.method(Acceptance, 'create', async data => (agreement = { _id: '666666666666666666666666', ...data }));
+  t.mock.method(Acceptance, 'findById', () => ({ lean: async () => agreement }));
+  const req = { params: { roundId: round._id }, body: { roleName: 'Keys', agreement: { accepted: true, fullName: 'Test Musician', version: terms.version, textHash: terms.textHash } }, user: { id: participant } };
   const failed = response(); await reserveOriginalRound(req, failed);
   assert.equal(failed.code, 409); assert.equal(start.mock.callCount(), 0);
   fail = false;

@@ -31,6 +31,7 @@ export const runOriginalsAutomation = async ({ now = new Date() } = {}) => {
   for (const reservation of reservations) {
     if (reservation.expiresAt <= now) {
       reservation.state = "expired";
+      reservation.slotHeld = false;
       await reservation.save();
       await originalEventModel.create({
         projectId: reservation.projectId,

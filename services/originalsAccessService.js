@@ -1,3 +1,5 @@
+import { getOriginalAgreement } from "./originalsAgreementService.js";
+import { originalTakeAssetIds } from "./originalsTakeFilesService.js";
 import { originalRoleProgress } from "./originalsRoleProgressService.js";
 import { sharedChatAssetIds } from "./originalsChatService.js";
 import { previewOriginalsSplits } from "./originalsRoyaltyService.js";
@@ -13,11 +15,11 @@ export async function requireOriginalProjectManager(req, res, projectId) {
 
 export const originalReferenceKinds = new Set(['initial_stem', 'guide_track', 'demo', 'video_submission', 'click_track']);
 
-export function presentOriginalWorkspace({ project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages }, user) {
+export function presentOriginalWorkspace({ project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages, futureReservations = [] }, user) {
   const viewerId = getOriginalsUserId(user);
   const canManage = canManageOriginalProject(project, user);
   const chatAssetIds = sharedChatAssetIds(messages);
-  const acceptedAssetIds = new Set(submissions.filter(item => item.state === 'accepted').flatMap(item => [String(item.outputAssetId || ''), ...(item.takes || []).flatMap(take => [String(take.stemAssetId), String(take.mixdownAssetId), String(take.wetStemAssetId || "")])]));
+  const acceptedAssetIds = new Set(submissions.filter(item => item.state === 'accepted').flatMap(item => [String(item.outputAssetId || ''), ...originalTakeAssetIds(item.takes || []).map(String)]));
   const visibleSubmissions = canManage ? submissions : submissions.filter(item => String(item.musicianId) === viewerId || item.state === 'accepted');
   const visibleSubmissionIds = new Set(visibleSubmissions.filter(item => String(item.musicianId) === viewerId).map(item => String(item._id)));
   const visibleProject = { ...project, ownerName: originalOwnerDisplayName(project) };
@@ -26,9 +28,10 @@ export function presentOriginalWorkspace({ project, rounds, reservations, submis
     if (project.ownerAnonymous) visibleProject.ownerId = null;
   }
   return {
-    roleProgress: originalRoleProgress({ project, rounds, reservations, submissions }),
+    roleProgress: originalRoleProgress({ project, rounds, reservations, submissions, futureReservations }),
+    futureReservations: (canManage ? futureReservations : futureReservations.filter(item => String(item.musicianId) === viewerId)).map(item => ({ ...item, agreementNeedsReview: !item.agreementAcceptanceId || item.agreementVersion !== getOriginalAgreement().version || item.agreementTextHash !== getOriginalAgreement().textHash })),
     success: true, viewerId, permissions: { canManage }, project: visibleProject, rounds,
-    activeSlotCount: reservations.filter(item => String(item.roundId) === String(project.currentRoundId) && item.state === 'active' && new Date(item.expiresAt) > new Date()).length,
+    activeSlotCount: reservations.filter(item => String(item.roundId) === String(project.currentRoundId) && (item.state === 'active' && new Date(item.expiresAt) > new Date() || item.state === 'submitted') && item.slotHeld !== false && !submissions.some(sub => String(sub.reservationId) === String(item._id) && ['rejected','withdrawn','retracted'].includes(sub.state))).length,
     reservations: canManage ? reservations : reservations.filter(item => String(item.musicianId) === viewerId),
     submissions: visibleSubmissions,
     assets: canManage ? assets : assets.filter(item => item.state === 'active' && (String(item.ownerId) === viewerId || originalReferenceKinds.has(item.kind) || (project.initialAssetIds || []).some(id => String(id) === String(item._id)) || acceptedAssetIds.has(String(item._id)) || chatAssetIds.has(String(item._id)))),

@@ -1,3 +1,4 @@
+import Future from "../models/originalRoleReservationModel.js";
 import { originalRoleProgress } from "./originalsRoleProgressService.js";
 import Project from '../models/originalProjectModel.js';
 import Round from '../models/originalRoundModel.js';
@@ -11,7 +12,7 @@ const roleKey = value => String(value || '').trim().toLowerCase();
 const retained = item => item.state === 'accepted' || (item.state === 'retraction_requested' && ['whole_take', 'selected_ranges'].includes(item.selectionMode));
 
 export function originalParticipation(snapshot, musicianId, now = new Date()) {
-  const { project, rounds = [], reservations = [], submissions = [], invitations = [] } = snapshot;
+  const { project, rounds = [], reservations = [], submissions = [], invitations = [], futureReservations = [] } = snapshot;
   const id = key(musicianId);
   const mine = submissions.filter(item => key(item.musicianId) === id);
   const bookings = reservations.filter(item => key(item.musicianId) === id);
@@ -28,27 +29,29 @@ export function originalParticipation(snapshot, musicianId, now = new Date()) {
   const accepted = mine.some(retained);
   const awaiting = mine.some(item => ['submitted', 'retraction_requested'].includes(item.state) && inCurrent(item) && !blockedRoles.includes(roleKey(item.roleName)));
   const active = bookings.some(item => item.state === 'active' && new Date(item.expiresAt) > now && inCurrent(item) && !blockedRoles.includes(roleKey(item.roleName)) && !mine.some(sub => key(sub.reservationId) === key(item._id) && failed(sub)));
+  const waiting = futureReservations.some(item => key(item.musicianId) === id && item.state === "waiting" && !blockedRoles.includes(roleKey(item.roleName)));
   const owner = key(project.ownerId) === id;
   return {
-    canAccess: owner || accepted || awaiting || active || validInvitations.some(invite => invitedFor(invite.roleName)) || !losses.length,
-    notify: owner || accepted || awaiting || active,
+    canAccess: owner || accepted || awaiting || active || waiting || validInvitations.some(invite => invitedFor(invite.roleName)) || !losses.length,
+    notify: owner || accepted || awaiting || active || waiting,
     blockedRoles,
   };
 }
 
 export async function loadOriginalMembership(project) {
   const projectId = project._id;
-  const [rounds, reservations, submissions, invitations] = await Promise.all([
+  const [rounds, reservations, submissions, invitations, futureReservations] = await Promise.all([
     Round.find({ projectId }).select('_id state').lean(),
     Reservation.find({ projectId }).select('_id musicianId roundId roleName state expiresAt anonymous creditName createdAt updatedAt').lean(),
     Submission.find({ projectId }).select('musicianId roundId reservationId roleName state selectionMode decidedAt createdAt updatedAt').lean(),
     Invitation.find({ projectId }).select('invitedMusicianId roundId roleName state expiresAt createdAt').lean(),
+    Future.find({ projectId, state: 'waiting' }).select('musicianId roleName state').lean(),
   ]);
-  return { project, rounds, reservations, submissions, invitations };
+  return { project, rounds, reservations, submissions, invitations, futureReservations };
 }
 
 export const originalChatRecipients = (snapshot, authorId, now = new Date()) => [...new Set([
-  key(snapshot.project.ownerId), ...snapshot.reservations.map(item => key(item.musicianId)), ...snapshot.submissions.map(item => key(item.musicianId)),
+  key(snapshot.project.ownerId), ...snapshot.reservations.map(item => key(item.musicianId)), ...snapshot.submissions.map(item => key(item.musicianId)), ...(snapshot.futureReservations || []).map(item => key(item.musicianId)),
 ])].filter(id => id && id !== key(authorId) && originalParticipation(snapshot, id, now).notify);
 
 export async function requireOriginalParticipation(req, res, next) {

@@ -4,6 +4,7 @@ const takeSchema = new mongoose.Schema(
   {
     label: { type: String, trim: true, maxlength: 80 },
     stemAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", required: true },
+    stemAssetIds: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "originalasset" }], default: undefined, validate: { validator: value => !value || (value.length >= 1 && value.length <= 3 && new Set(value.map(String)).size === value.length), message: "Supply one to three distinct stems" } },
     wetStemAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", default: null },
     mixdownAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", required: true },
     notes: { type: String, default: "", trim: true, maxlength: 1000 },
