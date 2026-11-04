@@ -22,6 +22,7 @@ import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.
 import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
+import { PDFDocument as PDFLibDocument, StandardFonts, rgb } from "pdf-lib";
 import crypto from "crypto";
 import { buildBandEventSheetEmailHtml } from "../utils/tscEmailBranding.js";
 import {
@@ -1295,6 +1296,152 @@ const fetchImageBufferForPdf = async (url) => {
   }
 };
 
+const getVenueDocumentsForPdf = (answers = {}) => {
+  const documents = Array.isArray(answers.sound_limits_documents)
+    ? answers.sound_limits_documents
+    : [];
+  const legacyDocument = answers.sound_limits_doc_url
+    ? [{
+        name: answers.sound_limits_doc_name || "Venue document",
+        url: answers.sound_limits_doc_url,
+        type: answers.sound_limits_doc_type || "",
+        purpose: answers.sound_limits_doc_needs_signing
+          ? "signing"
+          : "information",
+      }]
+    : [];
+
+  return [...documents, ...legacyDocument]
+    .filter((document) => document?.url)
+    .filter(
+      (document, index, all) =>
+        all.findIndex((candidate) => candidate.url === document.url) === index,
+    );
+};
+
+const fitInside = (width, height, maxWidth, maxHeight) => {
+  const scale = Math.min(maxWidth / width, maxHeight / height, 1);
+  return { width: width * scale, height: height * scale };
+};
+
+const appendVenueDocumentAppendix = async (basePdfBuffer, answers = {}) => {
+  const documents = getVenueDocumentsForPdf(answers);
+  if (!documents.length || typeof fetch !== "function") return basePdfBuffer;
+
+  const output = await PDFLibDocument.load(basePdfBuffer);
+  const regularFont = await output.embedFont(StandardFonts.Helvetica);
+  const boldFont = await output.embedFont(StandardFonts.HelveticaBold);
+
+  for (const [index, document] of documents.entries()) {
+    try {
+      const response = await fetch(document.url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const contentType = String(
+        response.headers.get("content-type") || document.type || "",
+      ).toLowerCase();
+      const isPdf = contentType.includes("pdf") || /\.pdf(?:$|\?)/i.test(document.url);
+      const isPng = contentType.includes("png") || /\.png(?:$|\?)/i.test(document.url);
+      const isJpeg =
+        contentType.includes("jpeg") ||
+        contentType.includes("jpg") ||
+        /\.jpe?g(?:$|\?)/i.test(document.url);
+
+      if (isPdf) {
+        const appendixPage = output.addPage([595.28, 841.89]);
+        appendixPage.drawText(
+          `Appendix ${index + 1}: ${document.name || "Venue document"}`,
+          {
+            x: 48,
+            y: 775,
+            size: 17,
+            font: boldFont,
+            color: rgb(0.07, 0.09, 0.14),
+          },
+        );
+        appendixPage.drawText(
+          document.purpose === "signing"
+            ? "Venue document supplied for signing"
+            : "Venue document supplied for information",
+          {
+            x: 48,
+            y: 742,
+            size: 10,
+            font: regularFont,
+            color: rgb(0.29, 0.33, 0.39),
+          },
+        );
+        const attachment = await PDFLibDocument.load(bytes);
+        const pages = await output.copyPages(
+          attachment,
+          attachment.getPageIndices(),
+        );
+        pages.forEach((page) => output.addPage(page));
+        continue;
+      }
+
+      if (isPng || isJpeg) {
+        const image = isPng
+          ? await output.embedPng(bytes)
+          : await output.embedJpg(bytes);
+        const page = output.addPage([595.28, 841.89]);
+        const fitted = fitInside(image.width, image.height, 515.28, 735);
+        page.drawText(`Appendix ${index + 1}: ${document.name || "Venue document"}`, {
+          x: 40,
+          y: 800,
+          size: 13,
+          font: boldFont,
+          color: rgb(0.07, 0.09, 0.14),
+        });
+        page.drawImage(image, {
+          x: (page.getWidth() - fitted.width) / 2,
+          y: 35 + (735 - fitted.height) / 2,
+          width: fitted.width,
+          height: fitted.height,
+        });
+        continue;
+      }
+
+      const page = output.addPage([595.28, 841.89]);
+      page.drawText(`Appendix ${index + 1}: ${document.name || "Venue document"}`, {
+        x: 48,
+        y: 780,
+        size: 16,
+        font: boldFont,
+        color: rgb(0.07, 0.09, 0.14),
+      });
+      page.drawText(
+        "This document was uploaded with the event sheet. Its file format cannot be embedded in this PDF; use the link below to open the original.",
+        {
+          x: 48,
+          y: 735,
+          size: 10,
+          font: regularFont,
+          maxWidth: 499,
+          lineHeight: 15,
+          color: rgb(0.29, 0.33, 0.39),
+        },
+      );
+      page.drawText(String(document.url), {
+        x: 48,
+        y: 675,
+        size: 9,
+        font: regularFont,
+        maxWidth: 499,
+        lineHeight: 13,
+        color: rgb(1, 0.4, 0.4),
+      });
+    } catch (error) {
+      console.warn("Could not append venue document to event sheet PDF", {
+        url: document.url,
+        message: error?.message,
+      });
+    }
+  }
+
+  return Buffer.from(await output.save());
+};
+
 export const buildEventSheetPdfBuffer = async (booking, act = null) => {
   const doc = new PDFDocument({ margin: 42, size: "A4" });
   const chunks = [];
@@ -1983,7 +2130,8 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
     );
 
   doc.end();
-  return done;
+  const basePdf = await done;
+  return appendVenueDocumentAppendix(basePdf, answers);
 };
 
 router.get("/band-sheet/:token", async (req, res) => {

@@ -51,6 +51,7 @@
     "nodemon": "^3.1.9",
     "open": "^9.1.0",
     "openai": "^4.96.2",
+    "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.1",
     "pdfkit": "^0.18.0",
     "puppeteer": "^25.16.0",
