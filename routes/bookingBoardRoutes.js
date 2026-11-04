@@ -174,7 +174,7 @@ export const buildIntroEmail = (row) => {
   const actName = resolveBookedActName({ board: row }) || "the band";
   const eventType = normalizeEventType(row?.eventType) || "event";
   const date = row?.eventDateISO
-    ? formatEmailSubjectDate(row.eventDateISO)
+    ? `the ${formatEmailSubjectDate(row.eventDateISO)}`
     : "your event date";
   const publicSiteBase = cleanString(
     process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "https://thesupremecollective.co.uk",

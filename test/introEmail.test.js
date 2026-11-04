@@ -73,7 +73,7 @@ test("intro email preview and send content prefers the booked act name over the 
     contactRole: "direct_client",
   });
 
-  assert.equal(email.subject, "Rhythm Mystique & your Wedding on 10th of December 2026");
+  assert.equal(email.subject, "Rhythm Mystique & your Wedding on the 10th of December 2026");
   assert.match(email.text, /band manager for Rhythm Mystique/);
   assert.match(email.html, /band manager for Rhythm Mystique/);
   assert.match(email.text, /due on the 10th November 2026/);
@@ -81,4 +81,21 @@ test("intro email preview and send content prefers the booked act name over the 
   assert.doesNotMatch(email.subject, /Dancefloor Magic/);
   assert.doesNotMatch(email.text, /Dancefloor Magic/);
   assert.doesNotMatch(email.html, /Dancefloor Magic/);
+});
+
+test("intro email subject uses a natural ordinal event-date phrase", () => {
+  const email = buildIntroEmail({
+    clientEmail: "sarah@example.com",
+    clientFirstNames: "Sarah",
+    bookingRef: "261011277662",
+    actName: "Soul Spectrum",
+    eventType: "Wedding",
+    eventDateISO: "2027-02-20",
+    contactRole: "direct_client",
+  });
+
+  assert.equal(
+    email.subject,
+    "Soul Spectrum & your Wedding on the 20th of February 2027",
+  );
 });
