@@ -767,6 +767,7 @@ export const APPROVED_CLIENT_AUTOMATION_EMAILS = [
   "georgia.hyndman@ukimediaevents.com",
   "reception@fireangeltech.com",
   "meganltompkins2716@hotmail.com",
+  "sarah.murphy11@hotmail.co.uk",
 ];
 
 export const APPROVED_CLIENT_AUTOMATION_BOOKING_REFS = [
@@ -775,6 +776,7 @@ export const APPROVED_CLIENT_AUTOMATION_BOOKING_REFS = [
   "260915275050",
   "260922275836",
   "260115241436",
+  "261011277662",
 ];
 
 const configuredAllowlist = () => new Set([
