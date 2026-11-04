@@ -1,3 +1,5 @@
+import { deliverOriginalReferrals } from "./services/originalsReferralService.js";
+import { deliverOriginalChatNotifications } from "./services/originalsChatNotificationService.js";
 // backend/server.js
 import express from "express";
 import cors from "cors";
@@ -875,6 +877,12 @@ cron.schedule("*/5 * * * *", async () => {
   } catch (error) {
     console.error("❌ [CRON] Originals workflow automation failed:", error?.message || error);
   }
+});
+
+// Chat email retries are independent of the optional workflow-state automation.
+cron.schedule("* * * * *", async () => {
+  try { await deliverOriginalChatNotifications(); await deliverOriginalReferrals(); }
+  catch (error) { console.error("Originals chat notification retry failed:", error?.message || error); }
 });
 
 // Privately index new uploads and gradually inventory/check legacy video links.

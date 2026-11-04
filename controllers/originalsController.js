@@ -1,3 +1,5 @@
+import { originalRoleProgress } from "../services/originalsRoleProgressService.js";
+import { loadOriginalMembership, originalParticipation } from "../services/originalsMembershipService.js";
 import mongoose from "mongoose";
 import musicianModel from "../models/musicianModel.js";
 import originalProjectModel from "../models/originalProjectModel.js";
@@ -200,7 +202,7 @@ export const submitOriginalProjectForModeration = async (req, res) => {
   }
 };
 
-export const listOriginalProjects = async (_req, res) => {
+export const listOriginalProjects = async (req, res) => {
   try {
     const projects = await originalProjectModel
       .find({
@@ -214,7 +216,19 @@ export const listOriginalProjects = async (_req, res) => {
       })
       .sort({ publishedAt: -1, createdAt: -1 })
       .lean();
-    return res.json({ success: true, projects: projects.map((project) => presentProject(project)) });
+    const scoped = req.originalReferralProjectIds ? projects.filter(project => req.originalReferralProjectIds.some(id => String(id) === String(project._id))) : projects;
+    const visible = await Promise.all(scoped.map(async project => {
+      if (canManageOriginalProject(project, req.user)) return project;
+      const snapshot = await loadOriginalMembership(project);
+      const participation = originalParticipation(snapshot, getOriginalsUserId(req.user));
+      if (!participation.canAccess) return null;
+      if (req.originalReferralGrants && !participation.notify) {
+        const roles = req.originalReferralGrants.filter(grant => String(grant.projectId) === String(project._id)).map(grant => grant.roleName.toLowerCase());
+        if (!originalRoleProgress(snapshot).some(role => role.canRecommend && roles.includes(role.name.toLowerCase()))) return null;
+      }
+      return project;
+    }));
+    return res.json({ success: true, projects: visible.filter(Boolean).map(project => presentProject(project)) });
   } catch (error) {
     console.error("❌ listOriginalProjects error:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch Originals projects" });

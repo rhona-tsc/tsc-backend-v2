@@ -61,3 +61,19 @@ test("a project without a stem splits composition among claimers, or everybody i
 test("credits cannot be calculated without exactly one accepted mix and master", () => {
   assert.throws(() => calculateOriginalsSplits({ project: { ownerId: "owner" }, acceptedSubmissions: [{ category: "contribution", musicianId: "g", roleName: "Guitar" }] }), /accepted mix/);
 });
+
+test('read-only preview uses only approvals and preserves formal calculation requirements', async () => {
+  const { previewOriginalsSplits } = await import('../services/originalsRoyaltyService.js');
+  const project = { ownerId: 'owner', ownerSongwritingClaim: true };
+  const contribution = { state: 'accepted', category: 'contribution', musicianId: 'keys', roleName: 'Keys', songwritingChoice: 'songwriting_claim' };
+  assert.equal(previewOriginalsSplits({ project, submissions: [{ ...contribution, state: 'submitted' }] }), null);
+  const preview = previewOriginalsSplits({ project, submissions: [contribution, { ...contribution, state: 'retracted', roleName: 'Bass' }] });
+  assert.equal(totalPercent(preview.master), 100);
+  assert.deepEqual(preview.composition.map(item => item.percent), [50, 50]);
+  assert.equal(preview.master.find(item => item.role === 'Keys').percent, 40);
+  assert.ok(preview.master.every(item => !('recipientId' in item)));
+  const complete = calculateOriginalsSplits({ project, acceptedSubmissions: [contribution, ...production] });
+  assert.deepEqual(preview.master, complete.master.map(({ role, percent }) => ({ role, percent })));
+  assert.deepEqual(preview.composition, complete.composition.map(({ role, percent }) => ({ role, percent })));
+  assert.throws(() => calculateOriginalsSplits({ project, acceptedSubmissions: [contribution] }), /accepted mix/);
+});

@@ -45,3 +45,17 @@ export const calculateOriginalsSplits = ({ project, acceptedSubmissions = [] }) 
 
 export const totalPercent = (shares = []) =>
   Math.round(shares.reduce((sum, share) => sum + Number(share.percent || 0), 0) * 1000000) / 1000000;
+
+// Read-only illustration: formal credit creation still requires accepted production outputs.
+export const previewOriginalsSplits = ({ project, submissions = [] }) => {
+  const accepted = submissions.filter(item => item.state === "accepted");
+  const contributions = accepted.filter(item => item.category === "contribution" || !item.category);
+  if (!contributions.length) return null;
+  const production = ["mix", "master"].map(category => {
+    const selected = accepted.filter(item => item.category === category);
+    return selected.length === 1 ? selected[0] : { category, musicianId: null };
+  });
+  const splits = calculateOriginalsSplits({ project, acceptedSubmissions: [...contributions, ...production] });
+  // The display needs roles and percentages, never private recipient identities.
+  return Object.fromEntries(Object.entries(splits).map(([pool, shares]) => [pool, shares.map(({ role, percent }) => ({ role, percent }))]));
+};

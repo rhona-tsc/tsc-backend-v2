@@ -1,3 +1,7 @@
+import { originalTakeAssetIds, originalTakeKindsValid } from "../services/originalsTakeFilesService.js";
+import { queueOriginalChatNotifications, deliverOriginalChatNotifications } from "../services/originalsChatNotificationService.js";
+import { randomUUID } from "node:crypto";
+import { chatUploadError, chatDisplayName, CHAT_ATTACHMENT_LIMIT } from "../services/originalsChatService.js";
 import { requireOriginalProjectManager, presentOriginalWorkspace, originalReferenceKinds } from "../services/originalsAccessService.js";
 import mongoose from "mongoose";
 import { v2 as cloudinary } from "cloudinary";
@@ -38,7 +42,7 @@ const AUDIO_MIMES = new Set([
 ]);
 const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime"]);
 const ASSET_KINDS = new Set([
-  "initial_stem", "guide_track", "demo", "voice_note", "video_submission", "click_track", "take_stem", "take_mixdown", "mix", "master",
+  "initial_stem", "guide_track", "demo", "voice_note", "video_submission", "click_track", "take_stem", "take_mixdown", "mix", "master", "chat_attachment",
 ]);
 
 const audit = ({ projectId, roundId, reservationId, type, user, metadata = {} }) =>
@@ -56,7 +60,8 @@ const uploadAuthenticated = (file, projectId) =>
     const stream = cloudinary.uploader.upload_stream(
       {
         folder: `originals/${projectId}`,
-        resource_type: "video",
+        resource_type: !/^(audio|video)\//.test(file.mimetype) ? "raw" : "video",
+        ...(!/^(audio|video)\//.test(file.mimetype) ? { public_id: `${randomUUID()}.${String(file.originalname).split(".").at(-1).replace(/[^a-z0-9]/gi, "").slice(0, 10) || "bin"}` } : {}),
         type: "authenticated",
         use_filename: false,
         unique_filename: true,
@@ -76,7 +81,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
       originalReservationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).lean(),
       originalSubmissionModel.find({ projectId: project._id }).sort({ submittedAt: -1 }).lean(),
       originalAssetModel.find({ projectId: project._id, state: { $ne: "deleted" } })
-        .select("kind originalName mimeType bytes state ownerId roundId reservationId createdAt")
+        .select("kind originalName mimeType bytes finalEligible state ownerId roundId reservationId createdAt")
         .sort({ createdAt: -1 }).lean(),
       canManage ? originalNotificationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).limit(50).lean() : [],
       canManage ? originalInvitationModel.find({ projectId: project._id })
@@ -84,7 +89,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
         .sort({ createdAt: -1 }).lean() : [],
       originalCreditVersionModel.find({ projectId: project._id }).sort({ version: -1 }).lean(),
       originalIssueModel.find({ projectId: project._id }).sort({ createdAt: -1 }).lean(),
-      originalMessageModel.find({ projectId: project._id }).sort({ createdAt: 1 }).limit(500).lean(),
+      originalMessageModel.find({ projectId: project._id }).sort({ createdAt: -1, _id: -1 }).limit(500).populate("attachmentIds", "kind originalName mimeType bytes state").lean(),
     ]);
     const currentIndex = rounds.findIndex(round => String(round._id) === String(project.currentRoundId));
     if (currentIndex >= 0) {
@@ -94,7 +99,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
         project.state = { foundation: "foundation_open", instrument: "role_round_open", mix: "mix_open", master: "master_open" }[rounds[currentIndex].type];
       }
     }
-    return res.json(presentOriginalWorkspace({ project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages }, req.user));
+    return res.json(presentOriginalWorkspace({ project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages: messages.reverse() }, req.user));
   } catch (error) {
     console.error("❌ getOriginalProjectWorkspace error:", error);
     return res.status(500).json({ success: false, message: "Failed to load project workspace" });
@@ -107,12 +112,15 @@ export const uploadOriginalAsset = async (req, res) => {
     if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
     if (!req.file) return res.status(400).json({ success: false, message: "Choose a file to upload" });
     const kind = clean(req.body?.kind).toLowerCase();
-    if (!["take_stem", "take_mixdown", "mix", "master", "voice_note"].includes(kind) && !canManageOriginalProject(project, req.user)) return res.status(403).json({ success: false, message: "Only the project owner can upload project references" });
+    if (!["take_stem", "take_mixdown", "mix", "master", "voice_note", "chat_attachment"].includes(kind) && !canManageOriginalProject(project, req.user)) return res.status(403).json({ success: false, message: "Only the project owner can upload project references" });
     if (!ASSET_KINDS.has(kind)) return res.status(400).json({ success: false, message: "Invalid asset type" });
-    if (![...AUDIO_MIMES, ...VIDEO_MIMES].includes(req.file.mimetype)) {
+    req.file.mimetype = String(req.file.mimetype).split(";")[0].toLowerCase();
+    const chatError = chatUploadError(kind, req.file);
+    if (chatError) return res.status(415).json({ success: false, message: chatError });
+    if (kind !== "chat_attachment" && ![...AUDIO_MIMES, ...VIDEO_MIMES].includes(req.file.mimetype)) {
       return res.status(415).json({ success: false, message: "Use WAV, MP3, AIFF, FLAC, M4A, MP4 or MOV" });
     }
-    if (VIDEO_MIMES.has(req.file.mimetype) && !["demo", "video_submission"].includes(kind)) {
+    if (VIDEO_MIMES.has(req.file.mimetype) && !["demo", "video_submission", "chat_attachment"].includes(kind)) {
       return res.status(415).json({ success: false, message: "Video is only allowed for project demos" });
     }
 
@@ -145,9 +153,9 @@ export const uploadOriginalAsset = async (req, res) => {
       cloudinaryResourceType: uploaded.resource_type || "video",
       cloudinaryFormat: uploaded.format || "",
       deliveryType: "authenticated",
-      finalEligible: !["guide_track", "demo", "voice_note", "video_submission", "click_track", "take_mixdown"].includes(kind),
+      finalEligible: !["guide_track", "demo", "voice_note", "video_submission", "click_track", "take_mixdown", "chat_attachment"].includes(kind),
     });
-    if (["initial_stem", "guide_track", "demo", "video_submission", "voice_note", "click_track"].includes(kind)) {
+    if (["initial_stem", "guide_track", "demo", "video_submission", "click_track"].includes(kind)) {
       project.initialAssetIds.addToSet(asset._id);
       if (kind === "initial_stem") {
         project.hasInitialStem = true;
@@ -177,58 +185,62 @@ export const postOriginalMessage = async (req, res) => {
   try {
     const project = await originalProjectModel.findById(req.params.id).lean();
     if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
+    const authorId = objectId(getOriginalsUserId(req.user));
+    if (!authorId) return res.status(401).json({ success: false, message: "Please sign in again to send a message" });
+    const clientMessageId = clean(req.body?.clientMessageId);
+    if (clientMessageId.length > 100) return res.status(400).json({ success: false, message: "Invalid message identifier" });
+    if (clientMessageId) {
+      const existing = await originalMessageModel.findOne({ projectId: project._id, authorId, clientMessageId });
+      if (existing) return res.status(200).json({ success: true, message: existing });
+    }
     const body = clean(req.body?.body);
+    if (body.length > 3000) return res.status(400).json({ success: false, message: "Messages can contain up to 3,000 characters" });
+    const attachments = req.body?.attachmentIds || [];
+    if (!Array.isArray(attachments) || attachments.length > CHAT_ATTACHMENT_LIMIT || attachments.some(id => !objectId(id))) return res.status(400).json({ success: false, message: "Attach up to five valid files" });
+    const attachmentIds = [...new Set(attachments.map(objectId))];
+    if (attachmentIds.length) {
+      const count = await originalAssetModel.countDocuments({ _id: { $in: attachmentIds }, projectId: project._id, ownerId: authorId, kind: "chat_attachment", state: "active" });
+      if (count !== attachmentIds.length) return res.status(400).json({ success: false, message: "One or more attachments are unavailable" });
+    }
+    if (req.body?.voiceAssetId && !objectId(req.body.voiceAssetId)) return res.status(400).json({ success: false, message: "Invalid voice note" });
     const voiceAssetId = objectId(req.body?.voiceAssetId) || null;
-    if (!body && !voiceAssetId) return res.status(400).json({ success: false, message: "Write a message or attach a voice note" });
+    if (!body && !voiceAssetId && !attachmentIds.length) return res.status(400).json({ success: false, message: "Write a message or attach a voice note" });
     if (voiceAssetId) {
-      const voice = await originalAssetModel.findOne({ _id: voiceAssetId, projectId: project._id, kind: "voice_note", state: "active" });
+      const voice = await originalAssetModel.findOne({ _id: voiceAssetId, projectId: project._id, kind: "voice_note", ownerId: authorId, state: "active" });
       if (!voice) return res.status(400).json({ success: false, message: "Voice note is unavailable" });
     }
-    const message = await originalMessageModel.create({
+    const profile = await musicianModel.findById(authorId).select("firstName lastName").lean();
+    const isOwner = String(project.ownerId) === authorId;
+    const preference = await originalReservationModel.findOne({ projectId: project._id, musicianId: authorId }).sort({ createdAt: -1 }).lean();
+    const anonymous = (isOwner && project.ownerAnonymous) || preference?.anonymous || req.body?.anonymous === true;
+    const alias = (isOwner && project.ownerAnonymous ? project.ownerCreditName : preference?.anonymous ? preference.creditName : req.body?.creditName);
+    const authorName = isOwner ? project.ownerName : [profile?.firstName, profile?.lastName].filter(Boolean).join(" ");
+    let message;
+    try { message = await originalMessageModel.create({
       projectId: project._id,
-      authorId: objectId(getOriginalsUserId(req.user)),
+      authorId,
       body,
       voiceAssetId,
-      authorAnonymous: req.body?.anonymous === true,
-      authorCreditName: clean(req.body?.creditName),
-    });
-    const participantIds = await originalSubmissionModel.distinct("musicianId", {
-      projectId: project._id,
-      state: { $nin: ["rejected", "withdrawn", "retracted"] },
-    });
-    const reservedIds = await originalReservationModel.distinct("musicianId", {
-      projectId: project._id,
-      state: { $in: ["active", "submitted"] },
-    });
-    const authorId = String(objectId(getOriginalsUserId(req.user)) || "");
-    const recipientIds = [...new Set([
-      String(project.ownerId || ""),
-      ...participantIds.map(String),
-      ...reservedIds.map(String),
-    ])].filter((id) => objectId(id) && id !== authorId);
-    if (recipientIds.length) {
-      await originalNotificationModel.insertMany(
-        recipientIds.map((recipientMusicianId) => ({
-          projectId: project._id,
-          recipientMusicianId,
-          eventKey: `group-message:${message._id}:${recipientMusicianId}`,
-          channels: ["whatsapp"],
-          template: "originals_group_chat_message",
-          payload: {
-            messageId: String(message._id),
-            projectId: String(project._id),
-            projectTitle: project.title,
-            preview: body.slice(0, 240),
-            hasVoiceNote: Boolean(voiceAssetId),
-          },
-        })),
-        { ordered: false },
-      ).catch((error) => {
-        if (error?.code !== 11000 && !error?.writeErrors?.every((item) => item?.code === 11000)) throw error;
-      });
+      attachmentIds,
+      ...(clientMessageId ? { clientMessageId } : {}),
+      authorAnonymous: Boolean(anonymous),
+      authorCreditName: anonymous ? clean(alias) || "Anonymous" : chatDisplayName(authorName),
+    }); } catch (error) {
+      if (error.code !== 11000 || !clientMessageId) throw error;
+      const existing = await originalMessageModel.findOne({ projectId: project._id, authorId, clientMessageId });
+      if (!existing) throw error;
+      return res.status(200).json({ success: true, message: existing });
     }
-    await audit({ projectId: project._id, type: "group_message_posted", user: req.user, metadata: { messageId: String(message._id), hasVoiceNote: Boolean(voiceAssetId) } });
-    return res.status(201).json({ success: true, message });
+    // Delivery and audit failures must never turn a saved chat message into a failed send.
+    try {
+      await queueOriginalChatNotifications({ project, message });
+      await audit({ projectId: project._id, type: "group_message_posted", user: req.user, metadata: { messageId: String(message._id), hasVoiceNote: Boolean(voiceAssetId) } });
+    } catch (error) { console.error("Originals chat follow-up failed after message was saved:", error); }
+    res.status(201).json({ success: true, message });
+    // The response is already sent; SMTP latency cannot leave the chat composer waiting.
+    try { await deliverOriginalChatNotifications({ projectId: project._id }); }
+    catch (error) { console.error("Originals chat email delivery will retry:", error); }
+    return;
   } catch (error) {
     console.error("❌ postOriginalMessage error:", error);
     return res.status(500).json({ success: false, message: "Failed to post message" });
@@ -245,14 +257,14 @@ export const replaceOriginalSubmission = async (req, res) => {
     if (laterRound) return res.status(409).json({ success: false, message: "This project has moved to the next stage; open a concern instead" });
     const takes = Array.isArray(req.body?.takes) ? req.body.takes.slice(0, 3) : [];
     if (!takes.length) return res.status(400).json({ success: false, message: "Add at least one replacement take" });
-    const assetIds = takes.flatMap((take) => [take.stemAssetId, take.mixdownAssetId]).map(objectId);
+    const assetIds = originalTakeAssetIds(takes).map(objectId);
+    if (assetIds.some(id => !id)) return res.status(400).json({ success: false, message: "Choose valid recording files" });
     const assets = await originalAssetModel.find({ _id: { $in: assetIds }, reservationId: submission.reservationId, ownerId: submission.musicianId, state: "active" }).lean();
     if (assets.length !== new Set(assetIds).size) return res.status(400).json({ success: false, message: "Replacement files are unavailable" });
-    const kinds = new Map(assets.map((asset) => [String(asset._id), asset.kind]));
-    if (takes.some((take) => kinds.get(String(take.stemAssetId)) !== "take_stem" || kinds.get(String(take.mixdownAssetId)) !== "take_mixdown")) return res.status(400).json({ success: false, message: "Each replacement needs a stem and mixdown" });
-    const oldAssetIds = submission.takes.flatMap((take) => [take.stemAssetId, take.mixdownAssetId]);
+    if (!originalTakeKindsValid(takes, assets)) return res.status(400).json({ success: false, message: "Each replacement needs a stem and mixdown" });
+    const oldAssetIds = originalTakeAssetIds(submission.takes);
     await originalAssetModel.updateMany({ _id: { $in: oldAssetIds } }, { $set: { state: "hidden" } });
-    submission.takes = takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId, notes: clean(take.notes) }));
+    submission.takes = takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId, wetStemAssetId: take.wetStemAssetId || null, notes: clean(take.notes) }));
     submission.revision += 1;
     submission.notes = clean(req.body?.notes);
     await submission.save();
@@ -302,7 +314,7 @@ export const updateOriginalIssue = async (req, res) => {
     if (action === "resolve") submission.state = issue.priorSubmissionState;
     if (action === "confirm_retraction") {
       submission.state = "retracted";
-      const ids = submission.outputAssetId ? [submission.outputAssetId] : submission.takes.flatMap((take) => [take.stemAssetId, take.mixdownAssetId]);
+      const ids = submission.outputAssetId ? [submission.outputAssetId] : originalTakeAssetIds(submission.takes);
       await originalAssetModel.updateMany({ _id: { $in: ids } }, { $set: { state: "hidden" } });
       await originalProjectModel.updateOne({ _id: submission.projectId }, { $set: { state: "owner_review", currentCreditVersionId: null } });
     }
@@ -320,7 +332,7 @@ export const accessOriginalAsset = async (req, res) => {
     const asset = await originalAssetModel.findById(req.params.assetId).lean();
     if (!asset || asset.state !== "active") return res.status(404).json({ success: false, message: "Asset not found" });
     const project = await originalProjectModel.findById(asset.projectId).lean();
-    const visible = project && (canManageOriginalProject(project, req.user) || String(asset.ownerId) === getOriginalsUserId(req.user) || originalReferenceKinds.has(asset.kind) || (project.initialAssetIds || []).some(id => String(id) === String(asset._id)) || await originalSubmissionModel.exists({ projectId: project._id, state: "accepted", $or: [{ outputAssetId: asset._id }, { "takes.stemAssetId": asset._id }, { "takes.mixdownAssetId": asset._id }] }));
+    const visible = project && (canManageOriginalProject(project, req.user) || String(asset.ownerId) === getOriginalsUserId(req.user) || originalReferenceKinds.has(asset.kind) || (project.initialAssetIds || []).some(id => String(id) === String(asset._id)) || await originalMessageModel.exists({ projectId: project._id, $or: [{ voiceAssetId: asset._id }, { attachmentIds: asset._id }] }) || await originalSubmissionModel.exists({ projectId: project._id, state: "accepted", $or: [{ outputAssetId: asset._id }, { "takes.stemAssetId": asset._id }, { "takes.mixdownAssetId": asset._id }, { "takes.wetStemAssetId": asset._id }] }));
     if (!visible) return res.status(403).json({ success: false, message: "This file is private to its contributor and the project owner" });
     const url = cloudinary.utils.private_download_url(
       asset.cloudinaryPublicId,
@@ -431,19 +443,18 @@ export const submitOriginalTakes = async (req, res) => {
     if (!["master_only", "songwriting_claim"].includes(songwritingChoice)) {
       return res.status(400).json({ success: false, message: "Choose your songwriting credit preference" });
     }
-    const assetIds = takes.flatMap((take) => [take.stemAssetId, take.mixdownAssetId]).map(objectId);
+    const assetIds = originalTakeAssetIds(takes).map(objectId);
     if (assetIds.some((id) => !id)) return res.status(400).json({ success: false, message: "Every take needs a stem and mixdown" });
     const assets = await originalAssetModel.find({ _id: { $in: assetIds }, reservationId: reservation._id, ownerId: musicianId, state: "active" }).lean();
     if (assets.length !== new Set(assetIds).size) return res.status(400).json({ success: false, message: "One or more take files are unavailable" });
-    const kinds = new Map(assets.map((asset) => [String(asset._id), asset.kind]));
-    if (takes.some((take) => kinds.get(String(take.stemAssetId)) !== "take_stem" || kinds.get(String(take.mixdownAssetId)) !== "take_mixdown")) {
+    if (!originalTakeKindsValid(takes, assets)) {
       return res.status(400).json({ success: false, message: "Each take requires the correct stem and mixdown files" });
     }
     const submission = await originalSubmissionModel.create({
       projectId: reservation.projectId, roundId: reservation.roundId, reservationId: reservation._id,
       musicianId, roleName: reservation.roleName, songwritingChoice,
       anonymous: reservation.anonymous, creditName: reservation.creditName,
-      takes: takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId, notes: clean(take.notes) })),
+      takes: takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId, wetStemAssetId: take.wetStemAssetId || null, notes: clean(take.notes) })),
       notes: clean(req.body?.notes),
     });
     reservation.state = "submitted";
@@ -514,7 +525,7 @@ export const decideOriginalSubmission = async (req, res) => {
       submission.selectedRanges = [];
       const assetIds = submission.outputAssetId
         ? [submission.outputAssetId]
-        : submission.takes.flatMap((take) => [take.stemAssetId, take.mixdownAssetId]);
+        : originalTakeAssetIds(submission.takes);
       await originalAssetModel.updateMany({ _id: { $in: assetIds } }, { $set: { state: "hidden" } });
       const round = await originalRoundModel.findById(submission.roundId);
       if (round && ["review", "closed"].includes(round.state)) {
@@ -730,5 +741,17 @@ export const submitOriginalProduction = async (req, res) => {
     if (error?.code === 11000) return res.status(409).json({ success: false, message: "This reservation has already been submitted" });
     console.error("❌ submitOriginalProduction error:", error);
     return res.status(500).json({ success: false, message: "Failed to submit production output" });
+  }
+};
+
+export const getOriginalMessages = async (req, res) => {
+  try {
+    if (!await originalProjectModel.exists({ _id: req.params.id })) return res.status(404).json({ success: false, message: "Originals project not found" });
+    const messages = await originalMessageModel.find({ projectId: req.params.id }).sort({ createdAt: -1, _id: -1 }).limit(500).populate("attachmentIds", "kind originalName mimeType bytes state").lean();
+    res.set("Cache-Control", "no-store");
+    return res.json({ success: true, messages: messages.reverse() });
+  } catch (error) {
+    console.error("Originals chat load failed:", error);
+    return res.status(500).json({ success: false, message: "Could not refresh chat" });
   }
 };

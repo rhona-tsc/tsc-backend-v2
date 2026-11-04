@@ -6,6 +6,9 @@ const originalMessageSchema = new mongoose.Schema(
     authorId: { type: mongoose.Schema.Types.ObjectId, ref: "musician", required: true, index: true },
     body: { type: String, default: "", trim: true, maxlength: 3000 },
     voiceAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", default: null },
+    attachmentIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "originalasset" }],
+    chatNotificationsQueued: { type: Boolean, default: false },
+    clientMessageId: { type: String, maxlength: 100 },
     authorAnonymous: { type: Boolean, default: false },
     authorCreditName: { type: String, default: "", trim: true },
   },
@@ -13,4 +16,5 @@ const originalMessageSchema = new mongoose.Schema(
 );
 
 originalMessageSchema.index({ projectId: 1, createdAt: 1 });
+originalMessageSchema.index({ projectId: 1, authorId: 1, clientMessageId: 1 }, { unique: true, partialFilterExpression: { clientMessageId: { $type: "string" } } });
 export default mongoose.models.originalmessage || mongoose.model("originalmessage", originalMessageSchema);

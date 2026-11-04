@@ -4,6 +4,7 @@ const takeSchema = new mongoose.Schema(
   {
     label: { type: String, trim: true, maxlength: 80 },
     stemAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", required: true },
+    wetStemAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", default: null },
     mixdownAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", required: true },
     notes: { type: String, default: "", trim: true, maxlength: 1000 },
   },
