@@ -27,6 +27,7 @@ test("Originals private preview is limited to Rhona's allowlisted identities", (
   assert.equal(canAccessOriginalsPreview({ email: "HELLO@THESUPREMECOLLECTIVE.CO.UK" }), true);
   assert.equal(canAccessOriginalsPreview({ email: "rhona@thesupremecollective.co.uk" }), true);
   assert.equal(canAccessOriginalsPreview({ email: "ewanneilmcintosh@gmail.com" }), true);
+  assert.equal(canAccessOriginalsPreview({ email: "RHONAGDOWNIE@GMAIL.COM" }), true);
   assert.equal(canAccessOriginalsPreview({ email: "tsc.test.account@gmail.com" }), true);
   assert.equal(canAccessOriginalsPreview({ email: "tscanything@gmail.com" }), true);
   assert.equal(canAccessOriginalsPreview({ email: "someone.tsc@gmail.com" }), false);

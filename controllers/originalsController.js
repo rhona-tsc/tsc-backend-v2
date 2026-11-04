@@ -6,6 +6,8 @@ import originalEventModel from "../models/originalEventModel.js";
 import {
   ORIGINALS_OWNER_AGREEMENT_VERSION,
   canModerateOriginals,
+  canManageOriginalProject,
+  originalOwnerDisplayName,
   getOriginalsUserId,
   normaliseRequestedRoles,
   normaliseStringList,
@@ -43,14 +45,12 @@ const presentProject = (project, { includePrivate = false } = {}) => {
     value.ownerEmail = "";
   } else if (!includePrivate) {
     value.ownerEmail = "";
+    value.ownerName = originalOwnerDisplayName(value);
   }
   return value;
 };
 
-const canManageProject = (project, user) => {
-  if (canModerateOriginals(user)) return true;
-  return String(project?.ownerId || "") === getOriginalsUserId(user);
-};
+const canManageProject = canManageOriginalProject;
 
 const buildProjectFields = (body = {}, { partial = false } = {}) => {
   const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
@@ -290,7 +290,8 @@ export const decideOriginalProjectModeration = async (req, res) => {
         state: "open",
         slotLimit: 3,
         openedAt: new Date(),
-        closesAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        closesAt: null,
+        clockStartedAt: null,
       });
       project.currentRoundId = round._id;
     } else if (decision === "request_changes") {

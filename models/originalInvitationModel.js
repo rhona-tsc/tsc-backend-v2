@@ -9,7 +9,7 @@ const originalInvitationSchema = new mongoose.Schema(
     roleName: { type: String, required: true, trim: true },
     message: { type: String, default: "", trim: true, maxlength: 1000 },
     state: { type: String, enum: ["pending", "accepted", "declined", "expired", "cancelled"], default: "pending", index: true },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, default: null, index: true },
   },
   { timestamps: true },
 );

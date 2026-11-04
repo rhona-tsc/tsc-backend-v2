@@ -5,7 +5,7 @@ import originalNotificationModel from "../models/originalNotificationModel.js";
 import originalProjectModel from "../models/originalProjectModel.js";
 import originalReservationModel from "../models/originalReservationModel.js";
 import originalSubmissionModel from "../models/originalSubmissionModel.js";
-import { getOriginalsUserId } from "../services/originalsPolicyService.js";
+import { canManageOriginalProject, canModerateOriginals, getOriginalsUserId } from "../services/originalsPolicyService.js";
 import { calculateOriginalsSplits, totalPercent } from "../services/originalsRoyaltyService.js";
 
 const clean = (value) => String(value || "").trim();
@@ -15,6 +15,7 @@ export const createOriginalCreditVersion = async (req, res) => {
   try {
     const project = await originalProjectModel.findById(req.params.id).lean();
     if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
+    if (!canManageOriginalProject(project, req.user)) return res.status(403).json({ success: false, message: "Only the project owner or TSC can manage credits" });
     const submissions = await originalSubmissionModel.find({ projectId: project._id, state: "accepted" }).lean();
     let splits;
     try { splits = calculateOriginalsSplits({ project, acceptedSubmissions: submissions }); }
@@ -68,6 +69,7 @@ export const confirmOriginalCreditVersion = async (req, res) => {
 
 export const finaliseOriginalCreditsAsAdmin = async (req, res) => {
   try {
+    if (!canModerateOriginals(req.user)) return res.status(403).json({ success: false, message: "Only TSC can finalise credits on behalf of participants" });
     const reason = clean(req.body?.reason);
     if (!reason) return res.status(400).json({ success: false, message: "Record why TSC is finalising on participants' behalf" });
     const version = await originalCreditVersionModel.findById(req.params.versionId);
@@ -89,6 +91,7 @@ export const completeOriginalProject = async (req, res) => {
   try {
     const project = await originalProjectModel.findById(req.params.id);
     if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
+    if (!canManageOriginalProject(project, req.user)) return res.status(403).json({ success: false, message: "Only the project owner or TSC can manage credits" });
     const creditVersion = project.currentCreditVersionId ? await originalCreditVersionModel.findById(project.currentCreditVersionId) : null;
     if (!creditVersion || creditVersion.state !== "final") return res.status(409).json({ success: false, message: "Finalise the current credit version first" });
     const acceptedMaster = await originalSubmissionModel.exists({ projectId: project._id, category: "master", state: "accepted" });

@@ -1,3 +1,4 @@
+import { originalOwnerDisplayName } from "./originalsPolicyService.js";
 import musicianModel from "../models/musicianModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.js";
@@ -48,9 +49,7 @@ export const buildOriginalProjectApprovedEmail = ({ project, firstName = "there"
   const title = clean(project?.title) || "New Originals project";
   const roles = (project?.requestedRoles || []).map((role) => clean(role?.name)).filter(Boolean);
   const genres = (project?.genres || []).map(clean).filter(Boolean);
-  const ownerName = project?.ownerAnonymous
-    ? clean(project?.ownerCreditName) || "Anonymous"
-    : clean(project?.ownerName) || "A TSC musician";
+  const ownerName = originalOwnerDisplayName(project);
   const subject = `New TSC Originals project: ${title}`;
   const text = [
     `Hi ${firstName || "there"},`,

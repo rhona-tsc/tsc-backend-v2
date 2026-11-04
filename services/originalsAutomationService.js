@@ -4,7 +4,8 @@ import originalProjectModel from "../models/originalProjectModel.js";
 import originalReservationModel from "../models/originalReservationModel.js";
 import originalRoundModel from "../models/originalRoundModel.js";
 import originalSubmissionModel from "../models/originalSubmissionModel.js";
-import { getDueReservationReminder } from "./originalsPolicyService.js";
+import { prepareOriginalRoundClock } from "./originalsRoundClockService.js";
+import { getDueReservationReminder, isOriginalRoundExpired } from "./originalsPolicyService.js";
 
 const queueNotification = async ({ projectId, musicianId, eventKey, template, payload }) => {
   try {
@@ -63,9 +64,11 @@ export const runOriginalsAutomation = async ({ now = new Date() } = {}) => {
   }
 
   const openRounds = await originalRoundModel.find({ state: { $in: ["open", "reopened"] } });
-  for (const round of openRounds) {
+  for (const listedRound of openRounds) {
+    const round = await prepareOriginalRoundClock(listedRound);
+    if (!round) continue;
     const submissions = await originalSubmissionModel.countDocuments({ roundId: round._id, state: { $in: ["submitted", "accepted"] } });
-    if (round.closesAt > now && submissions < round.slotLimit) continue;
+    if (!isOriginalRoundExpired(round, now) && submissions < round.slotLimit) continue;
     round.state = "review";
     round.closedAt = now;
     round.closeReason = submissions >= round.slotLimit ? "submission_limit_reached" : "seven_day_window_ended";

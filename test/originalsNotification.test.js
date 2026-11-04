@@ -43,3 +43,12 @@ test("approved project email links directly to the workspace and lists roles", (
   assert.match(message.text, /Seeking: Keys, Vocals/);
   assert.match(message.projectUrl, /\/originals\/project123$/);
 });
+
+test('project emails abbreviate owner surnames and preserve anonymous credit names', () => {
+  const message = buildOriginalProjectApprovedEmail({ project: { _id: 'project123', ownerName: 'Veronica Downie' } });
+  assert.match(message.text, /Project owner: Veronica D\./);
+  assert.doesNotMatch(message.html, /Veronica Downie/);
+  const anonymous = buildOriginalProjectApprovedEmail({ project: { ownerName: 'Veronica Downie', ownerAnonymous: true, ownerCreditName: 'Blue Sky' } });
+  assert.match(anonymous.text, /Project owner: Blue Sky/);
+  assert.doesNotMatch(anonymous.text, /Veronica/);
+});

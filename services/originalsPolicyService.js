@@ -27,6 +27,7 @@ const ORIGINALS_PREVIEW_USER_IDS = new Set(["693ac400ef2c3100595c0ed8"]);
 const ORIGINALS_PREVIEW_EMAILS = new Set([
   "hello@thesupremecollective.co.uk",
   "rhona@thesupremecollective.co.uk",
+  "rhonagdownie@gmail.com",
   "ewanneilmcintosh@gmail.com",
 ]);
 const isOriginalsTestEmail = (email) => /^tsc[^@]*@gmail\.com$/i.test(email);
@@ -129,3 +130,16 @@ export const validateOriginalProjectForModeration = (project = {}) => {
   }
   return errors;
 };
+
+export const canManageOriginalProject = (project = {}, user = {}) =>
+  canModerateOriginals(user) || Boolean(getOriginalsUserId(user) && String(project.ownerId || '') === getOriginalsUserId(user));
+
+export const originalOwnerDisplayName = (project = {}) => {
+  if (project.ownerAnonymous) return String(project.ownerCreditName || '').trim() || 'Anonymous';
+  const parts = String(project.ownerName || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'A TSC musician';
+  return parts.length > 1 ? `${parts[0]} ${Array.from(parts.at(-1))[0]}.` : parts[0];
+};
+
+export const getOriginalRoundDeadline = from => new Date(new Date(from).getTime() + 7 * 24 * 60 * 60 * 1000);
+export const isOriginalRoundExpired = (round, now = new Date()) => Boolean(round?.closesAt && new Date(round.closesAt) <= now);

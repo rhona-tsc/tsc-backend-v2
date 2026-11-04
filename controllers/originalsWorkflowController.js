@@ -1,3 +1,4 @@
+import { requireOriginalProjectManager, presentOriginalWorkspace, originalReferenceKinds } from "../services/originalsAccessService.js";
 import mongoose from "mongoose";
 import { v2 as cloudinary } from "cloudinary";
 import originalProjectModel from "../models/originalProjectModel.js";
@@ -14,9 +15,13 @@ import originalIssueModel from "../models/originalIssueModel.js";
 import originalMessageModel from "../models/originalMessageModel.js";
 import {
   canRequestReservationExtension,
+  canManageOriginalProject,
+  isOriginalRoundExpired,
   getOriginalsUserId,
   getReservationExpiry,
 } from "../services/originalsPolicyService.js";
+
+import { prepareOriginalRoundClock, startOriginalRoundClock } from "../services/originalsRoundClockService.js";
 
 cloudinary.config({
   cloud_name: process.env.REACT_APP_CLOUDINARY_NAME,
@@ -65,6 +70,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
   try {
     const project = await originalProjectModel.findById(req.params.id).lean();
     if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
+    const canManage = canManageOriginalProject(project, req.user);
     const [rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages] = await Promise.all([
       originalRoundModel.find({ projectId: project._id }).sort({ sequence: 1 }).lean(),
       originalReservationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).lean(),
@@ -72,15 +78,23 @@ export const getOriginalProjectWorkspace = async (req, res) => {
       originalAssetModel.find({ projectId: project._id, state: { $ne: "deleted" } })
         .select("kind originalName mimeType bytes state ownerId roundId reservationId createdAt")
         .sort({ createdAt: -1 }).lean(),
-      originalNotificationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).limit(50).lean(),
-      originalInvitationModel.find({ projectId: project._id })
+      canManage ? originalNotificationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).limit(50).lean() : [],
+      canManage ? originalInvitationModel.find({ projectId: project._id })
         .populate("invitedMusicianId", "firstName lastName email instrument")
-        .sort({ createdAt: -1 }).lean(),
+        .sort({ createdAt: -1 }).lean() : [],
       originalCreditVersionModel.find({ projectId: project._id }).sort({ version: -1 }).lean(),
       originalIssueModel.find({ projectId: project._id }).sort({ createdAt: -1 }).lean(),
       originalMessageModel.find({ projectId: project._id }).sort({ createdAt: 1 }).limit(500).lean(),
     ]);
-    return res.json({ success: true, project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages });
+    const currentIndex = rounds.findIndex(round => String(round._id) === String(project.currentRoundId));
+    if (currentIndex >= 0) {
+      const prepared = await prepareOriginalRoundClock(rounds[currentIndex]);
+      if (prepared) rounds[currentIndex] = prepared.toObject ? prepared.toObject() : prepared;
+      if (project.state === "owner_review" && ["open", "reopened"].includes(rounds[currentIndex].state)) {
+        project.state = { foundation: "foundation_open", instrument: "role_round_open", mix: "mix_open", master: "master_open" }[rounds[currentIndex].type];
+      }
+    }
+    return res.json(presentOriginalWorkspace({ project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages }, req.user));
   } catch (error) {
     console.error("❌ getOriginalProjectWorkspace error:", error);
     return res.status(500).json({ success: false, message: "Failed to load project workspace" });
@@ -93,6 +107,7 @@ export const uploadOriginalAsset = async (req, res) => {
     if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
     if (!req.file) return res.status(400).json({ success: false, message: "Choose a file to upload" });
     const kind = clean(req.body?.kind).toLowerCase();
+    if (!["take_stem", "take_mixdown", "mix", "master", "voice_note"].includes(kind) && !canManageOriginalProject(project, req.user)) return res.status(403).json({ success: false, message: "Only the project owner can upload project references" });
     if (!ASSET_KINDS.has(kind)) return res.status(400).json({ success: false, message: "Invalid asset type" });
     if (![...AUDIO_MIMES, ...VIDEO_MIMES].includes(req.file.mimetype)) {
       return res.status(415).json({ success: false, message: "Use WAV, MP3, AIFF, FLAC, M4A, MP4 or MOV" });
@@ -224,6 +239,7 @@ export const replaceOriginalSubmission = async (req, res) => {
   try {
     const submission = await originalSubmissionModel.findById(req.params.submissionId);
     if (!submission || submission.state !== "submitted") return res.status(409).json({ success: false, message: "Only a pending submission can be replaced" });
+    if (String(submission.musicianId) !== getOriginalsUserId(req.user) && !await requireOriginalProjectManager(req, res, submission.projectId)) return;
     const round = await originalRoundModel.findById(submission.roundId).lean();
     const laterRound = await originalRoundModel.exists({ projectId: submission.projectId, sequence: { $gt: round.sequence } });
     if (laterRound) return res.status(409).json({ success: false, message: "This project has moved to the next stage; open a concern instead" });
@@ -252,6 +268,7 @@ export const openOriginalIssue = async (req, res) => {
   try {
     const submission = await originalSubmissionModel.findById(req.params.submissionId);
     if (!submission || !["submitted", "accepted"].includes(submission.state)) return res.status(404).json({ success: false, message: "Submission is unavailable" });
+    if (String(submission.musicianId) !== getOriginalsUserId(req.user) && !await requireOriginalProjectManager(req, res, submission.projectId)) return;
     const category = clean(req.body?.category);
     const reason = clean(req.body?.reason);
     if (!["lyrics", "creative_direction", "credit", "conduct", "other"].includes(category) || !reason) return res.status(400).json({ success: false, message: "Choose a category and explain the concern" });
@@ -271,6 +288,7 @@ export const updateOriginalIssue = async (req, res) => {
   try {
     const issue = await originalIssueModel.findById(req.params.issueId);
     if (!issue || ["resolved", "retraction_confirmed", "cancelled"].includes(issue.state)) return res.status(404).json({ success: false, message: "Open concern not found" });
+    if (String(issue.openedBy) !== getOriginalsUserId(req.user) && !await requireOriginalProjectManager(req, res, issue.projectId)) return;
     const action = clean(req.body?.action);
     const body = clean(req.body?.body);
     if (!["propose_remedy", "request_amendments", "resolve", "confirm_retraction"].includes(action) || !body) return res.status(400).json({ success: false, message: "Choose an action and add a note" });
@@ -301,6 +319,9 @@ export const accessOriginalAsset = async (req, res) => {
   try {
     const asset = await originalAssetModel.findById(req.params.assetId).lean();
     if (!asset || asset.state !== "active") return res.status(404).json({ success: false, message: "Asset not found" });
+    const project = await originalProjectModel.findById(asset.projectId).lean();
+    const visible = project && (canManageOriginalProject(project, req.user) || String(asset.ownerId) === getOriginalsUserId(req.user) || originalReferenceKinds.has(asset.kind) || (project.initialAssetIds || []).some(id => String(id) === String(asset._id)) || await originalSubmissionModel.exists({ projectId: project._id, state: "accepted", $or: [{ outputAssetId: asset._id }, { "takes.stemAssetId": asset._id }, { "takes.mixdownAssetId": asset._id }] }));
+    if (!visible) return res.status(403).json({ success: false, message: "This file is private to its contributor and the project owner" });
     const url = cloudinary.utils.private_download_url(
       asset.cloudinaryPublicId,
       asset.cloudinaryFormat || null,
@@ -319,8 +340,11 @@ export const accessOriginalAsset = async (req, res) => {
 
 export const reserveOriginalRound = async (req, res) => {
   try {
-    const round = await originalRoundModel.findOne({ _id: req.params.roundId, state: { $in: ["open", "reopened"] } });
-    if (!round || round.closesAt <= new Date()) return res.status(409).json({ success: false, message: "This round is closed" });
+    const candidate = await originalRoundModel.findById(req.params.roundId);
+    const project = candidate ? await originalProjectModel.findById(candidate.projectId).lean() : null;
+    if (!project || String(project.currentRoundId) !== String(candidate._id)) return res.status(409).json({ success: false, message: "This is not the current round" });
+    const round = await prepareOriginalRoundClock(candidate);
+    if (!round || !["open", "reopened"].includes(round.state) || isOriginalRoundExpired(round)) return res.status(409).json({ success: false, message: "This round is closed" });
     const musicianId = objectId(getOriginalsUserId(req.user));
     const now = new Date();
     await originalReservationModel.updateMany(
@@ -341,8 +365,14 @@ export const reserveOriginalRound = async (req, res) => {
       projectId: round.projectId, roundId: round._id, musicianId, roleName, anonymous, creditName,
       reservedAt: now, expiresAt: getReservationExpiry(now),
     });
+    const timedRound = await startOriginalRoundClock(round._id, now);
+    if (!timedRound) {
+      reservation.state = "cancelled";
+      await reservation.save();
+      return res.status(409).json({ success: false, message: "This round has just closed. Please refresh the workspace." });
+    }
     await audit({ projectId: round.projectId, roundId: round._id, reservationId: reservation._id, type: "reservation_created", user: req.user, metadata: { roleName } });
-    return res.status(201).json({ success: true, reservation });
+    return res.status(201).json({ success: true, reservation, round: timedRound });
   } catch (error) {
     if (error?.code === 11000) return res.status(409).json({ success: false, message: "You already hold an active slot in this round" });
     console.error("❌ reserveOriginalRound error:", error);
@@ -371,6 +401,7 @@ export const decideReservationExtension = async (req, res) => {
     if (!reservation || reservation.extensionRequest?.status !== "pending") {
       return res.status(404).json({ success: false, message: "Pending extension request not found" });
     }
+    if (!await requireOriginalProjectManager(req, res, reservation.projectId)) return;
     const hours = Number(req.body?.hours);
     if (![12, 24].includes(hours)) return res.status(400).json({ success: false, message: "Choose a 12 or 24 hour extension" });
     reservation.extensionRequest.status = "approved";
@@ -432,6 +463,7 @@ export const decideOriginalSubmission = async (req, res) => {
     if (!submission || submission.state !== "submitted") {
       return res.status(404).json({ success: false, message: "Pending submission not found" });
     }
+    if (!await requireOriginalProjectManager(req, res, submission.projectId)) return;
     const decision = clean(req.body?.decision).toLowerCase();
     if (!["accept", "reject"].includes(decision)) {
       return res.status(400).json({ success: false, message: "Choose accept or reject" });
@@ -488,7 +520,8 @@ export const decideOriginalSubmission = async (req, res) => {
       if (round && ["review", "closed"].includes(round.state)) {
         round.state = "reopened";
         round.openedAt = new Date();
-        round.closesAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        round.closesAt = null;
+        round.clockStartedAt = null;
         round.closedAt = null;
         round.closeReason = "reopened_after_rejection";
         await round.save();
@@ -526,10 +559,12 @@ export const reopenOriginalRound = async (req, res) => {
   try {
     const round = await originalRoundModel.findById(req.params.roundId);
     if (!round) return res.status(404).json({ success: false, message: "Round not found" });
+    if (!await requireOriginalProjectManager(req, res, round.projectId)) return;
     if (["open", "reopened"].includes(round.state)) return res.status(409).json({ success: false, message: "Round is already open" });
     round.state = "reopened";
     round.openedAt = new Date();
-    round.closesAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    round.closesAt = null;
+    round.clockStartedAt = null;
     round.closedAt = null;
     round.closeReason = clean(req.body?.reason) || "reopened_by_owner";
     await round.save();
@@ -549,6 +584,7 @@ export const openNextOriginalRound = async (req, res) => {
   try {
     const project = await originalProjectModel.findById(req.params.id);
     if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
+    if (!canManageOriginalProject(project, req.user)) return res.status(403).json({ success: false, message: "Only the project owner or TSC can open stages" });
     const type = clean(req.body?.type).toLowerCase();
     if (!["instrument", "mix", "master"].includes(type)) {
       return res.status(400).json({ success: false, message: "Choose an instrument, mix or master round" });
@@ -580,7 +616,8 @@ export const openNextOriginalRound = async (req, res) => {
       state: "open",
       slotLimit: 3,
       openedAt: new Date(),
-      closesAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      closesAt: null,
+      clockStartedAt: null,
     });
     project.currentRoundId = round._id;
     project.state = type === "instrument" ? "role_round_open" : type === "mix" ? "mix_open" : "master_open";
@@ -598,6 +635,7 @@ export const inviteOriginalMusician = async (req, res) => {
   try {
     const round = await originalRoundModel.findOne({ _id: req.params.roundId, state: { $in: ["open", "reopened"] } });
     if (!round) return res.status(409).json({ success: false, message: "Invitations require an open round" });
+    if (!await requireOriginalProjectManager(req, res, round.projectId)) return;
     const invitedMusicianId = objectId(req.body?.musicianId);
     const musician = invitedMusicianId ? await musicianModel.findById(invitedMusicianId).select("_id firstName lastName email") : null;
     if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
@@ -633,6 +671,8 @@ export const inviteOriginalMusician = async (req, res) => {
 
 export const searchOriginalMusicians = async (req, res) => {
   try {
+    if (!objectId(req.query?.projectId)) return res.status(400).json({ success: false, message: "Choose a project before searching musicians" });
+    if (!await requireOriginalProjectManager(req, res, req.query.projectId)) return;
     const query = clean(req.query?.q);
     if (query.length < 2) return res.json({ success: true, musicians: [] });
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

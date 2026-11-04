@@ -25,6 +25,7 @@ const originalRoundSchema = new mongoose.Schema(
     slotLimit: { type: Number, default: 3, min: 1, max: 3 },
     openedAt: { type: Date, default: null },
     closesAt: { type: Date, default: null },
+    clockStartedAt: { type: Date, default: null },
     closedAt: { type: Date, default: null },
     closeReason: { type: String, default: "", trim: true },
   },
