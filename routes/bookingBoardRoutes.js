@@ -1158,6 +1158,18 @@ const mergeDeep = (target, source) => {
   return out;
 };
 
+export const linkedBookingBoardLinkPatch = (body = {}) => ({
+  ...(body.eventSheetLink !== undefined
+    ? { eventSheetLink: String(body.eventSheetLink || "").trim() }
+    : {}),
+  ...(body.draftSetlistLink !== undefined
+    ? { draftSetlistLink: String(body.draftSetlistLink || "").trim() }
+    : {}),
+  ...(body.whatsappGroupLink !== undefined
+    ? { whatsappGroupLink: String(body.whatsappGroupLink || "").trim() }
+    : {}),
+});
+
 export const protectBookingAssignmentPatch = (body = {}) => {
   const patch = {
     ...body,
@@ -1284,7 +1296,7 @@ const sanitizeBookingPatch = (body = {}) => {
   return patch;
 };
 
-const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
+export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
   const patch = sanitizeBookingPatch(rawPatch);
 
   const requestedEventDate = patch.eventDateISO || patch.eventDate || patch.date;
@@ -1317,6 +1329,7 @@ const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
     "actTscName",
     "songSuggestionsDueDateISO",
     "siteAutomationsEnabled",
+    "whatsappGroupLink",
   ];
   scalarFields.forEach((field) => {
     if (
@@ -3763,6 +3776,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
           ? { lineupComposition: body.lineupComposition }
           : {}),
         ...(body.bandSize !== undefined ? { bandSize: Number(body.bandSize || 0) || 0 } : {}),
+        ...linkedBookingBoardLinkPatch(body),
         ...(body.arrivalTime !== undefined ? { arrivalTime: body.arrivalTime } : {}),
         ...(body.startTime !== undefined ? { startTime: body.startTime } : {}),
         ...(body.finishTime !== undefined ? { finishTime: body.finishTime } : {}),

@@ -2,10 +2,46 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  applyBookingPatch,
+  linkedBookingBoardLinkPatch,
   parseBookingContract,
   protectBookingAssignmentPatch,
   resolveBookingAssignmentsForUpsert,
 } from "../routes/bookingBoardRoutes.js";
+
+test("quick edits persist a WhatsApp group link on linked core bookings", async () => {
+  const bookingDoc = {
+    constructor: {
+      schema: {
+        path(field) {
+          return field === "whatsappGroupLink";
+        },
+      },
+    },
+    totals: {},
+    async save() {
+      return this;
+    },
+  };
+
+  await applyBookingPatch(bookingDoc, {
+    whatsappGroupLink: "https://chat.whatsapp.com/SarahGroup123",
+  });
+
+  assert.equal(
+    bookingDoc.whatsappGroupLink,
+    "https://chat.whatsapp.com/SarahGroup123",
+  );
+});
+
+test("linked booking link edits are mirrored back to the booking-board row", () => {
+  assert.deepEqual(
+    linkedBookingBoardLinkPatch({
+      whatsappGroupLink: "  https://chat.whatsapp.com/SarahGroup123  ",
+    }),
+    { whatsappGroupLink: "https://chat.whatsapp.com/SarahGroup123" },
+  );
+});
 
 test("manual edits and PDF re-imports preserve existing accepted musicians", () => {
   const accepted = {
