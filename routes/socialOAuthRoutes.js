@@ -8,6 +8,8 @@ import {
   encryptSocialToken,
 } from "../utils/socialTokenCrypto.js";
 
+import { resolveMetaAccount } from "../services/metaAccountService.js";
+
 const router = express.Router();
 const API_BASE = String(
   process.env.SOCIAL_OAUTH_BASE_URL ||
@@ -118,7 +120,7 @@ router.get("/status", musicianAuth, async (req, res) => {
     .findById(req.userId)
     .select(
       "socialFeedConnectionPreference " +
-        "socialConnections.meta.connected socialConnections.meta.connectedAt socialConnections.meta.lastSyncedAt " +
+        "socialConnections.meta.connected socialConnections.meta.accountId socialConnections.meta.connectedAt socialConnections.meta.lastSyncedAt " +
         "+socialConnections.meta.accessTokenEncrypted " +
         "socialConnections.tiktok.connected socialConnections.tiktok.connectedAt socialConnections.tiktok.lastSyncedAt " +
         "+socialConnections.tiktok.accessTokenEncrypted",
@@ -134,6 +136,7 @@ router.get("/status", musicianAuth, async (req, res) => {
         configured: Boolean(providerConfig.meta.clientId() && providerConfig.meta.clientSecret()),
         connected: Boolean(
           musician.socialConnections?.meta?.connected &&
+            musician.socialConnections?.meta?.accountId &&
             musician.socialConnections?.meta?.accessTokenEncrypted,
         ),
         connectedAt: musician.socialConnections?.meta?.connectedAt || null,
@@ -210,11 +213,13 @@ router.get("/meta/callback", async (req, res) => {
     longUrl.searchParams.set("fb_exchange_token", shortToken.access_token);
     const token = await getJson(longUrl);
 
-    const pagesUrl = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/me/accounts`);
-    pagesUrl.searchParams.set("fields", "id,name,access_token,instagram_business_account");
-    pagesUrl.searchParams.set("access_token", token.access_token);
-    const pages = await getJson(pagesUrl);
-    const page = (pages.data || []).find((item) => item.instagram_business_account?.id) || pages.data?.[0];
+    const { page, scopes } = await resolveMetaAccount({
+      token: token.access_token,
+      appId: config.clientId(),
+      appSecret: config.clientSecret(),
+      version: META_GRAPH_VERSION,
+      getJson,
+    });
 
     await musicianModel.collection.updateOne({ _id: new mongoose.Types.ObjectId(state.musicianId) }, {
       $set: {
@@ -222,7 +227,7 @@ router.get("/meta/callback", async (req, res) => {
         "socialConnections.meta.accountId": page?.instagram_business_account?.id || "",
         "socialConnections.meta.pageId": page?.id || "",
         "socialConnections.meta.accessTokenEncrypted": encryptSocialToken(page?.access_token || token.access_token),
-        "socialConnections.meta.scopes": String(process.env.META_SOCIAL_SCOPES || "pages_show_list,pages_read_engagement,instagram_basic").split(","),
+        "socialConnections.meta.scopes": scopes,
         "socialConnections.meta.expiresAt": token.expires_in ? new Date(Date.now() + Number(token.expires_in) * 1000) : null,
         "socialConnections.meta.connectedAt": new Date(),
         "socialConnections.meta.lastSyncError": "",
