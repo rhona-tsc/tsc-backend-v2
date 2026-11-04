@@ -231,7 +231,9 @@ Your earnings£1591.00
   assert.equal(draft.commissionGross, 397.75);
   assert.equal(draft.passThroughGross, 1591);
   assert.equal(draft.accounting.commissionVat, 0);
-  assert.equal(draft.payments.depositChargedAmount, 159.1);
+  // Encore's client deposit status does not prove an artist payment received.
+  assert.equal(draft.payments.depositChargedAmount, 0);
+  assert.equal(draft.importMetadata.encore.clientDepositPaidToEncore, true);
   assert.equal(draft.bandSize, 4);
   assert.equal(draft.arrivalTime, "19:00");
 });

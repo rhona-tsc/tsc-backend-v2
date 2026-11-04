@@ -65,6 +65,13 @@ const sectionNames = [
   "BAND MEAL FAST-TRACK & KEEPING PLATES ASIDE", "TIME FOR BAND MEAL", "SCHEDULE", "SPOTIFY PLAYLIST", "ADVANCED DJ REQUESTS",
   "FIRST DANCE & SONG LIST", "SOCIALS (OPTIONAL)", "OTHER SUPPLIERS (OPTIONAL)", "PAYMENT", "NOTES",
 ];
+// Older DJ sheets use shorter/different headings for the same answer boxes.
+const sectionAliases = {
+  "PA SYSTEM": "PA SYSTEM & LIGHTS",
+  "PA & LIGHTING": "PA SYSTEM & LIGHTS",
+  "DJ'S POINT OF CONTACT": "BAND'S POINT OF CONTACT",
+  "POINT OF CONTACT": "BAND'S POINT OF CONTACT",
+};
 const sectionSet = new Set(sectionNames.map((name) => name.replace(/[’]/g, "'").toUpperCase()));
 const normalizedHeading = (line) => tidy(line).replace(/[’]/g, "'").toUpperCase();
 
@@ -80,12 +87,37 @@ const promptStarts = {
   "CHANGING ROOM": ["is there a room available"],
 };
 
+// Remove complete template wording, rather than dropping any answer that happens
+// to mention parking, PA or a DJ. Matching whitespace also covers wrapped DOCX
+// paragraphs, and leaves answers on the same line intact.
+const promptPattern = text => new RegExp(text
+  .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  .replace(/[’']/g, "['’]")
+  .replace(/\s+/g, "\\s+"), "gi");
+const templatePrompts = [
+  "If you have a Google Map pin or a what3words location of the parking please provide that below.",
+  "Is there an in-house PA system that the band needs to use, or would you prefer that they bring and use their own?",
+  "The DJ takes 30 minutes to pack down everything and leave the site from the moment the music is turned off. Is there a hard venue close time for the DJ in terms of packing down and offloading? For example, any gates that shut at midnight or requirements from the venue to be off-site by a certain time?",
+  "Who is the DJ’s point of contact on the day, and could you kindly provide their mobile number, please?",
+  "Who is the band’s point of contact on the day (often the best man, bridesmaid, or wedding planner), and could you kindly provide their mobile number, please?",
+  "What room will the DJ be performing in? And what area in that room would you like the DJ to set up in? If you are having the DJ perform outdoors please note that arrangements for cover over the DJ must be made to ensure equipment is protected in the event of rain.",
+  "If you could kindly confirm the full address that would be most helpful.",
+  "Please also provide a google map pin or what3words location of the loading point for the band.",
+].map(promptPattern);
+const stripTemplatePrompts = value => {
+  let answer = value
+    .replace(/Could\s+I\s+ask\s+if\s+there\s+will\s+be\s+free\s+parking\s+available\s+for\s+(?:X|\d+)\s+cars?\s*\?/gi, "")
+    .replace(/for\s+the\s+address\s+we\s+have\s*:[\s\S]*?If\s+you\s+could\s+kindly\s+confirm\s+the\s+full\s+address\s+that\s+would\s+be\s+most\s+helpful\./gi, "");
+  for (const pattern of templatePrompts) answer = answer.replace(pattern, "");
+  return answer.split(/\r?\n/).map(tidy).filter(line => line && !/^(?:[.\s…]+|and\s*\.)$/i.test(line));
+};
+
 function sectionsFrom(text) {
-  const lines = String(text || "").split(/\r?\n/).map(tidy).filter(Boolean);
+  const lines = stripTemplatePrompts(String(text || "")).map(tidy).filter(Boolean);
   const sections = {};
   let current = "";
   for (const line of lines) {
-    const heading = normalizedHeading(line);
+    const heading = sectionAliases[normalizedHeading(line)] || normalizedHeading(line);
     if (sectionSet.has(heading)) { current = heading; sections[current] ||= []; continue; }
     if (current) sections[current].push(line);
   }
@@ -214,4 +246,4 @@ export async function parseVenueEventSheet(file) {
   };
 }
 
-export { addressFromLocationLines, countyFromAddress, lookupCountyFromAddress, postcodeFrom, roomNameFrom };
+export { sectionsFrom, addressFromLocationLines, countyFromAddress, lookupCountyFromAddress, postcodeFrom, roomNameFrom };
