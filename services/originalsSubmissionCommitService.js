@@ -34,7 +34,7 @@ export const originalSubmissionCommit = {
           { $inc: { submissionSerial: 1 }, $set: { lastSubmissionAt: now } }, { session },
         );
         if (claimed.matchedCount !== 1) throw closed();
-        [saved] = await Submission.create([{ ...payload, listeningMixRequired, ownerNotificationPending: true, submittedChatPending: !production }], { session });
+        [saved] = await Submission.create([{ ...payload, listeningMixRequired, ownerNotificationPending: true, submitterConfirmationPending: true, submittedChatPending: !production }], { session });
         reservation.state = 'submitted';
         await reservation.save({ session });
       });

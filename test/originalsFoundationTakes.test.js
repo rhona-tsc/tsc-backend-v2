@@ -41,6 +41,7 @@ test('three foundation stems persist without mixdowns as three separate review o
   const state = setup(t); const res = await submit(stems.map(stemAssetId => ({ stemAssetId })));
   assert.equal(res.code, 201); assert.equal(state.reservationSaved, 1);
   assert.equal(state.saved.ownerNotificationPending, true); assert.equal(state.saved.listeningMixRequired, false); assert.equal(state.saved.takes.length, 3);
+  assert.equal(state.saved.submitterConfirmationPending, true);
   assert.ok(state.saved.takes.every(take => take.mixdownAssetId === null));
   assert.deepEqual(state.assetQueries[0]._id.$in, stems);
   assert.equal(String(state.assetQueries[0].ownerId), musicianId);
@@ -85,6 +86,7 @@ test('foundation and later instrument replacements both accept a stem alone', as
   const replacedAfter = Date.now();
   let res = response(); await replaceOriginalSubmission({ user: { id: musicianId }, params: { submissionId: String(doc._id) }, body: { takes: [{ stemAssetId: stems[0] }] } }, res);
   assert.equal(res.code, 200); assert.equal(saves, 1); assert.equal(doc.ownerNotificationPending, true); assert.equal(doc.listeningMixRequired, false); assert.equal(doc.takes[0].mixdownAssetId, null); assert.ok(doc.submittedAt.getTime() >= replacedAfter);
+  assert.equal(doc.submitterConfirmationPending, true);
   t.mock.method(Round, 'findById', () => ({ lean: async () => ({ _id: roundId, projectId, type: 'instrument', state: 'open', sequence: 0 }) }));
   res = response(); await replaceOriginalSubmission({ user: { id: musicianId }, params: { submissionId: String(doc._id) }, body: { takes: [{ stemAssetId: stems[0] }] } }, res);
   assert.equal(res.code, 200); assert.equal(saves, 2); assert.equal(state.reservationSaved, 0);

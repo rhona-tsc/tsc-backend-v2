@@ -45,6 +45,7 @@ const originalSubmissionSchema = new mongoose.Schema(
     state: { type: String, enum: ["submitted", "accepted", "rejected", "withdrawn", "retraction_requested", "retracted"], default: "submitted", index: true },
     revision: { type: Number, default: 1, min: 1 },
     ownerNotificationPending: { type: Boolean, default: false, index: true },
+    submitterConfirmationPending: { type: Boolean, default: false, index: true },
     submittedChatPending: { type: Boolean, default: false },
     approvedChatPending: { type: Boolean, default: false },
     selectionMode: { type: String, enum: ["whole_take", "selected_ranges", ""], default: "" },

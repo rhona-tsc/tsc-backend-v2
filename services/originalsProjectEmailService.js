@@ -7,6 +7,7 @@ import sendEmail from '../utils/sendEmail.js';
 import { escapeEmailHtml, buildTscEmailFooter } from '../utils/tscEmailBranding.js';
 import { isOriginalsEnabled } from './originalsPolicyService.js';
 import { buildOriginalProjectApprovedEmail, collectOriginalsNotificationRecipients, PREVIEW_EMAIL_PATTERN } from './originalsNotificationService.js';
+import { buildOriginalSubmissionConfirmationEmail } from '../utils/originalsSubmissionConfirmationEmail.js';
 
 export const buildOriginalProjectModerationEmail = project => {
   const url = `${String(process.env.ADMIN_FRONTEND_URL || 'https://admin.thesupremecollective.co.uk').replace(/\/$/, '')}/originals/moderation#project-${encodeURIComponent(String(project._id))}`;
@@ -72,6 +73,21 @@ export async function queueOriginalSubmissionEmail({ submission, emailRepository
   });
 }
 
+export async function queueOriginalSubmissionConfirmation({ submission, emailRepository = ProjectEmail, projectRepository = Project, musicianRepository = Musician, now = new Date() }) {
+  const project = await projectRepository.findById(submission.projectId).lean();
+  if (!project || ['withdrawn', 'retracted'].includes(submission.state)) return;
+  const musician = await musicianRepository.findById(submission.musicianId).select('email firstName').lean();
+  if (!musician) return;
+  const to = String(musician.email || '').trim().toLowerCase();
+  if (!to) throw new Error('Submitting musician has no email address');
+  await insertEmail(emailRepository, {
+    projectId: project._id, kind: 'submission_confirmation', submissionId: submission._id,
+    revision: submission.revision || 1, musicianId: submission.musicianId,
+    eventKey: `submission-confirmation:${submission._id}:${submission.revision || 1}`, sendAfter: now, to,
+    ...buildOriginalSubmissionConfirmationEmail({ project, submission, firstName: musician.firstName || 'there' }),
+  });
+}
+
 export async function deliverOriginalProjectEmails({ emailSender = sendEmail, emailRepository = ProjectEmail, projectRepository = Project, musicianRepository = Musician, submissionRepository = Submission, now = new Date(), limit = 25 } = {}) {
   if (!isOriginalsEnabled()) return;
   // Repairs a submit/save succeeded but queue-write failed interruption. Historical
@@ -92,6 +108,16 @@ export async function deliverOriginalProjectEmails({ emailSender = sendEmail, em
       await submissionRepository.updateOne({ _id: submission._id, revision: submission.revision || 1 }, { $set: { ownerNotificationPending: false } });
     } catch (error) { console.error('Originals submission email queue will retry:', submission._id, error.message); }
   }
+  // Save this marker atomically with each new submission/replacement. A failed
+  // owner alert must not block the musician's receipt, and legacy takes stay quiet.
+  const confirmations = await submissionRepository.find({ submitterConfirmationPending: true }).limit(limit).lean();
+  for (const submission of confirmations) {
+    if (submission.submitterConfirmationPending !== true) continue;
+    try {
+      await queueOriginalSubmissionConfirmation({ submission, emailRepository, projectRepository, musicianRepository, now });
+      await submissionRepository.updateOne({ _id: submission._id, revision: submission.revision || 1 }, { $set: { submitterConfirmationPending: false } });
+    } catch (error) { console.error('Originals submission confirmation queue will retry:', submission._id, error.message); }
+  }
   for (let index = 0; index < limit; index++) {
     const leaseToken = crypto.randomUUID();
     const job = await emailRepository.findOneAndUpdate({ $or: [{ state: 'queued', sendAfter: { $lte: now } }, { state: 'sending', leaseExpiresAt: { $lte: now } }] }, { $set: { state: 'sending', leaseToken, leaseExpiresAt: new Date(now.getTime() + 300000) }, $inc: { attempts: 1 } }, { new: true }).lean();
@@ -111,6 +137,22 @@ export async function deliverOriginalProjectEmails({ emailSender = sendEmail, em
           const owner = await musicianRepository.findById(project.ownerId).select('email').lean();
           to = String(owner?.email || project.ownerEmail || '').trim().toLowerCase();
           if (!to) throw new Error('Project owner has no email address');
+        }
+      }
+      if (job.kind === 'submission_confirmation') {
+        const submission = await submissionRepository.findById(job.submissionId).lean();
+        // A fast review or round advance does not invalidate a receipt. A changed
+        // revision/recipient or withdrawn recording does invalidate a queued one.
+        eligible = project && submission && String(project._id) === String(submission.projectId)
+          && String(submission.musicianId) === String(job.musicianId) && Number(submission.revision || 1) === job.revision
+          && !['withdrawn', 'retracted'].includes(submission.state);
+        if (eligible) {
+          const musician = await musicianRepository.findById(job.musicianId).select('email').lean();
+          if (!musician) eligible = false;
+          else {
+            to = String(musician.email || '').trim().toLowerCase();
+            if (!to) throw new Error('Submitting musician has no email address');
+          }
         }
       }
       if (!eligible) { await emailRepository.updateOne(filter, { $set: { state: 'cancelled', leaseExpiresAt: null } }); continue; }

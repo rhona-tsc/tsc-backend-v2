@@ -102,6 +102,7 @@ test('mix and master outputs save their email marker with the submission', async
   for(type of ['mix','master']) {
     const res=response();await submitOriginalProduction({user:{id:musicianId},params:{reservationId:booking},body:{outputAssetId:assetId}},res);
     assert.equal(res.code,201);assert.equal(saved.ownerNotificationPending,true);assert.equal(saved.category,type);
+    assert.equal(saved.submitterConfirmationPending,true);
     const f=fixture();f.submission.category=type;f.submission.roleName=type;
     const sent=[];await deliverOriginalProjectEmails({...f,emailSender:async mail=>{sent.push(mail);return{ok:true};},now});assert.match(sent[0].text,new RegExp(`${type} output`));
   }

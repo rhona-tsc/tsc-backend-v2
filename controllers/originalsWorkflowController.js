@@ -294,6 +294,7 @@ export const replaceOriginalSubmission = async (req, res) => {
     submission.revision += 1;
     submission.submittedAt = new Date();
     submission.ownerNotificationPending = true;
+    submission.submitterConfirmationPending = true;
     submission.notes = clean(req.body?.notes);
     await submission.save();
     await audit({ projectId: submission.projectId, roundId: submission.roundId, reservationId: submission.reservationId, type: "submission_replaced", user: req.user, metadata: { submissionId: String(submission._id), revision: submission.revision } });
@@ -475,7 +476,7 @@ export const submitOriginalTakes = async (req, res) => {
     await requireOriginalStemReviews({ assets, musicianId });
     const submission = await originalSubmissionCommit.run({ reservationId: reservation._id, musicianId, payload: {
       projectId: reservation.projectId, roundId: reservation.roundId, reservationId: reservation._id,
-      musicianId, roleName: reservation.roleName, songwritingChoice, listeningMixRequired, ownerNotificationPending: true,
+      musicianId, roleName: reservation.roleName, songwritingChoice, listeningMixRequired, ownerNotificationPending: true, submitterConfirmationPending: true,
       anonymous: reservation.anonymous, creditName: reservation.creditName,
       takes: takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId || null, stemAssetIds: take.stemAssetIds || [take.stemAssetId], wetStemAssetId: take.wetStemAssetId || null, notes: clean(take.notes) })),
       notes: clean(req.body?.notes),
@@ -712,7 +713,7 @@ export const submitOriginalProduction = async (req, res) => {
       musicianId,
       roleName: reservation.roleName,
       category: round.type,
-      ownerNotificationPending: true,
+      ownerNotificationPending: true, submitterConfirmationPending: true,
       outputAssetId: asset._id,
       songwritingChoice: "master_only",
       anonymous: reservation.anonymous,

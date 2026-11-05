@@ -17,6 +17,7 @@ function setup(t) {return originalsTransactionStore(t,{
 test('round closure emails each unselected reserved musician once, including someone who has not submitted',async t=>{
  const s=setup(t),sent=[];await deliverOriginalRoundLifecycleNotifications({now,emailSender:async mail=>{sent.push(mail);return{ok:true};}});
  assert.deepEqual(sent.map(mail=>mail.to).sort(),['other@example.test','second@example.test']);assert.ok(sent.every(mail=>/stop recording/.test(mail.text)));assert.ok(sent.every(mail=>/Any accepted contribution or other role/.test(mail.text)));assert.equal(s.data.rounds[0].closureNotificationsPending,false);
+ assert.ok(sent.every(mail=>!mail.bcc&&!mail.cc));
  await deliverOriginalRoundLifecycleNotifications({now,emailSender:()=>assert.fail('no duplicate delivery')});assert.equal(s.data.notifications.length,2);assert.ok(s.data.notifications.every(n=>n.state==='sent'));
 });
 test('queue failures retain the closure marker, then retry without duplicate recipients',async t=>{
@@ -31,6 +32,7 @@ test('SMTP failures retry, while reopening the old round cancels stale closure e
 test('a new private invitation emails its intended account and grants only that project',async t=>{
  const s=setup(t);s.data.rounds[0].closureNotificationsPending=false;s.data.invitations.push({_id:'invite',projectId,roundId:current,invitedMusicianId:other,roleName:'Vocal',state:'pending',emailPending:true,createdAt:now,message:'Please try a harmony.'});
  let mail;await deliverOriginalRoundLifecycleNotifications({now,emailSender:async message=>{mail=message;return{ok:true};}});assert.equal(mail.to,'other@example.test');assert.match(mail.subject,/Vocal/);assert.match(mail.text,/does not reserve a slot/);assert.equal(s.data.invitations[0].emailPending,false);
+ assert.equal(mail.bcc,'hello@thesupremecollective.co.uk');assert.equal(mail.cc,undefined);assert.doesNotMatch(mail.html,/bcc|hello@thesupremecollective.co.uk/i);
  assert.equal(await allowOriginalInvitationRequest({path:`/projects/${projectId}/workspace`,user:{id:other}},now),true);
  assert.equal(await allowOriginalInvitationRequest({path:`/projects/${'a'.repeat(24)}/workspace`,user:{id:other}},now),false);
  assert.equal(await allowOriginalInvitationRequest({path:'/moderation',user:{id:other}},now),false);
@@ -45,5 +47,30 @@ test('expired, wrong-role and previous-round invitations are not emailed',async 
  assert.ok(s.data.notifications.every(n=>n.state==='cancelled'));
 });
 test('invitation message is escaped and retains the project and role link',()=>{
- const message=buildOriginalPrivateInvitationEmail({project:{_id:projectId,title:'<Song>'},invitation:{roleName:'<Vocal>',message:'<script>bad</script>'}});assert.doesNotMatch(message.html,/<script>/);assert.match(message.html,/&lt;script&gt;/);assert.match(message.text,/#project-roles/);
+ const message=buildOriginalPrivateInvitationEmail({project:{_id:projectId,title:'<Song>'},invitation:{roleName:'<Vocal>',message:'<script>bad</script>\nA second line.'},firstName:'<Rhona>'});assert.doesNotMatch(message.html,/<script>|<Song>|<Vocal>|<Rhona>/);assert.match(message.html,/&lt;script&gt;/);assert.match(message.text,/#project-roles/);
+ assert.match(message.html,/&lt;Rhona&gt;/);assert.match(message.html,/&lt;Song&gt;/);assert.match(message.html,/&lt;Vocal&gt;/);
+ assert.match(message.html,/<br>A second line/);assert.match(message.html,/bgcolor="#ff6667"/);assert.match(message.html,/>Open the project<\/a>/);
+ assert.match(message.html,/TSC ORIGINALS/);assert.match(message.html,/TSC_Signature_2026/);assert.match(message.html,/Find us online/);assert.match(message.text,/Company Number: 16883956/);
+ const noNote=buildOriginalPrivateInvitationEmail({project:{_id:projectId,title:'Song'},invitation:{roleName:'Piano'}});
+ assert.doesNotMatch(noNote.html,/A MESSAGE FOR YOU|undefined/);
+});
+test('invitation monitoring can be disabled and avoids a duplicate copy to the main recipient',async t=>{
+ const s=setup(t);s.data.rounds[0].closureNotificationsPending=false;
+ const invite=id=>({_id:id,projectId,roundId:current,invitedMusicianId:other,roleName:'Vocal',state:'pending',emailPending:true,createdAt:now});
+ s.data.invitations.push(invite('disabled'));
+ const sent=[];const emailSender=async mail=>{sent.push(mail);return{ok:true};};
+ await deliverOriginalRoundLifecycleNotifications({now,emailSender,env:{ORIGINALS_INVITATION_BCC_ENABLED:'false'}});
+ assert.equal(sent.length,1);assert.equal(sent[0].to,'other@example.test');assert.equal(sent[0].bcc,undefined);
+ s.data.musicians.find(m=>m._id===other).email=' Hello@TheSupremeCollective.co.uk ';
+ s.data.invitations.push(invite('self'));
+ await deliverOriginalRoundLifecycleNotifications({now,emailSender,env:{ORIGINALS_INVITATION_BCC_ENABLED:'true'}});
+ assert.equal(sent.length,2);assert.equal(sent[1].bcc,undefined);
+});
+test('invitation SMTP retries retain the hidden monitoring copy without re-sending a delivered invitation',async t=>{
+ const s=setup(t);s.data.rounds[0].closureNotificationsPending=false;
+ s.data.invitations.push({_id:'retry',projectId,roundId:current,invitedMusicianId:other,roleName:'Vocal',state:'pending',emailPending:true,createdAt:now});
+ let attempts=0;const emailSender=async mail=>{attempts++;assert.equal(mail.bcc,'hello@thesupremecollective.co.uk');return{ok:attempts>1,error:'Temporary SMTP failure'};};
+ await deliverOriginalRoundLifecycleNotifications({now,emailSender});assert.equal(s.data.notifications[0].state,'queued');
+ await deliverOriginalRoundLifecycleNotifications({now:new Date(+now+300000),emailSender});assert.equal(s.data.notifications[0].state,'sent');
+ await deliverOriginalRoundLifecycleNotifications({now:new Date(+now+300000),emailSender});assert.equal(attempts,2);
 });

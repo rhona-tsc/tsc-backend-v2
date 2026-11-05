@@ -6,6 +6,7 @@ import { openNextOriginalRound, submitOriginalTakes } from '../controllers/origi
 import { originalParticipation } from '../services/originalsMembershipService.js';
 import { originalsTransactionStore } from './helpers/originalsTransactionStore.js';
 import Event from '../models/originalEventModel.js';
+import Submission from '../models/originalSubmissionModel.js';
 const owner='111111111111111111111111',winner='222222222222222222222222',other='333333333333333333333333',submitted='444444444444444444444444',projectId='555555555555555555555555',old='666666666666666666666666';
 const now=new Date('2026-11-05T16:00:00Z');
 const setup=t=>originalsTransactionStore(t,{
@@ -39,7 +40,13 @@ test('a stale submit cannot restore a reservation after the project advances',as
  const s=setup(t);await advance();await assert.rejects(originalSubmissionCommit.run({reservationId:'working',musicianId:other,payload:{projectId,roundId:old,reservationId:'working',musicianId:other,roleName:'Click',takes:[{stemAssetId:'new-recording'}]},now}),/round has closed/);assert.equal(s.data.reservations[1].state,'cancelled');assert.equal(s.data.submissions.length,2);
 });
 test('a take committed immediately before advancement is included in the closed alternatives',async t=>{
- const s=setup(t);await originalSubmissionCommit.run({reservationId:'working',musicianId:other,payload:{projectId,roundId:old,reservationId:'working',musicianId:other,roleName:'Click',category:'contribution',takes:[{stemAssetId:'new-recording'}]},now});assert.equal(s.data.submissions.at(-1).state,'submitted');await advance();assert.equal(s.data.submissions.at(-1).state,'rejected');assert.equal(s.data.assets.at(-1).state,'hidden');assert.equal(s.data.reservations[1].state,'cancelled');
+ const s=setup(t);await originalSubmissionCommit.run({reservationId:'working',musicianId:other,payload:{projectId,roundId:old,reservationId:'working',musicianId:other,roleName:'Click',category:'contribution',takes:[{stemAssetId:'new-recording'}]},now});assert.equal(s.data.submissions.at(-1).state,'submitted');assert.equal(s.data.submissions.at(-1).submitterConfirmationPending,true);await advance();assert.equal(s.data.submissions.at(-1).state,'rejected');assert.equal(s.data.assets.at(-1).state,'hidden');assert.equal(s.data.reservations[1].state,'cancelled');
+});
+test('a failed submission transaction leaves no confirmation marker or reserved-place change',async t=>{
+ const s=setup(t),before=structuredClone(s.data),create=Submission.create;
+ t.mock.method(Submission,'create',async(...args)=>{await create(...args);throw new Error('Submission storage interrupted');});
+ await assert.rejects(originalSubmissionCommit.run({reservationId:'working',musicianId:other,payload:{projectId,roundId:old,reservationId:'working',musicianId:other,roleName:'Click',category:'contribution',takes:[{stemAssetId:'new-recording'}]},now}),/storage interrupted/);
+ assert.deepEqual(s.data,before);
 });
 test('the HTTP next-round action returns the committed new round and preserves its clock until reservation',async t=>{
  const s=setup(t);const res={code:200,status(code){this.code=code;return this;},json(body){this.body=body;return this;}};
