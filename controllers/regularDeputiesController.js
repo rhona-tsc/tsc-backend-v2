@@ -1,3 +1,4 @@
+import { musicianDirectoryVisibility } from '../services/musicianDirectoryVisibility.js';
 import mongoose from "mongoose";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
@@ -487,6 +488,7 @@ export const searchRegularDeputyMusicians = async (req, res) => {
     const escapedGenre = genre.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const genrePattern = new RegExp(`^${escapedGenre}$`, "i");
     const musicians = await musicianModel.find({
+      ...musicianDirectoryVisibility(req.user),
       $and: [textMatch].filter(Boolean),
     })
       .select("firstName lastName email basicInfo musicianSlug instrumentation other_skills vocals genres capabilities profilePhoto")

@@ -23,7 +23,7 @@ test('an empty name browses a whole instrument, using stored profile genres and 
   const roles=calls[0].query.$and[0].$or;assert.deepEqual(roles.slice(0,3).map(item=>Object.keys(item)[0]),['instrument','instruments','instrumentation.instrument']);
   assert.ok(roles[3]['vocals.type'].$in.some(pattern=>pattern.test('Lead Vocalist')));assert.ok(!roles[3]['vocals.type'].$in.some(pattern=>pattern.test("I don't sing")));
   const genres=calls[0].query.$and[1].$or;assert.equal(genres[0]['vocals.genres'].test('Soul & Motown'),true);assert.equal(genres[0]['vocals.genres'].test('Soul & Motown Tribute'),false);
-  assert.deepEqual(result.musicians,[{_id:id,displayName:'Shamyra A.',instruments:['Keys','Lead Vocalist'],genres:['Soul & Motown'],profilePath:'/musician/shamyra-a-vocal'}]);
+  assert.deepEqual(result.musicians,[{_id:id,displayName:'Shamyra A.',instruments:['Keys','Lead Vocalist'],genres:['Soul & Motown'],profilePhoto:'',profilePath:'/musician/shamyra-a-vocal'}]);
   assert.doesNotMatch(JSON.stringify(result),/private@example|postcode|phone|Anderson/);
 });
 test('guitar browsing does not mistake bass guitar for guitar, and bass does not search vocal range',()=>{
@@ -50,8 +50,8 @@ test('filter options include actual profile tags, custom instruments and the sta
  directory(t);let pipeline;
  t.mock.method(Musician,'distinct',()=>{throw new Error('distinct is unavailable with apiStrict:true');});
  t.mock.method(Musician,'aggregate',async stages=>{pipeline=stages;return[{instrumentation:[{_id:'Cello'},{_id:'Keys'}],vocals:[{_id:'Lead Vocalist'},{_id:"I don't sing"}],vocalGenres:[{_id:'Jazz & Swing'},{_id:'Neo Soul'}],genres:[{_id:'Neo Soul'},{_id:'Classical'},{_id:null},{_id:42},{_id:'  '}]}];});
- const result=await browseOriginalMusicians({includeFilters:'true'});assert.equal(Object.keys(pipeline[0].$facet).length,6);
- assert.deepEqual(pipeline[0].$facet.instrumentation,[{$project:{_id:0,value:'$instrumentation.instrument'}},{$unwind:'$value'},{$match:{value:{$type:'string'}}},{$group:{_id:'$value'}}]);
+ const result=await browseOriginalMusicians({includeFilters:'true'});assert.equal(Object.keys(pipeline[1].$facet).length,6);
+ assert.deepEqual(pipeline[1].$facet.instrumentation,[{$project:{_id:0,value:'$instrumentation.instrument'}},{$unwind:'$value'},{$match:{value:{$type:'string'}}},{$group:{_id:'$value'}}]);
  assert.ok(!JSON.stringify(pipeline).includes('email'));assert.ok(!JSON.stringify(pipeline).includes('$out'));assert.ok(result.filters.instruments.includes('Cello'));assert.ok(result.filters.instruments.includes('Vocal'));assert.ok(!result.filters.instruments.includes("I don't sing"));assert.deepEqual(result.filters.genres,['Classical','Jazz & Swing','Neo Soul']);
 });
 test('invalid filters and unbounded pages are refused before accessing the database',async t=>{

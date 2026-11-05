@@ -1,3 +1,4 @@
+import { musicianDirectoryVisibility, canSeeMusicianInDirectory } from '../services/musicianDirectoryVisibility.js';
 import express from "express";
 import Stripe from "stripe";
 import multer from "multer";
@@ -70,7 +71,7 @@ const findMusicianByIdOrSlug = async (value) => {
 };
 
 const sanitizePublicMusician = (doc) => {
-  if (!doc) return doc;
+  if (!doc || doc.privateTestProfile) return null;
   const publicFields = [
     "_id",
     "musicianId",
@@ -824,6 +825,7 @@ router.get("/search", verifyToken, async (req, res) => {
 
     const musicians = await musicianModel
       .find({
+        ...musicianDirectoryVisibility(req.user),
         $and: [
           {
             $or: [
@@ -906,7 +908,7 @@ router.get("/search", verifyToken, async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { status } = req.query || {};
-    const q = { role: "musician" };
+    const q = { role: "musician", ...musicianDirectoryVisibility() };
     if (status) q.status = status;
     const list = await musicianModel.find(q).lean();
     res.json({
@@ -953,6 +955,9 @@ const readProtectedMusicianByIdOrSlug = async (req, res) => {
       req.user?.id || req.user?._id || req.user?.musicianId || "",
     );
     const requesterRole = String(req.user?.role || "").toLowerCase();
+    if (!canSeeMusicianInDirectory(doc, req.user) && requesterId !== String(doc._id)) {
+      return res.status(404).json({ success: false, message: "Musician not found" });
+    }
     const requesterEmail = String(req.user?.email || "").toLowerCase();
     const configuredAdminEmails = String(
       process.env.ADMIN_EMAILS || process.env.ADMIN_EMAIL || "",
@@ -1141,7 +1146,7 @@ router.get("/musicians/suggest", async (req, res) => {
       : [];
 
     // Base match: only approved musicians, not excluded
-    const match = { status: "approved" };
+    const match = { status: "approved", ...musicianDirectoryVisibility() };
     if (excludeIds.length) match._id = { $nin: excludeIds };
 
     // Instrument match (case-insensitive, exact or partial)

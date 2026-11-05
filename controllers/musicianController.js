@@ -1,3 +1,4 @@
+import { canSeeMusicianInDirectory, musicianDirectoryVisibility } from '../services/musicianDirectoryVisibility.js';
 // musicianController.js
 import Stripe from "stripe";
 import validator from "validator";
@@ -882,7 +883,7 @@ async function getDeputyById(req, res) {
     const isSelfBySlug = !!meSlug && meSlug === identifier;
     const isSelf = isSelfById || isSelfBySlug;
     const isAgent = (me?.role || me?.userRole || "").toLowerCase() === "agent";
-    if (!isSelf && !isAgent) {
+    if ((!isSelf && !isAgent) || (!isSelf && !canSeeMusicianInDirectory(deputy, me))) {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
@@ -3362,6 +3363,7 @@ const suggestDeputies = async (req, res) => {
 
     // ----- fetch pool -----
     const baseFilter = {
+      ...musicianDirectoryVisibility(),
       role: "musician",
       status: { $in: ["approved", "Approved, changes pending"] },
       ...(excludeIds?.length ? { _id: { $nin: excludeIds } } : {}),

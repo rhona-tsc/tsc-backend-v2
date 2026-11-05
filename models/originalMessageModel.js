@@ -5,6 +5,7 @@ const originalMessageSchema = new mongoose.Schema(
     projectId: { type: mongoose.Schema.Types.ObjectId, ref: "originalproject", required: true, index: true },
     authorId: { type: mongoose.Schema.Types.ObjectId, ref: "musician", required: true, index: true },
     body: { type: String, default: "", trim: true, maxlength: 3000 },
+    messageType: { type: String, enum: ['message', 'stem_submitted', 'stem_approved'], default: 'message' },
     voiceAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", default: null },
     attachmentIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "originalasset" }],
     chatNotificationsQueued: { type: Boolean, default: false },

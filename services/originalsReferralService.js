@@ -11,7 +11,7 @@ import Credit from '../models/originalCreditVersionModel.js';
 import { loadOriginalMembership, originalParticipation } from './originalsMembershipService.js';
 import { originalRoleProgress } from './originalsRoleProgressService.js';
 import { getOriginalsUserId, isOriginalsEnabled } from './originalsPolicyService.js';
-import { escapeEmailHtml } from '../utils/tscEmailBranding.js';
+import { escapeEmailHtml, buildTscEmailFooter, buildTscEmailFooterText } from '../utils/tscEmailBranding.js';
 import sendEmail from '../utils/sendEmail.js';
 export const referralHash = token => crypto.createHash('sha256').update(String(token)).digest('hex');
 const key = value => String(value || '').trim().toLowerCase();
@@ -52,8 +52,47 @@ export async function allowOriginalReferralRequest(req) {
 export const buildOriginalReferralEmail = ({ referral, project, token }) => {
   const base = String(process.env.ADMIN_FRONTEND_URL || 'https://admin.thesupremecollective.co.uk').replace(/\/$/, '');
   const url = `${base}/originals/${project._id}?referral=${encodeURIComponent(token)}`;
-  const text = `Hi ${referral.fullName},\n\n${referral.referrerName} saw the TSC Originals project “${project.title}”, which is looking for ${referral.roleName}, and thought you might be a great fit.\n\nRead the brief and decide whether you would like to take part:\n${url}\n\nSign in or create an account using this email address. Your invitation gives access to this project only; it does not reserve a slot or guarantee selection.\n\nThe Supreme Collective`;
-  return { to: referral.email, subject: `${referral.referrerName} recommended you for ${referral.roleName}`, text, html: `<p>Hi ${escapeEmailHtml(referral.fullName)},</p><p>${escapeEmailHtml(referral.referrerName)} saw <strong>${escapeEmailHtml(project.title)}</strong>, which is looking for <strong>${escapeEmailHtml(referral.roleName)}</strong>, and thought you might be a great fit.</p><p><a href="${escapeEmailHtml(url)}">Read the brief and consider taking part</a></p><p>Sign in or create an account using this email address. Access is for this project only; a recommendation does not reserve a slot or guarantee selection.</p><p>The Supreme Collective</p>` };
+  const brief = String(project.description || '').trim();
+  const encouragement = `Follow ${referral.referrerName}’s recommendation as soon as you can to make sure you don’t miss out on this opportunity to contribute!`;
+  const signIn = 'Sign in using this email address, or create an account if you’re new to TSC.';
+  const text = `Hi ${referral.fullName},\n\n${referral.referrerName} saw this original project “${project.title}”, which is looking for someone to fill the role of “${referral.roleName}”, and thought you might be a great fit.\n\nProject brief\n${brief || 'Read the project brief in the workspace.'}\n\n${encouragement}\n\nView the project and take part:\n${url}\n\n${signIn}\n\nWarmest wishes,\nThe Supreme Collective\n\n${buildTscEmailFooterText()}`;
+  return {
+    to: referral.email,
+    subject: `${referral.referrerName} recommended you for ${referral.roleName}`,
+    text,
+    html: `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>A project recommendation for you</title></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111111;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f3f4f6;"><tr><td align="center" style="padding:24px 12px;">
+    <!--[if mso]><table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background:#ffffff;border:1px solid #e5e7eb;border-radius:20px;">
+      <tr><td style="padding:26px 24px;background:#111111;border-radius:20px 20px 0 0;">
+        <p style="margin:0 0 12px;font-size:12px;line-height:18px;letter-spacing:2px;font-weight:700;color:#ff8585;">TSC ORIGINALS</p>
+        <h1 style="margin:0;font-size:28px;line-height:35px;color:#ffffff;">A project recommendation for you</h1>
+      </td></tr>
+      <tr><td style="padding:28px 24px;word-break:break-word;overflow-wrap:anywhere;">
+        <p style="margin:0 0 18px;font-size:16px;line-height:26px;">Hi ${escapeEmailHtml(referral.fullName)},</p>
+        <p style="margin:0 0 22px;font-size:16px;line-height:26px;color:#444444;">${escapeEmailHtml(referral.referrerName)} saw this original project <strong>“${escapeEmailHtml(project.title)}”</strong>, which is looking for someone to fill the role of <strong>“${escapeEmailHtml(referral.roleName)}”</strong>, and thought you might be a great fit.</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;"><tr><td style="padding:18px;word-break:break-word;overflow-wrap:anywhere;">
+          <p style="margin:0 0 6px;font-size:12px;line-height:18px;color:#666666;">PROJECT</p>
+          <h2 style="margin:0 0 16px;font-size:20px;line-height:28px;color:#111111;">${escapeEmailHtml(project.title)}</h2>
+          <p style="margin:0 0 16px;font-size:15px;line-height:24px;color:#444444;">Role: <strong>${escapeEmailHtml(referral.roleName)}</strong></p>
+          <h3 style="margin:0 0 8px;font-size:16px;line-height:24px;color:#111111;">Project brief</h3>
+          <p style="margin:0;font-size:15px;line-height:25px;color:#444444;">${escapeEmailHtml(brief || 'Read the project brief in the workspace.').replace(/\r\n|\r|\n/g, '<br>')}</p>
+        </td></tr></table>
+        <p style="margin:22px 0 0;font-size:16px;line-height:26px;color:#444444;">${escapeEmailHtml(encouragement)}</p>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;"><tr><td bgcolor="#ff6667" style="border-radius:8px;text-align:center;">
+          <a href="${escapeEmailHtml(url)}" style="display:inline-block;padding:14px 24px;font-size:16px;line-height:24px;font-weight:700;color:#111111;text-decoration:none;">View the project and take part</a>
+        </td></tr></table>
+        <p style="margin:0 0 24px;font-size:13px;line-height:21px;color:#666666;">${escapeEmailHtml(signIn)}</p>
+        <p style="margin:0;font-size:15px;line-height:25px;color:#444444;">Warmest wishes,<br><strong>The Supreme Collective</strong></p>
+        ${buildTscEmailFooter({ audience: 'musician' })}
+      </td></tr>
+    </table>
+    <!--[if mso]></td></tr></table><![endif]-->
+  </td></tr></table>
+</body></html>`,
+  };
 };
 
 export async function deliverOriginalReferrals({ referralId, emailSender = sendEmail, limit = 20, now = new Date() } = {}) {

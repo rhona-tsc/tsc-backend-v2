@@ -1,7 +1,9 @@
 import { originalSubmissionCommit } from "../services/originalsSubmissionCommitService.js";
+import { originalStemChatActivity } from "../services/originalsStemChatActivityService.js";
 import { addOriginalAssetCredits } from "../services/originalsAssetCreditService.js";
 import { advanceOriginalRound } from "../services/originalsRoundProgressionService.js";
 import { browseOriginalMusicians } from "../services/originalsMusicianDirectoryService.js";
+import { canSeeMusicianInDirectory } from '../services/musicianDirectoryVisibility.js';
 import { recordOriginalAgreement, originalAgreementType } from "../services/originalsAgreementService.js";
 import Future from "../models/originalRoleReservationModel.js";
 import { createOriginalRecordingReservation, activateOriginalRoleReservations, eligibleRoundRoles } from "../services/originalsReservationService.js";
@@ -204,7 +206,7 @@ export const postOriginalMessage = async (req, res) => {
     const authorId = objectId(getOriginalsUserId(req.user));
     if (!authorId) return res.status(401).json({ success: false, message: "Please sign in again to send a message" });
     const clientMessageId = clean(req.body?.clientMessageId);
-    if (clientMessageId.length > 100) return res.status(400).json({ success: false, message: "Invalid message identifier" });
+    if (clientMessageId.length > 100 || clientMessageId.startsWith('system:')) return res.status(400).json({ success: false, message: "Invalid message identifier" });
     if (clientMessageId) {
       const existing = await originalMessageModel.findOne({ projectId: project._id, authorId, clientMessageId });
       if (existing) return res.status(200).json({ success: true, message: existing });
@@ -474,6 +476,8 @@ export const submitOriginalTakes = async (req, res) => {
       takes: takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId || null, stemAssetIds: take.stemAssetIds || [take.stemAssetId], wetStemAssetId: take.wetStemAssetId || null, notes: clean(take.notes) })),
       notes: clean(req.body?.notes),
     } });
+    try { await originalStemChatActivity.publish(submission); }
+    catch (error) { console.error('Originals submitted stem chat update will retry:', error.message); }
     await audit({ projectId: reservation.projectId, roundId: reservation.roundId, reservationId: reservation._id, type: "submission_received", user: req.user, metadata: { submissionId: String(submission._id), takeCount: takes.length, songwritingChoice } });
     return res.status(201).json({ success: true, submission });
   } catch (error) {
@@ -561,7 +565,10 @@ export const decideOriginalSubmission = async (req, res) => {
     submission.decisionNote = note;
     submission.decidedAt = new Date();
     submission.decidedBy = objectId(getOriginalsUserId(req.user)) || null;
+    if (submission.state === 'accepted' && (!submission.category || submission.category === 'contribution')) submission.approvedChatPending = true;
     await submission.save();
+    try { await originalStemChatActivity.publish(submission); }
+    catch (error) { console.error('Originals approved stem chat update will retry:', error.message); }
     if (submission.state === "rejected") await originalReservationModel.updateOne({ _id: submission.reservationId }, { $set: { slotHeld: false, state: "released" } });
     try {
       await originalNotificationModel.create({
@@ -643,8 +650,8 @@ export const inviteOriginalMusician = async (req, res) => {
     if (!round) return res.status(409).json({ success: false, message: "Invitations require an open round" });
     if (!await requireOriginalProjectManager(req, res, round.projectId)) return;
     const invitedMusicianId = objectId(req.body?.musicianId);
-    const musician = invitedMusicianId ? await musicianModel.findById(invitedMusicianId).select("_id firstName lastName email") : null;
-    if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
+    const musician = invitedMusicianId ? await musicianModel.findById(invitedMusicianId).select("_id firstName lastName email privateTestProfile") : null;
+    if (!musician || !canSeeMusicianInDirectory(musician, req.user)) return res.status(404).json({ success: false, message: "Musician not found" });
     const roleName = clean(req.body?.roleName || round.roleName);
     if (!eligibleRoundRoles(round).some(role => clean(role).toLowerCase() === roleName.toLowerCase())) return res.status(400).json({ success: false, message: "Choose an instrument in the current round" });
     const invitation = await originalInvitationModel.create({
@@ -670,7 +677,7 @@ export const searchOriginalMusicians = async (req, res) => {
   try {
     if (!objectId(req.query?.projectId)) return res.status(400).json({ success: false, message: "Choose a project before searching musicians" });
     if (!await requireOriginalProjectManager(req, res, req.query.projectId)) return;
-    return res.json(await browseOriginalMusicians(req.query, { allowEmail: true }));
+    return res.json(await browseOriginalMusicians(req.query, { allowEmail: true, viewer: req.user }));
   } catch (error) {
     if (error.status) return res.status(error.status).json({ success: false, message: error.message });
     console.error("❌ searchOriginalMusicians error:", error);

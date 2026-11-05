@@ -44,7 +44,7 @@ test('optional effects recording is a distinct, validated stem and does not repl
 test('recommendation search returns public profile details without email or phone',async t=>{
  t.mock.method(Musician,'find',()=>({select:()=>({sort:()=>({skip:()=>({limit:()=>({lean:async()=>[{_id:player,firstName:'John',lastName:'Smith',email:'private@example.test',phone:'private',instrument:'Bass'}]})})})})}));
  const res=response();await searchOriginalReferralMusicians({query:{q:'John Smith'}},res);
- assert.deepEqual(res.body.musicians,[{_id:player,displayName:'John S.',instruments:['Bass'],genres:[],profilePath:`/musician/${player}`}]);
+ assert.deepEqual(res.body.musicians,[{_id:player,displayName:'John S.',profilePhoto:'',instruments:['Bass'],genres:[],profilePath:`/musician/${player}`}]);
 });
 test('new contacts are saved with their referral, with a validated role and no account created for them',async t=>{
  setup(t);t.mock.method(Referral,'findOne',async()=>null);t.mock.method(Referral,'countDocuments',async()=>0);
@@ -72,7 +72,7 @@ test('claimed project access is scoped to its project, not the full Originals pr
 });
 test('recommendation emails explain the role and have a project-specific secret link with escaped HTML',()=>{
  const mail=buildOriginalReferralEmail({project,referral:{fullName:'<Sam>',referrerName:'Veronica D.',roleName:'Bass',email:'sam@example.test'},token:'secret'});
- assert.match(mail.text,/looking for Bass/);assert.match(mail.text,/referral=secret/);assert.match(mail.html,/&lt;Sam&gt;/);assert.doesNotMatch(mail.html,/<Sam>/);
+ assert.match(mail.text,/role of “Bass”/);assert.match(mail.text,/referral=secret/);assert.match(mail.html,/&lt;Sam&gt;/);assert.doesNotMatch(mail.html,/<Sam>/);
 });
 test('referral delivery stores a token hash, sends the email and does not expose the raw token to API clients',async t=>{
  setup(t);let claimed=false;const updates=[];let email;

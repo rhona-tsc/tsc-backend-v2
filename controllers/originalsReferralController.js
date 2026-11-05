@@ -1,4 +1,5 @@
 import { browseOriginalMusicians } from '../services/originalsMusicianDirectoryService.js';
+import { canSeeMusicianInDirectory } from '../services/musicianDirectoryVisibility.js';
 import validator from 'validator';
 import mongoose from 'mongoose';
 import Referral from '../models/originalReferralModel.js';
@@ -14,7 +15,7 @@ const key = value => clean(value).toLowerCase();
 
 export async function searchOriginalReferralMusicians(req, res) {
   try {
-    return res.json(await browseOriginalMusicians(req.query));
+    return res.json(await browseOriginalMusicians(req.query, { viewer: req.user }));
   } catch (error) { return res.status(error.status || 500).json({ success: false, message: error.status ? error.message : 'Could not search musicians' }); }
 }
 
@@ -30,8 +31,8 @@ export async function recommendOriginalMusician(req, res) {
     let contact;
     if (req.body.musicianId) {
       if (!mongoose.Types.ObjectId.isValid(req.body.musicianId)) return res.status(400).json({ success: false, message: 'Choose a valid musician' });
-      const target = await Musician.findById(req.body.musicianId).select('firstName lastName email phone').lean();
-      if (target) contact = { fullName: [target.firstName,target.lastName].filter(Boolean).join(' '), email: key(target.email), phone: target.phone || '' };
+      const target = await Musician.findById(req.body.musicianId).select('firstName lastName email phone privateTestProfile').lean();
+      if (target && canSeeMusicianInDirectory(target, req.user)) contact = { fullName: [target.firstName,target.lastName].filter(Boolean).join(' '), email: key(target.email), phone: target.phone || '' };
     } else contact = { fullName: clean(req.body.fullName), email: key(req.body.email), phone: clean(req.body.phone) };
     if (!contact || !validator.isEmail(contact.email || '') || contact.fullName.length < 2 || contact.fullName.length > 160 || contact.phone.length > 40 || (!req.body.musicianId && contact.phone.replace(/\D/g,'').length < 7)) return res.status(400).json({ success: false, message: 'Enter a full name, valid email address and phone number' });
     const referrer = await Musician.findById(referrerId).select('firstName lastName email').lean();

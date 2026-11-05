@@ -26,7 +26,7 @@ export async function addOriginalAssetCredits({ assets = [], project, submission
   });
   const ids = [...new Set(contexts.filter(item => !item.anonymous && item.musicianId).map(item => item.musicianId))];
   const profiles = ids.length ? await Musician.find({ _id: { $in: ids } })
-    .select('firstName lastName basicInfo.firstName basicInfo.lastName musicianSlug').lean() : [];
+    .select('firstName lastName basicInfo.firstName basicInfo.lastName musicianSlug privateTestProfile').lean() : [];
   const byId = new Map(profiles.map(profile => [idOf(profile._id), profile]));
   return contexts.map(({ asset, musicianId, isOwner, anonymous, creditName }) => {
     if (anonymous) return { ...asset, submittedBy: { displayName: creditName, anonymous: true, profilePath: null } };
@@ -36,7 +36,7 @@ export async function addOriginalAssetCredits({ assets = [], project, submission
     const displayName = firstName ? `${firstName}${lastName ? ` ${Array.from(lastName)[0]}.` : ''}` : isOwner && text(project.ownerName) ? chatDisplayName(project.ownerName) : 'Project participant';
     return { ...asset, submittedBy: {
       displayName, anonymous: false,
-      profilePath: profile ? `/musician/${encodeURIComponent(text(profile.musicianSlug) || idOf(profile._id))}` : null,
+      profilePath: profile && !profile.privateTestProfile ? `/musician/${encodeURIComponent(text(profile.musicianSlug) || idOf(profile._id))}` : null,
     } };
   });
 }
