@@ -1,3 +1,4 @@
+import { validateOriginalRecordingOrder } from './originalsRecordingPlanService.js';
 import { hasRecordedOriginalOwnerAgreement } from "./originalsAgreementService.js";
 export { ORIGINALS_OWNER_AGREEMENT_VERSION } from "./originalsAgreementService.js";
 
@@ -85,10 +86,13 @@ export const normaliseRequestedRoles = (value) => {
       name,
       order: roles.length,
       foundationEligible: Boolean(item?.foundationEligible),
+      ...(item?.recordingOrder != null && item.recordingOrder !== '' ? { recordingOrder: item.recordingOrder } : {}),
     });
   });
 
-  return roles.slice(0, 30);
+  const validated = validateOriginalRecordingOrder(roles.slice(0, 30));
+  for (const role of validated) if (role.recordingOrder === null) delete role.recordingOrder;
+  return validated;
 };
 
 export const validateOriginalProjectForModeration = (project = {}) => {

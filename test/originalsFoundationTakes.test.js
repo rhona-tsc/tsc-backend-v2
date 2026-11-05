@@ -81,8 +81,10 @@ test('foundation and later instrument replacements both accept a stem alone', as
   t.mock.method(Submission, 'findById', async () => doc);
   t.mock.method(Round, 'exists', async () => false);
   t.mock.method(Asset, 'updateMany', async () => ({}));
+  doc.submittedAt = new Date('2026-01-01T00:00:00Z');
+  const replacedAfter = Date.now();
   let res = response(); await replaceOriginalSubmission({ user: { id: musicianId }, params: { submissionId: String(doc._id) }, body: { takes: [{ stemAssetId: stems[0] }] } }, res);
-  assert.equal(res.code, 200); assert.equal(saves, 1); assert.equal(doc.ownerNotificationPending, true); assert.equal(doc.listeningMixRequired, false); assert.equal(doc.takes[0].mixdownAssetId, null);
+  assert.equal(res.code, 200); assert.equal(saves, 1); assert.equal(doc.ownerNotificationPending, true); assert.equal(doc.listeningMixRequired, false); assert.equal(doc.takes[0].mixdownAssetId, null); assert.ok(doc.submittedAt.getTime() >= replacedAfter);
   t.mock.method(Round, 'findById', () => ({ lean: async () => ({ _id: roundId, projectId, type: 'instrument', state: 'open', sequence: 0 }) }));
   res = response(); await replaceOriginalSubmission({ user: { id: musicianId }, params: { submissionId: String(doc._id) }, body: { takes: [{ stemAssetId: stems[0] }] } }, res);
   assert.equal(res.code, 200); assert.equal(saves, 2); assert.equal(state.reservationSaved, 0);

@@ -1,3 +1,4 @@
+import { originalRecordingPlan } from './originalsRecordingPlanService.js';
 import { getOriginalAgreement } from "./originalsAgreementService.js";
 import { originalReviewStatus } from './originalsReviewService.js';
 import { originalRoleManagement } from './originalsRoleManagementService.js';
@@ -40,7 +41,7 @@ export function presentOriginalWorkspace({ project, rounds, reservations, submis
     activeSlotCount: reservations.filter(item => String(item.roundId) === String(project.currentRoundId) && (item.state === 'active' && new Date(item.expiresAt) > new Date() || item.state === 'submitted') && item.slotHeld !== false && !submissions.some(sub => String(sub.reservationId) === String(item._id) && ['rejected','withdrawn','retracted'].includes(sub.state))).length,
     reservations: canManage ? reservations : reservations.filter(item => String(item.musicianId) === viewerId),
     submissions: visibleSubmissions,
-    ...(canManage ? { reviewStatus: originalReviewStatus(submissions) } : {}),
+    ...(canManage ? { reviewStatus: originalReviewStatus(submissions), recordingPlan: originalRecordingPlan({ project, rounds, submissions }) } : {}),
     assets: canManage ? assets : assets.filter(item => item.state === 'active' && (String(item.ownerId) === viewerId || originalReferenceKinds.has(item.kind) || (project.initialAssetIds || []).some(id => String(id) === String(item._id)) || acceptedAssetIds.has(String(item._id)) || chatAssetIds.has(String(item._id)))),
     notifications: canManage ? notifications : [], invitations: canManage ? invitations : [],
     royaltyPreview: previewOriginalsSplits({ project, submissions }),

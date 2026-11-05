@@ -76,3 +76,28 @@ test('a historical round cannot be reopened to bring a removed part back implici
  const s=base();setup(t,s);let saved=false;t.mock.method(Round,'findById',async()=>({_id:'old',projectId,type:'instrument',roleName:'Strings',state:'closed',save:async()=>{saved=true;}}));
  const res=response();await reopenOriginalRound({params:{roundId:'old'},user:{id:owner},body:{}},res);assert.equal(res.code,409);assert.equal(saved,false);assert.match(res.body.message,/removed/);
 });
+
+test('owner or TSC can save a partial recording plan without changing the live round; add/remove preserve it', async t => {
+ const {snapshot,writes,events}=setup(t);snapshot.project.requestedRoles[0].recordingOrder=2;
+ const res=response();await changeOriginalProjectRole(request({action:'set_order',recordingOrder:[{name:'Vocal',recordingOrder:2},{name:'Bass',recordingOrder:1}]}),res);
+ assert.equal(res.code,200);assert.equal(res.body.requestedRoles[1].recordingOrder,1);assert.equal(writes[0].query.currentRoundId,'round');assert.equal(events[0].type,'project_recording_order_updated');
+ const add=response();await changeOriginalProjectRole(request({action:'add',roleName:'Keys'}),add);assert.equal(add.body.requestedRoles[0].recordingOrder,2);
+ const remove=response();await changeOriginalProjectRole(request({action:'remove',roleName:'Bass'}),remove);assert.equal(remove.body.requestedRoles[0].recordingOrder,2);
+ const clear=response();await changeOriginalProjectRole(request({action:'set_order',recordingOrder:[{name:'Vocal',recordingOrder:''},{name:'Bass',recordingOrder:null}]}),clear);assert.equal(clear.body.requestedRoles[0].recordingOrder,null);
+});
+test('invalid, duplicated, missing or stale recording plans cannot alter the saved plan', async t => {
+ const {writes}=setup(t);
+ for(const recordingOrder of [[{name:'Vocal',recordingOrder:1},{name:'Bass',recordingOrder:1}],[{name:'Vocal',recordingOrder:-1},{name:'Bass'}]]){
+  const res=response();await changeOriginalProjectRole(request({action:'set_order',recordingOrder}),res);assert.equal(res.code,400);
+ }
+ for(const recordingOrder of [null,[{name:'Vocal'}],[{name:'Bass'},{name:' bass '}],[{name:'Vocal'},{name:'Keys'}]]){
+  const res=response();await changeOriginalProjectRole(request({action:'set_order',recordingOrder}),res);assert.equal(res.code,409);
+ }
+ const denied=response();await changeOriginalProjectRole(request({action:'set_order',recordingOrder:[]},{id:player}),denied);assert.equal(denied.code,403);assert.equal(writes.length,0);
+});
+test('saved recording plan and review deadline are manager-only workspace guidance', () => {
+ const s=base();s.project.requestedRoles[1].recordingOrder=2;s.submissions=[{_id:'sub',roundId:'round',roleName:'Vocal',state:'submitted',submittedAt:'2026-11-05T10:00:00Z'}];
+ const manager=presentOriginalWorkspace(s,{id:owner}),participant=presentOriginalWorkspace(s,{id:player});
+ assert.equal(manager.recordingPlan.reviewDueAt,'2026-11-12T10:00:00.000Z');assert.equal(participant.recordingPlan,undefined);
+ assert.equal(manager.roleProgress[1].recordingOrder,2);assert.equal(manager.roleProgress[0].isCurrent,true);
+});

@@ -35,7 +35,7 @@ export const originalRoleProgress = ({ project, rounds = [], reservations = [], 
     const advanceCount = futureReservations.filter(item => item.state === 'waiting' && key(item.roleName) === key(role.name)).length;
     return {
       canReserveAhead: !accepted && !isCurrent && ['live', 'foundation_open', 'role_round_open', 'owner_review'].includes(project.state),
-      advanceCount, advancePlacesRemaining: Math.max(0, 3 - advanceCount), name: role.name,
+      advanceCount, advancePlacesRemaining: Math.max(0, 3 - advanceCount), name: role.name, isCurrent, recordingOrder: role.recordingOrder ?? null,
       status: accepted ? 'Recording approved' : awaiting ? 'Submitted — awaiting review' : active ? 'Reserved — awaiting recording' : isCurrent && ['open', 'reopened'].includes(current.state) ? 'Awaiting interested musicians' : 'Awaiting a future round',
       canRecommend: !accepted,
       timingState: accepted ? 'complete' : active ? 'reserved' : awaiting || slots.length ? 'review' : isCurrent && ['open', 'reopened'].includes(current.state) ? 'awaiting_reservation' : 'future_round',

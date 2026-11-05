@@ -292,6 +292,7 @@ export const replaceOriginalSubmission = async (req, res) => {
     submission.takes = takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId || null, stemAssetIds: take.stemAssetIds || [take.stemAssetId], wetStemAssetId: take.wetStemAssetId || null, notes: clean(take.notes) }));
     submission.listeningMixRequired = listeningMixRequired;
     submission.revision += 1;
+    submission.submittedAt = new Date();
     submission.ownerNotificationPending = true;
     submission.notes = clean(req.body?.notes);
     await submission.save();

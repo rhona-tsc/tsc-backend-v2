@@ -4,6 +4,7 @@ const requestedRoleSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     order: { type: Number, required: true, min: 0 },
+    recordingOrder: { type: Number, default: null, min: 1, max: 30, validate: value => value == null || Number.isInteger(value) },
     foundationEligible: { type: Boolean, default: false },
   },
   { _id: false },

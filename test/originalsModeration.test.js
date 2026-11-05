@@ -124,3 +124,12 @@ test('a queue outage cannot undo approval and leaves a durable launch retry mark
   assert.equal(res.code, 200); assert.equal(res.body.project.moderation.status, 'approved');
   assert.equal(res.body.project.moderation.launchEmailPending, true); assert.equal(res.body.notification.failed, 1);
 });
+
+test('a project with an initial stem opens its first explicitly preferred instrument', async t => {
+  const state = setup(t);
+  state.project.sourceType = 'final_eligible_stem'; state.project.hasInitialStem = true;
+  state.project.initialAssetIds = ['444444444444444444444444'];
+  state.project.requestedRoles = [{ name: 'Vocal', order: 0, recordingOrder: 2 }, { name: 'Drums', order: 1, recordingOrder: 1 }];
+  const res = response(); await decideOriginalProjectModeration({ user, params: { id }, body: { decision: 'approve' } }, res);
+  assert.equal(res.code, 200); assert.equal(state.rounds[0].roleName, 'Drums'); assert.equal(state.rounds[0].closesAt, null);
+});

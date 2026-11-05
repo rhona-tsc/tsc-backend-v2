@@ -1,3 +1,4 @@
+import { orderedOriginalRoles } from '../services/originalsRecordingPlanService.js';
 import { getOriginalOwnerAgreement, originalOwnerAgreementAcceptance } from "../services/originalsAgreementService.js";
 import { originalRoleProgress } from "../services/originalsRoleProgressService.js";
 import { loadOriginalMembership, originalParticipation } from "../services/originalsMembershipService.js";
@@ -304,7 +305,7 @@ export const decideOriginalProjectModeration = async (req, res) => {
         projectId: project._id,
         type: project.hasInitialStem ? "instrument" : "foundation",
         sequence: 0,
-        roleName: project.hasInitialStem ? project.requestedRoles[0]?.name || "" : "",
+        roleName: project.hasInitialStem ? orderedOriginalRoles(project.requestedRoles)[0]?.name || "" : "",
         eligibleRoles: project.hasInitialStem
           ? []
           : project.requestedRoles.filter((role) => role.foundationEligible).map((role) => role.name),
