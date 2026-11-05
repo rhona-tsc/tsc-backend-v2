@@ -4,6 +4,7 @@ import Round from '../models/originalRoundModel.js';
 import Reservation from '../models/originalReservationModel.js';
 import Submission from '../models/originalSubmissionModel.js';
 import Asset from '../models/originalAssetModel.js';
+import { requireOriginalStemReviews } from './originalsRecordingContextService.js';
 import { originalTakeAssetIds, originalTakeKindsValid, originalTakeNeedsListeningMix } from './originalsTakeFilesService.js';
 const closed = () => Object.assign(new Error('This round has closed; it no longer accepts submissions'), { status: 409 });
 
@@ -25,6 +26,7 @@ export const originalSubmissionCommit = {
         const assets = await Asset.find({ _id: { $in: ids }, ownerId: musicianId, reservationId, state: 'active' }).session(session).lean();
         const listeningMixRequired = originalTakeNeedsListeningMix(round);
         if (assets.length !== new Set(ids.map(String)).size || (production ? assets[0]?.kind !== round.type : !originalTakeKindsValid(payload.takes, assets, { listeningMixRequired }))) throw Object.assign(new Error('The submitted files are no longer available'), { status: 409 });
+        if (!production) await requireOriginalStemReviews({ assets, musicianId, session });
         // Both submission and advancement write this round. A concurrent closure
         // forces a retry against the closed round instead of admitting a late take.
         const claimed = await Round.updateOne(

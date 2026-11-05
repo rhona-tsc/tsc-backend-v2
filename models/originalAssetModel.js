@@ -21,6 +21,12 @@ const originalAssetSchema = new mongoose.Schema(
     finalEligible: { type: Boolean, default: true },
     // Uploader declaration only; null means it was not recorded for this file.
     createdEntirelyWithAi: { type: Boolean, default: null },
+    alignmentReviewRequired: { type: Boolean, default: false },
+    alignmentReview: {
+      contextKey: { type: String, default: '' },
+      reviewedAt: { type: Date, default: null },
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'musician', default: null },
+    },
     state: { type: String, enum: ["active", "hidden", "deleted"], default: "active", index: true },
   },
   { timestamps: true },

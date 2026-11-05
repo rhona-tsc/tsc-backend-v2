@@ -1,5 +1,7 @@
 # Listening mixes for individual submitted stems
 
+Current recording and review behaviour is described in [Browser rough mixes and stem alignment review](originals-browser-rough-mixes.md). Stems no longer require separately uploaded listening mixes; the older pairing workflow below remains supported for existing material.
+
 Each new submission contains one to three independently reviewable takes. Each take contains one isolated stem and its own listening mix of that stem with the existing authorised project track or approved stems, where available. The contributor's other submitted alternatives are excluded from that listening mix. For three stem options, upload three corresponding listening mixes. MP3 is recommended for review, while the isolated recording remains the source used in the final mix.
 
 The submission form pairs each selected stem with a distinct uploaded listening mix. Missing, hidden, wrong-kind or other-reservation files cannot enable submission. Labels use the stem filenames (within the existing 80-character limit) so the owner can match the preview to the approval dropdown. Optional effects references attach to the first selected stem, remain explicitly labelled as references and still count towards the three-stem limit.

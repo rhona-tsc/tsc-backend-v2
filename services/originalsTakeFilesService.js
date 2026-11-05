@@ -1,6 +1,8 @@
 export const originalTakeStems = take => Array.isArray(take.stemAssetIds) ? take.stemAssetIds : take.stemAssetId ? [take.stemAssetId] : [];
 export const originalTakeAssetIds = takes => takes.flatMap(take => [...originalTakeStems(take), ...(take.mixdownAssetId ? [take.mixdownAssetId] : []), ...(take.wetStemAssetId ? [take.wetStemAssetId] : [])]);
-export const originalTakeNeedsListeningMix = round => round?.type !== 'foundation';
+// Listening mixes remain valid optional references, but new contributions can
+// be reviewed against the project stems directly in the browser.
+export const originalTakeNeedsListeningMix = () => false;
 export const originalTakeKindsValid = (takes, assets, { listeningMixRequired = true } = {}) => {
   const kinds = new Map(assets.map(asset => [String(asset._id), asset.kind]));
   return takes.every(take => {

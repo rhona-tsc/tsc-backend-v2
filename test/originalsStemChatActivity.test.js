@@ -110,7 +110,8 @@ test('anonymous contributors and owners use only their chosen credit, without a 
   state.data.submissions[0].anonymous = true; state.data.submissions[0].creditName = 'Midnight Drummer';
   await originalStemChatActivity.publish(state.data.submissions[0]);
   assert.match(state.data.messages[0].body, /^Midnight Drummer submitted/); assert.equal(lookup.mock.callCount(), 0);
-  assert.match(originalStemActivityBody({ submission: { ...submission, musicianId: owner }, project: { ...project, ownerAnonymous: true, ownerCreditName: 'Anonymous artist' }, profile: { firstName: 'Private' }, type: 'stem_approved' }), /Anonymous artist’s/);
+  assert.match(originalStemActivityBody({ submission: { ...submission, musicianId: owner, creditName: 'Unused credit' }, project: { ...project, ownerAnonymous: true, ownerCreditName: 'Anonymous artist' }, profile: { firstName: 'Private' }, type: 'stem_approved' }), /Anonymous artist’s/);
+  assert.match(originalStemActivityBody({ submission, project, profile: null, type: 'stem_submitted' }), /^Project participant submitted/);
 });
 
 test('multiple stems produce one group update; production outputs and legacy submissions do not create activity', async t => {

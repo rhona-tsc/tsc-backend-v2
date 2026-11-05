@@ -1,4 +1,5 @@
 import { allowOriginalInvitationRequest } from "../services/originalsInvitationAccessService.js";
+import { getOriginalStemPreview, confirmOriginalStemReview, streamOriginalAudio } from '../controllers/originalsRecordingController.js';
 import { changeOriginalProjectRole } from '../controllers/originalsRolesController.js';
 import { getOriginalReviewStatus } from '../controllers/originalsReviewController.js';
 import { getOriginalChatUnread, readOriginalChat } from '../controllers/originalsChatReadController.js';
@@ -120,6 +121,9 @@ router.get("/projects/:id/workspace", getOriginalProjectWorkspace);
 router.get("/projects/:id/review-status", getOriginalReviewStatus);
 router.post("/projects/:id/assets", upload.single("file"), uploadOriginalAsset);
 router.get("/assets/:assetId/access", accessOriginalAsset);
+router.get('/assets/:assetId/audio', streamOriginalAudio);
+router.get('/assets/:assetId/recording-preview', getOriginalStemPreview);
+router.post('/assets/:assetId/alignment-review', confirmOriginalStemReview);
 router.post("/rounds/:roundId/reservations", reserveOriginalRound);
 router.post("/reservations/:reservationId/request-extension", requestReservationExtension);
 router.post("/reservations/:reservationId/grant-extension", decideReservationExtension);

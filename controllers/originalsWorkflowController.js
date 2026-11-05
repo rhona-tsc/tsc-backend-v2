@@ -1,3 +1,5 @@
+import { authoriseOriginalAsset } from '../services/originalsAssetAccessService.js';
+import { requireOriginalStemReviews } from '../services/originalsRecordingContextService.js';
 import { originalSubmissionCommit } from "../services/originalsSubmissionCommitService.js";
 import { originalStemChatActivity } from "../services/originalsStemChatActivityService.js";
 import { addOriginalAssetCredits } from "../services/originalsAssetCreditService.js";
@@ -89,7 +91,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
       originalReservationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).lean(),
       originalSubmissionModel.find({ projectId: project._id }).sort({ submittedAt: -1 }).lean(),
       originalAssetModel.find({ projectId: project._id, state: { $ne: "deleted" } })
-        .select("kind originalName mimeType bytes finalEligible createdEntirelyWithAi state ownerId roundId reservationId createdAt")
+        .select("kind originalName mimeType bytes finalEligible createdEntirelyWithAi alignmentReviewRequired alignmentReview state ownerId roundId reservationId createdAt")
         .sort({ createdAt: -1 }).lean(),
       canManage ? originalNotificationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).limit(50).lean() : [],
       canManage ? originalInvitationModel.find({ projectId: project._id })
@@ -164,6 +166,7 @@ export const uploadOriginalAsset = async (req, res) => {
       ownerId,
       kind,
       createdEntirelyWithAi,
+      alignmentReviewRequired: kind === "take_stem",
       originalName: req.file.originalname,
       mimeType: req.file.mimetype,
       bytes: req.file.size,
@@ -192,7 +195,7 @@ export const uploadOriginalAsset = async (req, res) => {
       await project.save();
     }
     await audit({ projectId: project._id, roundId, reservationId, type: "asset_uploaded", user: req.user, metadata: { assetId: String(asset._id), kind, ...(isStem ? { createdEntirelyWithAi } : {}) } });
-    return res.status(201).json({ success: true, asset: { _id: asset._id, kind, originalName: asset.originalName, bytes: asset.bytes, createdEntirelyWithAi: asset.createdEntirelyWithAi } });
+    return res.status(201).json({ success: true, asset: { _id: asset._id, kind, originalName: asset.originalName, bytes: asset.bytes, createdEntirelyWithAi: asset.createdEntirelyWithAi, alignmentReviewRequired: asset.alignmentReviewRequired } });
   } catch (error) {
     console.error("❌ uploadOriginalAsset error:", error);
     return res.status(500).json({ success: false, message: "Private upload failed" });
@@ -282,6 +285,7 @@ export const replaceOriginalSubmission = async (req, res) => {
     if (assets.length !== new Set(assetIds).size) return res.status(400).json({ success: false, message: "Replacement files are unavailable" });
     const listeningMixRequired = originalTakeNeedsListeningMix(round);
     if (!originalTakeKindsValid(takes, assets, { listeningMixRequired })) return res.status(400).json({ success: false, message: listeningMixRequired ? "Each replacement needs a stem and listening mix" : "Choose valid stems and any optional listening mixes" });
+    await requireOriginalStemReviews({ assets, musicianId: submission.musicianId });
     const oldAssetIds = originalTakeAssetIds(submission.takes);
     await originalAssetModel.updateMany({ _id: { $in: oldAssetIds } }, { $set: { state: "hidden" } });
     submission.$where = { state: "submitted", revision: submission.revision };
@@ -294,6 +298,7 @@ export const replaceOriginalSubmission = async (req, res) => {
     await audit({ projectId: submission.projectId, roundId: submission.roundId, reservationId: submission.reservationId, type: "submission_replaced", user: req.user, metadata: { submissionId: String(submission._id), revision: submission.revision } });
     return res.json({ success: true, submission });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message, code: error.code, assetId: error.assetId });
     if (error.name === "DocumentNotFoundError") return res.status(409).json({ success: false, message: "This submission changed or its round closed. Refresh the workspace." });
     console.error("❌ replaceOriginalSubmission error:", error);
     return res.status(500).json({ success: false, message: "Failed to replace submission" });
@@ -353,11 +358,7 @@ export const updateOriginalIssue = async (req, res) => {
 
 export const accessOriginalAsset = async (req, res) => {
   try {
-    const asset = await originalAssetModel.findById(req.params.assetId).lean();
-    if (!asset || asset.state !== "active") return res.status(404).json({ success: false, message: "Asset not found" });
-    const project = await originalProjectModel.findById(asset.projectId).lean();
-    const visible = project && (canManageOriginalProject(project, req.user) || String(asset.ownerId) === getOriginalsUserId(req.user) || originalReferenceKinds.has(asset.kind) || (project.initialAssetIds || []).some(id => String(id) === String(asset._id)) || await originalMessageModel.exists({ projectId: project._id, $or: [{ voiceAssetId: asset._id }, { attachmentIds: asset._id }] }) || await originalSubmissionModel.exists({ projectId: project._id, state: "accepted", $or: [{ outputAssetId: asset._id }, { "takes.stemAssetId": asset._id }, { "takes.stemAssetIds": asset._id }, { "takes.mixdownAssetId": asset._id }, { "takes.wetStemAssetId": asset._id }] }));
-    if (!visible) return res.status(403).json({ success: false, message: "This file is private to its contributor and the project owner" });
+    const asset = await authoriseOriginalAsset(req);
     const url = cloudinary.utils.private_download_url(
       asset.cloudinaryPublicId,
       asset.cloudinaryFormat || null,
@@ -372,6 +373,7 @@ export const accessOriginalAsset = async (req, res) => {
     });
     return res.json({ success: true, url, downloadUrl, expiresInSeconds: 300 });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message });
     console.error("❌ accessOriginalAsset error:", error);
     return res.status(500).json({ success: false, message: "Failed to grant asset access" });
   }
@@ -469,6 +471,7 @@ export const submitOriginalTakes = async (req, res) => {
     if (!originalTakeKindsValid(takes, assets, { listeningMixRequired })) {
       return res.status(400).json({ success: false, message: listeningMixRequired ? "Each take requires a stem and its listening mix" : "Choose valid stems and any optional listening mixes" });
     }
+    await requireOriginalStemReviews({ assets, musicianId });
     const submission = await originalSubmissionCommit.run({ reservationId: reservation._id, musicianId, payload: {
       projectId: reservation.projectId, roundId: reservation.roundId, reservationId: reservation._id,
       musicianId, roleName: reservation.roleName, songwritingChoice, listeningMixRequired, ownerNotificationPending: true,
@@ -481,7 +484,7 @@ export const submitOriginalTakes = async (req, res) => {
     await audit({ projectId: reservation.projectId, roundId: reservation.roundId, reservationId: reservation._id, type: "submission_received", user: req.user, metadata: { submissionId: String(submission._id), takeCount: takes.length, songwritingChoice } });
     return res.status(201).json({ success: true, submission });
   } catch (error) {
-    if (error.status) return res.status(error.status).json({ success: false, message: error.message });
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message, ...(error.code ? { code: error.code, assetId: error.assetId } : {}) });
     if (error?.code === 11000) return res.status(409).json({ success: false, message: "This reservation has already been submitted" });
     console.error("❌ submitOriginalTakes error:", error);
     return res.status(500).json({ success: false, message: "Failed to submit takes" });

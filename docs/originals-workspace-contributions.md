@@ -1,5 +1,7 @@
 # Contribution workflow and project recommendations
 
+Current recording and review behaviour is described in [Browser rough mixes and stem alignment review](originals-browser-rough-mixes.md). Stems no longer require separately uploaded listening mixes; the older pairing workflow below remains supported for existing material.
+
 ## Recording and submitting
 
 The project guidance and embedded guide/sample come before the role progress cards and file uploads. The combined “Listen to the project” player retains its existing meaning: approved stems played together. Role cards use aggregate statuses calculated on the backend, without exposing other musicians' pending recordings or identities.

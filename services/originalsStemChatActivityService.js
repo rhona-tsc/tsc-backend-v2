@@ -13,9 +13,11 @@ export const originalStemActivityKey = (submissionId, type) => `system:${submiss
 export function originalStemActivityBody({ submission, project, profile, type }) {
   const isOwner = String(submission.musicianId) === String(project.ownerId);
   const anonymous = submission.anonymous || (isOwner && project.ownerAnonymous);
+  const publicName = [profile?.firstName || profile?.basicInfo?.firstName, profile?.lastName || profile?.basicInfo?.lastName].filter(Boolean).join(' ') || (isOwner && project.ownerName);
+  const alias = (submission.anonymous && submission.creditName) || (isOwner && project.ownerAnonymous && project.ownerCreditName);
   const name = anonymous
-    ? String(submission.creditName || (isOwner && project.ownerCreditName) || 'Anonymous').trim() || 'Anonymous'
-    : chatDisplayName([profile?.firstName || profile?.basicInfo?.firstName, profile?.lastName || profile?.basicInfo?.lastName].filter(Boolean).join(' ') || (isOwner && project.ownerName) || 'Project participant');
+    ? String(alias || 'Anonymous').trim() || 'Anonymous'
+    : publicName ? chatDisplayName(publicName) : 'Project participant';
   const stemCount = new Set((submission.takes || []).flatMap(take => take.stemAssetIds?.length ? take.stemAssetIds.map(String) : [String(take.stemAssetId)])).size;
   return type === 'stem_approved'
     ? `${submission.roleName} stem approved — ${name}’s contribution has been selected.`

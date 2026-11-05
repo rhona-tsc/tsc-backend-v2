@@ -28,9 +28,9 @@ async function submit(takes, extra = {}) {
   await submitOriginalTakes({ user: { id: musicianId }, params: { reservationId }, body: { songwritingChoice: 'master_only', takes, ...extra } }, res);
   return res;
 }
-test('only foundation rounds can waive a listening mix, with conservative defaults', () => {
+test('all recording rounds accept optional listening mixes while legacy validation remains explicit', () => {
   assert.equal(originalTakeNeedsListeningMix({ type: 'foundation' }), false);
-  for (const round of [undefined, {}, { type: 'instrument' }, { type: 'mix' }, { type: 'master' }]) assert.equal(originalTakeNeedsListeningMix(round), true);
+  for (const round of [undefined, {}, { type: 'instrument' }, { type: 'mix' }, { type: 'master' }]) assert.equal(originalTakeNeedsListeningMix(round), false);
   const takes = [{ stemAssetId: stems[0] }], assets = [{ _id: stems[0], kind: 'take_stem' }];
   assert.deepEqual(originalTakeAssetIds(takes), [stems[0]]);
   assert.equal(originalTakeKindsValid(takes, assets), false);
@@ -51,11 +51,11 @@ test('foundation musicians may still attach an optional mix and it is validated'
   const res = await submit([{ stemAssetId: stems[0], mixdownAssetId: mix }]);
   assert.equal(res.code, 201); assert.equal(String(state.saved.takes[0].mixdownAssetId), mix);
 });
-test('later rounds cannot bypass required listening mixes with a client-supplied exemption', async t => {
+test('later rounds accept stems without a separate listening mix using server policy', async t => {
   const state = setup(t, 'instrument');
   const res = await submit([{ stemAssetId: stems[0] }], { listeningMixRequired: false });
-  assert.equal(res.code, 400); assert.match(res.body.message, /listening mix/);
-  assert.equal(state.saved, null); assert.equal(state.reservationSaved, 0);
+  assert.equal(res.code, 201); assert.equal(state.saved.listeningMixRequired, false);
+  assert.equal(state.reservationSaved, 1);
 });
 test('unavailable, foreign, malformed and wrong-kind optional mixdowns are refused', async t => {
   const state = setup(t);
@@ -74,7 +74,7 @@ test('schema permits missing mixdowns only for server-recorded foundation submis
   await assert.rejects(new Submission(base).validate(), /mixdownAssetId/);
   await assert.rejects(new Submission({ ...base, listeningMixRequired: true }).validate(), /mixdownAssetId/);
 });
-test('foundation replacements also accept a stem alone while later revisions still require their mix', async t => {
+test('foundation and later instrument replacements both accept a stem alone', async t => {
   const state = setup(t); let saves = 0;
   const doc = new Submission({ projectId, roundId, reservationId, musicianId, roleName: 'Keys', state: 'submitted', songwritingChoice: 'master_only', takes: [{ stemAssetId: stems[1], mixdownAssetId: mix }] });
   doc.save = async () => { await doc.validate(); saves++; };
@@ -85,13 +85,13 @@ test('foundation replacements also accept a stem alone while later revisions sti
   assert.equal(res.code, 200); assert.equal(saves, 1); assert.equal(doc.ownerNotificationPending, true); assert.equal(doc.listeningMixRequired, false); assert.equal(doc.takes[0].mixdownAssetId, null);
   t.mock.method(Round, 'findById', () => ({ lean: async () => ({ _id: roundId, projectId, type: 'instrument', state: 'open', sequence: 0 }) }));
   res = response(); await replaceOriginalSubmission({ user: { id: musicianId }, params: { submissionId: String(doc._id) }, body: { takes: [{ stemAssetId: stems[0] }] } }, res);
-  assert.equal(res.code, 400); assert.equal(saves, 1); assert.equal(state.reservationSaved, 0);
+  assert.equal(res.code, 200); assert.equal(saves, 2); assert.equal(state.reservationSaved, 0);
 });
-test('new contributor terms state the foundation exception without changing production terms', () => {
+test('new contributor terms describe browser alignment review without changing production terms', () => {
   const agreement = getOriginalAgreement();
-  assert.equal(agreement.version, 'originals-contributor-v0.5');
-  assert.match(agreement.sections[0].text, /first foundation round.*listening mix is optional/);
-  assert.match(agreement.sections[0].text, /later instrument rounds.*separate listening mix/);
+  assert.equal(agreement.version, 'originals-contributor-v0.6');
+  assert.match(agreement.sections[0].text, /separate listening mix is optional/);
+  assert.match(agreement.sections[0].text, /Review each newly uploaded stem.*zero point.*before submitting/);
   assert.equal(getOriginalAgreement('mix').version, 'originals-mix-v0.3');
   assert.equal(getOriginalAgreement('master').version, 'originals-master-v0.3');
 });

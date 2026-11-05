@@ -35,3 +35,8 @@ Tests cover missing/unchecked consent, empty names, stale versions, forged hashe
 ## Listening mix for each stem
 
 Contributor version 0.4 changes only the deliverables paragraph: each submitted stem or alternative take has its own listening mix with the authorised project track/approved stems where available. Other submitted alternatives must be left out of that mix. An optional effects reference belongs to its paired stem and counts towards the three-stem limit. Mix/master terms remain version 0.3. Earlier acceptance evidence remains intact; waiting contributors with outdated terms must review the current wording before activation. Existing timed reservations are not retrospectively signed. See [the per-stem listening workflow](originals-per-stem-listening-mixes.md).
+
+
+## Browser review and stems-only contributions
+
+Contributor version 0.6 makes uploaded listening mixes optional in every recording round. New stems are reviewed with the current project references in the browser, with a per-file alignment acknowledgement. Browser rough mixes are private recording/review references and do not become approved release masters. Production agreements remain version 0.3. Earlier acceptance evidence and active reservations are retained; the existing renewal rules apply when current terms are required. See [the browser mixing workflow](originals-browser-rough-mixes.md).
