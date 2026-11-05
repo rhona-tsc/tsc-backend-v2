@@ -7,7 +7,7 @@ import originalSubmissionModel from "../models/originalSubmissionModel.js";
 import { prepareOriginalRoundClock } from "./originalsRoundClockService.js";
 import { getDueReservationReminder, isOriginalRoundExpired } from "./originalsPolicyService.js";
 
-const queueNotification = async ({ projectId, musicianId, eventKey, template, payload }) => {
+const queueNotification = async ({ projectId, musicianId, eventKey, template, payload, channels = ["email", "whatsapp"] }) => {
   try {
     await originalNotificationModel.create({
       projectId,
@@ -15,7 +15,7 @@ const queueNotification = async ({ projectId, musicianId, eventKey, template, pa
       eventKey,
       template,
       payload,
-      channels: ["email", "whatsapp"],
+      channels,
     });
     return true;
   } catch (error) {
@@ -52,16 +52,18 @@ export const runOriginalsAutomation = async ({ now = new Date() } = {}) => {
 
     const reminder = getDueReservationReminder(reservation, now);
     if (!reminder) continue;
-    reservation.remindersSent[reminder] = true;
-    await reservation.save();
     const hours = reminder === "oneHour" ? 1 : reminder === "sixHour" ? 6 : 12;
     if (await queueNotification({
       projectId: reservation.projectId,
       musicianId: reservation.musicianId,
       eventKey: `reservation:${reservation._id}:reminder:${hours}`,
       template: "originals_reservation_reminder",
-      payload: { reservationId: String(reservation._id), roleName: reservation.roleName, hours },
+      channels: ["email"],
+      payload: { reservationId: String(reservation._id), roleName: reservation.roleName, hours, expiresAt: new Date(reservation.expiresAt).toISOString() },
     })) result.remindersQueued += 1;
+    reservation.remindersSent ||= {};
+    reservation.remindersSent[reminder] = true;
+    await reservation.save();
   }
 
   const openRounds = await originalRoundModel.find({ state: { $in: ["open", "reopened"] } });

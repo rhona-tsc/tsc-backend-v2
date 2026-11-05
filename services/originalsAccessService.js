@@ -1,4 +1,5 @@
 import { getOriginalAgreement } from "./originalsAgreementService.js";
+import { originalReviewStatus } from './originalsReviewService.js';
 import { originalRoleManagement } from './originalsRoleManagementService.js';
 import { originalTakeAssetIds } from "./originalsTakeFilesService.js";
 import { originalRoleProgress } from "./originalsRoleProgressService.js";
@@ -27,16 +28,19 @@ export function presentOriginalWorkspace({ project, rounds, reservations, submis
   const visibleProject = { ...project, ownerName: originalOwnerDisplayName(project) };
   if (!canManage) {
     visibleProject.ownerEmail = '';
+    delete visibleProject.ownerAgreement;
+    delete visibleProject.ownerAgreementHistory;
     if (project.ownerAnonymous) visibleProject.ownerId = null;
   }
   return {
-    roleProgress: originalRoleProgress({ project, rounds, reservations, submissions, futureReservations }).map(role => ({ ...role, ...(roleManagement?.roles.find(rule => rule.name === role.name) || {}) })),
+    roleProgress: originalRoleProgress({ project, rounds, reservations, submissions, futureReservations, viewerId }).map(role => ({ ...role, ...(roleManagement?.roles.find(rule => rule.name === role.name) || {}) })),
     ...(roleManagement ? { roleManagement: { canEdit: roleManagement.canEdit, reason: roleManagement.reason } } : {}),
     futureReservations: (canManage ? futureReservations : futureReservations.filter(item => String(item.musicianId) === viewerId)).map(item => ({ ...item, agreementNeedsReview: !item.agreementAcceptanceId || item.agreementVersion !== getOriginalAgreement().version || item.agreementTextHash !== getOriginalAgreement().textHash })),
     success: true, viewerId, permissions: { canManage, canIllustrateTscShare: String(user?.email || user?.useremail || '').trim().toLowerCase() === 'hello@thesupremecollective.co.uk' }, project: visibleProject, rounds,
     activeSlotCount: reservations.filter(item => String(item.roundId) === String(project.currentRoundId) && (item.state === 'active' && new Date(item.expiresAt) > new Date() || item.state === 'submitted') && item.slotHeld !== false && !submissions.some(sub => String(sub.reservationId) === String(item._id) && ['rejected','withdrawn','retracted'].includes(sub.state))).length,
     reservations: canManage ? reservations : reservations.filter(item => String(item.musicianId) === viewerId),
     submissions: visibleSubmissions,
+    ...(canManage ? { reviewStatus: originalReviewStatus(submissions) } : {}),
     assets: canManage ? assets : assets.filter(item => item.state === 'active' && (String(item.ownerId) === viewerId || originalReferenceKinds.has(item.kind) || (project.initialAssetIds || []).some(id => String(id) === String(item._id)) || acceptedAssetIds.has(String(item._id)) || chatAssetIds.has(String(item._id)))),
     notifications: canManage ? notifications : [], invitations: canManage ? invitations : [],
     royaltyPreview: previewOriginalsSplits({ project, submissions }),

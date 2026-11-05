@@ -112,6 +112,7 @@ export async function getActCards(req, res) {
     genres: 1,
     genre: 1,
     instruments: 1,
+    setlist: 1,
     instrumentation: 1,
 
     vocalist: 1,

@@ -1,4 +1,5 @@
 import actCardModel from "../models/actCard.model.js";
+import { normalizeSetlistControl } from '../utils/setlistControl.js';
 import { normalize } from "../utils/normalize.js";
 
 
@@ -140,6 +141,7 @@ if (String(process.env.DEBUG_CARD_PRICING || "").toLowerCase() === "true") {
         lineupSizes_norm,
         instruments,
         instruments_norm,
+        setlist: normalizeSetlistControl(act.setlist),
       },
     },
     { upsert: true, new: true }

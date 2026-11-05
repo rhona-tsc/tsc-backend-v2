@@ -1,7 +1,7 @@
-const normalise = (value) => String(value || "").trim().toLowerCase();
+import { hasRecordedOriginalOwnerAgreement } from "./originalsAgreementService.js";
+export { ORIGINALS_OWNER_AGREEMENT_VERSION } from "./originalsAgreementService.js";
 
-export const ORIGINALS_OWNER_AGREEMENT_VERSION =
-  "originals-owner-v0.1-legal-review";
+const normalise = (value) => String(value || "").trim().toLowerCase();
 
 export const isOriginalsEnabled = (env = process.env) => {
   const configured = env.ORIGINALS_ENABLED;
@@ -122,10 +122,7 @@ export const validateOriginalProjectForModeration = (project = {}) => {
   if (project.originalWorkConfirmed !== true) {
     errors.push("The original-work declaration must be accepted");
   }
-  if (
-    project.ownerAgreement?.accepted !== true ||
-    project.ownerAgreement?.version !== ORIGINALS_OWNER_AGREEMENT_VERSION
-  ) {
+  if (!hasRecordedOriginalOwnerAgreement(project.ownerAgreement)) {
     errors.push("The current owner agreement must be accepted");
   }
   return errors;

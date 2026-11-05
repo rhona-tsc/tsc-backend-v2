@@ -1,8 +1,9 @@
+import { originalSubmissionCommit } from '../services/originalsSubmissionCommitService.js';
 import ChatRead from '../models/originalChatReadModel.js';
 import ChatMessage from '../models/originalMessageModel.js';
 import { beforeEach } from "node:test";
 import Future from "../models/originalRoleReservationModel.js";
-beforeEach(t => { t.mock.method(Future, "find", () => ({ select: () => ({ lean: async () => [] }), sort: () => ({ lean: async () => [] }) })); });
+beforeEach(t => { t.mock.method(Invitation, "exists", async () => false);  t.mock.method(originalSubmissionCommit, "run", async ({ payload }) => { const saved = await Submission.create(payload); const reservation = await Reservation.findOne({}); reservation.state = "submitted"; await reservation.save(); return saved; });  t.mock.method(Future, "find", () => ({ select: () => ({ lean: async () => [] }), sort: () => ({ lean: async () => [] }) })); });
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { originalRoleProgress } from '../services/originalsRoleProgressService.js';
@@ -82,6 +83,7 @@ test('referral delivery stores a token hash, sends the email and does not expose
 });
 
 test('take submission validates ownership of all three files and saves the optional effects reference',async t=>{
+ t.mock.method(Round,'findById',()=>({lean:async()=>({_id:'round',projectId,type:'instrument',state:'open'})}));
  const stem='444444444444444444444444',mix='555555555555555555555555',wet='666666666666666666666666',booking='777777777777777777777777';
  t.mock.method(Reservation,'findOne',async()=>({_id:booking,projectId,roundId:'round',musicianId:player,roleName:'Vocal',save:async()=>{}}));
  let ids,saved;
@@ -93,6 +95,7 @@ test('take submission validates ownership of all three files and saves the optio
 });
 
 test('three individual stem/mix pairs remain separate review options after submission',async t=>{
+ t.mock.method(Round,'findById',()=>({lean:async()=>({_id:'round',projectId,type:'instrument',state:'open'})}));
  const stems=['444444444444444444444441','444444444444444444444442','444444444444444444444443'];
  const mixes=['555555555555555555555551','555555555555555555555552','555555555555555555555553'];
  const booking='777777777777777777777777';let saved,reservationSaved=0;

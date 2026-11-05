@@ -19,6 +19,8 @@ const originalReservationSchema = new mongoose.Schema(
     slotHeld: { type: Boolean, default: true },
     futureReservationId: { type: mongoose.Schema.Types.ObjectId, ref: "originalrolereservation" },
     roundNotificationQueued: { type: Boolean, default: false },
+    endedByRoundAdvance: { type: Boolean, default: false },
+    roundAdvanceClosedAt: { type: Date, default: null },
     roleName: { type: String, required: true, trim: true },
     agreementAcceptanceId: { type: mongoose.Schema.Types.ObjectId, ref: "originalagreementacceptance" },
     anonymous: { type: Boolean, default: false },

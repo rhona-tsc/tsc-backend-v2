@@ -23,11 +23,11 @@ export function getOriginalAgreement(type = 'contributor') {
   const title = production ? `${type === 'mix' ? 'Mix producer' : 'Mastering engineer'} agreement` : 'Contributor agreement';
   // Versions and review status are audit metadata, not participant-facing banners.
   // This revision is a researched draft, not specialist legal approval.
-  const version = `originals-${type}-${production ? "v0.3" : "v0.4"}`;
+  const version = `originals-${type}-${production ? "v0.3" : "v0.5"}`;
   const sections = [
     { title: 'Reservation and deliverables', text: production
       ? `Your recording reservation lasts 24 hours once this round opens and your place activates. Extensions require separate approval, up to three times. Submit the ${type === 'mix' ? 'mix' : 'master'} output specified in the project brief. Selection for this production role carries the 10% selected-role master allocation described below. Controlled source downloads are for this project only. Access to rejected material requires recorded authorisation, the necessary permission and contributor-rights review before use.`
-      : 'An advance place has no recording countdown until its round opens and the place activates. A recording reservation then lasts 24 hours; extensions require separate approval, up to three times. Provide at least one and no more than three aligned instrument stems, plus a separate listening mix for each submitted stem. Each listening mix must combine only its matching submitted stem with the authorised project track or approved stems, if available, so the owner can review and select each option separately. Keep your other submitted options out of that mix. An optional effects version of the same performance is a reference for its paired stem, counts towards the three-stem limit and is not a separate take. Reference access is restricted and may end when participation ends unless an accepted contribution or later role requires continued access. Reference material must not be used outside this project.' },
+      : 'An advance place has no recording countdown until its round opens and the place activates. A recording reservation then lasts 24 hours; extensions require separate approval, up to three times. Provide at least one and no more than three aligned instrument stems. In the first foundation round, stems can be submitted on their own and a separate listening mix is optional. In later instrument rounds, provide a separate listening mix for each submitted stem, combining only that stem with the authorised project track or approved stems so the owner can review and select each option separately. Keep your other submitted options out of that mix. An optional effects version of the same performance is a reference for its paired stem, counts towards the three-stem limit and is not a separate take. Reference access is restricted and may end when participation ends unless an accepted contribution or later role requires continued access. Reference material must not be used outside this project.' },
     ...common.map(section => production && section.title === 'Songwriting claims and proposed splits'
       ? { ...section, text: 'Selection as a mix producer or mastering engineer carries the selected-role master allocation; it does not automatically create a songwriting share. Songwriting remains separate and must reflect accepted original compositional contributions and the necessary rightsholder agreement. If your work also includes original composition, raise that claim with TSC and the affected writers before final splits or release; the production role alone neither grants nor removes authorship. Statutory authorship, existing publisher or collecting-society rights and performer rights are not overridden by this acknowledgement.' }
       : { ...section }),
@@ -53,4 +53,54 @@ export async function requireCurrentOriginalAgreement({ agreementAcceptanceId, p
   const saved = agreementAcceptanceId ? await Acceptance.findById(agreementAcceptanceId).lean() : null;
   if (!saved || saved.accepted !== true || !saved.acceptedAt || !saved.fullName || String(saved.projectId) !== String(projectId) || String(saved.musicianId) !== String(musicianId) || saved.roleName !== String(roleName).trim().toLowerCase() || saved.type !== type || saved.version !== current.version || saved.textHash !== current.textHash || saved.text !== current.text) throw required('Review and accept the current agreement before this place can become a recording reservation.');
   return saved;
+}
+
+export const ORIGINALS_OWNER_AGREEMENT_VERSION = 'originals-owner-v0.2';
+
+export function getOriginalOwnerAgreement() {
+  const sections = [
+    { title: 'Your project and authority', text: 'TSC means The Supreme Collective Ltd, company number 16883956, trading as The Supreme Collective. These terms cover your role as the signed-in owner of the Originals project you submit. You confirm that the project and any source material you upload are original or otherwise controlled by you, are not a cover, and may lawfully be used for this collaboration. You must have the necessary permissions for any work or performance supplied by someone else. Tell TSC before uploading material subject to a publisher, label, sample licence or other restriction that could prevent the project uses described here.' },
+    { title: 'Owner responsibilities and reviews', text: 'Describe the project, requested roles and reference material accurately. Coordinate selection through the workspace and record accepted files, takes and any selected time ranges. Complete each required review, approval or response within seven days after you are notified; TSC will record and send reminders before intervention. If a response is overdue, the project may enter admin intervention and TSC may select material, reopen rounds, appoint production participants or progress the workflow, with a recorded reason. An administrative decision does not replace a rightsholder’s required consent or remove a contributor’s accrued, agreed rights. If you also reserve a contributor or production role, its separate reservation and deliverable terms apply.' },
+    ...common.filter(section => !['Project scope and your material', 'Expiry, release and concerns'].includes(section.title)).map(section => section.title === 'Later stages and changes to these terms'
+      ? { ...section, text: section.text.replace('These reservation terms alone', 'These project-owner terms alone').replace('account, project, role and time', 'account, project, owner role and time') }
+      : { ...section }),
+    { title: 'Project changes, withdrawal and concerns', text: 'Use the project’s recorded concerns process or contact TSC in writing before withdrawing submitted material, removing an accepted contribution or changing agreed credits. The affected files, permissions and royalty position must be reviewed and the outcome recorded. Closing a project, changing access, an expired reservation or a missed message does not transfer rights, authorise use of rejected material or automatically cancel accrued, agreed royalty rights. Existing agreements and decision records remain retained when a revised agreement is accepted. Keep project material secure and stop uses outside any continuing permission when the project or your participation ends.' },
+  ];
+  const ownerAcknowledgement = 'I have read and agree to the Originals project owner terms, including the master and songwriting framework. By entering my full name and ticking this box, I intend to sign this agreement electronically as the owner of this project.';
+  const text = [...sections.flatMap(section => [section.title, section.text]), ownerAcknowledgement].join('\n\n');
+  return { type: 'owner', title: 'Originals project owner agreement', version: ORIGINALS_OWNER_AGREEMENT_VERSION,
+    sections, acknowledgement: ownerAcknowledgement, text, textHash: createHash('sha256').update(text).digest('hex') };
+}
+
+export function originalOwnerAgreementAcceptance(body = {}, now = new Date()) {
+  if (body.ownerAgreementAccepted !== true) return { version: '', accepted: false, acceptedAt: null, displayName: '' };
+  const agreement = getOriginalOwnerAgreement();
+  const supplied = body.ownerAgreement;
+  if (supplied?.version !== agreement.version || supplied?.textHash !== agreement.textHash || supplied?.acknowledgement !== agreement.acknowledgement) {
+    throw required('The owner agreement has changed. Read and accept the current terms before submitting your project.');
+  }
+  const rawName = typeof body.ownerAgreementDisplayName === 'string' ? body.ownerAgreementDisplayName : '';
+  const displayName = rawName.trim().replace(/\s+/g, ' ');
+  if (!displayName || displayName.length > 160 || /[\x00-\x1f\x7f]/.test(rawName)) {
+    throw Object.assign(new Error('Enter your full name to acknowledge the owner agreement.'), { status: 400 });
+  }
+  return { version: agreement.version, text: agreement.text, textHash: agreement.textHash,
+    acknowledgement: agreement.acknowledgement, accepted: true, acceptedAt: now, displayName };
+}
+
+export function hasCurrentOriginalOwnerAgreement(acceptance = {}) {
+  if (!acceptance) return false;
+  const current = getOriginalOwnerAgreement();
+  return acceptance.accepted === true && Boolean(acceptance.acceptedAt && Number.isFinite(new Date(acceptance.acceptedAt).getTime()) && typeof acceptance.displayName === 'string' && acceptance.displayName.trim()) &&
+    acceptance.version === current.version && acceptance.text === current.text &&
+    acceptance.textHash === current.textHash && acceptance.acknowledgement === current.acknowledgement;
+}
+
+// Preserve genuine acknowledgements saved before the detailed owner document
+// existed. New submissions cannot create these records through the API.
+export function hasRecordedOriginalOwnerAgreement(acceptance) {
+  return hasCurrentOriginalOwnerAgreement(acceptance) || Boolean(acceptance?.accepted === true &&
+    acceptance.version === 'originals-owner-v0.1-legal-review' &&
+    typeof acceptance.displayName === 'string' && acceptance.displayName.trim() &&
+    acceptance.acceptedAt && Number.isFinite(new Date(acceptance.acceptedAt).getTime()));
 }

@@ -1,7 +1,7 @@
+import { getOriginalOwnerAgreement, originalOwnerAgreementAcceptance } from "../services/originalsAgreementService.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  ORIGINALS_OWNER_AGREEMENT_VERSION,
   canAccessOriginalsPreview,
   canRequestReservationExtension,
   canModerateOriginals,
@@ -87,10 +87,7 @@ test("a project without an initial stem requires a foundation-eligible role", ()
     requestedRoles: [{ name: "Guitar", foundationEligible: false }],
     hasInitialStem: false,
     originalWorkConfirmed: true,
-    ownerAgreement: {
-      accepted: true,
-      version: ORIGINALS_OWNER_AGREEMENT_VERSION,
-    },
+    ownerAgreement: originalOwnerAgreementAcceptance({ ownerAgreementAccepted: true, ownerAgreementDisplayName: "Example Owner", ownerAgreement: getOriginalOwnerAgreement() }),
   };
 
   assert.deepEqual(validateOriginalProjectForModeration(base), [
@@ -130,10 +127,7 @@ test("anonymous owners require a credit alias and initial-stem projects require 
     ownerAnonymous: true,
     ownerCreditName: "",
     originalWorkConfirmed: true,
-    ownerAgreement: {
-      accepted: true,
-      version: ORIGINALS_OWNER_AGREEMENT_VERSION,
-    },
+    ownerAgreement: originalOwnerAgreementAcceptance({ ownerAgreementAccepted: true, ownerAgreementDisplayName: "Example Owner", ownerAgreement: getOriginalOwnerAgreement() }),
   });
 
   assert.deepEqual(errors, [

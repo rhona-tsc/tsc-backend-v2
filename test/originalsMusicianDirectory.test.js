@@ -47,8 +47,12 @@ test('pagination makes matches beyond the old first 15 or 20 reachable without c
  assert.deepEqual(calls[0].sort,calls[1].sort);assert.deepEqual(calls[0].sort,{firstName:1,lastName:1,_id:1});assert.equal(calls[1].skip,25);
 });
 test('filter options include actual profile tags, custom instruments and the standard vocal group',async t=>{
- directory(t);const fields=[];t.mock.method(Musician,'distinct',async field=>{fields.push(field);return({'instrumentation.instrument':['Cello','Keys'],'vocals.type':['Lead Vocalist',"I don't sing"],'vocals.genres':['Jazz & Swing','Neo Soul'],'genres':['Neo Soul','Classical']})[field]||[];});
- const result=await browseOriginalMusicians({includeFilters:'true'});assert.equal(fields.length,6);assert.ok(result.filters.instruments.includes('Cello'));assert.ok(result.filters.instruments.includes('Vocal'));assert.ok(!result.filters.instruments.includes("I don't sing"));assert.deepEqual(result.filters.genres,['Classical','Jazz & Swing','Neo Soul']);
+ directory(t);let pipeline;
+ t.mock.method(Musician,'distinct',()=>{throw new Error('distinct is unavailable with apiStrict:true');});
+ t.mock.method(Musician,'aggregate',async stages=>{pipeline=stages;return[{instrumentation:[{_id:'Cello'},{_id:'Keys'}],vocals:[{_id:'Lead Vocalist'},{_id:"I don't sing"}],vocalGenres:[{_id:'Jazz & Swing'},{_id:'Neo Soul'}],genres:[{_id:'Neo Soul'},{_id:'Classical'},{_id:null},{_id:42},{_id:'  '}]}];});
+ const result=await browseOriginalMusicians({includeFilters:'true'});assert.equal(Object.keys(pipeline[0].$facet).length,6);
+ assert.deepEqual(pipeline[0].$facet.instrumentation,[{$project:{_id:0,value:'$instrumentation.instrument'}},{$unwind:'$value'},{$match:{value:{$type:'string'}}},{$group:{_id:'$value'}}]);
+ assert.ok(!JSON.stringify(pipeline).includes('email'));assert.ok(!JSON.stringify(pipeline).includes('$out'));assert.ok(result.filters.instruments.includes('Cello'));assert.ok(result.filters.instruments.includes('Vocal'));assert.ok(!result.filters.instruments.includes("I don't sing"));assert.deepEqual(result.filters.genres,['Classical','Jazz & Swing','Neo Soul']);
 });
 test('invalid filters and unbounded pages are refused before accessing the database',async t=>{
  const calls=directory(t);
@@ -61,4 +65,19 @@ test('both controller entry points use the same browsable results, with owner ac
  t.mock.method(Project,'findById',()=>({lean:async()=>({_id:id,ownerId:id})}));
  const denied=response();await searchOriginalMusicians({query:{projectId:id,instrument:'Keys'},user:{id:'222222222222222222222222'}},denied);assert.equal(denied.code,403);assert.equal(calls.length,1);
  const owner=response();await searchOriginalMusicians({query:{projectId:id,instrument:'Keys'},user:{id}},owner);assert.equal(owner.code,200);assert.deepEqual(owner.body.musicians,participant.body.musicians);
+});
+
+
+test('empty filter collections still offer standard instruments without blocking musician results',async t=>{
+ directory(t,[{_id:id,firstName:'Example',lastName:'Player'}]);
+ t.mock.method(Musician,'aggregate',async()=>[]);
+ const result=await browseOriginalMusicians({includeFilters:'true',instrument:'Drums'});
+ assert.equal(result.musicians.length,1);assert.ok(result.filters.instruments.includes('Drums'));assert.deepEqual(result.filters.genres,[]);
+});
+
+test('ordinary paging does not repeat the full filter aggregation',async t=>{
+ directory(t);let filterQueries=0;
+ t.mock.method(Musician,'aggregate',async()=>{filterQueries++;return[];});
+ await browseOriginalMusicians({page:'2'});assert.equal(filterQueries,0);
+ await browseOriginalMusicians({includeFilters:'true'});assert.equal(filterQueries,1);
 });

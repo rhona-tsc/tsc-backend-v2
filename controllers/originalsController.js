@@ -1,3 +1,4 @@
+import { getOriginalOwnerAgreement, originalOwnerAgreementAcceptance } from "../services/originalsAgreementService.js";
 import { originalRoleProgress } from "../services/originalsRoleProgressService.js";
 import { loadOriginalMembership, originalParticipation } from "../services/originalsMembershipService.js";
 import mongoose from "mongoose";
@@ -6,7 +7,6 @@ import originalProjectModel from "../models/originalProjectModel.js";
 import originalRoundModel from "../models/originalRoundModel.js";
 import originalEventModel from "../models/originalEventModel.js";
 import {
-  ORIGINALS_OWNER_AGREEMENT_VERSION,
   canModerateOriginals,
   canManageOriginalProject,
   originalOwnerDisplayName,
@@ -16,6 +16,8 @@ import {
   validateOriginalProjectForModeration,
 } from "../services/originalsPolicyService.js";
 import { sendOriginalProjectApprovedNotifications } from "../services/originalsNotificationService.js";
+
+import { queueOriginalProjectModerationEmail, queueOriginalProjectLaunchEmails } from "../services/originalsProjectEmailService.js";
 
 const clean = (value) => String(value || "").trim();
 const cleanEmail = (value) => clean(value).toLowerCase();
@@ -41,6 +43,7 @@ const recordEvent = async ({ projectId, type, user, fromState, toState, reason, 
 
 const presentProject = (project, { includePrivate = false } = {}) => {
   const value = project?.toObject ? project.toObject() : { ...project };
+  if (!includePrivate) { delete value.ownerAgreement; delete value.ownerAgreementHistory; }
   if (!includePrivate && value.ownerAnonymous) {
     value.ownerId = null;
     value.ownerName = "Anonymous";
@@ -102,18 +105,13 @@ export const createOriginalProject = async (req, res) => {
       });
     }
 
-    const acceptedAgreement = req.body?.ownerAgreementAccepted === true;
+    const ownerAgreement = originalOwnerAgreementAcceptance(req.body);
     const project = await originalProjectModel.create({
       ...fields,
       ownerId,
       ownerName: [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim(),
       ownerEmail: cleanEmail(musician.email),
-      ownerAgreement: {
-        version: acceptedAgreement ? ORIGINALS_OWNER_AGREEMENT_VERSION : "",
-        accepted: acceptedAgreement,
-        acceptedAt: acceptedAgreement ? new Date() : null,
-        displayName: clean(req.body?.ownerAgreementDisplayName),
-      },
+      ownerAgreement,
     });
 
     await recordEvent({
@@ -126,6 +124,7 @@ export const createOriginalProject = async (req, res) => {
 
     return res.status(201).json({ success: true, project: presentProject(project, { includePrivate: true }) });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message, code: error.code });
     console.error("❌ createOriginalProject error:", error);
     return res.status(500).json({ success: false, message: "Failed to create Originals project" });
   }
@@ -144,18 +143,22 @@ export const updateOriginalProject = async (req, res) => {
 
     Object.assign(project, buildProjectFields(req.body, { partial: true }));
     if (req.body?.ownerAgreementAccepted === true) {
-      project.ownerAgreement = {
-        version: ORIGINALS_OWNER_AGREEMENT_VERSION,
-        accepted: true,
-        acceptedAt: new Date(),
-        displayName: clean(req.body?.ownerAgreementDisplayName),
-      };
+      if (String(project.ownerId) !== getOriginalsUserId(req.user)) {
+        return res.status(403).json({ success: false, message: "Only the project owner can accept the owner agreement." });
+      }
+      const acceptance = originalOwnerAgreementAcceptance(req.body);
+      if (project.ownerAgreement?.accepted) {
+        project.ownerAgreementHistory ||= [];
+        project.ownerAgreementHistory.push(project.ownerAgreement.toObject ? project.ownerAgreement.toObject() : { ...project.ownerAgreement });
+      }
+      project.ownerAgreement = acceptance;
     }
     await project.save();
 
     await recordEvent({ projectId: project._id, type: "project_updated", user: req.user });
     return res.json({ success: true, project: presentProject(project, { includePrivate: true }) });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message, code: error.code });
     console.error("❌ updateOriginalProject error:", error);
     return res.status(500).json({ success: false, message: "Failed to update Originals project" });
   }
@@ -195,6 +198,9 @@ export const submitOriginalProjectForModeration = async (req, res) => {
       toState: project.state,
     });
 
+    // Delivery is retried by the notification worker if the email queue is unavailable.
+    try { await queueOriginalProjectModerationEmail({ project }); }
+    catch (error) { console.error("Originals moderation email queue failed:", error.message); }
     return res.json({ success: true, project: presentProject(project, { includePrivate: true }) });
   } catch (error) {
     console.error("❌ submitOriginalProjectForModeration error:", error);
@@ -253,7 +259,7 @@ export const listOriginalsModeration = async (req, res) => {
       return res.status(403).json({ success: false, message: "Admin access required" });
     }
     const projects = await originalProjectModel
-      .find({ "moderation.status": { $in: ["pending", "changes_requested"] } })
+      .find({ state: "pending_moderation", "moderation.status": "pending" })
       .sort({ "moderation.submittedAt": 1, createdAt: 1 })
       .lean();
     return res.json({ success: true, projects });
@@ -291,9 +297,10 @@ export const decideOriginalProjectModeration = async (req, res) => {
         return res.status(400).json({ success: false, message: "Project is incomplete", errors: validationErrors });
       }
       project.moderation.status = "approved";
+      project.moderation.launchEmailPending = true;
       project.state = project.hasInitialStem ? "role_round_open" : "foundation_open";
       project.publishedAt = new Date();
-      round = await originalRoundModel.create({
+      const initialRound = {
         projectId: project._id,
         type: project.hasInitialStem ? "instrument" : "foundation",
         sequence: 0,
@@ -306,7 +313,22 @@ export const decideOriginalProjectModeration = async (req, res) => {
         openedAt: new Date(),
         closesAt: null,
         clockStartedAt: null,
-      });
+      };
+      // Reuse an initial round left by an interrupted approval, rather than leaving
+      // the project permanently stuck behind the unique project/sequence index.
+      const { type, roleName, eligibleRoles, ...roundDefaults } = initialRound;
+      const roundRoles = { type, roleName, eligibleRoles };
+      try {
+        round = await originalRoundModel.findOneAndUpdate(
+          { projectId: project._id, sequence: 0 }, { $setOnInsert: roundDefaults, $set: roundRoles }, { upsert: true, new: true, runValidators: true },
+        );
+      } catch (error) {
+        if (error.code !== 11000) throw error;
+        round = await originalRoundModel.findOneAndUpdate(
+          { projectId: project._id, sequence: 0 }, { $set: roundRoles }, { new: true, runValidators: true },
+        );
+        if (!round) throw error;
+      }
       project.currentRoundId = round._id;
     } else if (decision === "request_changes") {
       if (!reason) return res.status(400).json({ success: false, message: "A reason is required" });
@@ -318,8 +340,13 @@ export const decideOriginalProjectModeration = async (req, res) => {
       project.state = "cancelled";
     }
 
-    await project.save();
-    await recordEvent({
+    const saved = await originalProjectModel.findOneAndUpdate(
+      { _id: project._id, state: previousState, "moderation.status": "pending" },
+      { $set: { state: project.state, moderation: project.moderation, publishedAt: project.publishedAt, currentRoundId: project.currentRoundId } },
+      { new: true, runValidators: true },
+    );
+    if (!saved) return res.status(409).json({ success: false, message: "Another moderator has already decided this project. Refresh the queue." });
+    try { await recordEvent({
       projectId: project._id,
       type: `moderation_${decision}`,
       user: req.user,
@@ -327,24 +354,13 @@ export const decideOriginalProjectModeration = async (req, res) => {
       toState: project.state,
       reason,
       metadata: round ? { roundId: String(round._id) } : {},
-    });
+    }); } catch (error) { console.error("Originals moderation audit write failed:", project._id, error.message); }
 
     let notification = null;
     if (decision === "approve") {
       try {
-        notification = await sendOriginalProjectApprovedNotifications({ project });
-        await recordEvent({
-          projectId: project._id,
-          type: "project_launch_notifications_sent",
-          user: req.user,
-          fromState: project.state,
-          toState: project.state,
-          metadata: {
-            attempted: notification.attempted,
-            sent: notification.sent,
-            failed: notification.failed,
-          },
-        });
+        notification = await queueOriginalProjectLaunchEmails({ project: saved });
+        await originalProjectModel.updateOne({ _id: project._id }, { $set: { "moderation.launchEmailPending": false } });
       } catch (notificationError) {
         console.error("❌ Originals approval notifications failed:", notificationError);
         notification = {
@@ -356,7 +372,7 @@ export const decideOriginalProjectModeration = async (req, res) => {
       }
     }
 
-    return res.json({ success: true, project, round, notification });
+    return res.json({ success: true, project: saved, round, notification });
   } catch (error) {
     console.error("❌ decideOriginalProjectModeration error:", error);
     if (error?.code === 11000) {
@@ -395,4 +411,9 @@ export const resendOriginalProjectLaunchNotifications = async (req, res) => {
     console.error("❌ resendOriginalProjectLaunchNotifications error:", error);
     return res.status(500).json({ success: false, message: "Failed to send Originals project notifications" });
   }
+};
+
+export const getOriginalOwnerAgreementTerms = (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  return res.json({ success: true, agreement: getOriginalOwnerAgreement() });
 };

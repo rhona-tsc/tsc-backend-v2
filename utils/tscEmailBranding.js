@@ -10,6 +10,8 @@ const INSTAGRAM_URL = "https://instagram.com/thesupremecollective";
 const YOUTUBE_URL =
   "https://www.youtube.com/channel/UC6HhRZA4XLVajrz5vk5vn2A";
 const WEBSITE_URL = "https://thesupremecollective.co.uk";
+const REGISTERED_OFFICE = "71-75 Shelton Street, Covent Garden, London, WC2H 9JQ, United Kingdom";
+const COMPANY_NUMBER = "16883956";
 const INSTAGRAM_ICON_URL =
   "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777056960/instagram-icon_rtespa.png";
 const YOUTUBE_ICON_URL =
@@ -47,10 +49,20 @@ export const buildTscEmailFooter = ({ audience = "client" } = {}) => `
       </p>
       ${audience === "musician" ? '<p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#555555;">Keep your profile up to date at <a href="https://admin.thesupremecollective.co.uk" style="color:#ff6667;text-decoration:none;font-weight:700;">admin.thesupremecollective.co.uk</a></p>' : ""}
       <p style="margin:0 0 8px;font-size:12px;line-height:1.7;color:#777777;">Copyright © ${new Date().getFullYear()} The Supreme Collective Ltd. All rights reserved.</p>
-      <p style="margin:0;font-size:12px;line-height:1.7;color:#777777;">Registered Office: 71-75 Shelton Street, Covent Garden, London, WC2H 9JQ, United Kingdom | Company Number: 16883956</p>
+      <p style="margin:0;font-size:12px;line-height:1.7;color:#777777;">Registered Office: ${REGISTERED_OFFICE} | Company Number: ${COMPANY_NUMBER}</p>
     </div>
   </div>
 `;
+
+export const buildTscEmailFooterText = () => [
+  'The Supreme Collective Ltd',
+  `Registered Office: ${REGISTERED_OFFICE}`,
+  `Company Number: ${COMPANY_NUMBER}`,
+  `Website: ${WEBSITE_URL}`,
+  `Instagram: ${INSTAGRAM_URL}`,
+  `YouTube: ${YOUTUBE_URL}`,
+  `WhatsApp: ${WHATSAPP_URL}`,
+].join('\n');
 
 export const buildBandEventSheetEmailHtml = ({
   firstName,

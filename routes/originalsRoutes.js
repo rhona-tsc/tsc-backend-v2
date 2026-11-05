@@ -1,4 +1,6 @@
+import { allowOriginalInvitationRequest } from "../services/originalsInvitationAccessService.js";
 import { changeOriginalProjectRole } from '../controllers/originalsRolesController.js';
+import { getOriginalReviewStatus } from '../controllers/originalsReviewController.js';
 import { getOriginalChatUnread, readOriginalChat } from '../controllers/originalsChatReadController.js';
 import { getOriginalReservationAgreements, renewFutureOriginalAgreement, reserveFutureOriginalRole, releaseFutureOriginalRole, releaseOriginalReservation } from "../controllers/originalsReservationsController.js";
 import { allowOriginalReferralRequest } from "../services/originalsReferralService.js";
@@ -12,6 +14,7 @@ import multer from "multer";
 import authUser from "../middleware/auth.js";
 import {
   createOriginalProject,
+  getOriginalOwnerAgreementTerms,
   decideOriginalProjectModeration,
   listMyOriginalProjects,
   listOriginalProjects,
@@ -55,7 +58,7 @@ const router = express.Router();
 router.use(authUser);
 router.use(async (req, res, next) => {
   if (canAccessOriginalsPreview(req.user)) return next();
-  try { if (await allowOriginalReferralRequest(req)) return next(); }
+  try { if (await allowOriginalReferralRequest(req) || await allowOriginalInvitationRequest(req)) return next(); }
   catch { return res.status(400).json({ success: false, message: "Could not check project invitation" }); }
   if (!isOriginalsEnabled()) {
     return res.status(503).json({
@@ -97,6 +100,7 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024, files: 1 },
 });
 
+router.get("/owner-agreement", getOriginalOwnerAgreementTerms);
 router.get("/projects", listOriginalProjects);
 router.get("/mine", listMyOriginalProjects);
 router.post("/projects", createOriginalProject);
@@ -113,6 +117,7 @@ router.post("/projects/:id/role-reservations", reserveFutureOriginalRole);
 router.post("/projects/:id/role-reservations/:futureId/release", releaseFutureOriginalRole);
 router.post("/reservations/:reservationId/release", releaseOriginalReservation);
 router.get("/projects/:id/workspace", getOriginalProjectWorkspace);
+router.get("/projects/:id/review-status", getOriginalReviewStatus);
 router.post("/projects/:id/assets", upload.single("file"), uploadOriginalAsset);
 router.get("/assets/:assetId/access", accessOriginalAsset);
 router.post("/rounds/:roundId/reservations", reserveOriginalRound);

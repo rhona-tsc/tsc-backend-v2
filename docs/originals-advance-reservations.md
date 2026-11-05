@@ -8,6 +8,14 @@ Advance places live in `originalrolereservation`, separate from timed recording 
 
 When the owner opens a matching round, waiting places activate into timed reservations in order. Their individual 24 hours start on activation. The normal seven-day round clock starts when the first timed reservation is created. A minute-by-minute worker recovers interrupted activation and queues/sends a recipient-specific round-open email with the deadline, project link and release instructions. Email failures retry without duplicating the recording reservation. Released, expired or no-longer-eligible reservations do not receive those emails. Previous rejection rules continue to block that role; a legitimate waiting place in another role can retain project membership.
 
+## Deadline reminder monitoring
+
+The workflow automation queues reservation reminders at 12, 6 and 1 hours before expiry. The minute-by-minute email worker now delivers those queued reminders. Each email includes the current UK deadline and a workspace link; uploading a file alone is distinguished from submitting it for review. Submitted, released, expired, cancelled, extended or previous-round reservations are checked again before delivery so stale reminders are cancelled. Failed email delivery retries up to five times using the existing notification lease and unique event key.
+
+During monitoring, these reminder emails BCC `hello@thesupremecollective.co.uk`. Set `ORIGINALS_RESERVATION_REMINDER_BCC_ENABLED=false` in the backend environment to stop the monitoring copies while retaining musician reminders. An unset value defaults to monitoring enabled. The address is not added to CC or the message body, and is omitted from BCC when it is already the primary recipient. This setting does not copy chat notifications, invitations, round-open or closure emails.
+
+Scheduling and delivery both require `ORIGINALS_AUTOMATION_ENABLED=true` and Originals to be enabled. The existing workflow automation switch also controls expiry and automatic round review transitions; this change does not enable it or alter the live environment. Deploy the backend and verify that setting before expecting deadline reminders or BCC copies. Validation uses a mocked email sender and sends no real email.
+
 ## Releasing places
 
 Musicians can release their own waiting place, or their own unsubmitted timed reservation. Waiting releases free an advance place immediately; timed releases set `slotHeld=false`, free a numbered place and cancel queued round-open emails. They do not delete recordings or reset the round's deadline. Submitted contributions still use the existing review/retraction process.

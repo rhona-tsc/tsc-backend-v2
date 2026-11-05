@@ -1,4 +1,5 @@
 // services/buildActFilterCard.js
+import { normalizeSetlistControl } from '../utils/setlistControl.js';
 // ESM module
 import { v4 as uuidv4 } from "uuid";
 
@@ -479,9 +480,7 @@ export function buildCard(act) {
     lineupSizes: lineup_sizes,
     smallestLineupSize: smallestLineupSize(act),
     instruments: canonicalInstruments(act),
-    setlist: ["smallTailoring", "mediumTailoring", "largeTailoring"].includes(act?.setlist)
-      ? act.setlist
-      : "",
+    setlist: normalizeSetlistControl(act?.setlist),
     wirelessByInstrument,
     wirelessInstruments,
 

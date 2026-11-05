@@ -1,5 +1,6 @@
 // services/normalizeActCard.js
 // ESM module
+import { normalizeSetlistControl } from '../utils/setlistControl.js';
 
 export function normalizeActCard(raw = {}, act = {}) {
   // Safe arrays/maps
@@ -31,6 +32,7 @@ export function normalizeActCard(raw = {}, act = {}) {
     lineupSizes: arr(raw.lineupSizes),
     smallestLineupSize: numOrNull(raw.smallestLineupSize),
     instruments: arr(raw.instruments),
+    setlist: normalizeSetlistControl(act.setlist ?? raw.setlist),
     wirelessByInstrument: mapObj,
     wirelessInstruments: arr(raw.wirelessInstruments),
 

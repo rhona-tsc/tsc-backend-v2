@@ -19,6 +19,8 @@ const originalAssetSchema = new mongoose.Schema(
     cloudinaryFormat: { type: String, default: "", trim: true },
     deliveryType: { type: String, default: "authenticated" },
     finalEligible: { type: Boolean, default: true },
+    // Uploader declaration only; null means it was not recorded for this file.
+    createdEntirelyWithAi: { type: Boolean, default: null },
     state: { type: String, enum: ["active", "hidden", "deleted"], default: "active", index: true },
   },
   { timestamps: true },

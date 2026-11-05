@@ -7,6 +7,23 @@ const unique = values => [...new Set(values.filter(value => typeof value === 'st
 const instrumentFields = ['instrument', 'instruments', 'instrumentation.instrument'];
 const voiceTypes = ['Lead Vocalist', 'Backing Vocalist', 'Lead Vocalist-Instrumentalist', 'Backing Vocalist-Instrumentalist'];
 const canonicalInstruments = ['Vocal', 'Guitar', 'Bass', 'Keys', 'Drums', 'Percussion', 'Saxophone', 'Trumpet', 'Trombone', 'Violin'];
+// `distinct` is rejected by this deployment's strict Stable API connection.
+// Aggregate only public profile tags, retaining string and legacy array fields.
+export async function originalMusicianFilterOptions() {
+  const fields = { instrument: 'instrument', instruments: 'instruments', instrumentation: 'instrumentation.instrument', vocals: 'vocals.type', vocalGenres: 'vocals.genres', genres: 'genres' };
+  const facets = Object.fromEntries(Object.entries(fields).map(([key, field]) => [key, [
+    { $project: { _id: 0, value: `$${field}` } },
+    { $unwind: '$value' },
+    { $match: { value: { $type: 'string' } } },
+    { $group: { _id: '$value' } },
+  ]]));
+  const [result = {}] = await Musician.aggregate([{ $facet: facets }]);
+  const values = key => (result[key] || []).map(row => row._id);
+  return {
+    instruments: unique([...canonicalInstruments, ...values('instrument'), ...values('instruments'), ...values('instrumentation'), ...values('vocals').filter(type => voiceTypes.includes(type))]).filter(value => value.length <= 80).sort((a,b) => a.localeCompare(b, 'en')),
+    genres: unique([...values('vocalGenres'), ...values('genres')]).filter(value => value.length <= 100).sort((a,b) => a.localeCompare(b, 'en')),
+  };
+}
 const badRequest = message => Object.assign(new Error(message), { status: 400 });
 function textParam(value, name, max) {
   if (value === undefined || value === '') return '';
@@ -66,14 +83,7 @@ export async function browseOriginalMusicians(params = {}, { allowEmail = false 
   });
   const result = { success: true, musicians, pagination: { page, pageSize, hasMore: records.length > pageSize, hasPrevious: page > 1 } };
   if (params.includeFilters === 'true' || params.includeFilters === true) {
-    const [instrument, instruments, instrumentation, vocals, vocalGenres, genres] = await Promise.all([
-      ...instrumentFields.map(field => Musician.distinct(field)),
-      Musician.distinct('vocals.type'), Musician.distinct('vocals.genres'), Musician.distinct('genres'),
-    ]);
-    result.filters = {
-      instruments: unique([...canonicalInstruments, ...instrument, ...instruments, ...instrumentation, ...vocals.filter(type => voiceTypes.includes(type))]).filter(value => value.length <= 80).sort((a,b) => a.localeCompare(b, 'en')),
-      genres: unique([...vocalGenres, ...genres]).filter(value => value.length <= 100).sort((a,b) => a.localeCompare(b, 'en')),
-    };
+    result.filters = await originalMusicianFilterOptions();
   }
   return result;
 }

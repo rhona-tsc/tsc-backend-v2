@@ -77,6 +77,7 @@ const ActFilterCardSchema = new mongoose.Schema(
     genres: { type: [String], default: [] },
     lineupSizes: { type: [String], default: [] },
     instruments: { type: [String], default: [] },
+    setlist: { type: String, enum: ["", "smallTailoring", "mediumTailoring", "largeTailoring"], default: "" },
 
     /* wireless */
     wirelessByInstrument: { type: Map, of: Boolean, default: {} },

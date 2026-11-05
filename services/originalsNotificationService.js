@@ -12,7 +12,7 @@ const EXACT_PREVIEW_EMAILS = [
   "ewanneilmcintosh@gmail.com",
 ];
 
-const PREVIEW_EMAIL_PATTERN = /^(?:tsc[^@]*@gmail\.com|hello@thesupremecollective\.co\.uk|rhona@thesupremecollective\.co\.uk|ewanneilmcintosh@gmail\.com)$/i;
+export const PREVIEW_EMAIL_PATTERN = /^(?:tsc[^@]*@gmail\.com|hello@thesupremecollective\.co\.uk|rhona@thesupremecollective\.co\.uk|ewanneilmcintosh@gmail\.com)$/i;
 
 const FALLBACK_NAMES = new Map([
   ["hello@thesupremecollective.co.uk", "there"],

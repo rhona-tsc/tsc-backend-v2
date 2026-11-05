@@ -17,6 +17,7 @@ const moderationSchema = new mongoose.Schema(
       default: "not_submitted",
     },
     submittedAt: { type: Date, default: null },
+    launchEmailPending: { type: Boolean, default: false },
     decidedAt: { type: Date, default: null },
     decidedBy: { type: mongoose.Schema.Types.ObjectId, ref: "musician", default: null },
     reason: { type: String, default: "", trim: true },
@@ -30,6 +31,9 @@ const ownerAgreementSchema = new mongoose.Schema(
     accepted: { type: Boolean, default: false },
     acceptedAt: { type: Date, default: null },
     displayName: { type: String, default: "", trim: true },
+    text: { type: String, default: "" },
+    textHash: { type: String, default: "" },
+    acknowledgement: { type: String, default: "" },
   },
   { _id: false },
 );
@@ -89,6 +93,7 @@ const originalProjectSchema = new mongoose.Schema(
     },
     moderation: { type: moderationSchema, default: () => ({}) },
     ownerAgreement: { type: ownerAgreementSchema, default: () => ({}) },
+    ownerAgreementHistory: { type: [ownerAgreementSchema], default: undefined },
     publishedAt: { type: Date, default: null },
     currentRoundId: {
       type: mongoose.Schema.Types.ObjectId,

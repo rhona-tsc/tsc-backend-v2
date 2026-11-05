@@ -6,7 +6,7 @@ const takeSchema = new mongoose.Schema(
     stemAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", required: true },
     stemAssetIds: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "originalasset" }], default: undefined, validate: { validator: value => !value || (value.length >= 1 && value.length <= 3 && new Set(value.map(String)).size === value.length), message: "Supply one to three distinct stems" } },
     wetStemAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", default: null },
-    mixdownAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", required: true },
+    mixdownAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", default: null, required: function () { return this.ownerDocument().listeningMixRequired !== false; } },
     notes: { type: String, default: "", trim: true, maxlength: 1000 },
   },
   { _id: true },
@@ -34,6 +34,7 @@ const originalSubmissionSchema = new mongoose.Schema(
     songwritingChoice: { type: String, enum: ["master_only", "songwriting_claim"], required: true },
     anonymous: { type: Boolean, default: false },
     creditName: { type: String, default: "", trim: true },
+    listeningMixRequired: { type: Boolean, default: true },
     takes: {
       type: [takeSchema],
       validate: [function validateTakes(value) {
@@ -43,6 +44,7 @@ const originalSubmissionSchema = new mongoose.Schema(
     notes: { type: String, default: "", trim: true, maxlength: 2000 },
     state: { type: String, enum: ["submitted", "accepted", "rejected", "withdrawn", "retraction_requested", "retracted"], default: "submitted", index: true },
     revision: { type: Number, default: 1, min: 1 },
+    ownerNotificationPending: { type: Boolean, default: false, index: true },
     selectionMode: { type: String, enum: ["whole_take", "selected_ranges", ""], default: "" },
     selectedTakeId: { type: mongoose.Schema.Types.ObjectId, default: null },
     selectedRanges: { type: [selectedRangeSchema], default: [] },

@@ -1,6 +1,7 @@
 import ActFilterCard from "../models/ActFilterCard.js";
 import actCardModel from "../models/actCard.model.js";
 import actModel from "../models/actModel.js";
+import { normalizeSetlistControl } from '../utils/setlistControl.js';
 
 
 const APPROVED_LIKE = [
@@ -30,7 +31,7 @@ function toArray(v) {
     .filter(Boolean);
 }
 
-async function hydrateLoveCounts(cards = []) {
+async function hydrateCardDetails(cards = []) {
   if (!Array.isArray(cards) || cards.length === 0) return [];
 
   const ids = cards
@@ -42,11 +43,11 @@ async function hydrateLoveCounts(cards = []) {
   const [actCards, acts] = await Promise.all([
     actCardModel
       .find({ actId: { $in: ids } })
-      .select("actId loveCount timesShortlisted numberOfShortlistsIn")
+      .select("actId loveCount timesShortlisted numberOfShortlistsIn setlist")
       .lean(),
     actModel
       .find({ _id: { $in: ids } })
-      .select("_id loveCount timesShortlisted numberOfShortlistsIn")
+      .select("_id loveCount timesShortlisted numberOfShortlistsIn setlist")
       .lean(),
   ]);
 
@@ -58,7 +59,7 @@ async function hydrateLoveCounts(cards = []) {
 
   for (const row of acts || []) {
     const id = String(row._id || row.actId || "");
-    byId.set(id, { ...(byId.get(id) || {}), ...row });
+    byId.set(id, { ...(byId.get(id) || {}), ...row, setlist: normalizeSetlistControl(row.setlist) });
   }
 
   return cards.map((card) => {
@@ -77,6 +78,7 @@ async function hydrateLoveCounts(cards = []) {
 
     return {
       ...card,
+      setlist: normalizeSetlistControl(source.setlist ?? card.setlist),
       loveCount,
       timesShortlisted:
         Number(card?.timesShortlisted ?? source?.timesShortlisted ?? 0) || 0,
@@ -178,7 +180,7 @@ export const getFilterCards = async (req, res) => {
         ActFilterCard.countDocuments(baseMatch),
       ]);
 
-      const enrichedCards = await hydrateLoveCounts(cards);
+      const enrichedCards = await hydrateCardDetails(cards);
 
       return res.json({
         page,
@@ -287,7 +289,7 @@ export const getFilterCards = async (req, res) => {
     const cards = Array.isArray(facet?.[0]?.data) ? facet[0].data : [];
     const total = Number(facet?.[0]?.total?.[0]?.n || 0);
 
-    const enrichedCards = await hydrateLoveCounts(cards);
+    const enrichedCards = await hydrateCardDetails(cards);
 
     return res.json({
       page,

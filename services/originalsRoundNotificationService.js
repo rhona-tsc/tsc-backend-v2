@@ -19,8 +19,8 @@ export const buildOriginalRoundOpenEmail = ({ project, reservation, firstName = 
   const deadline = new Date(reservation.expiresAt).toLocaleString('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' });
   return {
     subject: `${reservation.roleName} round is open — your place is reserved`,
-    text: `Hi ${firstName},\n\nThe ${reservation.roleName} round for “${project.title}” is now open. Your advance place is now a 24-hour recording reservation, ending ${deadline} (UK time).\n\nRead the latest guidance, upload one to three stems with a separate listening mix for each stem, alongside the existing project track or approved stems if available, then submit your contribution:\n${url}\n\nIf you cannot take part, release your reservation in the workspace so someone else can use the place.\n\nThe Supreme Collective`,
-    html: `<p>Hi ${escapeEmailHtml(firstName)},</p><p>The <strong>${escapeEmailHtml(reservation.roleName)}</strong> round for <strong>${escapeEmailHtml(project.title)}</strong> is now open. Your place is reserved until <strong>${escapeEmailHtml(deadline)} (UK time)</strong>.</p><p>Upload one to three stems with a separate listening mix for each stem, alongside the existing project track or approved stems if available.</p><p><a href="${escapeEmailHtml(url)}">Open the project and submit your recordings</a></p><p>If you cannot take part, release your reservation in the workspace so someone else can use the place.</p>`,
+    text: `Hi ${firstName},\n\nThe ${reservation.roleName} round for “${project.title}” is now open. Your advance place is now a 24-hour recording reservation, ending ${deadline} (UK time).\n\nRead the latest guidance, upload one to three stems, then submit your contribution. In the first foundation round you can submit stems on their own; a listening mix is optional. In later instrument rounds, include a separate listening mix for each stem alongside the project track or approved stems:\n${url}\n\nIf you cannot take part, release your reservation in the workspace so someone else can use the place.\n\nThe Supreme Collective`,
+    html: `<p>Hi ${escapeEmailHtml(firstName)},</p><p>The <strong>${escapeEmailHtml(reservation.roleName)}</strong> round for <strong>${escapeEmailHtml(project.title)}</strong> is now open. Your place is reserved until <strong>${escapeEmailHtml(deadline)} (UK time)</strong>.</p><p>Upload one to three stems. In the first foundation round you can submit stems on their own; a listening mix is optional. In later instrument rounds, include a separate listening mix for each stem alongside the project track or approved stems.</p><p><a href="${escapeEmailHtml(url)}">Open the project and submit your recordings</a></p><p>If you cannot take part, release your reservation in the workspace so someone else can use the place.</p>`,
   };
 };
 
@@ -35,7 +35,7 @@ export const buildOriginalAgreementReviewEmail = ({ project, reservation, firstN
 
 export async function runOriginalRoundNotifications({ emailSender = sendEmail, now = new Date(), limit = 50 } = {}) {
   if (!isOriginalsEnabled()) return;
-  const projectIds = await Future.distinct('projectId', { $or: [{ state: 'waiting' }, { state: 'activated', activeReservationId: null }] });
+  const projectIds = (await Future.aggregate([{ $match: { $or: [{ state: 'waiting' }, { state: 'activated', activeReservationId: null }] } }, { $group: { _id: '$projectId' } }])).map(item => item._id);
   for (const projectId of projectIds) {
     const project = await Project.findById(projectId).lean();
     const round = project?.currentRoundId && await Round.findById(project.currentRoundId).lean();

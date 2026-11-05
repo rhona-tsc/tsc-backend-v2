@@ -1,3 +1,6 @@
+import { deliverOriginalRoundLifecycleNotifications } from "./services/originalsRoundLifecycleNotificationService.js";
+import { deliverOriginalReservationReminders } from "./services/originalsReservationReminderService.js";
+import { deliverOriginalProjectEmails } from "./services/originalsProjectEmailService.js";
 import { isBalanceCheckout, fulfilBalanceCheckout } from "./services/bookingBalancePaymentService.js";
 import { runOriginalRoundNotifications } from "./services/originalsRoundNotificationService.js";
 import { deliverOriginalReferrals } from "./services/originalsReferralService.js";
@@ -886,10 +889,10 @@ cron.schedule("*/5 * * * *", async () => {
   }
 });
 
-// Chat email retries are independent of the optional workflow-state automation.
+// Originals email retries are independent of the optional workflow-state automation.
 cron.schedule("* * * * *", async () => {
   try {
-    const results = await Promise.allSettled([deliverOriginalChatNotifications(), deliverOriginalReferrals(), runOriginalRoundNotifications()]);
+    const results = await Promise.allSettled([deliverOriginalChatNotifications(), deliverOriginalReferrals(), runOriginalRoundNotifications(), deliverOriginalProjectEmails(), deliverOriginalRoundLifecycleNotifications(), deliverOriginalReservationReminders()]);
     for (const result of results) if (result.status === "rejected") console.error("Originals notification worker failed:", result.reason?.message || result.reason);
   }
   catch (error) { console.error("Originals chat notification retry failed:", error?.message || error); }

@@ -119,7 +119,7 @@ test('round email explains when the reservation expires and how to release it',(
  const email=buildOriginalRoundOpenEmail({project,reservation:{roleName:'Bass',expiresAt:new Date(+now+86400000)}});assert.match(email.text,/24-hour/);assert.match(email.text,/one to three stems/);assert.match(email.text,/release/);assert.match(email.text,new RegExp(projectId));
 });
 test('released advance reservations do not receive round-open email',async t=>{
- t.mock.method(Future,'distinct',async()=>[]);t.mock.method(Reservation,'find',()=>({limit:()=>({lean:async()=>[]})}));let once=false;
+ t.mock.method(Future,'aggregate',async()=>[]);t.mock.method(Reservation,'find',()=>({limit:()=>({lean:async()=>[]})}));let once=false;
  t.mock.method(Notification,'findOneAndUpdate',()=>({lean:async()=>once?null:(once=true,{_id:'job',projectId,recipientMusicianId:player,payload:{reservationId:'booking'},attempts:1})}));
  t.mock.method(Reservation,'findById',()=>({lean:async()=>({state:'released',expiresAt:new Date('2030-01-01')})}));t.mock.method(Project,'findById',()=>({lean:async()=>project}));t.mock.method(Musician,'findById',()=>({select:()=>({lean:async()=>({email:'fake@example.test'})})}));let state;
  t.mock.method(Notification,'updateOne',async(_query,update)=>{state=update.$set.state;});await runOriginalRoundNotifications({emailSender:()=>assert.fail('must not email a released reservation'),now});assert.equal(state,'cancelled');
@@ -131,7 +131,7 @@ test('simultaneous recording reservations receive different numbered places',asy
 });
 test('active advance reservation receives a real round-open email through the delivery worker',async t=>{
  const reservation={_id:'booking',projectId,roundId:'round',musicianId:player,roleName:'Bass',state:'active',expiresAt:new Date('2030-01-01')};
- t.mock.method(Future,'distinct',async()=>[]);t.mock.method(Future,'find',()=>({select:()=>({lean:async()=>[]})}));
+ t.mock.method(Future,'aggregate',async()=>[]);t.mock.method(Future,'find',()=>({select:()=>({lean:async()=>[]})}));
  t.mock.method(Reservation,'find',()=>({limit:()=>({lean:async()=>[]}),select:()=>({lean:async()=>[reservation]})}));
  t.mock.method(Submission,'find',()=>({select:()=>({lean:async()=>[]})}));t.mock.method(Invitation,'find',()=>({select:()=>({lean:async()=>[]})}));t.mock.method(Round,'find',()=>({select:()=>({lean:async()=>[round]})}));
  let once=false;t.mock.method(Notification,'findOneAndUpdate',()=>({lean:async()=>once?null:(once=true,{_id:'job',projectId,recipientMusicianId:player,payload:{reservationId:'booking'},attempts:1})}));
@@ -139,7 +139,7 @@ test('active advance reservation receives a real round-open email through the de
  t.mock.method(Notification,'updateOne',async(_query,update)=>{state=update.$set.state;});await runOriginalRoundNotifications({emailSender:async email=>{mail=email;return{ok:true};},now});assert.equal(state,'sent');assert.equal(mail.to,'fake@example.test');assert.match(mail.subject,/Bass round is open/);
 });
 test('round-open outbox is marked only after an idempotent recipient-specific notification is saved',async t=>{
- t.mock.method(Future,'distinct',async()=>[]);t.mock.method(Reservation,'find',()=>({limit:()=>({lean:async()=>[{_id:'booking',projectId,musicianId:player,state:'active',expiresAt:new Date('2030-01-01')}]})}));let queued,marked;
+ t.mock.method(Future,'aggregate',async()=>[]);t.mock.method(Reservation,'find',()=>({limit:()=>({lean:async()=>[{_id:'booking',projectId,musicianId:player,state:'active',expiresAt:new Date('2030-01-01')}]})}));let queued,marked;
  t.mock.method(Notification,'updateOne',async(query,update,options)=>{queued={query,update,options};});t.mock.method(Reservation,'updateOne',async(_query,update)=>{marked=update.$set.roundNotificationQueued;});t.mock.method(Notification,'findOneAndUpdate',()=>({lean:async()=>null}));
  await runOriginalRoundNotifications({emailSender:()=>assert.fail('no claimed mail jobs'),now});assert.equal(marked,true);assert.equal(queued.options.upsert,true);assert.equal(queued.query.eventKey,'reserved-round:booking');assert.equal(queued.update.$setOnInsert.payload.reservationId,'booking');
 });
@@ -194,7 +194,7 @@ test('a waiting musician can accept renewed terms without erasing earlier eviden
 
 test('agreement review email tells a waiting musician the round is open without claiming a countdown has started',async t=>{
  const waiting={_id:'future',projectId,musicianId:player,roleName:'Bass',state:'waiting'};
- t.mock.method(Future,'distinct',async()=>[]);futureSnapshot(t,[waiting]);t.mock.method(Future,'findById',()=>({lean:async()=>waiting}));
+ t.mock.method(Future,'aggregate',async()=>[]);futureSnapshot(t,[waiting]);t.mock.method(Future,'findById',()=>({lean:async()=>waiting}));
  t.mock.method(Reservation,'find',()=>({limit:()=>({lean:async()=>[]}),select:()=>({lean:async()=>[]})}));t.mock.method(Submission,'find',()=>({select:()=>({lean:async()=>[]})}));
  t.mock.method(Project,'findById',()=>({lean:async()=>project}));t.mock.method(Round,'findById',()=>({lean:async()=>round}));t.mock.method(Musician,'findById',()=>({select:()=>({lean:async()=>({email:'test@example.test',firstName:'Test'})})}));
  let once=false;t.mock.method(Notification,'findOneAndUpdate',()=>({lean:async()=>once?null:(once=true,{_id:'review-job',projectId,recipientMusicianId:player,template:'originals_reservation_agreement_review',payload:{futureId:'future',roundId:round._id,textHash:terms.textHash},attempts:1})}));

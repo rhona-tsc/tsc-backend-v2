@@ -26,6 +26,7 @@ import {
 import actCardModel from "../models/actCard.model.js";
 import { upsertActCardFromAct } from "../services/actCard.service.js";
 import { searchActCards } from "../controllers/actCardController.js";
+import { normalizeSetlistControl } from '../utils/setlistControl.js';
 import requireAnyAuth from "../middleware/requireAnyAuth.js";
 
 /* ------------------------------- LOG HELPERS ------------------------------ */
@@ -357,6 +358,7 @@ router.get("/cards", async (req, res) => {
     "status",
     "genres",
     "instruments",
+    "setlist",
     "leadRole",
     "vocalist",
     "loveCount",
@@ -374,8 +376,8 @@ router.get("/cards", async (req, res) => {
       .limit(Number(limit) || 200)
       .lean();
 
-    // Keep counters fresh from the acts collection. actcards can be stale if the
-    // card was built before loveCount existed or before a shortlist update.
+    // Read current counts and setlist choices from the source acts. Older cards
+    // lack setlist, so existing listings work without rewriting stored cards.
     const actIds = items
       .map((item) => item?.actId)
       .filter(Boolean);
@@ -383,7 +385,7 @@ router.get("/cards", async (req, res) => {
     const sourceActs = actIds.length
       ? await actModel
           .find({ _id: { $in: actIds } })
-          .select("_id loveCount timesShortlisted numberOfShortlistsIn")
+          .select("_id loveCount timesShortlisted numberOfShortlistsIn setlist")
           .lean()
       : [];
 
@@ -394,6 +396,7 @@ router.get("/cards", async (req, res) => {
           loveCount: Number(act.loveCount ?? act.timesShortlisted ?? act.numberOfShortlistsIn ?? 0) || 0,
           timesShortlisted: Number(act.timesShortlisted ?? 0) || 0,
           numberOfShortlistsIn: Number(act.numberOfShortlistsIn ?? 0) || 0,
+          setlist: normalizeSetlistControl(act.setlist),
         },
       ])
     );
@@ -403,6 +406,7 @@ router.get("/cards", async (req, res) => {
       if (!counts) {
         return {
           ...item,
+          setlist: normalizeSetlistControl(item.setlist),
           loveCount: Number(item?.loveCount ?? item?.timesShortlisted ?? item?.numberOfShortlistsIn ?? 0) || 0,
           timesShortlisted: Number(item?.timesShortlisted ?? 0) || 0,
           numberOfShortlistsIn: Number(item?.numberOfShortlistsIn ?? 0) || 0,
@@ -411,6 +415,7 @@ router.get("/cards", async (req, res) => {
 
       return {
         ...item,
+        setlist: counts.setlist,
         loveCount: counts.loveCount,
         timesShortlisted: counts.timesShortlisted,
         numberOfShortlistsIn: counts.numberOfShortlistsIn,
