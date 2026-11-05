@@ -10,6 +10,8 @@ import path from "path";
 import fs from "fs";
 import sendEmail from "../utils/sendEmail.js";
 import { getDepositPaidToInvoiceCompany } from "../utils/invoiceDeposit.js";
+import { resolveInvoiceAmounts } from "../utils/invoiceAmounts.js";
+import { createOrReuseBalanceCheckout, fulfilBalanceCheckout, balanceIsPaid } from "../services/bookingBalancePaymentService.js";
 import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
 
 const STRIPE_API_VERSION = "2024-06-20";
@@ -268,130 +270,43 @@ export const scheduleBalance = async (req, res) => {
 };
 
 export const getOrCreateBalanceLink = async (req, res) => {
+  res.set("Cache-Control", "no-store");
   try {
     const { idOrRef } = req.params;
-    const refreshRequested = String(req.query?.refresh || "") === "1";
-    const expectedAmountPence = Number(req.query?.expectedAmountPence || 0);
-
     const booking = await Booking.findOne(
       looksLikeObjectId(idOrRef) ? { _id: idOrRef } : { bookingId: idOrRef },
     );
-
-    if (!booking) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Booking not found." });
-    }
-
-    const full = Number(booking?.totals?.fullAmount || booking?.fee || 0);
-    const charged = Number(booking?.totals?.chargedAmount || 0);
-    const explicit = Number(booking?.balanceAmountPence ?? NaN);
-
-    const totalsBasedRemainingPence = Math.max(
-      0,
-      Math.round((full - charged) * 100),
-    );
-
-    const calculatedRemainingPence =
-      totalsBasedRemainingPence > 0
-        ? totalsBasedRemainingPence
-        : Number.isFinite(explicit) && explicit > 0
-          ? explicit
-          : 0;
-
-    const remainingPence =
-      expectedAmountPence > 0 ? expectedAmountPence : calculatedRemainingPence;
-
-    if (!remainingPence) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No outstanding balance." });
-    }
-
-    const existingAmountMatches =
-      Number(booking?.balanceAmountPence || 0) === remainingPence;
-
-    if (
-      remainingPence > 0 &&
-      (booking.balancePaid === true || booking.balanceStatus === "paid")
-    ) {
-      booking.balancePaid = false;
-      booking.balanceStatus = "sent";
-    }
-
-    if (
-      booking.balanceInvoiceUrl &&
-      existingAmountMatches &&
-      !refreshRequested
-    ) {
-      return res.json({ success: true, url: booking.balanceInvoiceUrl });
-    }
-
-    if (!existingAmountMatches || refreshRequested) {
-      booking.balanceInvoiceUrl = "";
-      booking.balanceInvoiceId = "";
-    }
-
-    const origin = getOrigin(req);
-    const ref = booking.bookingId || String(booking._id);
-
-    const balanceMetadata = {
-      category: "balance",
-      payment_stage: "balance",
-      paymentStage: "balance",
-      booking_mode: "balance",
-      bookingId: ref,
-      booking_ref: ref,
-      bookingMongoId: String(booking._id),
-      remainingPence: String(remainingPence),
-      amount_pence: String(remainingPence),
-      fullAmount: String(full),
-      chargedAmount: String(charged),
-    };
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      payment_method_types: ["card"],
-      line_items: [
-        {
-          price_data: {
-            currency: (booking?.totals?.currency || "GBP").toLowerCase(),
-            product_data: {
-              name: `Outstanding balance for ${ref}`,
-            },
-            unit_amount: remainingPence,
-          },
-          quantity: 1,
-        },
-      ],
-      success_url: `${origin}/event-sheet/${ref}?balancePaid=1&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/event-sheet/${ref}?balanceCanceled=1`,
-      allow_promotion_codes: true,
-
-      // Session metadata
-      metadata: balanceMetadata,
-
-      // PaymentIntent metadata — this is important because your webhook prefers PI metadata
-      payment_intent_data: {
-        metadata: balanceMetadata,
-      },
-    });
-
-    booking.balanceAmountPence = remainingPence;
-    booking.balanceInvoiceUrl = session.url;
-    booking.balanceInvoiceId = session.id;
-    booking.balanceStatus = "sent";
-    booking.balancePaid = false;
-
-    await booking.save();
-
-    return res.json({ success: true, url: session.url });
+    if (!booking) return res.status(404).json({ success: false, message: "Booking not found." });
+    // The amount is calculated from saved booking totals, never a query parameter.
+    const client = getStripeClientForCompany(booking.accounting?.invoiceCompany || booking.invoiceCompany);
+    const result = await createOrReuseBalanceCheckout(booking, client);
+    return res.json({ success: true, ...result });
   } catch (err) {
-    console.error("getOrCreateBalanceLink error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to create or fetch balance link.",
-    });
+    console.error("Balance checkout unavailable:", { type: err?.type, code: err?.code });
+    return res.status(503).json({ success: false,
+      message: "Online balance payment is unavailable right now. Please contact us before making a payment." });
+  }
+};
+
+export const getBalancePaymentStatus = async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    const { idOrRef } = req.params;
+    const booking = await Booking.findOne(
+      looksLikeObjectId(idOrRef) ? { _id: idOrRef } : { bookingId: idOrRef },
+    );
+    if (!booking) return res.status(404).json({ success: false });
+    const sessionId = String(req.query?.session_id || "");
+    if (!sessionId.startsWith("cs_") || sessionId !== booking.balanceInvoiceId) {
+      return res.status(400).json({ success: false, message: "Payment session does not match this booking." });
+    }
+    const client = getStripeClientForCompany(booking.accounting?.invoiceCompany || booking.invoiceCompany);
+    const session = await client.checkout.sessions.retrieve(sessionId);
+    const paid = await fulfilBalanceCheckout(session);
+    return res.json({ success: true, paid: paid || balanceIsPaid(booking) });
+  } catch (err) {
+    console.error("Balance verification failed:", { type: err?.type, code: err?.code });
+    return res.status(503).json({ success: false, message: "Payment confirmation is pending. Please contact us before paying again." });
   }
 };
 
@@ -1106,7 +1021,7 @@ const buildExtraAccountingLines = (invoiceExtras, vatRate = 0.2) => {
 };
 
 // Helper: build board invoice split
-const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
+export const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
   const invoiceType = String(rowForInvoice?.invoiceType || "main").toLowerCase();
   const {
   invoiceExtras,
@@ -1177,14 +1092,15 @@ const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
   const calculatedGross = round2(
     passThroughGross + commissionGross + extrasTotal + manualAdjustmentAmount,
   );
-  const invoiceGross = calculatedGross || storedGross;
-  const depositPaid = round2(getDepositPaidToInvoiceCompany(rowForInvoice));
-  const amountDue = round2(Math.max(invoiceGross - depositPaid, 0));
+  const amounts = resolveInvoiceAmounts({
+    storedGross,
+    calculatedGross,
+    adjustments: extrasTotal + manualAdjustmentAmount,
+    depositPaid: getDepositPaidToInvoiceCompany(rowForInvoice),
+  });
 
  return {
-  gross: invoiceGross,
-  depositPaid,
-  amountDue,
+  ...amounts,
   storedGross,
   extrasTotal,
   manualAdjustmentAmount,
@@ -1254,7 +1170,7 @@ const applyDepositInvoiceSplit = (split, row) => {
   return split;
 };
 
-const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
+export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
   new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: "A4",
@@ -1453,7 +1369,7 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     );
     doc
       .font("Helvetica")
-      .fontSize(isDepositInvoice ? 8.5 : 10)
+      .fontSize(isDepositInvoice || String(invoiceRef).length > 25 ? 8 : 10)
       .fillColor(text);
     doc.text(
       `${isReceipt ? "Receipt" : "Invoice"} ref: ${invoiceRef}`,
@@ -1553,7 +1469,8 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     // Extras show the single-item fee before quantity and the accounting split.
     // Main invoices retain their existing five-column layout.
     const unitW = isExtrasInvoice ? 62 : 0;
-    const splitW = isExtrasInvoice ? 64 : 72;
+    const totalOnly = !isExtrasInvoice && !isDepositInvoice && split.totalOnly;
+    const splitW = totalOnly ? 0 : isExtrasInvoice ? 64 : 72;
     const qtyW = isExtrasInvoice ? 34 : 38;
     const amountW = isExtrasInvoice ? 72 : 78;
     const descW = tableW - unitW - qtyW - amountW - splitW - splitW;
@@ -1588,20 +1505,22 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       align: "right",
     });
 
-    doc.text("Supplier fee", supplierX + 4, tableY + 9, {
-      width: splitW - 8,
-      align: "right",
-    });
-
-    doc.text(
-      "Mgmt fee",
-      managementX + 4,
-      tableY + 9,
-      {
+    if (!totalOnly) {
+      doc.text("Supplier fee", supplierX + 4, tableY + 9, {
         width: splitW - 8,
         align: "right",
-      },
-    );
+      });
+
+      doc.text(
+        "Mgmt fee",
+        managementX + 4,
+        tableY + 9,
+        {
+          width: splitW - 8,
+          align: "right",
+        },
+      );
+    }
 
     doc.text(
       "Amount",
@@ -1680,12 +1599,14 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
           };
         })
         .filter(Boolean);
+    } else if (totalOnly) {
+      rows.push({ description: "Band performance and contracted extras", qty: "1", amount: split.gross });
     } else {
       // Main booking displayed as one row split between supplier and management.
       rows.push({
         description: isDepositInvoice
           ? `Booking deposit${row?.actName ? ` — ${row.actName}` : ""}`
-          : "Band performance and music management",
+          : split.balanceOnly ? "Outstanding balance for band performance" : "Band performance and music management",
         qty: "1",
         supplierAmount: round2(split.passThroughGross),
         managementAmount: round2(split.commissionGross),
@@ -1805,34 +1726,35 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
 
       doc.font("Helvetica").fontSize(8);
 
-      doc.text(
-        item.refundableDeposit
-          ? `${formatMoney(item.supplierAmount)} refundable`
-          : Number(item.supplierAmount || 0) !== 0
-            ? formatMoney(item.supplierAmount)
+      if (!totalOnly) {
+        doc.text(
+          item.refundableDeposit
+            ? `${formatMoney(item.supplierAmount)} refundable`
+            : Number(item.supplierAmount || 0) !== 0
+              ? formatMoney(item.supplierAmount)
+              : "—",
+          supplierX + 4,
+          y + 9,
+          {
+            width: splitW - 8,
+            align: "right",
+          },
+        );
+
+        doc.fillColor(text);
+
+        doc.text(
+          Number(item.managementAmount || 0) !== 0
+            ? formatMoney(item.managementAmount)
             : "—",
-        supplierX + 4,
-        y + 9,
-        {
-          width: splitW - 8,
-          align: "right",
-        },
-      );
-
-      doc.fillColor(text);
-
-      doc.text(
-        Number(item.managementAmount || 0) !== 0
-          ? formatMoney(item.managementAmount)
-          : "—",
-        managementX + 4,
-        y + 9,
-        {
-          width: splitW - 8,
-          align: "right",
-        },
-      );
-
+          managementX + 4,
+          y + 9,
+          {
+            width: splitW - 8,
+            align: "right",
+          },
+        );
+      }
       doc.font("Helvetica-Bold").fontSize(8.5);
 
       doc.text(
@@ -1903,6 +1825,11 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
    } else {
   let offsetY = totalsY;
 
+  if (totalOnly) {
+    doc.text("Booking total", totalsX, offsetY, { width: 125 });
+    doc.text(formatMoney(split.gross), totalsX + 125, offsetY, { width: 90, align: "right" });
+    offsetY += 18;
+  } else {
   doc.text("Supplier / pass-through fees", totalsX, offsetY, {
     width: 125,
   });
@@ -1966,6 +1893,8 @@ const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       },
     );
     offsetY += 18;
+  }
+
   }
 
   if (Number(split.depositPaid || 0) > 0) {

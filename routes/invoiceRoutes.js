@@ -1,6 +1,7 @@
 import express from "express";
 import {
   getOrCreateBalanceLink,
+  getBalancePaymentStatus,
   getOrCreateAddonLink,
   createInvoicePayLink,
   createBoardInvoice,
@@ -11,6 +12,7 @@ import {
 const router = express.Router();
 
 router.get("/balance-link/:idOrRef", getOrCreateBalanceLink);
+router.get("/balance-status/:idOrRef", getBalancePaymentStatus);
 router.get("/addon-link/:idOrRef", getOrCreateAddonLink);
 router.post("/create", createInvoicePayLink);
 router.post("/create-board-invoice", createBoardInvoice);

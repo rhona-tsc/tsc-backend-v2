@@ -1374,6 +1374,9 @@ export const createCheckoutSession = async (req, res) => {
       },
 
       totals: {
+        bookingTotal: grossTotal,
+        contractTotal: grossTotal,
+        addOnsPostBooking: 0,
         fullAmount: grossTotal,
         depositAmount: fixedDeposit,
         chargedAmount: chargeGross,

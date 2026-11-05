@@ -1,3 +1,4 @@
+import { isBalanceCheckout, fulfilBalanceCheckout } from "./services/bookingBalancePaymentService.js";
 import { runOriginalRoundNotifications } from "./services/originalsRoundNotificationService.js";
 import { deliverOriginalReferrals } from "./services/originalsReferralService.js";
 import { deliverOriginalChatNotifications } from "./services/originalsChatNotificationService.js";
@@ -393,6 +394,11 @@ try {
     // ----------------------------------------------------
     case "checkout.session.completed": {
       const session = event.data.object;
+      if (isBalanceCheckout(session)) {
+        await fulfilBalanceCheckout(session);
+        break;
+      }
+
 
       // Prefer PaymentIntent metadata (you set booking_ref etc there)
       const piId = String(session.payment_intent || "");

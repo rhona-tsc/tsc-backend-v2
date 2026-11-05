@@ -1117,18 +1117,13 @@ const sanitizeBookingPatch = (body = {}) => {
   }
 
   if (patch.totals && isPlainObject(patch.totals)) {
-    patch.totals = {
-      ...patch.totals,
-      fullAmount: Number(patch.totals.fullAmount || 0) || 0,
-      depositAmount: Number(patch.totals.depositAmount || 0) || 0,
-      chargedAmount:
-        Number(
-          patch.totals.chargedAmount ??
-            patch.amount ??
-            patch.totals.depositAmount ??
-            0,
-        ) || 0,
-    };
+    patch.totals = { ...patch.totals };
+    // A partial totals edit must not erase the existing contract or payments.
+    for (const field of ["fullAmount", "depositAmount", "chargedAmount"]) {
+      if (Object.prototype.hasOwnProperty.call(patch.totals, field)) {
+        patch.totals[field] = Number(patch.totals[field] || 0) || 0;
+      }
+    }
   }
 
   if (patch.amount != null) {
@@ -1198,6 +1193,9 @@ const sanitizeBookingPatch = (body = {}) => {
 
 export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
   const patch = sanitizeBookingPatch(rawPatch);
+  const previousGross = Number(bookingDoc?.totals?.fullAmount ?? bookingDoc?.amount ?? bookingDoc?.fee ?? 0) || 0;
+  const previousCharged = Number(bookingDoc?.totals?.chargedAmount ?? bookingDoc?.amount ?? bookingDoc?.totals?.depositAmount ?? 0) || 0;
+  const previouslyPaid = bookingDoc.balancePaid === true || bookingDoc.balanceStatus === "paid" || bookingDoc?.totals?.balancePaid === true;
 
   const requestedEventDate = patch.eventDateISO || patch.eventDate || patch.date;
   if (requestedEventDate !== undefined) {
@@ -1346,6 +1344,11 @@ export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
     ) || 0;
 
   const computedBalance = Math.max(0, gross - charged);
+  // An existing manual/bank settlement is still valid after a non-financial
+  // edit. A missing/zero price alone must never manufacture a paid status.
+  const isPaid = (previouslyPaid && gross === previousGross && charged === previousCharged)
+    || (gross > 0 && computedBalance <= 0.01);
+  const outstanding = isPaid ? 0 : computedBalance;
 
   bookingDoc.totals = {
     ...(bookingDoc.totals?.toObject
@@ -1354,6 +1357,9 @@ export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
     fullAmount: gross,
     depositAmount: deposit,
     chargedAmount: charged,
+    remainingAmount: outstanding,
+    outstandingBalance: outstanding,
+    balancePaid: isPaid,
   };
 
   if (patch.accounting && isPlainObject(patch.accounting)) {
@@ -1371,12 +1377,10 @@ export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
         ? "BMM"
         : "TSC";
   }
-  bookingDoc.balanceAmountPence = Math.round(computedBalance * 100);
-
-  if (computedBalance > 0) {
-    bookingDoc.balancePaid = false;
-  } else {
-    bookingDoc.balancePaid = true;
+  bookingDoc.balanceAmountPence = Math.round(outstanding * 100);
+  bookingDoc.balancePaid = isPaid;
+  if (!isPaid && bookingDoc.balanceStatus === "paid") {
+    bookingDoc.balanceStatus = bookingDoc.balanceInvoiceUrl ? "sent" : "scheduled";
   }
 
   await bookingDoc.save();

@@ -1,3 +1,4 @@
+import { isBalanceCheckout, fulfilBalanceCheckout } from "../services/bookingBalancePaymentService.js";
 // routes/payments.js
 import express from "express";
 import Stripe from "stripe";
@@ -67,6 +68,10 @@ router.post(
     try {
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
+        if (isBalanceCheckout(session)) {
+          await fulfilBalanceCheckout(session);
+          return res.json({ received: true });
+        }
 
         const sessionId = session?.id || null;
         const paymentIntentId = session?.payment_intent || null;

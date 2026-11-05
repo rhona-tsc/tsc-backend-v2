@@ -309,9 +309,32 @@ const AddonPaymentSchema = new mongoose.Schema(
 /*                                  Booking                                   */
 /* -------------------------------------------------------------------------- */
 
+// Totals already exist on legacy bookings. Declaring the subdocument makes
+// them readable and writable on hydrated Mongoose documents as well as lean reads.
+// Leave absent values absent: a missing price must never become evidence of payment.
+const BookingTotalsSchema = new mongoose.Schema(
+  {
+    bookingTotal: Number,
+    contractTotal: Number,
+    fullAmount: Number,
+    depositAmount: Number,
+    chargedAmount: Number,
+    remainingAmount: Number,
+    outstandingBalance: Number,
+    addOnsPostBooking: Number,
+    postBookingAddOns: Number,
+    chargeMode: String,
+    currency: String,
+    isLessThanFourWeeks: Boolean,
+    balancePaid: Boolean,
+  },
+  { _id: false, strict: false },
+);
+
 const BookingSchema = new mongoose.Schema(
   {
     bookingId: { type: String, required: true },
+    totals: { type: BookingTotalsSchema, default: undefined },
 
     // Act/lineup identity used by allocation, event sheets and notifications.
     // Manual booking-board rows must retain the same links as website bookings.
@@ -395,6 +418,9 @@ const BookingSchema = new mongoose.Schema(
     },
     balanceInvoiceUrl: { type: String },
     balanceInvoiceId: { type: String },
+    balancePaymentSessionId: { type: String },
+    balancePaymentIntentId: { type: String },
+    balancePaidAt: { type: Date },
     stripeInvoiceId: { type: String }, // (if you ever use Stripe Invoices API)
     balancePaid: { type: Boolean, default: false },
     status: { type: String, required: true, default: "pending" },
