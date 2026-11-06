@@ -1,3 +1,4 @@
+import { enableBirthdayReviewSequence } from "../services/birthdayReviewSequenceService.js";
 // routes/bookingBoardRoutes.js
 
 import express from "express";
@@ -3569,6 +3570,18 @@ router.put("/:id/review", musicianAuth, async (req, res) => {
   } catch (error) {
     console.error("❌ booking review save failed", error);
     return res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// Saving a sequence does not send an email. The scheduled runner retains its allowlist gates.
+router.post("/:id/birthday-review-sequence", musicianAuth, async (req, res) => {
+  if (!isTSCAdmin(req.user)) return res.status(403).json({ success: false, message: "Only an administrator can set up review emails." });
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ success: false, message: "A valid booking is required." });
+  try {
+    const row = await enableBirthdayReviewSequence({ bookingModel: BookingBoardItem, bookingId: req.params.id });
+    return res.json({ success: true, row });
+  } catch (error) {
+    return res.status(error.status || 400).json({ success: false, message: error.message });
   }
 });
 

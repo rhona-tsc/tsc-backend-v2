@@ -7,7 +7,7 @@ const extras={extras:[{name:'Saxophone',price:640}],extrasInvoicePdfUrl:'https:/
 const render=(row,overrides={})=>{const rule=prepareEventDetailsReminderRule({...source,...overrides});return {rule,subject:renderEventDetailsReminderConditions(rule.subject,row,rule),body:renderEventDetailsReminderConditions(rule.body,row,rule)};};
 test('38 resolves the copied tags, uses Due Today and attaches the unpaid extras PDF',()=>{
  const result=render(extras);
- assert.equal(result.subject,source.subject);
+ assert.equal(result.subject,"Automated Reminder: Event Sheet, Spotify Playlist(/s) & Extras Balance Due Today");
  assert.match(result.body,/the 'extras' balance should also be settled today\. The issued invoice is attached and includes the BACS details\./);
  assert.match(result.body,/paid the 'extras' balance/);
  assert.doesNotMatch(result.body,/\{\{|by this date|Due Soon/);
@@ -31,7 +31,7 @@ test('38 with paid extras uses the simpler subject and completion wording',()=>{
 });
 test('38 does not claim an attachment when no extras PDF is issued or attachment is disabled',()=>{
  for(const [row,overrides] of [[{extras:extras.extras},{}],[extras,{attachInvoice:false}]]){
-  const result=render(row,overrides);assert.equal(result.subject,source.subject);
+  const result=render(row,overrides);assert.equal(result.subject,"Automated Reminder: Event Sheet, Spotify Playlist(/s) & Extras Balance Due Today");
   assert.match(result.body,/paid the 'extras' balance/);assert.doesNotMatch(result.body,/settled today|attached|BACS/);
   assert.equal(eventDetailsExtrasState(row,result.rule).shouldAttachInvoice,false);
  }

@@ -64,7 +64,7 @@ export function renderEventDetailsReminderConditions(template, row, rule = {}) {
   const values = {
     [AUTOMATION_37_TAGS.subject]: hasOutstandingExtras
       ? (dueToday
-        ? "Automated Reminder: Event Sheet, Spotify Playlist(/s) & 'Extras' Balance Due Today"
+        ? "Automated Reminder: Event Sheet, Spotify Playlist(/s) & Extras Balance Due Today"
         : "Automated Reminder: Event Sheet, Spotify Playlist(/s) & Extras Balance Due Soon")
       : `Automated Reminder: Event Sheet & Spotify Playlist(/s) Due ${dueToday ? "Today" : "Soon"}`,
     [AUTOMATION_37_TAGS.payment]: shouldAttachInvoice

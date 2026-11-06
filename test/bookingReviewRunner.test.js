@@ -45,3 +45,14 @@ test('global sender switch and rule switches are respected for the saved sequenc
  enable(t);const f=fixture();process.env.CLIENT_AUTOMATIONS_ENABLED='false';const off=await f.run('2027-01-03');assert.equal(off.enabled,false);assert.equal(f.sent.length,0);
  process.env.CLIENT_AUTOMATIONS_ENABLED='true';f.options.automationConfigModel={findOne:()=>({lean:async()=>({rules:rules.map(rule=>({...rule,enabled:false}))})})};await f.run('2027-01-03');assert.equal(f.sent.length,0);
 });
+
+test('the new birthday template sends from the saved central rule, without enrolling corporate bookings',async t=>{
+ enable(t);const f=fixture();
+ f.rows[0].reviewRequestPlan.items[2]={automationNumber:41,offsetDays:17};
+ f.options.automationConfigModel={findOne:()=>({lean:async()=>({rules:[...rules,{sourceNumber:41,enabled:true,subject:'Birthday review for {{act_name}}',body:'Hi {{client_first_name}}, lovely birthday memories!'}]})})};
+ for(const day of ['2027-01-03','2027-01-10','2027-01-17']) await f.run(day);
+ assert.equal(f.sent.length,3);assert.equal(f.sent[2].subject,'Birthday review for Soul Allegiance');
+ const corporate=fixture();corporate.rows[0].eventType='Corporate Event';corporate.rows[0].reviewRequestPlan.items[2]={automationNumber:41,offsetDays:17};
+ corporate.options.automationConfigModel=f.options.automationConfigModel;
+ await corporate.run('2027-01-03');assert.equal(corporate.sent.length,0);
+});

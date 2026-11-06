@@ -1,4 +1,5 @@
-export const REVIEW_AUTOMATION_NUMBERS = [3, 13, 15, 26, 30];
+import { BIRTHDAY_REVIEW_NUMBER, isBirthdayBooking } from "./birthdayReviewSequence.js";
+export const REVIEW_AUTOMATION_NUMBERS = [3, 13, 15, 26, 30, BIRTHDAY_REVIEW_NUMBER];
 const iso = value => value instanceof Date && !Number.isNaN(value.getTime())
   ? value.toISOString().slice(0, 10)
   : String(value || "").match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || "";
@@ -10,13 +11,14 @@ const shift = (value, days) => {
 };
 export const exclusiveReviewPlan = row => row?.reviewRequestPlan?.exclusive === true;
 export const reviewPlanItems = (row = {}) => row.reviewRequestPlan?.enabled === true
-  ? (row.reviewRequestPlan.items || []).filter(item => [3, 13, 15].includes(Number(item.automationNumber))
+  ? (row.reviewRequestPlan.items || []).filter(item => [3, 13, 15, BIRTHDAY_REVIEW_NUMBER].includes(Number(item.automationNumber))
     && Number.isInteger(item.offsetDays) && item.offsetDays > 0 && item.offsetDays <= 90)
     .slice(0, 3).sort((a, b) => a.offsetDays - b.offsetDays)
   : [];
 export const reviewPlanItem = (row, number) => reviewPlanItems(row)
   .find(item => Number(item.automationNumber) === Number(number));
 export const reviewPlanStopReason = (row = {}) => {
+  if (reviewPlanItem(row, BIRTHDAY_REVIEW_NUMBER) && !isBirthdayBooking(row)) return "birthday_sequence_event_mismatch";
   if (row.siteAutomationsEnabled === false) return "site_automations_off";
   if (row.bookingStatus === "cancelled") return "booking_cancelled";
   if (row.review?.doNotRequest === true) return "review_requests_off";
@@ -66,6 +68,9 @@ export function reviewPlanTemplate(rule = {}, row = {}) {
 }
 
 export function renderReviewPlanEmail(rule, row, actName) {
+  if (Number(rule.sourceNumber) === BIRTHDAY_REVIEW_NUMBER && !isBirthdayBooking(row)) {
+    throw new Error("The birthday review template is only for birthday bookings.");
+  }
   const template = reviewPlanTemplate(rule, row);
   const names = String(row.clientFirstNames || row.bookerName || row.clientName || "there");
   const firstName = names.split(/\s+|&/)[0];

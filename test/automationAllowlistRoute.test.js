@@ -25,6 +25,7 @@ test('the dashboard reads the sender allowlist, including environment additions,
     assert.equal(policy.capabilities?.automation37Extras,true);
     assert.equal(policy.capabilities?.automation38Extras,true);
     assert.equal(policy.capabilities?.bookingReviewPlans,true);
+    assert.equal(policy.capabilities?.birthdayReviewSequences,true);
     assert.equal(policy.senderEnabled,String(process.env.CLIENT_AUTOMATIONS_ENABLED || "").trim().toLowerCase()==="true");
     assert.ok(policy.emails.includes('sue_young1576@hotmail.com'));
     assert.ok(policy.bookingRefs.includes('UUZfW'));

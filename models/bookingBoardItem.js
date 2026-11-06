@@ -389,7 +389,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
         configuredAt: Date,
         items: [{
           _id: false,
-          automationNumber: { type: Number, enum: [3, 13, 15], required: true },
+          automationNumber: { type: Number, enum: [3, 13, 15, 41], required: true },
           offsetDays: { type: Number, min: 1, max: 90, required: true },
           subject: String,
           body: String,
