@@ -2,7 +2,7 @@ import { authoriseOriginalAsset } from '../services/originalsAssetAccessService.
 import { requireOriginalStemReviews } from '../services/originalsRecordingContextService.js';
 import { originalSubmissionCommit } from "../services/originalsSubmissionCommitService.js";
 import { originalStemChatActivity } from "../services/originalsStemChatActivityService.js";
-import { addOriginalAssetCredits } from "../services/originalsAssetCreditService.js";
+import { addOriginalAssetCredits, addOriginalRoleCredits } from "../services/originalsAssetCreditService.js";
 import { advanceOriginalRound } from "../services/originalsRoundProgressionService.js";
 import { browseOriginalMusicians } from "../services/originalsMusicianDirectoryService.js";
 import { canSeeMusicianInDirectory } from '../services/musicianDirectoryVisibility.js';
@@ -112,6 +112,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
     }
     const workspace = presentOriginalWorkspace({ project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages: messages.reverse(), futureReservations }, req.user);
     workspace.assets = await addOriginalAssetCredits({ assets: workspace.assets, project, submissions, reservations });
+    workspace.roleProgress = await addOriginalRoleCredits({ roles: workspace.roleProgress, project, submissions, reservations });
     return res.json(workspace);
   } catch (error) {
     console.error("❌ getOriginalProjectWorkspace error:", error);
