@@ -1,3 +1,4 @@
+import { processOriginalRevisionTimers } from './originalsRevisionService.js';
 import originalEventModel from "../models/originalEventModel.js";
 import originalNotificationModel from "../models/originalNotificationModel.js";
 import originalProjectModel from "../models/originalProjectModel.js";
@@ -92,5 +93,6 @@ export const runOriginalsAutomation = async ({ now = new Date() } = {}) => {
     result.roundsClosed += 1;
   }
 
+  await processOriginalRevisionTimers({ now });
   return result;
 };

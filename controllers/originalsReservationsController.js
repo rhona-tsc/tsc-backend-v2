@@ -22,7 +22,7 @@ export async function reserveFutureOriginalRole(req, res) {
     if (existing) return res.status(409).json({ success: false, message: 'You already have an advance place for this role.' });
     const anonymous = req.body.anonymous === true, creditName = String(req.body.creditName || '').trim();
     if (anonymous && !creditName) return res.status(400).json({ success: false, message: 'Enter an artistic name for anonymous credits' });
-    const agreement = await recordOriginalAgreement({ input: req.body.agreement, projectId: project._id, musicianId, roleName: role.name });
+    const agreement = await recordOriginalAgreement({ input: req.body.agreement, projectId: project._id, projectTitle: project.title, musicianId, roleName: role.name });
     for (let seatNumber = 1; seatNumber <= 3; seatNumber++) {
       try {
         const reservation = await Future.create({ projectId: project._id, musicianId, roleName: role.name, roleKey: roleKey(role.name), seatNumber, anonymous, creditName, agreementAcceptanceId: agreement._id, agreementVersion: agreement.version, agreementTextHash: agreement.textHash });
@@ -68,11 +68,11 @@ export async function renewFutureOriginalAgreement(req, res) {
     const musicianId = getOriginalsUserId(req.user);
     const existing = await Future.findOne({ _id: req.params.futureId, projectId: req.params.id, musicianId, state: 'waiting' }).lean();
     if (!existing) return res.status(409).json({ success: false, message: 'This advance place is no longer waiting. Refresh the project.' });
-    const agreement = await recordOriginalAgreement({ input: req.body.agreement, projectId: req.params.id, musicianId, roleName: existing.roleName });
+    const project = await Project.findById(req.params.id).lean();
+    const agreement = await recordOriginalAgreement({ input: req.body.agreement, projectId: req.params.id, projectTitle: project?.title || '', musicianId, roleName: existing.roleName });
     // Retain the old acceptance in the append-only evidence collection.
     const reservation = await Future.findOneAndUpdate({ _id: existing._id, musicianId, state: 'waiting' }, { $set: { agreementAcceptanceId: agreement._id, agreementVersion: agreement.version, agreementTextHash: agreement.textHash } }, { new: true }).lean();
     if (!reservation) return res.status(409).json({ success: false, message: 'This place has changed. Refresh the project.' });
-    const project = await Project.findById(req.params.id).lean();
     const round = project?.currentRoundId ? await Round.findById(project.currentRoundId).lean() : null;
     if (project && round) await activateOriginalRoleReservations({ project, round });
     return res.json({ success: true, reservation });

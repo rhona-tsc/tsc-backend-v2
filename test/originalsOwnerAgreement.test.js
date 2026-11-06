@@ -75,6 +75,8 @@ test('creating a project records the agreement shown against the signed-in owner
   assert.equal(String(saved.ownerId), owner);
   assert.equal(saved.ownerAgreement.textHash, getOriginalOwnerAgreement().textHash);
   assert.equal(saved.ownerAgreement.displayName, 'Example Owner');
+  assert.equal(saved.ownerAgreement.receiptPending, true);
+  assert.equal(saved.ownerAgreement.projectTitle, 'An original song');
 });
 test('stale owner terms cannot create a project or write an acceptance', async t => {
   profile(t); let writes = 0;

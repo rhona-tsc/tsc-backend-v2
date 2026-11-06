@@ -128,7 +128,7 @@ test('the activity marker is committed with a submission and an aborted transact
   const state = setup(t, []), payload = { projectId, roundId, reservationId, musicianId, roleName: 'Click', category: 'contribution', takes: [{ stemAssetId: stem }] };
   const saved = await originalSubmissionCommit.run({ reservationId, musicianId, payload, now: at });
   assert.equal(saved.submittedChatPending, true); assert.equal(state.data.submissions[0].submittedChatPending, true);
-  await assert.rejects(originalSubmissionCommit.run({ reservationId, musicianId, payload, now: at }), /round has closed/);
+  await assert.rejects(originalSubmissionCommit.run({ reservationId, musicianId, payload, now: at }), /Reopen your recording session/);
   assert.equal(state.data.submissions.length, 1);
 });
 

@@ -39,6 +39,7 @@ export async function advanceOriginalRound({ projectId, fromRoundId, type, roleN
         nextRole = type === 'mix' ? 'Mix producer' : 'Mastering engineer';
       }
       const pending = await Submission.find({ projectId: project._id, roundId: previous._id, state: 'submitted' }).session(session).lean();
+      if (pending.some(item => item.revisionRequest?.status === 'pending' || (item.revisionSession?.status === 'editing' && new Date(item.revisionSession.expiresAt) > now))) throw conflict('Respond to pending revision requests and allow open revision sessions to finish before opening the next round');
       const kept = await Submission.find({ projectId: project._id, roundId: previous._id, $or: [{ state: 'accepted' }, { state: 'retraction_requested', selectionMode: { $in: ['whole_take', 'selected_ranges'] } }] }).session(session).lean();
       const keptIds = kept.map(item => item.reservationId);
       const [round] = await Round.create([{ projectId: project._id, type, sequence: previous.sequence + 1, roleName: nextRole,

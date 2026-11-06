@@ -5,7 +5,9 @@ import mongoose from 'mongoose';
 const schema = new mongoose.Schema({
   projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'originalproject', required: true },
   eventKey: { type: String, required: true, unique: true },
-  kind: { type: String, enum: ['moderation', 'launch', 'submission', 'submission_confirmation'], required: true },
+  kind: { type: String, enum: ['moderation', 'launch', 'submission', 'submission_confirmation', 'revision'], required: true },
+  revisionEventId: String,
+  revisionAction: String,
   submissionId: { type: mongoose.Schema.Types.ObjectId, ref: 'originalsubmission', default: null },
   revision: { type: Number, default: null },
   ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'musician', default: null },

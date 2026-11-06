@@ -40,10 +40,10 @@ export function presentOriginalWorkspace({ project, rounds, reservations, submis
     success: true, viewerId, permissions: { canManage, canIllustrateTscShare: String(user?.email || user?.useremail || '').trim().toLowerCase() === 'hello@thesupremecollective.co.uk' }, project: visibleProject, rounds,
     activeSlotCount: reservations.filter(item => String(item.roundId) === String(project.currentRoundId) && (item.state === 'active' && new Date(item.expiresAt) > new Date() || item.state === 'submitted') && item.slotHeld !== false && !submissions.some(sub => String(sub.reservationId) === String(item._id) && ['rejected','withdrawn','retracted'].includes(sub.state))).length,
     reservations: canManage ? reservations : reservations.filter(item => String(item.musicianId) === viewerId),
-    submissions: visibleSubmissions,
+    submissions: visibleSubmissions.map(item => canManage || String(item.musicianId) === viewerId ? item : { ...item, previousVersions: [], revisionRequest: undefined, revisionSession: undefined }),
     ...(canManage ? { reviewStatus: originalReviewStatus(submissions), recordingPlan: originalRecordingPlan({ project, rounds, submissions }) } : {}),
     assets: canManage ? assets : assets.filter(item => item.state === 'active' && (String(item.ownerId) === viewerId || originalReferenceKinds.has(item.kind) || (project.initialAssetIds || []).some(id => String(id) === String(item._id)) || acceptedAssetIds.has(String(item._id)) || chatAssetIds.has(String(item._id)))),
-    notifications: canManage ? notifications : [], invitations: canManage ? invitations : [],
+    notifications: canManage ? notifications.filter(item => item.template !== 'originals_signed_agreement_copy') : [], invitations: canManage ? invitations : [],
     royaltyPreview: previewOriginalsSplits({ project, submissions }),
     creditVersions, issues: canManage ? issues : issues.filter(item => String(item.openedBy) === viewerId || visibleSubmissionIds.has(String(item.submissionId))), messages,
   };

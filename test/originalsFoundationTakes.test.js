@@ -58,6 +58,21 @@ test('later rounds accept stems without a separate listening mix using server po
   assert.equal(res.code, 201); assert.equal(state.saved.listeningMixRequired, false);
   assert.equal(state.reservationSaved, 1);
 });
+test('effects labels persist separately for each stem, including an effects-only submission', async t => {
+  const state = setup(t, 'instrument');
+  const res = await submit([{ stemAssetId: stems[0], effects: 'with_effects' }, { stemAssetId: stems[1], effects: 'without_effects' }]);
+  assert.equal(res.code, 201);
+  assert.deepEqual(state.saved.takes.map(take => take.effects), ['with_effects', 'without_effects']);
+  assert.ok(state.saved.takes.every(take => take.wetStemAssetId === null));
+  const assets = [{ _id: stems[0], kind: 'take_stem' }];
+  assert.equal(originalTakeKindsValid([{ stemAssetId: stems[0], effects: 'with_effects' }], assets, { listeningMixRequired: false }), true);
+  assert.equal(originalTakeKindsValid([{ stemAssetId: stems[0], effects: 'unknown' }], assets, { listeningMixRequired: false }), false);
+});
+test('the four-stem file limit applies across all options and effects references together', () => {
+  const ids = [...stems, mix, "777777777777777777777777"], assets = ids.map(_id => ({ _id, kind: 'take_stem' }));
+  const tooMany = [{ stemAssetId: ids[0], stemAssetIds: ids.slice(0, 2) }, { stemAssetId: ids[2], stemAssetIds: [ids[2], ids[3]], wetStemAssetId: ids[4] }];
+  assert.equal(originalTakeKindsValid(tooMany, assets, { listeningMixRequired: false }), false);
+});
 test('unavailable, foreign, malformed and wrong-kind optional mixdowns are refused', async t => {
   const state = setup(t);
   for (const mixdownAssetId of [mix, 'invalid-id', stems[1]]) {
@@ -75,27 +90,28 @@ test('schema permits missing mixdowns only for server-recorded foundation submis
   await assert.rejects(new Submission(base).validate(), /mixdownAssetId/);
   await assert.rejects(new Submission({ ...base, listeningMixRequired: true }).validate(), /mixdownAssetId/);
 });
-test('foundation and later instrument replacements both accept a stem alone', async t => {
-  const state = setup(t); let saves = 0;
-  const doc = new Submission({ projectId, roundId, reservationId, musicianId, roleName: 'Keys', state: 'submitted', songwritingChoice: 'master_only', takes: [{ stemAssetId: stems[1], mixdownAssetId: mix }] });
-  doc.save = async () => { await doc.validate(); saves++; };
+test('legacy replacement endpoint uses the timed transactional revision service', async t => {
+  const state = setup(t);
+  const doc = new Submission({ projectId, roundId, reservationId, musicianId, roleName: 'Keys', state: 'submitted', songwritingChoice: 'master_only', takes: [{ stemAssetId: stems[1] }] });
   t.mock.method(Submission, 'findById', async () => doc);
-  t.mock.method(Round, 'exists', async () => false);
-  t.mock.method(Asset, 'updateMany', async () => ({}));
-  doc.submittedAt = new Date('2026-01-01T00:00:00Z');
-  const replacedAfter = Date.now();
-  let res = response(); await replaceOriginalSubmission({ user: { id: musicianId }, params: { submissionId: String(doc._id) }, body: { takes: [{ stemAssetId: stems[0] }] } }, res);
-  assert.equal(res.code, 200); assert.equal(saves, 1); assert.equal(doc.ownerNotificationPending, true); assert.equal(doc.listeningMixRequired, false); assert.equal(doc.takes[0].mixdownAssetId, null); assert.ok(doc.submittedAt.getTime() >= replacedAfter);
-  assert.equal(doc.submitterConfirmationPending, true);
-  t.mock.method(Round, 'findById', () => ({ lean: async () => ({ _id: roundId, projectId, type: 'instrument', state: 'open', sequence: 0 }) }));
-  res = response(); await replaceOriginalSubmission({ user: { id: musicianId }, params: { submissionId: String(doc._id) }, body: { takes: [{ stemAssetId: stems[0] }] } }, res);
-  assert.equal(res.code, 200); assert.equal(saves, 2); assert.equal(state.reservationSaved, 0);
+  let called;
+  t.mock.method(originalSubmissionCommit, 'run', async args => { called = args; return { revision: 2 }; });
+  const res = response(); await replaceOriginalSubmission({ user: { id: musicianId }, params: { submissionId: String(doc._id) }, body: { takes: [{ stemAssetId: stems[0] }] } }, res);
+  assert.equal(res.code, 200); assert.equal(String(called.reservationId), reservationId); assert.equal(called.payload.takes[0].stemAssetId, stems[0]); assert.equal(state.reservationSaved, 0);
 });
-test('new contributor terms describe browser alignment review without changing production terms', () => {
+test('updated terms describe alignment, four files and timed revisions', () => {
   const agreement = getOriginalAgreement();
-  assert.equal(agreement.version, 'originals-contributor-v0.6');
+  assert.equal(agreement.version, 'originals-contributor-v0.8');
   assert.match(agreement.sections[0].text, /separate listening mix is optional/);
   assert.match(agreement.sections[0].text, /Review each newly uploaded stem.*zero point.*before submitting/);
-  assert.equal(getOriginalAgreement('mix').version, 'originals-mix-v0.3');
-  assert.equal(getOriginalAgreement('master').version, 'originals-master-v0.3');
+  assert.match(agreement.sections[0].text, /Label each file accordingly.*four-file limit/);
+  assert.equal(getOriginalAgreement('mix').version, 'originals-mix-v0.4');
+  assert.equal(getOriginalAgreement('master').version, 'originals-master-v0.4');
+});
+test('four clean/effects stem options persist; a fifth option is rejected instead of being silently dropped', async t => {
+  const ids=[...stems,'555555555555555555555554','555555555555555555555555'];
+  const state=setup(t,'instrument',ids.map(_id=>({_id,kind:'take_stem'})));
+  const options=ids.map((stemAssetId,index)=>({stemAssetId,effects:index%2?'with_effects':'without_effects'}));
+  let res=await submit(options.slice(0,4));assert.equal(res.code,201);assert.equal(state.saved.takes.length,4);
+  state.saved=null;res=await submit(options);assert.equal(res.code,400);assert.equal(state.saved,null);
 });

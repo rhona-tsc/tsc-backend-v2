@@ -107,6 +107,7 @@ export const createOriginalProject = async (req, res) => {
     }
 
     const ownerAgreement = originalOwnerAgreementAcceptance(req.body);
+    if (ownerAgreement.accepted) ownerAgreement.projectTitle = fields.title;
     const project = await originalProjectModel.create({
       ...fields,
       ownerId,
@@ -148,6 +149,7 @@ export const updateOriginalProject = async (req, res) => {
         return res.status(403).json({ success: false, message: "Only the project owner can accept the owner agreement." });
       }
       const acceptance = originalOwnerAgreementAcceptance(req.body);
+      acceptance.projectTitle = project.title;
       if (project.ownerAgreement?.accepted) {
         project.ownerAgreementHistory ||= [];
         project.ownerAgreementHistory.push(project.ownerAgreement.toObject ? project.ownerAgreement.toObject() : { ...project.ownerAgreement });

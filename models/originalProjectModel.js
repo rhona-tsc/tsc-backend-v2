@@ -35,6 +35,8 @@ const ownerAgreementSchema = new mongoose.Schema(
     text: { type: String, default: "" },
     textHash: { type: String, default: "" },
     acknowledgement: { type: String, default: "" },
+    projectTitle: { type: String, default: "" },
+    receiptPending: { type: Boolean, default: false },
   },
   { _id: false },
 );
@@ -109,6 +111,8 @@ const originalProjectSchema = new mongoose.Schema(
 
 originalProjectSchema.index({ state: 1, publishedAt: -1, createdAt: -1 });
 originalProjectSchema.index({ "moderation.status": 1, createdAt: 1 });
+originalProjectSchema.index({ "ownerAgreement.receiptPending": 1 });
+originalProjectSchema.index({ "ownerAgreementHistory.receiptPending": 1 });
 
 const originalProjectModel =
   mongoose.models.originalproject ||

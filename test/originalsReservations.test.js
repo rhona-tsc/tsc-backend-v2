@@ -111,12 +111,12 @@ test('waiting for a different future role retains membership, but a rejected rol
  const base={project,rounds:[round],reservations:[],submissions:[{musicianId:player,roleName:'Vocal',roundId:'old',state:'rejected'}],invitations:[],futureReservations:[{musicianId:player,roleName:'Bass',state:'waiting'}]};
  assert.equal(originalParticipation(base,player,now).notify,true);base.futureReservations[0].roleName='Vocal';assert.equal(originalParticipation(base,player,now).canAccess,false);
 });
-test('three stems and one shared listening mix are valid; a fourth stem is refused',()=>{
- const stems=['a','b','c'],assets=[...stems.map(_id=>({_id,kind:'take_stem'})),{_id:'mix',kind:'take_mixdown'},{_id:'d',kind:'take_stem'}];
- const take={stemAssetId:'a',stemAssetIds:stems,mixdownAssetId:'mix'};assert.equal(originalTakeKindsValid([take],assets),true);assert.equal(originalTakeKindsValid([{...take,stemAssetIds:[...stems,'d']}],assets),false);assert.equal(originalTakeKindsValid([{...take,wetStemAssetId:'d'}],assets),false);
+test('four stems and one shared listening mix are valid; a fifth stem is refused',()=>{
+ const stems=['a','b','c'],assets=[...stems.map(_id=>({_id,kind:'take_stem'})),{_id:'mix',kind:'take_mixdown'},{_id:'d',kind:'take_stem'},{_id:'e',kind:'take_stem'}];
+ const take={stemAssetId:'a',stemAssetIds:stems,mixdownAssetId:'mix'};assert.equal(originalTakeKindsValid([take],assets),true);assert.equal(originalTakeKindsValid([{...take,stemAssetIds:[...stems,'d']}],assets),true);assert.equal(originalTakeKindsValid([{...take,stemAssetIds:[...stems,'d'],wetStemAssetId:'e'}],assets),false);
 });
 test('round email explains when the reservation expires and how to release it',()=>{
- const email=buildOriginalRoundOpenEmail({project,reservation:{roleName:'Bass',expiresAt:new Date(+now+86400000)}});assert.match(email.text,/24-hour/);assert.match(email.text,/one to three stems/);assert.match(email.text,/release/);assert.match(email.text,new RegExp(projectId));
+ const email=buildOriginalRoundOpenEmail({project,reservation:{roleName:'Bass',expiresAt:new Date(+now+86400000)}});assert.match(email.text,/24-hour/);assert.match(email.text,/one to four stems/);assert.match(email.text,/release/);assert.match(email.text,new RegExp(projectId));
 });
 test('released advance reservations do not receive round-open email',async t=>{
  t.mock.method(Future,'aggregate',async()=>[]);t.mock.method(Reservation,'find',()=>({limit:()=>({lean:async()=>[]})}));let once=false;

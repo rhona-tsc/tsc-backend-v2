@@ -132,7 +132,7 @@ export async function deliverOriginalProjectEmails({ emailSender = sendEmail, em
       if (job.kind === 'submission') {
         const submission = await submissionRepository.findById(job.submissionId).lean();
         eligible = project && submission && String(project._id) === String(submission.projectId) && String(project.ownerId) === String(job.ownerId)
-          && !['cancelled', 'archived'].includes(project.state) && submission.state === 'submitted' && Number(submission.revision || 1) === job.revision;
+          && !['cancelled', 'archived'].includes(project.state) && submission.state === 'submitted' && submission.revisionSession?.status !== 'editing' && Number(submission.revision || 1) === job.revision;
         if (eligible) {
           const owner = await musicianRepository.findById(project.ownerId).select('email').lean();
           to = String(owner?.email || project.ownerEmail || '').trim().toLowerCase();
@@ -152,6 +152,22 @@ export async function deliverOriginalProjectEmails({ emailSender = sendEmail, em
           else {
             to = String(musician.email || '').trim().toLowerCase();
             if (!to) throw new Error('Submitting musician has no email address');
+          }
+        }
+      }
+      if (job.kind === 'revision') {
+        const submission = await submissionRepository.findById(job.submissionId).lean();
+        eligible = project && submission && submission.state === 'submitted' && String(project.currentRoundId) === String(submission.roundId) && !['cancelled', 'archived', 'paused'].includes(project.state);
+        if (eligible) {
+          const request = submission.revisionRequest, recording = submission.revisionSession;
+          eligible = ['requested', 'escalated'].includes(job.revisionAction) ? request?.id === job.revisionEventId && request.status === 'pending'
+            : job.revisionAction === 'declined' ? request?.id === job.revisionEventId && request.status === 'declined'
+              : recording?.id === job.revisionEventId && recording.status === (job.revisionAction === 'expired' ? 'expired' : 'editing') && (job.revisionAction === 'expired' || new Date(recording.expiresAt) > now);
+          if (eligible && job.revisionAction !== 'escalated') {
+            const recipientId = job.revisionAction === 'requested' ? project.ownerId : submission.musicianId;
+            const recipient = await musicianRepository.findById(recipientId).select('email').lean();
+            to = String(recipient?.email || (job.revisionAction === 'requested' ? project.ownerEmail : '') || '').trim().toLowerCase();
+            if (!to) throw new Error('Revision recipient has no email address');
           }
         }
       }

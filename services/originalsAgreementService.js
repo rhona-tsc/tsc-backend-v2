@@ -23,11 +23,12 @@ export function getOriginalAgreement(type = 'contributor') {
   const title = production ? `${type === 'mix' ? 'Mix producer' : 'Mastering engineer'} agreement` : 'Contributor agreement';
   // Versions and review status are audit metadata, not participant-facing banners.
   // This revision is a researched draft, not specialist legal approval.
-  const version = `originals-${type}-${production ? "v0.3" : "v0.6"}`;
+  const version = `originals-${type}-${production ? "v0.4" : "v0.8"}`;
   const sections = [
     { title: 'Reservation and deliverables', text: production
       ? `Your recording reservation lasts 24 hours once this round opens and your place activates. Extensions require separate approval, up to three times. Submit the ${type === 'mix' ? 'mix' : 'master'} output specified in the project brief. Selection for this production role carries the 10% selected-role master allocation described below. Controlled source downloads are for this project only. Access to rejected material requires recorded authorisation, the necessary permission and contributor-rights review before use.`
-      : 'An advance place has no recording countdown until its round opens and the place activates. A recording reservation then lasts 24 hours; extensions require separate approval, up to three times. Provide at least one and no more than three aligned instrument stems. A separate listening mix is optional. Review each newly uploaded stem in the workspace against the available authorised guide, foundation or approved stems and confirm that it starts at the agreed zero point and fits before submitting it. Where no reference exists yet, check the stem on its own against the agreed tempo and count-in. Browser rough mixes are private project recording and review references, not approved release masters. Do not move or trim the reference start point when recording. An optional effects version of the same performance is a reference for its paired stem, counts towards the three-stem limit and is not a separate take. Reference access is restricted and may end when participation ends unless an accepted contribution or later role requires continued access. Reference material must not be used outside this project.' },
+      : 'An advance place has no recording countdown until its round opens and the place activates. A recording reservation then lasts 24 hours; extensions require separate approval, up to three times. Provide at least one and no more than four aligned instrument stems. A separate listening mix is optional. Review each newly uploaded stem in the workspace against the available authorised guide, foundation or approved stems and confirm that it starts at the agreed zero point and fits before submitting it. Where no reference exists yet, check the stem on its own against the agreed tempo and count-in. Browser rough mixes are private project recording and review references, not approved release masters. Do not move or trim the reference start point when recording. You may submit recordings with effects, without effects, or both. Label each file accordingly in the submission form. Versions with and without effects count towards the same four-file limit and may be reviewed as separate options; different versions or alternative takes for one role do not create additional royalty shares. Reference access is restricted and may end when participation ends unless an accepted contribution or later role requires continued access. Reference material must not be used outside this project.' },
+    { title: 'Revisions before selection', text: 'While your submitted recording is pending in the current round, you may reopen it for corrections before your recording deadline, keeping that deadline. The owner may request a revision with optional feedback, or approve a later revision request; either starts a fresh 24-hour revision window. If your recording deadline has passed, request permission to revise and explain the change. The owner has seven days to respond; unanswered requests are referred to TSC for a recorded approval or refusal. Silence is not approval. Earlier submitted versions and feedback are retained. A revision does not create another role or additional royalty share.' },
     ...common.map(section => production && section.title === 'Songwriting claims and proposed splits'
       ? { ...section, text: 'Selection as a mix producer or mastering engineer carries the selected-role master allocation; it does not automatically create a songwriting share. Songwriting remains separate and must reflect accepted original compositional contributions and the necessary rightsholder agreement. If your work also includes original composition, raise that claim with TSC and the affected writers before final splits or release; the production role alone neither grants nor removes authorship. Statutory authorship, existing publisher or collecting-society rights and performer rights are not overridden by this acknowledgement.' }
       : { ...section }),
@@ -39,13 +40,13 @@ export function getOriginalAgreement(type = 'contributor') {
 }
 
 const required = message => Object.assign(new Error(message), { status: 409, code: 'ORIGINALS_AGREEMENT_REQUIRED' });
-export async function recordOriginalAgreement({ input, projectId, musicianId, roleName, type = 'contributor', now = new Date() }) {
+export async function recordOriginalAgreement({ input, projectId, projectTitle = '', musicianId, roleName, type = 'contributor', now = new Date() }) {
   const agreement = getOriginalAgreement(type);
   if (input?.accepted !== true) throw required('Read and accept the agreement before reserving a place.');
   if (input.version !== agreement.version || input.textHash !== agreement.textHash || input.acknowledgement !== agreement.acknowledgement) throw required('The agreement has changed. Review the current version before reserving.');
   const fullName = typeof input.fullName === 'string' ? input.fullName.trim().replace(/\s+/g, ' ') : '';
   if (!fullName || fullName.length > 160 || /[\x00-\x1f\x7f]/.test(input.fullName)) throw Object.assign(new Error('Enter your full name to acknowledge the agreement.'), { status: 400 });
-  return Acceptance.create({ projectId, musicianId, roleName: String(roleName).trim().toLowerCase(), type, version: agreement.version, text: agreement.text, textHash: agreement.textHash, fullName, accepted: true, acceptedAt: now });
+  return Acceptance.create({ projectId, projectTitle, musicianId, roleName: String(roleName).trim().toLowerCase(), type, version: agreement.version, text: agreement.text, textHash: agreement.textHash, fullName, accepted: true, acceptedAt: now, receiptPending: true });
 }
 
 export async function requireCurrentOriginalAgreement({ agreementAcceptanceId, projectId, musicianId, roleName, type = 'contributor' }) {
@@ -85,7 +86,7 @@ export function originalOwnerAgreementAcceptance(body = {}, now = new Date()) {
     throw Object.assign(new Error('Enter your full name to acknowledge the owner agreement.'), { status: 400 });
   }
   return { version: agreement.version, text: agreement.text, textHash: agreement.textHash,
-    acknowledgement: agreement.acknowledgement, accepted: true, acceptedAt: now, displayName };
+    acknowledgement: agreement.acknowledgement, accepted: true, acceptedAt: now, displayName, receiptPending: true };
 }
 
 export function hasCurrentOriginalOwnerAgreement(acceptance = {}) {

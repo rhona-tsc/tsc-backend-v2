@@ -110,6 +110,7 @@ test('an idle round is not closed by the automation before its first reservation
   t.mock.method(Reservation, 'findOne', () => ({ sort: () => ({ lean: async () => null }) }));
   t.mock.method(Submission, 'exists', async () => false);
   t.mock.method(Submission, 'countDocuments', async () => 0);
+  t.mock.method(Submission, 'find', () => ({ lean: async () => [] }));
   t.mock.method(Round, 'find', async () => [{ _id: 'round', projectId, state: 'open', closesAt: null, slotLimit: 3 }]);
   const result = await runOriginalsAutomation({ now: new Date('2030-01-01T12:00:00Z') });
   assert.equal(result.roundsClosed, 0);

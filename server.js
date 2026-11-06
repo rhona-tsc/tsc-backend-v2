@@ -2,6 +2,7 @@ import { deliverOriginalRoundLifecycleNotifications } from "./services/originals
 import { originalStemChatActivity } from "./services/originalsStemChatActivityService.js";
 import { deliverOriginalReservationReminders } from "./services/originalsReservationReminderService.js";
 import { deliverOriginalProjectEmails } from "./services/originalsProjectEmailService.js";
+import { deliverOriginalAgreementReceipts } from "./services/originalsAgreementReceiptService.js";
 import { isBalanceCheckout, fulfilBalanceCheckout } from "./services/bookingBalancePaymentService.js";
 import { runOriginalRoundNotifications } from "./services/originalsRoundNotificationService.js";
 import { deliverOriginalReferrals } from "./services/originalsReferralService.js";
@@ -895,7 +896,7 @@ cron.schedule("* * * * *", async () => {
   try {
     try { await originalStemChatActivity.reconcile(); }
     catch (error) { console.error('Originals stem chat recovery failed:', error.message); }
-    const results = await Promise.allSettled([deliverOriginalChatNotifications(), deliverOriginalReferrals(), runOriginalRoundNotifications(), deliverOriginalProjectEmails(), deliverOriginalRoundLifecycleNotifications(), deliverOriginalReservationReminders()]);
+    const results = await Promise.allSettled([deliverOriginalChatNotifications(), deliverOriginalReferrals(), runOriginalRoundNotifications(), deliverOriginalProjectEmails(), deliverOriginalRoundLifecycleNotifications(), deliverOriginalReservationReminders(), deliverOriginalAgreementReceipts()]);
     for (const result of results) if (result.status === "rejected") console.error("Originals notification worker failed:", result.reason?.message || result.reason);
   }
   catch (error) { console.error("Originals chat notification retry failed:", error?.message || error); }

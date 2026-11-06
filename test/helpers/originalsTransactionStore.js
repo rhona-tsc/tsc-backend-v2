@@ -1,6 +1,8 @@
+import ProjectEmail from '../../models/originalProjectEmailModel.js';
 import Message from '../../models/originalMessageModel.js';
 import Credit from '../../models/originalCreditVersionModel.js';
 import Issue from '../../models/originalIssueModel.js';
+import Acceptance from '../../models/originalAgreementAcceptanceModel.js';
 import mongoose from 'mongoose';
 import Project from '../../models/originalProjectModel.js';
 import Round from '../../models/originalRoundModel.js';
@@ -13,21 +15,22 @@ import Notification from '../../models/originalNotificationModel.js';
 import Musician from '../../models/musicianModel.js';
 import Future from '../../models/originalRoleReservationModel.js';
 const copy = value => value === undefined ? undefined : structuredClone(value);
-const equal = (a,b) => a instanceof Date || b instanceof Date ? +new Date(a) === +new Date(b) : String(a) === String(b);
+const equal = (a,b) => Array.isArray(a) ? a.some(value=>equal(value,b)) : a instanceof Date || b instanceof Date ? +new Date(a) === +new Date(b) : String(a) === String(b);
 function matches(row, filter) {
   return Object.entries(filter).every(([key,value]) => {
     if(key==='$or') return value.some(part=>matches(row,part));
-    const actual=key.split('.').reduce((obj,part)=>obj?.[part],row);
+    const readPath=(value,parts)=>!parts.length?value:Array.isArray(value)&&!/^\d+$/.test(parts[0])?value.flatMap(item=>[readPath(item,parts)]):readPath(value?.[parts[0]],parts.slice(1));
+    const actual=readPath(row,key.split('.'));
     if(value && typeof value==='object' && !(value instanceof Date)) return Object.entries(value).every(([op,expected]) => op==='$in'?expected.some(v=>equal(actual,v)):op==='$nin'?!expected.some(v=>equal(actual,v)):op==='$ne'?!equal(actual,expected):op==='$gt'?actual>expected:op==='$lte'?actual<=expected:op==='$exists'?(actual!==undefined)===expected:matches(actual||{},{[op]:expected}));
     return equal(actual,value);
   });
 }
 function assign(row, values) { for(const[key,value]of Object.entries(values||{})) {const parts=key.split('.');let target=row;for(const part of parts.slice(0,-1))target=target[part]||=( {} );target[parts.at(-1)]=copy(value);} }
 export function originalsTransactionStore(t, initial) {
-  let store={projects:[],rounds:[],reservations:[],submissions:[],invitations:[],assets:[],events:[],notifications:[],musicians:[],futures:[],messages:[],credits:[],issues:[],...copy(initial)},counter=100,serial=Promise.resolve();
+  let store={projects:[],rounds:[],reservations:[],submissions:[],invitations:[],assets:[],events:[],notifications:[],musicians:[],futures:[],messages:[],credits:[],issues:[],acceptances:[],emails:[],...copy(initial)},counter=100,serial=Promise.resolve();
   const session={endSession:async()=>{},withTransaction:async work=>{const before=serial;let release;serial=new Promise(r=>release=r);await before;const snapshot=copy(store);try{return await work();}catch(error){store=snapshot;throw error;}finally{release();}}};
   t.mock.method(mongoose,'startSession',async()=>session);
-  for(const[Model,name]of[[Project,'projects'],[Round,'rounds'],[Reservation,'reservations'],[Submission,'submissions'],[Invitation,'invitations'],[Asset,'assets'],[Event,'events'],[Notification,'notifications'],[Musician,'musicians'],[Future,'futures'],[Message,'messages'],[Credit,'credits'],[Issue,'issues']]) {
+  for(const[Model,name]of[[ProjectEmail,'emails'],[Project,'projects'],[Round,'rounds'],[Reservation,'reservations'],[Submission,'submissions'],[Invitation,'invitations'],[Asset,'assets'],[Event,'events'],[Notification,'notifications'],[Musician,'musicians'],[Future,'futures'],[Message,'messages'],[Credit,'credits'],[Issue,'issues'],[Acceptance,'acceptances']]) {
     const doc=row=>row?{...copy(row),save:async function(options){if(options?.session) {if(options.session!==session)throw new Error('wrong session');}if(this.$where&&!matches(store[name].find(item=>equal(item._id,this._id))||{},this.$where))throw Object.assign(new Error('Document changed'),{name:'DocumentNotFoundError'});const record=Object.fromEntries(Object.entries(this).filter(([key,v])=>typeof v!=='function'&&key!=='$where'));store[name][store[name].findIndex(item=>equal(item._id,record._id))]=copy(record);return this;}}:null;
     const query=read=>({session(){return this;},select(){return this;},populate(){return this;},sort(){return this;},limit(){return this;},lean:async()=>copy(read()),then(resolve,reject){return Promise.resolve(read()).then(value=>Array.isArray(value)?value.map(doc):doc(value)).then(resolve,reject);}});
     t.mock.method(Model,'findById',id=>query(()=>store[name].find(row=>equal(row._id,id))||null));

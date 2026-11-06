@@ -93,7 +93,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
       originalAssetModel.find({ projectId: project._id, state: { $ne: "deleted" } })
         .select("kind originalName mimeType bytes finalEligible createdEntirelyWithAi alignmentReviewRequired alignmentReview state ownerId roundId reservationId createdAt")
         .sort({ createdAt: -1 }).lean(),
-      canManage ? originalNotificationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).limit(50).lean() : [],
+      canManage ? originalNotificationModel.find({ projectId: project._id, template: { $ne: 'originals_signed_agreement_copy' } }).sort({ createdAt: -1 }).limit(50).lean() : [],
       canManage ? originalInvitationModel.find({ projectId: project._id })
         .populate("invitedMusicianId", "firstName lastName email instrument")
         .sort({ createdAt: -1 }).lean() : [],
@@ -146,14 +146,15 @@ export const uploadOriginalAsset = async (req, res) => {
     const ownerId = objectId(getOriginalsUserId(req.user));
     const roundId = objectId(req.body?.roundId) || null;
     const reservationId = objectId(req.body?.reservationId) || null;
-    if (["take_stem", "take_mixdown"].includes(kind) && !reservationId) {
+    if (["take_stem", "take_mixdown", "mix", "master"].includes(kind) && !reservationId) {
       return res.status(400).json({ success: false, message: "A reservation is required for take uploads" });
     }
     if (reservationId) {
       const reservation = await originalReservationModel.findOne({
         _id: reservationId, projectId: project._id, musicianId: ownerId, state: { $in: ["active", "submitted"] },
       });
-      if (!reservation || (reservation.state === "active" && reservation.expiresAt <= new Date())) {
+      const pending = reservation?.state === 'submitted' ? await originalSubmissionModel.findOne({ reservationId, state: 'submitted' }).lean() : null;
+      if (!reservation || reservation.expiresAt <= new Date() || (reservation.state === 'submitted' && !(pending?.revisionSession?.status === 'editing' && new Date(pending.revisionSession.expiresAt) > new Date())) || String(project.currentRoundId) !== String(reservation.roundId)) {
         return res.status(409).json({ success: false, message: "This reservation is not active" });
       }
     }
@@ -268,43 +269,18 @@ export const postOriginalMessage = async (req, res) => {
   }
 };
 
+// Legacy clients use the same timed, transactional revision submission path.
 export const replaceOriginalSubmission = async (req, res) => {
   try {
     const submission = await originalSubmissionModel.findById(req.params.submissionId);
-    if (!submission || submission.state !== "submitted") return res.status(409).json({ success: false, message: "Only a pending submission can be replaced" });
-    if (String(submission.musicianId) !== getOriginalsUserId(req.user) && !await requireOriginalProjectManager(req, res, submission.projectId)) return;
-    const round = await originalRoundModel.findById(submission.roundId).lean();
-    if (!round || round.closeReason === "next_round_opened") return res.status(409).json({ success: false, message: "This round has closed; it no longer accepts replacements" });
-    const laterRound = await originalRoundModel.exists({ projectId: submission.projectId, sequence: { $gt: round.sequence } });
-    if (laterRound) return res.status(409).json({ success: false, message: "This project has moved to the next stage; open a concern instead" });
-    const takes = Array.isArray(req.body?.takes) ? req.body.takes.slice(0, 3) : [];
-    if (!takes.length) return res.status(400).json({ success: false, message: "Add at least one replacement take" });
-    const assetIds = originalTakeAssetIds(takes).map(objectId);
-    if (assetIds.some(id => !id)) return res.status(400).json({ success: false, message: "Choose valid recording files" });
-    const assets = await originalAssetModel.find({ _id: { $in: assetIds }, reservationId: submission.reservationId, ownerId: submission.musicianId, state: "active" }).lean();
-    if (assets.length !== new Set(assetIds).size) return res.status(400).json({ success: false, message: "Replacement files are unavailable" });
-    const listeningMixRequired = originalTakeNeedsListeningMix(round);
-    if (!originalTakeKindsValid(takes, assets, { listeningMixRequired })) return res.status(400).json({ success: false, message: listeningMixRequired ? "Each replacement needs a stem and listening mix" : "Choose valid stems and any optional listening mixes" });
-    await requireOriginalStemReviews({ assets, musicianId: submission.musicianId });
-    const oldAssetIds = originalTakeAssetIds(submission.takes);
-    await originalAssetModel.updateMany({ _id: { $in: oldAssetIds } }, { $set: { state: "hidden" } });
-    submission.$where = { state: "submitted", revision: submission.revision };
-    submission.takes = takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId || null, stemAssetIds: take.stemAssetIds || [take.stemAssetId], wetStemAssetId: take.wetStemAssetId || null, notes: clean(take.notes) }));
-    submission.listeningMixRequired = listeningMixRequired;
-    submission.revision += 1;
-    submission.submittedAt = new Date();
-    submission.ownerNotificationPending = true;
-    submission.submitterConfirmationPending = true;
-    submission.notes = clean(req.body?.notes);
-    await submission.save();
-    await audit({ projectId: submission.projectId, roundId: submission.roundId, reservationId: submission.reservationId, type: "submission_replaced", user: req.user, metadata: { submissionId: String(submission._id), revision: submission.revision } });
-    return res.json({ success: true, submission });
-  } catch (error) {
-    if (error.status) return res.status(error.status).json({ success: false, message: error.message, code: error.code, assetId: error.assetId });
-    if (error.name === "DocumentNotFoundError") return res.status(409).json({ success: false, message: "This submission changed or its round closed. Refresh the workspace." });
-    console.error("❌ replaceOriginalSubmission error:", error);
-    return res.status(500).json({ success: false, message: "Failed to replace submission" });
-  }
+    if (!submission || String(submission.musicianId) !== getOriginalsUserId(req.user)) return res.status(404).json({ success: false, message: 'Submission not found' });
+    const takes = Array.isArray(req.body?.takes) ? req.body.takes : [];
+    if (!takes.length || takes.length > 4 || originalTakeAssetIds(takes).some(id => !objectId(id))) return res.status(400).json({ success: false, message: 'Choose one to four valid recording files' });
+    const saved = await originalSubmissionCommit.run({ reservationId: submission.reservationId, musicianId: submission.musicianId, payload: {
+      category: submission.category, takes, notes: clean(req.body?.notes), songwritingChoice: submission.songwritingChoice,
+    } });
+    return res.json({ success: true, submission: saved });
+  } catch (error) { return res.status(error.status || 500).json({ success: false, message: error.status ? error.message : 'Could not submit the revision' }); }
 };
 
 export const openOriginalIssue = async (req, res) => {
@@ -398,7 +374,7 @@ export const reserveOriginalRound = async (req, res) => {
     const anonymous = req.body?.anonymous === true;
     const creditName = clean(req.body?.creditName);
     if (anonymous && !creditName) return res.status(400).json({ success: false, message: "Anonymous contributors need an artistic name" });
-    const agreement = await recordOriginalAgreement({ input: req.body.agreement, projectId: project._id, musicianId, roleName, type: originalAgreementType(round), now });
+    const agreement = await recordOriginalAgreement({ input: req.body.agreement, projectId: project._id, projectTitle: project.title, musicianId, roleName, type: originalAgreementType(round), now });
     await activateOriginalRoleReservations({ project, round, now });
     const { reservation, round: timedRound } = await createOriginalRecordingReservation({ round, musicianId, roleName, anonymous, creditName, agreementAcceptanceId: agreement._id, now });
     await audit({ projectId: round.projectId, roundId: round._id, reservationId: reservation._id, type: "reservation_created", user: req.user, metadata: { roleName } });
@@ -453,14 +429,15 @@ export const submitOriginalTakes = async (req, res) => {
   try {
     const musicianId = objectId(getOriginalsUserId(req.user));
     const reservation = await originalReservationModel.findOne({
-      _id: req.params.reservationId, musicianId, state: "active", expiresAt: { $gt: new Date() },
+      _id: req.params.reservationId, musicianId, state: { $in: ["active", "submitted"] }, expiresAt: { $gt: new Date() },
     });
     if (!reservation) return res.status(409).json({ success: false, message: "This reservation has expired or is unavailable" });
     const round = await originalRoundModel.findById(reservation.roundId).lean();
     if (!round || String(round.projectId) !== String(reservation.projectId)) return res.status(409).json({ success: false, message: "The reservation round is unavailable" });
     if (!["open", "reopened", "review"].includes(round.state) || round.closeReason === "next_round_opened") return res.status(409).json({ success: false, message: "This round has closed; it no longer accepts submissions" });
     const listeningMixRequired = originalTakeNeedsListeningMix(round);
-    const takes = Array.isArray(req.body?.takes) ? req.body.takes.slice(0, 3) : [];
+    const takes = Array.isArray(req.body?.takes) ? req.body.takes : [];
+    if (takes.length > 4) return res.status(400).json({ success: false, message: "Choose up to four stems" });
     if (!takes.length) return res.status(400).json({ success: false, message: "Submit at least one take" });
     const songwritingChoice = clean(req.body?.songwritingChoice);
     if (!["master_only", "songwriting_claim"].includes(songwritingChoice)) {
@@ -478,7 +455,7 @@ export const submitOriginalTakes = async (req, res) => {
       projectId: reservation.projectId, roundId: reservation.roundId, reservationId: reservation._id,
       musicianId, roleName: reservation.roleName, songwritingChoice, listeningMixRequired, ownerNotificationPending: true, submitterConfirmationPending: true,
       anonymous: reservation.anonymous, creditName: reservation.creditName,
-      takes: takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId || null, stemAssetIds: take.stemAssetIds || [take.stemAssetId], wetStemAssetId: take.wetStemAssetId || null, notes: clean(take.notes) })),
+      takes: takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId || null, stemAssetIds: take.stemAssetIds || [take.stemAssetId], wetStemAssetId: take.wetStemAssetId || null, effects: take.effects || 'not_specified', notes: clean(take.notes) })),
       notes: clean(req.body?.notes),
     } });
     try { await originalStemChatActivity.publish(submission); }
@@ -500,7 +477,9 @@ export const decideOriginalSubmission = async (req, res) => {
       return res.status(404).json({ success: false, message: "Pending submission not found" });
     }
     if (!await requireOriginalProjectManager(req, res, submission.projectId)) return;
-    submission.$where = { state: "submitted" };
+    if (submission.revisionSession?.status === 'editing') return res.status(409).json({ success: false, message: 'The contributor is revising this recording. Wait for their updated submission or revision deadline.' });
+    if (submission.revisionRequest?.status === 'pending') return res.status(409).json({ success: false, message: 'Approve or decline the pending revision request before deciding this submission' });
+    submission.$where = { state: "submitted", revision: submission.revision, 'revisionSession.status': { $ne: 'editing' }, 'revisionRequest.status': { $ne: 'pending' } };
     const decision = clean(req.body?.decision).toLowerCase();
     if (!["accept", "reject"].includes(decision)) {
       return res.status(400).json({ success: false, message: "Choose accept or reject" });
@@ -549,6 +528,14 @@ export const decideOriginalSubmission = async (req, res) => {
       submission.selectionMode = "";
       submission.selectedTakeId = null;
       submission.selectedRanges = [];
+    }
+
+    submission.decisionNote = note;
+    submission.decidedAt = new Date();
+    submission.decidedBy = objectId(getOriginalsUserId(req.user)) || null;
+    if (submission.state === 'accepted' && (!submission.category || submission.category === 'contribution')) submission.approvedChatPending = true;
+    await submission.save();
+    if (submission.state === 'rejected') {
       const assetIds = submission.outputAssetId
         ? [submission.outputAssetId]
         : originalTakeAssetIds(submission.takes);
@@ -566,12 +553,6 @@ export const decideOriginalSubmission = async (req, res) => {
         );
       }
     }
-
-    submission.decisionNote = note;
-    submission.decidedAt = new Date();
-    submission.decidedBy = objectId(getOriginalsUserId(req.user)) || null;
-    if (submission.state === 'accepted' && (!submission.category || submission.category === 'contribution')) submission.approvedChatPending = true;
-    await submission.save();
     try { await originalStemChatActivity.publish(submission); }
     catch (error) { console.error('Originals approved stem chat update will retry:', error.message); }
     if (submission.state === "rejected") await originalReservationModel.updateOne({ _id: submission.reservationId }, { $set: { slotHeld: false, state: "released" } });
@@ -694,7 +675,7 @@ export const submitOriginalProduction = async (req, res) => {
   try {
     const musicianId = objectId(getOriginalsUserId(req.user));
     const reservation = await originalReservationModel.findOne({
-      _id: req.params.reservationId, musicianId, state: "active", expiresAt: { $gt: new Date() },
+      _id: req.params.reservationId, musicianId, state: { $in: ["active", "submitted"] }, expiresAt: { $gt: new Date() },
     });
     if (!reservation) return res.status(409).json({ success: false, message: "This reservation has expired or is unavailable" });
     const round = await originalRoundModel.findById(reservation.roundId);
