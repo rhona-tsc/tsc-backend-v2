@@ -73,7 +73,7 @@ export async function runOriginalRoundNotifications({ emailSender = sendEmail, n
       if (!eligible || !membership.notify || membership.blockedRoles.includes(roleKey(reservation.roleName))) {
         await Notification.updateOne(filter, { $set: { state: 'cancelled', leaseExpiresAt: null } }); continue;
       }
-      const result = await emailSender({ to: recipient.email, ...(review ? buildOriginalAgreementReviewEmail : buildOriginalRoundOpenEmail)({ project, reservation, firstName: recipient.firstName }) });
+      const result = await emailSender({ musicianPreferences: true, to: recipient.email, ...(review ? buildOriginalAgreementReviewEmail : buildOriginalRoundOpenEmail)({ project, reservation, firstName: recipient.firstName }) });
       if (!result?.ok) throw new Error(result?.error || 'Email was not accepted');
       await Notification.updateOne(filter, { $set: { state: 'sent', leaseExpiresAt: null, lastError: '' } });
     } catch (error) {

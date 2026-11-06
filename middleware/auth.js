@@ -40,6 +40,7 @@ const authUser = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded?.purpose === "musician_email_preferences") throw new Error("A preferences link is not a login token");
 
     req.user = decoded || {};
     if (req.user && req.user._id && !req.user.id) {
@@ -77,6 +78,7 @@ export const optionalAuthUser = (req, _res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded?.purpose === "musician_email_preferences") throw new Error("A preferences link is not a login token");
 
     req.user = decoded || {};
     if (req.user && req.user._id && !req.user.id) {

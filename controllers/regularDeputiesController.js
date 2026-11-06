@@ -1,3 +1,5 @@
+import { musicianEmailPreferencesUrl } from '../utils/musicianEmailPreferences.js';
+import { musicianOpportunityAllowed } from '../services/musicianEmailPreferenceService.js';
 import { musicianDirectoryVisibility } from '../services/musicianDirectoryVisibility.js';
 import mongoose from "mongoose";
 import crypto from "crypto";
@@ -42,9 +44,6 @@ const copyDeputySnapshot = (deputy) => ({
 const hashToken = (token) => crypto.createHash("sha256").update(token).digest("hex");
 const emailHash = (email) => hashToken(normalise(email));
 const unsubscribeSecret = () => process.env.EMAIL_UNSUBSCRIBE_SECRET || process.env.JWT_SECRET;
-const unsubscribeBase = () => String(
-  process.env.BACKEND_PUBLIC_URL || process.env.BACKEND_URL || "https://tsc-backend-v2.onrender.com",
-).replace(/\/$/, "");
 const publicSiteBase = () => String(process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "https://admin.thesupremecollective.co.uk").replace(/\/$/, "");
 const escapeHtml = (value) => clean(value)
   .replace(/&/g, "&amp;")
@@ -65,18 +64,12 @@ const INSTAGRAM_ICON_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1
 const YOUTUBE_ICON_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777056960/1_lo9yf6.png";
 const WEBSITE_ICON_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777207820/website-icon_nuahjk.png";
 const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl, email, isPreview = false }) => {
-  const unsubscribeToken = isPreview ? "" : jwt.sign(
-      { purpose: "deputy_invite_unsubscribe", email: normalise(email) },
-      unsubscribeSecret(),
-      { expiresIn: "30d" },
-    );
-  const unsubscribeUrl = isPreview
-    ? "#"
-    : `${unsubscribeBase()}/api/regular-deputies/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`;
+  const unsubscribeUrl = isPreview ? '#' : musicianEmailPreferencesUrl(email);
   const unsubscribeLabel = isPreview
     ? "Unsubscribe from deputy invitations (disabled in this test)"
     : "Unsubscribe from deputy invitations";
   return ({
+  ...(isPreview ? {} : { opportunityCategory: 'deputy' }),
   subject: `Invitation to join ${actName} as a regular deputy`,
   text: [
     `Hi ${recipientName},`,
@@ -273,7 +266,7 @@ export const inviteRegularDeputy = async (req, res) => {
     if (!firstName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ success: false, message: "Enter their first name and a valid email address" });
     }
-    if (await deputyInviteSuppressionModel.exists({ emailHash: emailHash(email) })) {
+    if (!await musicianOpportunityAllowed(email, 'deputy') || await deputyInviteSuppressionModel.exists({ emailHash: emailHash(email) })) {
       return res.status(409).json({
         success: false,
         message: "This person has unsubscribed from deputy invitations and cannot be invited again.",

@@ -113,6 +113,7 @@ const musicianSchema = new mongoose.Schema(
     countyTravelFees: { type: Map, of: Number, default: undefined },
     password: { type: String },
     profilePhoto: { type: String, default: null },
+    profileDeletedAt: { type: Date, default: null, index: true },
     privateTestProfile: { type: Boolean, default: false, immutable: true },
     coverHeroImage: { type: String, default: null },
 

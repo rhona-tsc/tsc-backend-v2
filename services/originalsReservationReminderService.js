@@ -62,7 +62,7 @@ export async function deliverOriginalReservationReminders({ emailSender = sendEm
       if (!eligible) { await Notification.updateOne(filter, { $set: { state: 'cancelled', leaseExpiresAt: null } }); continue; }
       const bccEnabled = String(env.ORIGINALS_RESERVATION_REMINDER_BCC_ENABLED ?? 'true').trim().toLowerCase() !== 'false';
       const bcc = bccEnabled && recipient.email.trim().toLowerCase() !== monitorEmail ? monitorEmail : undefined;
-      const result = await emailSender({ to: recipient.email, ...(bcc ? { bcc } : {}), ...buildOriginalReservationReminderEmail({ project, reservation, firstName: recipient.firstName || 'there', hours, round }) });
+      const result = await emailSender({ musicianPreferences: true, to: recipient.email, ...(bcc ? { bcc } : {}), ...buildOriginalReservationReminderEmail({ project, reservation, firstName: recipient.firstName || 'there', hours, round }) });
       if (!result?.ok) throw new Error(result?.error || 'Email was not accepted');
       await Notification.updateOne(filter, { $set: { state: 'sent', leaseExpiresAt: null, lastError: '' } });
     } catch (error) {

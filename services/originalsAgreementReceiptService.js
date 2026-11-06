@@ -122,7 +122,7 @@ export async function deliverOriginalAgreementReceipts({ emailSender = sendEmail
       if (!recipient.email) throw new Error('Signing musician has no email address');
       const content = await pdfBuilder(record);
       const filename = `TSC-Originals-${record.type}-agreement-${new Date(record.acceptedAt).toISOString().slice(0, 10)}.pdf`;
-      const result = await emailSender({ to: recipient.email, ...buildOriginalAgreementReceiptEmail(record, recipient.firstName || 'there'), attachments: [{ filename, content, contentType: 'application/pdf' }] });
+      const result = await emailSender({ musicianPreferences: true, to: recipient.email, ...buildOriginalAgreementReceiptEmail(record, recipient.firstName || 'there'), attachments: [{ filename, content, contentType: 'application/pdf' }] });
       if (!result?.ok) throw new Error(result?.error || 'Email was not accepted');
       await Notification.updateOne(filter, { $set: { state: 'sent', leaseExpiresAt: null, lastError: '' } });
     } catch (error) {

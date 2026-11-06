@@ -2068,7 +2068,7 @@ const loginMusician = async (req, res) => {
       email: normEmail,
     });
 
-    if (!user) {
+    if (!user || user.profileDeletedAt) {
       console.warn("❌ No user found for email:", normEmail);
       return res.status(404).json({
         success: false,

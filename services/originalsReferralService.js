@@ -79,9 +79,9 @@ export async function deliverOriginalReferrals({ referralId, emailSender = sendE
       if (!eligible || referral.expiresAt <= now || ['cancelled','archived'].includes(project.state)) { await Referral.updateOne({ _id: referral._id }, { $set: { emailState: 'cancelled' } }); continue; }
       const token = crypto.randomBytes(32).toString('hex'); tokenHash = referralHash(token);
       await Referral.updateOne({ _id: referral._id, emailState: 'sending' }, { $set: { tokenHash } });
-      const result = await emailSender(buildOriginalReferralEmail({ referral, project, token }));
+      const result = await emailSender({ ...buildOriginalReferralEmail({ referral, project, token }), musicianPreferences: true, opportunityCategory: 'originals' });
       if (result?.ok !== true) throw new Error(result?.error || 'Email was not accepted');
-      await Referral.updateOne({ _id: referral._id, tokenHash }, { $set: { emailState: 'sent', leaseExpiresAt: null, lastError: '' } });
+      await Referral.updateOne({ _id: referral._id, tokenHash }, { $set: { emailState: result.skipped ? 'cancelled' : 'sent', leaseExpiresAt: null, lastError: '' } });
     } catch (error) {
       await Referral.updateOne({ _id: referral._id, ...(tokenHash ? { tokenHash } : {}) }, { $set: { emailState: referral.attempts >= 5 ? 'failed' : 'queued', leaseExpiresAt: null, sendAfter: new Date(now.getTime() + 5 * 60 * 1000), lastError: String(error.message).slice(0,500) } });
     }

@@ -8,5 +8,5 @@ const PRIVATE_TEST_VIEWERS = new Set([
 export const canSeePrivateTestMusicians = (user = {}) => PRIVATE_TEST_VIEWERS.has(
   String(user?.email || user?.useremail || '').trim().toLowerCase(),
 );
-export const musicianDirectoryVisibility = user => canSeePrivateTestMusicians(user) ? {} : { privateTestProfile: { $ne: true } };
-export const canSeeMusicianInDirectory = (musician, user) => !musician?.privateTestProfile || canSeePrivateTestMusicians(user);
+export const musicianDirectoryVisibility = user => ({ profileDeletedAt: null, ...(canSeePrivateTestMusicians(user) ? {} : { privateTestProfile: { $ne: true } }) });
+export const canSeeMusicianInDirectory = (musician, user) => !musician?.profileDeletedAt && (!musician?.privateTestProfile || canSeePrivateTestMusicians(user));

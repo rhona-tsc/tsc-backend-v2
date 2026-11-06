@@ -18,7 +18,7 @@ function creditContext(asset, submission, reservation, project) {
 async function addCredits(contexts, project) {
   const ids = [...new Set(contexts.filter(item => !item.anonymous && item.musicianId).map(item => item.musicianId))];
   const profiles = ids.length ? await Musician.find({ _id: { $in: ids } })
-    .select('firstName lastName basicInfo.firstName basicInfo.lastName musicianSlug privateTestProfile profilePhoto').lean() : [];
+    .select('firstName lastName basicInfo.firstName basicInfo.lastName musicianSlug privateTestProfile profilePhoto profileDeletedAt').lean() : [];
   const byId = new Map(profiles.map(profile => [idOf(profile._id), profile]));
   return contexts.map(({ asset, musicianId, isOwner, anonymous, creditName }) => {
     if (anonymous) return { ...asset, submittedBy: { displayName: creditName, anonymous: true, profilePath: null } };
@@ -26,11 +26,11 @@ async function addCredits(contexts, project) {
     const firstName = text(profile?.firstName) || text(profile?.basicInfo?.firstName);
     const lastName = text(profile?.lastName) || text(profile?.basicInfo?.lastName);
     const displayName = firstName ? `${firstName}${lastName ? ` ${Array.from(lastName)[0]}.` : ''}` : isOwner && text(project.ownerName) ? chatDisplayName(project.ownerName) : 'Project participant';
-    const profilePhoto = !profile?.privateTestProfile && /^https?:\/\//i.test(text(profile?.profilePhoto)) ? text(profile.profilePhoto) : '';
+    const profilePhoto = !profile?.privateTestProfile && !profile?.profileDeletedAt && /^https?:\/\//i.test(text(profile?.profilePhoto)) ? text(profile.profilePhoto) : '';
     return { ...asset, submittedBy: {
       displayName, anonymous: false,
       ...(profilePhoto ? { profilePhoto } : {}),
-      profilePath: profile && !profile.privateTestProfile ? `/musician/${encodeURIComponent(text(profile.musicianSlug) || idOf(profile._id))}` : null,
+      profilePath: profile && !profile.privateTestProfile && !profile.profileDeletedAt ? `/musician/${encodeURIComponent(text(profile.musicianSlug) || idOf(profile._id))}` : null,
     } };
   });
 }

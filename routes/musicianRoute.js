@@ -71,7 +71,7 @@ const findMusicianByIdOrSlug = async (value) => {
 };
 
 const sanitizePublicMusician = (doc) => {
-  if (!doc || doc.privateTestProfile) return null;
+  if (!doc || doc.privateTestProfile || doc.profileDeletedAt) return null;
   const publicFields = [
     "_id",
     "musicianId",

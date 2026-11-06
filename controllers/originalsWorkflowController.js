@@ -637,7 +637,7 @@ export const inviteOriginalMusician = async (req, res) => {
     if (!round) return res.status(409).json({ success: false, message: "Invitations require an open round" });
     if (!await requireOriginalProjectManager(req, res, round.projectId)) return;
     const invitedMusicianId = objectId(req.body?.musicianId);
-    const musician = invitedMusicianId ? await musicianModel.findById(invitedMusicianId).select("_id firstName lastName email privateTestProfile") : null;
+    const musician = invitedMusicianId ? await musicianModel.findById(invitedMusicianId).select("_id firstName lastName email privateTestProfile profileDeletedAt") : null;
     if (!musician || !canSeeMusicianInDirectory(musician, req.user)) return res.status(404).json({ success: false, message: "Musician not found" });
     const roleName = clean(req.body?.roleName || round.roleName);
     if (!eligibleRoundRoles(round).some(role => clean(role).toLowerCase() === roleName.toLowerCase())) return res.status(400).json({ success: false, message: "Choose an instrument in the current round" });

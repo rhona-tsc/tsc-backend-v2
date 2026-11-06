@@ -84,9 +84,9 @@ export async function deliverOriginalRoundLifecycleNotifications({ emailSender =
       if (!eligible) { await Notification.updateOne(filter, { $set: { state: 'cancelled', leaseExpiresAt: null } }); continue; }
       const bccEnabled = job.template === 'originals_private_invitation' && String(env.ORIGINALS_INVITATION_BCC_ENABLED ?? 'true').trim().toLowerCase() !== 'false';
       const bcc = bccEnabled && recipient.email.trim().toLowerCase() !== invitationMonitorEmail ? invitationMonitorEmail : undefined;
-      const result = await emailSender({ to: recipient.email, ...(bcc ? { bcc } : {}), ...message });
+      const result = await emailSender({ musicianPreferences: true, ...(job.template === 'originals_private_invitation' ? { opportunityCategory: 'originals' } : {}), to: recipient.email, ...(bcc ? { bcc } : {}), ...message });
       if (!result?.ok) throw new Error(result?.error || 'Email was not accepted');
-      await Notification.updateOne(filter, { $set: { state: 'sent', leaseExpiresAt: null, lastError: '' } });
+      await Notification.updateOne(filter, { $set: { state: result.skipped ? 'cancelled' : 'sent', leaseExpiresAt: null, lastError: '' } });
     } catch (error) {
       await Notification.updateOne(filter, { $set: { state: job.attempts >= 5 ? 'failed' : 'queued', leaseExpiresAt: null, sendAfter: new Date(now.getTime() + 300000), lastError: String(error.message).slice(0, 500) } });
     }

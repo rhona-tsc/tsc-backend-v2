@@ -56,7 +56,7 @@ export async function deliverOriginalChatNotifications({ projectId, emailSender 
         await Notification.updateOne({ _id: job._id, state: 'sending', leaseToken }, { $set: { state: 'cancelled', leaseExpiresAt: null } });
         result.cancelled++; continue;
       }
-      const receipt = await emailSender({ to: recipient.email, ...buildOriginalChatEmail({ project, firstName: recipient.firstName || 'there' }) });
+      const receipt = await emailSender({ musicianPreferences: true, to: recipient.email, ...buildOriginalChatEmail({ project, firstName: recipient.firstName || 'there' }) });
       if (receipt?.ok !== true) throw new Error(receipt?.error || receipt?.reason || 'Email was not accepted');
       await Notification.updateOne({ _id: job._id, state: 'sending', leaseToken }, { $set: { state: 'sent', leaseExpiresAt: null, lastError: '' } });
       result.sent++;

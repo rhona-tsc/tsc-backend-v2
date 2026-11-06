@@ -9,7 +9,7 @@ const asset = (id, extra = {}) => ({ _id: id, ownerId: player, kind: 'take_stem'
 const submission = extra => ({ musicianId: player, reservationId: 'reservation', category: 'contribution', state: 'accepted', takes: [{ stemAssetId: 'stem', stemAssetIds: ['stem', 'harmony'], wetStemAssetId: 'wet', mixdownAssetId: 'mix' }], ...extra });
 function profiles(t, records) {
   return t.mock.method(Musician, 'find', query => ({ select(fields) {
-    assert.equal(fields, 'firstName lastName basicInfo.firstName basicInfo.lastName musicianSlug privateTestProfile profilePhoto');
+    assert.equal(fields, 'firstName lastName basicInfo.firstName basicInfo.lastName musicianSlug privateTestProfile profilePhoto profileDeletedAt');
     return { lean: async () => records.filter(record => query._id.$in.includes(record._id)) };
   } }));
 }

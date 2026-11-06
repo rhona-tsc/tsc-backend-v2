@@ -10,7 +10,7 @@ function stub(t){const calls=[];t.mock.method(Musician,'find',filter=>{calls.pus
 
 test('private directory permission belongs to Rhona identities, not agents or project owners generally',()=>{
  for(const email of ['hello@thesupremecollective.co.uk','RHONA@thesupremecollective.co.uk','rhonagdownie@gmail.com'])assert.equal(canSeePrivateTestMusicians({email}),true);
- for(const user of [{},{role:'agent',email:'other@thesupremecollective.co.uk'},{role:'admin'},{email:'hello@thesupremecollective.co.uk.fake'},{email:'tscplayer@gmail.com'}])assert.deepEqual(musicianDirectoryVisibility(user),{privateTestProfile:{$ne:true}});
+ for(const user of [{},{role:'agent',email:'other@thesupremecollective.co.uk'},{role:'admin'},{email:'hello@thesupremecollective.co.uk.fake'},{email:'tscplayer@gmail.com'}])assert.deepEqual(musicianDirectoryVisibility(user),{profileDeletedAt:null,privateTestProfile:{$ne:true}});
 });
 test('Originals browse excludes the test profile for everyone else and prevents query-string identity overrides',async t=>{
  const calls=stub(t);const hidden=await browseOriginalMusicians({email:'hello@thesupremecollective.co.uk',privateTestProfile:'true'},{viewer:{email:'other@example.test'},allowEmail:true});assert.deepEqual(hidden.musicians.map(r=>r._id),[publicId]);assert.equal(calls[0].privateTestProfile.$ne,true);

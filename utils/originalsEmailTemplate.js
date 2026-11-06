@@ -27,6 +27,7 @@ ${content}
 ${afterButton.map(originalsEmailParagraph).join('\n')}
 <p style="margin:0;font-size:15px;line-height:25px;color:#444444;">Warmest wishes,<br><strong>The Supreme Collective</strong></p>
 ${buildTscEmailFooter({ audience: 'musician' })}
+<!-- musician-email-preferences -->
 </td></tr></table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>`;
   return { subject, text, html };
 }

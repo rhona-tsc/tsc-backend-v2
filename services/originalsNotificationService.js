@@ -67,6 +67,7 @@ export const sendOriginalProjectApprovedNotifications = async ({
   const results = await Promise.all(recipients.map(async (recipient) => {
     const message = buildOriginalProjectApprovedEmail({ project, firstName: recipient.firstName });
     const result = await emailSender({
+      musicianPreferences: true, opportunityCategory: "originals",
       to: recipient.email,
       subject: message.subject,
       text: message.text,

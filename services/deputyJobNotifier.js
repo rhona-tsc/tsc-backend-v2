@@ -1,3 +1,5 @@
+import { musicianOpportunityAllowed } from './musicianEmailPreferenceService.js';
+import { musicianEmailPreferencesUrl } from '../utils/musicianEmailPreferences.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 // services/deputyJobNotifier.js
 import nodemailer from "nodemailer";
@@ -256,13 +258,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
     "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777059616/google-icon2_wc33od.png";
   const WEBSITE_ICON_URL =
     "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777207820/website-icon_nuahjk.png";
-  const UNSUBSCRIBE_SUBJECT = encodeURIComponent(
-    "Please unsubscribe me from The Supreme Collective",
-  );
-  const UNSUBSCRIBE_BODY = encodeURIComponent(
-    "Please hit send to unsubscribe from The Supreme Collective",
-  );
-  const UNSUBSCRIBE_URL = `mailto:hello@thesupremecollective.co.uk?subject=${UNSUBSCRIBE_SUBJECT}&body=${UNSUBSCRIBE_BODY}`;
+  const UNSUBSCRIBE_URL = musicianEmailPreferencesUrl(musician?.email);
 
   const POST_JOB_IMAGE_URL =
     "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777045523/post-your-own-dep-jobs_l0jy6s.png";
@@ -495,7 +491,7 @@ const buildHtmlEmail = ({ musician, job, applyUrl }) => {
                 Registered Office: 71-75, Shelton Street, Covent Garden, London, WC2H 9JQ, United Kingdom | Company Number: 16883956
               </p>
               <p style="margin:0; font-size:12px; line-height:1.7; color:#777777;">
-                <a href="${UNSUBSCRIBE_URL}" style="color:#ff6667; text-decoration:none; font-weight:700;">Unsubscribe</a>
+                <a href="${UNSUBSCRIBE_URL}" style="color:#ff6667; text-decoration:none; font-weight:700;">Manage email preferences or unsubscribe</a>
               </p>
             </div>
           </div>
@@ -533,8 +529,7 @@ const buildTextEmail = ({ musician, job, applyUrl }) => {
   const YOUTUBE_URL = "https://www.youtube.com/channel/UC6HhRZA4XLVajrz5vk5vn2A";
   const GOOGLE_REVIEWS_URL =
     "https://www.google.com/search?q=the+supreme+collective&oq=the+supreme+collective&aqs=chrome.0.0i355i512j46i175i199i512j0i22i30l3j69i60j69i61l2.4878j0j7&sourceid=chrome&ie=UTF-8#lrd=0x751df2ff4f2e30d:0xb1f44d25caa515eb,1,,,";
-  const UNSUBSCRIBE_URL =
-    "mailto:hello@thesupremecollective.co.uk?subject=Please%20unsubscribe%20me%20from%20The%20Supreme%20Collective&body=Please%20hit%20send%20to%20unsubscribe%20from%20The%20Supreme%20Collective";
+  const UNSUBSCRIBE_URL = musicianEmailPreferencesUrl(musician?.email);
 
   const shareText = encodeURIComponent(
     `I thought this deputy opportunity might be a great fit for you: ${applyUrl}`,
@@ -621,6 +616,11 @@ export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => 
             sentAt: new Date(),
             error: "Missing recipient email",
           });
+          continue;
+        }
+
+        if (!await musicianOpportunityAllowed(email, 'deputy')) {
+          results.push({ musicianId, email, phone, channel: 'email', status: 'skipped', sentAt: new Date(), error: 'Unsubscribed from deputy opportunity emails' });
           continue;
         }
 

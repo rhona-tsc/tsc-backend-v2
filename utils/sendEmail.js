@@ -1,4 +1,6 @@
 import nodemailer from "nodemailer";
+import { musicianOpportunityAllowed } from "../services/musicianEmailPreferenceService.js";
+import { addMusicianEmailPreferences } from "./musicianEmailPreferences.js";
 
 // Build lazily so env normalization happens before auth is used.
 // Prevents pasted app-password issues like "xxxx xxxx xxxx xxxx" or trailing newlines.
@@ -64,6 +66,8 @@ async function sendEmail({
   forceCc = null,
   forceBcc = null,
   subjectPrefix = null,
+  musicianPreferences = false,
+  opportunityCategory,
 }) {
   console.log("🟣 [sendEmail] called", {
     to,
@@ -137,6 +141,16 @@ originalRecipients: recipients,    });
   }
 
   const finalSubject = `${subjectPrefix ? String(subjectPrefix) : testMode ? "[TEST]" : ""}${(subjectPrefix || testMode) ? " " : ""}${subject || ""}`.trim();
+
+  if (opportunityCategory && !testMode && !dryRun) {
+    if (recipients.length !== 1) return { ok: false, error: 'Opportunity emails must have one recipient so their preferences stay private.' };
+    try {
+      if (!await musicianOpportunityAllowed(recipients[0], opportunityCategory)) return { ok: true, skipped: true, reason: 'unsubscribed' };
+    } catch { return { ok: false, error: 'Could not check email preferences. Delivery will retry.' }; }
+  }
+  if ((musicianPreferences || opportunityCategory) && toArr.length === 1) {
+    ({ html, text } = addMusicianEmailPreferences({ html, text, email: toArr[0] }));
+  }
 
   const mail = {
 from:

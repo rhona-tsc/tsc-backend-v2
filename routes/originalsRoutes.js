@@ -60,7 +60,7 @@ const router = express.Router();
 
 router.use(authUser);
 router.use(async (req, res, next) => {
-  if (canAccessOriginalsPreview(req.user)) return next();
+  if (canAccessOriginalsPreview(req.user) || isOriginalsEnabled()) return next();
   try { if (await allowOriginalReferralRequest(req) || await allowOriginalInvitationRequest(req)) return next(); }
   catch { return res.status(400).json({ success: false, message: "Could not check project invitation" }); }
   if (!isOriginalsEnabled()) {

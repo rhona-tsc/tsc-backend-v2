@@ -109,7 +109,8 @@ test('three individual stem/mix pairs remain separate review options after submi
  assert.equal(saved.takes[1].label,'Vocal option 2');
 });
 
-test('real API invitation flow grants only its project and still revokes access after rejection',async t=>{
+test('open Originals allows signed-in musicians to browse projects while rejection still revokes participation',async t=>{
+ const enabled=process.env.ORIGINALS_ENABLED;process.env.ORIGINALS_ENABLED='true';t.after(()=>{if(enabled===undefined)delete process.env.ORIGINALS_ENABLED;else process.env.ORIGINALS_ENABLED=enabled;});
  const {default:express}=await import('express');const {default:jwt}=await import('jsonwebtoken');const {default:router}=await import('../routes/originalsRoutes.js');
  setup(t);let claimed=false,removed=false;
  t.mock.method(Project,'exists',async()=>true);t.mock.method(ChatRead,'findOne',()=>({select:()=>({lean:async()=>null})}));let readWrites=0;t.mock.method(ChatRead,'updateOne',async query=>{assert.equal(query.musicianId,player);readWrites++;});t.mock.method(ChatMessage,'countDocuments',async()=>2);t.mock.method(ChatMessage,'findOne',query=>({select:()=>({lean:async()=>({_id:query._id,createdAt:new Date('2026-11-04T20:00:00Z')})})}));
@@ -123,13 +124,13 @@ test('real API invitation flow grants only its project and still revokes access 
  const previous=process.env.JWT_SECRET;process.env.JWT_SECRET='originals-referral-test-only';t.after(()=>{if(previous===undefined)delete process.env.JWT_SECRET;else process.env.JWT_SECRET=previous;});t.mock.method(console,'log',()=>{});
  const app=express();app.use(express.json());app.use('/api/originals',router);const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
  const token=jwt.sign({id:player,email:'outside@example.test'},process.env.JWT_SECRET);const headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'};const url=`http://127.0.0.1:${server.address().port}/api/originals`;
- assert.equal((await fetch(`${url}/projects/${projectId}/access`,{headers})).status,403);
+ assert.equal((await fetch(`${url}/projects/${projectId}/access`,{headers})).status,200);
  assert.equal((await fetch(`${url}/projects/${projectId}/referrals/claim`,{method:'POST',headers,body:JSON.stringify({token:'b'.repeat(64)})})).status,403);
  const accepted=await fetch(`${url}/projects/${projectId}/referrals/claim`,{method:'POST',headers,body:JSON.stringify({token:'a'.repeat(64)})});assert.equal(accepted.status,200);assert.equal(claimed,true);
  assert.equal((await fetch(`${url}/projects/${projectId}/access`,{headers})).status,200);
  const unread=await fetch(`${url}/projects/${projectId}/messages/unread`,{headers});assert.equal(unread.status,200);assert.equal((await unread.json()).unreadCount,2);const marked=await fetch(`${url}/projects/${projectId}/messages/read`,{method:'POST',headers,body:JSON.stringify({messageId:'777777777777777777777777',musicianId:owner})});assert.equal(marked.status,200);assert.equal(readWrites,1);
- assert.equal((await fetch(`${url}/projects/444444444444444444444444/access`,{headers})).status,403);
- const board=await(await fetch(`${url}/projects`,{headers})).json();assert.deepEqual(board.projects.map(item=>String(item._id)),[projectId]);
+ assert.equal((await fetch(`${url}/projects/444444444444444444444444/access`,{headers})).status,200);
+ const board=await(await fetch(`${url}/projects`,{headers})).json();assert.deepEqual(board.projects.map(item=>String(item._id)),[projectId,'444444444444444444444444']);
  removed=true;const ended=await fetch(`${url}/projects/${projectId}/access`,{headers});assert.equal(ended.status,403);assert.equal((await ended.json()).code,'ORIGINALS_PARTICIPATION_ENDED');
  assert.equal((await fetch(`${url}/projects/${projectId}/messages/unread`,{headers})).status,403);assert.equal((await fetch(`${url}/projects/${projectId}/messages/read`,{method:'POST',headers,body:JSON.stringify({messageId:'777777777777777777777777'})})).status,403);assert.equal(readWrites,1);
 });

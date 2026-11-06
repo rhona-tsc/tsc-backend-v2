@@ -171,9 +171,9 @@ export async function deliverOriginalProjectEmails({ emailSender = sendEmail, em
         }
       }
       if (!eligible) { await emailRepository.updateOne(filter, { $set: { state: 'cancelled', leaseExpiresAt: null } }); continue; }
-      const result = await emailSender({ to, subject: job.subject, text: job.text, html: job.html });
+      const result = await emailSender({ musicianPreferences: true, ...(job.kind === 'launch' ? { opportunityCategory: 'originals' } : {}), to, subject: job.subject, text: job.text, html: job.html });
       if (!result?.ok) throw new Error(result?.error || 'Email was not accepted');
-      await emailRepository.updateOne(filter, { $set: { state: 'sent', leaseExpiresAt: null, lastError: '' } });
+      await emailRepository.updateOne(filter, { $set: { state: result.skipped ? 'cancelled' : 'sent', leaseExpiresAt: null, lastError: '' } });
     } catch (error) {
       if (job.attempts >= 5) console.error('Originals project email exhausted delivery retries:', job._id, error.message);
       await emailRepository.updateOne(filter, { $set: { state: job.attempts >= 5 ? 'failed' : 'queued', leaseExpiresAt: null, sendAfter: new Date(now.getTime() + 300000), lastError: String(error.message).slice(0, 500) } });
