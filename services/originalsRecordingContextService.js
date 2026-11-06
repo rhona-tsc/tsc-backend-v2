@@ -43,11 +43,11 @@ export async function loadOriginalRecordingContext({ projectId, excludeId, sessi
   const assets = await read(Asset.find({ projectId, state: 'active', kind: { $in: ['initial_stem', 'take_stem', 'guide_track', 'demo', 'click_track'] } }).select('kind originalName mimeType state finalEligible createdAt'), session);
   return originalRecordingContext({ project, submissions, assets, excludeId });
 }
-export async function requireOriginalStemReviews({ assets, musicianId, session }) {
+export async function requireOriginalStemReviews({ assets, musicianId }) {
   const stems = assets.filter(asset => asset.kind === 'take_stem' && asset.alignmentReviewRequired);
-  if (!stems.length) return;
-  const { contextKey } = await loadOriginalRecordingContext({ projectId: stems[0].projectId, session });
+  // Confirm each immutable uploaded file once. Later project approvals do not
+  // erase that confirmation; a replacement upload has its own unreviewed ID.
   for (const asset of stems) {
-    if (asset.alignmentReview?.contextKey !== contextKey || !asset.alignmentReview?.reviewedAt || id(asset.alignmentReview?.reviewedBy) !== id(musicianId)) throw Object.assign(new Error('Listen to this stem with the current project tracks and confirm its alignment before submitting.'), { status: 409, code: 'ORIGINALS_ALIGNMENT_REVIEW_REQUIRED', assetId: id(asset._id) });
+    if (!asset.alignmentReview?.reviewedAt || id(asset.alignmentReview?.reviewedBy) !== id(musicianId)) throw Object.assign(new Error('Listen to this stem with the project tracks and confirm its alignment before submitting.'), { status: 409, code: 'ORIGINALS_ALIGNMENT_REVIEW_REQUIRED', assetId: id(asset._id) });
   }
 }

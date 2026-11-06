@@ -6,7 +6,7 @@ import Musician from '../models/musicianModel.js';
 import Notification from '../models/originalNotificationModel.js';
 import sendEmail from '../utils/sendEmail.js';
 import { isOriginalsEnabled } from './originalsPolicyService.js';
-import { escapeEmailHtml as escape, buildTscEmailFooter, buildTscEmailFooterText } from '../utils/tscEmailBranding.js';
+import { buildOriginalsEmail } from '../utils/originalsEmailTemplate.js';
 
 const template = 'originals_signed_agreement_copy';
 const titles = { contributor: 'Contributor agreement', mix: 'Mix producer agreement', master: 'Mastering engineer agreement', owner: 'Project owner agreement' };
@@ -63,11 +63,10 @@ export function buildOriginalAgreementReceiptEmail(record, firstName = 'there') 
   const url = `${String(process.env.ADMIN_FRONTEND_URL || 'https://admin.thesupremecollective.co.uk').replace(/\/$/, '')}/originals/${encodeURIComponent(String(record.projectId))}`;
   const description = `Attached is your PDF copy of the ${titles[record.type].toLowerCase()} you electronically accepted for ${record.roleName} on “${record.projectTitle}”.`;
   const detail = `Signed as ${record.fullName} on ${signingTime(record.acceptedAt)} (UK time). The PDF contains the wording and agreement version recorded at signing. Please keep it for your records.`;
-  return {
-    subject: `Your signed agreement: ${record.roleName} — ${record.projectTitle}`,
-    text: `Hi ${firstName},\n\n${description}\n\n${detail}\n\nOpen the project: ${url}\n\nWarmest wishes,\nThe Supreme Collective\n\n${buildTscEmailFooterText()}`,
-    html: `<div style="margin:0;padding:24px 12px;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111827;"><div style="max-width:640px;margin:0 auto;background:white;border:1px solid #e5e7eb;border-radius:20px;overflow:hidden;"><div style="padding:26px 24px;background:#111111;"><p style="margin:0 0 12px;font-size:12px;letter-spacing:2px;font-weight:700;color:#ff8585;">TSC ORIGINALS</p><h1 style="margin:0;font-size:28px;line-height:35px;color:white;">Your signed agreement</h1></div><div style="padding:28px 24px;overflow-wrap:anywhere;"><p style="font-size:16px;line-height:26px;">Hi ${escape(firstName)},</p><p style="font-size:16px;line-height:26px;">${escape(description)}</p><p style="font-size:16px;line-height:26px;">${escape(detail)}</p><p style="margin:24px 0;"><a href="${escape(url)}" style="display:inline-block;padding:14px 24px;background:#ff6667;border-radius:8px;color:#111111;text-decoration:none;font-weight:700;">Open the project</a></p><p style="line-height:25px;">Warmest wishes,<br><strong>The Supreme Collective</strong></p>${buildTscEmailFooter({ audience: 'musician' })}</div></div></div>`,
-  };
+  return buildOriginalsEmail({
+    subject: `Your signed agreement: ${record.roleName} — ${record.projectTitle}`, heading: 'Your signed agreement', firstName,
+    paragraphs: [description, detail], buttonUrl: url,
+  });
 }
 
 async function queueReceipt({ project, acceptance, musicianId, roleName, type, reference, eventKey, now }) {

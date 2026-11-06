@@ -9,7 +9,7 @@ import { isOriginalsEnabled, isOriginalRoundExpired } from './originalsPolicySer
 import { eligibleRoundRoles, roleKey } from './originalsReservationService.js';
 import { loadOriginalMembership, originalParticipation } from './originalsMembershipService.js';
 import sendEmail from '../utils/sendEmail.js';
-import { escapeEmailHtml, buildTscEmailFooter } from '../utils/tscEmailBranding.js';
+import { buildOriginalsEmail } from '../utils/originalsEmailTemplate.js';
 
 const monitorEmail = 'hello@thesupremecollective.co.uk';
 const reminderHours = (expiresAt, now) => {
@@ -23,12 +23,13 @@ export function buildOriginalReservationReminderEmail({ project, reservation, fi
   const url = `${String(process.env.ADMIN_FRONTEND_URL || 'https://admin.thesupremecollective.co.uk').replace(/\/$/, '')}/originals/${project._id}${production ? '' : '#submit-take'}`;
   const deadline = new Date(reservation.expiresAt).toLocaleString('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'long' });
   const deliverable = production ? `your ${round.type} output` : 'your stem or take';
-  const subject = `Reminder: ${reservation.roleName} submission due within ${hours} hour${hours === 1 ? '' : 's'} — ${project.title}`;
-  return {
-    subject,
-    text: `Hi ${firstName},\n\nYour ${reservation.roleName} reservation for “${project.title}” ends at ${deadline} (UK time). You have ${hours === 1 ? 'up to 1 hour' : `up to ${hours} hours`} left to submit ${deliverable}.\n\nUploading a file alone does not submit your contribution. Choose your files in ${section} and send them for review:\n${url}\n\nNeed longer? Request an extension in Reservations and extensions before your deadline. An extension request does not change the deadline unless approved. If you cannot take part, release your reservation in the workspace.\n\nThe Supreme Collective`,
-    html: `<p>Hi ${escapeEmailHtml(firstName)},</p><p>Your <strong>${escapeEmailHtml(reservation.roleName)}</strong> reservation for <strong>${escapeEmailHtml(project.title)}</strong> ends at <strong>${escapeEmailHtml(deadline)} (UK time)</strong>. You have up to ${hours} hour${hours === 1 ? '' : 's'} left to submit ${deliverable}.</p><p>Uploading a file alone does not submit your contribution. Choose your files in ${section} and send them for review.</p><p><a href="${escapeEmailHtml(url)}">Open the project and submit</a></p><p>Need longer? Request an extension in Reservations and extensions before your deadline. The deadline changes only when an extension is approved. If you cannot take part, release your reservation in the workspace.</p>${buildTscEmailFooter({ audience: 'musician' })}`,
-  };
+  return buildOriginalsEmail({
+    subject: `Reminder: ${reservation.roleName} submission due within ${hours} hour${hours === 1 ? '' : 's'} — ${project.title}`,
+    heading: `Your ${reservation.roleName} recording is due soon`, firstName,
+    paragraphs: [`Your ${reservation.roleName} reservation for “${project.title}” ends at ${deadline} (UK time). You have up to ${hours} hour${hours === 1 ? '' : 's'} left to submit ${deliverable}.`, `Uploading a file alone does not submit your contribution. Choose your files in ${section} and send them for review.`],
+    buttonUrl: url, buttonLabel: 'Open the project and submit',
+    afterButton: ['Need longer? Request an extension in Reservations and extensions before your deadline. An extension request does not change the deadline unless approved. If you cannot take part, release your reservation in the workspace.'],
+  });
 }
 
 export async function deliverOriginalReservationReminders({ emailSender = sendEmail, now = new Date(), limit = 50, env = process.env } = {}) {

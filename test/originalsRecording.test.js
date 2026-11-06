@@ -33,11 +33,16 @@ test('new stems cannot bypass the alignment check even by calling the commit ser
  const context=await loadOriginalRecordingContext({projectId});await confirmOriginalStemReview(req({reviewed:true,contextKey:context.contextKey}),response());
  const saved=await originalSubmissionCommit.run({reservationId,musicianId:player,payload});assert.equal(saved.listeningMixRequired,false);assert.equal(saved.takes[0].mixdownAssetId,undefined);assert.equal(s.data.reservations[0].state,'submitted');
 });
-test('a new approval or range change invalidates an earlier listening acknowledgement',async t=>{
+test('a new approval or range change keeps the uploaded file’s saved alignment confirmation',async t=>{
  const s=setup(t),context=await loadOriginalRecordingContext({projectId});await confirmOriginalStemReview(req({reviewed:true,contextKey:context.contextKey}),response());
  await requireOriginalStemReviews({assets:[s.data.assets[0]],musicianId:player});
  s.data.submissions[0].selectedRanges[0].endSeconds=4;
- await assert.rejects(requireOriginalStemReviews({assets:[s.data.assets[0]],musicianId:player}),/current project tracks/);
+ await requireOriginalStemReviews({assets:[s.data.assets[0]],musicianId:player});
+ const res=response();await getOriginalStemPreview(req(),res);
+ assert.deepEqual(res.body.stem.alignmentReview,s.data.assets[0].alignmentReview);
+ const payload={projectId,roundId,reservationId,musicianId:player,roleName:'Bass',category:'contribution',songwritingChoice:'master_only',takes:[{stemAssetId:stemId}]};
+ await originalSubmissionCommit.run({reservationId,musicianId:player,payload});
+ assert.equal(s.data.reservations[0].state,'submitted');
 });
 test('guides are used only before there is an approved recording; legacy uploads remain usable',async t=>{
  const s=setup(t);s.data.assets.push({_id:'guide',projectId,kind:'guide_track',state:'active',mimeType:'audio/wav'});
@@ -56,4 +61,14 @@ test('authenticated audio streaming preserves bytes and denies private, hidden a
  result=await fetch(base+'?viewer=aaaaaaaaaaaaaaaaaaaaaaaa');assert.equal(result.status,403);assert.equal(fetched,1);
  s.data.assets[0].state='hidden';result=await fetch(base);assert.equal(result.status,404);assert.equal(fetched,1);
  s.data.assets[0].state='active';s.data.assets[0].mimeType='video/mp4';result=await fetch(base);assert.equal(result.status,415);assert.equal(fetched,1);
+});
+
+
+test('alignment confirmation belongs to the exact uploaded file and uploader',async t=>{
+ const s=setup(t),context=await loadOriginalRecordingContext({projectId});
+ await confirmOriginalStemReview(req({reviewed:true,contextKey:context.contextKey}),response());
+ const replacement={...s.data.assets[0],_id:'aaaaaaaaaaaaaaaaaaaaaaaa',alignmentReview:undefined};
+ await assert.rejects(requireOriginalStemReviews({assets:[replacement],musicianId:player}),error=>error.code==='ORIGINALS_ALIGNMENT_REVIEW_REQUIRED'&&error.assetId===replacement._id);
+ await assert.rejects(requireOriginalStemReviews({assets:[{...s.data.assets[0],alignmentReview:{...s.data.assets[0].alignmentReview,reviewedBy:owner}}],musicianId:player}),error=>error.code==='ORIGINALS_ALIGNMENT_REVIEW_REQUIRED');
+ await requireOriginalStemReviews({assets:[s.data.assets[0]],musicianId:player});
 });

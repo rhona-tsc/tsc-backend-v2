@@ -8,7 +8,7 @@ import Musician from '../models/musicianModel.js';
 import Email from '../models/originalProjectEmailModel.js';
 import Event from '../models/originalEventModel.js';
 import { canManageOriginalProject, canModerateOriginals, getOriginalsUserId } from './originalsPolicyService.js';
-import { escapeEmailHtml, buildTscEmailFooter } from '../utils/tscEmailBranding.js';
+import { buildOriginalsEmail } from '../utils/originalsEmailTemplate.js';
 
 const HOUR = 3600000;
 const fail = (message, status = 409) => Object.assign(new Error(message), { status });
@@ -25,9 +25,8 @@ export function buildOriginalRevisionEmail({ project, submission, action, note =
   };
   const title = `${submission.roleName} — ${project.title}`;
   const lines = [descriptions[action], ...(deadline ? [`Deadline: ${new Date(deadline).toUTCString()}`] : []), ...(note ? [`Feedback / message: ${note}`] : [])];
-  return { subject: `${action === 'escalated' ? 'TSC review needed' : action === 'requested' ? 'Revision request' : action === 'opened' ? 'Revision session reopened' : action === 'declined' ? 'Revision request declined' : 'Revision window ended'}: ${title}`,
-    text: `${title}\n\n${lines.join('\n\n')}\n\nOpen the project: ${url}`,
-    html: `<div style="font-family:Arial,sans-serif;line-height:1.6"><h2>${escapeEmailHtml(title)}</h2>${lines.map(line => `<p style="white-space:pre-line">${escapeEmailHtml(line)}</p>`).join('')}<p style="margin:24px 0"><a href="${escapeEmailHtml(url)}" style="display:inline-block;padding:13px 22px;border-radius:8px;background:#111827;color:#fff;text-decoration:none;font-weight:700">Open the project</a></p>${buildTscEmailFooter({ audience: 'musician' })}</div>` };
+  const heading = action === 'escalated' ? 'TSC review needed' : action === 'requested' ? 'Revision request' : action === 'opened' ? 'Revision session reopened' : action === 'declined' ? 'Revision request declined' : 'Revision window ended';
+  return buildOriginalsEmail({ subject: `${heading}: ${title}`, heading, paragraphs: [title, ...lines], buttonUrl: url });
 }
 
 async function queueEmail({ project, submission, action, id, note, deadline, now, session }) {

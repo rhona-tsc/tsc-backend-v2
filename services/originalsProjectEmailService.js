@@ -4,7 +4,7 @@ import Project from '../models/originalProjectModel.js';
 import Musician from '../models/musicianModel.js';
 import Submission from '../models/originalSubmissionModel.js';
 import sendEmail from '../utils/sendEmail.js';
-import { escapeEmailHtml, buildTscEmailFooter } from '../utils/tscEmailBranding.js';
+import { buildOriginalsEmail } from '../utils/originalsEmailTemplate.js';
 import { isOriginalsEnabled } from './originalsPolicyService.js';
 import { buildOriginalProjectApprovedEmail, collectOriginalsNotificationRecipients, PREVIEW_EMAIL_PATTERN } from './originalsNotificationService.js';
 import { buildOriginalSubmissionConfirmationEmail } from '../utils/originalsSubmissionConfirmationEmail.js';
@@ -12,12 +12,11 @@ import { buildOriginalSubmissionConfirmationEmail } from '../utils/originalsSubm
 export const buildOriginalProjectModerationEmail = project => {
   const url = `${String(process.env.ADMIN_FRONTEND_URL || 'https://admin.thesupremecollective.co.uk').replace(/\/$/, '')}/originals/moderation#project-${encodeURIComponent(String(project._id))}`;
   const title = project.title || 'Untitled project';
-  const lines = [`An Originals project is awaiting your approval: ${title}`, `Owner: ${project.ownerName || 'Unknown'} (${project.ownerEmail || 'No email provided'})`, project.description || '', `Genres: ${(project.genres || []).join(', ')}`, `Roles: ${(project.requestedRoles || []).map(role => role.name).join(', ')}`];
-  return {
-    subject: `Originals project awaiting approval: ${title}`,
-    text: [...lines, '', `Review the project: ${url}`].join('\n\n'),
-    html: `<div style="font-family:Arial,sans-serif;line-height:1.6">${lines.map(line => `<p>${escapeEmailHtml(line)}</p>`).join('')}<p><a href="${escapeEmailHtml(url)}">Review the project</a></p>${buildTscEmailFooter({ audience: 'musician' })}</div>`,
-  };
+  return buildOriginalsEmail({
+    subject: `Originals project awaiting approval: ${title}`, heading: 'A project is awaiting your approval',
+    paragraphs: [`An Originals project is awaiting your approval: ${title}`, `Owner: ${project.ownerName || 'Unknown'} (${project.ownerEmail || 'No email provided'})`, project.description || '', `Genres: ${(project.genres || []).join(', ')}`, `Roles: ${(project.requestedRoles || []).map(role => role.name).join(', ')}`].filter(Boolean),
+    buttonUrl: url, buttonLabel: 'Review the project',
+  });
 };
 
 async function insertEmail(repository, record) {
@@ -53,12 +52,12 @@ export const buildOriginalSubmissionEmail = ({ project, submission }) => {
   const type = submission.category === 'mix' ? 'mix output' : submission.category === 'master' ? 'master output' : 'recording submission';
   const role = submission.roleName || 'Project role';
   const credit = submission.anonymous ? submission.creditName || 'An anonymous contributor' : 'A project contributor';
-  const description = `${credit} has ${revision > 1 ? 'updated' : 'made'} a ${type} for ${role} on “${project.title}”.`;
-  return {
+  return buildOriginalsEmail({
     subject: `${revision > 1 ? 'Updated' : 'New'} ${role} submission to review: ${project.title}`,
-    text: `${description}\n\nRevision ${revision}. Open the workspace to listen and review:\n${url}\n\nThe Supreme Collective`,
-    html: `<div style="font-family:Arial,sans-serif;line-height:1.6"><p>${escapeEmailHtml(description)}</p><p>Revision ${revision}. Listen to the submitted recordings and record your decision in the workspace.</p><p><a href="${escapeEmailHtml(url)}">Review the submission</a></p>${buildTscEmailFooter({ audience: 'musician' })}</div>`,
-  };
+    heading: revision > 1 ? 'An updated submission is ready to review' : 'A new submission is ready to review',
+    paragraphs: [`${credit} has ${revision > 1 ? 'updated' : 'made'} a ${type} for ${role} on “${project.title}”.`, `Revision ${revision}. Listen to the submitted recordings and record your decision in the workspace.`],
+    buttonUrl: url, buttonLabel: 'Review the submission',
+  });
 };
 
 export async function queueOriginalSubmissionEmail({ submission, emailRepository = ProjectEmail, projectRepository = Project, musicianRepository = Musician, now = new Date() }) {

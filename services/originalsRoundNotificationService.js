@@ -12,25 +12,26 @@ import { activateOriginalRoleReservations } from './originalsReservationService.
 import { loadOriginalMembership, originalParticipation } from './originalsMembershipService.js';
 import { isOriginalsEnabled } from './originalsPolicyService.js';
 import sendEmail from '../utils/sendEmail.js';
-import { escapeEmailHtml } from '../utils/tscEmailBranding.js';
+import { buildOriginalsEmail } from '../utils/originalsEmailTemplate.js';
 
 export const buildOriginalRoundOpenEmail = ({ project, reservation, firstName = 'there' }) => {
-  const url = `${String(process.env.ADMIN_FRONTEND_URL || 'https://admin.thesupremecollective.co.uk').replace(/\/$/,'')}/originals/${project._id}`;
+  const url = `${String(process.env.ADMIN_FRONTEND_URL || 'https://admin.thesupremecollective.co.uk').replace(/\/$/, '')}/originals/${project._id}`;
   const deadline = new Date(reservation.expiresAt).toLocaleString('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' });
-  return {
-    subject: `${reservation.roleName} round is open — your place is reserved`,
-    text: `Hi ${firstName},\n\nThe ${reservation.roleName} round for “${project.title}” is now open. Your advance place is now a 24-hour recording reservation, ending ${deadline} (UK time).\n\nRead the latest guidance, upload one to four stems, then submit your contribution. A separate listening mix is optional. Listen to each new stem in the workspace with the available project tracks and confirm that it lines up before submitting:\n${url}\n\nIf you cannot take part, release your reservation in the workspace so someone else can use the place.\n\nThe Supreme Collective`,
-    html: `<p>Hi ${escapeEmailHtml(firstName)},</p><p>The <strong>${escapeEmailHtml(reservation.roleName)}</strong> round for <strong>${escapeEmailHtml(project.title)}</strong> is now open. Your place is reserved until <strong>${escapeEmailHtml(deadline)} (UK time)</strong>.</p><p>Upload one to four stems. A separate listening mix is optional. Listen to each new stem in the workspace with the available project tracks and confirm that it lines up before submitting.</p><p><a href="${escapeEmailHtml(url)}">Open the project and submit your recordings</a></p><p>If you cannot take part, release your reservation in the workspace so someone else can use the place.</p>`,
-  };
+  return buildOriginalsEmail({
+    subject: `${reservation.roleName} round is open — your place is reserved`, heading: 'Your recording round is open', firstName,
+    paragraphs: [`The ${reservation.roleName} round for “${project.title}” is now open. Your advance place is now a 24-hour recording reservation, ending ${deadline} (UK time).`, 'Read the latest guidance, upload one to four stems, then submit your contribution. A separate listening mix is optional. Listen to each new stem in the workspace with the available project tracks and confirm that it lines up before submitting.'],
+    buttonUrl: url, buttonLabel: 'Open the project and submit your recordings',
+    afterButton: ['If you cannot take part, release your reservation in the workspace so someone else can use the place.'],
+  });
 };
 
 export const buildOriginalAgreementReviewEmail = ({ project, reservation, firstName = 'there' }) => {
-  const url = `${String(process.env.ADMIN_FRONTEND_URL || 'https://admin.thesupremecollective.co.uk').replace(/\/$/,'')}/originals/${project._id}#project-roles`;
-  return {
-    subject: `${reservation.roleName} round is open — review your reservation agreement`,
-    text: `Hi ${firstName},\n\nThe ${reservation.roleName} round for “${project.title}” is open. Please review and accept the current reservation agreement in the project workspace before your advance place can become a recording reservation. Your 24-hour recording countdown has not started.\n\n${url}\n\nIf you cannot take part, release your advance place in the workspace.\n\nThe Supreme Collective`,
-    html: `<p>Hi ${escapeEmailHtml(firstName)},</p><p>The <strong>${escapeEmailHtml(reservation.roleName)}</strong> round for <strong>${escapeEmailHtml(project.title)}</strong> is open. Review and accept the current reservation agreement before your advance place can become a recording reservation. Your 24-hour recording countdown has not started.</p><p><a href="${escapeEmailHtml(url)}">Review your reservation agreement</a></p><p>If you cannot take part, release your advance place in the workspace.</p>`,
-  };
+  const url = `${String(process.env.ADMIN_FRONTEND_URL || 'https://admin.thesupremecollective.co.uk').replace(/\/$/, '')}/originals/${project._id}#project-roles`;
+  return buildOriginalsEmail({
+    subject: `${reservation.roleName} round is open — review your reservation agreement`, heading: 'Review your reservation agreement', firstName,
+    paragraphs: [`The ${reservation.roleName} round for “${project.title}” is open. Please review and accept the current reservation agreement in the project workspace before your advance place can become a recording reservation. Your 24-hour recording countdown has not started.`],
+    buttonUrl: url, buttonLabel: 'Review your reservation agreement', afterButton: ['If you cannot take part, release your advance place in the workspace.'],
+  });
 };
 
 export async function runOriginalRoundNotifications({ emailSender = sendEmail, now = new Date(), limit = 50 } = {}) {

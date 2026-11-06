@@ -1,7 +1,7 @@
 import { originalOwnerDisplayName } from "./originalsPolicyService.js";
 import musicianModel from "../models/musicianModel.js";
 import sendEmail from "../utils/sendEmail.js";
-import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.js";
+import { buildOriginalsEmail } from '../utils/originalsEmailTemplate.js';
 
 const clean = (value) => String(value || "").trim();
 const normaliseEmail = (value) => clean(value).toLowerCase();
@@ -42,46 +42,16 @@ export const collectOriginalsNotificationRecipients = (records = []) => {
 };
 
 export const buildOriginalProjectApprovedEmail = ({ project, firstName = "there" } = {}) => {
-  const adminBase = clean(
-    process.env.ADMIN_FRONTEND_URL || "https://admin.thesupremecollective.co.uk",
-  ).replace(/\/$/, "");
+  const adminBase = clean(process.env.ADMIN_FRONTEND_URL || "https://admin.thesupremecollective.co.uk").replace(/\/$/, "");
   const projectUrl = `${adminBase}/originals/${project?._id}`;
   const title = clean(project?.title) || "New Originals project";
-  const roles = (project?.requestedRoles || []).map((role) => clean(role?.name)).filter(Boolean);
+  const roles = (project?.requestedRoles || []).map(role => clean(role?.name)).filter(Boolean);
   const genres = (project?.genres || []).map(clean).filter(Boolean);
-  const ownerName = originalOwnerDisplayName(project);
-  const subject = `New TSC Originals project: ${title}`;
-  const text = [
-    `Hi ${firstName || "there"},`,
-    "",
-    `A new TSC Originals collaboration has been approved and is now open: ${title}.`,
-    `Project owner: ${ownerName}`,
-    genres.length ? `Genres: ${genres.join(", ")}` : "",
-    roles.length ? `Seeking: ${roles.join(", ")}` : "",
-    "",
-    "Log in to read the full brief and take part:",
-    projectUrl,
-    "",
-    "Warmest wishes,",
-    "The Supreme Collective",
-  ].filter((line) => line !== "").join("\n");
-  const html = `
-    <div style="font-family:Arial,Helvetica,sans-serif;color:#111111;max-width:720px;margin:0 auto;line-height:1.7;">
-      <p>Hi ${escapeEmailHtml(firstName || "there")},</p>
-      <p>A new <strong>TSC Originals</strong> collaboration has been approved and is now open:</p>
-      <div style="margin:20px 0;padding:20px;border:1px solid #ececec;border-radius:16px;">
-        <h2 style="margin:0 0 10px;font-size:22px;">${escapeEmailHtml(title)}</h2>
-        <p style="margin:0 0 6px;"><strong>Project owner:</strong> ${escapeEmailHtml(ownerName)}</p>
-        ${genres.length ? `<p style="margin:0 0 6px;"><strong>Genres:</strong> ${escapeEmailHtml(genres.join(", "))}</p>` : ""}
-        ${roles.length ? `<p style="margin:0;"><strong>Seeking:</strong> ${escapeEmailHtml(roles.join(", "))}</p>` : ""}
-      </div>
-      <p style="text-align:center;margin:24px 0;"><a href="${escapeEmailHtml(projectUrl)}" style="display:inline-block;padding:13px 22px;border-radius:999px;background:#ff6667;color:#ffffff;text-decoration:none;font-weight:700;">View the project</a></p>
-      <p>Log in to read the full brief and take part.</p>
-      <p>Warmest wishes,<br /><strong>The Supreme Collective</strong></p>
-      ${buildTscEmailFooter({ audience: "musician" })}
-    </div>`;
-
-  return { subject, text, html, projectUrl };
+  return { ...buildOriginalsEmail({
+    subject: `New TSC Originals project: ${title}`, heading: 'A new collaboration is open', firstName,
+    paragraphs: [`A new TSC Originals collaboration has been approved and is now open: ${title}.`, `Project owner: ${originalOwnerDisplayName(project)}`, ...(genres.length ? [`Genres: ${genres.join(', ')}`] : []), ...(roles.length ? [`Seeking: ${roles.join(', ')}`] : [])],
+    buttonUrl: projectUrl, buttonLabel: 'View the project', afterButton: ['Log in to read the full brief and take part.'],
+  }), projectUrl };
 };
 
 export const sendOriginalProjectApprovedNotifications = async ({

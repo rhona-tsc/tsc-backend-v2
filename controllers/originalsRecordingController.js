@@ -18,7 +18,7 @@ export async function getOriginalStemPreview(req, res) {
     const asset = await ownStem(req);
     const { contextKey, tracks } = await loadOriginalRecordingContext({ projectId: asset.projectId, excludeId: asset._id });
     res.set('Cache-Control', 'no-store');
-    return res.json({ success: true, contextKey, stem: { _id: asset._id, originalName: asset.originalName, kind: asset.kind, state: asset.state }, tracks });
+    return res.json({ success: true, contextKey, stem: { _id: asset._id, originalName: asset.originalName, kind: asset.kind, state: asset.state, alignmentReview: asset.alignmentReview }, tracks });
   } catch (error) { return fail(res, error); }
 }
 export async function confirmOriginalStemReview(req, res) {
