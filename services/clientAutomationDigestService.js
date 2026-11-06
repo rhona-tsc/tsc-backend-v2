@@ -1,3 +1,4 @@
+import { isEncoreBooking } from "../utils/encoreSettlement.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import ClientAutomationDelivery from "../models/clientAutomationDeliveryModel.js";
 import ClientAutomationDigest from "../models/clientAutomationDigestModel.js";
@@ -81,6 +82,9 @@ const scheduleStatus = ({ row, definition, todayISO, delivery, allowlisted }) =>
   }
   if (row.siteAutomationsEnabled === false) return "Suppressed — site automations are off";
   if (!allowlisted) return "Preview only — not on the live allowlist";
+  if ((definition.number === 10 || definition.number === 11) && isEncoreBooking(row)) {
+    return "Not required — original payment arranged through Encore";
+  }
   if ((definition.number === 10 || definition.number === 11) && (
     row.balancePaid || row.balancePaymentReceived || row.invoicePaid ||
     row.payments?.balancePaymentReceived || row.payments?.invoicePaid
@@ -100,7 +104,7 @@ export const buildClientAutomationDigest = ({ rows = [], deliveries = [], todayI
 
   const bookings = rows.map((row) => {
     const emailAllowed = rowEmails(row).some((email) => emails.has(email));
-    const refAllowed = !refs.size || refs.has(clean(row.bookingRef).toUpperCase());
+    const refAllowed = !refs.size || refs.has(clean(row.bookingRef));
     const allowlisted = emailAllowed && refAllowed;
     const automations = automationDefinitions.map((definition) => {
       const delivery = deliveryMap.get(`${row._id}|${definition.key}`);

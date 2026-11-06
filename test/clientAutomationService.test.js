@@ -327,6 +327,7 @@ test("the staged runner sends Automation 10 only to the allowlisted booking with
       "260922275836",
       "260115241436",
       "261011277662",
+      "UUZfW",
     ],
   });
   assert.equal(deliveryRecord.status, "sent");

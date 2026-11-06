@@ -118,3 +118,18 @@ test("daily digest sends once per London calendar day", async () => {
   assert.equal(sent[0].to, "rhona@thesupremecollective.co.uk");
   assert.equal(ledger.status, "sent");
 });
+
+
+test("Encore booking keeps its mixed-case reference and is live without original balance reminders", () => {
+  const allowlist = clientAutomationAllowlistSnapshot();
+  assert.equal(allowlist.emails.has("sue_young1576@hotmail.com"), true);
+  assert.equal(allowlist.bookingRefs.has("UUZfW"), true);
+  const digest = buildClientAutomationDigest({
+    rows: [{ ...susie, bookingRef: "UUZfW", clientEmail: "sue_young1576@hotmail.com", agent: "Encore" }],
+    todayISO: "2026-11-06",
+  });
+  assert.equal(digest.bookings[0].allowlisted, true);
+  for (const number of [10, 11]) {
+    assert.match(digest.bookings[0].automations.find(item => item.number === number).status, /payment arranged through Encore/);
+  }
+});

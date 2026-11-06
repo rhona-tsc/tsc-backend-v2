@@ -769,6 +769,7 @@ export const APPROVED_CLIENT_AUTOMATION_EMAILS = [
   "reception@fireangeltech.com",
   "meganltompkins2716@hotmail.com",
   "sarah.murphy11@hotmail.co.uk",
+  "sue_young1576@hotmail.com",
 ];
 
 export const APPROVED_CLIENT_AUTOMATION_BOOKING_REFS = [
@@ -778,6 +779,7 @@ export const APPROVED_CLIENT_AUTOMATION_BOOKING_REFS = [
   "260922275836",
   "260115241436",
   "261011277662",
+  "UUZfW",
 ];
 
 const configuredAllowlist = () => new Set([
@@ -793,7 +795,8 @@ const configuredBookingRefs = () => new Set(
     ...APPROVED_CLIENT_AUTOMATION_BOOKING_REFS,
     ...clean(process.env.CLIENT_AUTOMATION_BOOKING_REF_ALLOWLIST).split(","),
   ]
-    .map((value) => clean(value).toUpperCase())
+    // External references can be case-sensitive (for example Encore UUZfW).
+    .map((value) => clean(value))
     .filter(Boolean),
 );
 
