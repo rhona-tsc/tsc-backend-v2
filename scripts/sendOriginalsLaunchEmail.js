@@ -27,7 +27,7 @@ const save = async ledger => { const temp=ledgerPath+'.tmp';await fs.writeFile(t
 async function verifyLiveReadiness() {
   const backend = String(process.env.BACKEND_PUBLIC_URL || 'https://tsc-backend-v2.onrender.com').replace(/\/+$/, '');
   const auth = jwt.sign({id:'000000000000000000000001',role:'musician',email:'release-check@example.invalid'},process.env.JWT_SECRET,{expiresIn:'5m'});
-  const response = await fetch(`${backend}/api/originals`,{headers:{Authorization:`Bearer ${auth}`},signal:AbortSignal.timeout(20000)});
+  const response = await fetch(`${backend}/api/originals/projects`,{headers:{Authorization:`Bearer ${auth}`},signal:AbortSignal.timeout(20000)});
   const data = await response.json();
   if (!response.ok || data.success !== true) throw new Error('Launch paused: ordinary musicians cannot yet access the live Originals workspace. No campaign email sent.');
   const link=new URL(musicianEmailPreferencesUrl('launch-readiness@example.invalid'));
