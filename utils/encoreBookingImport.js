@@ -108,6 +108,7 @@ export function parseEncoreBookingDocuments(documents, { parseDate, parseTime, s
   if (earnings !== null && explicitServiceFee !== null && Math.abs(performanceFee - serviceFee - earnings) > 0.02) {
     throw new Error('Encore performance fee, service fee and earnings do not reconcile. Check the PDFs before importing.');
   }
+  const originalFee = earnings ?? (explicitServiceFee !== null ? Math.round((performanceFee - serviceFee) * 100) / 100 : 0);
   const arrivalTime = parseTime(primary.match(/\nArrive\s*\n([^\n]+)/i)?.[1]);
   const slot = (acceptance || detail).match(/(\d{1,2}[:.]\d{2}\s*(?:am|pm))\s+for\s+(\d+(?:\.\d+)?)\s+hours?/i);
   const startTime = parseTime(slot?.[1]);
@@ -121,7 +122,7 @@ export function parseEncoreBookingDocuments(documents, { parseDate, parseTime, s
   if (/vocalist|front the band|first choice/i.test(conversations)) warnings.push('Review the vocalist preference and availability in the conversation. No musician has been assigned.');
   if (arrivalTime && arrivalTime === startTime) warnings.push('Encore lists the same time for arrival and the event slot. Confirm setup, arrival and first-set timings.');
   const clientDepositPaidToEncore = /Deposit paid\s*-\s*Encore Pay/i.test(primary);
-  if (clientDepositPaidToEncore) warnings.push('The client deposit is marked paid to Encore. These PDFs do not confirm the artist deposit amount or that it reached your bank.');
+  if (clientDepositPaidToEncore) warnings.push('Payment arranged through Encore. The client deposit and Encore service fee are excluded from your receivable; only your earnings form the original booking fee.');
   if (!bookings.length) warnings.push('Add the Encore booking overview to capture the booking reference, full client name, lineup and booking history.');
   if (!accepted.length) warnings.push('Add the booking acceptance email to verify the fee breakdown and acceptance date.');
   if (venueNote) warnings.push(`Venue note: ${venueNote}. Check the full street address before saving.`);
@@ -130,25 +131,25 @@ export function parseEncoreBookingDocuments(documents, { parseDate, parseTime, s
     warnings.length && `Encore import - review\n${warnings.map(value => `- ${value}`).join('\n')}`,
     conversations && `Encore conversation evidence (requests and quotes require review)\n${conversations}`,
   ].filter(Boolean).join('\n\n');
-  const incompleteFields = [!performanceFee && 'grossValue', earnings === null && explicitServiceFee === null && 'feeBreakdown', !bandSize && 'bandSize', !clientName && 'clientName', !clientEmail && 'clientEmail', !phone && 'clientPhone', !address && 'venueAddress', !arrivalTime && 'arrivalTime', !startTime && 'startTime', 'finishTime', 'clientAddress'].filter(Boolean);
+  const incompleteFields = [!originalFee && 'grossValue', earnings === null && explicitServiceFee === null && 'feeBreakdown', !bandSize && 'bandSize', !clientName && 'clientName', !clientEmail && 'clientEmail', !phone && 'clientPhone', !address && 'venueAddress', !arrivalTime && 'arrivalTime', !startTime && 'startTime', 'finishTime', 'clientAddress'].filter(Boolean);
   return {
     bookerName: clientName, clientFirstNames: splitName(clientName).firstName,
     clientLastName: splitName(clientName).lastName, clientEmail, clientPhone: phone, clientAddress: '',
     bookingRef: reference, eventDateISO: dates[0] || '', enquiryDateISO: parseDate(enquiryDate), bookingDateISO: parseDate(bookingDate),
     eventType: /birthday party/i.test(primary || detail || acceptance) ? 'Birthday Party' : /wedding/i.test(primary || detail || acceptance) ? 'Wedding' : '',
     agent: 'Encore', actName, actTscName: actName, address,
-    grossValue: performanceFee, commissionGross: serviceFee, passThroughGross: earnings ?? Math.round((performanceFee - serviceFee) * 100) / 100,
+    grossValue: originalFee, originalBookingTotal: originalFee, commissionGross: 0, passThroughGross: originalFee,
     vatRate: 0, invoiceCompany: 'TSC', currency: 'GBP',
     lineupSelected: lineup || (bandSize ? `${bandSize} musicians` : ''), lineupComposition: [], bandSize,
     arrivalTime, startTime, finishTime: '', performancePlan, notes,
-    accounting: { invoiceCompany: 'TSC', paymentStage: '', vatRate: 0, commissionGross: serviceFee, commissionVat: 0, commissionNet: serviceFee, passThroughGross: earnings ?? performanceFee - serviceFee, currency: 'GBP' },
+    accounting: { invoiceCompany: 'TSC', paymentStage: '', vatRate: 0, commissionGross: 0, commissionVat: 0, commissionNet: 0, passThroughGross: originalFee, currency: 'GBP' },
     // A client deposit paid to Encore is not evidence of an artist payment received.
     payments: { depositAmount: 0, depositChargedAmount: 0, balancePaymentReceived: false, bandPaymentsSent: false },
     importMetadata: {
       source: 'encore_pdf', contractFilename: bookings[0]?.filename || '', invoiceFilename: accepted[0]?.filename || '',
       documents: docs.map(doc => ({ filename: doc.filename || '', kind: doc.booking ? 'booking' : doc.accepted ? 'acceptance' : 'conversation' })),
       importedAt: new Date().toISOString(), incompleteFields, warnings,
-      encore: { clientDepositPaidToEncore, venueNote, eventSlotHours: slot ? Number(slot[2]) : null, serviceFeeInferred: explicitServiceFee === null && earnings !== null },
+      encore: { earnings: originalFee, performanceFee, serviceFee, clientDepositPaidToEncore, venueNote, eventSlotHours: slot ? Number(slot[2]) : null, serviceFeeInferred: explicitServiceFee === null && earnings !== null },
     },
   };
 }

@@ -105,6 +105,8 @@ const BookingExtraSchema = new mongoose.Schema(
     id: { type: String },
     key: { type: String, default: "" },
     name: { type: String, default: "" },
+    addsMusician: { type: Boolean, default: false },
+    musicianRole: { type: String, default: "" },
     quantity: { type: Number, default: 1 },
     price: { type: Number, default: 0 },
     passThroughGross: { type: Number, default: 0 },
@@ -297,6 +299,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
     songSuggestionsDueDateISO: { type: String }, // authoritative song/request deadline
 
     invoiceDueDateISO: { type: String }, // payment due date
+    originalBookingTotal: { type: Number, default: undefined },
     grossValue: { type: Number, default: 0 },
     netCommission: { type: Number, default: 0 }, // agency commission amount £
     agent: { type: String }, // e.g. "Encore", "TSC Direct", "Other Agent"

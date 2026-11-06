@@ -4,6 +4,7 @@ import ClientAutomationDelivery from "../models/clientAutomationDeliveryModel.js
 import Act from "../models/actModel.js";
 import cloudinary from "../config/cloudinary.js";
 import sendEmail from "../utils/sendEmail.js";
+import { isEncoreBooking } from "../utils/encoreSettlement.js";
 import { buildIntroInvoiceAttachments } from "../utils/introInvoiceAttachment.js";
 import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.js";
 import { buildBandSheetShareUrl } from "../utils/bandSheetUrl.js";
@@ -1047,7 +1048,7 @@ export const runClientAutomations = async ({
       }
     };
 
-    if (isBalancePaid(row)) summary.skipped += 1;
+    if (isBalancePaid(row) || isEncoreBooking(row)) summary.skipped += 1;
     else await sendClientAutomation({
       automationKey: AUTOMATION_10_KEY,
       automationNumber: AUTOMATION_10_NUMBER,
@@ -1109,7 +1110,7 @@ export const runClientAutomations = async ({
       summary.skipped += 1;
     }
 
-    if (isBalancePaid(row)) summary.skipped += 1;
+    if (isBalancePaid(row) || isEncoreBooking(row)) summary.skipped += 1;
     else await sendClientAutomation({
       automationKey: AUTOMATION_11_KEY,
       automationNumber: AUTOMATION_11_NUMBER,

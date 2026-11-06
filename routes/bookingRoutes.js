@@ -39,6 +39,8 @@ import {
 } from "../services/eventSheetSectionNotificationService.js";
 import { resolveBookedActName } from "../utils/bookingDisplayName.js";
 
+import { isEncoreBooking, resolveEncoreSettlement } from "../utils/encoreSettlement.js";
+import { effectiveLineupRoles, lineupDisplayLabel, bookingExtras, additionalMusicianRoles } from "../utils/bookingLineupAdditions.js";
 const router = express.Router();
 
 const formatOrdinalDate = (value, { weekday = false } = {}) => {
@@ -79,7 +81,7 @@ const formatOrdinalDate = (value, { weekday = false } = {}) => {
     : dateText;
 };
 
-const withConfirmedAllocation = async (booking) => {
+export const withConfirmedAllocation = async (booking, { BoardModel = BookingBoardItem, ActModel = Act, MusicianModel = Musician } = {}) => {
   if (!booking) return booking;
   const plain = typeof booking.toObject === "function" ? booking.toObject() : booking;
   const conditions = [];
@@ -90,7 +92,7 @@ const withConfirmedAllocation = async (booking) => {
     conditions.push({ bookingId: plain._id }, { sourceBookingId: plain._id });
   }
   const board = conditions.length
-    ? await BookingBoardItem.findOne({ $or: conditions }).lean()
+    ? await BoardModel.findOne({ $or: conditions }).lean()
     : null;
   const assignments = [
     board?.assignedMusicians,
@@ -106,7 +108,7 @@ const withConfirmedAllocation = async (booking) => {
     .map((member) => member?.musicianId)
     .filter((id) => mongoose.isValidObjectId(String(id || "")));
   const profiles = musicianIds.length
-    ? await Musician.find({ _id: { $in: musicianIds } })
+    ? await MusicianModel.find({ _id: { $in: musicianIds } })
         .select("dietaryRequirements musicianSlug firstName lastName")
         .lean()
     : [];
@@ -131,13 +133,13 @@ const withConfirmedAllocation = async (booking) => {
     null;
   let actProfile = null;
   if (mongoose.isValidObjectId(String(boardActId || ""))) {
-    actProfile = await Act.findById(boardActId)
+    actProfile = await ActModel.findById(boardActId)
       .select("name tscName images coverImage profileImage videos tscVideos lineups")
       .lean();
   }
   if (!actProfile && boardActName) {
     const escapedName = boardActName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    actProfile = await Act.findOne({
+    actProfile = await ActModel.findOne({
       $or: [
         { tscName: { $regex: `^${escapedName}$`, $options: "i" } },
         { name: { $regex: `^${escapedName}$`, $options: "i" } },
@@ -146,6 +148,8 @@ const withConfirmedAllocation = async (booking) => {
       .select("name tscName images coverImage profileImage videos tscVideos lineups")
       .lean();
   }
+  const encoreTotals = board && isEncoreBooking(board) ? resolveEncoreSettlement(board) : null;
+  const displayLineup = board ? lineupDisplayLabel(board) : lineupDisplayLabel(plain);
   const boardBookingTotal = Number(board?.grossValue || 0);
   const boardDepositPaid = Number(
     board?.payments?.depositChargedAmount ?? board?.payments?.depositAmount ?? 0,
@@ -159,6 +163,10 @@ const withConfirmedAllocation = async (booking) => {
     ...(coreFirstAct || {}),
     ...(boardFirstAct || {}),
   };
+  const additions = additionalMusicianRoles(board || plain);
+  const effectiveMembers = additions.length ? getLineupMembersForPdf({
+    ...plain, ...(board || {}), actsSummary: [bookingFirstAct],
+  }, actProfile) : [];
   const mergedFirstAct = {
     ...bookingFirstAct,
     ...(actProfile?._id || boardActId ? { actId: actProfile?._id || boardActId } : {}),
@@ -174,7 +182,14 @@ const withConfirmedAllocation = async (booking) => {
           lineups: actProfile.lineups || [],
         }
       : {}),
-    ...(board?.lineupSelected ? { lineupLabel: board.lineupSelected } : {}),
+    ...(board?.lineupSelected ? { lineupLabel: displayLineup } : {}),
+    ...(additions.length ? {
+      bandSize: effectiveMembers.filter(member => !isNonPerformerForPdf(member)).length,
+      bandMembers: effectiveMembers,
+      lineup: { ...(bookingFirstAct.lineup || {}), bandMembers: effectiveMembers,
+        hasAdditionalMusicians: true,
+        hotMeal: effectiveMembers.filter(member => !isNonPerformerForPdf(member)).length },
+    } : {}),
     ...((board?.arrivalTime || board?.startTime || board?.finishTime)
       ? {
           performance: {
@@ -225,7 +240,7 @@ const withConfirmedAllocation = async (booking) => {
         }
       : {}),
     ...(board?.lineupSelected
-      ? { lineupSelected: board.lineupSelected, lineupLabel: board.lineupSelected }
+      ? { lineupSelected: board.lineupSelected, lineupLabel: displayLineup }
       : {}),
     ...(Array.isArray(board?.lineupComposition) && board.lineupComposition.length
       ? { lineupComposition: board.lineupComposition }
@@ -254,6 +269,13 @@ const withConfirmedAllocation = async (booking) => {
           balanceAmountPence: Math.round(boardBalance * 100),
         }
       : {}),
+    ...(board ? { extras: bookingExtras(board) } : {}),
+    ...(encoreTotals ? {
+      totals: { ...(plain.totals || {}), ...encoreTotals, balancePaid: encoreTotals.remainingAmount <= 0.01 },
+      paymentArrangement: encoreTotals.paymentArrangement,
+      extrasPaymentUrl: board?.payments?.extrasInvoiceUrl || "",
+      balanceAmountPence: Math.round(encoreTotals.remainingAmount * 100),
+    } : {}),
     actsSummary: Object.keys(mergedFirstAct).length
       ? [mergedFirstAct, ...(plain?.actsSummary || []).slice(1)]
       : plain?.actsSummary,
@@ -935,7 +957,7 @@ const getExplicitLineupRolesForPdf = (booking) => {
 };
 
 const getWantedLineupRolesForPdf = (booking) => {
-  const explicit = getExplicitLineupRolesForPdf(booking);
+  const explicit = effectiveLineupRoles(booking, getExplicitLineupRolesForPdf(booking));
   if (explicit.length) return explicit.map(normalisePdfRole).filter(Boolean);
 
   const allocated = [
@@ -1017,7 +1039,7 @@ const getLineupLabelForPdf = (booking, act) => {
     firstAct?.actSize ||
     booking?.lineupLabel ||
     booking?.lineupName ||
-    booking?.lineupSelected ||
+    lineupDisplayLabel(booking) ||
     booking?.lineup?.actSize ||
     ""
   );
@@ -1032,7 +1054,10 @@ const getLineupMembersForPdf = (booking, act) => {
   const firstAct = getFirstActSummary(booking) || {};
   const lineup = resolveActLineupForPdf(booking, act);
   const configured = lineup?.bandMembers || firstAct.bandMembers || firstAct.lineup?.bandMembers || [];
-  const explicitRoles = getExplicitLineupRolesForPdf(booking);
+  const baseRoles = getExplicitLineupRolesForPdf(booking);
+  const explicitRoles = baseRoles.length ? effectiveLineupRoles(booking, baseRoles)
+    : bookingExtras(booking).some(extra => extra.addsMusician === true)
+      ? effectiveLineupRoles(booking, configured.filter(member => !isNonPerformerForPdf(member)).map(member => member.instrument || member.role)) : [];
   if (explicitRoles.length) {
     const unmatched = configured
       .filter((member) => !isNonPerformerForPdf(member))

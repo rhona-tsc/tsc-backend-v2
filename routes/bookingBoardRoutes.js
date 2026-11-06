@@ -1,6 +1,8 @@
 // routes/bookingBoardRoutes.js
 
 import express from "express";
+import { isEncoreBooking } from "../utils/encoreSettlement.js";
+import { effectiveLineupRoles } from "../utils/bookingLineupAdditions.js";
 import { isBespokeLineup, normaliseBespokeLineup, updateBespokeSummary } from "../utils/bespokeLineup.js";
 import mongoose from "mongoose";
 import BookingBoardItem from "../models/bookingBoardItem.js";
@@ -190,12 +192,15 @@ export const buildIntroEmail = (row) => {
   const specialRequestLabel = /wedding/i.test(eventType)
     ? "First Dance"
     : "Off Repertoire";
+  const paymentParagraph = isEncoreBooking(row)
+    ? "Payment for your original booking is arranged through Encore. Any extras agreed separately are invoiced directly."
+    : "Please also find linked below the invoice for the balance, which is due around a week before the performance. The BACS details are on the footer of the attached invoice.";
   const paragraphs = [
     `Allow me to introduce myself, my name is Rhona, I am the band manager for ${actName}. Thank you for booking the band - we're excited to be delivering the entertainment for you at your ${eventType}, and I'm very much looking forward to sorting out the fine details for the entertainment in the run-up.`,
     "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and kindly fill in the blanks directly into the document. The event sheet will auto-save, so you can just close it when you're done. I'll review the details you provide, and I'll be back in touch if I've any questions for you or vice versa.",
     "Also please feel free to email or WhatsApp if you've any urgent questions or requests. Or alternatively, you can schedule a call with me directly in my calendar: https://calendly.com/thesupremecollective/call",
-    "Please also find linked below the invoice for the balance, which is due around a week before the performance. The BACS details are on the footer of the attached invoice.",
-    `Key dates include:\n- Song suggestions and ${specialRequestLabel} request due on the ${songDue}\n- Completed event sheet (including playlists), and balance due on the ${finalDetailsDue}`,
+    paymentParagraph,
+    `Key dates include:\n- Song suggestions and ${specialRequestLabel} request due on the ${songDue}\n- Completed event sheet (including playlists)${isEncoreBooking(row) ? "" : ", and balance"} due on the ${finalDetailsDue}`,
     "You'll also receive a few emails from me in the run up to the performance date as reminders to submit certain bits of information to the event sheet just to keep everything on track.",
     "Hopefully, everything makes sense, but any questions, don't hesitate!",
   ];
@@ -239,10 +244,10 @@ export const buildIntroEmail = (row) => {
       ? "First Dance request"
       : "Off Repertoire Request";
     const paragraphs = [
-      `Many thanks for sending over the deposit and for signing the contract. I've sent through a receipt for the deposit separately for your records. I'm pleased to say that is the band secure for your client's ${eventType}. :) Thank you for booking the band! They are very much looking forward to performing for your clients and their guests, and I'm very much looking forward to sorting out the fine details for the entertainment in the run-up to the big day.`,
+      isEncoreBooking(row) ? `Thank you for booking ${actName} through Encore. We are looking forward to performing for your clients and their guests.` : `Many thanks for sending over the deposit and for signing the contract. I've sent through a receipt for the deposit separately for your records. I'm pleased to say that is the band secure for your client's ${eventType}. :) Thank you for booking the band! They are very much looking forward to performing for your clients and their guests, and I'm very much looking forward to sorting out the fine details for the entertainment in the run-up to the big day.`,
       "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and kindly fill in the blanks directly into the document. The event sheet will auto-save, you can tick off each section when you're done, and then 'Notify Band' when complete. At this point I'll check over the details and see if I or the band have any questions for you or vice versa.",
       "Also please feel free to email or WhatsApp if you've any urgent questions or requests. Or alternatively, you can schedule a call with me directly in my calendar: https://calendly.com/thesupremecollective/call",
-      "Please also find linked below the invoice for the balance, which is due around a week before the performance. The BACS details are on the footer of the invoice: Invoice attached",
+      paymentParagraph,
       `Key dates include:\n- Song suggestions and ${specialRequestLabel} due on the ${formatDate(songDue)}\n- Completed event sheet (including playlists) due on the ${formatDate(invoiceDue)}`,
       "You'll also receive a few emails from me in the run up to the performance date as reminders to submit certain bits of information to the event sheet just to keep everything on track.",
       "Hopefully, everything makes sense, but any questions, don't hesitate!",
@@ -982,6 +987,7 @@ const normaliseImportRow = (item = {}) => {
     address: cleanString(item.address || item.venueAddress || item.venue),
     county: cleanString(item.county),
     grossValue,
+    ...(item.originalBookingTotal != null ? { originalBookingTotal: Number(item.originalBookingTotal) } : {}),
     netCommission: 0,
     bandSize: toNumber(item.bandSize),
     lineupSelected: cleanString(item.lineupSelected || item.lineup),
@@ -1198,7 +1204,7 @@ const sanitizeBookingPatch = (body = {}) => {
 export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
   const patch = sanitizeBookingPatch(normaliseBespokeLineup(rawPatch));
   const previousGross = Number(bookingDoc?.totals?.fullAmount ?? bookingDoc?.amount ?? bookingDoc?.fee ?? 0) || 0;
-  const previousCharged = Number(bookingDoc?.totals?.chargedAmount ?? bookingDoc?.amount ?? bookingDoc?.totals?.depositAmount ?? 0) || 0;
+  const previousCharged = Number(bookingDoc?.totals?.chargedAmount ?? (isEncoreBooking(bookingDoc) ? 0 : bookingDoc?.amount) ?? bookingDoc?.totals?.depositAmount ?? 0) || 0;
   const previouslyPaid = bookingDoc.balancePaid === true || bookingDoc.balanceStatus === "paid" || bookingDoc?.totals?.balancePaid === true;
 
   const requestedEventDate = patch.eventDateISO || patch.eventDate || patch.date;
@@ -1352,7 +1358,7 @@ export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
 
   const charged =
     Number(
-      bookingDoc?.totals?.chargedAmount ?? bookingDoc?.amount ?? deposit ?? 0,
+      bookingDoc?.totals?.chargedAmount ?? (isEncoreBooking(bookingDoc) ? 0 : bookingDoc?.amount) ?? deposit ?? 0,
     ) || 0;
 
   const computedBalance = Math.max(0, gross - charged);
@@ -1607,6 +1613,7 @@ export const mergeRowData = (preferred, secondary) => {
       cleanString(boardSource?.introEmailMessageId)
       || cleanString(preferred?.introEmailMessageId)
       || cleanString(secondary?.introEmailMessageId),
+    originalBookingTotal: boardSource?.originalBookingTotal ?? preferred?.originalBookingTotal ?? secondary?.originalBookingTotal,
     grossValue:
       Number(preferred?.grossValue || 0) ||
       Number(secondary?.grossValue || 0) ||
@@ -1889,6 +1896,7 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
         doc?.bookingDetails?.songSuggestionsDueDateISO,
     ).slice(0, 10),
     grossValue,
+    ...(doc.totals?.bookingTotal != null ? { originalBookingTotal: Number(doc.totals.bookingTotal) } : {}),
     netCommission: Number(doc?.netCommission || 0) || 0,
     agent: normaliseAgent(doc?.agent),
     eventType:
@@ -2525,6 +2533,7 @@ router.post("/", musicianAuth, async (req, res) => {
           ? "BMM"
           : "TSC",
       createdManually: true,
+      agent: normaliseAgent(payload.agent),
       ...(linkedAct
         ? {
             act: linkedAct._id,
@@ -2563,6 +2572,11 @@ router.post("/", musicianAuth, async (req, res) => {
       amount: Number(payload.grossValue || 0) || 0,
       fee: Number(payload.grossValue || 0) || 0,
 
+      ...(isEncoreBooking(payload) ? { totals: {
+        bookingTotal: Number(payload.originalBookingTotal ?? payload.grossValue ?? 0),
+        fullAmount: Number(payload.grossValue || 0), depositAmount: 0, chargedAmount: 0,
+        remainingAmount: Number(payload.grossValue || 0), currency: "GBP",
+      } } : {}),
       accounting: payload.accounting || undefined,
       ...(typeof payload.notes === "string" ? { notes: payload.notes } : {}),
 
@@ -2670,6 +2684,7 @@ router.post("/", musicianAuth, async (req, res) => {
       clientEmail,
       clientPhone: String(payload.clientPhone || "").trim(),
       clientAddress: String(payload.clientAddress || "").trim(),
+      ...(payload.originalBookingTotal != null ? { originalBookingTotal: Number(payload.originalBookingTotal) } : {}),
       accounting: payload.accounting || undefined,
       eventType: normalizeEventType(payload.eventType),
       actName: String(payload.actName || "").trim(),
@@ -2727,7 +2742,7 @@ router.post("/", musicianAuth, async (req, res) => {
       [
         "bookerName", "clientFirstNames", "clientEmail", "clientEmails",
         "clientPhone", "clientAddress", "contactRole", "agent", "eventType",
-        "grossValue", "netCommission", "accounting", "depositInvoice",
+        "originalBookingTotal", "grossValue", "netCommission", "accounting", "depositInvoice",
         "paymentInstructions", "invoiceDateISO", "songSuggestionsDueDateISO",
         "invoiceUrl", "invoicePdfUrl", "balanceAmountPence", "balanceStatus",
         "payments",
@@ -2836,9 +2851,7 @@ router.post("/:id/whatsapp-group", musicianAuth, async (req, res) => {
     const confirmed = assignments.filter((member) =>
       ["accepted", "confirmed"].includes(cleanString(member?.status).toLowerCase()),
     );
-    const expectedCount = Array.isArray(row.lineupComposition)
-      ? row.lineupComposition.filter(Boolean).length
-      : Number(row.bandSize || 0);
+    const expectedCount = effectiveLineupRoles(row).filter(Boolean).length || Number(row.bandSize || 0);
     if (!confirmed.length || (expectedCount > 0 && confirmed.length < expectedCount)) {
       return res.status(409).json({
         success: false,
@@ -3584,6 +3597,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
     // Non-admins can only do lightweight row edits
     if (!isAdmin) {
+      delete body.originalBookingTotal;
       delete body.grossValue;
       delete body.netCommission;
       delete body.totals;
@@ -3727,6 +3741,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         ...(body.enquiryDateISO !== undefined
           ? { enquiryDateISO: String(body.enquiryDateISO || "").slice(0, 10) }
           : {}),
+        ...(body.originalBookingTotal != null ? { originalBookingTotal: Number(body.originalBookingTotal) } : {}),
         ...(body.agent !== undefined ? { agent: normaliseAgent(body.agent) } : {}),
         ...(body.actName !== undefined ? { actName: body.actName } : {}),
         ...(body.actTscName !== undefined ? { actTscName: body.actTscName } : {}),

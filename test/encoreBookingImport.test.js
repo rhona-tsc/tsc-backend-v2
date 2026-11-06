@@ -101,9 +101,13 @@ test('Encore bundle captures booking fields, repaired contact, fees and history 
   assert.equal(draft.eventType, 'Birthday Party');
   assert.equal(draft.actName, 'Example Soul Band');
   assert.equal(draft.address, 'Example Road, Exampletown EX1 1AB');
-  assert.equal(draft.grossValue, 3268.75);
-  assert.equal(draft.commissionGross, 653.75);
+  assert.equal(draft.grossValue, 2615);
+  assert.equal(draft.commissionGross, 0);
   assert.equal(draft.passThroughGross, 2615);
+  assert.equal(draft.originalBookingTotal, 2615);
+  assert.equal(draft.importMetadata.encore.performanceFee, 3268.75);
+  assert.equal(draft.importMetadata.encore.serviceFee, 653.75);
+  assert.equal(draft.accounting.commissionGross, 0);
   assert.equal(draft.bandSize, 4);
   assert.equal(draft.performancePlan, '3 x 40 minute sets');
   assert.equal(draft.startTime, '21:00');
@@ -122,7 +126,7 @@ test('conversation evidence excludes other clients and keeps requests separate f
   assert.ok(draft.importMetadata.incompleteFields.includes('finishTime'));
   assert.ok(draft.importMetadata.warnings.some(warning => warning.includes('00:30')));
   assert.equal(draft.bandSize, 4);
-  assert.equal(draft.grossValue, 3268.75);
+  assert.equal(draft.grossValue, 2615);
   assert.equal(draft.assignedMusicians, undefined);
   assert.equal(draft.bookingDetails?.djServicesBooked, undefined);
 });
@@ -132,12 +136,12 @@ test('deposit paid to Encore never marks artist earnings as received', () => {
   assert.equal(draft.importMetadata.encore.clientDepositPaidToEncore, true);
   assert.equal(draft.payments.depositChargedAmount, 0);
   assert.equal(draft.payments.balancePaymentReceived, false);
-  assert.match(draft.notes, /do not confirm the artist deposit amount/);
+  assert.match(draft.notes, /Payment arranged through Encore/);
 });
 
 test('supports overview alone, inferring service fee only from stated earnings', () => {
   const draft = parseEncoreBookingBundle(documents.slice(0, 1));
-  assert.equal(draft.commissionGross, 653.75);
+  assert.equal(draft.commissionGross, 0);
   assert.equal(draft.importMetadata.encore.serviceFeeInferred, true);
   assert.ok(draft.importMetadata.warnings.some(warning => warning.includes('acceptance email')));
 });

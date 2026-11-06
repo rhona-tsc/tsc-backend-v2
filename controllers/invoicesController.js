@@ -1,5 +1,6 @@
 // controllers/invoicesController.js
 import { startOfDay, subDays, subHours, isValid, parseISO } from "date-fns";
+import { isEncoreBooking } from "../utils/encoreSettlement.js";
 import Booking from "../models/bookingModel.js";
 import { enqueueReminder } from "../services/remindersQueue.js"; // BullMQ / Agenda / node-cron wrapper
 import Stripe from "stripe";
@@ -193,6 +194,7 @@ export const scheduleBalance = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Booking not found." });
     }
+    if (isEncoreBooking(booking)) return res.status(409).json({ success: false, message: "Payment arranged through Encore. Use the extras invoice." });
     booking.balanceDueAt = dueAt;
     booking.balanceAmountPence = amountPence;
     booking.balanceStatus = "scheduled";
@@ -277,6 +279,10 @@ export const getOrCreateBalanceLink = async (req, res) => {
       looksLikeObjectId(idOrRef) ? { _id: idOrRef } : { bookingId: idOrRef },
     );
     if (!booking) return res.status(404).json({ success: false, message: "Booking not found." });
+    const board = await BookingBoardItem.findOne({ bookingRef: booking.bookingId }).lean();
+    if (isEncoreBooking(booking) || isEncoreBooking(board || {})) {
+      return res.status(409).json({ success: false, message: "Payment arranged through Encore. Use the extras invoice." });
+    }
     // The amount is calculated from saved booking totals, never a query parameter.
     const client = getStripeClientForCompany(booking.accounting?.invoiceCompany || booking.invoiceCompany);
     const result = await createOrReuseBalanceCheckout(booking, client);
@@ -469,6 +475,9 @@ export const createInvoicePayLink = async (req, res) => {
       });
     }
 
+    if (isEncoreBooking(booking) && !["addon_deposit", "addon_full"].includes(stageNorm)) {
+      return res.status(409).json({ success: false, message: "Payment arranged through Encore. Use the extras invoice." });
+    }
     const VAT_RATE = getEffectiveVatRate(booking, DEFAULT_VAT_RATE);
 
     // Void old invoice first, if requested
@@ -2106,6 +2115,9 @@ export const createBoardInvoice = async (req, res) => {
       });
     }
 
+    if (isEncoreBooking(row) && !isExtrasInvoice) {
+      return res.status(409).json({ success: false, message: "The original booking payment is arranged through Encore. Use an extras invoice for direct client charges." });
+    }
     if (isDepositInvoice && Number(row?.depositInvoice?.gross || 0) <= 0) {
       return res.status(400).json({
         success: false,
@@ -2663,6 +2675,9 @@ export const serveBoardReceiptPdf = async (req, res) => {
     if (!row) return res.status(404).send("Receipt not found");
 
     const invoiceTypeNorm = String(req.query?.invoiceType || "main").toLowerCase();
+    if (isEncoreBooking(row) && invoiceTypeNorm !== "extras") {
+      return res.status(409).send("The original booking payment is arranged through Encore. Use the extras invoice.");
+    }
 
     const rowForInvoice = {
       ...row,
@@ -2707,6 +2722,9 @@ export const serveBoardInvoicePdf = async (req, res) => {
     if (!row) return res.status(404).send("Invoice not found");
 
     const invoiceTypeNorm = String(req.query?.invoiceType || "main").toLowerCase();
+    if (isEncoreBooking(row) && invoiceTypeNorm !== "extras") {
+      return res.status(409).send("The original booking payment is arranged through Encore. Use the extras invoice.");
+    }
 
     const eventDate = firstNonEmpty(row.eventDateISO, row.eventDate, row.date);
     const finalDueDate =

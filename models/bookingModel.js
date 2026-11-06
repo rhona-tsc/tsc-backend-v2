@@ -24,6 +24,8 @@ const ExtraSchema = new mongoose.Schema(
   {
     key: String,
     name: String,
+    addsMusician: { type: Boolean, default: false },
+    musicianRole: String,
     quantity: { type: Number, default: 1 },
     price: { type: Number, default: 0 }, // gross £ charged to client
     finishTime: String,

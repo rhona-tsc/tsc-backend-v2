@@ -1,3 +1,4 @@
+import { isEncoreBooking } from "./encoreSettlement.js";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
 import { request as httpsRequest } from "node:https";
@@ -411,6 +412,7 @@ export const buildIntroInvoiceAttachments = async (
   row,
   options = {},
 ) => {
+  if (isEncoreBooking(row)) return [];
   const invoiceUrl = getIntroInvoiceUrl(row);
   if (!invoiceUrl) return [];
 

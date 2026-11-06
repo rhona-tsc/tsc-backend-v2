@@ -2,6 +2,7 @@ import Booking from "../models/bookingModel.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import { buildEventSheetUrl } from "../utils/publicSiteUrl.js";
 
+import { isEncoreBooking } from "../utils/encoreSettlement.js";
 const pence = (value) => Math.round(Number(value || 0) * 100);
 export const isBalanceCheckout = (session) =>
   [session?.metadata?.category, session?.metadata?.payment_stage, session?.metadata?.paymentStage]
@@ -10,6 +11,7 @@ export const balanceIsPaid = (booking) => booking.balancePaid === true ||
   booking.totals?.balancePaid === true || booking.balanceStatus === "paid";
 
 export const getBalanceAmounts = (booking) => {
+  if (isEncoreBooking(booking)) throw new Error("The original booking payment is arranged through Encore. Use the extras invoice.");
   const full = pence(booking.totals?.fullAmount ?? booking.fee);
   const charged = booking.totals?.chargedAmount == null ? NaN : pence(booking.totals.chargedAmount);
   if (!Number.isSafeInteger(full) || !Number.isSafeInteger(charged) || full <= 0 || charged < 0) {
