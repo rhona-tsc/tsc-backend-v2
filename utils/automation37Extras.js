@@ -35,14 +35,20 @@ export function automation37ExtrasState(row = {}, rule = {}) {
   };
 }
 
-// Migrate only the three standard passages; retain the rest of Rhona's template
-// and every other automation unchanged. Already-migrated rules are idempotent.
-export function prepareAutomation37Rule(rule = {}) {
-  if (Number(rule.sourceNumber) !== 37) return rule;
-  const standardSubject = /^(?:Reminder: Advanced Requests, Event Sheet & Balance Due|Automated Reminder: Event Sheet(?: & Spotify Playlist\(\/s\)|, Spotify Playlist\(\/s\)\s*& Extras Balance) Due Soon)$/i;
+export const isEventDetailsExtrasReminder = (rule = {}) => [37, 38].includes(Number(rule.sourceNumber));
+export const eventDetailsExtrasState = automation37ExtrasState;
+
+// Keep both reminders' conditional wording together. Only Automation 37 uses
+// the advance Thursday rule; Automation 38 retains its deadline-day schedule.
+export function prepareEventDetailsReminderRule(rule = {}) {
+  if (!isEventDetailsExtrasReminder(rule)) return rule;
+  const dueToday = Number(rule.sourceNumber) === 38;
+  const standardSubject = dueToday
+    ? /^(?:Reminder: Advanced Requests, Event Sheet & Balance|Automated Reminder: Event Sheet(?: & Spotify Playlist\(\/s\)|, Spotify Playlist\(\/s\)\s*& ['‘’"]?Extras['‘’"]? Balance)) Due Today$/i
+    : /^(?:Reminder: Advanced Requests, Event Sheet & Balance Due|Automated Reminder: Event Sheet(?: & Spotify Playlist\(\/s\)|, Spotify Playlist\(\/s\)\s*& Extras Balance) Due Soon)$/i;
   return {
     ...rule,
-    timing: { ...rule.timing, ...AUTOMATION_37_TIMING },
+    ...(dueToday ? {} : { timing: { ...rule.timing, ...AUTOMATION_37_TIMING } }),
     subject: standardSubject.test(clean(rule.subject)) ? AUTOMATION_37_TAGS.subject : rule.subject,
     body: String(rule.body || "")
       .replace(/^(?:And\s+)?finally,\s+the\s+(?:['‘’"]?extras['‘’"]?\s+)?balance[^\n]*(?:\n\s*\n(?:\{pulse\.link7\}|\{\{invoice_link\}\}|Invoice attached)[ \t]*)?/gim, AUTOMATION_37_TAGS.payment)
@@ -51,15 +57,18 @@ export function prepareAutomation37Rule(rule = {}) {
   };
 }
 
-export function renderAutomation37Conditions(template, row, rule = {}) {
-  if (Number(rule.sourceNumber) !== 37) return String(template || "");
+export function renderEventDetailsReminderConditions(template, row, rule = {}) {
+  if (!isEventDetailsExtrasReminder(rule)) return String(template || "");
+  const dueToday = Number(rule.sourceNumber) === 38;
   const { hasOutstandingExtras, shouldAttachInvoice } = automation37ExtrasState(row, rule);
   const values = {
     [AUTOMATION_37_TAGS.subject]: hasOutstandingExtras
-      ? "Automated Reminder: Event Sheet, Spotify Playlist(/s) & Extras Balance Due Soon"
-      : "Automated Reminder: Event Sheet & Spotify Playlist(/s) Due Soon",
+      ? (dueToday
+        ? "Automated Reminder: Event Sheet, Spotify Playlist(/s) & 'Extras' Balance Due Today"
+        : "Automated Reminder: Event Sheet, Spotify Playlist(/s) & Extras Balance Due Soon")
+      : `Automated Reminder: Event Sheet & Spotify Playlist(/s) Due ${dueToday ? "Today" : "Soon"}`,
     [AUTOMATION_37_TAGS.payment]: shouldAttachInvoice
-      ? "Finally, the 'extras' balance should also be settled by this date. The issued invoice is attached and includes the BACS details."
+      ? `Finally, the 'extras' balance should also be settled ${dueToday ? "today" : "by this date"}. The issued invoice is attached and includes the BACS details.`
       : "",
     [AUTOMATION_37_TAGS.completion]: hasOutstandingExtras
       ? "If you have already submitted your playlist link(s), completed the Event Sheet, and paid the 'extras' balance, please disregard this email."
@@ -68,3 +77,10 @@ export function renderAutomation37Conditions(template, row, rule = {}) {
   return Object.entries(values).reduce((output, [tag, value]) => output.split(tag).join(value), String(template || ""))
     .replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, "\n\n");
 }
+
+
+// Retain the existing Automation 37 API for its callers and regression tests.
+export const prepareAutomation37Rule = (rule = {}) => Number(rule.sourceNumber) === 37
+  ? prepareEventDetailsReminderRule(rule) : rule;
+export const renderAutomation37Conditions = (template, row, rule = {}) => Number(rule.sourceNumber) === 37
+  ? renderEventDetailsReminderConditions(template, row, rule) : String(template || "");

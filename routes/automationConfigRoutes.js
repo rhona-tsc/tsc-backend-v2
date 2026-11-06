@@ -32,7 +32,7 @@ router.get("/allowlist", verifyToken, (_req, res) => {
     success: true,
     emails: [...emails],
     bookingRefs: [...bookingRefs],
-    capabilities: { automation37Extras: true },
+    capabilities: { automation37Extras: true, automation38Extras: true },
   });
 });
 

@@ -23,6 +23,7 @@ test('the dashboard reads the sender allowlist, including environment additions,
     assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
     const policy=await response.json();assert.equal(policy.success,true);
     assert.equal(policy.capabilities?.automation37Extras,true);
+    assert.equal(policy.capabilities?.automation38Extras,true);
     assert.ok(policy.emails.includes('sue_young1576@hotmail.com'));
     assert.ok(policy.bookingRefs.includes('UUZfW'));
     assert.ok(policy.emails.includes('extra@example.test'));

@@ -1,8 +1,9 @@
 import mongoose from "mongoose";
 import {
   automation37ExtrasState,
-  prepareAutomation37Rule,
-  renderAutomation37Conditions,
+  isEventDetailsExtrasReminder,
+  prepareEventDetailsReminderRule,
+  renderEventDetailsReminderConditions,
 } from "./automation37Extras.js";
 
 const invalidRequest = (message, statusCode = 400) => Object.assign(new Error(message), { statusCode });
@@ -14,7 +15,7 @@ export async function prepareAutomationTestMessage(input, {
   buildMainAttachments,
   buildExtrasAttachments,
 }) {
-  const isExtrasReminder = Number(input.automationNumber) === 37;
+  const isExtrasReminder = isEventDetailsExtrasReminder({sourceNumber:input.automationNumber});
   let attachments = [];
   let row;
   if (isExtrasReminder || input.attachInvoice === true) {
@@ -27,11 +28,11 @@ export async function prepareAutomationTestMessage(input, {
   let subject = String(input.subject || "").trim();
   let body = String(input.body || "").trim();
   if (isExtrasReminder) {
-    const rule = prepareAutomation37Rule({
-      sourceNumber: 37, subject, body, attachInvoice: input.attachInvoice !== false,
+    const rule = prepareEventDetailsReminderRule({
+      sourceNumber: Number(input.automationNumber), subject, body, attachInvoice: input.attachInvoice !== false,
     });
-    subject = renderAutomation37Conditions(rule.subject, row, rule);
-    body = renderAutomation37Conditions(rule.body, row, rule);
+    subject = renderEventDetailsReminderConditions(rule.subject, row, rule);
+    body = renderEventDetailsReminderConditions(rule.body, row, rule);
     if (automation37ExtrasState(row, rule).shouldAttachInvoice) {
       attachments = await buildExtrasAttachments(row);
       if (!attachments.length) throw new Error("The issued extras invoice PDF could not be attached.");

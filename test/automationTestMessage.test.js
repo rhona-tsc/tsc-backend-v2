@@ -57,3 +57,23 @@ test('other automation subjects, wording and main attachment behavior remain unc
  const noInvoice=await prepareAutomationTestMessage({...request,attachInvoice:false},{});
  assert.deepEqual(noInvoice,{subject:request.subject,body:request.body,attachments:[]});
 });
+
+test('Automation 38 resolves Due Today wording from the stored booking and uses only the extras PDF',async()=>{
+ const request={...input,automationNumber:38};
+ for(const row of [extrasRow,{...extrasRow,extrasPaid:true},{invoicePdfUrl:'https://invoices.example.com/main.pdf'},{extras:extrasRow.extras}]){
+  const {deps,calls}=setup(row);const result=await prepareAutomationTestMessage(request,deps);
+  assert.match(result.subject,/Due Today$/);assert.doesNotMatch(result.body,/\{\{|Due Soon/);
+  assert.ok(calls.every(call=>call[0]!=='main'));
+  if(row===extrasRow){
+   assert.match(result.body,/balance should also be settled today/);
+   assert.deepEqual(result.attachments,[{filename:'extras.pdf'}]);
+  }else{
+   assert.doesNotMatch(result.body,/invoice is attached/);assert.deepEqual(result.attachments,[]);
+  }
+ }
+});
+
+test('Automation 38 will not send wording claiming attachment when its extras PDF cannot be attached',async()=>{
+ const {deps}=setup(extrasRow);
+ await assert.rejects(prepareAutomationTestMessage({...input,automationNumber:38},{...deps,buildExtrasAttachments:async()=>[]}),/could not be attached/);
+});
