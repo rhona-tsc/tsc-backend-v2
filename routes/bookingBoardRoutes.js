@@ -1723,7 +1723,8 @@ export const mergeRowData = (preferred, secondary) => {
       preferred?.balanceInvoicePdfUrl || secondary?.balanceInvoicePdfUrl || "",
 
     allocation: preferred?.allocation || secondary?.allocation,
-    review: preferred?.review || secondary?.review,
+    review: boardSource?.reviewRequestPlan ? boardSource.review : preferred?.review || secondary?.review,
+    reviewRequestPlan: boardSource?.reviewRequestPlan || preferred?.reviewRequestPlan || secondary?.reviewRequestPlan,
     eventSheet: preferred?.eventSheet || secondary?.eventSheet,
     userAddress: preferred?.userAddress || secondary?.userAddress,
     actOwnerMusicianId:
@@ -1950,6 +1951,7 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
 
     allocation: doc?.allocation || { status: "in_progress" },
     review: doc?.review || { requestedCount: 0, received: false },
+    reviewRequestPlan: doc?.reviewRequestPlan,
     referralDiscountCode: doc?.referralDiscountCode || "",
     eventSheet: doc?.eventSheet || {},
     userEmail: doc?.userEmail || "",
@@ -3577,6 +3579,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
   });
   try {
     const rawBody = { ...req.body };
+    if (Object.keys(rawBody).some(key => key === "reviewRequestPlan" || key.startsWith("reviewRequestPlan.")) && !isTSCAdmin(req.user)) {
+      return res.status(403).json({ success: false, message: "Only an administrator can edit the review email sequence." });
+    }
     const body = { ...normaliseBespokeLineup(protectBookingAssignmentPatch(rawBody)), updatedAt: new Date() };
     if (Object.prototype.hasOwnProperty.call(body, "siteAutomationsEnabled")) {
       const siteAutomationsEnabled = parseSiteAutomationsEnabled(

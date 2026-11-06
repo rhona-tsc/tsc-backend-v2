@@ -71,7 +71,7 @@ test("daily digest recognises Georgia and Susie as live allowlisted bookings", (
   assert.equal(digest.bookings[0].bookingRef, "260915275050");
   assert.equal(digest.bookings[1].allowlisted, true);
   assert.equal(digest.bookings[1].bookingRef, "BBM 497 DESIGN");
-  assert.match(digest.subject, /2 upcoming gigs/);
+  assert.match(digest.subject, /2 bookings/);
   assert.match(digest.text, /Rhythm Mystique/);
   assert.match(digest.text, /260915275050/);
   assert.match(digest.text, /Automation 16.*Sent 3rd November 2026/);
@@ -132,4 +132,13 @@ test("Encore booking keeps its mixed-case reference and is live without original
   for (const number of [10, 11]) {
     assert.match(digest.bookings[0].automations.find(item => item.number === number).status, /payment arranged through Encore/);
   }
+});
+
+test('daily digest includes the three booking review requests after the event',()=>{
+ const row={_id:'sarah-review-plan',bookingRef:'UUZfW',clientEmail:'sue_young1576@hotmail.com',eventDateISO:'2026-12-31',eventType:'Birthday Party',reviewRequestPlan:{enabled:true,exclusive:true,items:[{automationNumber:13,offsetDays:3},{automationNumber:15,offsetDays:10},{automationNumber:3,offsetDays:17}]}};
+ const digest=buildClientAutomationDigest({rows:[row],deliveries:[],todayISO:'2027-01-03'});
+ const reviews=digest.bookings[0].automations.filter(item=>[13,15,3].includes(item.number));
+ assert.deepEqual(reviews.map(item=>item.plannedISO),['2027-01-03','2027-01-10','2027-01-17']);
+ assert.equal(reviews[0].status,'DUE NOW');
+ assert.ok(!digest.bookings[0].automations.some(item=>[10,11,14,16,21].includes(item.number)));
 });

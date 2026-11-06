@@ -32,7 +32,8 @@ router.get("/allowlist", verifyToken, (_req, res) => {
     success: true,
     emails: [...emails],
     bookingRefs: [...bookingRefs],
-    capabilities: { automation37Extras: true, automation38Extras: true },
+    capabilities: { automation37Extras: true, automation38Extras: true, bookingReviewPlans: true },
+    senderEnabled: String(process.env.CLIENT_AUTOMATIONS_ENABLED || "").trim().toLowerCase() === "true",
   });
 });
 

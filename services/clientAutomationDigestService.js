@@ -1,3 +1,4 @@
+import { reviewPlanItems, reviewPlanSchedule } from "../utils/reviewRequestPlan.js";
 import { isEncoreBooking } from "../utils/encoreSettlement.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import ClientAutomationDelivery from "../models/clientAutomationDeliveryModel.js";
@@ -107,7 +108,15 @@ export const buildClientAutomationDigest = ({ rows = [], deliveries = [], todayI
     const refAllowed = !refs.size || refs.has(clean(row.bookingRef));
     const allowlisted = emailAllowed && refAllowed;
     const schedulingRow = { ...row, automationDeliveries: deliveries.filter(item => String(item.bookingId) === String(row._id)) };
-    const automations = automationDefinitions.map((definition) => {
+    const reviewDefinitions = reviewPlanItems(row).map(item => ({
+      number: Number(item.automationNumber),
+      key: `automation-${item.automationNumber}-booking-review-request`,
+      name: "Booking review request",
+      schedule: (booking, today) => reviewPlanSchedule(booking, item.automationNumber, today),
+    }));
+    const baseDefinitions = String(row.eventDateISO || row.eventDate || "").slice(0, 10) < todayISO
+      ? automationDefinitions.filter(definition => definition.intro) : automationDefinitions;
+    const automations = [...baseDefinitions, ...reviewDefinitions].map((definition) => {
       const delivery = deliveryMap.get(`${row._id}|${definition.key}`);
       const status = scheduleStatus({ row: schedulingRow, definition, todayISO, delivery, allowlisted });
       const plannedISO = definition.schedule
@@ -138,10 +147,10 @@ export const buildClientAutomationDigest = ({ rows = [], deliveries = [], todayI
     };
   }).sort((left, right) => Number(right.allowlisted) - Number(left.allowlisted));
 
-  const subject = `Daily automation safety digest — ${bookings.length} upcoming gig${bookings.length === 1 ? "" : "s"} — ${friendlyDate(todayISO)}`;
+  const subject = `Daily automation safety digest — ${bookings.length} booking${bookings.length === 1 ? "" : "s"} — ${friendlyDate(todayISO)}`;
   const text = [
     `Daily automation safety digest for ${friendlyDate(todayISO)}`,
-    `${bookings.length} upcoming gig(s); ${warningCount} item(s) need attention or are due now.`,
+    `${bookings.length} booking(s); ${warningCount} item(s) need attention or are due now.`,
     "",
     ...bookings.flatMap((booking) => [
       `${booking.eventDate} · ${booking.act} · ${booking.client} · ${booking.bookingRef}`,
@@ -168,7 +177,7 @@ export const buildClientAutomationDigest = ({ rows = [], deliveries = [], todayI
     <div style="font-family:Arial,Helvetica,sans-serif;color:#101828;max-width:900px;margin:auto;">
       <h1 style="font-size:24px;margin-bottom:6px;">Daily automation safety digest</h1>
       <p style="color:#475467;margin-top:0;">${escapeEmailHtml(friendlyDate(todayISO))} · <strong>${bookings.length}</strong> upcoming gig${bookings.length === 1 ? "" : "s"} · <strong>${warningCount}</strong> item${warningCount === 1 ? "" : "s"} due or needing attention.</p>
-      ${htmlBookings || "<p>No upcoming gigs were found.</p>"}
+      ${htmlBookings || "<p>No bookings are scheduled for this report.</p>"}
       <p style="font-size:12px;color:#667085;">This report is generated from the same schedule rules, booking allowlists and delivery ledger used by the live sender.</p>
     </div>`;
 
@@ -197,8 +206,13 @@ export const sendClientAutomationDigest = async ({
   if (existing?.status === "sent" || sendingRecently) {
     return { enabled: true, sent: false, reason: "already_processed", digestDate: todayISO };
   }
+  const reviewWindowStart = new Date(`${todayISO}T12:00:00Z`);
+  reviewWindowStart.setUTCDate(reviewWindowStart.getUTCDate() - 90);
   const rows = await bookingModel.find({
-    eventDateISO: { $gte: todayISO },
+    $or: [
+      { eventDateISO: { $gte: todayISO } },
+      { "reviewRequestPlan.enabled": true, eventDateISO: { $gte: reviewWindowStart.toISOString().slice(0, 10) } },
+    ],
     bookingStatus: { $ne: "cancelled" },
   }).sort({ eventDateISO: 1, bookingRef: 1 }).lean();
   const deliveries = rows.length

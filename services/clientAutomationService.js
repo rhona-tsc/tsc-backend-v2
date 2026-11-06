@@ -1,3 +1,6 @@
+import { AutomationConfig } from "../models/automationConfigModel.js";
+import { exclusiveReviewPlan, reviewPlanItems, reviewPlanSchedule, renderReviewPlanEmail } from "../utils/reviewRequestPlan.js";
+import { automationBodyToHtml } from "../utils/automationEmailTemplate.js";
 import { collisionFreeAddOnDay } from "../utils/addOnAutomationDate.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import Booking from "../models/bookingModel.js";
@@ -261,6 +264,7 @@ export const automation11Schedule = (row, todayISO) => scheduledWindow({
 });
 
 export const automation30Schedule = (row, todayISO) => {
+  if (exclusiveReviewPlan(row)) return { eligible: false, reason: "booking_review_plan", plannedISO: "" };
   const review = row?.review || {};
   const receivedISO = isoDate(review.nonGoogleReceivedAt || review.receivedAt);
   const today = isoDate(todayISO);
@@ -282,6 +286,7 @@ export const automation30Schedule = (row, todayISO) => {
 };
 
 export const automation26Schedule = (row, todayISO, automation30Delivery) => {
+  if (exclusiveReviewPlan(row)) return { eligible: false, reason: "booking_review_plan", plannedISO: "" };
   const review = row?.review || {};
   const sentISO = isoDate(automation30Delivery?.sentAt);
   const today = isoDate(todayISO);
@@ -968,6 +973,7 @@ export const runClientAutomations = async ({
   attachmentBuilder = buildIntroInvoiceAttachments,
   cloudinaryClient = cloudinary,
   actProfileModel = Act,
+  automationConfigModel = AutomationConfig,
 } = {}) => {
   if (clean(process.env.CLIENT_AUTOMATIONS_ENABLED).toLowerCase() !== "true") {
     return { enabled: false, considered: 0, sent: 0, skipped: 0, failed: 0 };
@@ -992,6 +998,8 @@ export const runClientAutomations = async ({
   };
   if (bookingRefs.size) query.bookingRef = { $in: [...bookingRefs] };
   const rows = await bookingModel.find(query).lean();
+  const reviewConfig = rows.some(row => reviewPlanItems(row).length)
+    ? await automationConfigModel.findOne({ key: "client-email-rules" }).lean() : null;
   const summary = {
     enabled: true,
     considered: rows.length,
@@ -1080,6 +1088,27 @@ export const runClientAutomations = async ({
         summary.failed += 1;
       }
     };
+
+    for (const item of reviewPlanItems(row)) {
+      const number = Number(item.automationNumber);
+      const rule = reviewConfig?.rules?.find(candidate => Number(candidate.sourceNumber) === number);
+      const schedule = reviewPlanSchedule(schedulingRow, number, todayISO);
+      if (!rule || rule.enabled === false || !schedule.eligible) {
+        summary.skipped += 1;
+        continue;
+      }
+      try {
+        const email = renderReviewPlanEmail(rule, row, resolveBookedActName({ board: row }) || "the band");
+        await sendClientAutomation({
+          automationKey: `automation-${number}-booking-review-request`,
+          automationNumber: number,
+          schedule,
+          email: { ...email, html: emailShell(`<p style="margin:0 0 20px;font-size:16px;line-height:1.7;">${automationBodyToHtml(email.text)}</p>`) },
+        });
+      } catch {
+        summary.failed += 1;
+      }
+    }
 
     if (isBalancePaid(row) || isEncoreBooking(row)) summary.skipped += 1;
     else await sendClientAutomation({

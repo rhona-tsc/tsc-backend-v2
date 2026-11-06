@@ -382,6 +382,21 @@ const BookingBoardItemSchema = new mongoose.Schema(
     manualAdjustmentAmount: { type: Number, default: 0 },
     allocation: AllocationSchema,
     review: ReviewSchema,
+    reviewRequestPlan: {
+      type: new mongoose.Schema({
+        enabled: { type: Boolean, default: false },
+        exclusive: { type: Boolean, default: true },
+        configuredAt: Date,
+        items: [{
+          _id: false,
+          automationNumber: { type: Number, enum: [3, 13, 15], required: true },
+          offsetDays: { type: Number, min: 1, max: 90, required: true },
+          subject: String,
+          body: String,
+        }],
+      }, { _id: false }),
+      default: undefined,
+    },
     referralDiscountCode: {
       type: String,
       default: undefined,
