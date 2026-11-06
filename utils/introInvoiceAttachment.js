@@ -1,3 +1,4 @@
+import { extrasInvoicePdfUrl } from "./automation37Extras.js";
 import { isEncoreBooking } from "./encoreSettlement.js";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
@@ -408,20 +409,24 @@ export const downloadIssuedInvoicePdf = async (
   }
 };
 
-export const buildIntroInvoiceAttachments = async (
-  row,
-  options = {},
-) => {
-  if (isEncoreBooking(row)) return [];
-  const invoiceUrl = getIntroInvoiceUrl(row);
+const buildIssuedInvoiceAttachments = async (row, invoiceUrl, suffix, options) => {
   if (!invoiceUrl) return [];
 
   const downloadUrl = getIssuedInvoiceDownloadUrl(invoiceUrl, options);
   const content = await downloadIssuedInvoicePdf(downloadUrl, options);
 
   return [{
-    filename: `${cleanString(row?.bookingRef) || "booking"}-invoice.pdf`,
+    filename: `${cleanString(row?.bookingRef) || "booking"}-${suffix}.pdf`,
     content,
     contentType: "application/pdf",
   }];
+};
+
+export const buildIntroInvoiceAttachments = async (row, options = {}) => {
+  if (isEncoreBooking(row)) return [];
+  return buildIssuedInvoiceAttachments(row, getIntroInvoiceUrl(row), "invoice", options);
+};
+
+export const buildExtrasInvoiceAttachments = async (row, options = {}) => {
+  return buildIssuedInvoiceAttachments(row, extrasInvoicePdfUrl(row), "extras-invoice", options);
 };

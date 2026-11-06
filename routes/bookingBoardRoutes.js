@@ -24,6 +24,7 @@ import sendEmail from "../utils/sendEmail.js";
 import cloudinary from "../config/cloudinary.js";
 import {
   buildIntroInvoiceAttachments,
+  buildExtrasInvoiceAttachments,
   getIntroInvoiceUrl,
 } from "../utils/introInvoiceAttachment.js";
 import {
@@ -31,6 +32,7 @@ import {
   escapeEmailHtml,
 } from "../utils/tscEmailBranding.js";
 import { automationBodyToHtml } from "../utils/automationEmailTemplate.js";
+import { prepareAutomationTestMessage } from "../utils/automationTestMessage.js";
 import {
   finalDetailsDueISO,
   thursdayInWeekBeforeISO,
@@ -2976,15 +2978,22 @@ router.post("/automation-email/test", musicianAuth, async (req, res) => {
       return res.status(403).json({ success: false, message: "Admin only." });
     }
 
-    const subject = cleanString(req.body?.subject);
-    const body = cleanString(req.body?.body);
-    if (!subject || !body) {
+    const requestedSubject = cleanString(req.body?.subject);
+    const requestedBody = cleanString(req.body?.body);
+    if (!requestedSubject || !requestedBody) {
       return res.status(400).json({
         success: false,
         message: "A subject and email body are required.",
       });
     }
 
+    const { subject, body, attachments } = await prepareAutomationTestMessage({
+      ...req.body, subject: requestedSubject, body: requestedBody,
+    }, {
+      loadBooking: (id) => BookingBoardItem.findById(id).lean(),
+      buildMainAttachments: (row) => buildIntroInvoiceAttachments(row, { cloudinaryClient: cloudinary }),
+      buildExtrasAttachments: (row) => buildExtrasInvoiceAttachments(row, { cloudinaryClient: cloudinary }),
+    });
     const bodyHtml = automationBodyToHtml(body);
     const html = `
       <div style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#111111;">
@@ -2993,23 +3002,6 @@ router.post("/automation-email/test", musicianAuth, async (req, res) => {
           ${buildTscEmailFooter({ audience: req.body?.audience === "musician" ? "musician" : "client" })}
         </div>
       </div>`;
-
-    let attachments = [];
-    if (req.body?.attachInvoice === true) {
-      if (!mongoose.isValidObjectId(req.body?.bookingId)) {
-        return res.status(400).json({
-          success: false,
-          message: "Select a valid booking before testing an invoice attachment.",
-        });
-      }
-      const row = await BookingBoardItem.findById(req.body.bookingId).lean();
-      if (!row) {
-        return res.status(404).json({ success: false, message: "Booking not found." });
-      }
-      attachments = await buildIntroInvoiceAttachments(row, {
-        cloudinaryClient: cloudinary,
-      });
-    }
 
     const result = await sendEmail({
       to: INTRO_EMAIL_TEST_RECIPIENT,
@@ -3033,7 +3025,7 @@ router.post("/automation-email/test", musicianAuth, async (req, res) => {
       invoiceAttached: attachments.length > 0,
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 });
 

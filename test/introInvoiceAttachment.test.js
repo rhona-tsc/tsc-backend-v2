@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildIntroInvoiceAttachments,
+  buildExtrasInvoiceAttachments,
   createPinnedLookup,
   downloadIssuedInvoicePdf,
   getIntroInvoiceUrl,
@@ -294,4 +295,29 @@ test("Cloudinary invoice URLs from another account are rejected", () => {
     }),
     /does not match/i,
   );
+});
+
+
+test("extras reminder attaches the exact issued extras PDF for Encore without using the main invoice", async () => {
+  const bytes = Buffer.from("%PDF-1.7\nExtras invoice exact bytes\n%%EOF");
+  const capture = {};
+  const extrasUrl = storedCloudinaryUrl.replace("invoice-BBM", "extras-invoice-BBM");
+  const attachments = await buildExtrasInvoiceAttachments({
+    agent: "Encore", bookingRef: "UUZfW",
+    invoicePdfUrl: storedCloudinaryUrl,
+    extrasInvoicePdfUrl: extrasUrl,
+  }, {
+    cloudinaryClient: makeCloudinaryClient(capture),
+    resolveHostname: publicLookup,
+    fetchImpl: async () => new Response(bytes, {status: 200}),
+  });
+  assert.match(capture.publicId, /extras-invoice-BBM/);
+  assert.equal(attachments[0].filename, "UUZfW-extras-invoice.pdf");
+  assert.deepEqual(attachments[0].content, bytes);
+  assert.equal(attachments[0].contentType, "application/pdf");
+});
+
+test("extras attachment never falls back to a main invoice or generates an unissued invoice", async () => {
+  assert.deepEqual(await buildExtrasInvoiceAttachments({invoicePdfUrl: storedCloudinaryUrl}), []);
+  assert.deepEqual(await buildIntroInvoiceAttachments({agent: "Encore", invoicePdfUrl: storedCloudinaryUrl}), []);
 });

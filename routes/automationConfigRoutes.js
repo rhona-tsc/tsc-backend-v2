@@ -28,7 +28,12 @@ const validRules = (rules) =>
 router.get("/allowlist", verifyToken, (_req, res) => {
   const { emails, bookingRefs } = clientAutomationAllowlistSnapshot();
   res.set("Cache-Control", "no-store");
-  return res.json({ success: true, emails: [...emails], bookingRefs: [...bookingRefs] });
+  return res.json({
+    success: true,
+    emails: [...emails],
+    bookingRefs: [...bookingRefs],
+    capabilities: { automation37Extras: true },
+  });
 });
 
 router.get("/rules", verifyToken, async (_req, res) => {
