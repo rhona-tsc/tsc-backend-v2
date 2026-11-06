@@ -5,6 +5,8 @@ import BookingBoardItem from "../models/bookingBoardItem.js";
 import { oauth2Client } from "../controllers/googleController.js";
 import { buildBandSheetShareUrl, getBandSheetOrigin } from "./bandSheetUrl.js";
 import { bandSheetTokenPersistenceUpdate } from "./bandSheetTokenRegistry.js";
+import { resolveBookedActName } from "./bookingDisplayName.js";
+import { extractBookingRefFromCalendarEvent } from "./calendarBookingIdentity.js";
 
 const clean = (value = "") => String(value || "").trim();
 
@@ -104,6 +106,20 @@ const eventSheetLink = (booking = {}) => {
   return `${getBandSheetOrigin()}/api/booking/${encodeURIComponent(ref)}/event-sheet/pdf`;
 };
 
+const calendarClientName = (booking = {}) => {
+  const eventType = clean(booking.eventType).toLowerCase();
+  const billingName = clean(booking.clientAddress).split(",")[0].trim();
+  const looksLikeCompany = /\b(?:ltd|limited|llp|plc|inc|company)\b/i.test(
+    billingName,
+  );
+  if (/corporate|company|business/.test(eventType) && looksLikeCompany) {
+    return billingName;
+  }
+  return clean(
+    booking.clientFirstNames || booking.bookerName || booking.clientName || "Client",
+  );
+};
+
 export async function updateOrCreateBookingEvent({ booking, assignedMusicians = [] }) {
   if (!booking) throw new Error("Missing booking for calendar update");
 
@@ -147,10 +163,9 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
     calendarEventId: booking.calendarEventId,
   };
 
-  const eventId = booking.calendarEventId || null;
+  let eventId = booking.calendarEventId || null;
   const summaryName = clean(
-    calendarBooking.actTscName ||
-      calendarBooking.actName ||
+    resolveBookedActName({ board: boardBooking, booking: calendarBooking }) ||
       firstAct(calendarBooking)?.actName ||
       firstAct(calendarBooking)?.tscName ||
       "Band",
@@ -159,12 +174,7 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
   if (!times.dateISO) throw new Error("Booking has no event date for calendar update");
   const lineup = lineupFor(calendarBooking, assignedMusicians);
 
-  const clientName = clean(
-    calendarBooking.clientFirstNames ||
-      calendarBooking.bookerName ||
-      calendarBooking.clientName ||
-      "Client",
-  );
+  const clientName = calendarClientName(calendarBooking);
   const possessiveClient = /s$/i.test(clientName)
     ? `${clientName}'`
     : `${clientName}'s`;
@@ -206,6 +216,30 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
     },
   };
 
+  // A stale event id must never be allowed to redirect one booking's updates
+  // into another booking. Prefer the embedded booking reference over the id.
+  if (eventId && ref) {
+    try {
+      const linked = await cal.events.get({ calendarId, eventId });
+      const linkedRef = extractBookingRefFromCalendarEvent(linked.data);
+      if (linkedRef && linkedRef !== ref) eventId = null;
+    } catch (error) {
+      if (Number(error?.code || error?.status) === 404) eventId = null;
+      else throw error;
+    }
+  }
+
+  if (!eventId && ref) {
+    const matching = await cal.events.list({
+      calendarId,
+      privateExtendedProperty: [`bookingRef=${ref}`],
+      singleEvents: true,
+      maxResults: 2,
+      showDeleted: false,
+    });
+    eventId = matching.data.items?.[0]?.id || null;
+  }
+
   // 1️⃣ UPDATE existing event
   if (eventId) {
     const updated = await cal.events.patch({
@@ -214,7 +248,14 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
       requestBody: eventPayload,
     });
 
-    return updated.data.id;
+    const resolvedEventId = updated.data.id;
+    if (resolvedEventId !== booking.calendarEventId) {
+      await Booking.collection.updateOne(
+        booking._id ? { _id: booking._id } : { bookingId: ref },
+        { $set: { calendarEventId: resolvedEventId } },
+      );
+    }
+    return resolvedEventId;
   }
 
   // 2️⃣ CREATE brand-new event (fallback)

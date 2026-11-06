@@ -7,6 +7,7 @@ import { isBespokeLineup, normaliseBespokeLineup, updateBespokeSummary } from ".
 import mongoose from "mongoose";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import Booking from "../models/bookingModel.js";
+import AvailabilityModel from "../models/availabilityModel.js";
 import ClientAutomationDelivery from "../models/clientAutomationDeliveryModel.js";
 import actModel from "../models/actModel.js";
 import musicianModel from "../models/musicianModel.js";
@@ -2283,6 +2284,71 @@ const skip = (page - 1) * limit;
     }
 
     const rows = [...dedupeMap.values()];
+
+    // Calendar declines are deliberately a confirmation state rather than an
+    // allocation status. Decorate the returned assignments so the board can
+    // show that warning without prematurely removing the musician.
+    const rowBookingRefs = rows
+      .map((row) => cleanString(row?.bookingRef || row?.bookingId || row?.sessionId))
+      .filter(Boolean);
+    if (rowBookingRefs.length) {
+      const pendingCalendarDeclines = await AvailabilityModel.find({
+        bookingId: { $in: rowBookingRefs },
+        $or: [
+          { calendarCancellationConfirmationPending: true },
+          { calendarStatus: "decline_confirmation_pending" },
+        ],
+      })
+        .select(
+          "bookingId musicianId calendarInviteEmail calendarStatus calendarDeclinedAt calendarCancellationConfirmationPending",
+        )
+        .lean();
+      const declinesByBooking = new Map();
+      pendingCalendarDeclines.forEach((decline) => {
+        const key = cleanString(decline.bookingId).toLowerCase();
+        declinesByBooking.set(key, [...(declinesByBooking.get(key) || []), decline]);
+      });
+
+      const decorateAssignments = (assignments = [], declines = []) =>
+        assignments.map((assignment) => {
+          const assignmentId = String(assignment?.musicianId || "");
+          const assignmentEmail = cleanString(assignment?.email).toLowerCase();
+          const decline = declines.find(
+            (item) =>
+              (assignmentId && String(item?.musicianId || "") === assignmentId) ||
+              (assignmentEmail &&
+                cleanString(item?.calendarInviteEmail).toLowerCase() === assignmentEmail),
+          );
+          return decline
+            ? {
+                ...assignment,
+                calendarStatus: decline.calendarStatus,
+                calendarDeclinedAt: decline.calendarDeclinedAt,
+                calendarCancellationConfirmationPending: true,
+              }
+            : assignment;
+        });
+
+      rows.forEach((row) => {
+        const ref = cleanString(
+          row?.bookingRef || row?.bookingId || row?.sessionId,
+        ).toLowerCase();
+        const declines = declinesByBooking.get(ref) || [];
+        if (!declines.length) return;
+        row.assignedMusicians = decorateAssignments(row.assignedMusicians, declines);
+        row.bookingMusicians = decorateAssignments(row.bookingMusicians, declines);
+        row.bandLineup = decorateAssignments(row.bandLineup, declines);
+        if (row.bookingDetails) {
+          row.bookingDetails = {
+            ...row.bookingDetails,
+            assignedMusicians: decorateAssignments(
+              row.bookingDetails.assignedMusicians,
+              declines,
+            ),
+          };
+        }
+      });
+    }
 
     // The automation audit needs the persisted delivery history so messages
     // sent outside the live runner (for example, from the booking board) are

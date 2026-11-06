@@ -24,6 +24,10 @@ const AllocationSchema = new mongoose.Schema(
     notes: { type: String },
     // optional: who/role gaps you still need
     gaps: [{ instrument: String, needed: Number }],
+    managerApprovalRequired: { type: Boolean, default: false },
+    managerApprovalReason: { type: String, default: "" },
+    managerApprovalRequestedAt: { type: Date, default: null },
+    managerApprovalNotifiedAt: { type: Date, default: null },
   },
   { _id: false },
 );

@@ -24,6 +24,10 @@ import nodemailer from "nodemailer";
 import { buildBandEventSheetEmailHtml } from "../utils/tscEmailBranding.js";
 import { buildBandSheetShareUrl } from "../utils/bandSheetUrl.js";
 import sendEmail from "../utils/sendEmail.js";
+import {
+  isOnlyActiveVocalist,
+  isVocalRole,
+} from "../utils/calendarBookingIdentity.js";
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper: firstNameOf                             */
@@ -629,6 +633,16 @@ const musicianMatchesAssignment = (entry = {}, user = {}) => {
 
 export const withdrawAllocatedBooking = async ({ board, assignment, user, reason = "", source = "portal" }) => {
   const now = new Date();
+  const allocationPools = [
+    ...(board.assignedMusicians || []),
+    ...(board.bookingMusicians || []),
+    ...(board.bandLineup || []),
+    ...(board.bookingDetails?.assignedMusicians || []),
+  ];
+  const needsVocalistApproval = isOnlyActiveVocalist({
+    assignment,
+    assignments: allocationPools,
+  });
   const roleSlotId = String(assignment?.roleSlotId || "");
   const offerRequestId = String(assignment?.offerRequestId || "");
   const deputyJobId = assignment?.deputyJobId || null;
@@ -667,8 +681,50 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
     lastCheckedAt: now,
     notes: `${role} withdrew on ${now.toLocaleDateString("en-GB")}. Reallocation required.`,
     gaps,
+    ...(needsVocalistApproval
+      ? {
+          managerApprovalRequired: true,
+          managerApprovalReason:
+            "The gig's only vocalist is unavailable. Client approval is required before offering the role to a replacement vocalist.",
+          managerApprovalRequestedAt: now,
+        }
+      : {}),
   };
   await board.save();
+
+  if (needsVocalistApproval) {
+    const adminEmail = String(
+      process.env.ALLOCATION_FAILURE_EMAIL ||
+        process.env.ADMIN_EMAIL ||
+        "rhona@thesupremecollective.co.uk",
+    ).trim();
+    const adminOrigin = String(
+      process.env.ADMIN_FRONTEND_URL || "https://admin.thesupremecollective.co.uk",
+    ).replace(/\/+$/, "");
+    try {
+      await sendEmail({
+        to: adminEmail,
+        subject: `Client approval needed: vocalist unavailable — ${board.bookingRef || board.bookerName || "booking"}`,
+        text: [
+          `${assignment?.name || "The allocated vocalist"} has confirmed that they are unavailable.`,
+          `Booking: ${board.bookingRef || "Not recorded"}`,
+          `Act: ${board.actName || board.actTscName || "Not recorded"}`,
+          `Event date: ${board.eventDateISO || "Not recorded"}`,
+          `Role: ${role}`,
+          "No replacement vocalist has been contacted. Please inform the client and obtain approval before reallocating this role.",
+          `${adminOrigin}/booking-board`,
+        ].join("\n"),
+      });
+      board.allocation.managerApprovalNotifiedAt = new Date();
+      await board.save();
+    } catch (notificationError) {
+      console.warn("Could not email the vocalist client-approval alert", {
+        bookingRef: board.bookingRef,
+        message: notificationError?.message,
+      });
+    }
+    return { route: "manager_approval_required" };
+  }
 
   if (deputyJobId && mongoose.isValidObjectId(deputyJobId)) {
     const job = await DeputyJob.findById(deputyJobId);
@@ -1434,6 +1490,13 @@ export const confirmBookingRole = async (req, res) => {
       ...(board.allocation?.toObject?.() || board.allocation || {}),
       status: "in_progress",
       lastCheckedAt: new Date(),
+      ...(isVocalRole(role)
+        ? {
+            managerApprovalRequired: false,
+            managerApprovalReason: "",
+            managerApprovalRequestedAt: null,
+          }
+        : {}),
     };
     await board.save();
     await closeCompetingRoleOffers({
@@ -1503,8 +1566,16 @@ export const confirmBookingRole = async (req, res) => {
               : null,
           calendarStatus: "accepted",
         },
+        $setOnInsert: {
+          phone: contact.phone || "",
+          musicianName: candidate.name || musicianDisplayName(musician),
+          duties: role,
+          dateISO,
+          formattedDate: dateISO,
+          formattedAddress: board.address || board.venue || "",
+        },
       },
-      { new: true },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
     );
     if (confirmation.eventId && confirmation.email) {
       candidate.calendarInviteSentAt = new Date();
