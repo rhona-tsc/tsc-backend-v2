@@ -24,7 +24,7 @@ test('no extras: only Event Sheet and playlist subject and completion sentence, 
 });
 test('unpaid extras and issued PDF: extras subject, payment paragraph and paid-extras completion sentence',()=>{
   const result=render(withExtras);
-  assert.equal(result.subject,'Automated Reminder: Event Sheet, Spotify Playlist(/s)& Extras Balance Due Soon');
+  assert.equal(result.subject,'Automated Reminder: Event Sheet, Spotify Playlist(/s) & Extras Balance Due Soon');
   assert.match(result.body,/Finally, the 'extras' balance should also be settled by this date\. The issued invoice is attached and includes the BACS details\./);
   assert.match(result.body,/and paid the 'extras' balance, please disregard this email\./);
   assert.equal(automation37ExtrasState(withExtras,legacy).shouldAttachInvoice,true);

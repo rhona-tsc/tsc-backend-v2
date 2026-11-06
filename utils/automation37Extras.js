@@ -1,3 +1,5 @@
+import { AUTOMATION_37_TIMING } from "./automation37Schedule.js";
+
 const clean = (value) => String(value || "").trim();
 const positiveAmount = (value) => Math.max(0, Number(value) || 0);
 
@@ -40,6 +42,7 @@ export function prepareAutomation37Rule(rule = {}) {
   const standardSubject = /^(?:Reminder: Advanced Requests, Event Sheet & Balance Due|Automated Reminder: Event Sheet(?: & Spotify Playlist\(\/s\)|, Spotify Playlist\(\/s\)\s*& Extras Balance) Due Soon)$/i;
   return {
     ...rule,
+    timing: { ...rule.timing, ...AUTOMATION_37_TIMING },
     subject: standardSubject.test(clean(rule.subject)) ? AUTOMATION_37_TAGS.subject : rule.subject,
     body: String(rule.body || "")
       .replace(/^(?:And\s+)?finally,\s+the\s+(?:['‘’"]?extras['‘’"]?\s+)?balance[^\n]*(?:\n\s*\n(?:\{pulse\.link7\}|\{\{invoice_link\}\}|Invoice attached)[ \t]*)?/gim, AUTOMATION_37_TAGS.payment)
@@ -53,7 +56,7 @@ export function renderAutomation37Conditions(template, row, rule = {}) {
   const { hasOutstandingExtras, shouldAttachInvoice } = automation37ExtrasState(row, rule);
   const values = {
     [AUTOMATION_37_TAGS.subject]: hasOutstandingExtras
-      ? "Automated Reminder: Event Sheet, Spotify Playlist(/s)& Extras Balance Due Soon"
+      ? "Automated Reminder: Event Sheet, Spotify Playlist(/s) & Extras Balance Due Soon"
       : "Automated Reminder: Event Sheet & Spotify Playlist(/s) Due Soon",
     [AUTOMATION_37_TAGS.payment]: shouldAttachInvoice
       ? "Finally, the 'extras' balance should also be settled by this date. The issued invoice is attached and includes the BACS details."
