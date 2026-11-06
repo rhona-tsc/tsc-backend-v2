@@ -242,13 +242,15 @@ export const automation21Schedule = (row, todayISO) => {
   }
   const options = { introISO, deadlineISO: dueISO, blockedISOs };
   let plannedISO = collisionFreeAddOnDay({ ...options, plannedISO: midpointISO(introISO, dueISO) });
+  const originalPlannedISO = plannedISO;
   if (plannedISO && today > plannedISO && today < dueISO) {
     plannedISO = collisionFreeAddOnDay({ ...options, plannedISO: today, notBeforeISO: today });
   }
   if (!plannedISO && introISO && dueISO && today && today < dueISO) {
     return { eligible: false, reason: "no_available_date", plannedISO: "" };
   }
-  return scheduledWindow({ plannedISO, todayISO, lastISO: dueISO, allowLastDay: false });
+  const result = scheduledWindow({ plannedISO, todayISO, lastISO: dueISO, allowLastDay: false });
+  return result.eligible && originalPlannedISO < today ? { ...result, reason: "catch_up" } : result;
 };
 
 export const automation11Schedule = (row, todayISO) => scheduledWindow({

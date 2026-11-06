@@ -17,6 +17,7 @@ test('both adjacent days can be occupied, and catch-up uses the next genuinely f
  assert.equal(schedule.eligible,false);
  assert.equal(schedule.plannedISO,'2026-12-02'); // due-today on 30th, vocalist follow-up on 1st
  assert.equal(automation21Schedule(row,'2026-12-02').sendISO,'2026-12-02');
+ assert.equal(automation21Schedule(row,'2026-12-02').reason,'catch_up');
 });
 test('a missed advance reminder takes priority, but an already-sent reminder does not keep blocking',()=>{
  const row=fixture();
