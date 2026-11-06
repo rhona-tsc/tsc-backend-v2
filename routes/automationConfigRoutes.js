@@ -1,4 +1,5 @@
 import express from "express";
+import { clientAutomationAllowlistSnapshot } from "../services/clientAutomationService.js";
 import verifyToken from "../middleware/agentAuth.js";
 import {
   AutomationConfig,
@@ -22,6 +23,13 @@ const validRules = (rules) =>
       String(rule.id || "").trim(),
   ) &&
   Buffer.byteLength(JSON.stringify(rules), "utf8") <= MAX_SERIALIZED_BYTES;
+
+// Use the same server configuration as the sender, including environment additions.
+router.get("/allowlist", verifyToken, (_req, res) => {
+  const { emails, bookingRefs } = clientAutomationAllowlistSnapshot();
+  res.set("Cache-Control", "no-store");
+  return res.json({ success: true, emails: [...emails], bookingRefs: [...bookingRefs] });
+});
 
 router.get("/rules", verifyToken, async (_req, res) => {
   const config = await AutomationConfig.findOne({ key: CONFIG_KEY }).lean();
