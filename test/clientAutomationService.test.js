@@ -118,7 +118,9 @@ test("Susie's reviewed automation dates resolve to the staged live schedule", ()
   };
   assert.equal(automation16Schedule(row, "2026-10-17").sendISO, "2026-10-17");
   assert.equal(automation14Schedule(row, "2026-10-18").sendISO, "2026-10-18");
-  assert.equal(automation21Schedule(row, "2026-10-19").sendISO, "2026-10-19");
+  assert.equal(automation21Schedule({ ...row, automationDeliveries: [
+    { automationNumber: 10, status: "sent", sentAt: "2026-10-17" },
+  ] }, "2026-10-20").sendISO, "2026-10-20");
   assert.equal(automation11Schedule(row, "2026-10-22").sendISO, "2026-10-22");
 });
 
@@ -362,6 +364,7 @@ test("the staged runner sends Susie's six live rules once on their reviewed date
     clientFirstNames: "Susie",
     clientEmail: "susie@tigproductions.co.uk",
     actTscName: "Committed to Kisstory",
+    bandEventSheetUrl: "https://example.test/band-sheet",
     eventType: "Corporate Event",
     eventDateISO: "2026-10-29",
     songSuggestionsDueDateISO: "2026-10-18",
@@ -375,6 +378,7 @@ test("the staged runner sends Susie's six live rules once on their reviewed date
   const bookingModel = { find: () => ({ lean: async () => [row] }) };
   const records = new Map();
   const deliveryModel = {
+    find: ({ bookingId }) => ({ lean: async () => [...records.values()].filter(record => record.bookingId === bookingId && record.status === "sent") }),
     findOne: async ({ automationKey, bookingId }) => records.get(`${automationKey}|${bookingId}`) || null,
     create: async (value) => {
       const record = { ...value, save: async () => {} };
@@ -396,6 +400,7 @@ test("the staged runner sends Susie's six live rules once on their reviewed date
   await runClientAutomations({ ...options, now: new Date("2026-10-17T09:05:00.000Z") });
   await runClientAutomations({ ...options, now: new Date("2026-10-18T09:05:00.000Z") });
   await runClientAutomations({ ...options, now: new Date("2026-10-19T09:05:00.000Z") });
+  await runClientAutomations({ ...options, now: new Date("2026-10-20T09:05:00.000Z") });
   await runClientAutomations({ ...options, now: new Date("2026-10-22T09:05:00.000Z") });
 
   assert.deepEqual([...records.keys()].sort(), [
@@ -460,6 +465,7 @@ test("vocalist setlist automation alerts once while links are missing, then send
   };
   const records = new Map();
   const deliveryModel = {
+    find: ({ bookingId }) => ({ lean: async () => [...records.values()].filter(record => record.bookingId === bookingId && record.status === "sent") }),
     findOne: async ({ automationKey, bookingId }) => records.get(`${automationKey}|${bookingId}`) || null,
     create: async (value) => {
       const record = { ...value, save: async () => {} };

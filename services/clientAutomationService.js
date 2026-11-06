@@ -1,3 +1,4 @@
+import { collisionFreeAddOnDay } from "../utils/addOnAutomationDate.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import Booking from "../models/bookingModel.js";
 import ClientAutomationDelivery from "../models/clientAutomationDeliveryModel.js";
@@ -220,12 +221,34 @@ const midpointISO = (startValue, endValue) => {
 
 export const automation21Schedule = (row, todayISO) => {
   const dueISO = finalDueISO(row);
-  return scheduledWindow({
-    plannedISO: midpointISO(row?.introEmailSentAt, dueISO),
-    todayISO,
-    lastISO: dueISO,
-    allowLastDay: false,
-  });
+  const introISO = isoDate(row?.introEmailSentAt);
+  const today = isoDate(todayISO);
+  const deliveries = row?.automationDeliveries || [];
+  const sent = number => deliveries.some(delivery => delivery.status === "sent" && Number(delivery.automationNumber) === number);
+  const blockedISOs = [introISO, ...deliveries
+    .filter(delivery => delivery.status === "sent" && Number(delivery.automationNumber) !== 21)
+    .map(delivery => isoDate(delivery.sentAt))];
+  const otherRules = [
+    [16, automation16Schedule], [14, automation14Schedule], [4, automation4Schedule],
+    ...(!isBalancePaid(row) && !isEncoreBooking(row) ? [[10, automation10Schedule], [11, automation11Schedule]] : []),
+  ];
+  for (const [number, schedule] of otherRules) {
+    if (sent(number)) continue;
+    const other = schedule(row, today);
+    blockedISOs.push(other.plannedISO);
+    // Client reminders that are catching up today also take priority. The
+    // vocalist follow-up has different recipients, so reserve its planned day.
+    if (number !== 4 && other.eligible) blockedISOs.push(other.sendISO);
+  }
+  const options = { introISO, deadlineISO: dueISO, blockedISOs };
+  let plannedISO = collisionFreeAddOnDay({ ...options, plannedISO: midpointISO(introISO, dueISO) });
+  if (plannedISO && today > plannedISO && today < dueISO) {
+    plannedISO = collisionFreeAddOnDay({ ...options, plannedISO: today, notBeforeISO: today });
+  }
+  if (!plannedISO && introISO && dueISO && today && today < dueISO) {
+    return { eligible: false, reason: "no_available_date", plannedISO: "" };
+  }
+  return scheduledWindow({ plannedISO, todayISO, lastISO: dueISO, allowLastDay: false });
 };
 
 export const automation11Schedule = (row, todayISO) => scheduledWindow({
@@ -996,6 +1019,10 @@ export const runClientAutomations = async ({
   };
 
   for (const row of rows) {
+    const deliveryQuery = typeof deliveryModel.find === "function"
+      ? deliveryModel.find({ bookingId: row._id, status: "sent" }) : null;
+    const priorDeliveries = deliveryQuery ? await deliveryQuery.lean() : row.automationDeliveries || [];
+    const schedulingRow = { ...row, automationDeliveries: [...priorDeliveries] };
     const recipient = rowEmails(row).find((email) => allowlist.has(email));
     const sendClientAutomation = async ({
       automationKey,
@@ -1043,6 +1070,7 @@ export const runClientAutomations = async ({
         delivery.invoiceAttached = attachInvoice;
         await delivery.save();
         summary.sent += 1;
+        schedulingRow.automationDeliveries.push({ automationNumber, status: "sent", sentAt: todayISO });
       } catch (error) {
         delivery.status = "failed";
         delivery.error = clean(error?.message).slice(0, 1000);
@@ -1092,7 +1120,7 @@ export const runClientAutomations = async ({
       email: buildAutomation26Email(row),
     });
 
-    const addOnSchedule = automation21Schedule(row, todayISO);
+    const addOnSchedule = automation21Schedule(schedulingRow, todayISO);
     if (addOnSchedule.eligible) {
       try {
         const enrichedRow = await loadActProfile(row);

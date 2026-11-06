@@ -106,11 +106,12 @@ export const buildClientAutomationDigest = ({ rows = [], deliveries = [], todayI
     const emailAllowed = rowEmails(row).some((email) => emails.has(email));
     const refAllowed = !refs.size || refs.has(clean(row.bookingRef));
     const allowlisted = emailAllowed && refAllowed;
+    const schedulingRow = { ...row, automationDeliveries: deliveries.filter(item => String(item.bookingId) === String(row._id)) };
     const automations = automationDefinitions.map((definition) => {
       const delivery = deliveryMap.get(`${row._id}|${definition.key}`);
-      const status = scheduleStatus({ row, definition, todayISO, delivery, allowlisted });
+      const status = scheduleStatus({ row: schedulingRow, definition, todayISO, delivery, allowlisted });
       const plannedISO = definition.schedule
-        ? definition.schedule(row, todayISO).plannedISO || ""
+        ? definition.schedule(schedulingRow, todayISO).plannedISO || ""
         : "";
       return { ...definition, status, plannedISO };
     });
