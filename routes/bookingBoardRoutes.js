@@ -1,6 +1,7 @@
 // routes/bookingBoardRoutes.js
 
 import express from "express";
+import { isBespokeLineup, normaliseBespokeLineup, updateBespokeSummary } from "../utils/bespokeLineup.js";
 import mongoose from "mongoose";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import Booking from "../models/bookingModel.js";
@@ -984,6 +985,9 @@ const normaliseImportRow = (item = {}) => {
     netCommission: 0,
     bandSize: toNumber(item.bandSize),
     lineupSelected: cleanString(item.lineupSelected || item.lineup),
+    lineupId: item.lineupId || "",
+    lineupMode: item.lineupMode || "standard",
+    lineupSlots: item.lineupSlots || [],
     lineupComposition: Array.isArray(item.lineupComposition)
       ? item.lineupComposition
       : [],
@@ -1192,7 +1196,7 @@ const sanitizeBookingPatch = (body = {}) => {
 };
 
 export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
-  const patch = sanitizeBookingPatch(rawPatch);
+  const patch = sanitizeBookingPatch(normaliseBespokeLineup(rawPatch));
   const previousGross = Number(bookingDoc?.totals?.fullAmount ?? bookingDoc?.amount ?? bookingDoc?.fee ?? 0) || 0;
   const previousCharged = Number(bookingDoc?.totals?.chargedAmount ?? bookingDoc?.amount ?? bookingDoc?.totals?.depositAmount ?? 0) || 0;
   const previouslyPaid = bookingDoc.balancePaid === true || bookingDoc.balanceStatus === "paid" || bookingDoc?.totals?.balancePaid === true;
@@ -1219,6 +1223,7 @@ export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
     "clientAddress",
     "county",
     "lineupSelected",
+    "lineupMode",
     "lineupId",
     "bandSize",
     "arrivalTime",
@@ -1292,6 +1297,13 @@ export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
   if (Array.isArray(patch.actsSummary)) {
     bookingDoc.actsSummary = patch.actsSummary;
   }
+  if (patch.lineupMode === "bespoke" && Array.isArray(patch.lineupSlots)) {
+    bookingDoc.lineupSlots = patch.lineupSlots;
+    bookingDoc.actsSummary = (bookingDoc.actsSummary || []).map((summary, index) => index === 0
+      ? updateBespokeSummary(summary.toObject ? summary.toObject() : summary, patch)
+      : summary);
+  }
+
 
   if (Array.isArray(patch.assignedMusicians)) {
     bookingDoc.assignedMusicians = patch.assignedMusicians;
@@ -1888,7 +1900,10 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     actTscName,
     address,
     county,
-    lineupSelected,
+    lineupSelected: doc?.lineupMode === "bespoke" ? doc.lineupSelected : lineupSelected,
+    lineupId: doc?.lineupId || actSummary?.lineupId || "",
+    lineupMode: doc?.lineupMode || "standard",
+    lineupSlots: doc?.lineupSlots || [],
     lineupComposition,
     assignedMusicians,
     bookingMusicians: assignedMusicians,
@@ -2405,7 +2420,7 @@ router.post("/", musicianAuth, async (req, res) => {
       return res.status(403).json({ success: false, message: "Admin only." });
     }
 
-    const payload = req.body || {};
+    const payload = normaliseBespokeLineup(req.body || {});
     const bookingRef = String(
       payload.bookingRef || payload.bookingId || "",
     ).trim();
@@ -2518,6 +2533,11 @@ router.post("/", musicianAuth, async (req, res) => {
           }
         : {}),
       ...(linkedActSummary ? { actsSummary: [linkedActSummary] } : {}),
+      lineupSelected: payload.lineupSelected || linkedActSummary?.lineupLabel || "",
+      lineupComposition: payload.lineupComposition || [],
+      lineupMode: payload.lineupMode || "standard",
+      lineupSlots: payload.lineupSlots || [],
+      bandSize: payload.bandSize ?? linkedActSummary?.bandSize ?? 0,
       ...(siteAutomationsEnabled !== undefined
         ? { siteAutomationsEnabled }
         : {}),
@@ -2610,6 +2630,7 @@ router.post("/", musicianAuth, async (req, res) => {
     const boardPatch = {
       bookingId: booking._id, // ObjectId ref to Booking
       ...(linkedAct ? { actId: linkedAct._id } : {}),
+      lineupId: linkedLineupId,
       ...(linkedActSummary ? { actsSummary: [linkedActSummary] } : {}),
       ...(siteAutomationsEnabled !== undefined
         ? { siteAutomationsEnabled }
@@ -2663,6 +2684,8 @@ router.post("/", musicianAuth, async (req, res) => {
         || linkedActSummary?.bandSize
         || 0,
       lineupSelected: String(payload.lineupSelected || "").trim(),
+      lineupMode: payload.lineupMode || "standard",
+      lineupSlots: payload.lineupSlots || [],
       lineupComposition: Array.isArray(payload.lineupComposition)
         ? payload.lineupComposition
         : [],
@@ -3483,7 +3506,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
   });
   try {
     const rawBody = { ...req.body };
-    const body = { ...protectBookingAssignmentPatch(rawBody), updatedAt: new Date() };
+    const body = { ...normaliseBespokeLineup(protectBookingAssignmentPatch(rawBody)), updatedAt: new Date() };
     if (Object.prototype.hasOwnProperty.call(body, "siteAutomationsEnabled")) {
       const siteAutomationsEnabled = parseSiteAutomationsEnabled(
         body.siteAutomationsEnabled,
@@ -3710,6 +3733,8 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         ...(body.address !== undefined ? { address: body.address } : {}),
         ...(body.county !== undefined ? { county: body.county } : {}),
         ...(body.lineupSelected !== undefined ? { lineupSelected: body.lineupSelected } : {}),
+        ...(body.lineupMode !== undefined ? { lineupMode: body.lineupMode } : {}),
+        ...(body.lineupSlots !== undefined ? { lineupSlots: body.lineupSlots } : {}),
         ...(Array.isArray(body.lineupComposition)
           ? { lineupComposition: body.lineupComposition }
           : {}),
@@ -3879,6 +3904,11 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
     const { bookingDetails: bodyBookingDetails, ...bodyWithoutBookingDetails } = body;
     delete bodyWithoutBookingDetails.replaceAssignedMusicians;
+    if (isBespokeLineup(bodyWithoutBookingDetails)) {
+      const existing = await BookingBoardItem.findById(req.params.id).select("actsSummary").lean();
+      bodyWithoutBookingDetails.actsSummary = (existing?.actsSummary || []).map((summary, index) => index === 0
+        ? updateBespokeSummary(summary, bodyWithoutBookingDetails) : summary);
+    }
 
     const deadlineInputsChanged =
       bodyWithoutBookingDetails.eventDateISO !== undefined ||

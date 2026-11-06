@@ -1,3 +1,4 @@
+import { isBespokeLineup, bespokeLineupSnapshot } from "./bespokeLineup.js";
 const clean = (value) => String(value || "").trim();
 const normalizedName = (value) => clean(value).toLowerCase();
 const normalizedLooseName = (value) => normalizedName(value).replace(/[^a-z0-9]/g, "");
@@ -98,6 +99,7 @@ export const findBestActProfile = (row = {}, acts = []) => {
 };
 
 export const findActLineup = (act = {}, row = {}) => {
+  if (isBespokeLineup(row)) return bespokeLineupSnapshot(row, row.actsSummary?.[0]?.lineup || {});
   const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
   const requestedIds = [
     row.lineupId,

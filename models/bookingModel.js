@@ -342,6 +342,8 @@ const BookingSchema = new mongoose.Schema(
     actId: { type: mongoose.Schema.Types.ObjectId, ref: "Act" },
     lineupId: { type: String, default: "" },
     lineupSelected: { type: String, default: "" },
+    lineupMode: { type: String, default: "standard" },
+    lineupSlots: { type: [{ role: String, excluded: Boolean, _id: false }], default: [] },
     lineupComposition: { type: [String], default: [] },
     bandSize: { type: Number, default: 0 },
     actsSummary: { type: [ActSummarySchema], default: [] },

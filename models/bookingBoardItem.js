@@ -346,6 +346,9 @@ const BookingBoardItemSchema = new mongoose.Schema(
     extrasPaidAt: { type: Date },
     bandSize: { type: Number, default: 0 }, // excluding manager
     lineupSelected: { type: String }, // human label e.g. "6-Piece (2xVoc, Sax, Gtr, Bass, Drums)"
+    lineupId: { type: String, default: "" },
+    lineupMode: { type: String, default: "standard" },
+    lineupSlots: { type: [{ role: String, excluded: Boolean, _id: false }], default: [] },
     lineupComposition: [{ type: String }], // e.g. ["Lead Vocal","Guitar","Bass","Drums"]
     assignedMusicians: [AssignedMusicianSchema],
     bookingMusicians: [AssignedMusicianSchema],
