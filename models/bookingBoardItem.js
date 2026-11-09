@@ -380,6 +380,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
     manualAdjustment: ManualAdjustmentSchema,
     manualAdjustmentLabel: { type: String, default: "" },
     manualAdjustmentAmount: { type: Number, default: 0 },
+    mainInvoiceIncludesExtras: { type: Boolean, default: false },
     allocation: AllocationSchema,
     review: ReviewSchema,
     reviewRequestPlan: {

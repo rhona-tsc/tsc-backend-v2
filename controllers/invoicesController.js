@@ -882,7 +882,9 @@ const getInvoiceExtrasAndAdjustment = (row) => {
   const invoiceExtras =
     invoiceType === "extras"
       ? sourceExtras.filter((extra) => extra?.includeOnExtrasInvoice !== false)
-      : sourceExtras.filter((extra) => extra?.includeOnMainInvoice !== false);
+      : row?.mainInvoiceIncludesExtras === true
+        ? sourceExtras.filter((extra) => extra?.includeOnMainInvoice !== false)
+        : [];
 
   const extrasTotal = round2(
     invoiceExtras.reduce(
@@ -1038,13 +1040,38 @@ export const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
   manualAdjustmentAmount,
 } = getInvoiceExtrasAndAdjustment(rowForInvoice);
 
-  const storedGross = round2(
+  const fullStoredGross = round2(
     rowForInvoice.grossValue ||
       rowForInvoice.totals?.fullAmount ||
       rowForInvoice.amount ||
       rowForInvoice.fee ||
       0,
   );
+
+  const sourceExtras = Array.isArray(rowForInvoice?.extras)
+    ? rowForInvoice.extras
+    : Array.isArray(rowForInvoice?.bookingDetails?.extras)
+      ? rowForInvoice.bookingDetails.extras
+      : [];
+  const allExtrasTotal = round2(
+    sourceExtras.reduce(
+      (sum, extra) =>
+        sum + Number(extra?.price || 0) * (Number(extra?.quantity || 1) || 1),
+      0,
+    ),
+  );
+  const storedGross =
+    invoiceType === "main" && rowForInvoice?.mainInvoiceIncludesExtras !== true
+      ? round2(
+          rowForInvoice.originalBookingTotal ??
+            Math.max(
+              fullStoredGross -
+                allExtrasTotal -
+                Number(manualAdjustmentAmount || 0),
+              0,
+            ),
+        )
+      : fullStoredGross;
 
   const accounting = rowForInvoice.accounting || {};
   // Date-based company policy overrides stale accounting saved on the row.
@@ -2080,6 +2107,7 @@ export const createBoardInvoice = async (req, res) => {
       documentType = "invoice",
       invoiceType = "main",
       includePaymentLink = false,
+      includeExtras,
       paymentDate,
       sendReceipt = false,
     } = req.body;
@@ -2170,6 +2198,12 @@ export const createBoardInvoice = async (req, res) => {
 
     const rowForInvoice = {
       ...row,
+      mainInvoiceIncludesExtras:
+        invoiceTypeNorm === "main"
+          ? typeof includeExtras === "boolean"
+            ? includeExtras
+            : row?.mainInvoiceIncludesExtras === true
+          : false,
       ...(isReceipt
         ? {
             paidAt: isExtrasInvoice ? row?.paidAt : requestedPaidAt,
@@ -2471,6 +2505,8 @@ export const createBoardInvoice = async (req, res) => {
           }
         : {
             invoiceCompany: invoiceCompany.brand,
+            mainInvoiceIncludesExtras:
+              rowForInvoice.mainInvoiceIncludesExtras === true,
             invoiceDateISO,
             invoiceDueDateISO: finalDueDate,
             invoiceUrl: browserDocumentUrl,
@@ -2555,6 +2591,8 @@ export const createBoardInvoice = async (req, res) => {
           }
         : {
             invoiceCompany: invoiceCompany.brand,
+            mainInvoiceIncludesExtras:
+              rowForInvoice.mainInvoiceIncludesExtras === true,
             invoiceDateISO,
             invoiceDueDateISO: finalDueDate,
             invoiceUrl: browserDocumentUrl,
@@ -2683,6 +2721,8 @@ export const serveBoardReceiptPdf = async (req, res) => {
       ...row,
       documentType: "receipt",
       invoiceType: invoiceTypeNorm,
+      mainInvoiceIncludesExtras:
+        invoiceTypeNorm === "main" && row?.mainInvoiceIncludesExtras === true,
       invoiceCompany:
         resolveDocumentInvoiceCompanyBrand({
           row,
@@ -2736,6 +2776,11 @@ export const serveBoardInvoicePdf = async (req, res) => {
       ...row,
       documentType: "invoice",
       invoiceType: invoiceTypeNorm,
+      mainInvoiceIncludesExtras:
+        invoiceTypeNorm === "main" &&
+        (String(req.query?.includeExtras || "") === "1" ||
+          (req.query?.includeExtras == null &&
+            row?.mainInvoiceIncludesExtras === true)),
       invoiceDueDateISO: finalDueDate,
       invoiceCompany:
         resolveDocumentInvoiceCompanyBrand({

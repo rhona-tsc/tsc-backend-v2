@@ -44,3 +44,28 @@ test('extras-only invoice does not subtract the original booking deposit', async
   assert.match(text, /Total due\s*£417\.00/);
   assert.doesNotMatch(text, /Deposit already paid|980\.76/);
 });
+test('main invoice keeps extras separate by default', async () => {
+  const row = {
+    ...fixture(),
+    originalBookingTotal: 2972,
+    grossValue: 3000,
+    extras: [{ name: 'Parking', quantity: 1, price: 28 }],
+  };
+  row.accounting = { commissionGross: 1702, passThroughGross: 1270 };
+  const text = await render(row);
+  assert.doesNotMatch(text, /Parking/);
+  assert.match(text, /Total due\s*£1,991\.24/);
+});
+test('main invoice includes extras only when explicitly selected', async () => {
+  const row = {
+    ...fixture(),
+    originalBookingTotal: 2972,
+    grossValue: 3000,
+    mainInvoiceIncludesExtras: true,
+    extras: [{ name: 'Parking', quantity: 1, price: 28 }],
+  };
+  row.accounting = { commissionGross: 1702, passThroughGross: 1270 };
+  const text = await render(row);
+  assert.match(text, /Parking/);
+  assert.match(text, /Total due\s*£2,019\.24/);
+});
