@@ -19,7 +19,7 @@ export async function buildInstagramHighlights(media, { musicianId, upload }) {
       title: "", tag: "Performance highlight", url: "",
       mediaUrl: image.secure_url, thumbnailUrl: image.secure_url,
       mediaType: "image", platform: "instagram", visible: true,
-      importedAt: new Date(),
+      importedAt: new Date(), moderationStatus: "approved", moderatedAt: new Date(),
     });
   }
   if (media.length && !posts.length) throw new Error("Instagram returned no importable photos or video thumbnails");

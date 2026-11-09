@@ -122,19 +122,34 @@ const sanitizePublicMusician = (doc) => {
     },
   );
 
+  const instagramSnapshotUrl = (value) => {
+    try {
+      const parsed = new URL(String(value || ""));
+      if (!/(^|\.)instagram\.com$/i.test(parsed.hostname)) return "";
+      const shortcode = parsed.pathname.match(/^\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/i)?.[1];
+      return shortcode ? `https://www.instagram.com/p/${shortcode}/media/?size=l` : "";
+    } catch {
+      return "";
+    }
+  };
+
   sanitized.socialHighlightPostLinks = (
     Array.isArray(doc.socialHighlightPostLinks)
       ? doc.socialHighlightPostLinks
       : []
   )
-    .filter((post) => post?.visible !== false)
+    .filter(
+      (post) =>
+        post?.visible !== false &&
+        (post?.mediaUrl || post?.thumbnailUrl || post?.moderationStatus === "approved"),
+    )
     .map((post) => ({
       _id: post?._id,
       title: post?.title || "",
-      mediaUrl: post?.mediaUrl || "",
-      thumbnailUrl: post?.thumbnailUrl || "",
-      mediaType: post?.mediaType || "unknown",
-      platform: post?.platform || "",
+      mediaUrl: post?.mediaUrl || instagramSnapshotUrl(post?.url),
+      thumbnailUrl: post?.thumbnailUrl || instagramSnapshotUrl(post?.url),
+      mediaType: post?.mediaType === "unknown" ? "image" : post?.mediaType || "image",
+      platform: post?.platform || (instagramSnapshotUrl(post?.url) ? "instagram" : ""),
       tag: post?.tag || "",
     }));
 

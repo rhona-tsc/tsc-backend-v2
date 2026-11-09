@@ -183,6 +183,12 @@ lastLoginAt: { type: Date, default: null, index: true },
         tag: { type: String, maxlength: 60, default: "" },
         visible: { type: Boolean, default: true },
         importedAt: { type: Date, default: null },
+        moderationStatus: {
+          type: String,
+          enum: ["pending", "approved", "rejected"],
+          default: "pending",
+        },
+        moderatedAt: { type: Date, default: null },
       },
     ],
     socialFeedConnectionPreference: {
