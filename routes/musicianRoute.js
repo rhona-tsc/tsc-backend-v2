@@ -604,6 +604,13 @@ router.post(
   },
 );
 
+router.get(
+  "/moderation/video-resubmission-capabilities",
+  verifyToken,
+  agentAuth,
+  (_req, res) => res.json({ customReason: true, version: 2 }),
+);
+
 router.post("/moderation/bios/backfill/start", verifyToken, async (req, res) => {
   try {
     const role = String(req.user?.role || "").toLowerCase();
