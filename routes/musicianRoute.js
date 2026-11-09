@@ -541,6 +541,8 @@ router.post(
       const firstName = String(musician.firstName || musician?.basicInfo?.firstName || "there").trim();
       const category = req.body?.category === "original" ? "original" : "function";
       const submittedUrl = String(req.body?.url || "").trim();
+      const suppliedReason = String(req.body?.reason || "").trim().slice(0, 800);
+      const reason = suppliedReason || "The supplied link is not a clean, directly playable profile video.";
       const portalUrl = `${String(process.env.ADMIN_FRONTEND_URL || "https://admin.thesupremecollective.co.uk").replace(/\/$/, "")}/edit-deputy/${musician._id}`;
       const smtpPort = Number(process.env.SMTP_PORT || 587);
       const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER;
@@ -571,6 +573,7 @@ router.post(
         })[character]);
       const safeFirstName = escapeHtml(firstName);
       const safeSubmittedUrl = escapeHtml(submittedUrl);
+      const safeReason = escapeHtml(reason);
 
       await transporter.sendMail({
         from: `"The Supreme Collective" <${fromAddress}>`,
@@ -578,15 +581,16 @@ router.post(
         bcc: adminEmail,
         replyTo: process.env.SMTP_REPLY_TO || adminEmail,
         subject: "Please resubmit your profile video",
-        text: `Hi ${firstName},\n\nThanks for submitting your ${typeLabel} video. The link supplied opens a webpage rather than a playable video, so we cannot add or approve it on your profile.\n\nPlease sign in and replace it with either a direct YouTube or Vimeo video link, or upload the original video file.\n\nUpdate your profile: ${portalUrl}\n\nIf the video comes from Instagram, TikTok or Facebook, please upload the original file or provide a direct downloadable file rather than the social profile/page link.\n\nThank you,\nThe Supreme Collective`,
+        text: `Hi ${firstName},\n\nThanks for submitting your ${typeLabel} video. We cannot approve this version for your profile for the following reason:\n\n${reason}\n\nPlease sign in and replace it with a clean, directly playable YouTube or Vimeo video link, or upload the original video file.\n\nUpdate your profile: ${portalUrl}\n\nProfile videos must be unbranded and must not show contact details, social handles, website addresses or a performer's full name.\n\nThank you,\nThe Supreme Collective`,
         html: `
           <div style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;max-width:640px;margin:auto">
             <h2 style="color:#111827">A quick update to your profile video</h2>
             <p>Hi ${safeFirstName},</p>
-            <p>Thanks for submitting your ${typeLabel} video. The link supplied opens a webpage rather than a playable video, so we cannot add or approve it on your profile.</p>
-            <p>Please replace it with either a <strong>direct YouTube or Vimeo video link</strong>, or upload the original video file.</p>
+            <p>Thanks for submitting your ${typeLabel} video. We cannot approve this version for your profile for the following reason:</p>
+            <p style="background:#fef2f2;border-left:4px solid #dc2626;padding:12px"><strong>${safeReason}</strong></p>
+            <p>Please replace it with a clean, directly playable <strong>YouTube or Vimeo video link</strong>, or upload the original video file.</p>
             <p><a href="${portalUrl}" style="display:inline-block;background:#ff6667;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:bold">Update my profile video</a></p>
-            <p>If the video comes from Instagram, TikTok or Facebook, please upload the original file or provide a direct downloadable file rather than the social profile/page link.</p>
+            <p>Profile videos must be unbranded and must not show contact details, social handles, website addresses or a performer's full name.</p>
             ${submittedUrl ? `<p style="font-size:12px;color:#6b7280">Link that needs replacing: ${safeSubmittedUrl}</p>` : ""}
             <p>Thank you,<br>The Supreme Collective</p>
           </div>`,
