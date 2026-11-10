@@ -1,5 +1,6 @@
 // models/enquiryBoardItem.js
 import mongoose from "mongoose";
+import { marketingAttributionSchema } from './marketingAttributionSchema.js';
 
 const EnquiryBoardItemSchema = new mongoose.Schema(
   {
@@ -7,6 +8,8 @@ const EnquiryBoardItemSchema = new mongoose.Schema(
     enquiryRef: { type: String, index: true },
     websiteKey: { type: String, unique: true, sparse: true },
     measurementId: { type: String },
+    marketingSource: { type: String },
+    attribution: { type: marketingAttributionSchema, default: undefined },
     enquiryId: { type: mongoose.Types.ObjectId, ref: "Enquiry" },
 
     // ✅ Add these so we can trigger availability properly

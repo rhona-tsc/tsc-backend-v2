@@ -1,3 +1,4 @@
+import { marketingAttributionSchema } from './marketingAttributionSchema.js';
 // models/bookingModel.js
 import mongoose from "mongoose";
 
@@ -337,6 +338,9 @@ const BookingTotalsSchema = new mongoose.Schema(
 const BookingSchema = new mongoose.Schema(
   {
     bookingId: { type: String, required: true },
+    attribution: { type: marketingAttributionSchema, default: undefined },
+    linkedEnquiryRefs: { type: [String], default: undefined },
+    linkedMeasurementIds: { type: [String], default: undefined },
     totals: { type: BookingTotalsSchema, default: undefined },
     // Website checkout and its payment-verified completion need these fields on
     // hydrated documents; undeclared fields are silently stripped by Mongoose.

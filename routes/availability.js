@@ -82,6 +82,7 @@ const normalizeAvailabilityBody = (body = {}) => {
 
   return {
     actId,
+    attribution: body.attribution,
     lineupId: lineupId || undefined,
     dateISO,
     formattedAddress,
@@ -370,6 +371,8 @@ router.post("/request", async (req, res) => {
     }
 
     const enquiry = await recordWebsiteEnquiry(payload);
+    // Acquisition data belongs on the enquiry, not in musician requests or emails.
+    delete payload.attribution;
     if (enquiry) payload.enquiryId = enquiry.enquiryRef;
     const result = await triggerAvailabilityRequest(payload);
 

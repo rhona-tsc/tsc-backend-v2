@@ -332,7 +332,7 @@ router.get("/", musicianAuth, async (req, res) => {
 
     const user = req.user || {};
     const admin = isTSCAdmin(user) || isAgent(user);
-    const proj = admin ? {} : { grossValue: 0, netCommission: 0 };
+    const proj = admin ? {} : { grossValue: 0, netCommission: 0, attribution: 0, marketingSource: 0 };
 
     let allowedActIds = [];
     if (!admin || String(scope) === "mine") {

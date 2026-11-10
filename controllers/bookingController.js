@@ -1,3 +1,4 @@
+import { linkBookingEnquiries } from '../services/websiteEnquiryService.js';
 import { loadVocalistChoices, validateVocalistSelection } from "../services/vocalistChoiceService.js";
 import { verifiedInitialPayment, paidBookingMeasurement } from "../utils/bookingMeasurement.js";
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
@@ -1355,7 +1356,10 @@ export const createCheckoutSession = async (req, res) => {
     // ✅ Adjust deposit logic for full payments
     const fixedDeposit = finalMode === "full" ? 0 : depositGross;
 
+    const enquiryLinks = await linkBookingEnquiries({ email: userEmail, date, address: venueAddress || venue,
+      actsSummary: actsSummaryWithPerf || actsSummary, attribution: req.body.attribution });
     await Booking.create({
+      ...enquiryLinks,
       bookingId,
       actsSummary: actsSummaryWithPerf || actsSummary || [],
       performanceTimes,
