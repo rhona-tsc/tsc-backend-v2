@@ -12,6 +12,7 @@ import express from "express";
 import cors from "cors";
 import "dotenv/config";
 import requireStaffAuth from "./middleware/requireStaffAuth.js";
+import voiceEnquiryRoutes from './routes/voiceEnquiryRoutes.js';
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import cron from "node-cron";
@@ -595,6 +596,9 @@ app.use("/api/debug", requireStaffAuth);
 app.use("/api/admin", requireStaffAuth);
 app.use("/api/finance", requireStaffAuth);
 
+// Dedicated signature-verified parsers must run before JSON consumes raw webhooks.
+// Voice handling remains disabled unless explicitly configured for test callers.
+app.use('/api/voice-enquiries', voiceEnquiryRoutes);
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
