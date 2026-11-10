@@ -36,8 +36,17 @@ import {
   trackDeputyPresentationView,
 } from "../controllers/deputyJobController.js";
 import authUser, { optionalAuthUser } from "../middleware/auth.js";
+import deputyJobModel from '../models/deputyJobModel.js';
+import { deputyJobManagerGuard } from '../middleware/deputyJobManager.js';
 
 const deputyJobRouter = express.Router();
+
+// Optional-auth responses differ per viewer and must never be shared by a cache.
+deputyJobRouter.use((_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Robots-Tag', 'noindex, nofollow');
+  next();
+});
 
 /**
  * Twilio inbound webhooks
@@ -60,6 +69,15 @@ deputyJobRouter.post(
   express.json(),
   trackDeputyPresentationView,
 );
+
+// All job subroutes are management-only except applying as the logged-in musician.
+// Leave the public list/detail and signed Twilio/tracking flows above unchanged.
+const requireJobManager = deputyJobManagerGuard(id => deputyJobModel.findById(id)
+  .select('createdBy createdByEmail managerEmail').lean());
+deputyJobRouter.use('/:id/:action', (req, res, next) => {
+  if (req.params.action === 'apply') return next();
+  return authUser(req, res, () => requireJobManager(req, res, next));
+});
 
 /**
  * Preview / test / resend notifications for an existing job

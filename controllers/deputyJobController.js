@@ -1,4 +1,5 @@
 import { musicianEmailPreferencesUrl } from '../utils/musicianEmailPreferences.js';
+import { visibleDeputyJob } from '../utils/deputyJobVisibility.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 // controllers/deputyJobController.js
 import Stripe from "stripe";
@@ -3094,7 +3095,7 @@ export const listDeputyJobs = async (req, res) => {
       canViewHistorical,
       isOwnApplicationHistory,
       includeHistorical,
-      jobs: jobs.map(withDeputyJobAliases),
+      jobs: jobs.map(job => visibleDeputyJob(withDeputyJobAliases(job), req.user)),
     });
   } catch (error) {
     console.error("❌ listDeputyJobs error:", error);
@@ -3168,6 +3169,7 @@ export const getDeputyJobById = async (req, res) => {
           "createdByName",
           "createdByEmail",
           "createdByPhone",
+          "managerEmail",
           "matchedCount",
           "notifiedCount",
           "applicationCount",
@@ -3211,7 +3213,7 @@ export const getDeputyJobById = async (req, res) => {
     const safeJob = { ...job, myApplication };
     delete safeJob.applications;
 
-    return res.json({ success: true, job: withDeputyJobAliases(safeJob) });
+    return res.json({ success: true, job: visibleDeputyJob(withDeputyJobAliases(safeJob), req.user) });
   } catch (error) {
     console.error("❌ getDeputyJobById error:", error);
     return res
@@ -3840,7 +3842,7 @@ The Supreme Collective`,
     return res.json({
       success: true,
       message: "Application submitted",
-      job: withDeputyJobAliases(job),
+      job: visibleDeputyJob(withDeputyJobAliases(job), req.user),
     });
   } catch (error) {
     console.error("❌ applyToDeputyJob error:", {
