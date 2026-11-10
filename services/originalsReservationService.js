@@ -6,6 +6,7 @@ import Submission from '../models/originalSubmissionModel.js';
 import Future from '../models/originalRoleReservationModel.js';
 import { startOriginalRoundClock } from './originalsRoundClockService.js';
 import { getReservationExpiry, isOriginalRoundExpired } from './originalsPolicyService.js';
+import { originalAvailableSeat } from './originalsPreferredPlacesService.js';
 export const roleKey = value => String(value || '').trim().toLowerCase();
 const conflict = message => Object.assign(new Error(message), { status: 409 });
 export const eligibleRoundRoles = round => round?.type === 'foundation' ? round.eligibleRoles || [] : round?.roleName ? [round.roleName] : [];
@@ -22,13 +23,13 @@ export async function createOriginalRecordingReservation({ round, musicianId, ro
   const failed = await Submission.find({ roundId: round._id, state: { $in: ['rejected','withdrawn','retracted'] } }).select('reservationId').lean();
   const failedIds = new Set(failed.map(item => String(item.reservationId)));
   for (let attempt = 0; attempt < round.slotLimit; attempt++) {
-    const occupied = (await Reservation.find({ roundId: round._id, slotHeld: { $ne: false }, $or: [{ state: 'active', expiresAt: { $gt: now } }, { state: 'submitted' }] }).select('_id musicianId seatNumber state').lean()).filter(item => !failedIds.has(String(item._id)));
+    const occupied = (await Reservation.find({ roundId: round._id, slotHeld: { $ne: false }, $or: [{ state: 'active', expiresAt: { $gt: now } }, { state: 'submitted' }] }).select('_id musicianId seatNumber state futureReservationId').lean()).filter(item => !failedIds.has(String(item._id)));
     if (occupied.some(item => String(item.musicianId) === String(musicianId))) throw conflict('You already have a reservation or submission in this round');
     if (occupied.length >= round.slotLimit) throw conflict('All places in this round are reserved');
-    const used = new Set(occupied.map(item => item.seatNumber).filter(Boolean));
-    // Legacy reservations have no numbered seat; still count them against capacity.
-    for (const item of occupied.filter(item => !item.seatNumber)) { const seat = Array.from({ length: round.slotLimit }, (_, i) => i + 1).find(number => !used.has(number)); used.add(seat); }
-    const seatNumber = Array.from({ length: round.slotLimit }, (_, i) => i + 1).find(number => !used.has(number));
+    const preferred = await Future.find({ projectId: round.projectId, assignedByOwner: true, roleKey: { $in: eligibleRoundRoles(round).map(roleKey) }, $or: [{ state: 'waiting' }, { state: 'activated', activeReservationId: null }] }).sort({ createdAt: 1, _id: 1 }).lean();
+    if (!futureReservationId && preferred.some(item => String(item.musicianId) === String(musicianId))) throw conflict('You have a held place. Review its agreement in Recording progress to activate it.');
+    const seatNumber = originalAvailableSeat({ occupied, preferred, slotLimit: round.slotLimit, musicianId, futureReservationId });
+    if (!seatNumber) throw conflict('All remaining places are held for preferred musicians.');
     let reservation;
     try {
       reservation = await Reservation.create({ projectId: round.projectId, roundId: round._id, musicianId, roleName, anonymous, creditName, agreementAcceptanceId, seatNumber, slotHeld: true, ...(futureReservationId ? { futureReservationId } : {}), reservedAt: now, expiresAt: getReservationExpiry(now) });

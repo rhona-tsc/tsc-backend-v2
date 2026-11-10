@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { requireOriginalTemporaryReplacements } from '../services/originalsTemporaryStemService.js';
 import originalCreditVersionModel from "../models/originalCreditVersionModel.js";
 import originalEventModel from "../models/originalEventModel.js";
 import originalNotificationModel from "../models/originalNotificationModel.js";
@@ -17,6 +18,7 @@ export const createOriginalCreditVersion = async (req, res) => {
     if (!project) return res.status(404).json({ success: false, message: "Originals project not found" });
     if (!canManageOriginalProject(project, req.user)) return res.status(403).json({ success: false, message: "Only the project owner or TSC can manage credits" });
     const submissions = await originalSubmissionModel.find({ projectId: project._id, state: "accepted" }).lean();
+    await requireOriginalTemporaryReplacements({ projectId: project._id });
     let splits;
     try { splits = calculateOriginalsSplits({ project, acceptedSubmissions: submissions }); }
     catch (error) { return res.status(409).json({ success: false, message: error.message }); }
@@ -42,6 +44,7 @@ export const createOriginalCreditVersion = async (req, res) => {
     await originalEventModel.create({ projectId: project._id, type: "credit_version_created", actorId: objectId(getOriginalsUserId(req.user)) || null, metadata: { creditVersionId: String(creditVersion._id), version: creditVersion.version } });
     return res.status(201).json({ success: true, creditVersion });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message, code: error.code });
     console.error("❌ createOriginalCreditVersion error:", error);
     return res.status(500).json({ success: false, message: "Failed to calculate credits" });
   }
@@ -96,12 +99,14 @@ export const completeOriginalProject = async (req, res) => {
     if (!creditVersion || creditVersion.state !== "final") return res.status(409).json({ success: false, message: "Finalise the current credit version first" });
     const acceptedMaster = await originalSubmissionModel.exists({ projectId: project._id, category: "master", state: "accepted" });
     if (!acceptedMaster) return res.status(409).json({ success: false, message: "Accept the final master first" });
+    await requireOriginalTemporaryReplacements({ projectId: project._id });
     project.state = "approved_master";
     project.completedAt = new Date();
     await project.save();
     await originalEventModel.create({ projectId: project._id, type: "project_completed", actorId: objectId(getOriginalsUserId(req.user)) || null, metadata: { creditVersionId: String(creditVersion._id) } });
     return res.json({ success: true, project, creditVersion });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message, code: error.code });
     console.error("❌ completeOriginalProject error:", error);
     return res.status(500).json({ success: false, message: "Failed to complete project" });
   }

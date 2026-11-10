@@ -1,3 +1,4 @@
+import { validateOriginalTemporaryStem, saveOriginalTemporaryStem } from '../services/originalsTemporaryStemService.js';
 import { authoriseOriginalAsset } from '../services/originalsAssetAccessService.js';
 import { requireOriginalStemReviews } from '../services/originalsRecordingContextService.js';
 import { originalSubmissionCommit } from "../services/originalsSubmissionCommitService.js";
@@ -52,7 +53,7 @@ const AUDIO_MIMES = new Set([
 ]);
 const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime"]);
 const ASSET_KINDS = new Set([
-  "initial_stem", "guide_track", "demo", "voice_note", "video_submission", "click_track", "take_stem", "take_mixdown", "mix", "master", "chat_attachment",
+  "initial_stem", "temporary_stem", "guide_track", "demo", "voice_note", "video_submission", "click_track", "take_stem", "take_mixdown", "mix", "master", "chat_attachment",
 ]);
 
 const audit = ({ projectId, roundId, reservationId, type, user, metadata = {} }) =>
@@ -91,7 +92,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
       originalReservationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).lean(),
       originalSubmissionModel.find({ projectId: project._id }).sort({ submittedAt: -1 }).lean(),
       originalAssetModel.find({ projectId: project._id, state: { $ne: "deleted" } })
-        .select("kind originalName mimeType bytes finalEligible createdEntirelyWithAi alignmentReviewRequired alignmentReview state ownerId roundId reservationId createdAt")
+        .select("kind originalName mimeType bytes finalEligible replacementRoleName createdEntirelyWithAi alignmentReviewRequired alignmentReview state ownerId roundId reservationId createdAt")
         .sort({ createdAt: -1 }).lean(),
       canManage ? originalNotificationModel.find({ projectId: project._id, template: { $ne: 'originals_signed_agreement_copy' } }).sort({ createdAt: -1 }).limit(50).lean() : [],
       canManage ? originalInvitationModel.find({ projectId: project._id })
@@ -128,7 +129,9 @@ export const uploadOriginalAsset = async (req, res) => {
     const kind = clean(req.body?.kind).toLowerCase();
     if (!["take_stem", "take_mixdown", "mix", "master", "voice_note", "chat_attachment"].includes(kind) && !canManageOriginalProject(project, req.user)) return res.status(403).json({ success: false, message: "Only the project owner can upload project references" });
     if (!ASSET_KINDS.has(kind)) return res.status(400).json({ success: false, message: "Invalid asset type" });
-    const isStem = ["initial_stem", "take_stem", "click_track"].includes(kind);
+    if (kind === 'initial_stem' && ![true, 'true'].includes(req.body?.finalStemConfirmed)) return res.status(400).json({ success: false, message: 'Confirm this is a stem intended for the final production, or upload it as a reference-only idea or guide.' });
+    const isStem = ["initial_stem", "temporary_stem", "take_stem", "click_track"].includes(kind);
+    const replacementRoleName = kind === "temporary_stem" ? validateOriginalTemporaryStem(project, req.body?.replacementRoleName) : "";
     const declaration = req.body?.createdEntirelyWithAi;
     if (declaration !== undefined && (!isStem || ![true, false, "true", "false"].includes(declaration))) {
       return res.status(400).json({ success: false, message: "Use a true or false AI declaration for stem files only" });
@@ -161,8 +164,9 @@ export const uploadOriginalAsset = async (req, res) => {
     }
 
     const uploaded = await uploadAuthenticated(req.file, project._id);
-    const asset = await originalAssetModel.create({
+    const assetData = {
       projectId: project._id,
+      replacementRoleName,
       roundId,
       reservationId,
       ownerId,
@@ -176,29 +180,33 @@ export const uploadOriginalAsset = async (req, res) => {
       cloudinaryResourceType: uploaded.resource_type || "video",
       cloudinaryFormat: uploaded.format || "",
       deliveryType: "authenticated",
-      finalEligible: !["guide_track", "demo", "voice_note", "video_submission", "click_track", "take_mixdown", "chat_attachment"].includes(kind),
-    });
-    if (["initial_stem", "guide_track", "demo", "video_submission", "click_track"].includes(kind)) {
+      finalEligible: !["temporary_stem", "guide_track", "demo", "voice_note", "video_submission", "click_track", "take_mixdown", "chat_attachment"].includes(kind),
+    };
+    const asset = kind === 'temporary_stem'
+      ? await saveOriginalTemporaryStem({ projectId: project._id, data: assetData, songwritingClaim: req.body?.songwritingClaim })
+      : await originalAssetModel.create(assetData);
+    if (["initial_stem", "guide_track", "demo", "voice_note", "video_submission", "click_track"].includes(kind)) {
       project.initialAssetIds.addToSet(asset._id);
       if (kind === "initial_stem") {
         project.hasInitialStem = true;
         project.sourceType = "final_eligible_stem";
-        project.ownerSongwritingClaim = true;
+        if (req.body?.songwritingClaim !== undefined) project.ownerSongwritingClaim = [true, "true"].includes(req.body.songwritingClaim);
       }
-      if (kind === "guide_track") {
+      if (kind === "guide_track" && !['final_eligible_stem', 'temporary_stem'].includes(project.sourceType)) {
         project.sourceType = "guide_track";
         project.hasInitialStem = true;
-        project.ownerSongwritingClaim = true;
+        if (req.body?.songwritingClaim !== undefined) project.ownerSongwritingClaim = [true, "true"].includes(req.body.songwritingClaim);
       }
-      if (kind === "video_submission") {
+      if (kind === "video_submission" && !['final_eligible_stem', 'temporary_stem', 'guide_track'].includes(project.sourceType)) {
         project.sourceType = "video_demo";
         project.ownerSongwritingClaim = req.body?.songwritingClaim === "true";
       }
       await project.save();
     }
     await audit({ projectId: project._id, roundId, reservationId, type: "asset_uploaded", user: req.user, metadata: { assetId: String(asset._id), kind, ...(isStem ? { createdEntirelyWithAi } : {}) } });
-    return res.status(201).json({ success: true, asset: { _id: asset._id, kind, originalName: asset.originalName, bytes: asset.bytes, createdEntirelyWithAi: asset.createdEntirelyWithAi, alignmentReviewRequired: asset.alignmentReviewRequired } });
+    return res.status(201).json({ success: true, asset: { _id: asset._id, kind, originalName: asset.originalName, bytes: asset.bytes, replacementRoleName: asset.replacementRoleName, finalEligible: asset.finalEligible, createdEntirelyWithAi: asset.createdEntirelyWithAi, alignmentReviewRequired: asset.alignmentReviewRequired } });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message, code: error.code });
     console.error("❌ uploadOriginalAsset error:", error);
     return res.status(500).json({ success: false, message: "Private upload failed" });
   }
@@ -662,6 +670,7 @@ export const inviteOriginalMusician = async (req, res) => {
 
 export const searchOriginalMusicians = async (req, res) => {
   try {
+    if (req.path === '/musicians/for-project') return res.json(await browseOriginalMusicians(req.query, { viewer: req.user }));
     if (!objectId(req.query?.projectId)) return res.status(400).json({ success: false, message: "Choose a project before searching musicians" });
     if (!await requireOriginalProjectManager(req, res, req.query.projectId)) return;
     return res.json(await browseOriginalMusicians(req.query, { allowEmail: true, viewer: req.user }));

@@ -5,7 +5,7 @@ import Round from '../models/originalRoundModel.js';
 import Reservation from '../models/originalReservationModel.js';
 import Future from '../models/originalRoleReservationModel.js';
 import Notification from '../models/originalNotificationModel.js';
-import { getOriginalsUserId } from '../services/originalsPolicyService.js';
+import { canManageOriginalProject, getOriginalsUserId } from '../services/originalsPolicyService.js';
 import { roleKey, eligibleRoundRoles } from '../services/originalsReservationService.js';
 export async function reserveFutureOriginalRole(req, res) {
   try {
@@ -42,7 +42,11 @@ export async function reserveFutureOriginalRole(req, res) {
 
 export async function releaseFutureOriginalRole(req, res) {
   try {
-  const reservation = await Future.findOneAndUpdate({ _id: req.params.futureId, projectId: req.params.id, musicianId: getOriginalsUserId(req.user), state: 'waiting' }, { $set: { state: 'released' } }, { new: true }).lean();
+  const musicianId = getOriginalsUserId(req.user);
+  const own = await Future.findOne({ _id: req.params.futureId, projectId: req.params.id, musicianId, state: 'waiting' }).lean();
+  const project = !own && await Project.findById(req.params.id).lean();
+  const permission = own ? { musicianId } : project && canManageOriginalProject(project, req.user) ? { assignedByOwner: true } : { musicianId };
+  const reservation = await Future.findOneAndUpdate({ _id: req.params.futureId, projectId: req.params.id, ...permission, state: 'waiting' }, { $set: { state: 'released' } }, { new: true }).lean();
   if (!reservation) return res.status(409).json({ success: false, message: 'This reservation is no longer waiting. Refresh the project; if its round has opened, release the recording reservation instead.' });
   return res.json({ success: true, reservation });
   } catch { return res.status(500).json({ success: false, message: "Could not release this advance place" }); }

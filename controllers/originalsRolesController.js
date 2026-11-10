@@ -1,5 +1,6 @@
 import { validateOriginalRecordingOrder } from '../services/originalsRecordingPlanService.js';
 import Project from '../models/originalProjectModel.js';
+import Asset from '../models/originalAssetModel.js';
 import Event from '../models/originalEventModel.js';
 import { requireOriginalProjectManager } from '../services/originalsAccessService.js';
 import { getOriginalsUserId } from '../services/originalsPolicyService.js';
@@ -23,6 +24,7 @@ export async function changeOriginalProjectRole(req, res) {
       roles.push({ name, order: roles.length, foundationEligible: false });
     } else if (action === 'remove') {
       if (!existing) return res.status(409).json({ success: false, message: 'This part has already been removed. Refresh the project.' });
+      if (await Asset.exists({ projectId: project._id, kind: 'temporary_stem', state: 'active', replacementRoleName: existing.name })) return res.status(409).json({ success: false, message: 'This role must replace a temporary stem. Approve its replacement before removing the role.' });
       const rule = management.roles.find(role => sameOriginalRole(role.name, existing.name));
       if (!rule?.canRemove) return res.status(409).json({ success: false, message: rule?.removeReason || 'This part cannot be removed.' });
       roles.splice(roles.indexOf(existing), 1);

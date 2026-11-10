@@ -2,7 +2,7 @@ const key = value => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase
 const editableStates = new Set(['draft', 'changes_requested', 'live', 'foundation_open', 'role_round_open', 'owner_review']);
 
 export function originalRoleManagement(snapshot, now = new Date()) {
-  const { project, rounds = [], reservations = [], submissions = [], futureReservations = [], invitations = [] } = snapshot;
+  const { project, rounds = [], reservations = [], submissions = [], futureReservations = [], invitations = [], assets = [] } = snapshot;
   const roles = project.requestedRoles || [];
   const reason = project.currentCreditVersionId ? 'The project already has a credit version. Resolve the credits before changing its parts.'
     : !editableStates.has(project.state) ? 'Parts can be changed while planning or recording, before mixing, mastering or final credits.' : '';
@@ -17,6 +17,7 @@ export function originalRoleManagement(snapshot, now = new Date()) {
       const heldReservation = reservations.some(item => matches(item) && ((item.state === 'active' && new Date(item.expiresAt) > now)
         || (item.state === 'submitted' && !submissions.some(sub => String(sub.reservationId) === String(item._id) && ['rejected', 'withdrawn', 'retracted'].includes(sub.state)))));
       const removeReason = reason || (protectedSubmission ? 'This part has a submitted or approved recording. Keep it to preserve the review and credits.'
+        : assets.some(asset => asset.kind === 'temporary_stem' && asset.state === 'active' && key(asset.replacementRoleName) === key(role.name)) ? 'This role must replace a temporary stem before the project can be completed.'
         : heldReservation ? 'Someone has an active recording place for this part. It must be released or expire first.'
         : futureReservations.some(item => matches(item) && item.state === 'waiting') ? 'Someone has an advance place for this part. They must release it first.'
         : invitations.some(item => matches(item) && String(item.roundId) === String(project.currentRoundId) && ['pending', 'accepted'].includes(item.state) && (!item.expiresAt || new Date(item.expiresAt) > now)) ? 'This part has an active invitation in the current round.'

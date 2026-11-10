@@ -9,6 +9,8 @@ const schema = new mongoose.Schema({
   state: { type: String, enum: ['waiting', 'activated', 'released', 'cancelled'], default: 'waiting', index: true },
   anonymous: { type: Boolean, default: false },
   creditName: { type: String, default: '' },
+  assignedByOwner: { type: Boolean, default: false },
+  assignedDisplayName: { type: String, default: '' },
   agreementVersion: { type: String },
   agreementTextHash: { type: String },
   activeReservationId: { type: mongoose.Schema.Types.ObjectId, ref: 'originalreservation', default: null },

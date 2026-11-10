@@ -4,11 +4,14 @@ import Submission from '../models/originalSubmissionModel.js';
 import Asset from '../models/originalAssetModel.js';
 
 const id = value => String(value?._id || value || '');
+const roleKey = value => String(value || '').trim().toLowerCase();
 const read = (query, session) => (session ? query.session(session) : query).lean();
 export function originalRecordingContext({ project, submissions = [], assets = [], excludeId = '' }) {
   const available = new Map(assets.filter(asset => asset.state === 'active' && id(asset._id) !== id(excludeId)).map(asset => [id(asset._id), asset]));
   const layers = new Map();
+  for (const asset of available.values()) if (asset.kind === 'temporary_stem') layers.set(id(asset._id), { ...asset, label: `${asset.replacementRoleName || 'Starting part'} — temporary` });
   for (const asset of available.values()) if (asset.kind === 'initial_stem' && asset.finalEligible !== false) layers.set(id(asset._id), { ...asset });
+  const replacedRoles = new Set();
   for (const submission of submissions) {
     if (submission.state !== 'accepted' || (submission.category && submission.category !== 'contribution')) continue;
     for (const take of submission.takes || []) {
@@ -18,13 +21,14 @@ export function originalRecordingContext({ project, submissions = [], assets = [
       for (const stemId of take.stemAssetIds?.length ? take.stemAssetIds : [take.stemAssetId]) {
         const asset = available.get(id(stemId));
         if (!asset || asset.kind !== 'take_stem' || asset.finalEligible === false) continue;
+        replacedRoles.add(roleKey(submission.roleName));
         const previous = layers.get(id(stemId));
         if (previous && !previous.playbackRanges) continue;
         layers.set(id(stemId), { ...asset, label: submission.roleName, ...(!whole ? { playbackRanges: [...(previous?.playbackRanges || []), ...ranges] } : {}) });
       }
     }
   }
-  const references = [...layers.values()];
+  const references = [...layers.values()].filter(asset => asset.kind !== 'temporary_stem' || !replacedRoles.has(roleKey(asset.replacementRoleName)));
   if (!references.length) {
     const guides = [...available.values()].filter(asset => asset.kind === 'guide_track' && asset.mimeType?.startsWith('audio/'));
     const demos = [...available.values()].filter(asset => asset.kind === 'demo' && asset.mimeType?.startsWith('audio/'));
@@ -40,7 +44,7 @@ export async function loadOriginalRecordingContext({ projectId, excludeId, sessi
   const project = await read(Project.findById(projectId), session);
   if (!project) throw Object.assign(new Error('Project not found'), { status: 404 });
   const submissions = await read(Submission.find({ projectId, state: 'accepted' }).select('state category roleName takes selectionMode selectedTakeId selectedRanges'), session);
-  const assets = await read(Asset.find({ projectId, state: 'active', kind: { $in: ['initial_stem', 'take_stem', 'guide_track', 'demo', 'click_track'] } }).select('kind originalName mimeType state finalEligible createdAt'), session);
+  const assets = await read(Asset.find({ projectId, state: 'active', kind: { $in: ['initial_stem', 'temporary_stem', 'take_stem', 'guide_track', 'demo', 'click_track'] } }).select('kind originalName mimeType state finalEligible replacementRoleName createdAt'), session);
   return originalRecordingContext({ project, submissions, assets, excludeId });
 }
 export async function requireOriginalStemReviews({ assets, musicianId }) {

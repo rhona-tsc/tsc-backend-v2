@@ -20,7 +20,7 @@ const owner = '111111111111111111111111', player = '222222222222222222222222';
 const projectId = '333333333333333333333333', assetId = '444444444444444444444444', reservationId = '555555555555555555555555';
 const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
 const project = () => ({ _id: projectId, ownerId: owner, requestedRoles: [], initialAssetIds: { addToSet() {} }, save: async () => {} });
-const request = (kind, declaration) => ({ params: { id: projectId }, user: { id: ['take_stem', 'take_mixdown'].includes(kind) ? player : owner }, body: { kind, ...(['take_stem', 'take_mixdown'].includes(kind) ? { reservationId } : {}), ...(declaration === undefined ? {} : { createdEntirelyWithAi: declaration }) }, file: { originalname: 'Stem.wav', mimetype: 'audio/wav', size: 4, buffer: Buffer.from('stem') } });
+const request = (kind, declaration) => ({ params: { id: projectId }, user: { id: ['take_stem', 'take_mixdown'].includes(kind) ? player : owner }, body: { kind, ...(kind === 'initial_stem' ? { finalStemConfirmed: 'true' } : {}), ...(['take_stem', 'take_mixdown'].includes(kind) ? { reservationId } : {}), ...(declaration === undefined ? {} : { createdEntirelyWithAi: declaration }) }, file: { originalname: 'Stem.wav', mimetype: 'audio/wav', size: 4, buffer: Buffer.from('stem') } });
 
 function setupUpload(t) {
   t.mock.method(Project, 'findById', async () => project());
@@ -105,4 +105,40 @@ test('workspace includes saved AI metadata in owner review without exposing othe
   assert.equal(ownerRes.body.assets[1].createdEntirelyWithAi, undefined);
   const playerRes = response(); await getOriginalProjectWorkspace({ params: { id: projectId }, user: { id: player } }, playerRes);
   assert.equal(playerRes.body.assets.length, 1); assert.equal(playerRes.body.assets[0].createdEntirelyWithAi, true);
+});
+
+
+test('a starting stem needs explicit final-production confirmation before any upload', async t => {
+  const { uploads, saves } = setupUpload(t);
+  const req = request('initial_stem', false); delete req.body.finalStemConfirmed;
+  const res = response(); await uploadOriginalAsset(req, res);
+  assert.equal(res.code, 400); assert.match(res.body.message, /reference-only/);
+  assert.equal(uploads.mock.callCount(), 0); assert.equal(saves.mock.callCount(), 0);
+});
+
+test('ideas and voice notes stay ineligible for the final production', async t => {
+  const { saves } = setupUpload(t);
+  for (const kind of ['demo', 'guide_track', 'voice_note']) {
+    const res = response(); await uploadOriginalAsset(request(kind), res);
+    assert.equal(res.code, 201); assert.equal(saves.mock.calls.at(-1).arguments[0].finalEligible, false);
+  }
+});
+
+
+test('uploading someone’s reference does not automatically claim its songwriting for the project owner', async t => {
+ setupUpload(t); const savedProject=project(); savedProject.ownerSongwritingClaim=false;
+ t.mock.method(Project,'findById',async()=>savedProject);
+ const req=request('guide_track'); req.body.songwritingClaim='false';
+ const res=response(); await uploadOriginalAsset(req,res);
+ assert.equal(res.code,201); assert.equal(savedProject.ownerSongwritingClaim,false);
+});
+
+test('adding guide and video references after production stems does not change the project back to a reference-only start', async t => {
+ setupUpload(t); const savedProject=project();
+ t.mock.method(Project,'findById',async()=>savedProject);
+ for (const kind of ['initial_stem','guide_track','video_submission','click_track']) {
+  const req=request(kind); if(kind==='video_submission')req.file.mimetype='video/mp4';
+  const res=response(); await uploadOriginalAsset(req,res); assert.equal(res.code,201);
+  assert.equal(savedProject.sourceType,'final_eligible_stem'); assert.equal(savedProject.hasInitialStem,true);
+ }
 });

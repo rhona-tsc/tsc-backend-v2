@@ -1,4 +1,5 @@
 import { orderedOriginalRoles } from '../services/originalsRecordingPlanService.js';
+import { beginOriginalDraftEdit, saveOriginalDraftEdit } from '../services/originalsProjectDraftService.js';
 import { getOriginalOwnerAgreement, originalOwnerAgreementAcceptance } from "../services/originalsAgreementService.js";
 import { originalRoleProgress } from "../services/originalsRoleProgressService.js";
 import { loadOriginalMembership, originalParticipation } from "../services/originalsMembershipService.js";
@@ -17,6 +18,7 @@ import {
   validateOriginalProjectForModeration,
 } from "../services/originalsPolicyService.js";
 import { sendOriginalProjectApprovedNotifications } from "../services/originalsNotificationService.js";
+import { originalPreferredPlaces, validateOriginalPreferredMusicians, saveOriginalPreferredPlaces } from '../services/originalsPreferredPlacesService.js';
 
 import { queueOriginalProjectModerationEmail, queueOriginalProjectLaunchEmails } from "../services/originalsProjectEmailService.js";
 
@@ -108,13 +110,25 @@ export const createOriginalProject = async (req, res) => {
 
     const ownerAgreement = originalOwnerAgreementAcceptance(req.body);
     if (ownerAgreement.accepted) ownerAgreement.projectTitle = fields.title;
-    const project = await originalProjectModel.create({
+    const places = originalPreferredPlaces(req.body.preferredMusicians, fields.requestedRoles, fields.sourceType);
+    await validateOriginalPreferredMusicians(places, req.user);
+    const projectData = {
       ...fields,
       ownerId,
       ownerName: [musician.firstName, musician.lastName].filter(Boolean).join(" ").trim(),
       ownerEmail: cleanEmail(musician.email),
       ownerAgreement,
-    });
+    };
+    let project;
+    if (places.length) {
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          [project] = await originalProjectModel.create([projectData], { session });
+          await saveOriginalPreferredPlaces({ projectId: project._id, places, session });
+        });
+      } finally { await session.endSession(); }
+    } else project = await originalProjectModel.create(projectData);
 
     await recordEvent({
       projectId: project._id,
@@ -165,6 +179,20 @@ export const updateOriginalProject = async (req, res) => {
     console.error("❌ updateOriginalProject error:", error);
     return res.status(500).json({ success: false, message: "Failed to update Originals project" });
   }
+};
+
+export const editOriginalProjectSubmission = async (req, res) => {
+  try {
+    const result = await beginOriginalDraftEdit({ projectId: req.params.id, musicianId: getOriginalsUserId(req.user) });
+    return res.json({ success: true, ...result });
+  } catch (error) { return res.status(error.status || 500).json({ success: false, message: error.status ? error.message : 'Could not open the project for editing.' }); }
+};
+
+export const saveOriginalProjectSubmission = async (req, res) => {
+  try {
+    const result = await saveOriginalDraftEdit({ projectId: req.params.id, musicianId: getOriginalsUserId(req.user), user: req.user, fields: buildProjectFields(req.body, { partial: true }), input: req.body });
+    return res.json({ success: true, ...result });
+  } catch (error) { return res.status(error.status || (error.name === 'ValidationError' ? 400 : 500)).json({ success: false, message: error.status || error.name === 'ValidationError' ? error.message : 'Could not save the project changes.', code: error.code }); }
 };
 
 export const submitOriginalProjectForModeration = async (req, res) => {

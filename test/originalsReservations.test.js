@@ -23,6 +23,7 @@ const agreementInput={accepted:true,fullName:'Test Musician',version:terms.versi
 let acceptances;
 test.beforeEach(t=>{
  acceptances=new Map();
+ t.mock.method(Future,'find',()=>({sort:()=>({lean:async()=>[]}),select:()=>({lean:async()=>[]})}));
  t.mock.method(Acceptance,'create',async data=>{const row={_id:`agreement-${acceptances.size+1}`,...data};acceptances.set(row._id,row);return row;});
  t.mock.method(Acceptance,'findById',id=>({lean:async()=>acceptances.get(String(id))||null}));
  t.mock.method(Notification,'updateOne',async()=>({}));
@@ -96,7 +97,8 @@ test('opening a role activates its future place once, starts a real 24-hour cloc
  await activateOriginalRoleReservations({project,round,now});assert.equal(rows.length,1);assert.equal(rows[0].futureReservationId,'future');assert.equal(rows[0].anonymous,true);assert.equal(rows[0].creditName,'Stage Name');assert.equal(saved.activeReservationId,rows[0]._id);
  const recovered=await createOriginalRecordingReservation({round,musicianId:player,roleName:'Bass',futureReservationId:'future',now:new Date(+now+1000)});assert.equal(rows.length,1);assert.equal(recovered.reservation.reservedAt,now);
 });
-test('only the musician can release their waiting or unsubmitted reservation',async t=>{
+test('musicians can release their own waiting or unsubmitted reservation',async t=>{
+ t.mock.method(Future,'findOne',()=>({lean:async()=>({_id:'future',musicianId:player})}));
  t.mock.method(Future,'findOneAndUpdate',query=>({lean:async()=>{assert.equal(query.musicianId,player);assert.equal(query.state,'waiting');return{_id:'future',state:'released'};}}));
  const waiting=response();await releaseFutureOriginalRole({params:{id:projectId,futureId:'future'},user:{id:player}},waiting);assert.equal(waiting.code,200);
  t.mock.method(Reservation,'findOneAndUpdate',query=>({lean:async()=>{assert.equal(query.musicianId,player);assert.equal(query.state,'active');return null;}}));

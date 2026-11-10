@@ -8,7 +8,7 @@ const originalAssetSchema = new mongoose.Schema(
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: "musician", required: true, index: true },
     kind: {
       type: String,
-      enum: ["initial_stem", "guide_track", "demo", "voice_note", "video_submission", "click_track", "take_stem", "take_mixdown", "mix", "master", "chat_attachment"],
+      enum: ["initial_stem", "temporary_stem", "guide_track", "demo", "voice_note", "video_submission", "click_track", "take_stem", "take_mixdown", "mix", "master", "chat_attachment"],
       required: true,
     },
     originalName: { type: String, required: true, trim: true },
@@ -19,6 +19,7 @@ const originalAssetSchema = new mongoose.Schema(
     cloudinaryFormat: { type: String, default: "", trim: true },
     deliveryType: { type: String, default: "authenticated" },
     finalEligible: { type: Boolean, default: true },
+    replacementRoleName: { type: String, trim: true, maxlength: 80, default: '', required: function () { return this.kind === 'temporary_stem'; } },
     // Uploader declaration only; null means it was not recorded for this file.
     createdEntirelyWithAi: { type: Boolean, default: null },
     alignmentReviewRequired: { type: Boolean, default: false },

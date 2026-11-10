@@ -1,3 +1,5 @@
+import Future from '../models/originalRoleReservationModel.js';
+import { requireOriginalTemporaryReplacements } from './originalsTemporaryStemService.js';
 import mongoose from 'mongoose';
 import Project from '../models/originalProjectModel.js';
 import Round from '../models/originalRoundModel.js';
@@ -28,6 +30,7 @@ export async function advanceOriginalRound({ projectId, fromRoundId, type, roleN
       if (!previous || !['open', 'reopened', 'review', 'closed'].includes(previous.state)) throw conflict('The current round is unavailable');
       const accepted = await Submission.find({ projectId: project._id, roundId: previous._id, state: 'accepted' }).session(session).lean();
       if (!accepted.length) throw conflict('Approve a submission in the current round before opening the next one');
+      if (['mix', 'master'].includes(type)) await requireOriginalTemporaryReplacements({ projectId: project._id, session });
       let nextRole;
       if (type === 'instrument') {
         nextRole = project.requestedRoles.find(role => key(role.name) === key(roleName))?.name;
@@ -54,6 +57,8 @@ export async function advanceOriginalRound({ projectId, fromRoundId, type, roleN
       const unusedAssets = pending.flatMap(item => item.outputAssetId ? [item.outputAssetId] : originalTakeAssetIds(item.takes || []));
       if (unusedAssets.length) await Asset.updateMany({ _id: { $in: unusedAssets } }, { $set: { state: 'hidden' } }, { session });
       await Invitation.updateMany({ roundId: previous._id, state: { $in: ['pending', 'accepted'] } }, { $set: { state: 'cancelled' } }, { session });
+      const completedRoles = accepted.filter(item => item.category === 'contribution').map(item => key(item.roleName));
+      if (completedRoles.length) await Future.updateMany({ projectId: project._id, state: 'waiting', roleKey: { $in: completedRoles } }, { $set: { state: 'cancelled' } }, { session });
       project.currentRoundId = round._id;
       project.state = { instrument: 'role_round_open', mix: 'mix_open', master: 'master_open' }[type];
       await project.save({ session });

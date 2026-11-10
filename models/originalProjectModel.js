@@ -60,7 +60,7 @@ const originalProjectSchema = new mongoose.Schema(
     hasInitialStem: { type: Boolean, default: false },
     sourceType: {
       type: String,
-      enum: ["none", "final_eligible_stem", "guide_track", "video_demo"],
+      enum: ["none", "final_eligible_stem", "temporary_stem", "guide_track", "video_demo"],
       default: "none",
     },
     ownerSongwritingClaim: { type: Boolean, default: false },

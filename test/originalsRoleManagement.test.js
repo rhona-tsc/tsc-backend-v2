@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Project from '../models/originalProjectModel.js';
+import Asset from '../models/originalAssetModel.js';
 import Round from '../models/originalRoundModel.js';
 import Reservation from '../models/originalReservationModel.js';
 import Submission from '../models/originalSubmissionModel.js';
@@ -17,6 +18,7 @@ const now=new Date('2026-11-04T22:00:00Z');
 const base=()=>({ project:{_id:projectId,ownerId:owner,__v:2,state:'foundation_open',currentRoundId:'round',requestedRoles:[{name:'Vocal',order:0,foundationEligible:true},{name:'Bass',order:1,foundationEligible:false}]}, rounds:[{_id:'round',type:'foundation',eligibleRoles:['Vocal'],state:'open'}], reservations:[], submissions:[], invitations:[],futureReservations:[], assets:[],notifications:[],creditVersions:[],issues:[],messages:[] });
 const response=()=>({code:200,status(code){this.code=code;return this;},json(body){this.body=body;return this;}});
 function setup(t,snapshot=base()) {
+ t.mock.method(Asset,'exists',async query=>snapshot.assets.some(asset=>asset.kind==='temporary_stem'&&asset.state==='active'&&asset.replacementRoleName===query.replacementRoleName));
  const writes=[],events=[];
  t.mock.method(Project,'findById',()=>({lean:async()=>snapshot.project}));
  for(const [Model,key]of[[Round,'rounds'],[Reservation,'reservations'],[Submission,'submissions'],[Invitation,'invitations'],[Future,'futureReservations']]) t.mock.method(Model,'find',()=>({select:()=>({lean:async()=>snapshot[key]})}));

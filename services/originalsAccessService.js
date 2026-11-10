@@ -16,12 +16,12 @@ export async function requireOriginalProjectManager(req, res, projectId) {
   return project;
 }
 
-export const originalReferenceKinds = new Set(['initial_stem', 'guide_track', 'demo', 'video_submission', 'click_track']);
+export const originalReferenceKinds = new Set(['initial_stem', 'temporary_stem', 'guide_track', 'demo', 'voice_note', 'video_submission', 'click_track']);
 
 export function presentOriginalWorkspace({ project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages, futureReservations = [] }, user) {
   const viewerId = getOriginalsUserId(user);
   const canManage = canManageOriginalProject(project, user);
-  const roleManagement = canManage ? originalRoleManagement({ project, rounds, reservations, submissions, futureReservations, invitations }) : null;
+  const roleManagement = canManage ? originalRoleManagement({ project, rounds, reservations, submissions, futureReservations, invitations, assets }) : null;
   const chatAssetIds = sharedChatAssetIds(messages);
   const acceptedAssetIds = new Set(submissions.filter(item => item.state === 'accepted').flatMap(item => [String(item.outputAssetId || ''), ...originalTakeAssetIds(item.takes || []).map(String)]));
   const visibleSubmissions = canManage ? submissions : submissions.filter(item => String(item.musicianId) === viewerId || item.state === 'accepted');
