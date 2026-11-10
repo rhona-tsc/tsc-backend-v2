@@ -1,12 +1,4 @@
-import nodemailer from "nodemailer";
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+import sendEmail from "./sendEmail.js";
 
 // Prefer env, fall back to your admin host. MUST include protocol.
 const ADMIN_ORIGIN = (process.env.ADMIN_ORIGIN || "https://admin.thesupremecollective.co.uk")
@@ -34,6 +26,30 @@ const safeHref = (href) => {
   if (!h) return "";
   if (/^https?:\/\//i.test(h)) return h;
   return `https://${h.replace(/^\/\/+/, "")}`;
+};
+
+const deliverActEmail = async ({ to, subject, text, html }) => {
+  const result = await sendEmail({
+    to,
+    subject,
+    text,
+    html,
+    // Use the same SMTP_* configuration and sender defaults as Originals.
+    // ACT_SUBMISSIONS_FROM remains available if a verified submissions alias
+    // is added later, without requiring a second set of mail credentials.
+    from: String(process.env.ACT_SUBMISSIONS_FROM || "").trim() || undefined,
+    replyTo: String(
+      process.env.ACT_SUBMISSIONS_REPLY_TO ||
+      process.env.SMTP_REPLY_TO ||
+      "hello@thesupremecollective.co.uk"
+    ).trim(),
+  });
+
+  if (!result?.ok) {
+    throw new Error(result?.error || result?.reason || "Email delivery failed");
+  }
+
+  return result;
 };
 
 export const buildActSubmissionLink = (code) => {
@@ -108,8 +124,7 @@ const buildApprovalHtml = ({ name, actName, link, corrected = false }) => {
 export const sendActApprovalEmail = async (email, name, actName, code) => {
   const link = buildActSubmissionLink(code);
 
-  await transporter.sendMail({
-    from: '"Submissions" <submissions@thesupremecollective.co.uk>',
+  await deliverActEmail({
     to: email,
     subject: "You're Approved 🎉",
     text: `Hi ${name || "there"},\n\nWe’re delighted to approve ${actName || "your act"} for the next stage. Complete the full act listing here:\n${link}\n\nBest wishes,\nThe Supreme Collective`,
@@ -123,8 +138,7 @@ export const sendActApprovalEmail = async (email, name, actName, code) => {
 export const sendActApprovalEmailResend = async (email, name, actName, code) => {
   const link = buildActSubmissionLink(code);
 
-  await transporter.sendMail({
-    from: '"Submissions" <submissions@thesupremecollective.co.uk>',
+  await deliverActEmail({
     to: email,
     subject: "Quick update — your correct Act Submission link ✅",
     text: `Hi ${name || "there"},\n\nHere is a fresh secure link to complete the full listing for ${actName || "your act"}:\n${link}\n\nBest wishes,\nThe Supreme Collective`,
@@ -166,8 +180,7 @@ export const sendActRejectionEmail = async (email, name) => {
     </div>
   `;
 
-  await transporter.sendMail({
-    from: '"Submissions" <submissions@thesupremecollective.co.uk>',
+  await deliverActEmail({
     to: email,
     subject: "Your Act Submission",
     html,
