@@ -11,7 +11,7 @@ export function voiceConnectionConfig(env = process.env) {
   const config = {
     enabled: env.VOICE_ENQUIRY_ENABLED === 'true', base,
     twilioNumber: normalizeCallbackPhone(env.VOICE_ENQUIRY_TWILIO_NUMBER),
-    apiKey: env.OPENAI_API_KEY || '', webhookSecret: env.OPENAI_VOICE_WEBHOOK_SECRET || '',
+    apiKey: env.OPENAI_VOICE_API_KEY || '', webhookSecret: env.OPENAI_VOICE_WEBHOOK_SECRET || '',
     twilioToken: env.TWILIO_AUTH_TOKEN || '', bridgeSecret: env.VOICE_ENQUIRY_BRIDGE_SECRET || '',
     projectId: /^proj_[A-Za-z0-9_-]+$/.test(env.VOICE_ENQUIRY_PROJECT_ID || '') ? env.VOICE_ENQUIRY_PROJECT_ID : '',
     testCallers: split(env.VOICE_ENQUIRY_TEST_CALLERS),

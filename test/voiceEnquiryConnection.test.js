@@ -17,8 +17,11 @@ test('voice bridge requires signed, short-lived binding to the selected incoming
 test('feature defaults off and cannot be ready without test caller allowlist and credentials', () => {
   assert.equal(voiceConnectionConfig({}).enabled, false);
   assert.equal(voiceConnectionConfig({ VOICE_ENQUIRY_ENABLED: 'true' }).ready, false);
-  const config = voiceConnectionConfig({ VOICE_ENQUIRY_ENABLED: 'true', VOICE_ENQUIRY_PUBLIC_BASE_URL: 'https://example.com', VOICE_ENQUIRY_TWILIO_NUMBER: '+442079460123', OPENAI_API_KEY: 'test', OPENAI_VOICE_WEBHOOK_SECRET: 'test', TWILIO_AUTH_TOKEN: 'test', VOICE_ENQUIRY_BRIDGE_SECRET: secret, VOICE_ENQUIRY_PROJECT_ID: 'proj_test', VOICE_ENQUIRY_TEST_CALLERS: '07700 900123', VOICE_ENQUIRY_HUMAN_NUMBER: '07594 223200' });
+  const env = { VOICE_ENQUIRY_ENABLED: 'true', VOICE_ENQUIRY_PUBLIC_BASE_URL: 'https://example.com', VOICE_ENQUIRY_TWILIO_NUMBER: '+442079460123', OPENAI_VOICE_API_KEY: 'voice-test', OPENAI_API_KEY: 'unrelated-website-key', OPENAI_VOICE_WEBHOOK_SECRET: 'test', TWILIO_AUTH_TOKEN: 'test', VOICE_ENQUIRY_BRIDGE_SECRET: secret, VOICE_ENQUIRY_PROJECT_ID: 'proj_test', VOICE_ENQUIRY_TEST_CALLERS: '07700 900123', VOICE_ENQUIRY_HUMAN_NUMBER: '07594 223200' };
+  const config = voiceConnectionConfig(env);
   assert.equal(config.ready, true);
+  assert.equal(config.apiKey, 'voice-test');
+  assert.equal(voiceConnectionConfig({ ...env, OPENAI_VOICE_API_KEY: '' }).ready, false);
   assert.deepEqual(config.testCallers, ['+447700900123']);
   assert.equal(config.humanNumber, ''); // Do not create a loop back to the AI number.
   assert.equal(VOICE_MAX_SECONDS, 360);

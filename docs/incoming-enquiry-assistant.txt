@@ -3,7 +3,7 @@ Prepared 10 November 2026. Business number: 07594 223200.
 
 STATUS
 Code is prepared in a separate branch. It is NOT deployed or active. No phone settings were changed, no number purchased, no paid API requests made, and no real calls or customer records created by the tests.
-The selected mobile number was not found among IncomingPhoneNumbers in the existing Twilio account. Its current carrier and forwarding options still need confirming. Existing Twilio WhatsApp/SMS and emergency IVR are untouched.
+The mobile is on giffgaff. Virtual Landline 020 3576 5322 currently forwards to 07594 223200. Neither public number is registered in the connected Twilio account. An existing voice-capable UK Twilio number, 07453 423200, has a demo voice greeting and is a candidate test ingress; its messaging settings must remain untouched. Official giffgaff guidance now supports forwarding, and Virtual Landline permits updating its redirect destination through its portal. Existing plan-specific forwarding charges still need checking. Existing Twilio WhatsApp/SMS and emergency IVR are untouched.
 
 CALL EXPERIENCE
 Opening: Hello, you've reached The Supreme Collective. I'm the AI enquiry assistant. I can help with bands and take your details for Rhona. Is that okay?
@@ -17,7 +17,7 @@ Confirmed enquiries and partial callback requests upsert one EnquiryBoardItem pe
 Published band lookup selects only public descriptive fields from approved/live acts. It does not expose musician contacts, customer records, availability or prices.
 
 CONNECTION NEEDED BEFORE A REAL TEST
-1. Confirm the current mobile provider and whether it supports the desired forwarding. Do not replace its routing yet. Identify a dedicated voice-capable Twilio ingress number and agree its costs. VOICE_ENQUIRY_TWILIO_NUMBER is that ingress number, not necessarily 07594 223200.
+1. Test directly on existing Twilio 07453 423200, after configuration and approval of test usage. No new number purchase is required for that candidate. Retain both public numbers. After a successful test, Virtual Landline can point 020 3576 5322 directly to the AI ingress. Direct calls to 07594 223200 can be forwarded from giffgaff separately. Avoid a loop through either public number when setting human escalation. Do not change live forwarding yet. Confirm plan-specific forwarding charges and agree the test allowance. VOICE_ENQUIRY_TWILIO_NUMBER is that ingress number, not necessarily 07594 223200.
 2. Configure the chosen OpenAI project for realtime.call.incoming at the signed raw-body webhook endpoint below. Add its API key, project ID and webhook signing secret to the server environment through secure account settings; never paste keys into chat or commit them.
 3. Generate a random bridge secret of at least 32 characters. Configure an approved TEST caller phone number. Do not use the public number itself as the test caller if it is forwarded.
 4. Deploy to a test/staging backend first. Configure only the dedicated Twilio test ingress number with its voice POST webhook. Test by calling the ingress directly. Do not forward the public mobile line until Rhona has reviewed an actual call and agreed the ongoing spending limit.
@@ -31,7 +31,7 @@ VOICE_ENQUIRY_TEST_CALLERS=comma-separated approved test callers in +44 format.
 VOICE_ENQUIRY_PROJECT_ID=the OpenAI project starting proj_.
 VOICE_ENQUIRY_BRIDGE_SECRET=random secret at least 32 characters.
 OPENAI_VOICE_WEBHOOK_SECRET=the incoming-call webhook signing secret.
-OPENAI_API_KEY=server-side key for that project.
+OPENAI_VOICE_API_KEY=separate server-side key for the voice project. Do not replace the website's existing OPENAI_API_KEY. The voice feature does not fall back to that key.
 TWILIO_AUTH_TOKEN=existing Twilio account token for webhook signature checks.
 OPENAI_VOICE_MODEL defaults to gpt-realtime-2.1-mini; verify project access before the real test.
 VOICE_ENQUIRY_HUMAN_NUMBER=optional approved destination, different from the forwarded public mobile.
@@ -58,3 +58,12 @@ https://developers.openai.com/api/docs/guides/voice-server-controls?api=realtime
 https://www.twilio.com/docs/voice/twiml/sip
 https://www.twilio.com/docs/voice/twiml/dial
 https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource
+
+ACCOUNT PREPARATION UPDATE
+A separate OpenAI project, Enquiry Calls - Test, was created under The Supreme Collective organisation on 10 November 2026. No API key or service account has been created for it, no voice webhook has been activated, and no paid model requests have been made. Creating the backend service credential requires action-time approval because it grants the backend new access to this voice project.
+Project ID: proj_3rYgedW15bMlUuoTLaRh92vh. A $10 monthly project spending limit was saved with enforcement ON and then verified in the editor. The provider warns enforcement is not instantaneous, so final usage can exceed it slightly. This controls OpenAI usage only; it does not include Twilio or forwarding charges. No test-usage allowance has yet been approved.
+The API-key form is prepared for Realtime requests only, with a seven-day expiry; no key has been created. This is a temporary test credential, not a production access arrangement.
+
+FORWARDING SOURCES
+https://help.giffgaff.com/en/articles/240687-how-to-manage-call-forwarding-on-your-phone
+https://www.virtuallandline.co.uk/how-does-it-work/faqs

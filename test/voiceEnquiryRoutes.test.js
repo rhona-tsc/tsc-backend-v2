@@ -8,7 +8,7 @@ test('test-only voice ingress enforces feature flag, signatures, number and call
   const settings = {
     VOICE_ENQUIRY_ENABLED: 'true', VOICE_ENQUIRY_PUBLIC_BASE_URL: 'https://example.com',
     VOICE_ENQUIRY_TWILIO_NUMBER: '+442079460123',
-    OPENAI_API_KEY: 'test-key-never-used', OPENAI_VOICE_WEBHOOK_SECRET: 'test-secret-never-used',
+    OPENAI_VOICE_API_KEY: 'test-key-never-used', OPENAI_VOICE_WEBHOOK_SECRET: 'test-secret-never-used',
     TWILIO_AUTH_TOKEN: 'test-token', VOICE_ENQUIRY_BRIDGE_SECRET: 'test-only-secret-at-least-32-characters',
     VOICE_ENQUIRY_PROJECT_ID: 'proj_example', VOICE_ENQUIRY_TEST_CALLERS: '+447700900123',
   };
