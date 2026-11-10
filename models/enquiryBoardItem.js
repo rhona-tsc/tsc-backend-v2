@@ -5,6 +5,8 @@ const EnquiryBoardItemSchema = new mongoose.Schema(
   {
     // Identifiers / reference
     enquiryRef: { type: String, index: true },
+    websiteKey: { type: String, unique: true, sparse: true },
+    measurementId: { type: String },
     enquiryId: { type: mongoose.Types.ObjectId, ref: "Enquiry" },
 
     // ✅ Add these so we can trigger availability properly

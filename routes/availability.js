@@ -1,3 +1,5 @@
+import { loadVocalistChoices } from "../services/vocalistChoiceService.js";
+import { recordWebsiteEnquiry } from "../services/websiteEnquiryService.js";
 // ✅ routes/availability.js
 import express from "express";
 import AvailabilityModel from "../models/availabilityModel.js";
@@ -18,6 +20,16 @@ import { getAvailabilityBadge } from "../controllers/availabilityController.js";
 import User from "../models/userModel.js";
 
 const router = express.Router();
+router.get("/vocalist-choices", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    const { actId, lineupId, dateISO, address } = req.query;
+    if (!actId || !lineupId || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateISO)) || !String(address || "").trim())
+      return res.status(400).json({ success: false, message: "Please select your band, lineup, date and venue." });
+    const summary = await loadVocalistChoices({ actId, lineupId, dateISO, address });
+    return res.json({ success: true, complete: summary.complete, allRegularUnavailable: summary.allRegularUnavailable, roles: summary.roles });
+  } catch (err) { return res.status(400).json({ success: false, message: err.message }); }
+});
 
 
 // ---------------------- helpers for availability routes ----------------------
@@ -357,6 +369,8 @@ router.post("/request", async (req, res) => {
         .json({ success: false, message: "Missing actId/dateISO" });
     }
 
+    const enquiry = await recordWebsiteEnquiry(payload);
+    if (enquiry) payload.enquiryId = enquiry.enquiryRef;
     const result = await triggerAvailabilityRequest(payload);
 
     if (!result?.success) {
@@ -377,7 +391,7 @@ router.post("/request", async (req, res) => {
       }
     }
 
-    return res.json({ success: true, result });
+    return res.json({ success: true, result, measurement: enquiry?.measurement || null });
   } catch (err) {
     console.error("❌ (availability.js) /request error:", err);
     return res.status(500).json({ success: false, message: err.message });

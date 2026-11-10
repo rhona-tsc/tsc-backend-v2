@@ -1,3 +1,4 @@
+import { verifiedInitialPayment } from "../utils/bookingMeasurement.js";
 import { isBalanceCheckout, fulfilBalanceCheckout } from "../services/bookingBalancePaymentService.js";
 // routes/payments.js
 import express from "express";
@@ -92,6 +93,10 @@ router.post(
           });
           return res.json({ received: true });
         }
+
+        // Async/unpaid sessions and add-on payments must never confirm a booking.
+        const booking = await Booking.findOne(filter).lean();
+        if (!verifiedInitialPayment(session, booking)) return res.json({ received: true });
 
         // Fetch PI to grab latest_charge (chargeId)
         let chargeId = null;

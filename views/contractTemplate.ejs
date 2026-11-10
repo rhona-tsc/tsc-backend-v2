@@ -267,7 +267,12 @@
                 <%= description %>
               </div>
 
-              <% if (sv && hasVocalists) { %>
+              <% if (Array.isArray(it.chosenVocalists) && it.chosenVocalists.length) { %>
+                <div style="margin-top:4px; font-size:13px; color:#444;">
+                  Vocalists selected:
+                  <%= it.chosenVocalists.map(v => [v.name || v.vocalistName || "Vocalist", v.role].filter(Boolean).join(" — ")).join("; ") %>
+                </div>
+              <% } else if (sv && hasVocalists) { %>
                 <div style="margin-top:4px; font-size:13px; color:#444;">
                   Vocalist selected: <%= sv.firstName %> <%= sv.lastNameInitial %>.
                 </div>

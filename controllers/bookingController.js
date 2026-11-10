@@ -1,3 +1,5 @@
+import { loadVocalistChoices, validateVocalistSelection } from "../services/vocalistChoiceService.js";
+import { verifiedInitialPayment, paidBookingMeasurement } from "../utils/bookingMeasurement.js";
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 import mongoose from "mongoose";
 // controllers/bookingController.js
@@ -1009,6 +1011,10 @@ export const createCheckoutSession = async (req, res) => {
       pricesIncludeMargin,
     } = req.body;
 
+    if (!Array.isArray(actsSummary) || !actsSummary.length) {
+      return res.status(400).json({ error: "Your band lineup is missing. Please return to your cart." });
+    }
+
     const authUserId = req.user?._id || req.user?.id || null;
     const userId = bodyUserId || authUserId || null;
     const userEmail = customer?.email || req.user?.email || null;
@@ -1236,6 +1242,17 @@ export const createCheckoutSession = async (req, res) => {
           unit_amount: Math.round(passThroughGrossThisPayment * 100),
         },
       });
+    }
+
+    for (const item of (Array.isArray(actsSummary) ? actsSummary : [])) {
+      const summary = await loadVocalistChoices({ actId: item.actId, lineupId: item.lineupId,
+        dateISO: String(date || "").slice(0, 10), address: venueAddress || venue });
+      const chosen = validateVocalistSelection(summary, item.chosenVocalists || []);
+      if (!chosen) return res.status(409).json({ error: "Please return to your cart and choose one confirmed available vocalist for each vocal role." });
+      item.chosenVocalists = chosen.map(row => ({ musicianId: row.musicianId,
+        name: row.displayName, vocalistName: row.displayName, slotIndex: row.slotIndex,
+        role: summary.slotContacts.get(row.slotIndex)?.instrument || "Vocalist", isDeputy: row.isDeputy,
+        profileUrl: row.profileUrl }));
     }
 
     const session = await stripeInstance.checkout.sessions.create({
@@ -3494,6 +3511,12 @@ export const completeBookingV2 = async (req, res) => {
     if (!booking)
       throw new Error(`Booking not found for bookingId ${bookingRef}`);
 
+    // A success URL is not proof of payment. Verify before any confirmation,
+    // calendar invitations, allocation requests or client communications.
+    if (!verifiedInitialPayment(session, booking)) {
+      return res.status(409).json({ success: false, message: "Payment has not been verified for this booking." });
+    }
+
     // Patch booking
     booking.act = booking.act || booking?.actsSummary?.[0]?.actId || null;
     booking.lineupId =
@@ -3826,4 +3849,24 @@ export {
   upsertBoardRowFromBooking,
   upsertEnquiryRowFromShortlist,
   computePerMemberFee,
+};
+
+export const getBookingMeasurement = async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const sessionId = String(req.query.session_id || "");
+  if (!/^cs_(test|live)_[a-zA-Z0-9]+$/.test(sessionId)) {
+    return res.status(400).json({ success: false, message: "Invalid checkout reference." });
+  }
+  try {
+    const session = await stripeInstance.checkout.sessions.retrieve(sessionId);
+    const booking = await Booking.findOne({ sessionId }).lean();
+    if (!verifiedInitialPayment(session, booking)) {
+      return res.status(409).json({ success: false, message: "Your payment is still being checked. Please try again shortly." });
+    }
+    return res.json({ success: true, verified: true, bookingRef: booking.bookingId,
+      eventDate: booking.eventDateISO || booking.date || null,
+      measurement: paidBookingMeasurement(session, booking) });
+  } catch (err) {
+    return res.status(502).json({ success: false, message: "We couldn't verify your payment yet. Please try again." });
+  }
 };

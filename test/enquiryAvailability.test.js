@@ -110,7 +110,7 @@ test("a two-vocalist lineup is held until both slots have a yes", () => {
   assert.equal(bothCovered.selected.length, 2);
 });
 
-test("Day 2 email omits slot labels when exactly one vocalist is available per slot", () => {
+test("Day 2 keeps mixed usual and deputy lineups band-led", () => {
   const summary = availableVocalistsForLineup(
     [
       { slotIndex: 0, reply: "yes", musicianName: "Annie Afrilu", isDeputy: true },
@@ -129,17 +129,17 @@ test("Day 2 email omits slot labels when exactly one vocalist is available per s
     summary,
   });
 
-  assert.match(email.html, /For this Motown Luxe lineup/);
+  assert.match(email.html, /Motown Luxe is available/);
   assert.doesNotMatch(email.html, /Vocal slot 1/);
-  assert.match(email.html, /Introducing Annie A/);
+  assert.doesNotMatch(email.html, /Introducing Annie A/);
   assert.doesNotMatch(email.html, /Vocal slot 2/);
-  assert.match(email.html, /Introducing Rachel F/);
-  assert.match(email.html, /proceeding to checkout or you’re also welcome/);
+  assert.doesNotMatch(email.html, /Introducing Rachel F/);
+  assert.match(email.html, /secure the band through checkout/);
   assert.doesNotMatch(email.html, /preferred vocalist for each slot/);
   assert.doesNotMatch(email.html, /other deputy vocalists/);
 });
 
-test("Day 2 email keeps slot labels when a slot has multiple vocalist options", () => {
+test("Day 2 does not foreground deputy alternatives when a usual singer is available", () => {
   const summary = availableVocalistsForLineup(
     [
       { slotIndex: 0, reply: "yes", musicianName: "Annie Afrilu", isDeputy: true },
@@ -159,19 +159,20 @@ test("Day 2 email keeps slot labels when a slot has multiple vocalist options", 
     summary,
   });
 
-  assert.match(email.html, /Vocal slot 1/);
-  assert.match(email.html, /Vocal slot 2/);
-  assert.match(email.html, /preferred vocalist for each slot/);
+  assert.doesNotMatch(email.html, /Vocal slot 1/);
+  assert.doesNotMatch(email.html, /Vocal slot 2/);
+  assert.match(email.html, /Motown Luxe is available/);
 });
 
-test("Day 2 email includes the first vocalist and later available alternatives", () => {
+test("Day 2 deputy-only email includes every confirmed available choice and profile", () => {
   const lineup = { bandMembers: [{ instrument: "Lead Female Vocal" }] };
   const summary = availableVocalistsForLineup(
     [
+      { slotIndex: 0, reply: "unavailable", musicianName: "Usual Singer" },
       {
         slotIndex: 0,
         reply: "yes",
-        musicianName: "Mari Songs",
+        musicianName: "Mari Songs", isDeputy: true,
         repliedAt: "2026-10-23T10:00:00Z",
         profileUrl: "https://thesupremecollective.co.uk/musician/mari-s",
         photoUrl: "https://images.example.com/mari.jpg",
@@ -218,11 +219,11 @@ test("Day 2 email includes the first vocalist and later available alternatives",
   assert.match(email.html, /Introducing Shamyra A/);
   assert.match(email.html, /images\.example\.com\/rachel\.jpg/);
   assert.match(email.html, /youtu\.be\/shamyra/);
-  assert.match(email.html, /band(?:'|&#39;)s other deputy vocalists/);
+  assert.match(email.html, /trusted deputy vocalists/);
   assert.doesNotMatch(email.html, /<em>other deputy<\/em>/);
   assert.match(email.html, /selecting your preferred deputy/);
   assert.match(email.html, /simply by replying to this email/);
-  assert.match(email.text, /band's other deputy vocalists/);
+  assert.match(email.text, /trusted deputy vocalists/);
   assert.match(email.html, /TSC_Signature_2026/);
   assert.match(email.html, /google-5-star-reviews/);
   assert.match(email.html, /Company Number: 16883956/);
@@ -267,10 +268,10 @@ test("Day 4 email gives a clear availability reminder and booking action", () =>
   });
 
   assert.match(email.subject, /availability update/i);
-  assert.match(email.html, /Mari S and Rachel F/);
-  assert.match(email.html, /View Profile/);
-  assert.match(email.html, /high number of enquiries/);
-  assert.match(email.html, /booked elsewhere/);
+  assert.match(email.html, /Committed to Kisstory is available/);
+  assert.doesNotMatch(email.html, /View Profile/);
+  assert.match(email.html, /Availability can change until your booking is confirmed/);
+  assert.doesNotMatch(email.html, /Mari S and Rachel F/);
   assert.match(email.html, /avoid disappointment/);
   assert.match(email.html, /View Committed to Kisstory and book/);
   assert.match(email.html, /TSC_Signature_2026/);

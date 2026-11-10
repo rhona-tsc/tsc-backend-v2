@@ -9,6 +9,7 @@ import sendEmail from "../utils/sendEmail.js";
 import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.js";
 import {
   availableVocalistsForLineup,
+  assignDistinctVocalists,
   musicianCanFrontVocalSlot,
 } from "../utils/enquiryAvailability.js";
 import { automatedEnquiryFollowupEligible } from "../utils/enquiryAutomationEligibility.js";
@@ -117,6 +118,14 @@ const findLineup = (act, rows) => {
       String(lineup?._id || "") === String(lineupId || "") ||
       String(lineup?.lineupId || "") === String(lineupId || ""),
   );
+};
+
+const enquiryCartUrl = (enquiry, act, summary) => {
+  const lineupId = enquiry.lineupId || summary.all.find(row => row.lineupId)?.lineupId;
+  const actId = enquiry.actId || act?._id;
+  if (!actId || !lineupId) return null;
+  return `${publicSiteUrl()}/cart?payload=${encodeURIComponent(JSON.stringify({ actId: String(actId), lineupId: String(lineupId),
+    selectedDate: enquiry.eventDateISO, selectedAddress: enquiry.address || summary.all[0]?.formattedAddress || "" }))}`;
 };
 
 const vocalistProfileCardsHtml = (summary, { showSlotHeadings = true } = {}) =>
@@ -256,14 +265,10 @@ const enrichVocalistSummary = async (summary) => {
   return {
     ...summary,
     bySlot,
-    complete:
-      summary.requiredSlots.length > 0 &&
-      summary.requiredSlots.every(
-        (slotIndex) => (bySlot.get(slotIndex) || []).length > 0,
-      ),
-    selected: summary.requiredSlots
-      .map((slotIndex) => (bySlot.get(slotIndex) || [])[0])
-      .filter(Boolean),
+    complete: summary.complete && Boolean(assignDistinctVocalists(summary.requiredSlots, bySlot)),
+    readyToNotify: summary.readyToNotify && Boolean(assignDistinctVocalists(summary.requiredSlots, bySlot)) &&
+      (summary.anyRegularAvailable || summary.requiredSlots.every(slot => (bySlot.get(slot) || []).filter(row => row.isDeputy).length >= 2)),
+    selected: assignDistinctVocalists(summary.requiredSlots, bySlot) || [],
     all: summary.requiredSlots.flatMap(
       (slotIndex) => bySlot.get(slotIndex) || [],
     ),
@@ -277,7 +282,7 @@ export const buildEnquiryDayTwoEmail = ({ enquiry, act, summary }) => {
   const site = publicSiteUrl();
   const slug = clean(act?.slug || act?.tscSlug) || actName.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const address = clean(enquiry?.address || summary.all[0]?.formattedAddress);
-  const bookUrl = `${site}/act/${encodeURIComponent(slug)}?date=${encodeURIComponent(enquiry?.eventDateISO || "")}&address=${encodeURIComponent(address)}`;
+  const bookUrl = enquiryCartUrl(enquiry, act, summary) || `${site}/act/${encodeURIComponent(slug)}?date=${encodeURIComponent(enquiry?.eventDateISO || "")}&address=${encodeURIComponent(address)}`;
   const hasMultipleVocalSlots = summary.requiredSlots.length > 1;
   const hasOneVocalistPerSlot =
     hasMultipleVocalSlots &&
@@ -292,10 +297,12 @@ export const buildEnquiryDayTwoEmail = ({ enquiry, act, summary }) => {
     const label = hasMultipleVocalSlots ? `Vocal slot ${slotIndex + 1}` : "Available vocalists";
     return `${label}: ${names.join(", ")}`;
   });
-  const availabilityIntro = hasMultipleVocalSlots
-    ? `For this ${actName} lineup, the vocalists currently available to front the band are shown below:`
-    : "We have now heard back from the band's other deputy vocalists below, who are currently available for your date:";
-  const selectionGuidance = hasOneVocalistPerSlot
+  const availabilityIntro = !summary.deputyOnly
+    ? `${actName} is available for your event. We’d love to help you secure the band.`
+    : `${actName} is available for your event. The band's usual ${hasMultipleVocalSlots ? "vocalists are" : "vocalist is"} unavailable for your date, and their trusted deputy vocalists below have confirmed availability.`;
+  const selectionGuidance = !summary.deputyOnly
+    ? "You can secure the band through checkout, or reply to this email and I’ll help with your booking."
+    : hasOneVocalistPerSlot
     ? "If you would like to book these vocalists to front the band, you can do so by proceeding to checkout or you’re also welcome to progress your booking simply by replying to this email, if that’s easiest for you."
     : hasMultipleVocalSlots
     ? "If you would like to book these vocalists to front the band, you can do so by proceeding to checkout and selecting your preferred vocalist for each slot. You’re also welcome to progress your booking simply by replying to this email, if that’s easiest for you."
@@ -307,11 +314,11 @@ export const buildEnquiryDayTwoEmail = ({ enquiry, act, summary }) => {
     `I just wanted to check in personally to see whether you had any questions about ${actName}.`,
     "",
     availabilityIntro,
-    ...optionLines.map((line) => `- ${line}`),
+    ...(summary.deputyOnly ? optionLines.map((line) => `- ${line}`) : []),
     "",
     selectionGuidance,
     "",
-    "Please kindly note that availability can change because our vocalists also accept work through other avenues, so please let me know if you would like any help choosing the best fit.",
+    "Availability can change until your booking is confirmed. Let me know if you’d like any help.",
     "",
     `View the band and book: ${bookUrl}`,
     "",
@@ -323,9 +330,9 @@ export const buildEnquiryDayTwoEmail = ({ enquiry, act, summary }) => {
       <p>Hi ${escapeEmailHtml(clientFirstName)},</p>
       <p>I just wanted to check in personally to see whether you had any questions about <strong>${escapeEmailHtml(actName)}</strong>.</p>
       <p>${escapeEmailHtml(availabilityIntro)}</p>
-      ${vocalistProfileCardsHtml(summary, { showSlotHeadings: !hasOneVocalistPerSlot })}
+      ${summary.deputyOnly ? vocalistProfileCardsHtml(summary, { showSlotHeadings: !hasOneVocalistPerSlot }) : ""}
       <p>${escapeEmailHtml(selectionGuidance)}</p>
-      <p>Please kindly note that availability can change because our vocalists also accept work through other avenues, so please let me know if you would like any help choosing the best fit.</p>
+      <p>Availability can change until your booking is confirmed. Let me know if you’d like any help.</p>
       <p><a href="${escapeEmailHtml(bookUrl)}" style="display:inline-block;background:#ff6667;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:700;">View ${escapeEmailHtml(actName)} and book →</a></p>
       <p>Warmest wishes,<br />Rhona ✨</p>
       ${buildTscEmailFooter()}
@@ -348,7 +355,7 @@ export const buildEnquiryDayFourEmail = ({ enquiry, act, summary }) => {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");
   const address = clean(enquiry?.address || summary.all[0]?.formattedAddress);
-  const bookUrl = `${site}/act/${encodeURIComponent(slug)}?date=${encodeURIComponent(
+  const bookUrl = enquiryCartUrl(enquiry, act, summary) || `${site}/act/${encodeURIComponent(slug)}?date=${encodeURIComponent(
     enquiry?.eventDateISO || "",
   )}&address=${encodeURIComponent(address)}`;
   const vocalistNames = [
@@ -369,11 +376,11 @@ export const buildEnquiryDayFourEmail = ({ enquiry, act, summary }) => {
     "",
     `I just wanted to share a quick availability update for ${actName} on ${eventDate}.`,
     "",
-    `${namesText} ${availabilityVerb} currently available to front the band for your event.`,
+    `${actName} is available for your event.`,
     "",
-    "We receive a high number of enquiries, and our vocalists also accept work through other avenues. Availability can therefore change, and the longer you wait, the greater the chance that a vocalist who is currently available may be booked elsewhere.",
+    "Availability can change until your booking is confirmed.",
     "",
-    "If you would like to secure the band and your preferred vocalist, we recommend progressing your booking as soon as you’re ready to avoid disappointment.",
+    "If you would like to secure the band, we recommend progressing your booking as soon as you’re ready to avoid disappointment.",
     "",
     `View ${actName} and book: ${bookUrl}`,
     "",
@@ -386,10 +393,10 @@ export const buildEnquiryDayFourEmail = ({ enquiry, act, summary }) => {
     <div style="font-family:Arial,Helvetica,sans-serif;color:#111;line-height:1.7;max-width:720px;">
       <p>Hi ${escapeEmailHtml(clientFirstName)},</p>
       <p>I just wanted to share a quick availability update for <strong>${escapeEmailHtml(actName)}</strong> on <strong>${escapeEmailHtml(eventDate)}</strong>.</p>
-      <p><strong>${escapeEmailHtml(namesText)}</strong> ${availabilityVerb} currently available to front the band for your event.</p>
-      ${compactVocalistProfileCardsHtml(summary)}
-      <p>We receive a high number of enquiries, and our vocalists also accept work through other avenues. Availability can therefore change, and the longer you wait, the greater the chance that a vocalist who is currently available may be booked elsewhere.</p>
-      <p>If you would like to secure the band and your preferred vocalist, we recommend progressing your booking as soon as you’re ready to avoid disappointment.</p>
+      <p><strong>${escapeEmailHtml(actName)} is available</strong> for your event.</p>
+      ${summary.deputyOnly ? compactVocalistProfileCardsHtml(summary) : ""}
+      <p>Availability can change until your booking is confirmed.</p>
+      <p>If you would like to secure the band, we recommend progressing your booking as soon as you’re ready to avoid disappointment.</p>
       <p><a href="${escapeEmailHtml(bookUrl)}" style="display:inline-block;background:#ff6667;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:700;">View ${escapeEmailHtml(actName)} and book →</a></p>
       <p>If you have any questions or would like help putting the booking in place, simply reply to this email and I’ll be happy to help.</p>
       <p>Warmest wishes,<br />Rhona ✨</p>
@@ -413,7 +420,7 @@ export const buildEnquiryDaySixEmail = ({ enquiry, act, summary }) => {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");
   const address = clean(enquiry?.address || summary.all[0]?.formattedAddress);
-  const bookUrl = `${site}/act/${encodeURIComponent(slug)}?date=${encodeURIComponent(
+  const bookUrl = enquiryCartUrl(enquiry, act, summary) || `${site}/act/${encodeURIComponent(slug)}?date=${encodeURIComponent(
     enquiry?.eventDateISO || "",
   )}&address=${encodeURIComponent(address)}`;
   const subject = `Ideas for tailoring your ${actName} package on ${eventDate}`;
@@ -479,7 +486,7 @@ export const sendEnquiryDayFourTestEmail = async ({ enquiryRef, to } = {}) => {
   const summary = await enrichVocalistSummary(
     availableVocalistsForLineup(rows, lineup),
   );
-  if (!summary.complete) {
+  if (!summary.readyToNotify) {
     throw new Error(
       "The requested lineup does not yet have an available vocalist for every required slot",
     );
@@ -532,7 +539,7 @@ export const sendEnquiryDayTwoTestEmail = async ({
   const summary = await enrichVocalistSummary(
     availableVocalistsForLineup(rows, lineup),
   );
-  if (!summary.complete) {
+  if (!summary.readyToNotify) {
     throw new Error("The requested lineup does not yet have an available vocalist for every required slot");
   }
 
@@ -581,7 +588,7 @@ export const sendEnquiryDayTwoEmailNow = async ({ enquiryRef } = {}) => {
   const summary = await enrichVocalistSummary(
     availableVocalistsForLineup(rows, lineup),
   );
-  if (!summary.complete) {
+  if (!summary.readyToNotify) {
     throw new Error(
       "The requested lineup does not yet have an available vocalist for every required slot",
     );
@@ -663,7 +670,7 @@ export const runEnquiryDayTwoFollowups = async ({ now = new Date() } = {}) => {
     const summary = await enrichVocalistSummary(
       availableVocalistsForLineup(rows, lineup),
     );
-    if (!summary.complete) {
+    if (!summary.readyToNotify) {
       result.skipped += 1;
       continue;
     }
@@ -754,7 +761,7 @@ export const runEnquiryDayFourFollowups = async ({ now = new Date() } = {}) => {
     const summary = await enrichVocalistSummary(
       availableVocalistsForLineup(rows, lineup),
     );
-    if (!summary.complete) {
+    if (!summary.readyToNotify) {
       result.skipped += 1;
       continue;
     }
@@ -845,7 +852,7 @@ export const runEnquiryDaySixFollowups = async ({ now = new Date() } = {}) => {
     const summary = await enrichVocalistSummary(
       availableVocalistsForLineup(rows, lineup),
     );
-    if (!summary.complete) {
+    if (!summary.readyToNotify) {
       result.skipped += 1;
       continue;
     }

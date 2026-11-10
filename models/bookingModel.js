@@ -187,7 +187,8 @@ const ActSummarySchema = new mongoose.Schema(
     image: mongoose.Schema.Types.Mixed,
 
     chosenVocalists: [
-      { musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician" } },
+      { musicianId: { type: mongoose.Schema.Types.ObjectId, ref: "Musician" },
+        name: String, vocalistName: String, slotIndex: Number, role: String, isDeputy: Boolean, profileUrl: String },
     ],
 
     // full lineup snapshot
@@ -337,6 +338,16 @@ const BookingSchema = new mongoose.Schema(
   {
     bookingId: { type: String, required: true },
     totals: { type: BookingTotalsSchema, default: undefined },
+    // Website checkout and its payment-verified completion need these fields on
+    // hydrated documents; undeclared fields are silently stripped by Mongoose.
+    date: { type: Date },
+    eventDateISO: { type: String },
+    venue: { type: String },
+    venueAddress: { type: String },
+    userAddress: { type: mongoose.Schema.Types.Mixed },
+    signatureUrl: { type: String },
+    performanceTimes: { type: mongoose.Schema.Types.Mixed },
+    checkoutCompleted: { type: Boolean, default: false },
 
     // Act/lineup identity used by allocation, event sheets and notifications.
     // Manual booking-board rows must retain the same links as website bookings.

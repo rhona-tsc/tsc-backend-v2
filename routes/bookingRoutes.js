@@ -4,6 +4,7 @@ import { buildEventSheetUrl } from "../utils/publicSiteUrl.js";
 import verifyToken from "../middleware/agentAuth.js";
 import {
   createCheckoutSession,
+  getBookingMeasurement,
   completeBooking,
   manualCreateBooking,
   markMusicianAsPaid,
@@ -42,6 +43,7 @@ import { resolveBookedActName } from "../utils/bookingDisplayName.js";
 import { isEncoreBooking, resolveEncoreSettlement } from "../utils/encoreSettlement.js";
 import { effectiveLineupRoles, lineupDisplayLabel, bookingExtras, additionalMusicianRoles } from "../utils/bookingLineupAdditions.js";
 const router = express.Router();
+router.get("/measurement", getBookingMeasurement);
 
 const formatOrdinalDate = (value, { weekday = false } = {}) => {
   const isoMatch = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);

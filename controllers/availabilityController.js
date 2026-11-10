@@ -24,6 +24,7 @@ import {
 import sendEmail from "../utils/sendEmail.js";
 import {
   availableVocalistsForLineup,
+  sortedVocalContacts,
   musicianCanFrontVocalSlot,
 } from "../utils/enquiryAvailability.js";
 import { buildTscEmailFooter } from "../utils/tscEmailBranding.js";
@@ -1616,12 +1617,7 @@ export async function notifyDeputies({
     null;
   if (!lineup) return console.warn("⚠️ [notifyDeputies] No lineup found");
 
-  const vocalists =
-    lineup.bandMembers?.filter((m) =>
-      ["vocal", "vocalist"].some((v) =>
-        (m.instrument || "").toLowerCase().includes(v),
-      ),
-    ) || [];
+  const vocalists = sortedVocalContacts(lineup);
 
   if (!vocalists.length) {
     console.warn("⚠️ [notifyDeputies] No vocalists in lineup");
@@ -1717,6 +1713,8 @@ export async function notifyDeputies({
   let totalSent = 0;
 
   for (const vocalist of targetVocalists) {
+    const targetSlotIndex = slotIndex === null ? vocalists.indexOf(vocalist) : Number(slotIndex);
+    let roleSent = 0;
     const vocalistNames = firstLast(vocalist);
     const vocalistDisplayName = displayNameOf(vocalist);
     const deputiesToContact =
@@ -1765,12 +1763,12 @@ export async function notifyDeputies({
 
       try {
         await triggerAvailabilityRequest({
-          inheritedFee,
+          inheritedFee: slotIndex === null ? basePlusEssentialExtras(vocalist, dateISO) : inheritedFee,
           inheritedFeeIncludesTravel: false,
           actId,
           lineupId,
           dateISO,
-          slotIndex,
+          slotIndex: targetSlotIndex,
           formattedAddress,
 
           // ✅ ALWAYS pass client context to deputy rows
@@ -1823,9 +1821,10 @@ export async function notifyDeputies({
 
       existingSet.add(cleanPhone);
       totalSent++;
-      if (totalSent >= 3) {
-        console.log("🛑 [notifyDeputies] Limit reached — contacted 3 deputies");
-        return;
+      roleSent++;
+      if (roleSent >= 3) {
+        console.log("🛑 [notifyDeputies] Contacted three deputy options for this vocal role", { slotIndex: targetSlotIndex });
+        break;
       }
     }
   }
@@ -2741,10 +2740,11 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
         .replace(/,\s*/g, ",")
         .trim();
 
-    const makeRequestKey = ({ scope, actId, dateISO, address }) => {
+    const makeRequestKey = ({ scope, actId, lineupId, dateISO, address }) => {
       const raw = [
         String(scope || "anon").trim(),
         String(actId || "").trim(),
+        String(lineupId || "").trim(),
         String(dateISO || "").trim(),
         normalizeAddrStrict(address || ""),
       ].join("|");
@@ -2756,6 +2756,7 @@ export const ensureVocalistAvailabilityForLineup = async (req, res) => {
     const requestKey = makeRequestKey({
       scope: requestScope,
       actId,
+      lineupId,
       dateISO: resolvedDateISO,
       address: fullAddress,
     });
@@ -3025,10 +3026,11 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       .replace(/,\s*/g, ",")
       .trim();
 
-  const makeRequestKey = ({ scope, actId, dateISO, address }) => {
+  const makeRequestKey = ({ scope, actId, lineupId, dateISO, address }) => {
     const raw = [
       String(scope || "anon").trim(),
       String(actId || "").trim(),
+      String(lineupId || "").trim(),
       String(dateISO || "").trim(),
       normalizeAddrStrict(address || ""),
     ].join("|");
@@ -3385,6 +3387,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const requestKey = makeRequestKey({
       scope: requestScope,
       actId,
+      lineupId,
       dateISO,
       address: fullFormattedAddress,
     });
@@ -3496,9 +3499,19 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     /* -------------------------------------------------------------- */
     /* 🎤 MULTI-VOCALIST HANDLING (Lead only)                         */
     /* -------------------------------------------------------------- */
-    const vocalists = members.filter((m) =>
-      (m.instrument || "").toLowerCase().includes("vocal"),
-    );
+    const vocalists = sortedVocalContacts(lineup);
+    const recordUnavailableRegular = async ({ member, phone, musicianId, slotIndex }) => {
+      if (!phone) return;
+      await AvailabilityModel.findOneAndUpdate(
+        { actId, lineupId: lineupKey, requestKey, dateISO, phone, slotIndex, v2: true },
+        { $set: { isDeputy: false, musicianId: musicianId || null, reply: "unavailable", status: "unavailable",
+          repliedAt: new Date(), formattedAddress: fullFormattedAddress, enquiryId,
+          clientName: resolvedClientName, clientEmail: resolvedClientEmail, clientUserId,
+          actName: act.tscName || act.name, musicianName: `${member?.firstName || ""} ${member?.lastName || ""}`.trim(),
+          duties: member?.instrument || "Vocalist" } },
+        { upsert: true, new: true },
+      );
+    };
 
     if (!isDeputy && vocalists.length > 1) {
       const results = [];
@@ -3529,7 +3542,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           if (vMember?.musicianId) {
             musicianDoc = await Musician.findById(vMember.musicianId)
               .select(
-                "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl",
+                "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl skipAvailabilityChecks skipAvailabilityForActs",
               )
               .lean();
           }
@@ -3544,7 +3557,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
               ],
             })
               .select(
-                "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl",
+                "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl skipAvailabilityChecks skipAvailabilityForActs",
               )
               .lean();
           }
@@ -3553,7 +3566,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
           if (!musicianDoc && vEmail) {
             musicianDoc = await Musician.findOne({ email: vEmail })
               .select(
-                "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl",
+                "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl skipAvailabilityChecks skipAvailabilityForActs",
               )
               .lean();
           }
@@ -3584,6 +3597,8 @@ if (shouldAlwaysSkip) {
     realMusicianId: String(realMusicianId || ""),
     musicianName: `${vMember.firstName || ""} ${vMember.lastName || ""}`.trim(),
   });
+
+  await recordUnavailableRegular({ member: vMember, phone, musicianId: realMusicianId, slotIndex: slotIndexForThis });
 
   await notifyDeputies({
     actId,
@@ -3628,7 +3643,9 @@ if (shouldAlwaysSkip) {
             },
           );
 
-          await notifyDeputies({
+          await recordUnavailableRegular({ member: vMember, phone, musicianId: realMusicianId, slotIndex: slotIndexForThis });
+
+  await notifyDeputies({
             actId,
             lineupId: lineupKey,
             dateISO,
@@ -4149,6 +4166,8 @@ if (!isDeputy && shouldAlwaysSkip) {
     },
   );
 
+  await recordUnavailableRegular({ member: targetMember, phone, musicianId: realMusicianId, slotIndex: singleSlotIndex });
+
   await notifyDeputies({
     actId,
     lineupId: lineupKey,
@@ -4195,7 +4214,9 @@ if (!isDeputy && shouldAlwaysSkip) {
         },
       );
 
-      await notifyDeputies({
+      await recordUnavailableRegular({ member: targetMember, phone, musicianId: realMusicianId, slotIndex: singleSlotIndex });
+
+  await notifyDeputies({
         actId,
         lineupId: lineupKey,
         dateISO,
@@ -7743,7 +7764,9 @@ const renderActExtrasHtml = async (
       return `${actPath}?${params.toString()}`;
     };
 
-    const cartUrl = buildLineupUrl(selectedLineup);
+    const cartPayload = { actId: String(actDoc._id), lineupId: String(selectedLineup?._id || selectedLineup?.lineupId || ""),
+      selectedDate: String(dateISO), selectedAddress: String(selectedAddress || "") };
+    const cartUrl = `${SITE}cart?payload=${encodeURIComponent(JSON.stringify(cartPayload))}`;
 
     const normKey = (s = "") =>
       s
@@ -7945,7 +7968,7 @@ const renderActExtrasHtml = async (
       selectedLineup,
     );
 
-    if (!lineupAvailability.complete) {
+    if (!lineupAvailability.readyToNotify) {
       console.log("✉️ [rebuild] Client email held until every vocalist slot is covered", {
         requestKey: contextRequestKey,
         enquiryId: contextEnquiryId,
@@ -7988,7 +8011,7 @@ const renderActExtrasHtml = async (
       ),
     );
     const selectedVocalistCards = await Promise.all(
-      lineupAvailability.selected.map(async (row) => {
+      (lineupAvailability.deputyOnly ? [...new Map(lineupAvailability.all.map(row => [String(row.musicianId || row.phone), row])).values()] : []).map(async (row) => {
         const card = await buildMusicianProfileCard({
           musicianId: row.musicianId,
           fallbackName: row.displayName || row.musicianName || "Vocalist",
@@ -8005,9 +8028,11 @@ const renderActExtrasHtml = async (
         };
       }),
     );
-    const reservationSlotKey = `enquiry_${String(
-      contextRequestKey || contextEnquiryId || contextLineupId || "lineup",
-    ).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+    const reservationSlotKey = `enquiry_${crypto.createHash("sha256").update([
+      String(clientEmail || "").trim().toLowerCase(), dateISO,
+      String(selectedAddress || "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""),
+      String(contextLineupId || ""),
+    ].join("|")).digest("hex").slice(0, 24)}`;
 
     // Build an enquiry-scoped badge view. The public badge can contain rows from
     // several enquiries for the same act/date, but client emails must never do so.
@@ -8161,8 +8186,7 @@ const renderActExtrasHtml = async (
                   <p>Hi ${(clientName || "there").split(" ")[0]},</p>
                   <p>Thank you for shortlisting <strong>${actDoc.tscName || actDoc.name}</strong>!</p>
                   <p>
-                    We’re delighted to confirm that <strong>${actDoc.tscName || actDoc.name}</strong> is available as a <strong>${selectedLineupSize}</strong> with
-                    <strong>${vocalistShort}</strong> on vocals, and they’d love to perform for you and your guests.
+                    <strong>${actDoc.tscName || actDoc.name} is available</strong> as a <strong>${selectedLineupSize}</strong> for your event. They’d love to perform for you and your guests.
                   </p>
 
                   ${renderAvailabilityVocalistCards({
@@ -8304,14 +8328,7 @@ const renderActExtrasHtml = async (
                     ).length
                   : 1;
 
-              const unavailableVocalistPrefix =
-                vocalistCount > 1
-                  ? "One of the band's regular vocalists isn’t available for your date, but we’re delighted to confirm that"
-                  : "The band's regular vocalist isn’t available for your date, but we’re delighted to confirm that";
-              const deputyAvailabilityCopy =
-                lineupAvailability.selected.length > 1
-                  ? `${unavailableVocalistPrefix} <strong>${actDoc.tscName || actDoc.name}</strong> is available as a <strong>${selectedLineupSize}</strong> with <strong>${deputyShort}</strong> — trusted deputy vocalists for the band — available to perform.`
-                  : `${unavailableVocalistPrefix} <strong>${actDoc.tscName || actDoc.name}</strong> is available as a <strong>${selectedLineupSize}</strong> with <strong>${deputyShort}</strong> — one of the band's trusted deputy vocalists — available to perform.`;
+              const deputyAvailabilityCopy = `<strong>${actDoc.tscName || actDoc.name} is available</strong> as a <strong>${selectedLineupSize}</strong> for your event.<br/><br/>The band's usual ${vocalistCount > 1 ? "vocalists aren’t" : "vocalist isn’t"} available on your date. Their trusted deputy vocalists below have confirmed availability. View their profiles, then choose your favourite ${vocalistCount > 1 ? "vocalists" : "vocalist"} at checkout — one for each vocal role. Your booking confirmation will record who you choose.`;
 
               const actExtrasHtml = await renderActExtrasHtml(
                 actDoc,
@@ -8348,7 +8365,7 @@ const renderActExtrasHtml = async (
 
                   <h3 style="color:#111;">${actDoc.tscName || actDoc.name}</h3>
                   <p style="margin:6px 0 14px; color:#555;">${(actDoc.tscDescription || actDoc.description || "").toString()}</p>
-                  <p><a href="${deputyCard.profileUrl || profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
+                  <p><a href="${profileUrl}" style="color:#ff6667; font-weight:600; text-decoration:none;">View Profile →</a></p>
 
                   ${
                     lineupQuotes.length
