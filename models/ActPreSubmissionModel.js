@@ -19,6 +19,9 @@ const ActPreSubmissionSchema = new mongoose.Schema({
   inviteCode: { type: String, default: null },
 inviteCodeHash: { type: String, index: true, unique: true, sparse: true },
 inviteCodeUsed: { type: Boolean, default: false },
+  approvalEmailAttemptedAt: { type: Date, default: null },
+  approvalEmailSentAt: { type: Date, default: null },
+  approvalEmailLastError: { type: String, default: "" },
   createdAt: { type: Date, default: Date.now }
 });
 

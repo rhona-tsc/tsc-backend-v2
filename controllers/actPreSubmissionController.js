@@ -19,6 +19,27 @@ function hashCode(code) {
   return crypto.createHash("sha256").update(code).digest("hex");
 }
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function sendApprovalEmailWithRetry(recipientEmail, musicianName, actName, code) {
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await sendActApprovalEmail(recipientEmail, musicianName, actName, code);
+      return;
+    } catch (error) {
+      lastError = error;
+      console.warn("Act approval email attempt failed", {
+        recipientEmail,
+        attempt,
+        message: error?.message || String(error),
+      });
+      if (attempt < 2) await wait(750);
+    }
+  }
+  throw lastError;
+}
+
 export async function generateUniqueInviteCode() {
   for (let i = 0; i < 10; i++) {
     const code = generateInviteCode();
@@ -266,13 +287,33 @@ if (sub.status === "approved" && sub.inviteCodeHash) {
       actName: sub.actName,
       musicianName: musicianName || "there",
     });
-    // ✅ Send email (plaintext code ONLY goes to user)
-    await sendActApprovalEmail(
-      recipientEmail,
-      musicianName || "there",
-      sub.actName || "your act",
-      code
-    );
+    // Send the exact code whose hash was saved. Retry once to absorb a
+    // transient first SMTP connection failure.
+    sub.approvalEmailAttemptedAt = new Date();
+    await sub.save();
+    try {
+      await sendApprovalEmailWithRetry(
+        recipientEmail,
+        musicianName || "there",
+        sub.actName || "your act",
+        code,
+      );
+    } catch (emailError) {
+      // Do not leave a submission looking approved when its invitation was not
+      // delivered. A later click can safely mint and send a fresh code.
+      sub.status = "pending";
+      sub.inviteCodeHash = undefined;
+      sub.inviteCodeUsed = false;
+      sub.approvalEmailLastError = String(emailError?.message || emailError || "Email delivery failed").slice(0, 1000);
+      await sub.save();
+      return res.status(502).json({
+        success: false,
+        message: "Approval email could not be sent. The submission is still pending; please try again.",
+      });
+    }
+    sub.approvalEmailSentAt = new Date();
+    sub.approvalEmailLastError = "";
+    await sub.save();
     console.log(`🟩 [presub.approve][${rid}] email sent`, { to: recipientEmail });
 
     console.log(`🟩 [presub.approve][${rid}] done • ${Date.now() - t0}ms`);
@@ -357,6 +398,7 @@ export const resendActPreSubmissionApproval = async (req, res) => {
     await sendActApprovalEmailResend(
       recipientEmail,
       sub.musicianName || "there",
+      sub.actName || "your act",
       code
     );
 
