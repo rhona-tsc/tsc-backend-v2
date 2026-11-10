@@ -55,6 +55,26 @@ test("sample denominators exclude unavailable checks and missing overviews", () 
   assert.deepEqual(summary, { platform: "google_ai_overview", attempted: 4, observed: 2, mentions: 1, citations: 1, citationChecks: 1, noOverview: 1, unavailable: 1 });
   assert.equal(normaliseAiPrompts(Array(20).fill(" a ").concat(Array.from({ length: 20 }, (_, i) => String(i)))).length, 12);
 });
+test("Google encrypted citations resolve in one bounded authenticated POST without forwarding arbitrary URLs", async () => {
+  const calls = [];
+  const row = await fetchAiObservation({ platform: "google_ai_overview", prompt, request: async (url, options) => {
+    calls.push(url.searchParams.get("engine"));
+    if (calls.length === 1) return new Response(JSON.stringify({ ...success, ai_overview: { markdown: "The Supreme Collective offers wedding bands.", reference_links: [{ title: "Wedding bands", link: "https://www.google.com/goto?url=encrypted", link_token: "synthetic-token" }] } }));
+    assert.equal(url.origin, "https://www.searchapi.io"); assert.equal(options.method, "POST");
+    assert.deepEqual(JSON.parse(options.body), { engine: "google_resolve", results: [{ id: "0", link_token: "synthetic-token" }] });
+    return new Response(JSON.stringify({ results: [{ id: "0", link: "https://thesupremecollective.co.uk/wedding-bands-surrey/" }] }));
+  } });
+  assert.deepEqual(calls, ["google", "google_resolve"]);
+  assert.equal(row.cited, true); assert.equal(row.citationStatus, "resolved");
+});
+test("a failed resolver preserves the valid answer and unknown citation state", async () => {
+  let calls = 0;
+  const row = await fetchAiObservation({ platform: "google_ai_overview", prompt, request: async () => {
+    if (calls++) return new Response("Provider unavailable", { status: 503 });
+    return new Response(JSON.stringify({ ...success, ai_overview: { markdown: "Wedding bands offer live music.", reference_links: [{ link: "https://www.google.com/goto?url=encrypted", link_token: "synthetic-token" }] } }));
+  } });
+  assert.equal(calls, 2); assert.equal(row.status, "observed"); assert.equal(row.cited, null);
+});
 test("refresh reuses the monthly sample without network access or new purchases", async t => {
   const sample = { platform: "chatgpt", prompt, status: "observed", mentioned: true, cited: true, citations: [], model: "fixed" };
   const queries = [];

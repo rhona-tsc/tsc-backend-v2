@@ -72,11 +72,12 @@ export const parseAiObservation = ({ platform, prompt, data, checkedAt = new Dat
 };
 
 export const fetchAiObservation = async ({ platform, prompt, request = fetch }) => {
-  const query = async params => {
+  const query = async (params, postBody) => {
     const url = new URL("https://www.searchapi.io/api/v1/search");
     Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
     const response = await request(url, {
-      headers: { Authorization: `Bearer ${process.env.SEARCHAPI_API_KEY}` },
+      headers: { Authorization: `Bearer ${process.env.SEARCHAPI_API_KEY}`, ...(postBody ? { "Content-Type": "application/json" } : {}) },
+      ...(postBody ? { method: "POST", body: JSON.stringify({ engine: params.engine, ...postBody }) } : {}),
       signal: AbortSignal.timeout(55000), redirect: "error",
     });
     if (!response.ok) throw new Error(`AI search provider returned HTTP ${response.status}`);
@@ -89,6 +90,29 @@ export const fetchAiObservation = async ({ platform, prompt, request = fetch }) 
     const expanded = await query({ engine: "google_ai_overview", page_token: data.ai_overview.page_token });
     if (expanded.error) throw new Error("AI overview follow-up failed");
     data = { search_metadata: expanded.search_metadata || data.search_metadata, ai_overview: expanded.ai_overview || expanded };
+  }
+  if (platform === "google_ai_overview" && data.ai_overview) {
+    const payload = data.ai_overview;
+    const references = payload.reference_links || payload.references || [];
+    const pending = references.map((item, index) => ({ item, index }))
+      .filter(({ item }) => !safeCitationUrl(item.link || item.url) && typeof item.link_token === "string")
+      .slice(0, 25);
+    if (pending.length) {
+      try {
+        // Google now encrypts source destinations. One bounded batch, no retries.
+        // The provider documents this resolver as using zero search credits.
+        const resolved = await query({ engine: "google_resolve" }, { results: pending.map(({ item, index }) => ({ id: String(index), link_token: item.link_token })) });
+        for (const result of resolved.results || []) {
+          const index = Number(result.id);
+          if (pending.some(item => item.index === index) && !result.error && !result.link_token && safeCitationUrl(result.link)) {
+            references[index] = { ...references[index], link: result.link };
+          }
+        }
+        payload.reference_links = references;
+      } catch {
+        // Keep unresolved citations unknown; a resolver failure must not erase a valid answer.
+      }
+    }
   }
   return parseAiObservation({ platform, prompt, data });
 };
@@ -106,7 +130,7 @@ export const summariseAiVisibility = (samples = []) => AI_PLATFORMS.map(platform
 
 export const getAiVisibility = async ({ tracker, periods, collect = false }) => {
   const prompts = normaliseAiPrompts(tracker.aiPrompts);
-  const watchlistHash = crypto.createHash("sha256").update(JSON.stringify({ prompts, platforms: AI_PLATFORMS, country: "GB", language: "en", version: 1 })).digest("hex");
+  const watchlistHash = crypto.createHash("sha256").update(JSON.stringify({ prompts, platforms: AI_PLATFORMS, country: "GB", language: "en", version: 2 })).digest("hex");
   const identity = { propertyUrl: tracker.propertyUrl, reportPeriodStart: periods.periodStart, watchlistHash };
   let record = await SeoAiSnapshot.findOne(identity).lean();
   if (!record && collect && tracker.aiEnabled !== false && aiVisibilityConfigured() && prompts.length) {

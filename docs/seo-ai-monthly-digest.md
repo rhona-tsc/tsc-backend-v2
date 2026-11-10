@@ -18,7 +18,7 @@ The tracker defaults to including AI once connected, and provides an explicit sw
 
 Monthly AI observations are unique by property, report month and watchlist hash. A failed sample is retained rather than silently retried. A report lease prevents overlapping automatic jobs sending duplicate digests. The monthly emailedAt check continues to suppress repeat scheduled sends. Explicit staff sends remain possible. No AI failure blocks the organic report.
 
-Google can return encrypted citation links. These are marked unresolved and omitted from citation absence claims; the integration deliberately does not make unbounded follow-up resolver requests. Evidence stores at most a short 500-character excerpt and 30 safe citations per answer, with no raw provider payload, API URL or credentials. Email displays up to five links per answer; admin stores the remaining source evidence.
+Google can return encrypted citation links. The live trial confirmed this, so the integration resolves up to 25 destinations in one bounded POST batch per overview, without retries. SearchApi documents this resolver as using zero search credits: https://www.searchapi.io/docs/google-resolve-api . Failed or still-pending links remain unknown and are omitted from citation absence claims. Evidence stores at most a short 500-character excerpt and 30 safe citations per answer, with no raw provider payload, API URL or credentials. Email displays up to five links per answer; admin stores the remaining source evidence.
 
 ## Validation and operational notes
 
