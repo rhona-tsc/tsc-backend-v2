@@ -2,6 +2,7 @@ import SeoKeywordSnapshot from "../models/seoKeywordSnapshotModel.js";
 import jwt from "jsonwebtoken";
 import { google } from "googleapis";
 import { encryptSocialToken } from "../utils/socialTokenCrypto.js";
+import { aiVisibilityConfigured, DEFAULT_AI_PROMPTS, normaliseAiPrompts } from "../services/seoAiVisibilityService.js";
 import {
   buildSeoSnapshot,
   completedMonthPeriods,
@@ -10,7 +11,6 @@ import {
   searchConsoleOAuthAvailable,
   searchConsoleOAuthCallback,
   searchConsoleConfigured,
-  sendSeoSnapshotEmail,
 } from "../services/seoKeywordService.js";
 
 const cleanEmail = (value) => String(value || "").trim().toLowerCase();
@@ -27,6 +27,8 @@ export const getSeoKeywordTracker = async (_req, res) => {
       configured: await searchConsoleConfigured(),
       oauthAvailable: searchConsoleOAuthAvailable(),
       oauthCallback: searchConsoleOAuthCallback(),
+      aiConfigured: aiVisibilityConfigured(),
+      defaultAiPrompts: DEFAULT_AI_PROMPTS,
       tracker,
       snapshots,
     });
@@ -110,6 +112,8 @@ export const updateSeoKeywordTracker = async (req, res) => {
       tracker.recipients = [...new Set(body.recipients.map(cleanEmail).filter(Boolean))];
     }
     if (typeof body.enabled === "boolean") tracker.enabled = body.enabled;
+    if (typeof body.aiEnabled === "boolean") tracker.aiEnabled = body.aiEnabled;
+    if (Array.isArray(body.aiPrompts)) tracker.aiPrompts = normaliseAiPrompts(body.aiPrompts);
     if (Number.isFinite(Number(body.sendDay))) {
       tracker.sendDay = Math.min(20, Math.max(1, Number(body.sendDay)));
     }
@@ -153,9 +157,7 @@ export const refreshSeoKeywordTracker = async (_req, res) => {
 
 export const sendSeoKeywordTestEmail = async (_req, res) => {
   try {
-    const tracker = await getOrCreateSeoTracker();
-    const snapshot = await buildSeoSnapshot({ tracker });
-    await sendSeoSnapshotEmail({ tracker, snapshot });
+    const snapshot = await runSeoMonthlyReport({ sendEmailReport: true, collectAi: false });
     return res.json({ success: true, snapshot });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -179,7 +181,7 @@ export const runSeoKeywordCron = async (_req, res) => {
         emailedAt: existing.emailedAt,
       });
     }
-    const snapshot = await runSeoMonthlyReport({ sendEmailReport: true });
+    const snapshot = await runSeoMonthlyReport({ sendEmailReport: true, skipIfEmailed: true });
     return res.json({ success: true, periodStart: snapshot.periodStart, emailedAt: snapshot.emailedAt });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });

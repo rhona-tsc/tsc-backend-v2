@@ -1,8 +1,11 @@
 import { google } from "googleapis";
+import { randomUUID } from "node:crypto";
 import SeoKeywordTracker from "../models/seoKeywordTrackerModel.js";
 import SeoKeywordSnapshot from "../models/seoKeywordSnapshotModel.js";
 import sendEmail from "../utils/sendEmail.js";
 import { decryptSocialToken } from "../utils/socialTokenCrypto.js";
+import { getAiVisibility } from "./seoAiVisibilityService.js";
+import { renderAiVisibilityEmail } from "./seoVisibilityEmail.js";
 
 export const DEFAULT_KEYWORDS = [
   "soul wedding band",
@@ -201,7 +204,7 @@ const actionFor = ({ impressions, position, clicks, targetUrl, topPage }) => {
   return "Optimise the target page content and internal links";
 };
 
-export const buildSeoSnapshot = async ({ tracker, periods = completedMonthPeriods() }) => {
+export const buildSeoSnapshot = async ({ tracker, periods = completedMonthPeriods(), collectAi = false }) => {
   if (!(await searchConsoleConfigured())) {
     throw new Error("Search Console credentials are not configured");
   }
@@ -242,9 +245,12 @@ export const buildSeoSnapshot = async ({ tracker, periods = completedMonthPeriod
       return result;
     });
 
+  let aiVisibility;
+  try { aiVisibility = await getAiVisibility({ tracker, periods, collect: collectAi }); }
+  catch { aiVisibility = { status: "unavailable", summary: [], samples: [] }; }
   return SeoKeywordSnapshot.findOneAndUpdate(
     { propertyUrl: tracker.propertyUrl, periodStart: periods.periodStart },
-    { ...periods, propertyUrl: tracker.propertyUrl, rows },
+    { ...periods, propertyUrl: tracker.propertyUrl, rows, aiVisibility },
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
 };
@@ -256,7 +262,7 @@ const escapeHtml = (value = "") =>
 
 const formatPosition = (value) => (value == null ? "—" : Number(value).toFixed(1));
 
-export const sendSeoSnapshotEmail = async ({ tracker, snapshot }) => {
+export const buildSeoDigestEmail = snapshot => {
   const visible = [...snapshot.rows]
     .sort((a, b) => b.impressions - a.impressions || (a.position ?? 999) - (b.position ?? 999));
   const changed = visible.filter((row) => row.positionChange != null);
@@ -277,8 +283,9 @@ export const sendSeoSnapshotEmail = async ({ tracker, snapshot }) => {
   }).join("");
   const html = `
     <div style="font-family:Arial,sans-serif;color:#0f172a;max-width:900px;margin:auto">
-      <h1 style="font-size:24px">Monthly SEO keyword report</h1>
+      <h1 style="font-size:24px">Monthly SEO &amp; AI visibility digest</h1>
       <p>${snapshot.periodStart} to ${snapshot.periodEnd}, compared with ${snapshot.comparisonStart} to ${snapshot.comparisonEnd}.</p>
+      <h2>Google organic search</h2>
       <p><strong>${visible.length}</strong> tracked keywords · <strong>${improving}</strong> improving · <strong>${declining}</strong> declining</p>
       <table style="width:100%;border-collapse:collapse;font-size:14px">
         <thead><tr style="background:#0f172a;color:#fff">
@@ -288,13 +295,18 @@ export const sendSeoSnapshotEmail = async ({ tracker, snapshot }) => {
         </tr></thead><tbody>${htmlRows}</tbody>
       </table>
       <p style="color:#64748b;font-size:12px">A positive change means the average position improved. Keywords with no impressions are shown separately from position zero.</p>
+      <p style="color:#64748b;font-size:12px">Source: Google Search Console web search. These are organic metrics, not Google Ads costs or conversions. Average position is not a fixed rank. Google AI features can contribute to web totals; this watchlist does not isolate their traffic.</p>
+      ${renderAiVisibilityEmail(snapshot.aiVisibility)}
     </div>`;
+  return { subject: `SEO & AI visibility digest: ${snapshot.periodStart} to ${snapshot.periodEnd}`, html };
+};
+
+export const sendSeoSnapshotEmail = async ({ tracker, snapshot }) => {
   const recipients = tracker.recipients.filter(Boolean);
   if (!recipients.length) throw new Error("Add at least one monthly report recipient");
   const result = await sendEmail({
     to: recipients,
-    subject: `SEO keyword report: ${snapshot.periodStart} to ${snapshot.periodEnd}`,
-    html,
+    ...buildSeoDigestEmail(snapshot),
   });
   if (!result?.ok) throw new Error(result?.error || "Could not send SEO report email");
   snapshot.emailedAt = new Date();
@@ -303,23 +315,35 @@ export const sendSeoSnapshotEmail = async ({ tracker, snapshot }) => {
   await tracker.save();
 };
 
-export const runSeoMonthlyReport = async ({ sendEmailReport = true, skipIfEmailed = false } = {}) => {
+export const runSeoMonthlyReport = async ({ sendEmailReport = true, skipIfEmailed = false, collectAi = true } = {}) => {
   const tracker = await getOrCreateSeoTracker();
   const periods = completedMonthPeriods();
-  if (skipIfEmailed) {
-    const existing = await SeoKeywordSnapshot.findOne({
-      propertyUrl: tracker.propertyUrl,
-      periodStart: periods.periodStart,
-      emailedAt: { $ne: null },
-    });
-    if (existing) return existing;
+  const leaseOwner = randomUUID();
+  const lock = await SeoKeywordTracker.updateOne({ _id: tracker._id, $or: [
+    { monthlyReportLeaseUntil: { $exists: false } },
+    { monthlyReportLeaseUntil: null },
+    { monthlyReportLeaseUntil: { $lt: new Date() } },
+  ] }, { $set: { monthlyReportLeaseUntil: new Date(Date.now() + 20 * 60 * 1000), monthlyReportLeaseOwner: leaseOwner } });
+  if (lock.modifiedCount !== 1) throw new Error("A monthly visibility report is already running");
+  try {
+    if (skipIfEmailed) {
+      const existing = await SeoKeywordSnapshot.findOne({
+        propertyUrl: tracker.propertyUrl,
+        periodStart: periods.periodStart,
+        emailedAt: { $ne: null },
+      });
+      if (existing) return existing;
+    }
+    const snapshot = await buildSeoSnapshot({ tracker, periods, collectAi });
+    tracker.lastRunAt = new Date();
+    tracker.lastError = "";
+    await tracker.save();
+    if (sendEmailReport) await sendSeoSnapshotEmail({ tracker, snapshot });
+    return snapshot;
+  } finally {
+    await SeoKeywordTracker.updateOne({ _id: tracker._id, monthlyReportLeaseOwner: leaseOwner },
+      { $unset: { monthlyReportLeaseUntil: "", monthlyReportLeaseOwner: "" } });
   }
-  const snapshot = await buildSeoSnapshot({ tracker, periods });
-  tracker.lastRunAt = new Date();
-  tracker.lastError = "";
-  await tracker.save();
-  if (sendEmailReport) await sendSeoSnapshotEmail({ tracker, snapshot });
-  return snapshot;
 };
 
 let schedulerTimer;

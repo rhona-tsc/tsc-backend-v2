@@ -27,6 +27,7 @@ const snapshotSchema = new mongoose.Schema(
     comparisonStart: { type: String, required: true },
     comparisonEnd: { type: String, required: true },
     rows: { type: [rowSchema], default: [] },
+    aiVisibility: { type: mongoose.Schema.Types.Mixed, default: null },
     emailedAt: Date,
   },
   { timestamps: true },
