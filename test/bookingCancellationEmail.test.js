@@ -17,7 +17,7 @@ test("booking cancellation email releases the date and explains a zero fee", () 
   const email = buildMusicianCancellationEmail(row, { firstName: "Sam" }, 0);
 
   assert.match(email.subject, /The Riot Dogs/);
-  assert.match(email.text, /5 June 2027 in Tisbury/);
+  assert.match(email.text, /5th June 2027 in Tisbury/);
   assert.match(email.text, /no cancellation fee is due/i);
   assert.match(email.text, /date is now released/i);
 });
@@ -35,7 +35,7 @@ test("booking cancellation WhatsApp variables match the approved template slots"
     {
       "1": "Sam",
       "2": "The Riot Dogs",
-      "3": "5 June 2027",
+      "3": "5th June 2027",
       "4": "Tisbury",
       "5": "KeCJs",
     },

@@ -227,10 +227,17 @@ Your earnings£1591.00
   assert.equal(draft.eventDateISO, "2026-11-07");
   assert.equal(draft.bookingDateISO, "2026-04-16");
   assert.equal(draft.enquiryDateISO, "2026-03-02");
-  assert.equal(draft.grossValue, 1988.75);
-  assert.equal(draft.commissionGross, 397.75);
+  // Encore's service fee is not TSC commission. Only the artist earnings are
+  // our receivable; the client-facing performance fee remains import evidence.
+  assert.equal(draft.grossValue, 1591);
+  assert.equal(draft.originalBookingTotal, 1591);
+  assert.equal(draft.commissionGross, 0);
   assert.equal(draft.passThroughGross, 1591);
   assert.equal(draft.accounting.commissionVat, 0);
+  assert.equal(draft.accounting.commissionGross, 0);
+  assert.equal(draft.importMetadata.encore.performanceFee, 1988.75);
+  assert.equal(draft.importMetadata.encore.serviceFee, 397.75);
+  assert.equal(draft.importMetadata.encore.earnings, 1591);
   // Encore's client deposit status does not prove an artist payment received.
   assert.equal(draft.payments.depositChargedAmount, 0);
   assert.equal(draft.importMetadata.encore.clientDepositPaidToEncore, true);
