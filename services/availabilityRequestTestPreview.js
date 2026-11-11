@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { sortedVocalContacts } from '../utils/enquiryAvailability.js';
 
 const clean = value => String(value || '').trim();
-export const VOICE_PREVIEW_FIELDS = ['enquiryTopic', 'clientName', 'clientEmail', 'clientPhone', 'eventDateISO', 'address', 'styleMatch', 'styles', 'preferredSize', 'mustHaveInstruments', 'selectedBands'];
+export const VOICE_PREVIEW_FIELDS = ['enquiryTopic', 'clientName', 'clientEmail', 'clientPhone', 'preferredContactMethod', 'county', 'postcode', 'eventDateISO', 'address', 'styleMatch', 'styles', 'preferredSize', 'mustHaveInstruments', 'selectedBands'];
 export function voicePreviewSnapshot(record) {
   return JSON.stringify(Object.fromEntries(VOICE_PREVIEW_FIELDS.map(key => [key, key === 'selectedBands'
     ? (record[key] || []).map(band => ({ actId: String(band.actId), name: band.name || '', lineupId: band.lineupId || '' }))
@@ -63,5 +63,7 @@ export async function prepareVoiceAvailabilityBatch(record, { lookupBands, trigg
     else blocked.push({ bandName: band.name, reason: result.reason || 'Staff review is needed.' });
   }
   return { key: voicePreviewKey(record), testMode: true, sent: 0, status: blocked.length ? 'needs_details' : 'prepared',
+    preferredContactMethod: record.preferredContactMethod || '', managementRecipient: 'hello@thesupremecollective.co.uk',
+    replyRouting: record.preferredContactMethod === 'whatsapp' ? 'management_review_for_whatsapp' : 'management_review',
     preparedAt: now.toISOString(), requests, blocked, deliveryChecksPending: true, availabilityChecked: false };
 }

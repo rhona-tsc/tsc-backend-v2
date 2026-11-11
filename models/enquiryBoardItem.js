@@ -35,6 +35,15 @@ const EnquiryBoardItemSchema = new mongoose.Schema(
     availabilityRequestTest: { type: mongoose.Schema.Types.Mixed, default: undefined },
     clientEmail: { type: String, index: true },
 
+    postcode: { type: String, maxlength: 20 },
+    venueConfirmation: { type: mongoose.Schema.Types.Mixed, default: undefined },
+    preferredContactMethod: { type: String, enum: ['', 'email', 'whatsapp', 'phone'], default: '' },
+    contactConfirmed: { type: Boolean, default: false },
+    emailConfirmed: { type: Boolean, default: false },
+    decisionWindow: { type: String, maxlength: 300 },
+    bandSuggestionsDeclined: { type: Boolean, default: false },
+    callAppointment: { type: mongoose.Schema.Types.Mixed, default: undefined },
+
     // Source (agent)
     agent: { type: String, index: true },
 

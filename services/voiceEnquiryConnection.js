@@ -46,10 +46,12 @@ export function verifyVoiceBridge(token, secret, now = Date.now()) {
 
 export function buildEnquiryVoiceSession(config) {
   return { type: 'realtime', model: config.model,
-    instructions: ENQUIRY_ASSISTANT_INSTRUCTIONS,
-    audio: { output: { voice: 'marin' } },
+    instructions: `${ENQUIRY_ASSISTANT_INSTRUCTIONS}\nCURRENT TIME: ${new Date().toISOString()}. Use Europe/London for caller dates and callback hours.`,
+    audio: { input: { transcription: { model: 'gpt-4o-mini-transcribe', language: 'en', prompt: 'The Supreme Collective. UK venue names, band names, full postcodes, email addresses and phone numbers. Hedsor House, Taplow, Buckinghamshire.' } }, output: { voice: 'marin' } },
     output_modalities: ['audio'], max_output_tokens: 500,
     tools: ENQUIRY_ASSISTANT_TOOLS, tool_choice: 'auto', tracing: null };
 }
 
 export const voiceOpeningEvent = { type: 'response.create', response: { instructions: `Start this incoming call by saying exactly: ${ENQUIRY_ASSISTANT_GREETING}` } };
+
+export const voiceOpeningEventFor = intent => intent === 'human_callback' ? { type: 'response.create', response: { instructions: 'Start exactly: Hello, I am The Supreme Collective’s AI callback assistant. This call is transcribed for follow-up and quality review. I can help arrange a 20-minute call with someone from the team. In this test I can save a proposed time for confirmation. Is that okay?' } } : voiceOpeningEvent;

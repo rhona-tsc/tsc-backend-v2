@@ -1,3 +1,5 @@
+import { lookupVoiceVenues } from './voiceVenueLookup.js';
+import { lookupVoiceCallSlots } from './voiceAppointments.js';
 import { lookupVoiceBookingEquipment } from './voiceBookingEquipmentStore.js';
 import { lookupVoicePublicJobs } from './voicePublicJobs.js';
 import Act from '../models/actModel.js';
@@ -21,7 +23,7 @@ export async function saveVoiceBoardRecord(record) {
   details.marketingSource = 'Phone — AI pilot test';
   details.notes = `[AI PHONE PILOT TEST — not a real advertising conversion]\n${details.notes}`;
   return EnquiryBoardItem.findOneAndUpdate({ websiteKey: record.websiteKey }, {
-    $set: details, $setOnInsert: { status }, $unset: { availabilityRequestTest: 1 },
+    $set: details, $setOnInsert: { status }, $unset: { availabilityRequestTest: 1, callAppointment: 1, ...(!record.venueConfirmation ? { venueConfirmation: 1 } : {}) },
   }, { upsert: true, new: true, runValidators: true });
 }
 
@@ -39,4 +41,4 @@ export async function prepareVoiceAvailability(record) {
   return preview;
 }
 
-export const createVoiceEnquiryTools = ({ trustedTestCaller = false } = {}) => createEnquiryToolHandler({ trustedTestOperator: trustedTestCaller === true, lookupBookingEquipment: lookupVoiceBookingEquipment, lookupBands: lookupVoiceBands, lookupJobs: lookupVoicePublicJobs, saveBoardRecord: saveVoiceBoardRecord, prepareAvailability: prepareVoiceAvailability });
+export const createVoiceEnquiryTools = ({ trustedTestCaller = false } = {}) => createEnquiryToolHandler({ trustedTestOperator: trustedTestCaller === true, lookupVenues: lookupVoiceVenues, lookupCallSlots: lookupVoiceCallSlots, prepareAppointment: async (record, appointment) => { const saved = await EnquiryBoardItem.updateOne({ websiteKey: record.websiteKey, clientPhone: record.clientPhone, clientEmail: record.clientEmail }, { $set: { callAppointment: appointment } }); if (!saved.matchedCount) throw new VoiceEnquiryValidationError('The enquiry details changed. Save and confirm the latest contact details again.'); }, lookupBookingEquipment: lookupVoiceBookingEquipment, lookupBands: lookupVoiceBands, lookupJobs: lookupVoicePublicJobs, saveBoardRecord: saveVoiceBoardRecord, prepareAvailability: prepareVoiceAvailability });

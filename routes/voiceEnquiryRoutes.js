@@ -1,13 +1,14 @@
+import { startVoiceCallReview, createStoredCallTranscript, finishVoiceCallReview } from '../services/voiceCallReview.js';
 import express from 'express';
 import twilio from 'twilio';
 import OpenAI from 'openai';
 import { OpenAIRealtimeWS } from 'openai/realtime/ws';
 import { normalizeCallbackPhone, VoiceEnquiryValidationError } from '../services/incomingEnquiryAssistant.js';
 import { createVoiceEnquiryTools } from '../services/voiceEnquiryStore.js';
-import { voiceConnectionConfig, signVoiceBridge, verifyVoiceBridge, buildEnquiryVoiceSession, voiceOpeningEvent, VOICE_ENQUIRY_NUMBER, VOICE_MAX_SECONDS } from '../services/voiceEnquiryConnection.js';
+import { voiceConnectionConfig, signVoiceBridge, verifyVoiceBridge, buildEnquiryVoiceSession, voiceOpeningEventFor, VOICE_ENQUIRY_NUMBER, VOICE_MAX_SECONDS } from '../services/voiceEnquiryConnection.js';
 import { reserveVoicePilotCall } from '../services/voiceEnquiryPilotLimit.js';
 
-export function createVoiceEnquiryRouter({ reservePilotCall = reserveVoicePilotCall } = {}) {
+export function createVoiceEnquiryRouter({ reservePilotCall = reserveVoicePilotCall, startReview = startVoiceCallReview, createTranscript = createStoredCallTranscript, finishReview = finishVoiceCallReview } = {}) {
 const router = express.Router();
 const sessions = new Map();
 let reserving = false;
@@ -30,14 +31,9 @@ router.post('/twilio/incoming', express.urlencoded({ extended: false, limit: '16
   const from = normalizeCallbackPhone(req.body.From);
   if (normalizeCallbackPhone(req.body.To) !== config.twilioNumber || !config.testCallers.includes(from) || !/^CA[0-9a-f]{32}$/i.test(req.body.CallSid || '')) return sayContact(res);
   const xml = new twilio.twiml.VoiceResponse();
-  if (req.body.Digits === '2') {
-    if (config.humanNumber) xml.dial({ timeout: 20, timeLimit: VOICE_MAX_SECONDS }, config.humanNumber);
-    else return sayContact(res);
-    return res.type('text/xml').send(xml.toString());
-  }
-  if (req.body.Digits !== '1') {
+  if (!['1', '2'].includes(req.body.Digits)) {
     const gather = xml.gather({ input: 'dtmf', numDigits: 1, timeout: 8, method: 'POST', action: `${path}/twilio/incoming` });
-    gather.say({ voice: 'Polly.Amy', language: 'en-GB' }, 'Welcome to The Supreme Collective. Our AI assistant can help with band bookings and musician enquiries and save your details so someone from the team can follow up. Press one to continue with the AI assistant, or two to request a person.');
+    gather.say({ voice: 'Polly.Amy', language: 'en-GB' }, 'Welcome to The Supreme Collective. Our AI assistant can help with band bookings and musician enquiries. Calls are transcribed for follow-up and quality review. Press one for a band or musician enquiry, or two for AI help arranging a call with someone from the team.');
     xml.redirect({ method: 'POST' }, `${path}/twilio/finished`);
     return res.type('text/xml').send(xml.toString());
   }
@@ -51,18 +47,21 @@ router.post('/twilio/incoming', express.urlencoded({ extended: false, limit: '16
   try { reserved = await reservePilotCall({ projectId: config.projectId, callSid: sid, endsAt: config.testEndsAt, now }); }
   catch {} finally { reserving = false; }
   if (!reserved) return sayContact(res);
-  sessions.set(sid, { expiresAt: now + (VOICE_MAX_SECONDS + 30) * 1000, connecting: false, testCaller: from });
+  try { await startReview({ callSid: sid, caller: from, intent: req.body.Digits === '2' ? 'human_callback' : 'enquiry' }); } catch { return sayContact(res); }
+  sessions.set(sid, { intent: req.body.Digits === '2' ? 'human_callback' : 'enquiry', expiresAt: now + (VOICE_MAX_SECONDS + 30) * 1000, connecting: false, testCaller: from });
   const token = signVoiceBridge({ sid, to: VOICE_ENQUIRY_NUMBER, exp: now + 90000 }, config.bridgeSecret);
   const sip = `sip:${config.projectId}@sip.api.openai.com;transport=tls?X-TSC-Bridge=${encodeURIComponent(token)}`;
   xml.dial({ timeLimit: VOICE_MAX_SECONDS, timeout: 20, method: 'POST', action: `${path}/twilio/finished` }).sip(sip);
   return res.type('text/xml').send(xml.toString());
 });
 
-router.post('/twilio/finished', express.urlencoded({ extended: false, limit: '16kb' }), (req, res) => {
+router.post('/twilio/finished', express.urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
   const config = voiceConnectionConfig();
   if (!config.ready || !twilio.validateRequest(config.twilioToken, req.get('X-Twilio-Signature') || '', `${config.base}${path}/twilio/finished`, req.body)) return res.sendStatus(403);
-  sessions.delete(req.body.CallSid);
-  return sayContact(res);
+  const session = sessions.get(req.body.CallSid);
+  if (session?.end) await session.end();
+  else if (session) { await finishReview(req.body.CallSid).catch(() => {}); sessions.delete(req.body.CallSid); }
+  const xml = new twilio.twiml.VoiceResponse(); xml.hangup(); return res.type('text/xml').send(xml.toString());
 });
 
 router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '64kb' }), async (req, res) => {
@@ -93,6 +92,8 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
     await client.realtime.calls.accept(callId, buildEnquiryVoiceSession(config));
     binding.callId = callId;
     const connection = await OpenAIRealtimeWS.create(client, { callID: callId, options: { handshakeTimeout: 10000, maxPayload: 1024 * 1024 } });
+    const transcript = createTranscript(payload.sid);
+    let queue = Promise.resolve();
     let ending = false;
     const end = async () => {
       if (ending) return;
@@ -100,15 +101,19 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
       clearTimeout(timer);
       try { await client.realtime.calls.hangup(callId); } catch {}
       connection.close();
+      await queue.catch(() => {});
+      await transcript.flush().catch(() => {});
+      await finishReview(payload.sid).catch(() => {});
       sessions.delete(payload.sid);
     };
+    binding.end = end;
     const timer = setTimeout(end, VOICE_MAX_SECONDS * 1000);
     timer.unref?.();
-    connection.socket.on('open', () => connection.send(voiceOpeningEvent));
+    connection.socket.on('open', () => connection.send(voiceOpeningEventFor(binding.intent)));
+    for (const event of ['conversation.item.added', 'conversation.item.created', 'response.output_item.added', 'input_audio_buffer.committed', 'conversation.item.input_audio_transcription.completed', 'conversation.item.input_audio_transcription.failed', 'response.output_audio_transcript.done', 'conversation.item.truncated']) connection.on(event, data => transcript.accept(data));
     connection.socket.on('close', end);
-    connection.on('error', end); // Never log call audio/transcripts or personal details.
+    connection.on('error', end); // Transcript text goes only to the protected review store; never application logs.
     const results = new Map();
-    let queue = Promise.resolve();
     connection.on('response.function_call_arguments.done', tool => {
       queue = queue.then(async () => {
         if (ending) return;
@@ -121,11 +126,12 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
         }
         connection.send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: tool.call_id, output: JSON.stringify(result) } });
         connection.send({ type: 'response.create' });
-      }).catch(end);
+      }).catch(() => { void end(); });
     });
     return res.sendStatus(200);
   } catch {
     try { await client.realtime.calls.hangup(callId); } catch {}
+    await finishReview(payload.sid, { status: 'connection_failed' }).catch(() => {});
     sessions.delete(payload.sid);
     return res.sendStatus(502);
   }

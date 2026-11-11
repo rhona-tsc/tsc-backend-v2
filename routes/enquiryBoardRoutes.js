@@ -1,3 +1,4 @@
+import { listVoiceCallReviews, readVoiceCallReview, voiceFollowupReadiness } from '../services/voiceCallReview.js';
 import { lookupVoiceBookingEquipment } from '../services/voiceBookingEquipmentStore.js';
 import { equipmentConnectionStatus, beginEquipmentGoogleConnection, disconnectEquipmentGoogleConnection, verifyEquipmentGoogleConnection } from '../services/voiceEquipmentGoogle.js';
 import express from "express";
@@ -22,6 +23,22 @@ const preparePreferences = async input => {
 };
 
 // Management-only preparation and read-only test tools. Never write booking assignments.
+router.get('/voice-followup-status', musicianAuth, async (req, res) => {
+  if (!isTSCAdmin(req.user) && !isAgent(req.user)) return res.sendStatus(403);
+  try { res.json({ success: true, ...(await voiceFollowupReadiness()) }); }
+  catch { res.status(503).json({ success: false, message: 'Could not check follow-up connections.' }); }
+});
+router.get('/voice-calls', musicianAuth, async (req, res) => {
+  if (!isTSCAdmin(req.user) && !isAgent(req.user)) return res.sendStatus(403);
+  try { res.json({ success: true, calls: await listVoiceCallReviews() }); }
+  catch { res.status(503).json({ success: false, message: 'Call reviews could not be loaded.' }); }
+});
+router.get('/voice-calls/:ref', musicianAuth, async (req, res) => {
+  if (!isTSCAdmin(req.user) && !isAgent(req.user)) return res.sendStatus(403);
+  try { const call = await readVoiceCallReview(req.params.ref); if (!call) return res.status(404).json({ success: false, message: 'No saved transcript for this call.' }); res.json({ success: true, call }); }
+  catch { res.status(503).json({ success: false, message: 'Call review could not be loaded.' }); }
+});
+
 router.get('/equipment-test/status', musicianAuth, async (req, res) => {
   if (!isTSCAdmin(req.user) && !isAgent(req.user)) return res.sendStatus(403);
   try { res.json({ success: true, ...(await equipmentConnectionStatus()), canConnect: isTSCAdmin(req.user) }); }
@@ -386,7 +403,7 @@ router.get("/", musicianAuth, async (req, res) => {
 
     const user = req.user || {};
     const admin = isTSCAdmin(user) || isAgent(user);
-    const proj = admin ? {} : { grossValue: 0, netCommission: 0, attribution: 0, marketingSource: 0, availabilityRequestTest: 0 };
+    const proj = admin ? {} : { grossValue: 0, netCommission: 0, attribution: 0, marketingSource: 0, availabilityRequestTest: 0, venueConfirmation: 0, preferredContactMethod: 0, contactConfirmed: 0, emailConfirmed: 0, decisionWindow: 0, callAppointment: 0 };
 
     let allowedActIds = [];
     if (!admin || String(scope) === "mine") {

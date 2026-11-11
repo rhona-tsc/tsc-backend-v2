@@ -17,7 +17,7 @@ test('test-only voice ingress enforces feature flag, signatures, number and call
   Object.assign(process.env, settings);
   const app = express();
   let reservations = 0;
-  app.use('/api/voice-enquiries', createVoiceEnquiryRouter({ reservePilotCall: async () => { reservations++; return true; } }));
+  app.use('/api/voice-enquiries', createVoiceEnquiryRouter({ startReview: async () => {}, reservePilotCall: async () => { reservations++; return true; } }));
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const endpoint = '/api/voice-enquiries/twilio/incoming';
