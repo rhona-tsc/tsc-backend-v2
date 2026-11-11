@@ -1,3 +1,4 @@
+import { equipmentGoogleCallbackGate } from '../services/voiceEquipmentGoogle.js';
 import express from "express";
 import agentAuth from "../middleware/agentAuth.js";
 import {
@@ -23,7 +24,7 @@ const cronAuth = (req, res, next) => {
 };
 
 router.post("/run-monthly", cronAuth, runSeoKeywordCron);
-router.get("/google/callback", completeSeoGoogleOAuth);
+router.get("/google/callback", equipmentGoogleCallbackGate, completeSeoGoogleOAuth);
 router.use(agentAuth);
 router.get("/google/start", startSeoGoogleOAuth);
 router.get("/", getSeoKeywordTracker);

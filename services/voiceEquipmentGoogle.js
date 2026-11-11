@@ -7,7 +7,11 @@ const PREFIX='voice-equipment-test.';
 const key=()=>{const secret=process.env.VOICE_ENQUIRY_BRIDGE_SECRET||'';if(secret.length<32)throw new Error('Equipment connection is not configured.');return crypto.createHash('sha256').update(`voice-equipment:${secret}`).digest();};
 export function sealEquipmentToken(value){const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',key(),iv);const data=Buffer.concat([cipher.update(value,'utf8'),cipher.final()]);return [iv,cipher.getAuthTag(),data].map(part=>part.toString('base64url')).join('.');}
 export function openEquipmentToken(value){const parts=String(value||'').split('.');if(parts.length!==3)throw new Error('Invalid equipment connection.');const [iv,tag,data]=parts.map(part=>Buffer.from(part,'base64url'));const cipher=crypto.createDecipheriv('aes-256-gcm',key(),iv);cipher.setAuthTag(tag);return Buffer.concat([cipher.update(data),cipher.final()]).toString('utf8');}
-const oauth=()=>new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID,process.env.GOOGLE_CLIENT_SECRET,process.env.GOOGLE_REDIRECT_URI);
+const oauth=()=>{
+  const redirect=new URL(process.env.GOOGLE_REDIRECT_URI);
+  if(redirect.protocol!=='https:' || !['/api/google/oauth2callback','/api/seo-keywords/google/callback'].includes(redirect.pathname))throw new Error('The equipment Google return path is not configured.');
+  return new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID,process.env.GOOGLE_CLIENT_SECRET,redirect.href);
+};
 const connections=()=>mongoose.connection.db.collection('voice_equipment_google_connections');
 const states=()=>mongoose.connection.db.collection('voice_equipment_oauth_states');
 const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
@@ -21,6 +25,7 @@ export async function beginEquipmentGoogleConnection(userId){
   return oauth().generateAuthUrl({access_type:'offline',prompt:'consent',scope:[SHEETS_READ_ONLY],include_granted_scopes:false,state:PREFIX+nonce});
 }
 export function isEquipmentOAuthState(state){return typeof state==='string'&&state.startsWith(PREFIX);}
+export function equipmentGoogleCallbackGate(req,res,next){return isEquipmentOAuthState(req.query?.state)?handleEquipmentGoogleCallback(req,res):next();}
 export async function handleEquipmentGoogleCallback(req,res){
   const fallback='https://admin.thesupremecollective.co.uk/enquiry-board?equipmentConnection=';
   try{

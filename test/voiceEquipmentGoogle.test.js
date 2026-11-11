@@ -2,7 +2,7 @@ import test,{mock} from 'node:test';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 import {google} from 'googleapis';
-import {sealEquipmentToken,openEquipmentToken,beginEquipmentGoogleConnection,handleEquipmentGoogleCallback,readEquipmentProfile,equipmentConnectionStatus,disconnectEquipmentGoogleConnection,SHEETS_READ_ONLY} from '../services/voiceEquipmentGoogle.js';
+import {sealEquipmentToken,openEquipmentToken,beginEquipmentGoogleConnection,handleEquipmentGoogleCallback,readEquipmentProfile,equipmentConnectionStatus,disconnectEquipmentGoogleConnection,equipmentGoogleCallbackGate,SHEETS_READ_ONLY} from '../services/voiceEquipmentGoogle.js';
 import {EQUIPMENT_SUPPLIERS,EQUIPMENT_SHEET_ID} from '../services/voiceBookingEquipment.js';
 
 test('Google connection uses separate encrypted credentials, fixed read-only ranges, expiring single-use consent and no secret responses',async()=>{
@@ -30,7 +30,8 @@ test('Google connection uses separate encrypted credentials, fixed read-only ran
   const status=await equipmentConnectionStatus();assert.equal(status.connected,true);assert.doesNotMatch(JSON.stringify(status),/Encrypted|SECRET|refresh_token/);
   const profile=await readEquipmentProfile(EQUIPMENT_SUPPLIERS['6a05f1a00358e40a87adb33d']);assert.equal(profile.status,'reference_only');assert.doesNotMatch(JSON.stringify(profile),/9999|SECRET/);
   const replay=response();await handleEquipmentGoogleCallback({query:{state,code:'example-code'}},replay);assert.equal(replay.code,400);assert.equal(exchanged,1);
-  const invalid=response();await handleEquipmentGoogleCallback({query:{state:'voice-equipment-test.invalid',code:'bad'}},invalid);assert.equal(invalid.code,400);
+  let legacyCalls=0;await equipmentGoogleCallbackGate({query:{state:'existing-seo-state'}},response(),()=>{legacyCalls++;});assert.equal(legacyCalls,1);
+  const invalid=response();await equipmentGoogleCallbackGate({query:{state:'voice-equipment-test.invalid',code:'bad'}},invalid,()=>assert.fail('Equipment state must not reach the legacy callback'));assert.equal(invalid.code,400);
   await assert.rejects(readEquipmentProfile({tab:'Q1 Private',range:"'Q1 Private'!A1:Z99"}));
   assert.equal((await disconnectEquipmentGoogleConnection()).connected,false);
   assert.equal((await readEquipmentProfile(EQUIPMENT_SUPPLIERS['6a05f1a00358e40a87adb33d'])).status,'connection_required');
