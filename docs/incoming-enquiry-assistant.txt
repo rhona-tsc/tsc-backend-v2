@@ -1,56 +1,65 @@
-INCOMING ENQUIRY ASSISTANT — TEST IMPLEMENTATION
-Prepared 10 November 2026. Business number: 07594 223200.
+INCOMING ENQUIRY ASSISTANT — CONNECTED TEST
+Updated 11 November 2026, Europe/London.
 
-STATUS
-Code is prepared in a separate branch. It is NOT deployed or active. No phone settings were changed, no number purchased, no paid API requests made, and no real calls or customer records created by the tests.
-The mobile is on giffgaff. Virtual Landline 020 3576 5322 currently forwards to 07594 223200. Neither public number is registered in the connected Twilio account. An existing voice-capable UK Twilio number, 07453 423200, has a demo voice greeting and is a candidate test ingress; its messaging settings must remain untouched. Official giffgaff guidance now supports forwarding, and Virtual Landline permits updating its redirect destination through its portal. Existing plan-specific forwarding charges still need checking. Existing Twilio WhatsApp/SMS and emergency IVR are untouched.
+CURRENT STATUS
+The restricted seven-day voice credential was created with Rhona's approval and saved securely in the existing backend's environment. It expires on 18 November 2026. The separate Enquiry Calls - Test project has a $5 enforced OpenAI monthly cutoff, leaving room for telephone charges within the approved £10 test allowance. OpenAI cautions that enforcement can lag slightly. No new phone number, subscription or top-up was purchased.
+The initial backend commit 6ad3f92 was deployed successfully on Render on 11 November at 11:07 GMT. This revision connects the pilot to structured catalogue matching and the four preference fields. The existing Twilio test number 07453 423200 now POSTs voice calls to the new signed incoming-call endpoint. Its SMS/WhatsApp-related configuration and the account's other numbers were preserved. Its previous voice settings are backed up privately for rollback.
+Public Virtual Landline 020 3576 5322 still forwards to giffgaff 07594 223200. Neither public number's routing was changed. Google Ads and its spend-monitor automation remain paused.
+
+HOW TO TRY IT
+Call 07453 423200 FROM 07594 223200, with caller ID enabled. Press 1 to continue after the AI disclosure. Only that approved caller can reach the AI during this pilot.
+There are five AI bridge attempts TOTAL for this project, enforced in MongoDB across process restarts. Each call is limited to six minutes by both Twilio and the backend timer. The pilot also expires at 10:55 UTC on 18 November 2026; the API key has its own seven-day expiry. Do not reset the persistent allowance or extend the test without reviewing spending.
+Use fictional event details and explicitly confirm the read-back before saving. No real musician availability requests are sent. Physical audio, accent, latency, SIP-header forwarding and real call saving still need to be verified by an actual call. At the setup check, there had been no real calls to the test number since connection.
+
+ENQUIRY BOARD
+https://admin.thesupremecollective.co.uk/enquiry-board
+Confirmed phone details upsert one EnquiryBoardItem per CallSid, including contact, event date, location, requirements, budget and decision window. Callback requests may omit an event date. Callback numbers are in Notes. One call updates the same record rather than creating duplicate leads. Pilot entries have source Phone — AI pilot test and an AI PHONE PILOT TEST note. They never fire a Google Ads conversion.
+A synthetic integration check is visible as AI Phone Setup Test, reference PHONE-E1484868733D. It was saved twice and produced exactly one entry. Its status is Closed Lost to make clear it is a test, with a reserved example.invalid email and fictional UK test phone. It is not an actual phone call, customer, lost sale or advertising result. No messages were sent by this check.
 
 CALL EXPERIENCE
 Opening: Hello, you've reached The Supreme Collective. I'm the AI enquiry assistant. I can help with bands and take your details for Rhona. Is that okay?
-The Twilio greeting first discloses AI and asks callers to press 1 before bridging their call to OpenAI, or 2 for the separately configured human destination. A voice clone has not been created; the test uses an OpenAI stock voice with British English instructions. Listen to an actual test before choosing its final voice.
-Collect name; confirmed callback number or email; event type; event date INCLUDING YEAR; venue/town/postcode; music/band preferences; budget and lineup requirements; when they hope to book.
-Read details back and get confirmation before saving. Keep the band central. Do not announce individual singer availability. No availability check, reservation, checkout, payment, musician contact, outbound messaging or outbound sales-call tools are exposed.
-A caller asking for a person during the AI conversation can leave a callback request. Immediate mid-conversation transfer is not implemented. The initial keypad option can dial one configured human number; it cannot be the same mobile number because that could loop through forwarding.
+The initial keypad greeting discloses AI and requires pressing 1 before bridging audio. A voice clone has not been created; the test uses the stock marin voice with British-English instructions. Listen to an actual call before choosing the final voice.
+Collect name; confirmed callback phone/email; event type; event date INCLUDING YEAR; venue/town/postcode; music/band preferences; budget and lineup requirements; when they hope to book. Read back the details and obtain confirmation before saving. Do not announce singer availability or claim any band is available: the current assistant has no availability-check, reservation, booking or payment tool.
+No outbound messaging, musician contact, payment, contract or booking action is exposed. A request for a human can be saved as a callback. Immediate transfer during the AI conversation is not implemented. The initial keypad option for a human falls back to the contact page unless a separate, approved human destination is configured. Neither forwarded public number should become the escalation destination, to avoid routing loops.
 
-ENQUIRY BOARD
-Confirmed enquiries and partial callback requests upsert one EnquiryBoardItem per Twilio CallSid through websiteKey. Source is Phone — source unverified. Self-reported discovery source goes in notes and is not converted into Google Ads attribution. Callback number and the decision window appear in notes. Event date remains separate. No Google Ads conversion fires from these routes. No automated emails or musician availability requests are triggered.
-Published band lookup selects only public descriptive fields from approved/live acts. It does not expose musician contacts, customer records, availability or prices.
+CALENDLY
+https://calendly.com/thesupremecollective/call
+The public page was verified as Rhona Downie's 15-minute phone-call booking page. The assistant has the public link in its instructions and can explain it slowly over the phone or save a callback request. It does not have account access, live slot lookup, appointment creation or SMS/email delivery. It must never invent free times, claim to have made a booking, or promise it has sent the link.
 
-CONNECTION NEEDED BEFORE A REAL TEST
-1. Test directly on existing Twilio 07453 423200, after configuration and approval of test usage. No new number purchase is required for that candidate. Retain both public numbers. After a successful test, Virtual Landline can point 020 3576 5322 directly to the AI ingress. Direct calls to 07594 223200 can be forwarded from giffgaff separately. Avoid a loop through either public number when setting human escalation. Do not change live forwarding yet. Confirm plan-specific forwarding charges and agree the test allowance. VOICE_ENQUIRY_TWILIO_NUMBER is that ingress number, not necessarily 07594 223200.
-2. Configure the chosen OpenAI project for realtime.call.incoming at the signed raw-body webhook endpoint below. Add its API key, project ID and webhook signing secret to the server environment through secure account settings; never paste keys into chat or commit them.
-3. Generate a random bridge secret of at least 32 characters. Configure an approved TEST caller phone number. Do not use the public number itself as the test caller if it is forwarded.
-4. Deploy to a test/staging backend first. Configure only the dedicated Twilio test ingress number with its voice POST webhook. Test by calling the ingress directly. Do not forward the public mobile line until Rhona has reviewed an actual call and agreed the ongoing spending limit.
-5. Verify Twilio passes X-TSC-Bridge to the OpenAI incoming SIP event and TLS/SRTP negotiation succeeds. This has NOT been tested on the real carrier yet. No end-to-end audio quality, accent, latency or real call saving has been verified.
+BAND MATCHING — CONNECTED IN THIS REVISION
+The read-only search uses approved/live, non-test catalogue entries and only public names, genre tags, lineup references/sizes and instrument labels. It does not load musician contacts, names or fees. It normalizes R&B/RnB, named sizes such as trio, size ranges and instrument aliases. Styles may be alternatives or all required. Size and instruments must belong to the same lineup. A brass section requires at least two separate horn players; one multi-instrumentalist cannot occupy two simultaneous horn roles. Blank unused member rows and managers do not count as performers.
+The catalogue has 24 published acts and 75 lineups. Three Soul Allegiance lineups have declared size/performer-count inconsistencies. The assistant flags them for staff verification and does not present their recorded size as verified. It can still collect a named-band enquiry for review. Catalogue data was not silently changed.
+The assistant returns at most three matching bands. Unknown constraints request clarification; no match does not relax the caller's preferences. Date availability, travel/location suitability and final pricing are not checked by this search. These remain for staff review.
+A caller can save preferences without a band selection. Structured styles, preferredSize, mustHaveInstruments and selectedBands are saved on the enquiry board. Selected bands must have been looked up within that call, explicitly confirmed by the caller and revalidated against current catalogue data and the confirmed preferences. Model-supplied names/IDs are not accepted as authority. Optional lineup references must belong to that returned band and match the criteria. The confirmed choices are distinct from suggestions.
+Each active voice connection has its own selection state; public lookup results are not shared between callers. Saves still upsert one board item per call. These tools do not send band availability requests, emails, texts, calls or payments. No quote or booking is confirmed. The next separate integration is any approved use of the existing website availability-request process.
+
+VERIFIED CHECKS
+32 focused automated tests passed, including genuine enquiry validation, retry deduplication, closed failure paths, persistent pilot quota, signatures, caller restriction, paid-booking receipt logic and source preservation. Server syntax and git diff checks passed.
+The restricted key connected to the requested gpt-realtime-2.1-mini model and accepted the session settings without generating audio or a response.
+Live backend checks passed for the signed caller greeting, absence of an audio bridge before keypad consent, refusal of unapproved callers, rejection of invalid Twilio signatures, acceptance of a correctly signed OpenAI raw-body event and rejection of an unsigned event. These probes created no calls or musician requests.
+The synthetic board save and duplicate retry were verified in the actual enquiry board. The four preference fields were also tested on both manual and website-request records, with catalogue and lineup references retained after reload.
+A scripted Realtime text-tool test used fictional caller details and the production catalogue. R&B + five-piece + saxophone returned Indigo Delight and RnB Knights; after an explicit simulated read-back confirmation it saved Indigo Delight and its matching lineup, plus the three preference fields. A retry left one record, reference PHONE-6F40576272ED, client AI Band Matching Test. It was marked Closed Lost as a test. No telephone call or band request was placed by that check. The check used 5,501 reported input tokens and 544 reported output tokens through the restricted pilot project. This does not replace the physical acceptance call.
 
 SERVER SETTINGS
-VOICE_ENQUIRY_ENABLED=false by default; only explicitly set true for a prepared test.
-VOICE_ENQUIRY_PUBLIC_BASE_URL=https://the-staging-backend-host (origin only).
-VOICE_ENQUIRY_TWILIO_NUMBER=the Twilio voice ingress in +44 format.
-VOICE_ENQUIRY_TEST_CALLERS=comma-separated approved test callers in +44 format.
-VOICE_ENQUIRY_PROJECT_ID=the OpenAI project starting proj_.
-VOICE_ENQUIRY_BRIDGE_SECRET=random secret at least 32 characters.
-OPENAI_VOICE_WEBHOOK_SECRET=the incoming-call webhook signing secret.
-OPENAI_VOICE_API_KEY=separate server-side key for the voice project. Do not replace the website's existing OPENAI_API_KEY. The voice feature does not fall back to that key.
-TWILIO_AUTH_TOKEN=existing Twilio account token for webhook signature checks.
-OPENAI_VOICE_MODEL defaults to gpt-realtime-2.1-mini; verify project access before the real test.
-VOICE_ENQUIRY_HUMAN_NUMBER=optional approved destination, different from the forwarded public mobile.
+VOICE_ENQUIRY_ENABLED=true for this approved caller-only test.
+VOICE_ENQUIRY_PUBLIC_BASE_URL=https://tsc-backend-v2.onrender.com
+VOICE_ENQUIRY_TWILIO_NUMBER=+447453423200
+VOICE_ENQUIRY_TEST_CALLERS=+447594223200
+VOICE_ENQUIRY_PROJECT_ID=proj_3rYgedW15bMlUuoTLaRh92vh
+VOICE_ENQUIRY_TEST_END_AT=2026-11-18T10:55:00Z
+OPENAI_VOICE_MODEL=gpt-realtime-2.1-mini
+OPENAI_VOICE_API_KEY, OPENAI_VOICE_WEBHOOK_SECRET and VOICE_ENQUIRY_BRIDGE_SECRET are held privately in the backend environment. The website's existing OPENAI_API_KEY was not replaced. Existing TWILIO_AUTH_TOKEN verifies carrier requests. Do not paste secrets into chat or commit them.
+Optional VOICE_ENQUIRY_HUMAN_NUMBER must be a separately approved destination without a forwarding loop.
 
 ENDPOINTS
-POST /api/voice-enquiries/twilio/incoming — signed Twilio form webhook.
-POST /api/voice-enquiries/twilio/finished — signed Twilio continuation/fallback.
-POST /api/voice-enquiries/openai/webhook — signed raw JSON OpenAI webhook.
-Mount before the application-wide JSON parser. No unsigned public write endpoint is exposed.
+POST /api/voice-enquiries/twilio/incoming
+POST /api/voice-enquiries/twilio/finished
+POST /api/voice-enquiries/openai/webhook
+The router is mounted before the general JSON parser. Twilio signatures and OpenAI webhook signatures are checked. A short-lived signed bridge token binds the SIP event to an allowed call. No raw call recording or full transcript storage was added; provider processing/retention depends on account settings.
 
-TEST LIMITS AND LIMITATIONS
-One active test call and five accepted test calls per UTC day per process; these are IN-MEMORY test limits and reset on restart. They are NOT a durable financial cap or ready for multiple backend replicas. The carrier Dial leg has a six-minute time limit as well as a server timer, so it does not rely solely on the backend remaining alive. Caller allowlisting is a test restriction, not identity verification for private records; none are exposed.
-A production rollout needs persistent usage/cost controls, monitoring, durable call-state/recovery, approved human escalation, and a live acceptance test. The prototype does not promise recovery of details if a caller disconnects before confirming an enquiry. No raw call recording or full transcript storage is added by this code; provider processing and retention still depend on account configuration.
-
-ACCEPTANCE TESTS BEFORE MOBILE FORWARDING
-Normal new wedding enquiry; incomplete/undecided date; caller declines AI; human callback; wrong email/phone correction; silence/interruption; existing booking problem; caller requests unverified availability or price; tool/storage failure; duplicate tool delivery; forged webhook; unapproved caller; disconnect; six-minute cutoff and provider fallback.
-
-ROLLBACK
-Leave VOICE_ENQUIRY_ENABLED=false and keep the mobile provider's existing routing. Once testing has begun, remove the dedicated test number's new voice handler or restore its saved previous voice settings. Do not change WhatsApp/SMS webhooks or the emergency IVR.
+ROLLBACK / PRODUCTION GATE
+Set VOICE_ENQUIRY_ENABLED=false and restore only 07453 423200's backed-up voice URL/method. Leave its messaging settings and both public numbers unchanged.
+Before public forwarding: complete physical call tests, verify selected band matching and permitted request sending, verify recovery/fallback, agree ongoing spending and human escalation, and review provider-specific forwarding charges. The current prototype's active session binding is in memory and is not a production recovery mechanism; its TOTAL quota is persistent.
 
 PRIMARY DOCUMENTATION
 https://developers.openai.com/api/docs/guides/voice-sip?voice-api=realtime
@@ -58,12 +67,5 @@ https://developers.openai.com/api/docs/guides/voice-server-controls?api=realtime
 https://www.twilio.com/docs/voice/twiml/sip
 https://www.twilio.com/docs/voice/twiml/dial
 https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource
-
-ACCOUNT PREPARATION UPDATE
-A separate OpenAI project, Enquiry Calls - Test, was created under The Supreme Collective organisation on 10 November 2026. No API key or service account has been created for it, no voice webhook has been activated, and no paid model requests have been made. Creating the backend service credential requires action-time approval because it grants the backend new access to this voice project.
-Project ID: proj_3rYgedW15bMlUuoTLaRh92vh. A $10 monthly project spending limit was saved with enforcement ON and then verified in the editor. The provider warns enforcement is not instantaneous, so final usage can exceed it slightly. This controls OpenAI usage only; it does not include Twilio or forwarding charges. No test-usage allowance has yet been approved.
-The API-key form is prepared for Realtime requests only, with a seven-day expiry; no key has been created. This is a temporary test credential, not a production access arrangement.
-
-FORWARDING SOURCES
 https://help.giffgaff.com/en/articles/240687-how-to-manage-call-forwarding-on-your-phone
 https://www.virtuallandline.co.uk/how-does-it-work/faqs

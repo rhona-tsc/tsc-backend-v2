@@ -2,9 +2,8 @@ import express from 'express';
 import twilio from 'twilio';
 import OpenAI from 'openai';
 import { OpenAIRealtimeWS } from 'openai/realtime/ws';
-import Act from '../models/actModel.js';
-import EnquiryBoardItem from '../models/enquiryBoardItem.js';
-import { createEnquiryToolHandler, normalizeCallbackPhone } from '../services/incomingEnquiryAssistant.js';
+import { normalizeCallbackPhone, VoiceEnquiryValidationError } from '../services/incomingEnquiryAssistant.js';
+import { createVoiceEnquiryTools } from '../services/voiceEnquiryStore.js';
 import { voiceConnectionConfig, signVoiceBridge, verifyVoiceBridge, buildEnquiryVoiceSession, voiceOpeningEvent, VOICE_ENQUIRY_NUMBER, VOICE_MAX_SECONDS } from '../services/voiceEnquiryConnection.js';
 import { reserveVoicePilotCall } from '../services/voiceEnquiryPilotLimit.js';
 
@@ -13,28 +12,6 @@ const router = express.Router();
 const sessions = new Map();
 let reserving = false;
 const path = '/api/voice-enquiries';
-const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const stripHtml = value => String(value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-
-const handleTool = createEnquiryToolHandler({
-  lookupBands: async query => {
-    const words = query.split(/\s+/).filter(Boolean).slice(0, 5);
-    const pattern = words.map(escapeRegex).join('|');
-    const acts = await Act.find({ status: { $in: ['approved', 'live', 'approved_changes_pending', 'live_changes_pending'] }, isTest: { $ne: true },
-      $or: [{ tscName: { $regex: pattern, $options: 'i' } }, { genres: { $regex: pattern, $options: 'i' } }, { genre: { $regex: pattern, $options: 'i' } }] })
-      .select('tscName slug description genres genre').limit(3).lean();
-    return acts.map(act => ({ name: act.tscName, profile: act.slug ? `https://thesupremecollective.co.uk/act/${encodeURIComponent(act.slug)}/` : '',
-      description: stripHtml(act.description).slice(0, 700), genres: (act.genres?.length ? act.genres : act.genre) || [] }));
-  },
-  saveBoardRecord: record => {
-    const { status, ...details } = record;
-    details.marketingSource = 'Phone — AI pilot test';
-    details.notes = `[AI PHONE PILOT TEST — not a real advertising conversion]\n${details.notes}`;
-    return EnquiryBoardItem.findOneAndUpdate({ websiteKey: record.websiteKey }, {
-      $set: details, $setOnInsert: { status },
-    }, { upsert: true, new: true, runValidators: true });
-  },
-});
 
 function sayContact(res) {
   const xml = new twilio.twiml.VoiceResponse();
@@ -112,6 +89,7 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
   }
   binding.connecting = true;
   try {
+    const handleTool = createVoiceEnquiryTools();
     await client.realtime.calls.accept(callId, buildEnquiryVoiceSession(config));
     binding.callId = callId;
     const connection = await OpenAIRealtimeWS.create(client, { callID: callId, options: { handshakeTimeout: 10000, maxPayload: 1024 * 1024 } });
@@ -137,7 +115,8 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
         let result = results.get(tool.call_id);
         if (!result) {
           try { result = await handleTool({ callId: payload.sid, name: tool.name, arguments: tool.arguments }); }
-          catch { result = { saved: false, error: 'Could not complete this request. Confirm the required details or offer the contact page. Do not claim success.' }; }
+          catch (error) { result = { saved: false, error: error instanceof VoiceEnquiryValidationError ? error.message
+            : 'Could not complete this request. Confirm the required details or offer the contact page. Do not claim success.' }; }
           results.set(tool.call_id, result);
         }
         connection.send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: tool.call_id, output: JSON.stringify(result) } });
