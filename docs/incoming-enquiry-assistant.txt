@@ -50,7 +50,7 @@ SERVER SETTINGS
 VOICE_ENQUIRY_ENABLED=true for this approved caller-only test.
 VOICE_ENQUIRY_PUBLIC_BASE_URL=https://tsc-backend-v2.onrender.com
 VOICE_ENQUIRY_TWILIO_NUMBER=+447453423200
-VOICE_ENQUIRY_TEST_CALLERS=+447594223200
+VOICE_ENQUIRY_TEST_CALLERS includes the business mobile and the approved personal test caller (configured privately in Render).
 VOICE_ENQUIRY_PROJECT_ID=proj_3rYgedW15bMlUuoTLaRh92vh
 VOICE_ENQUIRY_TEST_END_AT=2026-11-18T10:55:00Z
 OPENAI_VOICE_MODEL=gpt-realtime-2.1-mini
@@ -75,3 +75,5 @@ https://www.twilio.com/docs/voice/twiml/dial
 https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource
 https://help.giffgaff.com/en/articles/240687-how-to-manage-call-forwarding-on-your-phone
 https://www.virtuallandline.co.uk/how-does-it-work/faqs
+
+Caller wording: the greeting and fallback refer to the team; follow-ups say someone from the team. The personal test caller is included alongside the business mobile, without opening the pilot to other numbers.
