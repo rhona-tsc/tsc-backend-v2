@@ -196,7 +196,7 @@ export function buildVoiceBoardRecord(callId, enquiry, now = new Date()) {
   };
 }
 
-export function createEnquiryToolHandler({ lookupBands, saveBoardRecord, prepareAvailability, lookupJobs, lookupBookingEquipment, lookupVenues, lookupCallSlots, prepareAppointment, trustedTestOperator = false, now = () => new Date() }) {
+export function createEnquiryToolHandler({ lookupBands, saveBoardRecord, prepareAvailability, lookupJobs, lookupBookingEquipment, lookupVenues, lookupCallSlots, prepareAppointment, trustedTestOperator = false, enforceBookingFlow = false, now = () => new Date() }) {
   // The live router creates one handler per call; catalogue selections never cross calls.
   const offeredByCall = new Map();
   const venuesByCall = new Map(), slotsByCall = new Map();
@@ -250,7 +250,7 @@ export function createEnquiryToolHandler({ lookupBands, saveBoardRecord, prepare
       const saved = confirmedByCall.get(callId);
       if (!saved?.qualified || !saved.record.selectedBands?.length || saved.choicesConfirmed !== true) throw new VoiceEnquiryValidationError('First save a confirmed event enquiry with the caller’s chosen bands. A callback or search result is not a request.');
       if (!prepareAvailability) throw new VoiceEnquiryValidationError('The test request preview is not available. The enquiry is still saved for staff review.');
-      if (saved.record.preferredContactMethod && (!saved.record.county || !saved.record.postcode || saved.record.venueConfirmation?.confirmed !== true)) throw new VoiceEnquiryValidationError('The enquiry is saved. Confirm the venue address, county and full postcode through lookup_venue before preparing requests.');
+      if ((enforceBookingFlow || saved.record.preferredContactMethod) && (!saved.record.county || !saved.record.postcode || saved.record.venueConfirmation?.confirmed !== true)) throw new VoiceEnquiryValidationError('The enquiry is saved. Confirm the venue address, county and full postcode through lookup_venue before preparing requests.');
       const preview = await prepareAvailability(saved.record);
       return { prepared: preview.status === 'prepared', testMode: true, sent: 0, enquiryRef: saved.record.enquiryRef,
         requests: preview.requests, blocked: preview.blocked, availabilityChecked: false, bookingConfirmed: false, messagesSent: false };
@@ -294,8 +294,9 @@ export function createEnquiryToolHandler({ lookupBands, saveBoardRecord, prepare
       enquiry.address = venue.address; enquiry.county = venue.county; enquiry.postcode = venue.postcode;
       enquiry.venueConfirmation = { venueId: venue.venueId, name: venue.name, source: venue.source, confirmed: !venue.addressIncomplete && !venue.countyConflict && venue.postcodeValidated && !!venue.county, callerConfirmed: true, confirmedAt: now().toISOString() };
     }
-    if (name === 'save_enquiry' && enquiry.preferredContactMethod && !enquiry.decisionWindow) throw new VoiceEnquiryValidationError('Ask when the caller hopes to choose/book the band. Save their answer or not sure separately from the event date.');
-    if (name === 'save_enquiry' && enquiry.preferredContactMethod && !enquiry.bandSuggestionsDeclined && (enquiry.styles?.length || enquiry.preferredSize || enquiry.mustHaveInstruments?.length) && !offeredByCall.has(callId)) throw new VoiceEnquiryValidationError('Before finishing, look up suitable bands and offer them, unless the caller explicitly declines suggestions.');
+    if (name === 'save_enquiry' && enforceBookingFlow && !enquiry.preferredContactMethod) throw new VoiceEnquiryValidationError('Ask for the preferred follow-up channel: email first, or WhatsApp/phone if declined. Read back and confirm that contact before saving.');
+    if (name === 'save_enquiry' && (enforceBookingFlow || enquiry.preferredContactMethod) && !enquiry.decisionWindow) throw new VoiceEnquiryValidationError('Ask when the caller hopes to choose/book the band. Save their answer or not sure separately from the event date.');
+    if (name === 'save_enquiry' && (enforceBookingFlow || enquiry.preferredContactMethod) && !enquiry.bandSuggestionsDeclined && (enquiry.styles?.length || enquiry.preferredSize || enquiry.mustHaveInstruments?.length) && !offeredByCall.has(callId)) throw new VoiceEnquiryValidationError('Before finishing, look up suitable bands and offer them, unless the caller explicitly declines suggestions.');
     const record = buildVoiceBoardRecord(callId, enquiry, now());
     // Store must upsert by websiteKey: one call produces one enquiry, including retries/updates.
     confirmedByCall.delete(callId); // A failed update must not leave earlier details eligible.
