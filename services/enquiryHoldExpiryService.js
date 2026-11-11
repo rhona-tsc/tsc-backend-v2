@@ -26,6 +26,8 @@ export async function expireEnquiryHolds({ now = new Date() } = {}) {
         // Read every request sharing the event: never expire a newer hold or
         // an event which has subsequently become a confirmed booking.
         const requests = await db.collection('availabilities').find({ calendarEventId: id }).toArray();
+        // Rhona explicitly retained Miles's Louise enquiry pending review.
+        if (requests.some(r => r.dateISO === '2026-11-28' && String(r.calendarInviteEmail || '').toLowerCase() === 'milesadaley@gmail.com')) continue;
         if (requests.some(r => r.confirmedBooking || !r.calendarInviteSentAt || holdExpiresAt(r.calendarInviteSentAt) > now)) continue;
         const { data: event } = await calendar.events.get({ calendarId: 'primary', eventId: id });
         if (event.status !== 'cancelled') {
