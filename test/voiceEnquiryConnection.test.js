@@ -32,7 +32,7 @@ test('feature defaults off and cannot be ready without test caller allowlist and
 
 test('voice session has only public lookup/enquiry capture tools and tracing disabled', () => {
   const config = buildEnquiryVoiceSession({ model: 'test-model' });
-  assert.deepEqual(config.tools.map(tool => tool.name), ['lookup_bands', 'request_band_availability', 'save_enquiry', 'request_callback']);
+  assert.deepEqual(config.tools.map(tool => tool.name), ['lookup_bands', 'lookup_musician_jobs', 'get_technical_guidance', 'request_band_availability', 'save_enquiry', 'request_callback']);
   assert.equal(config.tracing, null);
   assert.equal(config.max_output_tokens, 500);
 });

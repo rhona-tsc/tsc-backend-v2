@@ -1,3 +1,4 @@
+import { lookupVoicePublicJobs } from './voicePublicJobs.js';
 import Act from '../models/actModel.js';
 import EnquiryBoardItem from '../models/enquiryBoardItem.js';
 import { matchVoiceBands } from './voiceBandMatching.js';
@@ -37,4 +38,4 @@ export async function prepareVoiceAvailability(record) {
   return preview;
 }
 
-export const createVoiceEnquiryTools = () => createEnquiryToolHandler({ lookupBands: lookupVoiceBands, saveBoardRecord: saveVoiceBoardRecord, prepareAvailability: prepareVoiceAvailability });
+export const createVoiceEnquiryTools = () => createEnquiryToolHandler({ lookupBands: lookupVoiceBands, lookupJobs: lookupVoicePublicJobs, saveBoardRecord: saveVoiceBoardRecord, prepareAvailability: prepareVoiceAvailability });
