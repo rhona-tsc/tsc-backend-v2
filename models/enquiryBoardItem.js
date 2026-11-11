@@ -44,6 +44,10 @@ const EnquiryBoardItemSchema = new mongoose.Schema(
     bandSuggestionsDeclined: { type: Boolean, default: false },
     callAppointment: { type: mongoose.Schema.Types.Mixed, default: undefined },
 
+    voicePriceEstimates: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+    captureState: { type: String, enum: ['draft', 'confirmed'], default: undefined },
+    draftDetails: { type: mongoose.Schema.Types.Mixed, default: undefined },
+
     // Source (agent)
     agent: { type: String, index: true },
 

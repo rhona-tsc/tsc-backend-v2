@@ -1,3 +1,4 @@
+import { saveVoiceDraft } from './voiceEnquiryStore.js';
 import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import nodemailer from 'nodemailer';
@@ -33,7 +34,7 @@ export function createCallTranscript({ persist, now = () => new Date() }) {
     const output = [];
     const append = item => { if (visited.has(item.itemId) || visiting.has(item.itemId)) return; visiting.add(item.itemId); const previous = items.get(item.previousItemId); if (previous) append(previous); visiting.delete(item.itemId); visited.add(item.itemId); if (item.role && (item.text || item.transcriptionFailed || item.role === 'user')) { const { content, ...entry } = item; output.push({ ...entry, transcriptionPending: item.role === 'user' && !item.text && !item.transcriptionFailed }); } };
     [...items.values()].sort((a,b) => a.sequence-b.sequence).forEach(append);
-    return { turns: output, transcriptLimited: limited, transcriptHasGaps: failed || output.some(item => item.transcriptionFailed || item.transcriptionPending), transcriptNotice: 'Machine transcript; may contain recognition errors. Interrupted assistant speech may include generated words the caller did not hear.' };
+    return { turns: output, transcriptLimited: limited, transcriptHasGaps: failed || output.some(item => item.transcriptionFailed || item.transcriptionPending || item.recognitionSuspect), transcriptNotice: 'Machine transcript; may contain recognition errors. Interrupted assistant speech may include generated words the caller did not hear.' };
   };
   return {
     accept(event) {
@@ -49,6 +50,7 @@ export function createCallTranscript({ persist, now = () => new Date() }) {
         item.role = event.type.startsWith('conversation.') ? 'user' : 'assistant';
         item.content[Math.max(0, Math.min(10, Number(event.content_index) || 0))] = clean(event.transcript);
         item.text = Object.keys(item.content).sort((a,b)=>a-b).map(key=>item.content[key]).join('\n').slice(0, 12000);
+        item.recognitionSuspect = item.role === 'user' && /UK venue names, band names, full postcodes/i.test(item.text);
       } else if (event.type === 'conversation.item.input_audio_transcription.failed') { item = itemFor(event.item_id); if (!item) return; item.role = 'user'; item.transcriptionFailed = true; }
       else if (event.type === 'conversation.item.truncated') { item = itemFor(event.item_id); if (!item) return; item.interrupted = true; }
       else return;
@@ -62,6 +64,7 @@ export function createCallTranscript({ persist, now = () => new Date() }) {
 
 export async function startVoiceCallReview({ callSid, caller, intent }) {
   if (!/^CA[a-f\d]{32}$/i.test(callSid)) throw new Error('Invalid call reference.');
+  await saveVoiceDraft(callSid, {});
   await calls().createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
   await calls().updateOne({ _id: voiceCallRef(callSid) }, { $setOnInsert: { callSid, caller, intent, startedAt: new Date(), status: 'connecting', testMode: true, turns: [], expiresAt: new Date(Date.now()+90*86400000), notificationStatus: 'pending' } }, { upsert: true });
 }
@@ -73,12 +76,14 @@ export function managementCallEmail(call, enquiry) {
   const date = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' }).format(call.startedAt);
   const lines = [
     'AI PHONE PILOT TEST — no musician or customer messages were sent.', `Call: ${date} UK time`, `Reference: ${call._id}`, `Status: ${call.status}`,
+    enquiry?.captureState === 'draft' ? 'UNCONFIRMED DRAFT — details may be incomplete or misheard; review the transcript and confirm before following up.' : '',
     enquiry ? `Name: ${enquiry.clientName || 'Not captured'}\nPhone: ${enquiry.clientPhone || 'Not captured'}\nEmail: ${enquiry.clientEmail || 'Not supplied'}\nPreferred follow-up: ${enquiry.preferredContactMethod || 'Not specified'}\nEvent: ${enquiry.eventDateISO || 'Not captured'}\nVenue: ${enquiry.address || 'Not captured'}\nCounty: ${enquiry.county || 'Needs confirmation'}\nPostcode: ${enquiry.postcode || 'Needs confirmation'}\nBudget: ${enquiry.maxBudget ? `£${enquiry.maxBudget}` : 'Not supplied'}\nHopes to book: ${enquiry.decisionWindow || 'Not supplied'}\nSelected bands: ${(enquiry.selectedBands || []).map(item=>item.name).join(', ') || 'None selected'}\nAvailability previews: ${enquiry.availabilityRequestTest?.requests?.length || 0}; 0 sent\nCallback appointment: ${enquiry.callAppointment?.label || 'None'}${enquiry.callAppointment ? ' (test proposal; not booked)' : ''}\n\n${enquiry.notes || ''}` : 'No confirmed enquiry was saved. Review the transcript for incomplete details.',
+    enquiry?.voicePriceEstimates?.length ? `Website estimates checked (not bookings):\n${enquiry.voicePriceEstimates.map(quote=>`${quote.bandName}, ${quote.performerCount}-piece, ${quote.county}, ${quote.eventDateISO}: £${quote.priceGBP}, calculated travel included`).join('\n')}` : '',
     `Transcript: ${call.turns?.length || 0} turns${call.transcriptHasGaps ? '; capture gaps need review' : ''}${call.transcriptLimited ? '; capture limit reached' : ''}.`,
     'Review the call and all prepared band requests before contacting the client:', `https://admin.thesupremecollective.co.uk/enquiry-board?callReview=${call._id}`,
     'No live availability replies are expected in test mode. A prepared preview is not a sent request or a confirmed band.',
   ];
-  return { to: VOICE_MANAGEMENT_EMAIL, subject: `[AI test call] ${enquiry?.clientName || 'Incomplete enquiry'} — ${call._id}`, text: lines.join('\n\n') };
+  return { to: VOICE_MANAGEMENT_EMAIL, subject: `[AI test call] ${enquiry?.captureState === 'draft' ? 'Draft enquiry — ' : ''}${enquiry?.clientName || 'Incomplete enquiry'} — ${call._id}`, text: lines.join('\n\n') };
 }
 export async function finishVoiceCallReview(callSid, { status = 'completed', sendMail } = {}) {
   const id = voiceCallRef(callSid);
@@ -102,7 +107,10 @@ export async function listVoiceCallReviews() {
 export async function readVoiceCallReview(ref) {
   if (!/^PHONE-[A-F\d]{12}$/.test(ref || '')) return null;
   const call = await calls().findOne({ _id: ref, expiresAt: { $gt: new Date() } }, { projection: { callSid: 0, caller: 0 } });
-  const enquiry = await EnquiryBoardItem.findOne({ enquiryRef: ref, marketingSource: 'Phone — AI pilot test' }).select('enquiryRef clientName clientEmail clientPhone eventDateISO address county postcode venueConfirmation preferredContactMethod decisionWindow styles preferredSize maxBudget selectedBands availabilityRequestTest callAppointment notes createdAt').lean();
+  const enquiry = await EnquiryBoardItem.findOne({ enquiryRef: ref, marketingSource: 'Phone — AI pilot test' }).select('enquiryRef clientName clientEmail clientPhone eventDateISO address county postcode venueConfirmation preferredContactMethod decisionWindow styles preferredSize maxBudget selectedBands availabilityRequestTest callAppointment captureState draftDetails voicePriceEstimates notes createdAt').lean();
   if (!call && !enquiry) return null;
-  return { ...(call || { _id: ref, startedAt: enquiry?.createdAt, status: 'no_transcript', turns: [] }), enquiry };
+  const result = { ...(call || { _id: ref, startedAt: enquiry?.createdAt, status: 'no_transcript', turns: [] }), enquiry };
+  result.turns = (result.turns || []).map(turn=>({...turn,recognitionSuspect:!!turn.recognitionSuspect || turn.role==='user' && /UK venue names, band names, full postcodes/i.test(turn.text)}));
+  result.transcriptHasGaps = !!result.transcriptHasGaps || result.turns.some(turn=>turn.recognitionSuspect);
+  return result;
 }

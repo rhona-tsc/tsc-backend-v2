@@ -17,6 +17,7 @@ export const eventDateIsCurrentOrFuture = (value, now = Date.now()) => {
 };
 
 const eligibleWithinHours = (row, now, ageHours) => {
+  if (row?.captureState === 'draft' || row?.testMode === true || /^Phone — AI pilot test$/i.test(clean(row?.marketingSource)) || /^voice[_-]/i.test(clean(row?.source))) return false;
   const actName = clean(row?.actName);
   if (!actName || /^test\b/i.test(actName)) return false;
   if (!eventDateIsCurrentOrFuture(row?.dateISO || row?.date, now)) return false;

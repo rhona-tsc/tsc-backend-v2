@@ -60,7 +60,7 @@ router.post('/twilio/finished', express.urlencoded({ extended: false, limit: '16
   if (!config.ready || !twilio.validateRequest(config.twilioToken, req.get('X-Twilio-Signature') || '', `${config.base}${path}/twilio/finished`, req.body)) return res.sendStatus(403);
   const session = sessions.get(req.body.CallSid);
   if (session?.end) await session.end();
-  else if (session) { await finishReview(req.body.CallSid).catch(() => {}); sessions.delete(req.body.CallSid); }
+  else if (/^CA[0-9a-f]{32}$/i.test(req.body.CallSid || '')) { await finishReview(req.body.CallSid).catch(() => {}); sessions.delete(req.body.CallSid); }
   const xml = new twilio.twiml.VoiceResponse(); xml.hangup(); return res.type('text/xml').send(xml.toString());
 });
 
@@ -98,7 +98,7 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
     const end = async () => {
       if (ending) return;
       ending = true;
-      clearTimeout(timer);
+      clearTimeout(timer); clearTimeout(warningTimer);
       try { await client.realtime.calls.hangup(callId); } catch {}
       connection.close();
       await queue.catch(() => {});
@@ -107,6 +107,8 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
       sessions.delete(payload.sid);
     };
     binding.end = end;
+    const warningTimer = setTimeout(() => { try { if (!ending) connection.send({type:'conversation.item.create',item:{type:'message',role:'system',content:[{type:'input_text',text:'The test call has 45 seconds left. Keep this brief: checkpoint any partial details with save_enquiry_draft unless already confirmed. Ask for the one most important missing contact detail, or explain that the team will review the draft. Do not repeat the full enquiry or claim it is confirmed.'}]}}); } catch {} }, (VOICE_MAX_SECONDS-45)*1000);
+    warningTimer.unref?.();
     const timer = setTimeout(end, VOICE_MAX_SECONDS * 1000);
     timer.unref?.();
     connection.socket.on('open', () => connection.send(voiceOpeningEventFor(binding.intent)));
@@ -120,7 +122,7 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
         let result = results.get(tool.call_id);
         if (!result) {
           try { result = await handleTool({ callId: payload.sid, name: tool.name, arguments: tool.arguments }); }
-          catch (error) { result = { ...(tool.name === 'request_band_availability' ? { prepared: false, testMode: true, sent: 0 } : ['save_enquiry', 'request_callback'].includes(tool.name) ? { saved: false } : { lookupSucceeded: false }), error: error instanceof VoiceEnquiryValidationError ? error.message
+          catch (error) { result = { ...(tool.name === 'request_band_availability' ? { prepared: false, testMode: true, sent: 0 } : ['save_enquiry', 'request_callback', 'save_enquiry_draft'].includes(tool.name) ? { saved: false } : { lookupSucceeded: false }), error: error instanceof VoiceEnquiryValidationError ? error.message
             : 'Could not complete this request. Confirm the required details or offer the contact page. Do not claim success.' }; }
           results.set(tool.call_id, result);
         }
