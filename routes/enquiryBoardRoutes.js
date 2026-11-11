@@ -1,3 +1,5 @@
+import { lookupVoiceBookingEquipment } from '../services/voiceBookingEquipmentStore.js';
+import { equipmentConnectionStatus, beginEquipmentGoogleConnection, disconnectEquipmentGoogleConnection } from '../services/voiceEquipmentGoogle.js';
 import express from "express";
 import mongoose from "mongoose";
 import EnquiryBoardItem from "../models/enquiryBoardItem.js";
@@ -18,6 +20,28 @@ const preparePreferences = async input => {
     ids => Act.find({ _id: { $in: ids } }).select('_id tscName name lineups._id lineups.lineupId').lean());
   return preferences;
 };
+
+// Management-only preparation and read-only test tools. Never write booking assignments.
+router.get('/equipment-test/status', musicianAuth, async (req, res) => {
+  if (!isTSCAdmin(req.user) && !isAgent(req.user)) return res.sendStatus(403);
+  try { res.json({ success: true, ...(await equipmentConnectionStatus()), canConnect: isTSCAdmin(req.user) }); }
+  catch { res.status(503).json({ success: false, message: 'Could not check the equipment connection.' }); }
+});
+router.post('/equipment-test/connect', musicianAuth, async (req, res) => {
+  if (!isTSCAdmin(req.user)) return res.sendStatus(403);
+  try { res.json({ success: true, url: await beginEquipmentGoogleConnection(req.user._id || req.user.id || req.user.userId) }); }
+  catch { res.status(503).json({ success: false, message: 'Could not prepare the read-only Google connection.' }); }
+});
+router.post('/equipment-test/disconnect', musicianAuth, async (req, res) => {
+  if (!isTSCAdmin(req.user)) return res.sendStatus(403);
+  try { res.json({ success: true, ...(await disconnectEquipmentGoogleConnection()), canConnect: true }); }
+  catch { res.status(503).json({ success: false, message: 'Could not disconnect the equipment reference.' }); }
+});
+router.post('/equipment-test/lookup', musicianAuth, async (req, res) => {
+  if (!isTSCAdmin(req.user) && !isAgent(req.user)) return res.sendStatus(403);
+  try { res.json({ success: true, result: await lookupVoiceBookingEquipment(req.body, { trustedTestOperator: true }) }); }
+  catch { res.status(400).json({ success: false, message: 'Confirm the exact booking reference and date, or ask management to review the record.' }); }
+});
 
 router.get('/preferences/options', musicianAuth, async (req, res) => {
   if (!isTSCAdmin(req.user) && !isAgent(req.user)) return res.sendStatus(403);

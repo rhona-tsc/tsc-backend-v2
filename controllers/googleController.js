@@ -116,10 +116,19 @@ export const getAuthUrl = (req, res) => {
 };
 
 export const oauth2Callback = async (req, res) => {
+  // Separate read-only Sheets consent; never replace the Calendar client's credentials.
+  if (typeof req.query.state === 'string' && req.query.state.startsWith('voice-equipment-test.')) {
+    const { handleEquipmentGoogleCallback } = await import('../services/voiceEquipmentGoogle.js');
+    return handleEquipmentGoogleCallback(req, res);
+  }
   console.log(`😈 (controllers/googleController.js) oauth2Callback called at`, new Date().toISOString());
   const code = req.query.code;
   try {
     const { tokens } = await oauth2Client.getToken(code);
+    const grantedScopes = tokens.scope ? tokens.scope.split(/\s+/) : (await oauth2Client.getTokenInfo(tokens.access_token)).scopes;
+    if (!grantedScopes.some(scope => scope === 'https://www.googleapis.com/auth/calendar' || scope.startsWith('https://www.googleapis.com/auth/calendar.'))) {
+      return res.status(403).send('Calendar permission was not granted. Please use the equipment connection for Sheets access.');
+    }
     oauth2Client.setCredentials(tokens);
     console.log('🔐 Google authentication completed');
     res.send('Authentication successful! You can close this tab.');

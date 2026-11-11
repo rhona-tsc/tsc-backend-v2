@@ -51,7 +51,7 @@ router.post('/twilio/incoming', express.urlencoded({ extended: false, limit: '16
   try { reserved = await reservePilotCall({ projectId: config.projectId, callSid: sid, endsAt: config.testEndsAt, now }); }
   catch {} finally { reserving = false; }
   if (!reserved) return sayContact(res);
-  sessions.set(sid, { expiresAt: now + (VOICE_MAX_SECONDS + 30) * 1000, connecting: false });
+  sessions.set(sid, { expiresAt: now + (VOICE_MAX_SECONDS + 30) * 1000, connecting: false, testCaller: from });
   const token = signVoiceBridge({ sid, to: VOICE_ENQUIRY_NUMBER, exp: now + 90000 }, config.bridgeSecret);
   const sip = `sip:${config.projectId}@sip.api.openai.com;transport=tls?X-TSC-Bridge=${encodeURIComponent(token)}`;
   xml.dial({ timeLimit: VOICE_MAX_SECONDS, timeout: 20, method: 'POST', action: `${path}/twilio/finished` }).sip(sip);
@@ -89,7 +89,7 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
   }
   binding.connecting = true;
   try {
-    const handleTool = createVoiceEnquiryTools();
+    const handleTool = createVoiceEnquiryTools({ trustedTestCaller: config.testCallers.includes(binding.testCaller) });
     await client.realtime.calls.accept(callId, buildEnquiryVoiceSession(config));
     binding.callId = callId;
     const connection = await OpenAIRealtimeWS.create(client, { callID: callId, options: { handshakeTimeout: 10000, maxPayload: 1024 * 1024 } });

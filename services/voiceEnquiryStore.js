@@ -1,3 +1,4 @@
+import { lookupVoiceBookingEquipment } from './voiceBookingEquipmentStore.js';
 import { lookupVoicePublicJobs } from './voicePublicJobs.js';
 import Act from '../models/actModel.js';
 import EnquiryBoardItem from '../models/enquiryBoardItem.js';
@@ -38,4 +39,4 @@ export async function prepareVoiceAvailability(record) {
   return preview;
 }
 
-export const createVoiceEnquiryTools = () => createEnquiryToolHandler({ lookupBands: lookupVoiceBands, lookupJobs: lookupVoicePublicJobs, saveBoardRecord: saveVoiceBoardRecord, prepareAvailability: prepareVoiceAvailability });
+export const createVoiceEnquiryTools = ({ trustedTestCaller = false } = {}) => createEnquiryToolHandler({ trustedTestOperator: trustedTestCaller === true, lookupBookingEquipment: lookupVoiceBookingEquipment, lookupBands: lookupVoiceBands, lookupJobs: lookupVoicePublicJobs, saveBoardRecord: saveVoiceBoardRecord, prepareAvailability: prepareVoiceAvailability });
