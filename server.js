@@ -16,6 +16,8 @@ import voiceEnquiryRoutes from './routes/voiceEnquiryRoutes.js';
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import cron from "node-cron";
+import { expireEnquiryHolds } from './services/enquiryHoldExpiryService.js';
+cron.schedule('*/15 * * * *', () => expireEnquiryHolds().catch(error => console.error('Enquiry expiry failed', error.message)));
 import listEndpoints from "express-list-endpoints";
 import Stripe from "stripe";
 import { dedupeSelectedSongsForAllMusicians, startDedupeSelectedSongsCron } from "./cron/dedupeSelectedSongsCron.js";

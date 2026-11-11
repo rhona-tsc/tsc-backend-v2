@@ -5057,6 +5057,7 @@ export const processAvailabilityReplyFlow = async ({
           summary: `Enquiry — NOT CONFIRMED | ${possessiveClient} ${eventType} | ${calendarActName}`,
           description: [
             "AVAILABILITY ENQUIRY ONLY — this is not a confirmed booking. Your availability reply does not confirm an allocation. We will contact you separately if you are selected and booked.",
+            "This provisional hold expires after 7 days unless you have been confirmed for the booking. We will send a calendar cancellation when it expires.",
             "",
             `Event Date: ${formattedDateString}`,
             `Act: ${act.tscName || act.name}`,
