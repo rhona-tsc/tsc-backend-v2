@@ -77,3 +77,6 @@ https://help.giffgaff.com/en/articles/240687-how-to-manage-call-forwarding-on-yo
 https://www.virtuallandline.co.uk/how-does-it-work/faqs
 
 Caller wording: the greeting and fallback refer to the team; follow-ups say someone from the team. The personal test caller is included alongside the business mobile, without opening the pilot to other numbers.
+
+MUSICIAN QUESTIONS — INITIAL TEST HANDLING
+The assistant distinguishes hiring a band, a posted musician job question and joining the collective. Musician calls use request_callback after confirmed name/contact and question; they are not qualified client leads or availability requests. It captures enquiryTopic, musicianRole and caller-supplied jobReference, labels the board notes, and gives verified public job-board/login/profile routes. It cannot read private job/account records, apply, accept/allocate jobs, approve profiles, promise work, change fees or send links. Phone/email supplied on a call does not verify musician identity. Deeper job/account actions remain a separate integration.

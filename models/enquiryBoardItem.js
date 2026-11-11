@@ -6,6 +6,9 @@ const EnquiryBoardItemSchema = new mongoose.Schema(
   {
     // Identifiers / reference
     enquiryRef: { type: String, index: true },
+    enquiryTopic: { type: String, enum: ['client_event', 'human_callback', 'musician_job', 'musician_joining'], default: undefined },
+    musicianRole: { type: String, maxlength: 120 },
+    jobReference: { type: String, maxlength: 200 },
     websiteKey: { type: String, unique: true, sparse: true },
     measurementId: { type: String },
     marketingSource: { type: String },

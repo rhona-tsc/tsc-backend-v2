@@ -3,11 +3,17 @@ import crypto from 'node:crypto';
 import { normalizeEnquiryPreferences } from './enquiryPreferences.js';
 import { normalizeBandSearch } from './voiceBandMatching.js';
 
-export const ENQUIRY_ASSISTANT_GREETING = "Hello, you've reached The Supreme Collective. I'm the AI enquiry assistant. I can help with bands and take your enquiry for the team. Is that okay?";
+export const ENQUIRY_ASSISTANT_GREETING = "Hello, you've reached The Supreme Collective. I'm the AI assistant. I can help with band bookings or musician enquiries and take your details for the team. Is that okay?";
 
 export const ENQUIRY_ASSISTANT_INSTRUCTIONS = `You are The Supreme Collective's incoming enquiry assistant, supporting the team.
 IDENTITY AND STYLE
 Introduce yourself as an AI assistant using the supplied greeting. Never claim to be Rhona or a human. Speak warm, natural British English, one short question at a time. Listen without interrupting, allow pauses, and avoid sales pressure. Do not imitate a particular person's voice. When describing a follow-up, say 'someone from the team'. Never say 'Rhona’s team' or 'Rhona's team'. If the caller does not want AI, offer to take a callback request or direct them to thesupremecollective.co.uk/contact. Never claim a transfer has happened.
+CALL REASON
+Listen to the caller's reason before asking event questions. If unclear, ask whether they want to hire a band, ask about a musician job, or join The Supreme Collective. Follow the relevant path. Do not ask musicians for a wedding budget, band shortlist or client event requirements.
+MUSICIAN JOB QUESTIONS
+For a musician asking about a posted job, ask for the job reference or title/link, event date if known, their instrument/role, their question, name and confirmed callback phone/email. These details are caller-supplied, not verified job facts. The public job board is https://admin.thesupremecollective.co.uk/deputy-jobs . Explain that they can open the job and sign in or create an account to apply. You do not have job lookup, application, allocation, payment or private account access. Do not invent job fees, venue details, availability, acceptance or application status. A caller's phone/email or claimed name is not verified musician identity. For a specific question, read back and confirm, then use request_callback with enquiryTopic musician_job, musicianRole and jobReference if known, and the actual question in callbackReason. Use empty styles/instruments/selectedBands and an empty preferredSize; selectedBandsConfirmed is false. Someone from the team can follow up; do not promise a response time or claim to have applied for them.
+JOINING THE SUPREME COLLECTIVE
+For a joining enquiry, ask their instrument/vocal role, general location, whether they already have an account/profile and what they would like help with. The musician portal login/create-account page is https://admin.thesupremecollective.co.uk/login ; after signing in, they can complete Register as a Deputy at https://admin.thesupremecollective.co.uk/register-as-deputy . Account creation is not approval or a promise of work. Explain these steps briefly; do not invent admission rules, fees or approval times. For follow-up, confirm name, callback phone/email and their question, then use request_callback with enquiryTopic musician_joining, musicianRole if known and callbackReason. Do not collect passwords, ID, bank details or payment information. Use empty styles/instruments/selectedBands and an empty preferredSize; selectedBandsConfirmed is false. A musician query is a callback, never a qualified client lead or booking. You cannot send a signup link or create/approve a profile for them.
 HUMAN CALL APPOINTMENTS
 Rhona's public call-booking link is https://calendly.com/thesupremecollective/call . Offer it if someone wants to arrange a human conversation. If reading it aloud, say 'calendly dot com, slash the supreme collective as one word, slash call' and repeat slowly if asked. You do not have Calendly calendar or booking access. Never invent available times, claim an appointment is booked, or promise a text/email containing the link; you cannot send messages. A confirmed callback request is still available if the caller would prefer that.
 ENQUIRY FLOW
@@ -38,6 +44,14 @@ export function normalizeCallbackPhone(value) {
 export function normalizeVoiceEnquiry(input = {}, { now = new Date(), callbackOnly = false } = {}) {
   if (input.confirmed !== true) throw new Error('Read back the details and obtain the caller’s confirmation before saving.');
   if (input.styleMatch !== undefined && !['any', 'all'].includes(input.styleMatch)) throw new Error('Confirm whether all styles are required or they are alternatives.');
+  const enquiryTopic = input.enquiryTopic || (callbackOnly ? 'human_callback' : 'client_event');
+  if (!['client_event', 'human_callback', 'musician_job', 'musician_joining'].includes(enquiryTopic)) throw new Error('Confirm the type of enquiry before saving.');
+  if (!callbackOnly && enquiryTopic === 'human_callback') throw new Error('Use request_callback for a human callback request.');
+  if (enquiryTopic.startsWith('musician_')) {
+    if (!callbackOnly) throw new Error('Musician job and joining questions must be saved with request_callback, never as client booking leads.');
+    if (!text(input.callbackReason, 1000)) throw new Error('Confirm the musician’s question before saving the callback.');
+    if (input.selectedBands?.length || input.styles?.length || input.mustHaveInstruments?.length || text(input.preferredSize, 80)) throw new Error('Save the musician’s own role in musicianRole; do not create client band preferences or selections for a musician question.');
+  }
   const clientName = text(input.clientName, 120);
   const rawEmail = text(input.clientEmail, 254).toLowerCase();
   const clientEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail) ? rawEmail : '';
@@ -58,7 +72,8 @@ export function normalizeVoiceEnquiry(input = {}, { now = new Date(), callbackOn
   const maxBudget = Number(input.maxBudget);
   return {
     ...normalizeEnquiryPreferences(input),
-    clientName, clientEmail, clientPhone, eventDateISO, address, requirements,
+    clientName, clientEmail, clientPhone, eventDateISO, address, requirements, enquiryTopic,
+    jobReference: text(input.jobReference, 200), musicianRole: text(input.musicianRole, 120),
     styleMatch: input.styleMatch === 'all' ? 'all' : 'any',
     eventType: text(input.eventType, 100),
     preferredBands: text(input.preferredBands, 300),
@@ -71,6 +86,9 @@ export function normalizeVoiceEnquiry(input = {}, { now = new Date(), callbackOn
 }
 
 const fields = {
+  enquiryTopic: { type: 'string', enum: ['client_event', 'human_callback', 'musician_job', 'musician_joining'], description: 'The confirmed reason for this call. Musician topics must use request_callback, not save_enquiry.' },
+  jobReference: { type: 'string', description: 'Job reference, title or link as supplied by the musician; unverified. Empty if unknown.' },
+  musicianRole: { type: 'string', description: 'The musician’s own instrument/vocal role. Separate from a client’s must-have instruments.' },
   clientName: { type: 'string', description: 'Name provided by the caller.' },
   clientEmail: { type: 'string', description: 'Email read back and confirmed, or empty if not provided.' },
   clientPhone: { type: 'string', description: 'Callback number read back and confirmed, or empty if not provided. Do not assume caller ID.' },
@@ -99,17 +117,19 @@ export const ENQUIRY_ASSISTANT_TOOLS = [
   { type: 'function', name: 'request_band_availability', description: 'TEST MODE ONLY: prepare availability-request previews for the bands explicitly chosen in the saved, confirmed enquiry from this call. Sends nothing; does not check availability or book anything.',
     parameters: { type: 'object', properties: { confirmed: { type: 'boolean', description: 'True only after the caller confirms their details, band choices and wish to request availability.' } }, required: ['confirmed'], additionalProperties: false } },
   ...['save_enquiry', 'request_callback'].map(name => ({ type: 'function', name,
-    description: name === 'save_enquiry' ? 'Save one confirmed event enquiry to the team’s board, without sending messages or booking anything.' : 'Save a confirmed human callback request when details are incomplete or the caller needs someone from the team.',
+    description: name === 'save_enquiry' ? 'Save one confirmed event enquiry to the team’s board, without sending messages or booking anything.' : 'Save a confirmed callback or musician job/joining question for someone from the team. Does not apply for jobs, approve musicians or send messages.',
     parameters: { type: 'object', properties: fields,
-      required: ['clientName', 'confirmed', 'styles', 'styleMatch', 'preferredSize', 'mustHaveInstruments', 'selectedBands', 'selectedBandsConfirmed'], additionalProperties: false },
+      required: ['clientName', 'confirmed', 'enquiryTopic', 'styles', 'styleMatch', 'preferredSize', 'mustHaveInstruments', 'selectedBands', 'selectedBandsConfirmed'], additionalProperties: false },
   })),
 ];
 
 export function buildVoiceBoardRecord(callId, enquiry, now = new Date()) {
   const ref = `PHONE-${crypto.createHash('sha256').update(callId).digest('hex').slice(0, 12).toUpperCase()}`;
   const notes = [
-    enquiry.qualified ? 'Incoming phone enquiry — AI assistant; caller confirmed details.' : 'Incoming phone callback request — AI assistant; caller confirmed details.',
+    enquiry.enquiryTopic === 'musician_job' ? 'Musician job question — AI assistant; caller confirmed details.' : enquiry.enquiryTopic === 'musician_joining' ? 'Musician joining enquiry — AI assistant; caller confirmed details.' : enquiry.qualified ? 'Incoming phone enquiry — AI assistant; caller confirmed details.' : 'Incoming phone callback request — AI assistant; caller confirmed details.',
     enquiry.clientPhone && `Callback: ${enquiry.clientPhone}`,
+    enquiry.musicianRole && `Musician role: ${enquiry.musicianRole}`,
+    enquiry.jobReference && `Caller-supplied job reference (unverified): ${enquiry.jobReference}`,
     enquiry.eventType && `Event: ${enquiry.eventType}`,
     enquiry.requirements && `Requirements: ${enquiry.requirements}`,
     enquiry.preferredBands && `Preferred bands: ${enquiry.preferredBands}`,
@@ -120,11 +140,12 @@ export function buildVoiceBoardRecord(callId, enquiry, now = new Date()) {
     enquiry.decisionWindow && `Hoping to book: ${enquiry.decisionWindow}`,
     enquiry.callbackReason && `Callback reason: ${enquiry.callbackReason}`,
     enquiry.selfReportedSource && `Caller-reported source (unverified): ${enquiry.selfReportedSource}`,
-    'Availability and prices need checking. No booking or payment has been confirmed.',
+    enquiry.enquiryTopic?.startsWith('musician_') ? 'Musician query for team follow-up. Identity and job details are unverified. No job application, allocation, profile approval or booking has been made.' : 'Availability and prices need checking. No booking or payment has been confirmed.',
   ].filter(Boolean).join('\n');
   return {
     ...Object.fromEntries(['styles', 'preferredSize', 'mustHaveInstruments', 'selectedBands'].filter(field => Object.hasOwn(enquiry, field)).map(field => [field, enquiry[field]])),
-    websiteKey: `phone:${callId}`, enquiryRef: ref,
+    websiteKey: `phone:${callId}`, enquiryRef: ref, enquiryTopic: enquiry.enquiryTopic,
+    musicianRole: enquiry.musicianRole, jobReference: enquiry.jobReference,
     clientName: enquiry.clientName, clientEmail: enquiry.clientEmail, clientPhone: enquiry.clientPhone,
     enquiryDateISO: now.toISOString().slice(0, 10), eventDateISO: enquiry.eventDateISO,
     address: enquiry.address, maxBudget: enquiry.maxBudget, styleMatch: enquiry.styleMatch,
@@ -201,7 +222,7 @@ export function createEnquiryToolHandler({ lookupBands, saveBoardRecord, prepare
     confirmedByCall.set(callId, { record: { ...record, styleMatch: enquiry.styleMatch }, qualified: enquiry.qualified,
       choicesConfirmed: input.selectedBandsConfirmed === true });
     if (Object.hasOwn(record, 'selectedBands')) savedSelectionsByCall.set(callId, record.selectedBands);
-    return { saved: true, enquiryRef: record.enquiryRef, kind: enquiry.qualified ? 'enquiry' : 'callback_request',
+    return { saved: true, enquiryRef: record.enquiryRef, kind: enquiry.qualified ? 'enquiry' : 'callback_request', enquiryTopic: enquiry.enquiryTopic,
       preferences: Object.fromEntries(['styles', 'preferredSize', 'mustHaveInstruments', 'selectedBands'].filter(field => Object.hasOwn(record, field)).map(field => [field, record[field]])),
       bookingConfirmed: false, messagesSent: false };
   };

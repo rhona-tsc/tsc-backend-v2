@@ -392,6 +392,7 @@ router.get("/", musicianAuth, async (req, res) => {
         { county: new RegExp(escapeRegex(String(q)), "i") },
         { address: new RegExp(escapeRegex(String(q)), "i") },
         { clientName: new RegExp(escapeRegex(String(q)), "i") },
+        { enquiryTopic: new RegExp(escapeRegex(String(q)), 'i') },
         { clientEmail: new RegExp(escapeRegex(String(q)), "i") },
         { styles: new RegExp(escapeRegex(String(q)), 'i') },
         { preferredSize: new RegExp(escapeRegex(String(q)), 'i') },
@@ -674,7 +675,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
     let row = await EnquiryBoardItem.findByIdAndUpdate(
       req.params.id,
-      { $set: body, ...(['clientName', 'clientEmail', 'clientPhone', 'eventDateISO', 'address', 'styleMatch', ...ENQUIRY_PREFERENCE_KEYS].some(key => Object.hasOwn(body, key)) ? { $unset: { availabilityRequestTest: 1 } } : {}) },
+      { $set: body, ...(['enquiryTopic', 'clientName', 'clientEmail', 'clientPhone', 'eventDateISO', 'address', 'styleMatch', ...ENQUIRY_PREFERENCE_KEYS].some(key => Object.hasOwn(body, key)) ? { $unset: { availabilityRequestTest: 1 } } : {}) },
       { new: true, runValidators: true }
     ).lean();
 

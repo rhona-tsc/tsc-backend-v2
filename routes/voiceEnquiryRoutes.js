@@ -37,7 +37,7 @@ router.post('/twilio/incoming', express.urlencoded({ extended: false, limit: '16
   }
   if (req.body.Digits !== '1') {
     const gather = xml.gather({ input: 'dtmf', numDigits: 1, timeout: 8, method: 'POST', action: `${path}/twilio/incoming` });
-    gather.say({ voice: 'Polly.Amy', language: 'en-GB' }, 'Welcome to The Supreme Collective. Our AI assistant can help with band enquiries and save your details so someone from the team can follow up. Press one to continue with the AI assistant, or two to request a person.');
+    gather.say({ voice: 'Polly.Amy', language: 'en-GB' }, 'Welcome to The Supreme Collective. Our AI assistant can help with band bookings and musician enquiries and save your details so someone from the team can follow up. Press one to continue with the AI assistant, or two to request a person.');
     xml.redirect({ method: 'POST' }, `${path}/twilio/finished`);
     return res.type('text/xml').send(xml.toString());
   }

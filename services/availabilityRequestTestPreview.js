@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { sortedVocalContacts } from '../utils/enquiryAvailability.js';
 
 const clean = value => String(value || '').trim();
-export const VOICE_PREVIEW_FIELDS = ['clientName', 'clientEmail', 'clientPhone', 'eventDateISO', 'address', 'styleMatch', 'styles', 'preferredSize', 'mustHaveInstruments', 'selectedBands'];
+export const VOICE_PREVIEW_FIELDS = ['enquiryTopic', 'clientName', 'clientEmail', 'clientPhone', 'eventDateISO', 'address', 'styleMatch', 'styles', 'preferredSize', 'mustHaveInstruments', 'selectedBands'];
 export function voicePreviewSnapshot(record) {
   return JSON.stringify(Object.fromEntries(VOICE_PREVIEW_FIELDS.map(key => [key, key === 'selectedBands'
     ? (record[key] || []).map(band => ({ actId: String(band.actId), name: band.name || '', lineupId: band.lineupId || '' }))
