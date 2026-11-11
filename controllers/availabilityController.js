@@ -1,3 +1,4 @@
+import { interceptAvailabilityTest } from '../services/availabilityRequestTestPreview.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import Act from "../models/actModel.js";
@@ -3010,6 +3011,16 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
   const isExpress = !!maybeRes;
   const body = isExpress ? reqOrArgs.body : reqOrArgs;
   const res = isExpress ? maybeRes : null;
+
+  // Voice pilot is preview-only. Stop here before private contact lookups, queues or sends.
+  try {
+    const preview = await interceptAvailabilityTest(body, { loadAct: id => Act.findById(id)
+      .select('_id tscName status isTest lineups._id lineups.lineupId lineups.bandMembers.instrument').lean() });
+    if (preview) return res ? res.status(preview.success ? 200 : 409).json(preview) : preview;
+  } catch {
+    const failure = { success: false, testMode: true, sent: 0, reason: 'The test preview could not be prepared. The enquiry remains saved for staff review.' };
+    return res ? res.status(503).json(failure) : failure;
+  }
 
   // Normalize request object (this function is called both as an Express handler and as an internal helper)
   const reqObj = isExpress ? reqOrArgs : {};

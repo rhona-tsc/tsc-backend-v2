@@ -1,6 +1,8 @@
 import Act from '../models/actModel.js';
 import EnquiryBoardItem from '../models/enquiryBoardItem.js';
 import { matchVoiceBands } from './voiceBandMatching.js';
+import { prepareVoiceAvailabilityBatch, voicePreviewSnapshot, voicePreviewKey } from './availabilityRequestTestPreview.js';
+import { VoiceEnquiryValidationError } from './incomingEnquiryAssistant.js';
 import { createEnquiryToolHandler } from './incomingEnquiryAssistant.js';
 
 // Never load musician names, contacts, fees, availability or customer records for search.
@@ -17,8 +19,22 @@ export async function saveVoiceBoardRecord(record) {
   details.marketingSource = 'Phone — AI pilot test';
   details.notes = `[AI PHONE PILOT TEST — not a real advertising conversion]\n${details.notes}`;
   return EnquiryBoardItem.findOneAndUpdate({ websiteKey: record.websiteKey }, {
-    $set: details, $setOnInsert: { status },
+    $set: details, $setOnInsert: { status }, $unset: { availabilityRequestTest: 1 },
   }, { upsert: true, new: true, runValidators: true });
 }
 
-export const createVoiceEnquiryTools = () => createEnquiryToolHandler({ lookupBands: lookupVoiceBands, saveBoardRecord: saveVoiceBoardRecord });
+export async function prepareVoiceAvailability(record) {
+  const stored = await EnquiryBoardItem.findOne({ websiteKey: record.websiteKey }).lean();
+  if (!stored || stored.enquiryRef !== record.enquiryRef || voicePreviewSnapshot(stored) !== voicePreviewSnapshot(record)) throw new VoiceEnquiryValidationError('The enquiry details changed. Read back and save the current details and band choices again.');
+  const key = voicePreviewKey(record);
+
+  const { triggerAvailabilityRequest } = await import('../controllers/availabilityController.js');
+  const preview = await prepareVoiceAvailabilityBatch(record, { lookupBands: lookupVoiceBands, trigger: triggerAvailabilityRequest });
+  if (stored.availabilityRequestTest?.key === key) preview.preparedAt = stored.availabilityRequestTest.preparedAt;
+  const updated = await EnquiryBoardItem.findOneAndUpdate({ _id: stored._id, updatedAt: stored.updatedAt },
+    { $set: { availabilityRequestTest: preview } }, { new: true, runValidators: true });
+  if (!updated) throw new VoiceEnquiryValidationError('The enquiry changed while preparing the preview. Confirm and save the latest details again.');
+  return preview;
+}
+
+export const createVoiceEnquiryTools = () => createEnquiryToolHandler({ lookupBands: lookupVoiceBands, saveBoardRecord: saveVoiceBoardRecord, prepareAvailability: prepareVoiceAvailability });

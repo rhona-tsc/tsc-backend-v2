@@ -17,6 +17,7 @@ const EnquiryBoardItemSchema = new mongoose.Schema(
     lineupId: { type: String, index: true },                           // optional (string/uuid)
     styles: { type: [String], default: [] },
     preferredSize: { type: String, default: '', maxlength: 80 },
+    styleMatch: { type: String, enum: ['any', 'all'], default: 'any' },
     mustHaveInstruments: { type: [String], default: [] },
     selectedBands: { type: [new mongoose.Schema({
       actId: { type: mongoose.Schema.Types.ObjectId, ref: 'Act' },
@@ -26,6 +27,9 @@ const EnquiryBoardItemSchema = new mongoose.Schema(
 
     // ✅ Client identity (for sending emails!)
     clientName: { type: String },
+    clientPhone: { type: String },
+    // Inert test artefact only; no scheduler consumes this field.
+    availabilityRequestTest: { type: mongoose.Schema.Types.Mixed, default: undefined },
     clientEmail: { type: String, index: true },
 
     // Source (agent)

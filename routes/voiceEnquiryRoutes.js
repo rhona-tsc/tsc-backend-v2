@@ -115,7 +115,7 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
         let result = results.get(tool.call_id);
         if (!result) {
           try { result = await handleTool({ callId: payload.sid, name: tool.name, arguments: tool.arguments }); }
-          catch (error) { result = { saved: false, error: error instanceof VoiceEnquiryValidationError ? error.message
+          catch (error) { result = { ...(tool.name === 'request_band_availability' ? { prepared: false, testMode: true, sent: 0 } : { saved: false }), error: error instanceof VoiceEnquiryValidationError ? error.message
             : 'Could not complete this request. Confirm the required details or offer the contact page. Do not claim success.' }; }
           results.set(tool.call_id, result);
         }

@@ -265,6 +265,7 @@ const getUserActIds = async (user) => {
 
 const mapBoardRow = (row) => ({
   ...row,
+  availabilityRequestTest: row?.availabilityRequestTest || null,
   _source: "manual",
   enquiryRef: clean(row?.enquiryRef) || makeRef(),
   enquiryDateISO: toISODateOnly(row?.enquiryDateISO || row?.createdAt),
@@ -356,7 +357,7 @@ router.get("/", musicianAuth, async (req, res) => {
 
     const user = req.user || {};
     const admin = isTSCAdmin(user) || isAgent(user);
-    const proj = admin ? {} : { grossValue: 0, netCommission: 0, attribution: 0, marketingSource: 0 };
+    const proj = admin ? {} : { grossValue: 0, netCommission: 0, attribution: 0, marketingSource: 0, availabilityRequestTest: 0 };
 
     let allowedActIds = [];
     if (!admin || String(scope) === "mine") {
@@ -458,6 +459,7 @@ router.post("/", musicianAuth, async (req, res) => {
     }
 
     const payload = { ...(req.body || {}) };
+    delete payload.availabilityRequestTest;
     Object.assign(payload, await preparePreferences(payload));
 
     if (Array.isArray(payload?.lineupMembers)) {
@@ -654,6 +656,7 @@ router.post("/day-two-email/send", musicianAuth, async (req, res) => {
 router.patch("/:id", musicianAuth, async (req, res) => {
   try {
     const body = { ...(req.body || {}) };
+    delete body.availabilityRequestTest;
     const hasPreferences = ENQUIRY_PREFERENCE_KEYS.some(key => Object.hasOwn(body, key));
     if (hasPreferences && !isTSCAdmin(req.user) && !isAgent(req.user)) return res.status(403).json({ success: false, message: 'Only staff can change enquiry preferences.' });
     if (hasPreferences) Object.assign(body, await preparePreferences(body));
@@ -671,7 +674,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
     let row = await EnquiryBoardItem.findByIdAndUpdate(
       req.params.id,
-      { $set: body },
+      { $set: body, ...(['clientName', 'clientEmail', 'clientPhone', 'eventDateISO', 'address', 'styleMatch', ...ENQUIRY_PREFERENCE_KEYS].some(key => Object.hasOwn(body, key)) ? { $unset: { availabilityRequestTest: 1 } } : {}) },
       { new: true, runValidators: true }
     ).lean();
 
