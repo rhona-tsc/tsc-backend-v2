@@ -83,6 +83,8 @@ test('caller-confirmed preferences and catalogue selections save once to the fou
   assert.equal(row.selectedBands[0].name, small.tscName); assert.equal(String(row.selectedBands[0].actId), small._id); assert.equal(row.selectedBands[0].lineupId, 'trio-sax');
   assert.equal(row.bandSize, undefined);
   assert.deepEqual([result.saved, result.messagesSent, result.bookingConfirmed], [true, false, false]);
+  const aliases = await handler({ ...request, arguments: { ...request.arguments, styles: ['R&B', 'RnB'] } });
+  assert.deepEqual(aliases.preferences.styles, ['RnB']);
 });
 
 test('search suggestions are not selections; confirmation, same-call provenance and matching are enforced', async () => {
@@ -91,7 +93,9 @@ test('search suggestions are not selections; confirmation, same-call provenance 
   const save = patch => handler({ callId: 'call-one', name: 'save_enquiry', arguments: { ...details, selectedBands: [choice], selectedBandsConfirmed: true, ...patch } });
   await assert.rejects(save({ selectedBandsConfirmed: false }), /Confirm/);
   await assert.rejects(save({ selectedBands: [{ ...choice, actId: varied._id }] }), /Look up/);
-  await assert.rejects(save({ preferredSize: '5-piece' }), /does not match/);
+  await assert.rejects(save({ preferredSize: '5-piece' }), /confirmed search constraints/);
+  await assert.rejects(save({ styles: ['RnB', 'RnB, HipHop & Garage'] }), /Do not add catalogue genres/);
+  await assert.rejects(save({ mustHaveInstruments: [] }), /drop requirements/);
   await assert.rejects(save({ selectedBands: [{ ...choice, lineupId: 'invented' }] }), /specific lineup/);
   await assert.rejects(handler({ callId: 'call-two', name: 'save_enquiry', arguments: { ...details, selectedBands: [choice], selectedBandsConfirmed: true } }), /Look up/);
   assert.equal(saved.size, 0);

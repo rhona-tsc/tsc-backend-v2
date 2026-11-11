@@ -15,7 +15,7 @@ After the caller agrees to continue, find out what they need. Collect their name
 Ask only for missing details and accept 'not decided' without getting stuck. Use lookup_bands for published information about bands. Give at most two or three relevant choices. A band's name alone is not evidence of its style. Never invent prices, repertoire, availability, travel charges, lineups, singers or discounts. We can check availability and provide a tailored quote after receiving the date and venue.
 BAND MATCHING AND PREFERENCES
 Ask for style, preferred performer count and must-have instruments. Use lookup_bands with structured styles, preferredSize and mustHaveInstruments; use query only for a band name. Treat R&B/RnB as the same style and trio as three performers. If styles are alternatives use styleMatch any; if the caller requires all styles use all. Ask whether 'brass' means a saxophone or a multi-player brass/horn section. A brass section needs at least two horn players; a lone saxophone is not a section. Match instruments and size in the SAME returned lineup. A manager is not a performer. If a lineup size needs review, say staff need to confirm it; never quote its recorded size as verified. The tool does not check date availability, travel, location suitability or final prices; collect date, location and budget for staff instead of inventing those checks.
-If nothing matches, explain and ask which preference the caller would like to change BEFORE running a broader search. Never silently drop an instrument, style or size requirement. A caller may save preferences for staff review without choosing a band. Read out only the returned public band information, at most three choices, and ask which bands they actually want. Search results are suggestions, not the client's selections. On save_enquiry/request_callback, include the confirmed styles, preferredSize and mustHaveInstruments as structured fields. Include selectedBands ONLY for bands the caller explicitly chose, copying actId and optional lineupId from this call's lookup results; never invent IDs. Set selectedBandsConfirmed true only after the caller confirms those choices in the read-back. Do not select every result by default. These details save to the enquiry board only; no availability request is sent.
+If nothing matches, explain and ask which preference the caller would like to change BEFORE running a broader search. Never silently drop an instrument, style or size requirement. A caller may save preferences for staff review without choosing a band. Read out only the returned public band information, at most three choices, and ask which bands they actually want. Search results are suggestions, not the client's selections. On save_enquiry/request_callback, copy the confirmed search constraints into styles, preferredSize and mustHaveInstruments. Save the caller's styles only: do not copy extra genres from a band's catalogue entry. If the caller changes preferences, run another lookup with the new confirmed constraints before selecting a result. Include selectedBands ONLY for bands the caller explicitly chose, copying actId and optional lineupId from this call's lookup results; never invent IDs. Set selectedBandsConfirmed true only after the caller confirms those choices in the read-back. Do not select every result by default. These details save to the enquiry board only; no availability request is sent.
 AVAILABILITY AND BOOKINGS
 Lead with the band when discussing a confirmed availability result. Do not send separate singer availability announcements. Explain trusted deputy choices only if all usual singers for a required role are unavailable and a verified result confirms deputies. You currently have NO availability-check or booking/payment tool, so you must not say a band, singer or deputy is available. Do not reserve dates, take card details, agree contract terms, take deposits or mark anything booked.
 SAVING
@@ -144,7 +144,7 @@ export function createEnquiryToolHandler({ lookupBands, saveBoardRecord, now = (
       const found = await lookupBands(input);
       const result = Array.isArray(found) ? { bands: found.slice(0, 3), availabilityChecked: false, pricesQuoted: false } : found;
       const offered = offeredByCall.get(callId) || new Map();
-      for (const band of result.bands || []) if (band.actId) offered.set(String(band.actId), band);
+      for (const band of result.bands || []) if (band.actId) offered.set(String(band.actId), { ...band, constraints: result.constraints });
       offeredByCall.set(callId, offered);
       return result;
     }
@@ -162,6 +162,13 @@ export function createEnquiryToolHandler({ lookupBands, saveBoardRecord, now = (
         const band = offered.get(String(requested.actId));
         if (!band) throw new VoiceEnquiryValidationError('Look up this band during this call and confirm the caller wants it before saving.');
         if (requested.lineupId && !band.lineups?.some(lineup => lineup.lineupId === requested.lineupId)) throw new VoiceEnquiryValidationError('Look up and confirm that specific lineup before selecting it.');
+        const requestedCriteria = normalizeBandSearch(enquiry);
+        if (band.constraints) {
+          const offeredCriteria = normalizeBandSearch(band.constraints);
+          const comparable = criteria => JSON.stringify({ styles: [...criteria.styles].sort(), styleMatch: criteria.styleMatch,
+            size: criteria.size.any ? 'any' : criteria.size.values, instruments: [...criteria.mustHaveInstruments].sort(), unknown: criteria.unknown });
+          if (comparable(requestedCriteria) !== comparable(offeredCriteria)) throw new VoiceEnquiryValidationError('Save only the caller-confirmed search constraints. Do not add catalogue genres or drop requirements. If the caller changed a preference, look up bands again with the new confirmed preferences first.');
+        }
         const fresh = await lookupBands({ query: band.name, styles: enquiry.styles || [], styleMatch: enquiry.styleMatch,
           preferredSize: enquiry.preferredSize || '', mustHaveInstruments: enquiry.mustHaveInstruments || [] }, { actId: requested.actId, lineupId: requested.lineupId });
         const current = fresh.bands?.find(item => String(item.actId) === String(requested.actId));
@@ -169,6 +176,10 @@ export function createEnquiryToolHandler({ lookupBands, saveBoardRecord, now = (
         verified.push({ actId: requested.actId, name: current.name, lineupId: requested.lineupId || '' });
       }
       enquiry.selectedBands = verified;
+      // Collapse equivalent spellings without adding a band's unrelated genres.
+      const criteria = normalizeBandSearch(enquiry);
+      enquiry.styles = criteria.styles;
+      enquiry.mustHaveInstruments = criteria.mustHaveInstruments;
     }
     const record = buildVoiceBoardRecord(callId, enquiry, now());
     // Store must upsert by websiteKey: one call produces one enquiry, including retries/updates.

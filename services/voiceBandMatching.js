@@ -147,7 +147,7 @@ export function matchVoiceBands(acts, input = {}, selection = {}) {
     });
     if ((act.lineups || []).some(lineup => publicLineup(lineup).sizeNeedsReview)) result.reviewNotes.push(`${name}: at least one lineup size needs staff verification.`);
     if (!lineups.length) continue;
-    matches.push({ actId: String(act._id), name, genres,
+    matches.push({ actId: String(act._id), name, styles: criteria.styles.length ? criteria.styles.filter(style => keys.includes(style)) : keys,
       profile: act.slug ? `https://thesupremecollective.co.uk/act/${encodeURIComponent(act.slug)}/` : '',
       lineups: lineups.sort((a, b) => (a.size || 99) - (b.size || 99)).map(({ roles, recordedSize, ...lineup }) => lineup),
       score: criteria.styles.filter(style => keys.includes(style)).length });
