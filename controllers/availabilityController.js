@@ -5043,8 +5043,10 @@ export const processAvailabilityReplyFlow = async ({
           actId,
           dateISO,
           email: emailForInvite,
-          summary: `${possessiveClient} ${eventType} | ${calendarActName}`,
+          summary: `Enquiry — NOT CONFIRMED | ${possessiveClient} ${eventType} | ${calendarActName}`,
           description: [
+            "AVAILABILITY ENQUIRY ONLY — this is not a confirmed booking. Your availability reply does not confirm an allocation. We will contact you separately if you are selected and booked.",
+            "",
             `Event Date: ${formattedDateString}`,
             `Act: ${act.tscName || act.name}`,
             `Role: ${updated.duties || ""}`,
