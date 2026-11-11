@@ -15,6 +15,14 @@ const EnquiryBoardItemSchema = new mongoose.Schema(
     // ✅ Add these so we can trigger availability properly
     actId: { type: mongoose.Types.ObjectId, ref: "Act", index: true }, // <-- IMPORTANT
     lineupId: { type: String, index: true },                           // optional (string/uuid)
+    styles: { type: [String], default: [] },
+    preferredSize: { type: String, default: '', maxlength: 80 },
+    mustHaveInstruments: { type: [String], default: [] },
+    selectedBands: { type: [new mongoose.Schema({
+      actId: { type: mongoose.Schema.Types.ObjectId, ref: 'Act' },
+      name: { type: String, maxlength: 160 },
+      lineupId: { type: String, maxlength: 100 },
+    }, { _id: false })], default: [] },
 
     // ✅ Client identity (for sending emails!)
     clientName: { type: String },

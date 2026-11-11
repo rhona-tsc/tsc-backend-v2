@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import EnquiryBoardItem from "../models/enquiryBoardItem.js";
 import Act from "../models/actModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
+import { ENQUIRY_PREFERENCE_KEYS, normalizeEnquiryPreferences, enquiryPreferenceSearchValues, resolveSelectedBands } from '../services/enquiryPreferences.js';
 import { triggerAvailabilityRequest } from "../controllers/availabilityController.js";
 import {
   sendEnquiryDayFourTestEmail,
@@ -11,6 +12,24 @@ import {
 } from "../services/enquiryFollowupService.js";
 
 const router = express.Router();
+const preparePreferences = async input => {
+  const preferences = normalizeEnquiryPreferences(input);
+  if (preferences.selectedBands) preferences.selectedBands = await resolveSelectedBands(preferences.selectedBands,
+    ids => Act.find({ _id: { $in: ids } }).select('_id tscName name lineups._id lineups.lineupId').lean());
+  return preferences;
+};
+
+router.get('/preferences/options', musicianAuth, async (req, res) => {
+  if (!isTSCAdmin(req.user) && !isAgent(req.user)) return res.sendStatus(403);
+  try {
+    const acts = await Act.find({ status: { $in: ['approved', 'live', 'approved_changes_pending', 'live_changes_pending'] }, isTest: { $ne: true } })
+      .select('_id tscName name genre lineups._id lineups.lineupId lineups.actSize lineups.bandMembers.instrument').lean();
+    res.json({ success: true, styles: [...new Set(acts.flatMap(act => act.genre || []))].sort(),
+      instruments: [...new Set(['Brass section', ...acts.flatMap(act => (act.lineups || []).flatMap(lineup => (lineup.bandMembers || []).map(member => member.instrument))).filter(value => value && !/manager/i.test(value))])].sort(),
+      bands: acts.map(act => ({ actId: String(act._id), name: act.tscName || act.name,
+        lineups: (act.lineups || []).map(lineup => ({ lineupId: String(lineup.lineupId || lineup._id), name: lineup.actSize || 'Lineup' })) })).sort((a, b) => a.name.localeCompare(b.name)) });
+  } catch { res.status(500).json({ success: false, message: 'Could not load band options. Please try again.' }); }
+});
 
 const EXCLUDED_CLIENT_EMAILS = new Set([
   "hello@thesupremecollective.co.uk",
@@ -185,6 +204,7 @@ const filterRowsInMemory = (rows, { q, from, to, agent, actId }) => {
         row?.formattedAddress,
         row?.clientName,
         row?.clientEmail,
+        ...enquiryPreferenceSearchValues(row),
       ].some((value) => rx.test(String(value || "")))
     );
   }
@@ -254,6 +274,8 @@ const mapBoardRow = (row) => ({
   clientEmail: clean(row?.clientEmail).toLowerCase(),
   actId: row?.actId || null,
   requestId: row?.requestId || null,
+  styles: row?.styles || [], preferredSize: row?.preferredSize || '',
+  mustHaveInstruments: row?.mustHaveInstruments || [], selectedBands: row?.selectedBands || [],
 });
 
 const mapAvailabilityRow = (doc) => {
@@ -287,6 +309,8 @@ const mapAvailabilityRow = (doc) => {
     createdAt: doc?.createdAt,
     updatedAt: doc?.updatedAt,
     agent: clean(doc?.agent || "Direct"),
+    styles: doc?.styles || [], preferredSize: doc?.preferredSize || '',
+    mustHaveInstruments: doc?.mustHaveInstruments || [], selectedBands: doc?.selectedBands || [],
     slotIndex: doc?.slotIndex,
     reply: doc?.reply,
     calendarStatus: doc?.calendarStatus,
@@ -368,6 +392,10 @@ router.get("/", musicianAuth, async (req, res) => {
         { address: new RegExp(escapeRegex(String(q)), "i") },
         { clientName: new RegExp(escapeRegex(String(q)), "i") },
         { clientEmail: new RegExp(escapeRegex(String(q)), "i") },
+        { styles: new RegExp(escapeRegex(String(q)), 'i') },
+        { preferredSize: new RegExp(escapeRegex(String(q)), 'i') },
+        { mustHaveInstruments: new RegExp(escapeRegex(String(q)), 'i') },
+        { 'selectedBands.name': new RegExp(escapeRegex(String(q)), 'i') },
       ];
     }
 
@@ -430,6 +458,7 @@ router.post("/", musicianAuth, async (req, res) => {
     }
 
     const payload = { ...(req.body || {}) };
+    Object.assign(payload, await preparePreferences(payload));
 
     if (Array.isArray(payload?.lineupMembers)) {
       payload.bandSize = payload.lineupMembers.filter((m) =>
@@ -625,6 +654,9 @@ router.post("/day-two-email/send", musicianAuth, async (req, res) => {
 router.patch("/:id", musicianAuth, async (req, res) => {
   try {
     const body = { ...(req.body || {}) };
+    const hasPreferences = ENQUIRY_PREFERENCE_KEYS.some(key => Object.hasOwn(body, key));
+    if (hasPreferences && !isTSCAdmin(req.user) && !isAgent(req.user)) return res.status(403).json({ success: false, message: 'Only staff can change enquiry preferences.' });
+    if (hasPreferences) Object.assign(body, await preparePreferences(body));
 
     if (!isTSCAdmin(req.user) && !isAgent(req.user)) {
       delete body.grossValue;
@@ -637,11 +669,22 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       body.clientEmail = isEmail(body.clientEmail) ? clean(body.clientEmail).toLowerCase() : "";
     }
 
-    const row = await EnquiryBoardItem.findByIdAndUpdate(
+    let row = await EnquiryBoardItem.findByIdAndUpdate(
       req.params.id,
       { $set: body },
-      { new: true }
+      { new: true, runValidators: true }
     ).lean();
+
+    // Website requests are stored in availability collections, not the manual board.
+    // Only the four validated preference fields may be edited on those records here.
+    if (!row && hasPreferences && Object.keys(body).every(key => ENQUIRY_PREFERENCE_KEYS.includes(key))) {
+      for (const collection of AVAILABILITY_COLLECTION_CANDIDATES) {
+        const doc = await mongoose.connection.db.collection(collection).findOneAndUpdate(
+          { _id: new mongoose.Types.ObjectId(req.params.id) }, { $set: body },
+          { returnDocument: 'after', includeResultMetadata: false });
+        if (doc) return res.json({ success: true, row: mapAvailabilityRow(doc) });
+      }
+    }
 
     res.json({ success: !!row, row: row ? mapBoardRow(row) : null });
   } catch (e) {
