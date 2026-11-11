@@ -56,6 +56,9 @@ test('size alternatives, ranges and bounds retain their meaning', () => {
   assert.deepEqual(parsePreferredSize('3 or 5-piece').values, [3, 5]);
   assert.deepEqual(parsePreferredSize('5–7 piece').values, [5, 6, 7]);
   assert.deepEqual(parsePreferredSize('Trio / 3-piece').values, [3]);
+  assert.deepEqual(parsePreferredSize('five-piece').values, [5]);
+  assert.deepEqual(parsePreferredSize('5piece').values, [5]);
+  assert.deepEqual(parsePreferredSize('five to seven piece').values, [5, 6, 7]);
   for (const bad of ['0-piece', '999999999-piece', '8-5 piece', 'large']) assert.equal(parsePreferredSize(bad).unknown, true);
 });
 

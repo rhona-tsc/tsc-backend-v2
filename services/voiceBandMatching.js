@@ -28,9 +28,11 @@ const horns = ['Saxophone', 'Trumpet', 'Trombone'];
 const unique = values => [...new Set(values)];
 
 export function parsePreferredSize(raw = '') {
-  const value = clean(raw).toLowerCase().replace(/[–—]/g, '-');
+  let value = clean(raw).toLowerCase().replace(/[–—]/g, '-').replace(/(\d+)piece/g, '$1 piece');
   if (!value || /^(any|flexible|not decided|unsure|open)$/.test(value)) return { any: true, values: [] };
-  const named = { solo: 1, duo: 2, trio: 3, quartet: 4, quintet: 5, sextet: 6 };
+  const named = { solo: 1, duo: 2, trio: 3, quartet: 4, quintet: 5, sextet: 6,
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+  value = value.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/g, word => String(named[word]));
   const namedSizes = Object.entries(named).filter(([word]) => new RegExp(`\\b${word}\\b`).test(value)).map(([, size]) => size);
   const numbers = [...value.matchAll(/\b\d+\b/g)].map(match => Number(match[0]));
   let values = unique([...namedSizes, ...numbers]);
@@ -44,7 +46,7 @@ export function parsePreferredSize(raw = '') {
   else if (values.length === 1 && /\bup to\b|\bmaximum\b/.test(value)) values = Array.from({ length: values[0] }, (_, i) => i + 1);
   if (!values.length || values.some(size => size < 1 || size > 20)) return { unknown: true, values: [] };
   // Do not discard extra constraints such as "5-piece plus a DJ".
-  const residue = value.replace(/\b(solo|duo|trio|quartet|quintet|sextet|piece|pieces|musicians?|band|or|and|between|to|at least|minimum|up to|maximum)\b/g, '').replace(/[\d\s/,-]/g, '');
+  const residue = value.replace(/\b(solo|duo|trio|quartet|quintet|sextet|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|piece|pieces|musicians?|band|or|and|between|to|at least|minimum|up to|maximum)\b/g, '').replace(/[\d\s/,-]/g, '');
   return residue ? { unknown: true, values: [] } : { any: false, values: values.sort((a, b) => a - b) };
 }
 
@@ -147,12 +149,12 @@ export function matchVoiceBands(acts, input = {}, selection = {}) {
     if (!lineups.length) continue;
     matches.push({ actId: String(act._id), name, genres,
       profile: act.slug ? `https://thesupremecollective.co.uk/act/${encodeURIComponent(act.slug)}/` : '',
-      lineups: lineups.sort((a, b) => (a.size || 99) - (b.size || 99)).map(({ roles, ...lineup }) => lineup),
+      lineups: lineups.sort((a, b) => (a.size || 99) - (b.size || 99)).map(({ roles, recordedSize, ...lineup }) => lineup),
       score: criteria.styles.filter(style => keys.includes(style)).length });
   }
   result.totalMatches = matches.length;
   result.bands = matches.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, 3).map(({ score, ...band }) => ({ ...band, lineups: band.lineups.slice(0, 3) }));
-  result.reviewNotes = unique(result.reviewNotes).slice(0, 3);
+  result.reviewNotes = unique(result.reviewNotes).filter(note => !result.bands.length || result.bands.some(band => note.startsWith(`${band.name}:`))).slice(0, 3);
   if (!result.bands.length) result.reviewNotes.push('No verified lineup matches these requirements. Ask before changing a preference; otherwise save the enquiry for staff review.');
   return result;
 }
