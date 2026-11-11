@@ -2,19 +2,19 @@ import test,{mock} from 'node:test';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 import {google} from 'googleapis';
-import {sealEquipmentToken,openEquipmentToken,beginEquipmentGoogleConnection,handleEquipmentGoogleCallback,readEquipmentProfile,equipmentConnectionStatus,disconnectEquipmentGoogleConnection,equipmentGoogleCallbackGate,SHEETS_READ_ONLY} from '../services/voiceEquipmentGoogle.js';
+import {sealEquipmentToken,openEquipmentToken,beginEquipmentGoogleConnection,handleEquipmentGoogleCallback,readEquipmentProfile,equipmentConnectionStatus,disconnectEquipmentGoogleConnection,verifyEquipmentGoogleConnection,equipmentGoogleCallbackGate,SHEETS_READ_ONLY} from '../services/voiceEquipmentGoogle.js';
 import {EQUIPMENT_SUPPLIERS,EQUIPMENT_SHEET_ID} from '../services/voiceBookingEquipment.js';
 
 test('Google connection uses separate encrypted credentials, fixed read-only ranges, expiring single-use consent and no secret responses',async()=>{
  const envKeys=['VOICE_ENQUIRY_BRIDGE_SECRET','GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','GOOGLE_REDIRECT_URI'];
  const old=Object.fromEntries(envKeys.map(k=>[k,process.env[k]]));const db=mongoose.connection.db;
  Object.assign(process.env,{VOICE_ENQUIRY_BRIDGE_SECRET:'TEST-ONLY-EQUIPMENT-KEY-32-CHARS-LONG',GOOGLE_CLIENT_ID:'test-client',GOOGLE_CLIENT_SECRET:'test-secret',GOOGLE_REDIRECT_URI:'https://example.test/api/google/oauth2callback'});
- let pending,connection;let exchanged=0;const requests=[];
+ let pending,connection;let exchanged=0;let failSheetRead=false;const requests=[];
  mongoose.connection.db={collection:name=>name==='voice_equipment_oauth_states'?{
   createIndex:async()=>{},insertOne:async row=>{pending=row;},findOneAndUpdate:async query=>{if(!pending||pending._id!==query._id||pending.consumedAt||pending.expiresAt<=query.expiresAt.$gt)return null;pending.consumedAt=new Date();return pending;},
- }:{findOne:async()=>connection,updateOne:async(_,update)=>{connection={...update.$set};}}};
+ }:{findOne:async()=>connection,updateOne:async(_,update)=>{connection={...connection,...update.$set};for(const field of Object.keys(update.$unset||{}))delete connection[field];}}};
  const tokenMock=mock.method(google.auth.OAuth2.prototype,'getToken',async()=>{exchanged++;return {tokens:{refresh_token:'SECRET_REFRESH_TOKEN',access_token:'SECRET_ACCESS_TOKEN'}};});
- const sheetMock=mock.method(google,'sheets',()=>({spreadsheets:{values:{batchGet:async args=>{requests.push(args);return {data:{valueRanges:[]}};},get:async args=>{requests.push(args);return {data:{values:[['AUDIO'],['2','PA speaker','9999']]}};}}}}));
+ const sheetMock=mock.method(google,'sheets',()=>({spreadsheets:{values:{batchGet:async args=>{requests.push(args);if(failSheetRead)throw {response:{data:{error:{details:[{reason:'SERVICE_DISABLED'}]}}}};return {data:{valueRanges:[]}};},get:async args=>{requests.push(args);return {data:{values:[['AUDIO'],['2','PA speaker','9999']]}};}}}}));
  const response=()=>({code:200,target:'',status(n){this.code=n;return this;},send(t){this.target=t;return this;},redirect(t){this.target=t;return this;}});
  try{
   const sealed=sealEquipmentToken('SECRET_REFRESH_TOKEN');assert.equal(openEquipmentToken(sealed),'SECRET_REFRESH_TOKEN');assert.doesNotMatch(sealed,/SECRET/);assert.throws(()=>openEquipmentToken(sealed+'x'));
@@ -36,5 +36,11 @@ test('Google connection uses separate encrypted credentials, fixed read-only ran
   assert.equal((await disconnectEquipmentGoogleConnection()).connected,false);
   assert.equal((await readEquipmentProfile(EQUIPMENT_SUPPLIERS['6a05f1a00358e40a87adb33d'])).status,'connection_required');
   const expiredUrl=new URL(await beginEquipmentGoogleConnection('management-user'));pending.expiresAt=new Date(0);const expired=response();await handleEquipmentGoogleCallback({query:{state:expiredUrl.searchParams.get('state'),code:'expired'}},expired);assert.equal(expired.code,400);assert.equal(exchanged,1);
+  const failedUrl=new URL(await beginEquipmentGoogleConnection('management-user'));failSheetRead=true;const failedResponse=response();
+  await handleEquipmentGoogleCallback({query:{state:failedUrl.searchParams.get('state'),code:'another-code'}},failedResponse);
+  assert.match(failedResponse.target,/equipmentConnection=failed$/);const failedStatus=await equipmentConnectionStatus();
+  assert.equal(failedStatus.connected,false);assert.equal(failedStatus.authorised,true);assert.equal(failedStatus.configurationIssue,'SERVICE_DISABLED');
+  assert.ok(connection.pendingRefreshTokenEncrypted);assert.doesNotMatch(JSON.stringify(failedStatus),/SECRET|Encrypted/);
+  const exchangeCount=exchanged;failSheetRead=false;assert.equal((await verifyEquipmentGoogleConnection()).connected,true);assert.equal(exchanged,exchangeCount);
  }finally{tokenMock.mock.restore();sheetMock.mock.restore();mongoose.connection.db=db;for(const [k,v]of Object.entries(old)){if(v===undefined)delete process.env[k];else process.env[k]=v;}}
 });

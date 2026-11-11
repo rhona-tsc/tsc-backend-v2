@@ -15,8 +15,24 @@ const oauth=()=>{
 const connections=()=>mongoose.connection.db.collection('voice_equipment_google_connections');
 const states=()=>mongoose.connection.db.collection('voice_equipment_oauth_states');
 const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
-export async function equipmentConnectionStatus(){const record=await connections().findOne({_id:'reference'});return {connected:!!record?.refreshTokenEncrypted,sheetId:EQUIPMENT_SHEET_ID,tabs:Object.values(EQUIPMENT_SUPPLIERS).map(p=>p.tab),readOnly:true,testMode:true,connectedAt:record?.connectedAt||null};}
-export async function disconnectEquipmentGoogleConnection(){await connections().updateOne({_id:'reference'},{$unset:{refreshTokenEncrypted:1},$set:{disconnectedAt:new Date()}});return equipmentConnectionStatus();}
+export async function equipmentConnectionStatus(){const record=await connections().findOne({_id:'reference'});return {connected:!!record?.refreshTokenEncrypted,authorised:!!(record?.refreshTokenEncrypted||record?.pendingRefreshTokenEncrypted),configurationIssue:record?.lastErrorCode||null,sheetId:EQUIPMENT_SHEET_ID,tabs:Object.values(EQUIPMENT_SUPPLIERS).map(p=>p.tab),readOnly:true,testMode:true,connectedAt:record?.connectedAt||null};}
+const safeGoogleError=error=>{
+  const details=error?.response?.data?.error?.details||[];
+  const reason=details.find(item=>typeof item.reason==='string')?.reason;
+  return ['SERVICE_DISABLED','ACCESS_TOKEN_SCOPE_INSUFFICIENT','PERMISSION_DENIED'].includes(reason)?reason:'GOOGLE_REQUEST_FAILED';
+};
+export async function verifyEquipmentGoogleConnection(){
+  const record=await connections().findOne({_id:'reference'});
+  const encrypted=record?.pendingRefreshTokenEncrypted||record?.refreshTokenEncrypted;
+  if(!encrypted)throw new Error('Read-only Google permission is required.');
+  try{
+    const client=oauth();client.setCredentials({refresh_token:openEquipmentToken(encrypted)});
+    await google.sheets({version:'v4',auth:client}).spreadsheets.values.batchGet({spreadsheetId:EQUIPMENT_SHEET_ID,ranges:Object.values(EQUIPMENT_SUPPLIERS).map(p=>p.range),valueRenderOption:'FORMATTED_VALUE'},{timeout:8000});
+    await connections().updateOne({_id:'reference'},{$set:{refreshTokenEncrypted:encrypted,connectedAt:new Date()},$unset:{pendingRefreshTokenEncrypted:1,lastErrorCode:1,lastErrorPhase:1}});
+    return equipmentConnectionStatus();
+  }catch(error){await connections().updateOne({_id:'reference'},{$set:{lastErrorCode:safeGoogleError(error),lastErrorPhase:'sheet_read'}},{upsert:true});throw error;}
+}
+export async function disconnectEquipmentGoogleConnection(){await connections().updateOne({_id:'reference'},{$unset:{refreshTokenEncrypted:1,pendingRefreshTokenEncrypted:1,lastErrorCode:1,lastErrorPhase:1},$set:{disconnectedAt:new Date()}});return equipmentConnectionStatus();}
 export async function beginEquipmentGoogleConnection(userId){
   key();
   const nonce=crypto.randomBytes(32).toString('base64url');
@@ -28,20 +44,22 @@ export function isEquipmentOAuthState(state){return typeof state==='string'&&sta
 export function equipmentGoogleCallbackGate(req,res,next){return isEquipmentOAuthState(req.query?.state)?handleEquipmentGoogleCallback(req,res):next();}
 export async function handleEquipmentGoogleCallback(req,res){
   const fallback='https://admin.thesupremecollective.co.uk/enquiry-board?equipmentConnection=';
+  let phase='state';
   try{
     const state=String(req.query.state||'');const nonce=state.slice(PREFIX.length);
     if(!/^[A-Za-z0-9_-]{43}$/.test(nonce))return res.status(400).send('Invalid equipment connection request.');
     const consumed=await states().findOneAndUpdate({_id:hash(nonce),expiresAt:{$gt:new Date()},consumedAt:null},{$set:{consumedAt:new Date()}},{returnDocument:'after',includeResultMetadata:false});
     if(!consumed)return res.status(400).send('This equipment connection request expired or was already used. Start again from the enquiry board.');
     if(req.query.error || typeof req.query.code!=='string' || !req.query.code || req.query.code.length>4096)return res.redirect(fallback+'cancelled');
+    phase='token_exchange';
     const client=oauth();const {tokens}=await client.getToken(req.query.code);
     if(!tokens.refresh_token)throw new Error('No offline connection returned.');
-    client.setCredentials(tokens);
-    // Verify only the three fixed equipment rectangles. No other tabs or private event header cells.
-    await google.sheets({version:'v4',auth:client}).spreadsheets.values.batchGet({spreadsheetId:EQUIPMENT_SHEET_ID,ranges:Object.values(EQUIPMENT_SUPPLIERS).map(p=>p.range),valueRenderOption:'FORMATTED_VALUE'},{timeout:8000});
-    await connections().updateOne({_id:'reference'},{$set:{refreshTokenEncrypted:sealEquipmentToken(tokens.refresh_token),connectedAt:new Date(),requestedBy:consumed.requestedBy,requestedScope:SHEETS_READ_ONLY}},{upsert:true});
+    // Retain approved permission encrypted before verification so a configuration fix needs no new consent.
+    await connections().updateOne({_id:'reference'},{$set:{pendingRefreshTokenEncrypted:sealEquipmentToken(tokens.refresh_token),requestedBy:consumed.requestedBy,requestedScope:SHEETS_READ_ONLY}},{upsert:true});
+    phase='sheet_read';
+    await verifyEquipmentGoogleConnection();
     return res.redirect(fallback+'connected');
-  }catch{return res.redirect(fallback+'failed');}
+  }catch(error){try{await connections().updateOne({_id:'reference'},{$set:{lastErrorCode:safeGoogleError(error),lastErrorPhase:phase}},{upsert:true});}catch{}return res.redirect(fallback+'failed');}
 }
 export async function readEquipmentProfile(profile){
   if(!Object.values(EQUIPMENT_SUPPLIERS).some(p=>p.tab===profile?.tab&&p.range===profile?.range))throw new Error('Unapproved equipment profile.');

@@ -1,5 +1,5 @@
 import { lookupVoiceBookingEquipment } from '../services/voiceBookingEquipmentStore.js';
-import { equipmentConnectionStatus, beginEquipmentGoogleConnection, disconnectEquipmentGoogleConnection } from '../services/voiceEquipmentGoogle.js';
+import { equipmentConnectionStatus, beginEquipmentGoogleConnection, disconnectEquipmentGoogleConnection, verifyEquipmentGoogleConnection } from '../services/voiceEquipmentGoogle.js';
 import express from "express";
 import mongoose from "mongoose";
 import EnquiryBoardItem from "../models/enquiryBoardItem.js";
@@ -31,6 +31,11 @@ router.post('/equipment-test/connect', musicianAuth, async (req, res) => {
   if (!isTSCAdmin(req.user)) return res.sendStatus(403);
   try { res.json({ success: true, url: await beginEquipmentGoogleConnection(req.user._id || req.user.id || req.user.userId) }); }
   catch { res.status(503).json({ success: false, message: 'Could not prepare the read-only Google connection.' }); }
+});
+router.post('/equipment-test/verify', musicianAuth, async (req, res) => {
+  if (!isTSCAdmin(req.user)) return res.sendStatus(403);
+  try { res.json({ success: true, ...(await verifyEquipmentGoogleConnection()), canConnect: true }); }
+  catch { res.status(503).json({ success: false, message: 'Google Sheets access is not ready. Check the API configuration and try again.' }); }
 });
 router.post('/equipment-test/disconnect', musicianAuth, async (req, res) => {
   if (!isTSCAdmin(req.user)) return res.sendStatus(403);
