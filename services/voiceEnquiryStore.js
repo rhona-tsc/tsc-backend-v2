@@ -33,7 +33,7 @@ export async function saveVoiceDraft(callId, draft = {}, { Model = EnquiryBoardI
     return await Model.findOneAndUpdate({ websiteKey: `phone:${callId}`, captureState: { $ne: 'confirmed' } }, {
       $setOnInsert: { websiteKey: `phone:${callId}`, enquiryRef: ref, enquiryDateISO: now.toISOString().slice(0,10), agent: 'Direct', status: 'open' },
       $set: { ...draft, marketingSource: 'Phone — AI pilot test', captureState: 'draft', contactConfirmed: false, emailConfirmed: false, notes,
-        draftDetails: { unconfirmed: true, updatedAt: now.toISOString(), contactDeclined: !!draft.contactDeclined, qualified: false, availabilityRequestsSent: 0 } },
+        draftDetails: { fields: draft, unconfirmed: true, updatedAt: now.toISOString(), contactDeclined: !!draft.contactDeclined, qualified: false, availabilityRequestsSent: 0 } },
     }, { upsert: true, new: true, runValidators: true });
   } catch (error) {
     if(error.code !== 11000) throw error;

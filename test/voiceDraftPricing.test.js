@@ -21,7 +21,7 @@ test('draft persistence uses one call identity, labels every detail unconfirmed 
   let update,filter;
   const Model={findOneAndUpdate:async(f,u)=>{filter=f;update=u;return u.$set;}};
   await saveVoiceDraft('call1',{clientName:'Mary',clientPhone:'+447700900123'},{Model});
-  assert.equal(filter.websiteKey,'phone:call1');assert.deepEqual(filter.captureState,{$ne:'confirmed'});assert.equal(update.$set.captureState,'draft');assert.equal(update.$set.contactConfirmed,false);assert.match(update.$set.notes,/UNCONFIRMED DRAFT/);assert.equal(update.$setOnInsert.status,'open');
+  assert.equal(filter.websiteKey,'phone:call1');assert.deepEqual(filter.captureState,{$ne:'confirmed'});assert.equal(update.$set.captureState,'draft');assert.equal(update.$set.contactConfirmed,false);assert.match(update.$set.notes,/UNCONFIRMED DRAFT/);assert.equal(update.$setOnInsert.status,'open');assert.equal(update.$set.draftDetails.fields.clientName,'Mary');
   const confirmed={captureState:'confirmed'};
   const protectedModel={findOneAndUpdate:async()=>{throw Object.assign(new Error(),{code:11000});},findOne:async()=>confirmed};
   assert.equal(await saveVoiceDraft('call1',{}, {Model:protectedModel}),confirmed);
