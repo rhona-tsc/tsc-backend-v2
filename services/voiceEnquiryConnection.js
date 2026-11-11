@@ -17,8 +17,9 @@ export function voiceConnectionConfig(env = process.env) {
     testCallers: split(env.VOICE_ENQUIRY_TEST_CALLERS),
     humanNumber: normalizeCallbackPhone(env.VOICE_ENQUIRY_HUMAN_NUMBER),
     model: env.OPENAI_VOICE_MODEL || 'gpt-realtime-2.1-mini',
+    testEndsAt: Date.parse(env.VOICE_ENQUIRY_TEST_END_AT || ''),
   };
-  config.ready = !!(config.base && config.twilioNumber && config.apiKey && config.webhookSecret && config.twilioToken && config.projectId && config.bridgeSecret.length >= 32 && config.testCallers.length);
+  config.ready = !!(config.base && config.twilioNumber && config.apiKey && config.webhookSecret && config.twilioToken && config.projectId && config.bridgeSecret.length >= 32 && config.testCallers.length && Number.isFinite(config.testEndsAt) && config.testEndsAt > Date.now());
   // This first implementation is deliberately test-caller-only, even if enabled.
   if (config.humanNumber === VOICE_ENQUIRY_NUMBER) config.humanNumber = '';
   return config;

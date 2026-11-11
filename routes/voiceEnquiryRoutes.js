@@ -6,10 +6,12 @@ import Act from '../models/actModel.js';
 import EnquiryBoardItem from '../models/enquiryBoardItem.js';
 import { createEnquiryToolHandler, normalizeCallbackPhone } from '../services/incomingEnquiryAssistant.js';
 import { voiceConnectionConfig, signVoiceBridge, verifyVoiceBridge, buildEnquiryVoiceSession, voiceOpeningEvent, VOICE_ENQUIRY_NUMBER, VOICE_MAX_SECONDS } from '../services/voiceEnquiryConnection.js';
+import { reserveVoicePilotCall } from '../services/voiceEnquiryPilotLimit.js';
 
+export function createVoiceEnquiryRouter({ reservePilotCall = reserveVoicePilotCall } = {}) {
 const router = express.Router();
 const sessions = new Map();
-let daily = { day: '', count: 0 };
+let reserving = false;
 const path = '/api/voice-enquiries';
 const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const stripHtml = value => String(value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -26,6 +28,8 @@ const handleTool = createEnquiryToolHandler({
   },
   saveBoardRecord: record => {
     const { status, ...details } = record;
+    details.marketingSource = 'Phone — AI pilot test';
+    details.notes = `[AI PHONE PILOT TEST — not a real advertising conversion]\n${details.notes}`;
     return EnquiryBoardItem.findOneAndUpdate({ websiteKey: record.websiteKey }, {
       $set: details, $setOnInsert: { status },
     }, { upsert: true, new: true, runValidators: true });
@@ -64,10 +68,12 @@ router.post('/twilio/incoming', express.urlencoded({ extended: false, limit: '16
   for (const [sid, session] of sessions) if (session.expiresAt < now) sessions.delete(sid);
   const sid = req.body.CallSid;
   if (sessions.has(sid)) return res.sendStatus(409); // Never bridge a duplicate call request twice.
-  const day = new Date().toISOString().slice(0, 10);
-  if (daily.day !== day) daily = { day, count: 0 };
-  if (sessions.size || daily.count >= 5) return sayContact(res);
-  daily.count++;
+  if (sessions.size || reserving) return sayContact(res);
+  reserving = true;
+  let reserved = false;
+  try { reserved = await reservePilotCall({ projectId: config.projectId, callSid: sid, endsAt: config.testEndsAt, now }); }
+  catch {} finally { reserving = false; }
+  if (!reserved) return sayContact(res);
   sessions.set(sid, { expiresAt: now + (VOICE_MAX_SECONDS + 30) * 1000, connecting: false });
   const token = signVoiceBridge({ sid, to: VOICE_ENQUIRY_NUMBER, exp: now + 90000 }, config.bridgeSecret);
   const sip = `sip:${config.projectId}@sip.api.openai.com;transport=tls?X-TSC-Bridge=${encodeURIComponent(token)}`;
@@ -146,4 +152,7 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
   }
 });
 
-export default router;
+return router;
+}
+
+export default createVoiceEnquiryRouter();

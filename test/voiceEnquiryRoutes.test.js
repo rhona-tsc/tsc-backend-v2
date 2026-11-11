@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import twilio from 'twilio';
-import router from '../routes/voiceEnquiryRoutes.js';
+import { createVoiceEnquiryRouter } from '../routes/voiceEnquiryRoutes.js';
 
 test('test-only voice ingress enforces feature flag, signatures, number and caller allowlist', async () => {
   const settings = {
@@ -11,11 +11,13 @@ test('test-only voice ingress enforces feature flag, signatures, number and call
     OPENAI_VOICE_API_KEY: 'test-key-never-used', OPENAI_VOICE_WEBHOOK_SECRET: 'test-secret-never-used',
     TWILIO_AUTH_TOKEN: 'test-token', VOICE_ENQUIRY_BRIDGE_SECRET: 'test-only-secret-at-least-32-characters',
     VOICE_ENQUIRY_PROJECT_ID: 'proj_example', VOICE_ENQUIRY_TEST_CALLERS: '+447700900123',
+    VOICE_ENQUIRY_TEST_END_AT: new Date(Date.now() + 3600000).toISOString(),
   };
   const previous = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
   Object.assign(process.env, settings);
   const app = express();
-  app.use('/api/voice-enquiries', router);
+  let reservations = 0;
+  app.use('/api/voice-enquiries', createVoiceEnquiryRouter({ reservePilotCall: async () => { reservations++; return true; } }));
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const endpoint = '/api/voice-enquiries/twilio/incoming';
@@ -42,6 +44,7 @@ test('test-only voice ingress enforces feature flag, signatures, number and call
     assert.match(bridge, /transport=tls/);
     assert.match(bridge, /X-TSC-Bridge=/);
     assert.equal((await post({ ...body, Digits: '1' })).status, 409);
+    assert.equal(reservations, 1);
     // Producing TwiML locally does not place a call. No OpenAI API calls or DB writes occur.
   } finally {
     server.closeAllConnections();

@@ -19,7 +19,10 @@ test('feature defaults off and cannot be ready without test caller allowlist and
   assert.equal(voiceConnectionConfig({ VOICE_ENQUIRY_ENABLED: 'true' }).ready, false);
   const env = { VOICE_ENQUIRY_ENABLED: 'true', VOICE_ENQUIRY_PUBLIC_BASE_URL: 'https://example.com', VOICE_ENQUIRY_TWILIO_NUMBER: '+442079460123', OPENAI_VOICE_API_KEY: 'voice-test', OPENAI_API_KEY: 'unrelated-website-key', OPENAI_VOICE_WEBHOOK_SECRET: 'test', TWILIO_AUTH_TOKEN: 'test', VOICE_ENQUIRY_BRIDGE_SECRET: secret, VOICE_ENQUIRY_PROJECT_ID: 'proj_test', VOICE_ENQUIRY_TEST_CALLERS: '07700 900123', VOICE_ENQUIRY_HUMAN_NUMBER: '07594 223200' };
   const config = voiceConnectionConfig(env);
-  assert.equal(config.ready, true);
+  assert.equal(config.ready, false); // No expiry means no paid test calls.
+  env.VOICE_ENQUIRY_TEST_END_AT = new Date(Date.now() + 3600000).toISOString();
+  assert.equal(voiceConnectionConfig(env).ready, true);
+  assert.equal(voiceConnectionConfig({ ...env, VOICE_ENQUIRY_TEST_END_AT: '2000-01-01' }).ready, false);
   assert.equal(config.apiKey, 'voice-test');
   assert.equal(voiceConnectionConfig({ ...env, OPENAI_VOICE_API_KEY: '' }).ready, false);
   assert.deepEqual(config.testCallers, ['+447700900123']);
