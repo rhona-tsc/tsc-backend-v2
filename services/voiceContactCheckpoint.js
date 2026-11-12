@@ -8,7 +8,15 @@ const refused = text => /\b(?:don['’]?t|do not|rather not|prefer not to|won['�
 // Parse only explicit contact text from this caller's transcript, never caller ID,
 // prior customers or a model's inferred spelling. Unclear speech stays unconfirmed.
 export function extractVoiceContacts(text = '') {
-  let spoken = String(text).toLowerCase().replace(/\bat\b/g, '@').replace(/\bdot\b/g, '~DOT~')
+  let spoken = String(text).toLowerCase();
+  // Transcribers commonly write a spelled-out word as R-H-O-N-A. In an
+  // explicit spelling passage those marks separate letters; a spoken "hyphen"
+  // remains a real character. Do not remove literal hyphens from other emails.
+  if (/\b(?:spell(?:ed|ing)?|letter by letter)\b/i.test(text)) {
+    spoken = spoken.replace(/\b(?:[a-z0-9][\s,]*[-–—][\s,]*){2,}[a-z0-9]\b/g,
+      value => value.replace(/[\s,–—-]/g, ''));
+  }
+  spoken = spoken.replace(/\bat\b/g, '@').replace(/\bdot\b/g, '~DOT~')
     .replace(/\bunderscore\b/g, '~UNDER~').replace(/\b(?:hyphen|dash)\b/g, '~DASH~');
   spoken = spoken.replace(/\b(?:[a-z][\s,]+){2,}[a-z]\b/g, value => value.replace(/[\s,]+/g, ''));
   spoken = spoken.replace(/\s*@\s*/g, '@').replace(/\s*~DOT~\s*/g, '.')
@@ -36,18 +44,44 @@ export function contactReadback(field, value) {
 }
 
 export function createVoiceContactCheckpoint() {
-  const contacts = new Map(); let turn = 0, pending = '', lastText = '';
+  const contacts = new Map(), abandoned = new Set(); let turn = 0, pending = '', lastText = '', nameRequested = false;
   const next = () => fields.find(field => contacts.has(field) && !contacts.get(field).confirmed) || '';
   return {
+    observeAssistant(text) {
+      if (/\b(?:what(?:['’]s| is) your name|(?:may|can|could)\b[^?]{0,25}\byour name|your name[^?]{0,10}\bplease|who am i speaking to)\b/i.test(text || '')) nameRequested = true;
+    },
     acceptUser(text) {
       turn++; lastText = String(text || '').slice(0, 12000);
-      const supplied = extractVoiceContacts(lastText), previous = contacts.get(pending);
+      const supplied = extractVoiceContacts(lastText), captured = {};
+      if (nameRequested) {
+        nameRequested = false;
+        const name = lastText.trim().replace(/^(?:my name is|it['’]s|i am|i['’]m)\s+/i,'').replace(/[?.!]+$/,'').trim();
+        if (/^[\p{L}][\p{L}'’ .-]{0,119}$/u.test(name) && name.split(/\s+/).length <= 6 &&
+          !/^(?:no|yes|can|could|would|please|i|skip|rather|don['’]?t)\b/i.test(name)) captured.clientName = name;
+      }
+      let previous = contacts.get(pending);
+      if (previous?.switchOfferedTurn != null && turn > previous.switchOfferedTurn) {
+        const alternate = pending === 'clientEmail' ? 'clientPhone' : 'clientEmail';
+        const agreesToSwitch = affirmative(lastText) || (!negative(lastText) &&
+          /\b(?:yes|yeah|yep|let['’]?s|i['’]?ll|give you|use|prefer)\b/i.test(lastText) &&
+          (alternate === 'clientPhone' ? /\b(?:phone|callback|mobile|number)\b/i : /\bemail\b/i).test(lastText));
+        if (agreesToSwitch || supplied[alternate]) {
+          captured[pending] = ''; // Remove the rejected value from the draft too.
+          abandoned.add(pending);
+          contacts.delete(pending);
+          if (!contacts.has(alternate)) contacts.set(alternate, {value:'',confirmed:false,readbackTurn:null,needsRepeat:true,awaitingValue:true,failures:0});
+          pending = alternate; previous = contacts.get(pending);
+        } else if (negative(lastText)) {
+          // The rejection below records this as the first fresh correction.
+          previous.switchOfferedTurn = null; previous.failures = 0;
+        }
+      }
       if (previous?.needsRepeat && Object.keys(supplied).some(field => field !== pending) && !supplied[pending]) {
         contacts.delete(pending); pending = '';
       }
       if (pending && refused(lastText)) {
         for (const [field, contact] of contacts) if (!contact.confirmed) contacts.delete(field);
-        pending = ''; return {contactDeclined:true};
+        pending = ''; return {...captured,contactDeclined:true};
       }
       if (previous && negative(lastText)) {
         const rejected = /\bboth\b|\bneither\b/i.test(lastText) ? fields : [pending];
@@ -60,35 +94,39 @@ export function createVoiceContactCheckpoint() {
         previous.confirmed = true; previous.needsRepeat = false; pending = '';
       }
       for (const [field, value] of Object.entries(supplied)) {
+        abandoned.delete(field);
         const old = contacts.get(field);
         if (!old || old.value !== value || old.needsRepeat) contacts.set(field, {
-          value, confirmed:false, readbackTurn:null, needsRepeat:false, failures:old?.failures || 0,
+          value, confirmed:false, readbackTurn:null, needsRepeat:false, awaitingValue:false, failures:old?.failures || 0,
         });
       }
       pending = next();
-      return supplied;
+      return {...captured,...supplied};
     },
     response() {
       const contact = contacts.get(pending);
       if (!contact) return null;
       const label = pending === 'clientEmail' ? 'email address' : 'callback number';
-      const wording = contact.needsRepeat
+      const offeringAlternative = contact.needsRepeat && !contact.awaitingValue && contact.failures >= 2;
+      const wording = contact.awaitingValue ? `What's your ${label}?` : contact.needsRepeat
         ? (contact.failures >= 2
           ? `I'm having trouble confirming your ${label}. Would you prefer to use ${pending === 'clientEmail' ? 'a callback number' : 'an email address'} instead?`
           : `Sorry, let's correct just your ${label}. Could you ${pending === 'clientEmail' ? 'spell it, including any dots' : 'repeat the digits slowly'}?`)
         : contactReadback(pending, contact.value);
-      return {field:pending, value:contact.value, readback:!contact.needsRepeat, wording,
+      return {field:pending, value:contact.value, readback:!contact.needsRepeat, offeringAlternative, wording,
         event:{type:'response.create',response:{tool_choice:'none',instructions:
           `Contact confirmation checkpoint. Say ONLY the following, in a natural British accent, then STOP and WAIT for the caller's next answer. Do not add a preamble, 'please hold', 'one moment', or filler. Do not introduce yourself, acknowledge a save, ask another question, mention another contact detail, or continue to event questions. ${wording}`}}};
     },
     delivered(plan) {
       const contact = contacts.get(plan?.field);
       if (plan?.readback && contact && contact.value === plan.value) contact.readbackTurn = turn;
+      if (plan?.offeringAlternative && contact && contact.value === plan.value) contact.switchOfferedTurn = turn;
     },
     interrupted() { const contact = contacts.get(pending); if (contact) contact.readbackTurn = null; },
     draftInput(input = {}) {
       const draft = {...input};
       for (const field of fields) if (Object.hasOwn(draft, field) && draft[field]) {
+        if (abandoned.has(field)) throw new VoiceEnquiryValidationError(`The caller switched away from ${field}. Leave it empty and use their separately confirmed alternative contact.`);
         const value = field === 'clientPhone' ? normalizeCallbackPhone(draft[field]) : String(draft[field]).trim().toLowerCase();
         if (contacts.get(field)?.value !== value) throw new VoiceEnquiryValidationError(
           `Do not infer or change the caller's ${field === 'clientEmail' ? 'email spelling or punctuation' : 'phone digits'}. Ask them to repeat or spell that detail by itself.`);
@@ -105,7 +143,7 @@ export function createVoiceContactCheckpoint() {
     },
     context() {
       const confirmed = Object.fromEntries([...contacts].filter(([,contact]) => contact.confirmed).map(([field,contact]) => [field,contact.value]));
-      return `The greeting has already been delivered. Never greet or introduce yourself again. Ask one brief question, then stop and wait. Contact details separately confirmed in this call: ${JSON.stringify(confirmed)}. Preserve their exact spelling and digits; do not re-confirm these unless the caller changes them. A 'no' or correction refers to your last question; do not assume it means an undecided venue. Most recent caller transcript (may contain recognition errors): ${JSON.stringify(lastText)}.`;
+      return `The greeting has already been delivered. Never greet or introduce yourself again. Ask one brief question, then stop and wait. Contact details separately confirmed in this call: ${JSON.stringify(confirmed)}. Preserve their exact spelling and digits; do not re-confirm these unless the caller changes them. Contact fields the caller switched away from: ${JSON.stringify([...abandoned])}; omit these or leave them empty when saving, and do not ask for them again unless the caller volunteers them. A 'no' or correction refers to your last question; do not assume it means an undecided venue. Most recent caller transcript (may contain recognition errors): ${JSON.stringify(lastText)}.`;
     },
     get pending() { return pending; },
   };

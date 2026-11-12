@@ -67,7 +67,11 @@ export function createVoiceConversationTurns({ send, handleTool, callId, opening
       users.set(event.item_id,{complete:true,text:event.transcript || '',failed:event.type.endsWith('failed')});
       await drain(); return;
     }
-    if (event.type === 'response.output_audio_transcript.done') { askedQuestion ||= expectsAnswer(event.transcript || ''); return; }
+    if (event.type === 'response.output_audio_transcript.done') {
+      askedQuestion ||= expectsAnswer(event.transcript || '');
+      contact.observeAssistant(event.transcript || '');
+      return;
+    }
     if (event.type === 'response.function_call_arguments.done') {
       if (seenTools.has(event.call_id)) return;
       seenTools.add(event.call_id);

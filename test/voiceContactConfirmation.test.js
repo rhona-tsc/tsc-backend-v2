@@ -158,3 +158,63 @@ test('session disables automatic replies; callback menu choice also has one shor
   assert.doesNotMatch(voiceOpeningEventFor('human_callback').response.instructions,/Is that okay|you've reached|Hello/);
   assert.match(voiceOpeningEventFor('human_callback').response.instructions,/20-minute/);
 });
+
+test('explicit letter-by-letter spelling treats transcriber hyphens as separators and preserves spoken literal hyphens', () => {
+  assert.equal(extractVoiceContacts("alexsmith@example.invalid, so that's spelled A-L-E-X-S-M-I-T-H at example.invalid.").clientEmail,'alexsmith@example.invalid');
+  assert.equal(extractVoiceContacts("It's spelled A – L – E – X at example.invalid.").clientEmail,'alex@example.invalid');
+  assert.equal(extractVoiceContacts('My email is alex-smith@example.invalid.').clientEmail,'alex-smith@example.invalid');
+  assert.equal(extractVoiceContacts('Spelled a hyphen b hyphen c at example.invalid').clientEmail,'a-b-c@example.invalid');
+});
+
+function failedEmail() {
+  const gate=createVoiceContactCheckpoint();gate.acceptUser('alex@example.invalid');gate.delivered(gate.response());
+  gate.acceptUser('No');gate.delivered(gate.response());gate.acceptUser('Still wrong');gate.delivered(gate.response());
+  return gate;
+}
+
+test('Yes to the alternative-method offer transitions to asking for a number; it cannot confirm the rejected email', () => {
+  const gate=failedEmail();
+  const captured=gate.acceptUser('Yes.');assert.equal(captured.clientEmail,'');
+  assert.equal(gate.response().wording,"What's your callback number?");
+  assert.throws(()=>gate.assertConfirmed({clientEmail:'alex@example.invalid'}));
+  gate.delivered(gate.response());gate.acceptUser('Yes.');
+  assert.equal(gate.response().wording,"What's your callback number?");
+  assert.throws(()=>gate.assertConfirmed({clientPhone:'07700900123'}));
+});
+
+test('a natural agreement to give a phone number exits the email-recovery loop and clears the rejected draft value', () => {
+  const gate=failedEmail();
+  assert.deepEqual(gate.acceptUser("Yeah, let's, I'll give you my phone number and we can move on."),{clientEmail:''});
+  assert.equal(gate.response().wording,"What's your callback number?");gate.delivered(gate.response());
+  gate.acceptUser('07700900123');assert.equal(gate.response().field,'clientPhone');assert.equal(gate.response().readback,true);
+  gate.delivered(gate.response());gate.acceptUser('Yes');gate.assertConfirmed({clientPhone:'07700900123'});
+  assert.equal(gate.response(),null);assert.throws(()=>gate.assertConfirmed({clientEmail:'alex@example.invalid'}));
+  assert.throws(()=>gate.draftInput({clientEmail:'alex@example.invalid'}),/switched away/);
+  assert.match(gate.context(),/switched away from: \["clientEmail"\]/);
+});
+
+test('declining the alternative asks for corrected original details, rather than repeating the same offer', () => {
+  const gate=failedEmail();gate.acceptUser('No, I want to use email.');
+  assert.match(gate.response().wording,/spell it/);assert.doesNotMatch(gate.response().wording,/Would you prefer/);
+});
+
+test('caller name is checkpointed when supplied after a name question even if the model skips the draft tool', async () => {
+  const h=harness();h.turns.start();await h.done();await h.user('I want to book a band.');
+  await h.emit({type:'response.output_audio_transcript.done',transcript:"What's your name?"});await h.done();await h.user('Alex?');
+  assert.equal(h.tools.at(-1).name,'save_enquiry_draft');assert.deepEqual(h.tools.at(-1).arguments,{clientName:'Alex'});
+});
+
+test('live-turn recovery advances after alternate-method agreement, saves the number and never resurrects the rejected email', async () => {
+  const h=harness();h.turns.start();await h.done();
+  for(const text of ['alexsmith@example.invalid, spelled A-L-E-X-S-M-I-T-H at example.invalid.','No, no hyphens.','No, wrong.']) {
+    await h.user(text);await h.done();
+  }
+  assert.match(h.responses().at(-1).response.instructions,/Would you prefer to use a callback number/);
+  await h.user("Yeah, I'll give you my phone number.");await h.done();
+  assert.match(h.responses().at(-1).response.instructions,/What's your callback number/);
+  assert.doesNotMatch(h.responses().at(-1).response.instructions,/Would you prefer/);
+  assert.equal(h.tools.at(-1).arguments.clientEmail,'');
+  await h.user('07700900123');await h.done();await h.user('Yes');
+  assert.match(h.responses().at(-1).response.instructions,/"clientPhone":"\+447700900123"/);
+  assert.deepEqual(h.errors,[]);
+});
