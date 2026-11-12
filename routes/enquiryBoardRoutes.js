@@ -5,6 +5,7 @@ import express from "express";
 import mongoose from "mongoose";
 import EnquiryBoardItem from "../models/enquiryBoardItem.js";
 import AvailabilityModel from '../models/availabilityModel.js';
+import { requiredVocalistSlotIndexes } from '../utils/enquiryAvailability.js';
 import { enquiryAvailabilityFilter, enquiryAvailabilityProjection, enquiryAvailabilityRequests, enquiryAvailabilitySlots } from '../services/enquiryAvailabilityTracking.js';
 import Act from "../models/actModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
@@ -181,6 +182,12 @@ const pickSmallestLineup = (act) => {
   return lineups[0] || null;
 };
 
+const enquiryVocalistSlots = async row => {
+  const act = await Act.findById(row.actId).select('lineups').lean();
+  const lineup = (act?.lineups || []).find(item => idToString(item._id || item.lineupId) === String(row.lineupId));
+  return lineup ? requiredVocalistSlotIndexes(lineup) : null;
+};
+
 const escapeRegex = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const shouldHideClient = (row) => {
@@ -337,7 +344,7 @@ const mapAvailabilityRow = (doc) => {
     _id: doc?._id,
     actId,
     lineupId: doc?.lineupId || null,
-    enquiryRef: clean(doc?.enquiryRef) || clean(doc?.requestId) || makeRef(),
+    enquiryRef: clean(doc?.enquiryRef) || clean(doc?.enquiryId) || clean(doc?.requestId) || makeRef(),
     requestId: clean(doc?.requestId) || null,
     enquiryDateISO: toISODateOnly(doc?.createdAt || new Date()),
     eventDateISO: dateISO,
@@ -465,7 +472,10 @@ router.get("/", musicianAuth, async (req, res) => {
         };
       }
       const availabilityRows = await fetchAvailabilityRows(availabilityFilter);
-      rows.push(...availabilityRows);
+      const encoreEnquiries = rows.filter(row => clean(row.agent).toLowerCase() === 'encore');
+      rows.push(...availabilityRows.filter(reply => !encoreEnquiries.some(row =>
+        row.enquiryRef === reply.enquiryRef && idToString(row.actId) === idToString(reply.actId) && row.eventDateISO === reply.eventDateISO
+      )));
     }
 
     rows = filterRowsInMemory(rows, { q, from, to, agent, actId });
@@ -483,6 +493,8 @@ router.get("/", musicianAuth, async (req, res) => {
       const docs = await AvailabilityModel.find(filter).select(enquiryAvailabilityProjection).lean();
       const requests = enquiryAvailabilityRequests(docs);
       row.availabilitySlots = enquiryAvailabilitySlots(requests);
+      const requiredSlots = await enquiryVocalistSlots(row);
+      if (requiredSlots?.length) row.availabilityTotalSlots = requiredSlots.length;
     }));
 
     res.json({
@@ -507,9 +519,7 @@ router.get("/", musicianAuth, async (req, res) => {
   }
 });
 
-/**
- * POST /api/board/enquiries  (AGENT ONLY)
- */
+// Management-only, exact-enquiry reply monitoring. Does not send or resend requests.
 router.get('/:id/availability', musicianAuth, async (req, res) => {
   if (!isAgent(req.user) && !isTSCAdmin(req.user)) return res.sendStatus(403);
   if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ success: false, message: 'Invalid enquiry ID' });
@@ -519,7 +529,8 @@ router.get('/:id/availability', musicianAuth, async (req, res) => {
     const filter = enquiryAvailabilityFilter(row);
     if (!filter) return res.status(409).json({ success: false, message: 'Enquiry needs a reference, act and event date before replies can be tracked.' });
     const docs = await AvailabilityModel.find(filter).select(enquiryAvailabilityProjection).lean();
-    return res.json({ success: true, enquiryRef: row.enquiryRef, requests: enquiryAvailabilityRequests(docs) });
+    return res.json({ success: true, enquiryRef: row.enquiryRef,
+      requiredSlotIndexes: await enquiryVocalistSlots(row), requests: enquiryAvailabilityRequests(docs) });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Could not load vocalist replies.' });
   }
@@ -546,6 +557,9 @@ router.post("/", musicianAuth, async (req, res) => {
     payload.enquiryDateISO = toISODateOnly(payload.enquiryDateISO) || toISODateOnly(new Date());
     payload.eventDateISO = toISODateOnly(payload.eventDateISO);
 
+    if (clean(payload.agent).toLowerCase() === 'encore' && clean(payload.clientEmail) && !isEmail(payload.clientEmail)) {
+      return res.status(400).json({ success: false, message: 'Client email is optional for Encore, but must be valid when supplied.' });
+    }
     payload.clientName = clean(payload.clientName);
     payload.clientEmail = isEmail(payload.clientEmail)
       ? clean(payload.clientEmail).toLowerCase()
@@ -558,26 +572,21 @@ router.post("/", musicianAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing/invalid eventDateISO (YYYY-MM-DD)" });
     }
 
+    const actObjectId = toObjectIdOrNull(payload.actId);
+    const act = actObjectId ? await Act.findById(actObjectId).lean() : null;
+    const chosenLineup = payload.lineupId
+      ? (act?.lineups || []).find(lineup => [idToString(lineup._id), idToString(lineup.lineupId)].includes(String(payload.lineupId)))
+      : pickSmallestLineup(act);
+    if (payload.lineupId && !chosenLineup) return res.status(400).json({ success: false, message: 'Selected lineup does not belong to this act.' });
+    const chosenLineupId = idToString(chosenLineup?._id || chosenLineup?.lineupId) || null;
+    if (chosenLineupId) payload.lineupId = chosenLineupId;
     const row = await EnquiryBoardItem.create(payload);
     const createdRow = mapBoardRow(row.toObject ? row.toObject() : row);
 
     let availabilityTriggered = null;
 
     try {
-      const actObjectId = toObjectIdOrNull(payload.actId);
-      const act = actObjectId ? await Act.findById(actObjectId).lean() : null;
-
       if (act?._id) {
-        const chosenLineup = payload.lineupId
-          ? (Array.isArray(act.lineups)
-              ? act.lineups.find(
-                  (lineup) => idToString(lineup?._id || lineup?.lineupId) === String(payload.lineupId)
-                )
-              : null)
-          : pickSmallestLineup(act);
-
-        const chosenLineupId = idToString(chosenLineup?._id || chosenLineup?.lineupId) || null;
-
         const triggerResult = await triggerAvailabilityRequest({
           actId: idToString(act._id),
           lineupId: chosenLineupId,
@@ -588,7 +597,7 @@ router.post("/", musicianAuth, async (req, res) => {
           clientEmail: payload.clientEmail,
           enquiryId: createdRow.enquiryRef,
           requestId: createdRow.enquiryRef,
-          source: "manual_enquiry_board",
+          source: clean(payload.agent).toLowerCase() === 'encore' ? 'encore_enquiry_board' : 'manual_enquiry_board',
           skipDuplicateCheck: false,
         });
 

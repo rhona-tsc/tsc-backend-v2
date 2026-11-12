@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { enquiryAvailabilityFilter, enquiryAvailabilityRequests, enquiryAvailabilitySlots } from '../services/enquiryAvailabilityTracking.js';
+import { encoreRequestEnquiryScope, enquiryAvailabilityFilter, enquiryAvailabilityRequests, enquiryAvailabilitySlots } from '../services/enquiryAvailabilityTracking.js';
+
+test('Encore requests cannot reuse another enquiry response or active request', () => {
+  assert.deepEqual(encoreRequestEnquiryScope({ source: 'encore_enquiry_board', enquiryId: 'JOB-A' }), { enquiryId: 'JOB-A' });
+  assert.deepEqual(encoreRequestEnquiryScope({ source: 'manual_enquiry_board', enquiryId: 'JOB-A' }), {});
+  assert.notDeepEqual(encoreRequestEnquiryScope({ source: 'encore_enquiry_board', enquiryId: 'JOB-A' }), encoreRequestEnquiryScope({ source: 'encore_enquiry_board', enquiryId: 'JOB-B' }));
+});
 
 test('email-less enquiries are scoped by reference, act, date and selected lineup', () => {
   const row = { enquiryRef: 'SJxqh', actId: 'act-a', eventDateISO: '2027-04-03', lineupId: 'lineup-a' };

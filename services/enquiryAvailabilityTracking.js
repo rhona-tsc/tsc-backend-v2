@@ -1,5 +1,8 @@
 const clean = value => String(value || '').trim();
 
+export const encoreRequestEnquiryScope = body => body?.source === 'encore_enquiry_board' && clean(body.enquiryId)
+  ? { enquiryId: clean(body.enquiryId) } : {};
+
 // Never fall back to act/date alone: another client's reply is not availability for this enquiry.
 export function enquiryAvailabilityFilter(row) {
   if (!clean(row?.enquiryRef) || !clean(row?.actId) || !clean(row?.eventDateISO)) return null;
@@ -35,7 +38,9 @@ export function enquiryAvailabilitySlots(requests) {
     const timestamp = value => new Date(value.updatedAt || value.sentAt || 0).getTime();
     if (!previous || timestamp(request) >= timestamp(previous)) latest.set(request.slotIndex, request);
   }
-  return [...latest.values()].map(request => ({ ...request,
+  return [...latest.values()].map(request => ({
+    slotIndex: request.slotIndex, musicianName: request.musicianName, requestId: request.requestId,
+    reply: request.reply, repliedAt: request.repliedAt, deliveryStatus: request.deliveryStatus,
     // Only explicit yes/no/unavailable is a reply. Delivery and calendar state remain separate.
     status: request.reply ? request.status : ['failed', 'undelivered'].includes(request.status) ? request.status : 'pending',
   }));

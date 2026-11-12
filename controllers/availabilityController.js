@@ -1,6 +1,7 @@
 import { interceptAvailabilityTest } from '../services/availabilityRequestTestPreview.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 import AvailabilityModel from "../models/availabilityModel.js";
+import { encoreRequestEnquiryScope } from '../services/enquiryAvailabilityTracking.js';
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
 import {
@@ -3129,6 +3130,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     phone,
     slotIndex,
   }) => ({
+    ...encoreRequestEnquiryScope(body),
     actId,
     lineupId: lineupKey,
     dateISO,
@@ -3769,6 +3771,7 @@ if (shouldAlwaysSkip) {
         // 🧯 PRIOR-REPLY CHECK (per-slot, same location) — include lineupId
         try {
           const prior = await AvailabilityModel.findOne({
+            ...encoreRequestEnquiryScope(body),
             actId,
             lineupId: lineupKey,
             dateISO,
@@ -4352,6 +4355,7 @@ if (!isDeputy && shouldAlwaysSkip) {
     /* 🛡️ Prior-reply check (same date + same location)               */
     /* -------------------------------------------------------------- */
     const prior = await AvailabilityModel.findOne({
+      ...encoreRequestEnquiryScope(body),
       actId,
       lineupId: lineupKey,
       dateISO,
