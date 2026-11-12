@@ -62,6 +62,10 @@ export function createVoiceContactCheckpoint({callerNumber=''}={}) {
       }
       let previous = contacts.get(pending);
       let callerOfferRejected=false;
+      if(previous?.source==='caller_id' && !supplied.clientPhone && (supplied.clientEmail || /\b(?:prefer|use|rather|give)\b[^.!?]{0,30}\bemail\b/i.test(lastText))) {
+        contacts.delete(pending);pending='clientEmail';
+        contacts.set(pending,{value:'',confirmed:false,readbackTurn:null,needsRepeat:true,awaitingValue:true,failures:0});previous=contacts.get(pending);
+      }
       if(previous?.source==='caller_id' && /\b(?:no|nope|don['’]?t|do not|different|another|not mine|not this|isn['’]?t mine)\b/i.test(lastText) && !supplied.clientPhone) {
         contacts.delete(pending);pending='clientPhone';callerOfferRejected=true;
         contacts.set(pending,{value:'',confirmed:false,readbackTurn:null,needsRepeat:true,awaitingValue:true,failures:0});previous=contacts.get(pending);

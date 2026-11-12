@@ -48,6 +48,9 @@ test('a different number volunteered with rejection gets its own confirmation ra
 });
 
 test('caller can choose email or decline all contact rather than accepting the incoming number',()=>{
+  const direct=named();direct.delivered(direct.response());direct.acceptUser('Use alex@example.invalid instead.');
+  assert.equal(direct.response().field,'clientEmail');direct.delivered(direct.response());direct.acceptUser('Yes');
+  assert.equal(direct.response(),null);assert.throws(()=>direct.assertConfirmed({clientPhone:callerNumber}));
   const gate=named();gate.delivered(gate.response());gate.acceptUser('No');gate.delivered(gate.response());gate.acceptUser('I prefer to use email.');
   assert.equal(gate.response().wording,"What's your email address?");
   gate.acceptUser('alex@example.invalid');gate.delivered(gate.response());gate.acceptUser('Yes');gate.assertConfirmed({clientEmail:'alex@example.invalid'});
