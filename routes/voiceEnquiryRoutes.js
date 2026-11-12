@@ -113,7 +113,7 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
     warningTimer.unref?.();
     const timer = setTimeout(end, VOICE_MAX_SECONDS * 1000);
     timer.unref?.();
-    turns = createVoiceConversationTurns({send:event=>connection.send(event),handleTool,callId:payload.sid,
+    turns = createVoiceConversationTurns({send:event=>connection.send(event),handleTool,callId:payload.sid,callerNumber:binding.testCaller,
       openingEvent:voiceOpeningEventFor(binding.intent),instructions:sessionConfig.instructions,onError:()=>{void end();}});
     connection.socket.on('open', () => turns.start());
     connection.on('event', event => turns.accept(event));

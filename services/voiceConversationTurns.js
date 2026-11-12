@@ -7,12 +7,13 @@ const expectsAnswer = text => /\?|\bplease\s+(?:share|tell|give|repeat|spell|con
 
 // One response per caller turn, or one continuation after a complete tool batch.
 // Draft checkpoint tools are silent when the assistant has already asked a question.
-export function createVoiceConversationTurns({ send, handleTool, callId, openingEvent, instructions = ENQUIRY_ASSISTANT_INSTRUCTIONS, onError = () => {} }) {
-  const contact = createVoiceContactCheckpoint(), answers=createVoiceAnswerCapture(), seenUsers = new Set(), seenTools = new Set();
+export function createVoiceConversationTurns({ send, handleTool, callId, callerNumber='', openingEvent, instructions = ENQUIRY_ASSISTANT_INSTRUCTIONS, onError = () => {} }) {
+  const contact = createVoiceContactCheckpoint({callerNumber}), answers=createVoiceAnswerCapture(), seenUsers = new Set(), seenTools = new Set(), doneResponses=new Set();
   const users = new Map(), order = [];
   let queue = Promise.resolve(), active = false, playing = false, speaking = false, started = false, closed = false;
   let needsContinuation = false, askedQuestion = false, plan = null, completedPlan = null;
   let nextAction='';
+  let activeResponseId='';
   const instructionsForTurn = () => `${instructions}\n${contact.context()}\n${answers.context()}\n${nextAction}`;
   const respond = (event, checkpoint = null) => {
     if (closed) return;
@@ -30,7 +31,11 @@ export function createVoiceConversationTurns({ send, handleTool, callId, opening
       }
       if (!ready.length) return;
       const text = ready.filter(item => !item.failed).map(item => item.text).join(' ').trim();
-      if (!text) { if(ready.some(item=>item.failed)) respond(exact("Sorry, I didn't catch that. Could you repeat it, please?")); return; }
+      if (!text) {
+        if(ready.some(item=>item.failed)) {respond(exact("Sorry, I didn't catch that. Could you repeat it, please?"));return;}
+        // An empty background chunk must not swallow a ready catalogue result.
+        await drain();return;
+      }
       if(answers.isIncomplete(text)) return; // "It is..." is not a finished venue answer.
       nextAction='';
       const captured = {...contact.acceptUser(text),...answers.acceptUser(text)};
@@ -52,6 +57,7 @@ export function createVoiceConversationTurns({ send, handleTool, callId, opening
   };
   const process = async event => {
     if (closed) return;
+    if(event.type==='response.created') {activeResponseId=event.response?.id||'';active=true;return;}
     if (event.type === 'input_audio_buffer.speech_started') { speaking = true; return; }
     if (event.type === 'input_audio_buffer.speech_stopped') { speaking = false; await drain(); return; }
     if (event.type === 'output_audio_buffer.started') { playing = true; return; }
@@ -104,7 +110,11 @@ export function createVoiceConversationTurns({ send, handleTool, callId, opening
       return;
     }
     if (event.type === 'response.done') {
+      const id=event.response?.id;
+      if(id && (doneResponses.has(id)||activeResponseId&&id!==activeResponseId))return;
+      if(id)doneResponses.add(id);
       active = false;
+      activeResponseId='';
       if (plan) { if (playing) completedPlan = plan; else contact.delivered(plan); plan = null; }
       await drain();
     }

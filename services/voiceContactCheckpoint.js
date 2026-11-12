@@ -33,18 +33,19 @@ export function extractVoiceContacts(text = '') {
   return { ...(email ? {clientEmail:email} : {}), ...(phones.length ? {clientPhone:phones.at(-1)} : {}) };
 }
 
-export function contactReadback(field, value) {
+export function contactReadback(field, value, {clarifyLetters=false}={}) {
   if (field === 'clientPhone') {
     const local = value.startsWith('+44') ? `0${value.slice(3)}` : value;
     return `Your callback number is ${[...local].join(', ')}. Is that correct?`;
   }
   const [local, domain] = value.split('@');
-  const spell = part => [...part].map(char => ({'.':'dot','_':'underscore','-':'hyphen','+':'plus'})[char] || char).join(', ');
+  const spell = part => [...part].map(char => clarifyLetters && char==='d'?'D as in Delta':clarifyLetters && char==='g'?'G as in Golf':({'.':'dot','_':'underscore','-':'hyphen','+':'plus'})[char] || char).join(', ');
   return `Your email is ${spell(local)}, at ${domain.replaceAll('.', ' dot ')}. Is that correct?`;
 }
 
-export function createVoiceContactCheckpoint() {
-  const contacts = new Map(), abandoned = new Set(); let turn = 0, pending = '', lastText = '', nameRequested = false;
+export function createVoiceContactCheckpoint({callerNumber=''}={}) {
+  const incomingNumber=normalizeCallbackPhone(callerNumber);
+  const contacts = new Map(), abandoned = new Set(); let turn = 0, pending = '', lastText = '', nameRequested = false, nameProvided=false, incomingOffered=false, contactDeclined=false;
   const next = () => fields.find(field => contacts.has(field) && !contacts.get(field).confirmed) || '';
   return {
     observeAssistant(text) {
@@ -57,9 +58,18 @@ export function createVoiceContactCheckpoint() {
         nameRequested = false;
         const name = lastText.trim().replace(/^(?:my name is|it['’]s|i am|i['’]m)\s+/i,'').replace(/[?.!]+$/,'').trim();
         if (/^[\p{L}][\p{L}'’ .-]{0,119}$/u.test(name) && name.split(/\s+/).length <= 6 &&
-          !/^(?:no|yes|can|could|would|please|i|skip|rather|don['’]?t)\b/i.test(name)) captured.clientName = name;
+          !/^(?:no|yes|can|could|would|please|i|skip|rather|don['’]?t)\b/i.test(name)) {captured.clientName = name;nameProvided=true;}
       }
       let previous = contacts.get(pending);
+      let callerOfferRejected=false;
+      if(previous?.source==='caller_id' && /\b(?:no|nope|don['’]?t|do not|different|another|not mine|not this|isn['’]?t mine)\b/i.test(lastText) && !supplied.clientPhone) {
+        contacts.delete(pending);pending='clientPhone';callerOfferRejected=true;
+        contacts.set(pending,{value:'',confirmed:false,readbackTurn:null,needsRepeat:true,awaitingValue:true,failures:0});previous=contacts.get(pending);
+      }
+      if(previous?.awaitingValue && pending==='clientPhone' && /\b(?:prefer|use|rather|give)\b[^.!?]{0,30}\bemail\b/i.test(lastText) && !supplied.clientPhone) {
+        contacts.delete(pending);pending='clientEmail';
+        contacts.set(pending,{value:'',confirmed:false,readbackTurn:null,needsRepeat:true,awaitingValue:true,failures:0});previous=contacts.get(pending);
+      }
       if (previous?.switchOfferedTurn != null && turn > previous.switchOfferedTurn) {
         const alternate = pending === 'clientEmail' ? 'clientPhone' : 'clientEmail';
         const agreesToSwitch = affirmative(lastText) || (!negative(lastText) &&
@@ -81,17 +91,19 @@ export function createVoiceContactCheckpoint() {
       }
       if (pending && refused(lastText)) {
         for (const [field, contact] of contacts) if (!contact.confirmed) contacts.delete(field);
-        pending = ''; return {...captured,contactDeclined:true};
+        pending = '';contactDeclined=true; return {...captured,contactDeclined:true};
       }
-      if (previous && negative(lastText)) {
+      if (previous && negative(lastText) && !callerOfferRejected) {
         const rejected = /\bboth\b|\bneither\b/i.test(lastText) ? fields : [pending];
         for (const field of rejected) if (contacts.has(field)) {
           const contact = contacts.get(field);
           contact.confirmed = false; contact.readbackTurn = null; contact.needsRepeat = true; contact.failures++;
         }
       } else if (previous && previous.readbackTurn !== null && turn > previous.readbackTurn &&
-        !Object.keys(supplied).length && affirmative(lastText)) {
+        !Object.keys(supplied).length && (affirmative(lastText) || previous.source==='caller_id' && !negative(lastText) && !/\b(?:but|except|don['’]?t|do not)\b/i.test(lastText) &&
+          /^(?:yes|yeah|yep|sure|you can use|that(?:['’]s| is) (?:fine|okay|ok))\b/i.test(lastText.trim()))) {
         previous.confirmed = true; previous.needsRepeat = false; pending = '';
+        if(previous.source==='caller_id') {captured.clientPhone=previous.value;captured.preferredContactMethod='phone';}
       }
       for (const [field, value] of Object.entries(supplied)) {
         abandoned.delete(field);
@@ -104,15 +116,22 @@ export function createVoiceContactCheckpoint() {
       return {...captured,...supplied};
     },
     response() {
+      if(!pending && incomingNumber && nameProvided && !incomingOffered && !contactDeclined && !contacts.size) {
+        incomingOffered=true;pending='clientPhone';
+        contacts.set(pending,{value:incomingNumber,source:'caller_id',confirmed:false,readbackTurn:null,needsRepeat:false,failures:0});
+      }
       const contact = contacts.get(pending);
       if (!contact) return null;
       const label = pending === 'clientEmail' ? 'email address' : 'callback number';
       const offeringAlternative = contact.needsRepeat && !contact.awaitingValue && contact.failures >= 2;
-      const wording = contact.awaitingValue ? `What's your ${label}?` : contact.needsRepeat
+      const local=contact.value.startsWith('+44')?`0${contact.value.slice(3)}`:contact.value;
+      const wording = contact.source==='caller_id' && !contact.needsRepeat
+        ? `You're calling from ${[...local].join(', ')}. Can we use this as your callback number?`
+        : contact.awaitingValue ? `What's your ${label}?` : contact.needsRepeat
         ? (contact.failures >= 2
           ? `I'm having trouble confirming your ${label}. Would you prefer to use ${pending === 'clientEmail' ? 'a callback number' : 'an email address'} instead?`
           : `Sorry, let's correct just your ${label}. Could you ${pending === 'clientEmail' ? 'spell it, including any dots' : 'repeat the digits slowly'}?`)
-        : contactReadback(pending, contact.value);
+        : contactReadback(pending, contact.value,{clarifyLetters:contact.failures>0});
       return {field:pending, value:contact.value, readback:!contact.needsRepeat, offeringAlternative, wording,
         event:{type:'response.create',response:{tool_choice:'none',instructions:
           `Contact confirmation checkpoint. Say ONLY the following, in a natural British accent, then STOP and WAIT for the caller's next answer. Do not add a preamble, 'please hold', 'one moment', or filler. Do not introduce yourself, acknowledge a save, ask another question, mention another contact detail, or continue to event questions. ${wording}`}}};
@@ -125,7 +144,10 @@ export function createVoiceContactCheckpoint() {
     interrupted() { const contact = contacts.get(pending); if (contact) contact.readbackTurn = null; },
     draftInput(input = {}) {
       const draft = {...input};
+      for(const [field,contact] of contacts) if(contact.confirmed&&!draft[field])draft[field]=contact.value;
+      if(contacts.get('clientPhone')?.confirmed&&!draft.preferredContactMethod)draft.preferredContactMethod='phone';
       for (const field of fields) if (Object.hasOwn(draft, field) && draft[field]) {
+        if(contacts.get(field)?.source==='caller_id' && !contacts.get(field).confirmed) throw new VoiceEnquiryValidationError('The incoming caller number is only a proposal. Wait for explicit permission before saving it as a callback contact.');
         if (abandoned.has(field)) throw new VoiceEnquiryValidationError(`The caller switched away from ${field}. Leave it empty and use their separately confirmed alternative contact.`);
         const value = field === 'clientPhone' ? normalizeCallbackPhone(draft[field]) : String(draft[field]).trim().toLowerCase();
         if (contacts.get(field)?.value !== value) throw new VoiceEnquiryValidationError(
@@ -143,7 +165,7 @@ export function createVoiceContactCheckpoint() {
     },
     context() {
       const confirmed = Object.fromEntries([...contacts].filter(([,contact]) => contact.confirmed).map(([field,contact]) => [field,contact.value]));
-      return `The greeting has already been delivered. Never greet or introduce yourself again. Ask one brief question, then stop and wait. Contact details separately confirmed in this call: ${JSON.stringify(confirmed)}. Preserve their exact spelling and digits; do not re-confirm these unless the caller changes them. Contact fields the caller switched away from: ${JSON.stringify([...abandoned])}; omit these or leave them empty when saving, and do not ask for them again unless the caller volunteers them. A 'no' or correction refers to your last question; do not assume it means an undecided venue. Most recent caller transcript (may contain recognition errors): ${JSON.stringify(lastText)}.`;
+      return `The greeting has already been delivered. Never greet or introduce yourself again. Ask one brief question, then stop and wait. Contact details separately confirmed in this call: ${JSON.stringify(confirmed)}. Preserve their exact spelling and digits; do not re-confirm these unless the caller changes them. A confirmed callback number is enough to continue: use phone follow-up unless the caller explicitly chooses another channel; email is optional and must not block band options. Caller ID is only a proposed contact, never verified identity, account access or booking ownership. Contact fields the caller switched away from: ${JSON.stringify([...abandoned])}; omit these or leave them empty when saving, and do not ask for them again unless the caller volunteers them. A 'no' or correction refers to your last question; do not assume it means an undecided venue. Most recent caller transcript (may contain recognition errors): ${JSON.stringify(lastText)}.`;
     },
     get pending() { return pending; },
   };
