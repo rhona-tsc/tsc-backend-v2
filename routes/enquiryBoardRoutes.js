@@ -4,6 +4,8 @@ import { equipmentConnectionStatus, beginEquipmentGoogleConnection, disconnectEq
 import express from "express";
 import mongoose from "mongoose";
 import EnquiryBoardItem from "../models/enquiryBoardItem.js";
+import AvailabilityModel from '../models/availabilityModel.js';
+import { enquiryAvailabilityFilter, enquiryAvailabilityProjection, enquiryAvailabilityRequests, enquiryAvailabilitySlots } from '../services/enquiryAvailabilityTracking.js';
 import Act from "../models/actModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
 import { ENQUIRY_PREFERENCE_KEYS, normalizeEnquiryPreferences, enquiryPreferenceSearchValues, resolveSelectedBands } from '../services/enquiryPreferences.js';
@@ -474,6 +476,15 @@ router.get("/", musicianAuth, async (req, res) => {
     const start = (safePage - 1) * safeLimit;
     const pagedRows = rows.slice(start, start + safeLimit);
 
+    // Attach exact enquiry-scoped replies to Encore rows, including rows without a client email.
+    await Promise.all(pagedRows.filter(row => row._source === 'manual' && clean(row.agent).toLowerCase() === 'encore').map(async row => {
+      const filter = enquiryAvailabilityFilter(row);
+      if (!filter) return;
+      const docs = await AvailabilityModel.find(filter).select(enquiryAvailabilityProjection).lean();
+      const requests = enquiryAvailabilityRequests(docs);
+      row.availabilitySlots = enquiryAvailabilitySlots(requests);
+    }));
+
     res.json({
       success: true,
       rows: pagedRows,
@@ -499,6 +510,21 @@ router.get("/", musicianAuth, async (req, res) => {
 /**
  * POST /api/board/enquiries  (AGENT ONLY)
  */
+router.get('/:id/availability', musicianAuth, async (req, res) => {
+  if (!isAgent(req.user) && !isTSCAdmin(req.user)) return res.sendStatus(403);
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ success: false, message: 'Invalid enquiry ID' });
+  try {
+    const row = await EnquiryBoardItem.findById(req.params.id).lean();
+    if (!row) return res.status(404).json({ success: false, message: 'Enquiry not found' });
+    const filter = enquiryAvailabilityFilter(row);
+    if (!filter) return res.status(409).json({ success: false, message: 'Enquiry needs a reference, act and event date before replies can be tracked.' });
+    const docs = await AvailabilityModel.find(filter).select(enquiryAvailabilityProjection).lean();
+    return res.json({ success: true, enquiryRef: row.enquiryRef, requests: enquiryAvailabilityRequests(docs) });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Could not load vocalist replies.' });
+  }
+});
+
 router.post("/", musicianAuth, async (req, res) => {
   try {
     if (!isAgent(req.user) && !isTSCAdmin(req.user)) {
