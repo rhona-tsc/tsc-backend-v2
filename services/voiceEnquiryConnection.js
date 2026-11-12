@@ -47,7 +47,7 @@ export function verifyVoiceBridge(token, secret, now = Date.now()) {
 export function buildEnquiryVoiceSession(config) {
   return { type: 'realtime', model: config.model,
     instructions: `${ENQUIRY_ASSISTANT_INSTRUCTIONS}\nCURRENT TIME: ${new Date().toISOString()}. Use Europe/London for caller dates and callback hours. Maintain a natural British accent throughout; introduce yourself once only. Keep spoken turns short so the caller can answer between them.`,
-    audio: { input: { noise_reduction: { type: 'near_field' }, turn_detection: { type: 'server_vad', threshold: 0.7, prefix_padding_ms: 400, silence_duration_ms: 900, create_response: false, interrupt_response: false }, transcription: { model: 'gpt-4o-mini-transcribe', language: 'en' } }, output: { voice: 'marin' } },
+    audio: { input: { noise_reduction: { type: 'near_field' }, turn_detection: { type: 'semantic_vad', eagerness: 'low', create_response: false, interrupt_response: false }, transcription: { model: 'gpt-4o-mini-transcribe', language: 'en' } }, output: { voice: 'marin' } },
     output_modalities: ['audio'], max_output_tokens: 500,
     tools: ENQUIRY_ASSISTANT_TOOLS, tool_choice: 'auto', tracing: null };
 }

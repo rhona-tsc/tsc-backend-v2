@@ -1,4 +1,6 @@
 import { createVoiceContactCheckpoint } from './voiceContactCheckpoint.js';
+import { createVoiceAnswerCapture } from './voiceAnswerCapture.js';
+import { normalizeBandSearch } from './voiceBandMatching.js';
 import { ENQUIRY_ASSISTANT_INSTRUCTIONS, VoiceEnquiryValidationError } from './incomingEnquiryAssistant.js';
 
 const expectsAnswer = text => /\?|\bplease\s+(?:share|tell|give|repeat|spell|confirm|let me know)\b|\byour\s+(?:email|number|name|postcode)\b[^.!?]*\bplease\b/i.test(text);
@@ -6,10 +8,12 @@ const expectsAnswer = text => /\?|\bplease\s+(?:share|tell|give|repeat|spell|con
 // One response per caller turn, or one continuation after a complete tool batch.
 // Draft checkpoint tools are silent when the assistant has already asked a question.
 export function createVoiceConversationTurns({ send, handleTool, callId, openingEvent, instructions = ENQUIRY_ASSISTANT_INSTRUCTIONS, onError = () => {} }) {
-  const contact = createVoiceContactCheckpoint(), seenUsers = new Set(), seenTools = new Set();
+  const contact = createVoiceContactCheckpoint(), answers=createVoiceAnswerCapture(), seenUsers = new Set(), seenTools = new Set();
   const users = new Map(), order = [];
   let queue = Promise.resolve(), active = false, playing = false, speaking = false, started = false, closed = false;
   let needsContinuation = false, askedQuestion = false, plan = null, completedPlan = null;
+  let nextAction='';
+  const instructionsForTurn = () => `${instructions}\n${contact.context()}\n${answers.context()}\n${nextAction}`;
   const respond = (event, checkpoint = null) => {
     if (closed) return;
     active = true; askedQuestion = false; needsContinuation = false; plan = checkpoint;
@@ -26,14 +30,16 @@ export function createVoiceConversationTurns({ send, handleTool, callId, opening
       }
       if (!ready.length) return;
       const text = ready.filter(item => !item.failed).map(item => item.text).join(' ').trim();
-      if (!text) { respond(exact("Sorry, I didn't catch that. Could you repeat it, please?")); return; }
-      const captured = contact.acceptUser(text);
+      if (!text) { if(ready.some(item=>item.failed)) respond(exact("Sorry, I didn't catch that. Could you repeat it, please?")); return; }
+      if(answers.isIncomplete(text)) return; // "It is..." is not a finished venue answer.
+      nextAction='';
+      const captured = {...contact.acceptUser(text),...answers.acceptUser(text)};
       // This is the caller's canonical contact text, not a model-created variant.
       // Checkpoint it before the read-back; it remains an unconfirmed draft.
       if (Object.keys(captured).length) await handleTool({callId,name:'save_enquiry_draft',arguments:captured});
       const checkpoint = contact.response();
       if (checkpoint) respond(checkpoint.event, checkpoint);
-      else respond({type:'response.create',response:{instructions:`${instructions}\n${contact.context()}`}});
+      else respond({type:'response.create',response:{instructions:instructionsForTurn()}});
       return;
     }
     if (needsContinuation) {
@@ -41,7 +47,7 @@ export function createVoiceConversationTurns({ send, handleTool, callId, opening
       if (askedQuestion) { needsContinuation = false; return; }
       const checkpoint = contact.response();
       if (checkpoint) respond(checkpoint.event, checkpoint);
-      else respond({type:'response.create',response:{instructions:`${instructions}\n${contact.context()}`}});
+      else respond({type:'response.create',response:{instructions:instructionsForTurn()}});
     }
   };
   const process = async event => {
@@ -70,6 +76,7 @@ export function createVoiceConversationTurns({ send, handleTool, callId, opening
     if (event.type === 'response.output_audio_transcript.done') {
       askedQuestion ||= expectsAnswer(event.transcript || '');
       contact.observeAssistant(event.transcript || '');
+      answers.observeAssistant(event.transcript || '');
       return;
     }
     if (event.type === 'response.function_call_arguments.done') {
@@ -78,9 +85,14 @@ export function createVoiceConversationTurns({ send, handleTool, callId, opening
       let result;
       try {
         let input = typeof event.arguments === 'string' ? JSON.parse(event.arguments) : event.arguments || {};
+        if(['save_enquiry_draft','save_enquiry','request_callback'].includes(event.name)) input=answers.mergeInput(input);
+        if(event.name==='lookup_bands' && normalizeBandSearch(input).mustHaveInstruments.includes('Brass section') && !answers.hornMentioned)
+          throw new VoiceEnquiryValidationError('The caller has not requested a horn section. Search their stated singer/style/size requirements; do not introduce an extra instrument question.');
         if (['save_enquiry','request_callback'].includes(event.name)) contact.assertConfirmed(input);
         if (['save_enquiry_draft','save_enquiry','request_callback'].includes(event.name)) input = contact.draftInput(input);
         result = await handleTool({callId,name:event.name,arguments:input});
+        if(event.name==='lookup_venue') answers.venueResult(result);
+        if(event.name==='lookup_bands' && result.bands?.length) nextAction=`The band search succeeded. Present these returned acts by name now: ${JSON.stringify(result.bands.map(band=>({name:band.name,lineups:band.lineups})))}. Do not ask for preferences already supplied or invent extra requirements. State that these are catalogue matches, not confirmed availability or checked prices, and ask which acts they would like checked.`;
       } catch (error) {
         result = {testMode:true,messagesSent:false,sent:0,
           ...(['save_enquiry_draft','save_enquiry','request_callback'].includes(event.name) ? {saved:false} : {lookupSucceeded:false}),

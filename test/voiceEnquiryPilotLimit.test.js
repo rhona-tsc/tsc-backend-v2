@@ -17,9 +17,20 @@ test('pilot allowance survives handler restarts, refuses retries, expiry and sto
   assert.equal(await reserveVoicePilotCall({ ...config, callSid: 'call1' }), true);
   assert.equal(await reserveVoicePilotCall({ ...config, callSid: 'call1' }), false);
   const results = await Promise.all(Array.from({ length: 10 }, (_, i) => reserveVoicePilotCall({ ...config, callSid: `other${i}` })));
-  assert.equal(results.filter(Boolean).length, 4);
+  assert.equal(results.filter(Boolean).length, 7);
   assert.equal(await reserveVoicePilotCall({ ...config, callSid: 'after-restart' }), false);
   assert.equal(await reserveVoicePilotCall({ ...config, endsAt: 1, callSid: 'expired' }), false);
   assert.equal(await reserveVoicePilotCall({ ...config, callSid: 'offline', collection: { updateOne: async () => { throw new Error('offline'); } } }), false);
-  assert.equal(document.acceptedCalls, 5);
+  assert.equal(document.acceptedCalls, 8);
+});
+
+test('approved extension adds only three slots to the existing five-call meter without resetting it', async()=>{
+  const document={acceptedCalls:5,callHashes:[]};
+  const collection={updateOne:async()=>{},findOneAndUpdate:async(filter,update)=>{
+    if(document.acceptedCalls>=filter.acceptedCalls.$lt||document.callHashes.includes(filter.callHashes.$ne))return null;
+    document.acceptedCalls+=update.$inc.acceptedCalls;document.callHashes.push(update.$push.callHashes);return {...document};
+  }};
+  const config={collection,projectId:'proj_same_pilot',endsAt:Date.now()+3600000};
+  for(let i=0;i<3;i++)assert.equal(await reserveVoicePilotCall({...config,callSid:`extra${i}`}),true);
+  assert.equal(await reserveVoicePilotCall({...config,callSid:'fourth_extra'}),false);assert.equal(document.acceptedCalls,8);
 });

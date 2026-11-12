@@ -20,8 +20,8 @@ const instrumentAliases = {
   guitar: 'Guitar', guitarist: 'Guitar', electricguitar: 'Electric Guitar', acousticguitar: 'Acoustic Guitar',
   bass: 'Bass Guitar', bassguitar: 'Bass Guitar', bassist: 'Bass Guitar', drums: 'Drums', drummer: 'Drums', percussion: 'Percussion',
   vocals: 'Vocals', vocal: 'Vocals', vocalist: 'Vocals', singer: 'Vocals', leadvocal: 'Vocals',
-  femalevocals: 'Female vocals', femalevocalist: 'Female vocals', leadfemalevocal: 'Female vocals',
-  malevocals: 'Male vocals', malevocalist: 'Male vocals', leadmalevocal: 'Male vocals',
+  femalevocal: 'Female vocals', femalevocals: 'Female vocals', femalesinger: 'Female vocals', femalevocalist: 'Female vocals', leadfemalevocal: 'Female vocals', leadfemalevocals: 'Female vocals',
+  malevocal: 'Male vocals', malevocals: 'Male vocals', malesinger: 'Male vocals', malevocalist: 'Male vocals', leadmalevocal: 'Male vocals', leadmalevocals: 'Male vocals',
   rapper: 'Rapper', rap: 'Rapper', mc: 'Rapper', violin: 'Violin', fiddle: 'Violin',
 };
 const horns = ['Saxophone', 'Trumpet', 'Trombone'];
@@ -143,6 +143,7 @@ export function matchVoiceBands(acts, input = {}, selection = {}) {
       if (!criteria.size.any && (lineup.sizeNeedsReview || !criteria.size.values.includes(lineup.size))) return false;
       if (criteria.mustHaveInstruments.includes('Brass section') && lineup.hornPlayers < 2) return false;
       if (!hasSeparateHornPlayers(criteria.mustHaveInstruments.filter(instrument => horns.includes(instrument)), lineup.roles)) return false;
+      if (!hasSeparateHornPlayers(criteria.mustHaveInstruments.filter(instrument => ['Male vocals','Female vocals'].includes(instrument)), lineup.roles)) return false;
       return criteria.mustHaveInstruments.every(instrument => instrument === 'Brass section' || lineup.instruments.includes(instrument));
     });
     if ((act.lineups || []).some(lineup => publicLineup(lineup).sizeNeedsReview)) result.reviewNotes.push(`${name}: at least one lineup size needs staff verification.`);

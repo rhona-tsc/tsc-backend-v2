@@ -87,7 +87,7 @@ test('history counts past events once, excludes future/cancelled records and exp
 
 test('phone audio has no transcription hint, filters close-mic noise and does not cut speech on every detected sound',()=>{
   const config=buildEnquiryVoiceSession({model:'test'});
-  assert.equal(config.audio.input.transcription.prompt,undefined);assert.equal(config.audio.input.noise_reduction.type,'near_field');assert.equal(config.audio.input.turn_detection.interrupt_response,false);assert.ok(config.audio.input.turn_detection.threshold>.5);assert.match(config.instructions,/British accent/);
+  assert.equal(config.audio.input.transcription.prompt,undefined);assert.equal(config.audio.input.noise_reduction.type,'near_field');assert.equal(config.audio.input.turn_detection.interrupt_response,false);assert.equal(config.audio.input.turn_detection.type,'semantic_vad');assert.equal(config.audio.input.turn_detection.eagerness,'low');assert.match(config.instructions,/British accent/);
 });
 
 test('drafts and pilot phone records stay outside automated client follow-up',()=>{
