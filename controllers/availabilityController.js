@@ -1,3 +1,4 @@
+import { availabilityReplyIntent, availabilityButtonIntent, selectAvailabilityReplyTarget, recordAvailabilityReply, queueAvailabilityInbound } from "../services/availabilityInboundReply.js";
 import { interceptAvailabilityTest } from '../services/availabilityRequestTestPreview.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 import AvailabilityModel from "../models/availabilityModel.js";
@@ -6,6 +7,7 @@ import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
 import {
   sendSMSMessage,
+  fetchInboundMessageTime,
   sendWhatsAppText,
 } from "../utils/twilioClient.js";
 import DeferredAvailability from "../models/deferredAvailabilityModel.js";
@@ -1521,6 +1523,7 @@ export async function notifyDeputies({
   skipDuplicateCheck = false,
   skipIfUnavailable = true, // currently unused in this snippet
   customDeputyList = null,
+  enquiryId = null,
 }) {
   console.log("📢 [notifyDeputies] START", {
     actId,
@@ -1649,6 +1652,7 @@ export async function notifyDeputies({
       lineupId,
       dateISO,
       isDeputy: { $ne: true },
+      ...(enquiryId ? { enquiryId } : {}),
       ...(slotIndex !== null ? { slotIndex } : {}),
     })
       .sort({ updatedAt: -1, createdAt: -1 })
@@ -1705,7 +1709,7 @@ export async function notifyDeputies({
 
   // Build exclusion set (already YES/unavailable)
   const existingPhonesAgg = await AvailabilityModel.aggregate([
-    { $match: { actId, dateISO, reply: { $in: ["yes", "unavailable"] } } },
+    { $match: { actId, dateISO, ...(enquiryId ? { enquiryId, lineupId } : {}), reply: { $in: ["yes", "unavailable"] } } },
     { $group: { _id: "$phone" } },
   ]);
   const existingSet = new Set(
@@ -1779,6 +1783,7 @@ export async function notifyDeputies({
 
           // ✅ Ensure deputy rows get linked to the same enquiry/slot thread
           enquiryId: inheritedEnquiryId,
+          ...(enquiryId ? { source: "encore_enquiry_board", requestId: enquiryId } : {}),
 
           // ✅ Helps triggerAvailabilityRequest enrichment if email missing
           userId: inheritedClientUserId,
@@ -1840,6 +1845,10 @@ export async function triggerNextDeputy({
   dateISO,
   excludePhones = [],
   slotIndex = null, // 🆕 added for per-slot progression
+  enquiryId = null,
+  formattedAddress = "TBC",
+  clientName = "",
+  clientEmail = "",
 }) {
   console.log("🎯 [triggerNextDeputy] START", { actId, dateISO, slotIndex });
 
@@ -1896,10 +1905,11 @@ export async function triggerNextDeputy({
     actId,
     lineupId,
     dateISO,
-    formattedAddress: "TBC",
-    clientName: "Auto-triggered",
-    clientEmail: "hello@thesupremecollective.co.uk",
-    skipDuplicateCheck: true,
+    formattedAddress,
+    clientName,
+    clientEmail,
+    enquiryId,
+    skipDuplicateCheck: false,
     skipIfUnavailable: false,
     customDeputyList: [nextDeputy],
     slotIndex, // 🆕 ensures deputies triggered for correct slot only
@@ -4837,6 +4847,8 @@ export const processAvailabilityReplyFlow = async ({
   btnId = "",
   fromRaw = "",
 }) => {
+  const currentReplyFilter = { _id: updated._id, ...(updated.inbound?.sid ? { "inbound.sid": updated.inbound.sid } : {}), reply: updated.reply };
+  if (!await AvailabilityModel.exists(currentReplyFilter)) return;
   const pickPicLocal = (m = {}) =>
     m.photoUrl ||
     m.musicianProfileImageUpload ||
@@ -5170,12 +5182,8 @@ export const processAvailabilityReplyFlow = async ({
       ? { $or: musicianIdentityOptions }
       : { _id: updated._id };
     const enquiryIdentity = {
-      actId: updated.actId?._id || updated.actId,
-      dateISO: updated.dateISO,
-      v2: true,
-      ...(updated.formattedAddress
-        ? { formattedAddress: updated.formattedAddress }
-        : {}),
+      // Cancellation belongs to this request, never a different client's gig.
+      _id: updated._id,
     };
 
     const previouslyConfirmedRow = await AvailabilityModel.findOne({
@@ -5220,15 +5228,10 @@ export const processAvailabilityReplyFlow = async ({
     }
 
     await AvailabilityModel.updateOne(
-      { _id: updated._id },
-      {
-        $set: {
-          status: "unavailable",
-          reply: "unavailable",
-          repliedAt: new Date(),
-        },
-      },
+      currentReplyFilter,
+      { $set: { status: "unavailable" } },
     );
+    if (!await AvailabilityModel.exists(currentReplyFilter)) return;
 
     if (shouldSendCancellationEmail) {
       await AvailabilityModel.updateMany(
@@ -5274,6 +5277,8 @@ export const processAvailabilityReplyFlow = async ({
         actId,
         dateISO,
         __fromUnavailable: true,
+        requestKey: updated.requestKey || null,
+        enquiryId: updated.enquiryId || null,
       });
     } catch (e) {
       console.warn("⚠️ Badge rebuild (unavailable) failed:", e?.message || e);
@@ -5293,8 +5298,17 @@ export const processAvailabilityReplyFlow = async ({
       "Thanks for letting us know — we've updated your availability.",
     );
 
-    const shouldTriggerDeputies =
-      !isDeputy && ["unavailable", "no", "noloc", "nolocation"].includes(reply);
+    const slotScope = {
+      actId: updated.actId,
+      lineupId: updated.lineupId,
+      dateISO,
+      slotIndex,
+      ...(updated.enquiryId ? { enquiryId: updated.enquiryId } : { requestKey: updated.requestKey }),
+    };
+    const hasOtherPositive = await AvailabilityModel.exists({
+      ...slotScope, _id: { $ne: updated._id }, reply: "yes",
+    });
+    const shouldTriggerDeputies = !isDeputy && !hasOtherPositive;
 
     if (act?._id && shouldTriggerDeputies) {
       await notifyDeputies({
@@ -5306,22 +5320,25 @@ export const processAvailabilityReplyFlow = async ({
         clientName: updated.clientName || "",
         clientEmail: updated.clientEmail || "",
         slotIndex,
-        skipDuplicateCheck: true,
+        enquiryId: updated.enquiryId || null,
+        skipDuplicateCheck: false,
         skipIfUnavailable: false,
       });
-    } else if (isDeputy && reply === "unavailable") {
+    } else if (isDeputy && reply === "unavailable" && !hasOtherPositive) {
       await triggerNextDeputy({
         actId: act._id,
         lineupId: updated.lineupId || act.lineups?.[0]?._id || null,
         dateISO,
         slotIndex,
+        enquiryId: updated.enquiryId || null,
+        formattedAddress: updated.formattedAddress || "TBC",
+        clientName: updated.clientName || "",
+        clientEmail: updated.clientEmail || "",
         excludePhones: [
           updated.phone,
           updated.whatsappNumber,
           ...(await AvailabilityModel.distinct("phone", {
-            actId,
-            dateISO,
-            slotIndex,
+            ...slotScope,
             reply: { $in: ["unavailable", "yes"] },
           })),
         ],
@@ -5448,21 +5465,7 @@ export const twilioInbound = async (req, res) => {
     return v;
   };
 
-  const classifyReply = (s = "") => {
-    const t = String(s || "")
-      .trim()
-      .toLowerCase();
-    if (!t) return null;
-    if (
-      /^y(es)?$/.test(t) ||
-      t.includes("i'm available") ||
-      t.includes("i’m available") ||
-      t.includes("im available")
-    ) return "yes";
-    if (/^un/.test(t) || t.includes("already booked")) return "unavailable";
-    if (/^n(o)?$/.test(t) || t.includes("no thanks")) return "no";
-    return null;
-  };
+  const classifyReply = availabilityReplyIntent;
 
   const sendAutomatedReplyInstruction = async (phone, { isWhatsApp = true } = {}) => {
     if (!phone) return;
@@ -5574,21 +5577,15 @@ export const twilioInbound = async (req, res) => {
     const m = text.match(/#([A-Z0-9]{5,12})/i);
     const parsedRequestId = m ? m[1].toUpperCase() : null;
 
-    const t = text.replace(/#\w+/g, "").trim().toLowerCase();
-    const parsedReply = t.startsWith("y")
-      ? "yes"
-      : t.startsWith("un")
-        ? "unavailable"
-        : t.startsWith("n")
-          ? "no"
-          : null;
+    const parsedReply = availabilityReplyIntent(text);
 
     return { requestId: parsedRequestId, reply: parsedReply, source: "text" };
   }
   // --- end helpers ---
 
+  const receivedAt = new Date();
   setImmediate(() => {
-    (async () => {
+    queueAvailabilityInbound(normE164(req.body?.WaId || req.body?.From), async () => {
       try {
         const bodyObj = req.body || {};
 
@@ -5610,6 +5607,13 @@ export const twilioInbound = async (req, res) => {
             From: fromRaw,
           });
         }
+
+        // Check durable deduplication before conversational matching: a retry may
+        // arrive after the original conversation's 30-minute context expired.
+        if (inboundSid && await AvailabilityModel.exists({
+          phone: normE164(fromRaw),
+          $or: [{ "inbound.sid": inboundSid }, { "replyHistory.sid": inboundSid }],
+        })) return;
 
         if (
           typeof seenInboundOnce === "function" &&
@@ -5659,20 +5663,9 @@ export const twilioInbound = async (req, res) => {
           classifyReply(bodyText) ||
           null;
 
-        const tryExtractRid = (s) => {
-          if (!s) return null;
-          const t = String(s).trim();
-
-          const m1 = t.match(
-            /^(?:YES|NO|UNAVAILABLE)[:\s-]?([A-Z0-9]{5,12})$/i
-          );
-          if (m1) return m1[1].toUpperCase();
-
-          const m2 = t.match(/^([A-Z0-9]{5,12})$/i);
-          if (m2) return m2[1].toUpperCase();
-
-          return null;
-        };
+        const buttonIntent = availabilityButtonIntent(btnId);
+        if (buttonIntent) reply = buttonIntent.reply;
+        const tryExtractRid = (value) => availabilityButtonIntent(value)?.requestId || null;
 
         let requestId =
           tryExtractRid(btnId) ||
@@ -5891,11 +5884,6 @@ if (deputyAllocationJob && !deputyAllocationReply) {
           return;
         }
 
-        if (inboundIsWhatsApp && !usedQuickReply) {
-          await sendAutomatedReplyInstruction(sender);
-          return;
-        }
-
         if (!reply) {
           console.log("ℹ️ Unclassified inbound message", {
             bodyText,
@@ -5911,112 +5899,35 @@ if (deputyAllocationJob && !deputyAllocationReply) {
           return;
         }
 
-        /* ---------------------------------------------------------------------- */
-        /* 🎯 Locate the Availability row to update                               */
-        /*   1) Strict: requestId                                                 */
-        /*   2) Deterministic: repliedSid → outboundSid                           */
-        /*   3) Fallback: latest row by phone, v2, awaiting reply                 */
-        /* ---------------------------------------------------------------------- */
-        let updated = null;
-
-        if (requestId) {
-          updated = await AvailabilityModel.findOneAndUpdate(
-            { requestId },
-            {
-              $set: {
-                reply,
-                repliedAt: new Date(),
-                "inbound.sid": inboundSid || null,
-                "inbound.repliedSid": repliedSid || null,
-                "inbound.body": bodyText || "",
-                "inbound.buttonText": btnText || null,
-                "inbound.buttonPayload": btnId || null,
-                "inbound.source": "button-or-text",
-                "inbound.requestId": requestId,
-              },
-            },
-            { new: true }
-          );
-          if (!updated) {
-            console.log(
-              "⚠️ requestId not found, will try repliedSid/phone fallbacks",
-              { requestId }
-            );
-          }
-        }
-
-        if (!updated && repliedSid) {
-          updated = await AvailabilityModel.findOneAndUpdate(
-            { messageSidOut: repliedSid },
-            {
-              $set: {
-                reply,
-                repliedAt: new Date(),
-                "inbound.sid": inboundSid || null,
-                "inbound.repliedSid": repliedSid,
-                "inbound.body": bodyText || "",
-                "inbound.buttonText": btnText || null,
-                "inbound.buttonPayload": btnId || null,
-                "inbound.source": "button-or-text",
-                ...(requestId
-                  ? { requestId, "inbound.requestId": requestId }
-                  : {}),
-              },
-            },
-            { new: true }
-          );
-          if (!updated) {
-            console.log("⚠️ repliedSid did not match any row by outboundSid", {
-              repliedSid,
-            });
-          }
-        }
-
-        if (!updated && sender) {
-          updated = await AvailabilityModel.findOneAndUpdate(
-            {
-              phone: sender,
-              v2: true,
-              $or: [
-                { reply: { $exists: false } },
-                { reply: null },
-                { reply: "" },
-              ],
-            },
-            {
-              $set: {
-                reply,
-                repliedAt: new Date(),
-                "inbound.sid": inboundSid || null,
-                "inbound.repliedSid": repliedSid || null,
-                "inbound.body": bodyText || "",
-                "inbound.buttonText": btnText || null,
-                "inbound.buttonPayload": btnId || null,
-                "inbound.source": "button-or-text",
-                ...(requestId
-                  ? { requestId, "inbound.requestId": requestId }
-                  : {}),
-              },
-            },
-            { new: true, sort: { createdAt: -1 } }
-          );
-        }
-
-        if (!updated) {
-          const candidateCount = await AvailabilityModel.countDocuments({
-            phone: sender,
-            v2: true,
-          });
-          console.warn(
-            "⚠️ No matching AvailabilityModel found for inbound reply.",
-            {
-              sender,
-              candidateCount,
-              hint: "With Content quick replies, some payloads lack RID. We now try requestId, then OriginalRepliedMessageSid→outboundSid, then latest 'awaiting reply' by phone.",
-            }
-          );
+        // Match the sender as well as the reference. Never let a typed correction
+        // fall through to some other pending enquiry for the same musician.
+        const rows = await AvailabilityModel.find({ phone: sender, v2: true }).lean();
+        let target = selectAvailabilityReplyTarget(rows, { requestId, repliedSid, now: receivedAt });
+        if (!target || target.confirmedBooking) {
+          await (inboundIsWhatsApp ? sendWhatsAppText : sendSMSMessage)(sender,
+            "I couldn't safely match that availability reply to one enquiry. Please reply to the original enquiry message or include its #reference so we update the correct gig.");
           return;
         }
+        let occurredAt = null;
+        try { occurredAt = await fetchInboundMessageTime(inboundSid); }
+        catch (error) { console.warn("Inbound provider timestamp unavailable:", error.message); }
+        const event = {
+          reply, sid: inboundSid, occurredAt, receivedAt, repliedSid,
+          body: bodyText, buttonText: btnText, buttonPayload: btnId,
+          source: usedQuickReply ? "availability-button" : (inboundIsWhatsApp ? "whatsapp-text" : "sms-text"),
+        };
+        let result;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          result = await recordAvailabilityReply(AvailabilityModel, target, event);
+          if (result.state !== "conflict") break;
+          target = await AvailabilityModel.findById(target._id).lean();
+          if (!target) return;
+        }
+        if (result.state !== "recorded") return;
+        const updated = result.updated;
+        requestId = updated.requestId;
+        // Record repeat answers for the audit without resending invites/deputies.
+        if (!result.changed) return;
 
         await processAvailabilityReplyFlow({
           updated,
@@ -6033,7 +5944,7 @@ if (deputyAllocationJob && !deputyAllocationReply) {
       } catch (err) {
         console.error("❌ Error in twilioInbound background task:", err);
       }
-    })();
+    }).catch(error => console.error("Availability inbound queue failed:", error));
   });
 };
 
@@ -6878,6 +6789,7 @@ export async function rebuildAndApplyAvailabilityBadge({
   dateISO,
   requestKey = null,
   enquiryId = null,
+  notifyClients = true,
 }) {
   console.log("🟦 [rebuildAndApplyAvailabilityBadge] START", {
     actId,
@@ -7660,6 +7572,8 @@ const renderActExtrasHtml = async (
   }
 
   /* ===================== Client emails block ===================== */
+  // Reconciliation of an already handled reply must not repeat client outreach.
+  if (!notifyClients) return { success: true, updated: true, badge, clientEmailSkipped: "reconciliation" };
   try {
     const allRows = Array.isArray(availRows) ? availRows : [];
     const latestContextRow = allRows

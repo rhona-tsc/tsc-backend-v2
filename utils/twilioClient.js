@@ -51,6 +51,14 @@ function getTwilioClient() {
   }
 }
 
+// Provider creation time is authoritative for delayed/retried inbound webhooks.
+export async function fetchInboundMessageTime(sid) {
+  const client = getTwilioClient();
+  if (!client || !sid) return null;
+  const message = await client.messages(sid).fetch();
+  return message.dateCreated || null;
+}
+
 // -------------------- Helpers --------------------
 // Public site base (for profile links in messages)
 const PUBLIC_SITE_BASE = (

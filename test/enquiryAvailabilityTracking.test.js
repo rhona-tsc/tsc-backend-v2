@@ -32,3 +32,14 @@ test('only musician website messages are exposed for reply review', () => {
   const [request] = enquiryAvailabilityRequests([{ _id: 'r1', actId: 'a', websiteReplies: [{ senderRole: 'agent', body: 'internal' }, { senderRole: 'musician', body: 'What time is setup?' }] }]);
   assert.deepEqual(request.musicianMessages.map(message => message.body), ['What time is setup?']);
 });
+
+test('a corrected decline is current while the earlier yes remains in the management audit', () => {
+  const [request] = enquiryAvailabilityRequests([{ _id: 'r1', actId: 'a', reply: 'unavailable',
+    status: 'unavailable', calendarStatus: 'declined', inbound: { source: 'whatsapp-text' },
+    replyHistory: [{ reply: 'yes', source: 'legacy-snapshot' },
+      { reply: 'unavailable', previousReply: 'yes', source: 'whatsapp-text', body: "I'm not available sorry that was a mistake" }] }]);
+  assert.equal(request.reply, 'unavailable');
+  assert.equal(request.replySource, 'whatsapp-text');
+  assert.deepEqual(request.replyHistory.map(item => item.reply), ['yes', 'unavailable']);
+  assert.match(request.replyHistory[1].body, /not available/);
+});

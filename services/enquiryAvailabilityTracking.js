@@ -12,7 +12,7 @@ export function enquiryAvailabilityFilter(row) {
   };
 }
 
-export const enquiryAvailabilityProjection = 'enquiryId actId lineupId dateISO requestId slotIndex musicianId musicianName isDeputy reply status deliveryStatus deliveryErrorCode outboundSentAt repliedAt updatedAt createdAt calendarStatus websiteReplies';
+export const enquiryAvailabilityProjection = 'enquiryId actId lineupId dateISO requestId slotIndex musicianId musicianName isDeputy reply status deliveryStatus deliveryErrorCode outboundSentAt repliedAt updatedAt createdAt calendarStatus websiteReplies inbound replyHistory';
 
 export function enquiryAvailabilityRequests(docs) {
   return docs.map(doc => ({
@@ -24,6 +24,12 @@ export function enquiryAvailabilityRequests(docs) {
     reply: doc.reply || null, status: doc.status, deliveryStatus: doc.deliveryStatus || '',
     deliveryErrorCode: doc.deliveryErrorCode || '', sentAt: doc.outboundSentAt || null,
     repliedAt: doc.repliedAt || null, updatedAt: doc.updatedAt,
+    replySource: doc.inbound?.source || null,
+    replyHistory: (doc.replyHistory || []).map(item => ({
+      reply: item.reply, previousReply: item.previousReply || null,
+      occurredAt: item.occurredAt || null, receivedAt: item.receivedAt || null,
+      source: item.source || null, body: item.body || '',
+    })),
     calendarStatus: doc.calendarStatus || null,
     musicianMessages: (doc.websiteReplies || []).filter(message => message.senderRole === 'musician')
       .map(message => ({ body: message.body, senderName: message.senderName, createdAt: message.createdAt })),
