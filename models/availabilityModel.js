@@ -29,6 +29,8 @@ bandMemberId: { type: mongoose.Schema.Types.ObjectId, index: true },
 
     duties: { type: String, default: "" },
     fee: { type: String, default: "" },
+    feeBreakdown: { type: mongoose.Schema.Types.Mixed, default: null },
+    deputyPricingIssues: { type: [mongoose.Schema.Types.Mixed], default: [] },
     formattedDate: { type: String, default: "" },
     formattedAddress: { type: String, default: "" },
 

@@ -1,3 +1,4 @@
+import { resolveAutomaticDeputyPrice } from '../services/automaticDeputyPricing.js';
 import { availabilityReplyIntent, availabilityButtonIntent, selectAvailabilityReplyTarget, recordAvailabilityReply, queueAvailabilityInbound } from "../services/availabilityInboundReply.js";
 import { interceptAvailabilityTest } from '../services/availabilityRequestTestPreview.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
@@ -272,8 +273,9 @@ export async function processDueDeputyEscalations({ maxBatch = 20 } = {}) {
         clientName: row?.clientName || job.clientName || "",
         clientEmail: row?.clientEmail || job.clientEmail || "",
         slotIndex: typeof job.slotIndex === "number" ? job.slotIndex : null,
-        skipDuplicateCheck: true,
+        skipDuplicateCheck: false,
         skipIfUnavailable: false,
+        enquiryId: row?.enquiryId || null,
       });
 
       await DeferredAvailability.updateOne(
@@ -425,7 +427,7 @@ export async function findCanonicalMusicianByPhone(phoneLike) {
     ],
   })
     .select(
-      "_id firstName lastName email musicianSlug profilePhoto profilePicture musicianProfileImage profileImage photoUrl imageUrl phoneNormalized status vocals instrumentation",
+      "_id firstName lastName email musicianSlug profilePhoto profilePicture musicianProfileImage profileImage photoUrl imageUrl phone phoneNumber phoneNormalized skipAvailabilityChecks skipAvailabilityForActs status vocals instrumentation",
     )
     .lean();
 
@@ -1536,42 +1538,6 @@ export async function notifyDeputies({
     skipDuplicateCheck,
   });
 
-  const isNYE = (iso = "") => {
-    const d = String(iso).slice(0, 10);
-    return /-\d{2}-\d{2}$/.test(d) && d.endsWith("-12-31");
-  };
-
-  const getMemberFeeForDate = (member, iso) => {
-    const base = Number(member?.fee ?? 0);
-    if (!isNYE(iso)) return base;
-
-    // choose your structure:
-    // member.specialDatePricing.nye = { overrideFee, extraFee }
-    const nye = member?.specialDatePricing?.nye || {};
-    const overrideFee = nye.overrideFee;
-    if (
-      overrideFee !== undefined &&
-      overrideFee !== null &&
-      overrideFee !== ""
-    ) {
-      const v = Number(overrideFee);
-      if (Number.isFinite(v)) return v;
-    }
-
-    const extra = Number(nye.extraFee ?? 0);
-    return base + (Number.isFinite(extra) ? extra : 0);
-  };
-
-  const basePlusEssentialExtras = (member, iso) => {
-    const base = getMemberFeeForDate(member, iso);
-    const essentialExtras = Array.isArray(member?.additionalRoles)
-      ? member.additionalRoles
-          .filter((r) => r?.isEssential && Number(r?.additionalFee) > 0)
-          .reduce((sum, r) => sum + Number(r.additionalFee), 0)
-      : 0;
-    return base + essentialExtras;
-  };
-
   const normalizePhone = (raw = "") => {
     let v = String(raw || "")
       .replace(/\s+/g, "")
@@ -1639,11 +1605,10 @@ export async function notifyDeputies({
     slotIndex,
   });
 
-  // ✅ Inherit context from the lead row for this slot (fee + client identity + enquiryId)
-  let inheritedFee = basePlusEssentialExtras(targetVocalists?.[0], dateISO);
+  // Preserve exact enquiry/client context; a lead’s fee is not the deputy’s price.
   let inheritedClientName = clientName || "";
   let inheritedClientEmail = clientEmail || "";
-  let inheritedEnquiryId = null;
+  let inheritedEnquiryId = enquiryId || null;
   let inheritedClientUserId = null;
 
   try {
@@ -1659,7 +1624,7 @@ export async function notifyDeputies({
       .lean();
 
     if (leadRow) {
-      inheritedEnquiryId = leadRow.enquiryId || null;
+      inheritedEnquiryId = enquiryId || leadRow.enquiryId || null;
       inheritedClientUserId = leadRow.clientUserId || leadRow.userId || null;
 
       // Only fill if missing
@@ -1667,30 +1632,6 @@ export async function notifyDeputies({
         inheritedClientName = leadRow.clientName;
       if (!inheritedClientEmail && leadRow.clientEmail)
         inheritedClientEmail = leadRow.clientEmail;
-
-      // Fee inherit (avoid lead rows that already said no/unavailable)
-      if (
-        leadRow.reply !== "unavailable" &&
-        leadRow.reply !== "no" &&
-        leadRow.fee
-      ) {
-        inheritedFee = Number(leadRow.fee);
-        console.log("💾 [notifyDeputies] Inherited lead row context", {
-          inheritedFee,
-          inheritedClientName,
-          inheritedClientEmail,
-          inheritedEnquiryId,
-          inheritedClientUserId,
-        });
-      } else {
-        console.log(
-          "ℹ️ [notifyDeputies] Lead row found but fee not inherited (reply/no fee)",
-          {
-            reply: leadRow.reply,
-            fee: leadRow.fee,
-          },
-        );
-      }
     }
   } catch (err) {
     console.warn(
@@ -1699,17 +1640,9 @@ export async function notifyDeputies({
     );
   }
 
-  // Fallback fee from act data if still missing
-  if (!inheritedFee && targetVocalists[0]?.fee) {
-    inheritedFee = Number(targetVocalists[0].fee);
-    console.log("💾 [notifyDeputies] Fallback fee from act data", {
-      inheritedFee,
-    });
-  }
-
   // Build exclusion set (already YES/unavailable)
   const existingPhonesAgg = await AvailabilityModel.aggregate([
-    { $match: { actId, dateISO, ...(enquiryId ? { enquiryId, lineupId } : {}), reply: { $in: ["yes", "unavailable"] } } },
+    { $match: { actId, dateISO, ...(inheritedEnquiryId ? { enquiryId: inheritedEnquiryId, lineupId } : {}), reply: { $in: ["yes", "unavailable"] } } },
     { $group: { _id: "$phone" } },
   ]);
   const existingSet = new Set(
@@ -1764,13 +1697,12 @@ export async function notifyDeputies({
         formattedAddress: formattedAddress || null,
         lineupId,
         slotIndex,
-        inheritedFee,
       });
 
       try {
-        await triggerAvailabilityRequest({
-          inheritedFee: slotIndex === null ? basePlusEssentialExtras(vocalist, dateISO) : inheritedFee,
-          inheritedFeeIncludesTravel: false,
+        const outcome = await triggerAvailabilityRequest({
+          automaticDeputy: true,
+          automaticDeputyEssentialRoles: vocalist.additionalRoles || [],
           actId,
           lineupId,
           dateISO,
@@ -1783,7 +1715,7 @@ export async function notifyDeputies({
 
           // ✅ Ensure deputy rows get linked to the same enquiry/slot thread
           enquiryId: inheritedEnquiryId,
-          ...(enquiryId ? { source: "encore_enquiry_board", requestId: enquiryId } : {}),
+          ...(inheritedEnquiryId ? { source: "encore_enquiry_board", requestId: inheritedEnquiryId } : {}),
 
           // ✅ Helps triggerAvailabilityRequest enrichment if email missing
           userId: inheritedClientUserId,
@@ -1805,8 +1737,24 @@ export async function notifyDeputies({
           },
 
           inheritedDuties: vocalist.instrument || "Vocalist",
-          skipDuplicateCheck,
+          skipDuplicateCheck: false,
         });
+        if (!outcome?.success || !outcome?.sent) {
+          // Existing pending options still occupy this role’s three-contact cap.
+          // Failed/held sends do not, and are never counted as actual deliveries.
+          if (outcome?.success && outcome.skipped === 'already_requested_for_slot') {
+            roleSent++;
+            if (roleSent >= 3) break;
+          }
+          if (outcome?.code === 'DEPUTY_PRICING_UNCONFIRMED') {
+            const issue = { musicianId: String(deputy.musicianId || deputy.id || deputy._id || ''), musicianName: deputyDisplayName, county: countyFromAddress(formattedAddress)?.county || '', dateISO, reason: outcome.error, detectedAt: new Date() };
+            const scope = { actId, lineupId, dateISO, slotIndex: targetSlotIndex, ...(inheritedEnquiryId ? { enquiryId: inheritedEnquiryId } : {}), isDeputy: { $ne: true } };
+            await AvailabilityModel.updateOne(scope, { $pull: { deputyPricingIssues: { musicianId: issue.musicianId } } });
+            await AvailabilityModel.updateOne(scope, { $push: { deputyPricingIssues: issue } });
+          }
+          continue;
+        }
+        await AvailabilityModel.updateOne({ actId, lineupId, dateISO, slotIndex: targetSlotIndex, ...(inheritedEnquiryId ? { enquiryId: inheritedEnquiryId } : {}), isDeputy: { $ne: true } }, { $pull: { deputyPricingIssues: { musicianId: String(deputy.musicianId || deputy.id || deputy._id || '') } } });
       } catch (error) {
         if (
           error?.code === "DEPUTY_IDENTITY_MISMATCH" ||
@@ -3631,8 +3579,9 @@ if (shouldAlwaysSkip) {
     clientName: resolvedClientName || "",
     clientEmail: resolvedClientEmail || "",
     slotIndex: slotIndexForThis,
-    skipDuplicateCheck: true,
+    skipDuplicateCheck: false,
     skipIfUnavailable: false,
+    enquiryId,
   });
 
   results.push({
@@ -3676,8 +3625,9 @@ if (shouldAlwaysSkip) {
             clientName: resolvedClientName || "",
             clientEmail: resolvedClientEmail || "",
             slotIndex: slotIndexForThis,
-            skipDuplicateCheck: true,
+            skipDuplicateCheck: false,
             skipIfUnavailable: false,
+            enquiryId,
           });
 
           results.push({
@@ -3748,8 +3698,9 @@ if (shouldAlwaysSkip) {
             clientName: resolvedClientName || "",
             clientEmail: resolvedClientEmail || "",
             slotIndex: slotIndexForThis,
-            skipDuplicateCheck: true,
+            skipDuplicateCheck: false,
             skipIfUnavailable: false,
+            enquiryId,
           });
 
           results.push({
@@ -3818,8 +3769,9 @@ if (shouldAlwaysSkip) {
                 clientName: resolvedClientName || "",
                 clientEmail: resolvedClientEmail || "",
                 slotIndex: slotIndexForThis,
-                skipDuplicateCheck: true,
+                skipDuplicateCheck: false,
                 skipIfUnavailable: false,
+                enquiryId,
               });
             }
 
@@ -4117,7 +4069,7 @@ if (shouldAlwaysSkip) {
       if (email) {
         canonical = await Musician.findOne({ email })
           .select(
-            "_id email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl status vocals instrumentation",
+            "_id firstName lastName email phone phoneNumber phoneNormalized musicianSlug profilePhoto profilePicture photoUrl skipAvailabilityChecks skipAvailabilityForActs status vocals instrumentation",
           )
           .lean();
       }
@@ -4179,6 +4131,10 @@ if (shouldAlwaysSkip) {
     )
   );
 
+if (isDeputy && shouldAlwaysSkip) {
+  return res ? res.json({ success: true, sent: 0, skipped: 'always-unavailable' }) : { success: true, sent: 0, skipped: 'always-unavailable' };
+}
+
 if (!isDeputy && shouldAlwaysSkip) {
   console.log(
     "🚫 Permanent availability skip flag found — skipping lead WhatsApp, escalating to deputies",
@@ -4200,8 +4156,9 @@ if (!isDeputy && shouldAlwaysSkip) {
     clientName: resolvedClientName || "",
     clientEmail: resolvedClientEmail || "",
     slotIndex: singleSlotIndex,
-    skipDuplicateCheck: true,
+    skipDuplicateCheck: false,
     skipIfUnavailable: false,
+    enquiryId,
   });
 
   if (res)
@@ -4248,8 +4205,9 @@ if (!isDeputy && shouldAlwaysSkip) {
         clientName: resolvedClientName || "",
         clientEmail: resolvedClientEmail || "",
         slotIndex: singleSlotIndex,
-        skipDuplicateCheck: true,
+        skipDuplicateCheck: false,
         skipIfUnavailable: false,
+        enquiryId,
       });
 
       if (res)
@@ -4347,8 +4305,9 @@ if (!isDeputy && shouldAlwaysSkip) {
           clientName: resolvedClientName || "",
           clientEmail: resolvedClientEmail || "",
           slotIndex: singleSlotIndex,
-          skipDuplicateCheck: true,
+          skipDuplicateCheck: false,
           skipIfUnavailable: false,
+          enquiryId,
         });
 
         if (res)
@@ -4427,8 +4386,9 @@ if (!isDeputy && shouldAlwaysSkip) {
           clientName: resolvedClientName || "",
           clientEmail: resolvedClientEmail || "",
           slotIndex: singleSlotIndex,
-          skipDuplicateCheck: true,
+          skipDuplicateCheck: false,
           skipIfUnavailable: false,
+          enquiryId,
         });
       }
 
@@ -4441,8 +4401,16 @@ if (!isDeputy && shouldAlwaysSkip) {
     /* 🧮 Final Fee Logic (including deputy inheritedFee)             */
     /* -------------------------------------------------------------- */
     let finalFee;
+    let feeBreakdown = null;
 
-    if (isDeputy && inheritedFee != null) {
+    if (isDeputy && body?.automaticDeputy === true) {
+      feeBreakdown = await resolveAutomaticDeputyPrice({
+        musician: canonical, county: countyFromAddress(fullFormattedAddress)?.county,
+        dateISO, actName: act.tscName || act.name || '', bandSize: lineup?.bandMembers?.length,
+        essentialRoles: body.automaticDeputyEssentialRoles || [],
+      });
+      finalFee = feeBreakdown.total;
+    } else if (isDeputy && inheritedFee != null) {
       const parsedBase =
         parseFloat(String(inheritedFee).replace(/[^\d.]/g, "")) || 0;
 
@@ -4546,6 +4514,7 @@ if (!isDeputy && shouldAlwaysSkip) {
       actName: act?.tscName || act?.name || "",
       duties: roleStr,
       fee: String(finalFee),
+      ...(feeBreakdown ? { feeBreakdown } : {}),
       updatedAt: now,
       profileUrl: buildMusicianProfileUrl({
         _id: realMusicianId,
@@ -4691,7 +4660,7 @@ if (!isDeputy && shouldAlwaysSkip) {
     console.error("❌ triggerAvailabilityRequest error:", err);
     if (res)
       return res.status(500).json({ success: false, message: err.message });
-    return { success: false, error: err.message };
+    return { success: false, sent: 0, code: err.code || null, error: err.message };
   }
 };
 

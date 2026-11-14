@@ -12,7 +12,7 @@ export function enquiryAvailabilityFilter(row) {
   };
 }
 
-export const enquiryAvailabilityProjection = 'enquiryId actId lineupId dateISO requestId slotIndex musicianId musicianName isDeputy reply status deliveryStatus deliveryErrorCode outboundSentAt repliedAt updatedAt createdAt calendarStatus websiteReplies inbound replyHistory';
+export const enquiryAvailabilityProjection = 'enquiryId actId lineupId dateISO requestId slotIndex musicianId musicianName isDeputy reply status deliveryStatus deliveryErrorCode outboundSentAt repliedAt updatedAt createdAt calendarStatus websiteReplies inbound replyHistory fee feeBreakdown deputyPricingIssues';
 
 export function enquiryAvailabilityRequests(docs) {
   return docs.map(doc => ({
@@ -24,6 +24,7 @@ export function enquiryAvailabilityRequests(docs) {
     reply: doc.reply || null, status: doc.status, deliveryStatus: doc.deliveryStatus || '',
     deliveryErrorCode: doc.deliveryErrorCode || '', sentAt: doc.outboundSentAt || null,
     repliedAt: doc.repliedAt || null, updatedAt: doc.updatedAt,
+    fee: doc.fee || null, feeBreakdown: doc.feeBreakdown || null, deputyPricingIssues: doc.deputyPricingIssues || [],
     replySource: doc.inbound?.source || null,
     replyHistory: (doc.replyHistory || []).map(item => ({
       reply: item.reply, previousReply: item.previousReply || null,
