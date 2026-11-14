@@ -37,12 +37,21 @@ export function enquiryAvailabilityRequests(docs) {
 }
 
 export function enquiryAvailabilitySlots(requests) {
-  const latest = new Map();
+  const currentByMusician = new Map();
+  const timestamp = value => new Date(value.repliedAt || value.updatedAt || value.sentAt || 0).getTime();
   for (const request of requests) {
     if (!Number.isInteger(request.slotIndex)) continue;
+    // A singer's later decline replaces THEIR yes. It must not replace a
+    // different deputy's valid yes for the same role in this enquiry.
+    const key = `${request.slotIndex}:${request.musicianId || 'unknown'}`;
+    const previous = currentByMusician.get(key);
+    if (!previous || timestamp(request) >= timestamp(previous)) currentByMusician.set(key, request);
+  }
+  const latest = new Map();
+  for (const request of currentByMusician.values()) {
     const previous = latest.get(request.slotIndex);
-    const timestamp = value => new Date(value.updatedAt || value.sentAt || 0).getTime();
-    if (!previous || timestamp(request) >= timestamp(previous)) latest.set(request.slotIndex, request);
+    if (!previous || (request.reply === 'yes' && previous.reply !== 'yes') ||
+        ((request.reply === 'yes') === (previous.reply === 'yes') && timestamp(request) >= timestamp(previous))) latest.set(request.slotIndex, request);
   }
   return [...latest.values()].map(request => ({
     slotIndex: request.slotIndex, musicianName: request.musicianName, requestId: request.requestId,

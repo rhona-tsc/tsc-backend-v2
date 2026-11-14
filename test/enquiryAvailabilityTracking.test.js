@@ -43,3 +43,14 @@ test('a corrected decline is current while the earlier yes remains in the manage
   assert.deepEqual(request.replyHistory.map(item => item.reply), ['yes', 'unavailable']);
   assert.match(request.replyHistory[1].body, /not available/);
 });
+
+test('Rachel correction removes her yes without hiding Shamyra covering the same slot', () => {
+  const requests = [
+    { musicianId: 'rachel', slotIndex: 0, requestId: 'ZHSWMRC', reply: 'yes', repliedAt: '2026-11-14T09:23:16Z' },
+    { musicianId: 'shamyra', slotIndex: 0, requestId: 'EGUXXPT', reply: 'yes', repliedAt: '2026-11-14T10:57:49Z' },
+    { musicianId: 'rachel', slotIndex: 0, requestId: 'ZHSWMRC', reply: 'unavailable', repliedAt: '2026-11-14T09:23:24Z', updatedAt: '2026-11-14T18:00:00Z' },
+  ];
+  assert.equal(enquiryAvailabilitySlots(requests)[0].requestId, 'EGUXXPT');
+  assert.equal(enquiryAvailabilitySlots(requests.filter(r => r.musicianId === 'rachel'))[0].reply, 'unavailable');
+  assert.equal(enquiryAvailabilitySlots([...requests, { musicianId: 'shamyra', slotIndex: 0, requestId: 'EGUXXPT', reply: 'unavailable', repliedAt: '2026-11-14T18:02:00Z' }])[0].reply, 'unavailable');
+});
