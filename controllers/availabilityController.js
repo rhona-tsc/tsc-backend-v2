@@ -1,4 +1,4 @@
-import { resolveAutomaticDeputyPrice } from '../services/automaticDeputyPricing.js';
+import { resolveAutomaticDeputyPrice, performanceLineupSize } from '../services/automaticDeputyPricing.js';
 import { availabilityReplyIntent, availabilityButtonIntent, selectAvailabilityReplyTarget, recordAvailabilityReply, queueAvailabilityInbound } from "../services/availabilityInboundReply.js";
 import { interceptAvailabilityTest } from '../services/availabilityRequestTestPreview.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
@@ -4406,7 +4406,7 @@ if (!isDeputy && shouldAlwaysSkip) {
     if (isDeputy && body?.automaticDeputy === true) {
       feeBreakdown = await resolveAutomaticDeputyPrice({
         musician: canonical, county: countyFromAddress(fullFormattedAddress)?.county,
-        dateISO, actName: act.tscName || act.name || '', bandSize: lineup?.bandMembers?.length,
+        dateISO, actName: act.tscName || act.name || '', bandSize: performanceLineupSize(lineup),
         essentialRoles: body.automaticDeputyEssentialRoles || [],
       });
       finalFee = feeBreakdown.total;

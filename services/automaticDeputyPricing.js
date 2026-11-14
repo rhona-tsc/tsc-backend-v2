@@ -19,6 +19,11 @@ const money = value => {
 };
 const column = index => { let label = ''; for (let n = index + 1; n; n = Math.floor((n - 1) / 26)) label = String.fromCharCode(65 + (n - 1) % 26) + label; return label; };
 
+// Rosters also contain blank-instrument manager/crew rows. They are costs,
+// not an extra performer when matching the approved lineup’s musician count.
+export const performanceLineupSize = lineup => (lineup?.bandMembers || []).filter(member =>
+  String(member.instrument || '').trim() && !/manager|engineer|technician|crew/i.test(member.instrument)).length;
+
 let cached, inFlight;
 export async function readAutomaticDeputyRates() {
   if (cached && Date.now() - cached.cachedAt < 120000) return cached;
@@ -76,7 +81,7 @@ export function calculateAutomaticDeputyPrice({ rates, musician, county, dateISO
   const destination = countyRows[0];
   const name = normal(row[1]);
   const ownColumns = (rates.headers[1] || []).map((header, index) => ({ header: String(header || ''), index })).filter(({ header, index }) =>
-    index >= 18 && index < 40 && header.split(/\s*(?:&|and)\s*|\s*\(/i).some(part => normal(part).length >= 3 && name.startsWith(normal(part))));
+    index >= 18 && index < 40 && header.split(/\s*&\s*|\s+and\s+|\s*\(/i).some(part => normal(part).length >= 3 && name.startsWith(normal(part))));
   if (ownColumns.length > 1) throw hold('Multiple personal travel columns match this deputy.');
   const own = ownColumns[0];
   if (own && /only/i.test(own.header) && !(normal(actName).includes('motownluxe') && /motown\s*luxe/i.test(own.header))) throw hold('Act-specific personal travel requires review for this act.');

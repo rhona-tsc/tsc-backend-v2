@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateAutomaticDeputyPrice } from '../services/automaticDeputyPricing.js';
+import { calculateAutomaticDeputyPrice, performanceLineupSize } from '../services/automaticDeputyPricing.js';
 
 function fixture() {
   const headers = [[], []];
@@ -84,4 +84,11 @@ test('a missing or ambiguous act/lineup minimum holds instead of guessing a role
   assert.throws(() => price(fixture(), { bandSize: 9 }), /act\/lineup/);
   const rates = fixture(); rates.roleRows.push([...rates.roleRows[0]]); rates.roleRows[1][8] = '£355';
   assert.throws(() => price(rates), /act\/lineup/);
+});
+
+test('Indigo four-piece stays four musicians when the roster also contains a manager cost row', () => {
+  const lineup = { bandMembers: ['Lead Vocal', 'Bass Guitar', 'Electric Guitar', 'Drums', ''].map(instrument => ({ instrument })) };
+  lineup.bandMembers[4].additionalRoles = [{ role: 'Band Manager', isEssential: true, additionalFee: 350 }];
+  assert.equal(performanceLineupSize(lineup), 4);
+  assert.equal(price(fixture(), { bandSize: performanceLineupSize(lineup) }).total, 458);
 });
