@@ -7,7 +7,7 @@ import mongoose from "mongoose";
 import Stripe from "stripe";
 import Order from "../models/bookingModel.js";
 import ejs from "ejs";
-import puppeteer from "puppeteer";
+import { renderPdf } from "../services/pdfRenderer.js";
 import nodemailer from "nodemailer";
 import { v2 as cloudinary } from "cloudinary";
 import fs from "fs";
@@ -39,7 +39,6 @@ import userModel from "../models/userModel.js";
 import { updateOrCreateBookingEvent } from "../utils/updateOrCreateBookingEvent.js";
 import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
 import { normalize } from "../utils/phoneUtils.js";
-import chromium from "@sparticuz/chromium";
 import { sendContractEmail } from "./helpers/sendContractEmail.js";
 import { buildEventSheetUrl } from "../utils/publicSiteUrl.js";
 import { triggerBookingRequests } from "./allocationController.js";
@@ -222,15 +221,6 @@ const firstNameOf = (p = {}) => {
   if (full && String(full).trim()) return String(full).trim().split(/\s+/)[0];
   return "";
 };
-
-export async function launchBrowser() {
-  return await puppeteer.launch({
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(), // <-- note: this IS async
-    headless: chromium.headless,
-  });
-}
 
 // (optional) tiny helper to mirror contactRouting -> eventSheet.emergencyContact
 function mirrorEmergencyContact(contactRouting = {}) {
@@ -1741,14 +1731,7 @@ const completeBooking = async (req, res) => {
     let pdfBuffer;
     try {
       console.log("[completeBooking] ▶ puppeteer launch");
-      const browser = await launchBrowser({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      });
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: "load" });
-      pdfBuffer = await page.pdf({ format: "A4" });
-      await browser.close();
+      pdfBuffer = await renderPdf(html);
       console.log("[completeBooking] ✓ PDF generated", {
         bytes: pdfBuffer?.length || 0,
       });
@@ -2057,7 +2040,6 @@ export const previewContractHtml = async (req, res) => {
 };
 
 export const generateContractPdf = async (req, res) => {
-  let browser;
   try {
     const bookingMongoId = req.params.id;
 
@@ -2089,21 +2071,10 @@ export const generateContractPdf = async (req, res) => {
       logoUrl: `https://res.cloudinary.com/dvcgr3fyd/image/upload/v1746015511/TSC_logo_u6xl6u.png`,
     });
 
-    browser = await launchBrowser();
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "load" });
-
-    const pdfOut = await page.pdf({
-      format: "A4",
+    const pdfBuffer = await renderPdf(html, {
       printBackground: true,
       margin: { top: "12mm", right: "12mm", bottom: "12mm", left: "12mm" },
     });
-
-    // ✅ CRITICAL: force Node Buffer (prevents Express JSONifying it)
-    const pdfBuffer = Buffer.isBuffer(pdfOut) ? pdfOut : Buffer.from(pdfOut);
-
-    await browser.close();
-    browser = null;
 
     const filename = `contract-${booking.bookingId || bookingMongoId}.pdf`;
 
@@ -2113,11 +2084,6 @@ export const generateContractPdf = async (req, res) => {
     res.setHeader("Content-Length", String(pdfBuffer.length));
     res.end(pdfBuffer);
   } catch (err) {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch {}
-    }
     console.error("generateContractPdf error:", err);
     return res.status(500).json({ message: "Failed to generate contract PDF" });
   }
@@ -3737,17 +3703,7 @@ export const completeBookingV2 = async (req, res) => {
     // ------------------------------------------------
     let generatedPdf;
     try {
-      const browser = await launchBrowser({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      });
-
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: "load" });
-
-      generatedPdf = await page.pdf({ format: "A4" });
-
-      await browser.close();
+      generatedPdf = await renderPdf(html);
       console.log("📄 Contract PDF generated");
     } catch (e) {
       console.error("✖ PDF generation failed:", e?.message);

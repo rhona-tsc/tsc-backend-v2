@@ -9,7 +9,7 @@ import actModel from "../models/actModel.js";
 import nodemailer from "nodemailer";
 import connectCloudinary from "../config/cloudinary.js";
 import { uploader } from "../utils/cloudinary.js";
-import puppeteer from "puppeteer";
+import { renderPdf } from "../services/pdfRenderer.js";
 import mongoose from "mongoose";
 import { generateAndPublishMusicianBio } from "../services/musicianBioService.js";
 import Song from "../models/songModel.js";
@@ -2787,18 +2787,10 @@ const emailContract = async (req, res) => {
         .json({ success: false, message: "Missing form data" });
     }
 
-    const browser = await puppeteer.launch({ headless: true });
-    const page = await browser.newPage();
-
-    await page.setContent(
+    const pdfBuffer = await renderPdf(
       formData.deputy_contract_text || "<p>No contract content</p>",
-      {
-        waitUntil: "networkidle0",
-      },
+      { waitUntil: "networkidle0", printBackground: true },
     );
-
-    const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
-    await browser.close();
 
     const transporter = nodemailer.createTransport({
       service: "gmail",

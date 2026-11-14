@@ -1,3 +1,4 @@
+import { startMemoryMonitor } from "./utils/memoryMonitor.js";
 import { deliverOriginalRoundLifecycleNotifications } from "./services/originalsRoundLifecycleNotificationService.js";
 import { originalStemChatActivity } from "./services/originalsStemChatActivityService.js";
 import { deliverOriginalReservationReminders } from "./services/originalsReservationReminderService.js";
@@ -1087,7 +1088,10 @@ console.log(
 /*                                   Server                                   */
 /* -------------------------------------------------------------------------- */
 
-app.listen(port, () => console.log(`🚀 Server started on PORT: ${port}`));
+app.listen(port, () => {
+  console.log(`🚀 Server started on PORT: ${port}`);
+  startMemoryMonitor();
+});
 
 // Auto-register Google Calendar watch channel at startup
 (async () => {
