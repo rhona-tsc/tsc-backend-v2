@@ -17,6 +17,9 @@ import voiceEnquiryRoutes from './routes/voiceEnquiryRoutes.js';
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import cron from "node-cron";
+import peerReviewRoutes from './routes/peerReviewRoutes.js';
+import { sendPeerReviewInvitations } from './services/peerReviewService.js';
+cron.schedule('*/5 * * * *', () => sendPeerReviewInvitations().catch(e => console.error('Peer review invitations failed', e.message)));
 import { expireEnquiryHolds } from './services/enquiryHoldExpiryService.js';
 cron.schedule('*/15 * * * *', () => expireEnquiryHolds().catch(error => console.error('Enquiry expiry failed', error.message)));
 import listEndpoints from "express-list-endpoints";
@@ -762,6 +765,7 @@ app.use("/api/board/bookings", bookingBoardRoutes);
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/noticeboard", noticeRoutes);
 app.use("/api/feedback", feedbackRoutes);
+app.use('/api/peer-reviews', peerReviewRoutes);
 app.use("/api/seo-keywords", seoKeywordRoutes);
 
 app.use("/api/upload", uploadRoutes);
