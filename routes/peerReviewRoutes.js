@@ -3,6 +3,7 @@ import musicianAuth from '../middleware/musicianAuth.js';
 import requireStaffAuth from '../middleware/requireStaffAuth.js';
 import PeerReview from '../models/peerReviewModel.js';
 import mongoose from 'mongoose';
+import sendEmail from '../utils/sendEmail.js';
 import { categories, tasksFor, reviewBookings, validateReview, deliverReviewEmail, reviewEmail } from '../services/peerReviewService.js';
 const router = express.Router();
 router.post('/rollout', requireStaffAuth, async (req, res) => {
@@ -13,12 +14,25 @@ router.post('/rollout', requireStaffAuth, async (req, res) => {
     const done = new Set((await ledger.find({ _id: /^rollout:v1:/ }).project({ _id: 1 }).toArray()).map(r => r._id));
     const remaining = eligible.filter(m => !done.has(`rollout:v1:${m.email.trim().toLowerCase()}`));
     if (!req.body.send) return res.json({ eligible: eligible.length, remaining: remaining.length });
-    const results = [];
-    for (const m of remaining.slice(0, 10)) {
+    const claimed = [];
+    for (const m of remaining.slice(0, 40)) {
       const email = m.email.trim().toLowerCase();
-      results.push({ email, sent: await deliverReviewEmail(`rollout:v1:${email}`, email, reviewEmail({ name: m.firstName, announcement: true })) });
+      try { await ledger.insertOne({ _id: `rollout:v1:${email}`, to: email, state: 'sending', attemptedAt: new Date() }); claimed.push(email); }
+      catch (e) { if (e.code !== 11000) throw e; }
     }
-    res.json({ success: true, results, remaining: Math.max(0, remaining.length - results.length) });
+    const results = [];
+    if (claimed.length) {
+      // Bcc keeps musician addresses private and sends the same service update
+      // efficiently without opening a separate SMTP connection for every person.
+      const delivery = await sendEmail({ bcc: claimed, ...reviewEmail({ name: 'there', announcement: true }) });
+      const accepted = new Set((delivery.accepted || []).map(e => String(e).toLowerCase()));
+      for (const email of claimed) {
+        const sent = accepted.has(email);
+        await ledger.updateOne({ _id: `rollout:v1:${email}` }, { $set: { state: sent ? 'sent' : 'failed', messageId: delivery.messageId || '', error: sent ? '' : delivery.error || 'Recipient not accepted', completedAt: new Date() } });
+        results.push({ email, sent });
+      }
+    }
+    res.json({ success: true, results, remaining: Math.max(0, remaining.length - claimed.length) });
   } catch { res.status(500).json({ message: 'Could not process rollout emails. Check the delivery ledger before retrying.' }); }
 });
 router.get('/tasks', musicianAuth, async (req, res) => {
