@@ -4,7 +4,7 @@ import { encoreRequestEnquiryScope, enquiryAvailabilityFilter, enquiryAvailabili
 
 test('Encore requests cannot reuse another enquiry response or active request', () => {
   assert.deepEqual(encoreRequestEnquiryScope({ source: 'encore_enquiry_board', enquiryId: 'JOB-A' }), { enquiryId: 'JOB-A' });
-  assert.deepEqual(encoreRequestEnquiryScope({ source: 'manual_enquiry_board', enquiryId: 'JOB-A' }), {});
+  assert.deepEqual(encoreRequestEnquiryScope({ source: 'manual_enquiry_board', enquiryId: 'JOB-A' }), { enquiryId: 'JOB-A' });
   assert.notDeepEqual(encoreRequestEnquiryScope({ source: 'encore_enquiry_board', enquiryId: 'JOB-A' }), encoreRequestEnquiryScope({ source: 'encore_enquiry_board', enquiryId: 'JOB-B' }));
 });
 

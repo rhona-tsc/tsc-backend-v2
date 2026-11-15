@@ -1,5 +1,6 @@
 // models/availability.js
 import mongoose from "mongoose";
+import { availabilityEnquiryIndexKey, availabilityEnquiryIndexName } from '../services/availabilityRequestIdentity.js';
 
 const availabilitySchema = new mongoose.Schema(
   {
@@ -171,18 +172,11 @@ requestId: { type: String, index: true },
   { timestamps: true }
 );
 
-// ⚙️ Index adjustments
+// Address-independent deduplication within each enquiry. Existing installations
+// replace the older date-wide constraints with migrateAvailabilityEnquiryIndex.
 availabilitySchema.index(
-  {
-    actId: 1,
-    requestKey: 1,
-    lineupId: 1,
-    dateISO: 1,
-    phone: 1,
-    v2: 1,
-    slotIndex: 1, // 🆕 ensures uniqueness per vocalist slot
-  },
-  { unique: true }
+  availabilityEnquiryIndexKey,
+  { unique: true, name: availabilityEnquiryIndexName }
 );
 
 const AvailabilityModel = mongoose.model("Availability", availabilitySchema);

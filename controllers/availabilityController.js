@@ -4,6 +4,7 @@ import { interceptAvailabilityTest } from '../services/availabilityRequestTestPr
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import { encoreRequestEnquiryScope } from '../services/enquiryAvailabilityTracking.js';
+import { availabilityAttemptFilter, availabilityRequestEnquiryRef, reserveAvailabilityRequest } from '../services/availabilityRequestIdentity.js';
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
 import {
@@ -22,6 +23,7 @@ import { makeShortId } from "../utils/makeShortId.js";
 import crypto from "crypto"; // at top of file if not already
 import EnquiryMessage from "../models/EnquiryMessage.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
+import Booking from "../models/bookingModel.js";
 import TwilioMessageDelivery from "../models/twilioMessageDeliveryModel.js";
 import {
   resolveBookingReplyIntent,
@@ -3075,9 +3077,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     return { authUserId, bodyUserId, clientUserId, hasAuthHeader };
   };
 
-  // ✅ IMPORTANT: your unique index is:
-  // actId_1_lineupId_1_dateISO_1_phone_1_v2_1_slotIndex_1
-  // so ALL upserts must match on exactly these fields (NOT requestKey).
+  // Match the enquiry/person/slot index. requestKey can change with the venue.
   const resolveLineupKey = (lineup, lineupId) =>
     lineup?._id || lineupId || null;
 
@@ -3109,7 +3109,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
     return AvailabilityModel.findOne({
       ...q,
-      status: { $in: ["sent", "queued"] },
+      ...availabilityAttemptFilter(),
     })
       .select(
         "_id status createdAt updatedAt enquiryId clientUserId slotIndex phone musicianId reply requestKey",
@@ -3223,12 +3223,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     /* -------------------------------------------------------------- */
     /* 🔢 Enquiry                                                     */
     /* -------------------------------------------------------------- */
-    const enquiryId =
-      body.enquiryId ||
-      body.shortlistId ||
-      body.requestId ||
-      body.parentKey ||
-      null;
+    const enquiryId = availabilityRequestEnquiryRef(body);
 
     if (!enquiryId) {
       console.warn("⚠️ No enquiryId provided — slotIndex grouping may fail");
@@ -3474,7 +3469,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const recordUnavailableRegular = async ({ member, phone, musicianId, slotIndex }) => {
       if (!phone) return;
       await AvailabilityModel.findOneAndUpdate(
-        { actId, lineupId: lineupKey, requestKey, dateISO, phone, slotIndex, v2: true },
+        buildUniqueQuery({ actId, lineupKey, dateISO, phone, slotIndex }),
         { $set: { isDeputy: false, musicianId: musicianId || null, reply: "unavailable", status: "unavailable",
           repliedAt: new Date(), formattedAddress: fullFormattedAddress, enquiryId,
           clientName: resolvedClientName, clientEmail: resolvedClientEmail, clientUserId,
@@ -3893,11 +3888,12 @@ if (shouldAlwaysSkip) {
           requestId,
         });
 
-        const savedLead = await AvailabilityModel.findOneAndUpdate(
-          query,
-          { $setOnInsert: setOnInsert, $set: setAlways },
-          { new: true, upsert: true },
-        );
+        const reservation = await reserveAvailabilityRequest(AvailabilityModel, query, setOnInsert, setAlways);
+        if (!reservation.reserved) {
+          results.push({ name: vMember.firstName, slotIndex: slotIndexForThis, reusedExisting: true, existingStatus: reservation.doc?.status });
+          continue;
+        }
+        const savedLead = reservation.doc;
 
         // Build interactive buttons (carry requestId)
         const buttons = [
@@ -3994,10 +3990,10 @@ if (shouldAlwaysSkip) {
       if (res)
         return res.json({
           success: true,
-          sent: results.length,
+          sent: results.filter(result => result.sid).length,
           details: results,
         });
-      return { success: true, sent: results.length, details: results };
+      return { success: true, sent: results.filter(result => result.sid).length, details: results };
     } // ✅ end multi-vocalist block
 
     /* -------------------------------------------------------------- */
@@ -4542,11 +4538,12 @@ if (!isDeputy && shouldAlwaysSkip) {
       requestId,
     });
 
-    const saved = await AvailabilityModel.findOneAndUpdate(
-      query,
-      { $setOnInsert: setOnInsert, $set: setAlways },
-      { new: true, upsert: true },
-    );
+    const reservation = await reserveAvailabilityRequest(AvailabilityModel, query, setOnInsert, setAlways);
+    if (!reservation.reserved) {
+      const result = { success: true, sent: 0, skipped: 'already_requested_for_slot', requestKey };
+      return res ? res.json(result) : result;
+    }
+    const saved = reservation.doc;
 
     console.log(`✅ Upserted ${isDeputy ? "DEPUTY" : "LEAD"} row`, {
       slot: singleSlotIndex,

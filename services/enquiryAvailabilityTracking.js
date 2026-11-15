@@ -1,7 +1,7 @@
 const clean = value => String(value || '').trim();
-
-export const encoreRequestEnquiryScope = body => body?.source === 'encore_enquiry_board' && clean(body.enquiryId)
-  ? { enquiryId: clean(body.enquiryId) } : {};
+// Kept as an export alias for callers; all explicit enquiry references now scope
+// requests, including the manual board and agency workflows.
+export { availabilityRequestEnquiryScope as encoreRequestEnquiryScope } from './availabilityRequestIdentity.js';
 
 // Never fall back to act/date alone: another client's reply is not availability for this enquiry.
 export function enquiryAvailabilityFilter(row) {
