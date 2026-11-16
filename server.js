@@ -56,6 +56,7 @@ import v2Routes from "./routes/v2.js";
 import agentDashboardRoutes from "./routes/agentDashboardRoutes.js";
 import sitemapRoutes from "./routes/sitemapRoutes.js";
 import merchantFeedRoutes from "./routes/merchantFeedRoutes.js";
+import { runMasterSupplierPricingSync } from "./services/masterSupplierPricingSync.js";
 import socialOAuthRoutes from "./routes/socialOAuthRoutes.js";
 import enquiryBoardRoutes from "./routes/enquiryBoardRoutes.js";
 import adminRoutes from "./routes/admin.js";
@@ -615,6 +616,7 @@ app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
 connectDB()
   .then(async () => {
+    runMasterSupplierPricingSync().catch(error => console.error('Master pricing worker unavailable:', error.message));
     const resumedJobs = await resumePendingMusicianBioBackfills();
     if (resumedJobs) {
       console.log(`▶️ Resumed ${resumedJobs} musician biography backfill job(s)`);
@@ -890,6 +892,11 @@ app.get("/api/availability/process-deferred", async (_req, res) => {
 });
 
 // Run chase & escalation every hour
+// Poll the persistent pricing schedule; a database lease prevents overlapping runs.
+cron.schedule("* * * * *", () => {
+  runMasterSupplierPricingSync().catch(error => console.error('Master pricing worker unavailable:', error.message));
+}, { timezone: "Europe/London" });
+
 cron.schedule("0 * * * *", async () => {
   await runChaseAndEscalation();
 });
