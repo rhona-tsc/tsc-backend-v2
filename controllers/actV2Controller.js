@@ -1,3 +1,4 @@
+import { websiteActView } from '../utils/websiteLineups.js';
 import mongoose from "mongoose";
 import actModel from "../models/actModel.js"
 import { upsertActCardFromAct } from "./helpers/upsertActCardFromAct.js";
@@ -905,7 +906,7 @@ export const getActBySlugV2 = async (req, res) => {
       return res.status(404).json({ success: false, message: "Act not found" });
     }
 
-    return res.json({ success: true, act });
+    return res.json({ success: true, act: websiteActView(act) });
   } catch (err) {
     console.error("getActBySlugV2 error:", err?.message || err);
     return res.status(500).json({ success: false, message: "Server error" });
@@ -997,6 +998,8 @@ export const getAllActsV2 = async (req, res) => {
         "tscReviews.rating": 1,
         "testimonials.rating": 1,
       };
+
+    if (!mineFlag) projection.hiddenWebsiteLineupIds = 1;
 
     group("🧾 Projection in use");
     dbg(p(projection));
@@ -1154,7 +1157,8 @@ end();
     dbg("🔑 keys of first raw doc:", actsRaw[0] ? Object.keys(actsRaw[0]) : "(none)");
 
     /* ── Build items + genre diagnostics ── */
-    const items = actsRaw.map((doc) => {
+    const items = actsRaw.map((rawDoc) => {
+      const doc = mineFlag ? rawDoc : websiteActView(rawDoc);
       const cardImage =
         doc?.coverImage?.[0]?.url ||
         doc?.images?.[0]?.url ||

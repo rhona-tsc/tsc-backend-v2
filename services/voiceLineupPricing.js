@@ -1,9 +1,10 @@
+import { websiteActView } from '../utils/websiteLineups.js';
 import Act from '../models/actModel.js';
 import calculateWebsitePrice from './websiteLineupPricing.js';
 import { validPostcode } from './voiceVenueLookup.js';
 
 // Private calculation inputs never leave this service. The assistant receives only the retail total.
-export const VOICE_PRICE_FIELDS = '_id tscName status isTest supplierPricing useCountyTravelFee countyFees costPerMile useDifferentTeamForNorthernGigs northernTeam.instrument northernTeam.postCode northernTeam.isManager northernTeam.isNonPerformer northernTeam.additionalRoles.role lineups._id lineups.lineupId lineups.actSize lineups.bandMembers.instrument lineups.bandMembers.isEssential lineups.bandMembers.fee lineups.bandMembers.additionalRoles.role lineups.bandMembers.additionalRoles.isEssential lineups.bandMembers.additionalRoles.additionalFee lineups.bandMembers.postCode lineups.bandMembers.countyTravelFees lineups.bandMembers.isManager lineups.bandMembers.isNonPerformer';
+export const VOICE_PRICE_FIELDS = '_id tscName status isTest hiddenWebsiteLineupIds supplierPricing useCountyTravelFee countyFees costPerMile useDifferentTeamForNorthernGigs northernTeam.instrument northernTeam.postCode northernTeam.isManager northernTeam.isNonPerformer northernTeam.additionalRoles.role lineups._id lineups.lineupId lineups.actSize lineups.bandMembers.instrument lineups.bandMembers.isEssential lineups.bandMembers.fee lineups.bandMembers.additionalRoles.role lineups.bandMembers.additionalRoles.isEssential lineups.bandMembers.additionalRoles.additionalFee lineups.bandMembers.postCode lineups.bandMembers.countyTravelFees lineups.bandMembers.isManager lineups.bandMembers.isNonPerformer';
 const manager = member => member.isManager || member.isNonPerformer || /\bmanager|management\b/i.test(member.instrument || '') || member.additionalRoles?.some(role => /\bmanager|management\b/i.test(role.role || ''));
 const amount = value => value !== null && value !== '' && value !== undefined && Number.isFinite(Number(value)) && Number(value) >= 0;
 const countyFee = (table, county) => Object.entries(table || {}).find(([key])=>key.toLowerCase().trim() === county.toLowerCase().trim())?.[1];
@@ -26,7 +27,7 @@ export async function lookupVoiceLineupPrice({ actId, lineupId, eventDateISO, ve
   const act = await (loadAct || (id=>Act.findById(id).select(VOICE_PRICE_FIELDS).maxTimeMS(3000).lean()))(actId);
   const unavailable = reason => ({ priceAvailable: false, testMode: true, reason, bookingConfirmed: false, availabilityChecked: false });
   if (!act || act.isTest || !['approved','live','approved_changes_pending','live_changes_pending'].includes(act.status)) return unavailable('This band needs management review.');
-  const lineup = act.lineups?.find(item=>String(item.lineupId || item._id) === lineupId);
+  const lineup = websiteActView(act).lineups?.find(item=>String(item.lineupId || item._id) === lineupId);
   if (!lineup?.bandMembers?.length || lineup.bandMembers.length > 20) return unavailable('The selected lineup needs review.');
   const performers = lineup.bandMembers.filter(member=>!manager(member));
   const declaredSize = Number(String(lineup.actSize || '').match(/\d+/)?.[0]);

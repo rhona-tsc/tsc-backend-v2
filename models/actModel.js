@@ -304,6 +304,7 @@ minDisplayPrice: { type: Number, default: null },
         createdAt: { type: Date, default: Date.now },
       },
     ],
+    hiddenWebsiteLineupIds: { type: [String], default: undefined },
     lineups: [
       {
         lineupId: { type: String, default: () => uuidv4(), index: true },

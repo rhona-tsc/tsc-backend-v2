@@ -1,3 +1,4 @@
+import { websiteActView } from '../utils/websiteLineups.js';
 import { minimumSupplierPrice } from '../utils/supplierPricing.js';
 // services/buildActFilterCard.js
 import { normalizeSetlistControl } from '../utils/setlistControl.js';
@@ -408,6 +409,7 @@ function normalizeExtrasFromAct(act) {
 }
 
 export function buildCard(act) {
+  act = websiteActView(act);
   const { basePrice, breakdown } = computeCardBasePrice(act);
 
   if (String(process.env.DEBUG_CARD_PRICING || "").toLowerCase() === "true") {

@@ -1,3 +1,4 @@
+import { websiteActView } from '../utils/websiteLineups.js';
 import { lookupVoiceLineupPrice } from './voiceLineupPricing.js';
 import { lookupVoiceVenueHistory } from './voiceVenueHistory.js';
 import { lookupVoiceVenues } from './voiceVenueLookup.js';
@@ -12,12 +13,12 @@ import { VoiceEnquiryValidationError } from './incomingEnquiryAssistant.js';
 import { createEnquiryToolHandler, buildVoiceBoardRecord } from './incomingEnquiryAssistant.js';
 
 // Never load musician names, contacts, fees, availability or customer records for search.
-export const VOICE_CATALOGUE_FIELDS = '_id tscName slug status isTest genre genres lineups._id lineups.lineupId lineups.actSize lineups.bandMembers.instrument';
+export const VOICE_CATALOGUE_FIELDS = '_id tscName slug status isTest genre genres hiddenWebsiteLineupIds lineups._id lineups.lineupId lineups.actSize lineups.bandMembers.instrument';
 
 export async function lookupVoiceBands(criteria, selection) {
   const acts = await Act.find({ status: { $in: ['approved', 'live', 'approved_changes_pending', 'live_changes_pending'] }, isTest: { $ne: true } })
     .select(VOICE_CATALOGUE_FIELDS).limit(500).maxTimeMS(4000).lean();
-  return matchVoiceBands(acts, criteria, selection);
+  return matchVoiceBands(acts.map(websiteActView), criteria, selection);
 }
 
 export async function saveVoiceDraft(callId, draft = {}, { Model = EnquiryBoardItem, now = new Date() } = {}) {
