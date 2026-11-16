@@ -96,6 +96,7 @@ export async function getActCards(req, res) {
 
     formattedPrice: 1,
     minDisplayPrice: 1,
+    supplierPricing: 1,
     extras: 1,
 
     createdAt: 1,
@@ -550,6 +551,7 @@ export async function getActCards(req, res) {
         $addFields: {
           basePrice: {
             $ifNull: [
+              "$supplierPricing.minimumSupplierPrice",
               { $add: ["$_derivedBase", "$_derivedTravel"] },
               {
                 $min: {

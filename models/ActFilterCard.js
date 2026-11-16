@@ -63,6 +63,8 @@ const ActFilterCardSchema = new mongoose.Schema(
     imageUrl: { type: String, default: "" },
 
     // pricing helpers
+    supplierPricing: { type: mongoose.Schema.Types.Mixed, default: undefined },
+    minDisplayPrice: { type: Number, default: null },
     basePrice: { type: Number, default: null },
     loveCount: { type: Number, default: 0 },
     amendmentPending: { type: Boolean, default: false },

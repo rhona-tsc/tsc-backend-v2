@@ -1,3 +1,4 @@
+import { supplierQuote } from '../utils/supplierPricing.js';
 // Calculator used by the public act/checkout pages, ported without logging.
 // Source: tsc-2025/new-frontend-deploy src/pages/utils/pricing.jsx, 11 November 2026.
 // Voice supplies the confirmed county, exact lineup and a checked travel reader.
@@ -106,6 +107,8 @@ const calculateActPricing = async (act, selectedCounty, selectedAddress, selecte
   const outcode = extractOutcode(selectedAddress);
   const guessedFromOutcode = countyFromOutcode(outcode);
   const derivedCounty = selectedCounty || guessedFromAddress || guessedFromOutcode;
+  const masterQuote = supplierQuote(act, smallestLineup, derivedCounty);
+  if (masterQuote !== undefined) return masterQuote;
   const northernCounties = /* @__PURE__ */ new Set([
     "ceredigion",
     "cheshire",

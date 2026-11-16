@@ -1,3 +1,4 @@
+import { minimumSupplierPrice } from '../utils/supplierPricing.js';
 // services/buildActFilterCard.js
 import { normalizeSetlistControl } from '../utils/setlistControl.js';
 // ESM module
@@ -36,6 +37,8 @@ const minCountyFee = (act) => {
 
 // ✅ The “source of truth” card base price
 function computeCardBasePrice(act) {
+  const masterMinimum = minimumSupplierPrice(act);
+  if (masterMinimum != null) return { basePrice: masterMinimum, breakdown: { source: "master-supplier-price" } };
   const lineups = Array.isArray(act?.lineups) ? act.lineups : [];
   if (!lineups.length) return { basePrice: 0, breakdown: { source: "no_lineups" } };
 
@@ -465,6 +468,7 @@ export function buildCard(act) {
     // pricing
     basePrice: Number(basePrice) || 0,
     minDisplayPrice,
+    supplierPricing: act.supplierPricing,
 
     // simple stats / flags (safe defaults)
     loveCount: Number(act?.loveCount ?? act?.numberOfShortlistsIn ?? 0) || 0,

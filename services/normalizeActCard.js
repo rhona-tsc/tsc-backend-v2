@@ -21,6 +21,8 @@ export function normalizeActCard(raw = {}, act = {}) {
 
     // pricing / engagement
     basePrice: numOrNull(raw.basePrice),
+    minDisplayPrice: raw.minDisplayPrice ?? null,
+    supplierPricing: raw.supplierPricing,
     loveCount: toNumber(raw.loveCount, 0),
     amendmentPending: !!(raw.amendmentPending),
 

@@ -24,6 +24,7 @@ const ActCardSchema = new Schema(
     imageUrl: { type: String, default: "" },
 minDisplayPrice: { type: Number, default: null, index: true },
     // Pricing / engagement
+    supplierPricing: { type: mongoose.Schema.Types.Mixed, default: undefined },
     basePrice: { type: Number, default: null, index: true }, // smallest lineup total (with margin)
     loveCount: { type: Number, default: 0 },
     amendmentPending: { type: Boolean, default: false },

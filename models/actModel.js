@@ -87,6 +87,7 @@ function booleanField() {
 const actSchema = new mongoose.Schema(
   {
     name: { type: String },
+    supplierPricing: { type: mongoose.Schema.Types.Mixed, default: undefined },
     tscName: { type: String },
 slug: { type: String, default: "" },
     description: { type: String },
