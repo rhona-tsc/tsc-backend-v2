@@ -4,9 +4,9 @@ import actModel from "../models/actModel.js";
 const router = express.Router();
 
 router.get("/act-slugs", async (req, res) => {
-  // Adjust the filter to match what “live” means in your DB
+  // Approved acts remain public while amendments await review.
   const acts = await actModel
-    .find({ status: "approved" })
+    .find({ status: { $in: ["approved", "live", "Approved, changes pending"] } })
     .select("slug")
     .lean();
 
