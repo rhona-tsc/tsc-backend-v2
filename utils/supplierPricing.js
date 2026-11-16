@@ -1,7 +1,7 @@
 // Complete supplier fees from the master include travel. Never add member/travel fees again.
 export const countyKey = value => {
   const key = String(value || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
-  return ({ greaterlondon: 'london', countydurham: 'durham', cityofbristol: 'bristol' })[key] || key;
+  return ({ greaterlondon: 'london', greatermanchester: 'manchester', countydurham: 'durham', cityofbristol: 'bristol', eastridingofyorkshire: 'eastyorkshire', cityofedinburgh: 'edinburgh', edinburghcity: 'edinburgh', glasgowcity: 'glasgow', conway: 'conwy' })[key] || key;
 };
 
 export function minimumSupplierPrice(act) {

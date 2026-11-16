@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { supplierQuote, minimumSupplierPrice, customerPrice } from './supplierPricing.js';
+import { supplierQuote, minimumSupplierPrice, customerPrice, countyKey } from './supplierPricing.js';
 import calculateWebsitePrice from '../services/websiteLineupPricing.js';
 import calculateActPricing from './calculateActPricing.js';
 import { buildCard } from '../services/buildActFilterCard.js';
@@ -9,6 +9,12 @@ import { normalizeActCard } from '../services/normalizeActCard.js';
 const lineup = { lineupId: 'six', actSize: '6-Piece', bandMembers: [{ fee: 9999, instrument: 'Guitar' }] };
 const act = { tscName: 'Example', lineups: [lineup], useCountyTravelFee: true, countyFees: { London: 999 },
   supplierPricing: { lineups: { six: { counties: { London: 2760, Kent: 2900, Devon: 0 } } } }, minDisplayPrice: 3671 };
+
+test('website county names resolve to master county names', () => {
+  assert.equal(countyKey('Greater Manchester'), countyKey('Manchester'));
+  assert.equal(countyKey('East Riding of Yorkshire'), countyKey('East Yorkshire'));
+  assert.equal(countyKey('City of Edinburgh'), countyKey('Edinburgh'));
+});
 
 test('master fee includes travel and gets the customer margin exactly once', async () => {
   const quote = supplierQuote(act, lineup, 'Greater London');
