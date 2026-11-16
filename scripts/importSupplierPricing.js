@@ -8,7 +8,6 @@ import Act from '../models/actModel.js';
 import ActCard from '../models/actCard.model.js';
 import ActFilterCard from '../models/ActFilterCard.js';
 import { buildCard } from '../services/buildActFilterCard.js';
-import { normalizeActCard } from '../services/normalizeActCard.js';
 import { minimumSupplierPrice } from '../utils/supplierPricing.js';
 
 const [planPath, backupPath, mode] = process.argv.slice(2);
@@ -33,6 +32,8 @@ try {
     const backup = { createdAt: new Date().toISOString(), acts: documents,
       actCards: await ActCard.find({ actId: { $in: documents.map(act => act._id) } }).lean(),
       filterCards: await ActFilterCard.find({ actId: { $in: documents.map(act => act._id) } }).lean() };
+    assert.equal(backup.actCards.length, documents.length, 'Every selected act needs an existing card');
+    assert.equal(backup.filterCards.length, documents.length, 'Every selected act needs an existing filter card');
     await fs.writeFile(backupPath, JSON.stringify(backup, null, 2), { flag: 'wx', mode: 0o600 });
     for (let index = 0; index < plan.length; index++) {
       const item = plan[index], before = documents[index];
@@ -43,8 +44,13 @@ try {
       assert.equal(result.matchedCount, 1, 'Pricing changed during import; review backup before resuming');
       const act = { ...before, supplierPricing: item.supplierPricing, minDisplayPrice: item.minDisplayPrice };
       const raw = buildCard(act);
-      await ActFilterCard.updateOne({ actId: act._id }, { $set: raw }, { upsert: true });
-      await ActCard.updateOne({ actId: act._id }, { $set: normalizeActCard(raw, act) }, { upsert: true });
+      // Pricing imports must not change publication state or other cached metadata.
+      const pricingFields = { supplierPricing: item.supplierPricing,
+        minDisplayPrice: item.minDisplayPrice, basePrice: raw.basePrice };
+      const filterResult = await ActFilterCard.updateOne({ actId: act._id }, { $set: pricingFields });
+      const cardResult = await ActCard.updateOne({ actId: act._id }, { $set: pricingFields });
+      assert.equal(filterResult.matchedCount, 1, 'Missing filter card');
+      assert.equal(cardResult.matchedCount, 1, 'Missing act card');
     }
   }
   console.log(JSON.stringify({ applied: mode === '--apply', acts: plan.length,
