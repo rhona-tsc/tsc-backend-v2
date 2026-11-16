@@ -4,6 +4,7 @@ import { createActNameResolver } from './actNameMatching.js';
 import { canonicalCounty, countySlug, isPublicVenue, countyForReview } from './locationMatching.js';
 import { venueEveningExamples } from '../data/venueEveningExamples.js';
 import { locationImageUrl } from './locationImage.js';
+import { publicActStatuses } from '../utils/publicActStatuses.js';
 
 const nameKey = value => String(value || '').replace(/^for\s+(?:the\s+)?address\s+we\s+have\s*:\s*/i, '').trim().toLowerCase();
 export function buildPublicPerformanceHistory(acts, venues, now = new Date()) {
@@ -54,7 +55,7 @@ let expires = 0;
 export async function getPublicPerformanceHistory() {
   if (cached && Date.now() < expires) return cached;
   const [acts, venues] = await Promise.all([
-    Act.find({ status: 'approved' }).select('name tscName slug images.url images.locationCrop coverImage.url reviews._id reviews.reviewId reviews.eventLocation reviews.comment').lean(),
+    Act.find({ status: { $in: publicActStatuses } }).select('name tscName slug images.url images.locationCrop coverImage.url reviews._id reviews.reviewId reviews.eventLocation reviews.comment').lean(),
     Venue.find({}).select('name aliases county visits.actName visits.actId visits.eventDate').lean(),
   ]);
   cached = buildPublicPerformanceHistory(acts, venues);

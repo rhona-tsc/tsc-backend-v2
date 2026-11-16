@@ -1,4 +1,5 @@
 import Act from '../models/actModel.js';
+import { publicActStatuses } from '../utils/publicActStatuses.js';
 import Musician from '../models/musicianModel.js';
 import Venue from '../models/venueModel.js';
 import { locationImageUrl } from './locationImage.js';
@@ -74,7 +75,7 @@ let expires = 0;
 export const getLocationPages = async () => {
   if (cache && Date.now() < expires) return cache;
   const [acts, musicians, venues] = await Promise.all([
-    Act.find({ status: 'approved' }).select('tscName name slug tscDescription description genre images.url images.locationCrop coverImage.url lineups.bandMembers.musicianId lineups.bandMembers.email lineups.bandMembers.firstName lineups.bandMembers.lastName reviews').lean(),
+    Act.find({ status: { $in: publicActStatuses } }).select('tscName name slug tscDescription description genre images.url images.locationCrop coverImage.url lineups.bandMembers.musicianId lineups.bandMembers.email lineups.bandMembers.firstName lineups.bandMembers.lastName reviews').lean(),
     Musician.find({}).select('email firstName lastName basicInfo.firstName basicInfo.lastName address.county').lean(),
     Venue.find({}).select('name aliases county photoUrl photoAlt visits.actName visits.actId visits.eventDate').lean(),
   ]);
