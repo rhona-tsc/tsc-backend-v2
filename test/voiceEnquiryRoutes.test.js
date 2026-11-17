@@ -6,6 +6,7 @@ import { createVoiceEnquiryRouter } from '../routes/voiceEnquiryRoutes.js';
 
 test('test-only voice ingress enforces feature flag, signatures, number and caller allowlist', async () => {
   const settings = {
+    VOICE_ENQUIRY_MODE:'conversation',
     VOICE_ENQUIRY_ENABLED: 'true', VOICE_ENQUIRY_PUBLIC_BASE_URL: 'https://example.com',
     VOICE_ENQUIRY_TWILIO_NUMBER: '+442079460123',
     OPENAI_VOICE_API_KEY: 'test-key-never-used', OPENAI_VOICE_WEBHOOK_SECRET: 'test-secret-never-used',

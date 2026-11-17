@@ -77,17 +77,21 @@ export function managementCallEmail(call, enquiry) {
   const lines = [
     'AI PHONE PILOT TEST — no musician or customer messages were sent.', `Call: ${date} UK time`, `Reference: ${call._id}`, `Status: ${call.status}`,
     enquiry?.captureState === 'draft' ? 'UNCONFIRMED DRAFT — details may be incomplete or misheard; review the transcript and confirm before following up.' : '',
+    call.intent==='voicemail'?`RECORDED MESSAGE — ${call.recording?.fileId?'Private audio is available in the call review for 90 days.':'Recording is not yet available; check the processing status.'}\nCaller ID (unconfirmed): ${call.caller||'Withheld'}\nProcessing: ${call.voicemail?.status||'pending'}\nNo customer emails or musician requests have been sent.`:'',
     enquiry?.draftDetails?.sectionProgress ? `Enquiry sections: ${Object.entries(enquiry.draftDetails.sectionProgress.sections||{}).map(([name,status])=>`${name}: ${status}`).join('; ')}` : '',
     enquiry ? `Name: ${enquiry.clientName || 'Not captured'}\nPhone: ${enquiry.clientPhone || 'Not captured'}\nEmail: ${enquiry.clientEmail || 'Not supplied'}\nPreferred follow-up: ${enquiry.preferredContactMethod || 'Not specified'}\nEvent: ${enquiry.eventDateISO || 'Not captured'}\nVenue: ${enquiry.address || 'Not captured'}\nCounty: ${enquiry.county || 'Needs confirmation'}\nPostcode: ${enquiry.postcode || 'Needs confirmation'}\nBudget: ${enquiry.maxBudget ? `£${enquiry.maxBudget}` : 'Not supplied'}\nHopes to book: ${enquiry.decisionWindow || 'Not supplied'}\nSelected bands: ${(enquiry.selectedBands || []).map(item=>item.name).join(', ') || 'None selected'}\nAvailability previews: ${enquiry.availabilityRequestTest?.requests?.length || 0}; 0 sent\nCallback appointment: ${enquiry.callAppointment?.label || 'None'}${enquiry.callAppointment ? ' (test proposal; not booked)' : ''}\n\n${enquiry.notes || ''}` : 'No confirmed enquiry was saved. Review the transcript for incomplete details.',
     enquiry?.voicePriceEstimates?.length ? `Website estimates checked (not bookings):\n${enquiry.voicePriceEstimates.map(quote=>`${quote.bandName}, ${quote.performerCount}-piece, ${quote.county}, ${quote.eventDateISO}: £${quote.priceGBP}, calculated travel included`).join('\n')}` : '',
     `Transcript: ${call.turns?.length || 0} turns${call.transcriptHasGaps ? '; capture gaps need review' : ''}${call.transcriptLimited ? '; capture limit reached' : ''}.`,
     'Review the call and all prepared band requests before contacting the client:', `https://admin.thesupremecollective.co.uk/enquiry-board?callReview=${call._id}`,
     'No live availability replies are expected in test mode. A prepared preview is not a sent request or a confirmed band.',
+    call.voicemail?.suggestedBands?.length?`Catalogue suggestions for TEAM REVIEW ONLY (not client selections, checked availability or quoted prices): ${call.voicemail.suggestedBands.map(b=>b.name).join(', ')}`:'',
+    call.voicemail?.transcript?`Recorded message transcript (unconfirmed; listen to the audio to check spelling):\n${call.voicemail.transcript}`:'',
   ];
   return { to: VOICE_MANAGEMENT_EMAIL, subject: `[AI test call] ${enquiry?.captureState === 'draft' ? 'Draft enquiry — ' : ''}${enquiry?.clientName || 'Incomplete enquiry'} — ${call._id}`, text: lines.join('\n\n') };
 }
 export async function finishVoiceCallReview(callSid, { status = 'completed', sendMail } = {}) {
   const id = voiceCallRef(callSid);
+  if(status==='completed'&&(await calls().findOne({_id:id},{projection:{intent:1}}))?.intent==='voicemail')return;
   await calls().updateOne({ _id: id }, { $set: { status, endedAt: new Date() } });
   const claimed = await calls().findOneAndUpdate({ _id: id, notificationStatus: 'pending' }, { $set: { notificationStatus: 'sending' } }, { returnDocument: 'after', includeResultMetadata: false });
   if (!claimed) return;
@@ -101,16 +105,19 @@ export async function finishVoiceCallReview(callSid, { status = 'completed', sen
 }
 
 export async function listVoiceCallReviews() {
-  const reviews = await calls().find({ expiresAt: { $gt: new Date() } }, { projection: { callSid: 0, caller: 0, turns: 0 } }).sort({ startedAt: -1 }).limit(30).toArray();
+  const reviews = await calls().find({ expiresAt: { $gt: new Date() } }, { projection: { callSid: 0, caller: 0, turns: 0,recording:0 } }).sort({ startedAt: -1 }).limit(30).toArray();
   const old = await EnquiryBoardItem.find({ marketingSource: 'Phone — AI pilot test', enquiryRef: { $nin: reviews.map(item => item._id) } }).select('enquiryRef clientName createdAt').sort({ createdAt: -1 }).limit(10).lean();
   return [...reviews, ...old.map(item => ({ _id: item.enquiryRef, clientName: item.clientName, startedAt: item.createdAt, status: 'no_transcript', transcriptCount: 0 }))].sort((a,b)=>+new Date(b.startedAt)-+new Date(a.startedAt)).slice(0,30);
 }
 export async function readVoiceCallReview(ref) {
   if (!/^PHONE-[A-F\d]{12}$/.test(ref || '')) return null;
-  const call = await calls().findOne({ _id: ref, expiresAt: { $gt: new Date() } }, { projection: { callSid: 0, caller: 0 } });
+  const call = await calls().findOne({ _id: ref, expiresAt: { $gt: new Date() } }, { projection: { callSid: 0 } });
   const enquiry = await EnquiryBoardItem.findOne({ enquiryRef: ref, marketingSource: 'Phone — AI pilot test' }).select('enquiryRef clientName clientEmail clientPhone eventDateISO address county postcode venueConfirmation preferredContactMethod decisionWindow styles preferredSize maxBudget selectedBands availabilityRequestTest callAppointment captureState draftDetails voicePriceEstimates notes createdAt').lean();
   if (!call && !enquiry) return null;
   const result = { ...(call || { _id: ref, startedAt: enquiry?.createdAt, status: 'no_transcript', turns: [] }), enquiry };
+  if(call?.intent==='voicemail')result.detectedCallerNumber=call.caller||'';
+  delete result.caller;
+  result.recording={available:!!call?.recording?.fileId,status:call?.recording?.status||'not_recorded',durationSeconds:call?.recording?.durationSeconds||0,expiresAt:call?.recording?.fileId?call.expiresAt:null};
   result.turns = (result.turns || []).map(turn=>({...turn,recognitionSuspect:!!turn.recognitionSuspect || turn.role==='user' && /UK venue names, band names, full postcodes/i.test(turn.text)}));
   result.transcriptHasGaps = !!result.transcriptHasGaps || result.turns.some(turn=>turn.recognitionSuspect);
   return result;

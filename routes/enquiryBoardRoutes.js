@@ -1,4 +1,5 @@
 import { listVoiceCallReviews, readVoiceCallReview, voiceFollowupReadiness } from '../services/voiceCallReview.js';
+import {createVoiceAudioHandler} from '../services/voiceVoicemail.js';
 import { lookupVoiceBookingEquipment } from '../services/voiceBookingEquipmentStore.js';
 import { equipmentConnectionStatus, beginEquipmentGoogleConnection, disconnectEquipmentGoogleConnection, verifyEquipmentGoogleConnection } from '../services/voiceEquipmentGoogle.js';
 import express from "express";
@@ -41,6 +42,7 @@ router.get('/voice-calls/:ref', musicianAuth, async (req, res) => {
   try { const call = await readVoiceCallReview(req.params.ref); if (!call) return res.status(404).json({ success: false, message: 'No saved transcript for this call.' }); res.json({ success: true, call }); }
   catch { res.status(503).json({ success: false, message: 'Call review could not be loaded.' }); }
 });
+router.get('/voice-calls/:ref/audio',musicianAuth,createVoiceAudioHandler());
 
 router.get('/equipment-test/status', musicianAuth, async (req, res) => {
   if (!isTSCAdmin(req.user) && !isAgent(req.user)) return res.sendStatus(403);

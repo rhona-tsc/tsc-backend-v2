@@ -27,6 +27,7 @@ import listEndpoints from "express-list-endpoints";
 import Stripe from "stripe";
 import { dedupeSelectedSongsForAllMusicians, startDedupeSelectedSongsCron } from "./cron/dedupeSelectedSongsCron.js";
 import connectDB from "./config/mongodb.js";
+import {startVoiceVoicemailWorker} from './services/voiceVoicemail.js';
 import connectCloudinary from "./config/connectCloudinary.js";
 import cloudinary from "./config/cloudinary.js";
 import bookingForecastRouter from "./routes/bookingForecastRoute.js";
@@ -619,6 +620,7 @@ app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
 connectDB()
   .then(async () => {
+    startVoiceVoicemailWorker();
     runMasterSupplierPricingSync().catch(error => console.error('Master pricing worker unavailable:', error.message));
     const resumedJobs = await resumePendingMusicianBioBackfills();
     if (resumedJobs) {
