@@ -38,7 +38,7 @@ async function throughLocation(h,{email=false}={}) {
 test('named-band flow checkpoints early facts, completes ordered sections and only prepares previews after final agreement',async()=>{
   const h=setup();await throughLocation(h);
   assert.equal(h.drafts[0].eventDateISO,'2026-12-14');assert.equal(h.drafts[0].preferredBands,'Dancefloor Magic');
-  assert.equal(h.flow.section,'bands');assert.equal(h.flow.question.phase,'lineup');
+  assert.equal(h.flow.section,'bands');assert.equal(h.flow.question.phase,'size');
   await h.answer('Six-piece with saxophone',{preferredSize:'6-piece',mustHaveInstruments:['Saxophone']});
   assert.equal(h.flow.section,'notes');assert.equal(h.flow.question.text,VOICE_EXTRA_NOTES_QUESTION);
   await h.answer('We may want a band member DJ set.',{notes:'Considering a DJ set from a band member.'});
@@ -52,7 +52,7 @@ test('named-band flow checkpoints early facts, completes ordered sections and on
 });
 
 test('email selection confirms one complete address and chooses the email follow-up path',async()=>{
-  const h=setup();await throughLocation(h,{email:true});await h.answer('5-piece',{preferredSize:'5-piece'});
+  const h=setup();await throughLocation(h,{email:true});await h.answer('5-piece',{preferredSize:'5-piece'});await h.answer('No preference');
   await h.answer('No');assert.match(h.flow.question.text,/follow-up choice is email/);assert.doesNotMatch(h.flow.question.text,/We'll email you/);
   await h.answer('Yes');assert.equal(h.saved[0].clientEmail,'alex@example.invalid');assert.equal(h.saved[0].preferredContactMethod,'email');
 });
@@ -81,7 +81,7 @@ test('late answers from a previous spoken question cannot confirm a new section'
 test('unknown required date preserves the draft and prevents both confirmed save and availability preparation',async()=>{
   const h=setup();await h.answer('I want Dancefloor Magic',{topic:'client_event',bandNames:['Dancefloor Magic']});await h.answer('Alex',{clientName:'Alex'});await h.answer('Yes');await h.answer('No',{wantsEmail:false});
   await h.answer('Not decided',{unknown:true});await h.answer('The Ritz London',{venueQuery:'The Ritz London'});await h.answer('Yes');
-  await h.answer('6-piece',{preferredSize:'6-piece'});await h.answer('No');
+  await h.answer('6-piece',{preferredSize:'6-piece'});await h.answer('No preference');await h.answer('No');
   assert.equal(h.saved.length,0);assert.equal(h.previews.length,0);assert.equal(h.flow.snapshot.sections.event_date,'needs_followup');assert.match(h.flow.question.text,/unconfirmed test draft/);
 });
 
@@ -90,7 +90,7 @@ test('no named band follows genre, size and budget before catalogue choices, and
   await h.answer('Ritz London',{venueQuery:'Ritz London'});await h.answer('Yes');
   assert.equal(h.flow.question.phase,'names');await h.answer('No');assert.equal(h.flow.question.phase,'style');
   await h.answer('Rock',{styles:['Rock']});assert.equal(h.flow.question.phase,'size');
-  await h.answer('six-piece',{preferredSize:'6-piece'});assert.equal(h.flow.question.phase,'budget');
+  await h.answer('six-piece',{preferredSize:'6-piece'});assert.equal(h.flow.question.phase,'instruments');await h.answer('No preference');assert.equal(h.flow.question.phase,'budget');
   await h.answer('2500',{maxBudget:2500});assert.equal(h.flow.question.phase,'choose');assert.match(h.flow.question.text,/Dancefloor Magic/);
   assert.equal(h.saved.length,0);await h.answer('Yes');assert.equal(h.flow.question.phase,'choose');
   await h.answer('Dancefloor Magic',{bandNames:['Dancefloor Magic']});assert.equal(h.flow.section,'notes');
@@ -104,8 +104,8 @@ test('partial call progress identifies missing sections without fabricating a co
 });
 
 test('musician and callback intentions hand back to the existing specialised flow',async()=>{
-  for(const topic of ['musician_job','musician_joining','human_callback','technical_question']){
-    const h=setup();assert.deepEqual(await h.flow.accept('I have a question',{topic}),{handoff:true});assert.equal(h.saved.length,0);assert.equal(h.previews.length,0);
+  for(const [topic,text] of [['musician_job','I am calling about a job advert'],['musician_joining','I want to join your books'],['human_callback','I want to speak to a human'],['technical_question','What stage size do you need?']]){
+    const h=setup();assert.deepEqual(await h.flow.accept(text,{topic}),{handoff:true});assert.equal(h.saved.length,0);assert.equal(h.previews.length,0);
   }
 });
 
@@ -146,7 +146,7 @@ test('plain yes cannot be overridden by invented extractor contact choices',asyn
 });
 
 test('a corrected date or phone returns to that section for a fresh read-back',async()=>{
-  const h=setup();await throughLocation(h);await h.answer('6-piece',{preferredSize:'6-piece'});await h.answer('No');
+  const h=setup();await throughLocation(h);await h.answer('6-piece',{preferredSize:'6-piece'});await h.answer('No preference');await h.answer('No');
   assert.equal(h.flow.section,'review');await h.answer('Actually 15 December 2026',{eventDateISO:'2026-12-15'});
   assert.equal(h.flow.section,'event_date');assert.match(h.flow.question.text,/15 December/);await h.answer('Yes');
   assert.equal(h.flow.section,'review');await h.answer('Use 07700900999 instead',{clientPhone:'+447700900999'});
@@ -155,7 +155,7 @@ test('a corrected date or phone returns to that section for a fresh read-back',a
 });
 
 test('changed lineup preferences invalidate the previous selection',async()=>{
-  const h=setup();await throughLocation(h);await h.answer('6-piece',{preferredSize:'6-piece'});await h.answer('No');
+  const h=setup();await throughLocation(h);await h.answer('6-piece',{preferredSize:'6-piece'});await h.answer('No preference');await h.answer('No');
   await h.answer('Actually a five-piece',{preferredSize:'5-piece'});
   assert.equal(h.flow.section,'review');assert.match(h.flow.question.text,/5-piece/);assert.equal(h.saved.length,0);
   await h.answer('Yes');assert.equal(h.saved[0].selectedBands[0].lineupId,'five');
@@ -170,7 +170,94 @@ test('same-size lineups are distinguished by requested saxophone rather than cho
 
 
 test('an optional DJ extra cannot overwrite the captured wedding event type',async()=>{
-  const h=setup();await throughLocation(h);await h.answer('6-piece',{preferredSize:'6-piece'});
+  const h=setup();await throughLocation(h);await h.answer('6-piece',{preferredSize:'6-piece'});await h.answer('No preference');
   await h.answer('We might want a DJ set from a band member',{eventType:'DJ set request involving a band member',notes:'Band member DJ set'});
   await h.answer('Yes');assert.match(h.saved[0].notes,/Event: wedding/);assert.match(h.saved[0].notes,/Band member DJ set/);
+});
+
+test('a name and ordinary answers cannot trigger a specialist detour from a hallucinated topic label',async()=>{
+  for(const topic of ['human_callback','technical_question','musician_joining','musician_job']){
+    const h=setup();await h.answer('A soul band for my wedding',{topic:'client_event',styles:['Soul']});
+    await h.answer('Rona?',{topic,clientName:'Rhona'});
+    assert.equal(h.flow.section,'phone');assert.equal(h.flow.snapshot.sections.name,'complete');assert.equal(h.drafts.at(-1).clientName,'Rona');
+    await h.answer('Yes',{topic});assert.equal(h.flow.section,'email');
+  }
+});
+
+test('modern and classic soul, vague size and Saxofon follow the checklist instead of reporting a false no-match',async()=>{
+  const soulBand={...band,genre:['Soul & Motown']};
+  const h=setup({lookupBands:async(input,selection)=>matchVoiceBands([soulBand],input,selection)});
+  await h.answer('I want a soul band for my wedding',{topic:'client_event',styles:['Soul'],eventType:'wedding'});
+  await h.answer('Rona?',{topic:'human_callback'});await h.answer('Yes');await h.answer('No');
+  await h.answer('14 December 2028',{eventDateISO:'2028-12-14'});await h.answer('Yes');
+  await h.answer('The Ritz London',{venueQuery:'The Ritz London'});await h.answer('Yes');await h.answer('No');
+  await h.answer('Some modern soul and some classic soul',{styles:['modern soul','classic soul']});
+  assert.equal(h.flow.question.phase,'size');assert.doesNotMatch(h.flow.question.text,/modern soul|classic soul/);
+  await h.answer('A larger band',{preferredSize:'larger band'});
+  assert.equal(h.flow.question.phase,'size');assert.match(h.flow.question.text,/give a number/);assert.equal(h.calls.filter(c=>c.name==='lookup_bands').length,0);
+  await h.answer('six');assert.equal(h.flow.question.phase,'instruments');
+  await h.answer('Saxofon',{mustHaveInstruments:['Saxofon']});assert.equal(h.flow.question.phase,'budget');
+  await h.answer('Up to 4000',{maxBudget:4000});assert.equal(h.flow.question.phase,'choose');
+  await h.answer('Dancefloor Magic',{bandNames:['Dancefloor Magic']});assert.equal(h.flow.section,'notes');
+  await h.answer('No');await h.answer('Yes');
+  assert.equal(h.saved.length,1);assert.equal(h.saved[0].maxBudget,4000);assert.equal(h.saved[0].selectedBands[0].lineupId,'six');
+  assert.deepEqual(h.saved[0].styles,['Soul']);assert.deepEqual(h.saved[0].mustHaveInstruments,['Saxophone']);
+  assert.match(h.saved[0].notes,/modern soul and some classic soul/);assert.equal(h.flow.snapshot.missing.length,0);
+});
+
+test('an unsupported style is retained for clarification rather than silently broadening the search',async()=>{
+  const h=setup();await throughLocation(h);await h.answer('I want 6-piece blues',{styles:['Blues'],preferredSize:'6-piece'});
+  assert.equal(h.flow.question.phase,'style');assert.match(h.drafts.at(-1).requirements,/style: Blues/);
+  assert.equal(h.calls.filter(c=>c.name==='lookup_bands').length,0);assert.doesNotMatch(h.flow.question.text,/classic soul|modern soul/);
+});
+
+test('an explicitly removed saxophone requirement is cleared before finding a five-member lineup',async()=>{
+  const h=setup();await throughLocation(h);await h.answer('Six-piece with saxophone',{preferredSize:'6-piece',mustHaveInstruments:['Saxophone']});await h.answer('No');
+  await h.answer('Five members, forget the saxophone',{preferredSize:'5-piece',clearInstruments:true});
+  assert.equal(h.flow.section,'review');await h.answer('Yes');
+  assert.deepEqual(h.saved[0].mustHaveInstruments,[]);assert.equal(h.saved[0].selectedBands[0].lineupId,'five');
+});
+
+test('a named catalogue act with uncertain performer counts is kept for team review without an invented lineup',async()=>{
+  const h=setup({lookupBands:async input=>({bands:input.preferredSize?[]:[{actId:band._id,name:'Dancefloor Magic',lineups:[{lineupId:'unknown',size:null,sizeNeedsReview:true,instruments:['Saxophone']}]}],needsClarification:false})});
+  await throughLocation(h);await h.answer('6-piece with saxophone',{preferredSize:'6-piece',mustHaveInstruments:['Saxophone']});
+  assert.match(h.flow.question.text,/in our catalogue/);assert.match(h.flow.question.text,/unconfirmed test draft/);assert.doesNotMatch(h.flow.question.text,/Which lineup/);
+  assert.equal(h.saved.length,0);assert.equal(h.previews.length,0);assert.equal(h.drafts.at(-1).preferredBands,'Dancefloor Magic');
+});
+
+test('a short UK mobile transcription cannot replace the approved incoming number',async()=>{
+  const h=setup();await h.answer('A wedding band',{topic:'client_event'});await h.answer('Rona');
+  await h.answer('No');await h.answer('0785682367',{clientPhone:'0785682367'});
+  assert.equal(h.flow.section,'phone');assert.equal(h.drafts.at(-1).clientPhone,'');assert.doesNotMatch(h.flow.question.text,/0, 7, 8, 5, 6, 8/);
+});
+
+test('band names containing number words can pass the spoken shortlist check without a selection loop',async()=>{
+  const oneLove={...band,tscName:'One Love',genre:['Soul']};
+  const h=setup({lookupBands:async(input,selection)=>matchVoiceBands([oneLove],input,selection)});
+  await h.answer('A wedding band on 14 December 2026',{topic:'client_event',eventDateISO:'2026-12-14'});await h.answer('Rona');await h.answer('Yes');await h.answer('No');await h.answer('Yes');
+  await h.answer('Ritz London',{venueQuery:'Ritz London'});await h.answer('Yes');await h.answer('No');await h.answer('Soul',{styles:['Soul']});await h.answer('Six band members.');
+  await h.answer('Saxophone',{mustHaveInstruments:['Saxophone']});await h.answer('4000',{maxBudget:4000});assert.equal(h.flow.question.phase,'choose');
+  await h.answer('Option one please',{selectedOptions:[1]});assert.equal(h.flow.section,'notes');
+});
+
+test('a cut-off final test disclosure cannot unlock enquiry confirmation or request preparation',async()=>{
+  const h=setup();await throughLocation(h);await h.answer('Six with saxophone',{preferredSize:'6-piece',mustHaveInstruments:['Saxophone']});await h.answer('No');
+  const full=h.flow.question.text;assert.equal(h.flow.markSpoken(full.replace('no messages will be sent.','no messages')),false);h.flow.delivered();
+  await h.flow.accept('Yes');assert.equal(h.flow.section,'review');assert.equal(h.saved.length,0);assert.equal(h.previews.length,0);
+  await h.answer('Yes');assert.equal(h.saved.length,1);assert.equal(h.previews.length,1);
+});
+
+test('invented unknown flags cannot skip supplied venue/date or erase an unsupported style',async()=>{
+  const h=setup();await h.answer('Wedding',{topic:'client_event'});await h.answer('Rona');await h.answer('Yes');await h.answer('No');
+  await h.answer('14 December 2028',{eventDateISO:'2028-12-14',unknown:true});assert.equal(h.flow.question.phase,'confirm');await h.answer('Yes');
+  await h.answer('The Ritz London',{venueQuery:'The Ritz London',unknown:true});assert.equal(h.flow.section,'location');assert.equal(h.flow.question.phase,'confirm');
+  await h.answer('Yes');await h.answer('No');await h.answer('Blues',{styles:['Blues'],unknown:true});
+  assert.equal(h.flow.question.phase,'style');assert.equal(h.calls.filter(c=>c.name==='lookup_bands').length,0);
+});
+
+test('placeholder and unspoken venue/date extraction cannot invent answers to missing checklist sections',async()=>{
+  const h=setup();await h.answer('Wedding',{topic:'client_event'});await h.answer('Rona?',{clientName:'Rona',venueQuery:'none',postcode:'none',eventDateISO:'2028-12-14',bandNames:['none']});
+  assert.equal(h.drafts.at(-1).address,undefined);assert.equal(h.drafts.at(-1).eventDateISO,undefined);assert.equal(h.drafts.at(-1).preferredBands,'');
+  await h.answer('Yes');await h.answer('No');assert.equal(h.flow.section,'event_date');assert.equal(h.flow.question.phase,'collect');
+  await h.answer('14 December 2028',{eventDateISO:'2028-12-14'});await h.answer('Yes');assert.equal(h.flow.section,'location');assert.equal(h.flow.question.phase,'collect');
 });

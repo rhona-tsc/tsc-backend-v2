@@ -108,3 +108,9 @@ test('an unmatched enquiry can still save preferences for staff without invented
   await handler({ callId: 'unmatched', name: 'save_enquiry', arguments: { ...details, styles: ['Blues'], selectedBands: [] } });
   assert.deepEqual([...saved.values()][0].styles, ['Blues']); assert.deepEqual([...saved.values()][0].selectedBands, []);
 });
+
+test('classic and modern soul use the existing Soul filter while vague band sizes still need a number',()=>{
+  const result=matchVoiceBands([small,varied],{styles:['modern soul','classic soul'],preferredSize:'6-piece',mustHaveInstruments:['saxofon']});
+  assert.equal(result.needsClarification,false);assert.deepEqual(result.constraints.styles,['Soul']);assert.equal(result.bands[0].lineups[0].size,6);
+  assert.equal(matchVoiceBands([small,varied],{styles:['Soul'],preferredSize:'larger band'}).needsClarification,true);
+});

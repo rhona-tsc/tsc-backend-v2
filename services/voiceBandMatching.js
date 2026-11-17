@@ -1,7 +1,8 @@
 const clean = value => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim() : '';
 const key = value => clean(value).toLowerCase().replace(/r\s*&\s*b/g, 'rnb').replace(/[^a-z0-9]/g, '');
 const styleAliases = {
-  soul: ['Soul'], motown: ['Motown'], soulandmotown: ['Soul', 'Motown'], soulmotown: ['Soul', 'Motown'],
+  soul: ['Soul'], modernsoul: ['Soul'], classicsoul: ['Soul'], contemporarysoul: ['Soul'],
+  motown: ['Motown'], soulandmotown: ['Soul', 'Motown'], soulmotown: ['Soul', 'Motown'],
   rnb: ['RnB'], randb: ['RnB'], rhythmblue: ['RnB'], rhythmandblues: ['RnB'], hiphop: ['HipHop'], rap: ['HipHop'], garage: ['Garage'],
   rnbhiphopgarage: ['RnB', 'HipHop', 'Garage'], rnbhiphopandgarage: ['RnB', 'HipHop', 'Garage'],
   pop: ['Pop'], classicpop: ['Pop'], chartpop: ['Pop'], popclassicpop: ['Pop'], popandclassicpop: ['Pop'],
@@ -14,7 +15,7 @@ const styleAliases = {
   israeli: ['Israeli'], latin: ['Latin'], roaming: ['Roaming'], '90s': ['90s'], nineties: ['90s'], '00s': ['00s'], noughties: ['00s'],
 };
 const instrumentAliases = {
-  sax: 'Saxophone', saxophone: 'Saxophone', trumpet: 'Trumpet', trombone: 'Trombone',
+  sax: 'Saxophone', saxophone: 'Saxophone', saxofon: 'Saxophone', trumpet: 'Trumpet', trombone: 'Trombone',
   brasssection: 'Brass section', hornsection: 'Brass section',
   keys: 'Keyboard', keyboard: 'Keyboard', keyboards: 'Keyboard', piano: 'Keyboard', pianist: 'Keyboard',
   guitar: 'Guitar', guitarist: 'Guitar', electricguitar: 'Electric Guitar', acousticguitar: 'Acoustic Guitar',
@@ -26,6 +27,8 @@ const instrumentAliases = {
 };
 const horns = ['Saxophone', 'Trumpet', 'Trombone'];
 const unique = values => [...new Set(values)];
+export const VOICE_SEARCH_STYLES = Object.freeze(unique(Object.values(styleAliases).flat()));
+export const VOICE_SEARCH_INSTRUMENTS = Object.freeze(unique(Object.values(instrumentAliases)));
 
 export function parsePreferredSize(raw = '') {
   let value = clean(raw).toLowerCase().replace(/[–—]/g, '-').replace(/(\d+)piece/g, '$1 piece');
@@ -46,7 +49,7 @@ export function parsePreferredSize(raw = '') {
   else if (values.length === 1 && /\bup to\b|\bmaximum\b/.test(value)) values = Array.from({ length: values[0] }, (_, i) => i + 1);
   if (!values.length || values.some(size => size < 1 || size > 20)) return { unknown: true, values: [] };
   // Do not discard extra constraints such as "5-piece plus a DJ".
-  const residue = value.replace(/\b(solo|duo|trio|quartet|quintet|sextet|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|piece|pieces|musicians?|band|or|and|between|to|at least|minimum|up to|maximum)\b/g, '').replace(/[\d\s/,-]/g, '');
+  const residue = value.replace(/\b(solo|duo|trio|quartet|quintet|sextet|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|piece|pieces|musicians?|performers?|members?|players?|people|band|or|and|between|to|at least|minimum|up to|maximum)\b/g, '').replace(/[\d\s/,!.?-]/g, '');
   return residue ? { unknown: true, values: [] } : { any: false, values: values.sort((a, b) => a - b) };
 }
 

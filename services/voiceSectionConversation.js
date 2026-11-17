@@ -9,9 +9,9 @@ export function createVoiceSectionConversation({send,handleTool,callId,callerNum
   const users=new Map(),order=[],seen=new Set(),responses=new Set();
   const emitPlan=plan=>{
     active=true;kind='speak';responseId='';patch={};toolCallId='';
-    send({type:'response.create',response:{tools:[],tool_choice:'none',instructions:
-      `You are The Supreme Collective's British voice reader. Read ONLY the following server-approved words, exactly, in a natural British accent. Do not add greetings, say anything about inability, answer another question, or skip/rephrase any digits, names or words. Stop after these words and wait. The application controls the next section.\nWORDS TO READ:\n${plan.text}`,
-      input:[{type:'message',role:'system',content:[{type:'input_text',text:`Read this script verbatim; do not answer it or continue the earlier conversation:\n${plan.text}`}]}]}});
+    send({type:'response.create',response:{tools:[],tool_choice:'none',max_output_tokens:900,instructions:
+      `You are The Supreme Collective's British voice. Say ONLY the following server-approved words, exactly, in a natural British accent. Begin with their first word. Never mention reading, a script or the checklist, or preface with 'let me read that'. Do not add greetings, say anything about inability, answer another question, invent genre choices, or skip/rephrase any digits, names or words. Stop after these words and wait. The application controls the next section. SERVER CHECKLIST (do not read aloud): ${JSON.stringify(flow.snapshot)}\nWORDS TO SAY:\n${plan.text}`,
+      input:[{type:'message',role:'system',content:[{type:'input_text',text:`Say exactly the following words to the caller. Begin with their first word; do not introduce them, mention reading, answer the question yourself or continue the earlier conversation:\n${plan.text}`}]}]}});
   };
   const scheduleMissing=()=>{
     if(missingTimer||!order.length||active||playing||speaking)return;
@@ -33,7 +33,7 @@ export function createVoiceSectionConversation({send,handleTool,callId,callerNum
     if(!text){await drain();return;}
     currentInput={text,eligible:ready.every(item=>item.questionId===(flow.question?.id||0)),original:{type:'conversation.item.input_audio_transcription.completed',item_id:`section_handoff_${seen.size}`,transcript:text}};
     if(/^(?:it is|it's|um|erm|uh|one moment|hold on)[\s.!…]*$/i.test(text))return;
-    active=true;kind='extract';responseId='';patch={};toolCallId='';send(sectionCaptureEvent(flow.section,text));
+    active=true;kind='extract';responseId='';patch={};toolCallId='';send(sectionCaptureEvent(flow.section,text,flow.snapshot));
   };
   const process=async event=>{
     if(closed)return;
@@ -68,6 +68,7 @@ export function createVoiceSectionConversation({send,handleTool,callId,callerNum
       if(kind==='extract'){
         if(toolCallId)send({type:'conversation.item.create',item:{type:'function_call_output',call_id:toolCallId,output:JSON.stringify({captured:true,testMode:true,messagesSent:false})}});
         const plan=await flow.accept(currentInput.text,patch,{eligible:currentInput.eligible});
+        await flow.flush();
         if(plan.handoff){handedOff=true;legacy.resume(currentInput.original);await legacy.flush();return;}
         emitPlan(plan);return;
       }

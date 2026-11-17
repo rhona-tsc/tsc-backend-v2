@@ -58,7 +58,7 @@ export async function saveVoiceSectionProgress(callId, progress, {Model=EnquiryB
   const sections=Object.fromEntries(sectionNames.map(name=>[name,allowed.includes(progress?.sections?.[name])?progress.sections[name]:'pending']));
   return Model.updateOne({websiteKey:`phone:${callId}`,captureState:'draft'},{$set:{'draftDetails.sectionProgress':{
     version:1,currentSection:sectionNames.includes(progress?.currentSection)?progress.currentSection:'reason',
-    phase:String(progress?.phase||'').slice(0,60),sections,testMode:true,requestsSent:0,
+    phase:String(progress?.phase||'').slice(0,60),sections,missing:sectionNames.filter(name=>!['complete','skipped'].includes(sections[name])),testMode:true,requestsSent:0,
   }}});
 }
 
