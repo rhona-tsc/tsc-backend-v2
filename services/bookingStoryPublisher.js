@@ -13,7 +13,7 @@ export async function graph(path, token, data, method = data ? 'POST' : 'GET') {
 }
 export async function publisherConnection(settings, { revealToken = false } = {}) {
   const musician = settings.accountMusicianId && await Musician.findById(settings.accountMusicianId)
-    .select('socialConnections.meta +socialConnections.meta.accessTokenEncrypted').lean();
+    .select('socialConnections.meta.accountId socialConnections.meta.pageId socialConnections.meta.scopes socialConnections.meta.expiresAt +socialConnections.meta.accessTokenEncrypted').lean();
   const c = musician?.socialConnections?.meta;
   const missing = ['instagram_content_publish', 'pages_manage_posts'].filter(p => !c?.scopes?.includes(p));
   const matches = Boolean(c?.accountId && c?.pageId && c.accountId === settings.expectedInstagramId && c.pageId === settings.expectedPageId);
