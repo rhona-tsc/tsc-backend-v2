@@ -59,7 +59,8 @@ export async function publishStoryDestination(job, platform, connection) {
       }
       const progress = await graph(`${state.containerId}?fields=status`, token);
       if (progress.status?.video_status === 'error') throw new Error('Facebook video processing failed');
-      if (progress.status?.video_status !== 'ready') return;
+      const uploaded = ['ready', 'upload_complete'].includes(progress.status?.video_status) || progress.status?.uploading_phase?.status === 'complete';
+      if (!uploaded) return;
       state.state = 'publishing'; await job.save();
       const published = await graph(`${connection.pageId}/video_stories`, token, { upload_phase: 'finish', video_id: state.containerId });
       if (!published.success) throw new Error('Facebook publish outcome is unknown');

@@ -39,3 +39,13 @@ test('ambiguous provider response is held, never retried automatically',async()=
  await publishStoryDestination(job,'instagram',{token:'test',instagramId:'account'});assert.equal(calls,1);
  }finally{global.fetch=original;}
 });
+
+test('Facebook finalizes an uploaded story before waiting for publication',async()=>{
+ const original=global.fetch;const calls=[];
+ global.fetch=async(url,opts)=>{calls.push([url,opts.method]);return {ok:true,json:async()=>opts.method==='GET'?{status:{video_status:'upload_complete',uploading_phase:{status:'complete'}}}:{success:true,post_id:'fb-story'}}};
+ try{const job={facebook:{state:'processing',containerId:'uploaded-video'},save:async()=>{}};
+ await publishStoryDestination(job,'facebook',{token:'test',pageId:'page'});
+ assert.equal(job.facebook.state,'published');assert.equal(job.facebook.mediaId,'fb-story');
+ assert.equal(calls.length,2);assert.ok(calls[1][0].endsWith('/page/video_stories'));
+ }finally{global.fetch=original;}
+});
