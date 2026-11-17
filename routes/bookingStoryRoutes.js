@@ -78,6 +78,14 @@ router.patch('/:id', action(async (req, res) => {
   if (row?.address && job.venueName && job.venuePhotoUrl) await VenueStoryAsset.findOneAndUpdate({ address: row.address.trim().toLowerCase() }, { $set: { venueName: job.venueName, venueLocation: job.venueLocation, venuePhotoUrl: job.venuePhotoUrl } }, { upsert: true });
   res.json({ job });
 }));
+// Prepare an alternative preview without changing the publication audit.
+router.post('/:id/preview', action(async (req, res) => {
+  const job = await BookingStory.findById(req.params.id).lean();
+  if (!job) throw new Error('Story not found');
+  const asset = await ActStoryAsset.findOne({ actId: job.actId, transparencyVerified: true });
+  if (!asset) throw new Error('Save a verified transparent act sticker first');
+  res.json({ mediaUrl: await renderBookingStory({ ...job, stickerUrl: asset.stickerUrl }) });
+}));
 router.post('/:id/render', action(async (req, res) => {
   const job = await BookingStory.findById(req.params.id); if (!job) throw new Error('Story not found');
   if (['rendering', 'processing', 'published', 'needs_check'].includes(job.status)) throw new Error('Publication has already started');
