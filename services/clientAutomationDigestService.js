@@ -118,8 +118,8 @@ export const buildClientAutomationDigest = ({ rows = [], deliveries = [], todayI
     const baseDefinitions = String(row.eventDateISO || row.eventDate || "").slice(0, 10) < todayISO
       ? automationDefinitions.filter(definition => definition.intro) : automationDefinitions;
     const clientDefinitions = isEncoreBooking(row) ? [
-      ...baseDefinitions.filter(d => ![10,11].includes(d.number)).map(d => d.number === 14 ? {...d,number:36} : d),
-      ...[37,38].map(number => ({number,key:`automation-${number}-event-sheet-playlist`,name:number===37?'Event sheet and playlist due soon':'Event sheet and playlist due today',schedule:(booking,today)=>eventDetailsReminderSchedule(booking,number,today)})),
+      ...baseDefinitions.map(d => d.number === 14 ? {...d,number:36} : d),
+      ...(baseDefinitions.some(d=>d.number===16)?[37,38]:[]).map(number => ({number,key:`automation-${number}-event-sheet-playlist`,name:number===37?'Event sheet and playlist due soon':'Event sheet and playlist due today',schedule:(booking,today)=>eventDetailsReminderSchedule(booking,number,today)})),
     ] : baseDefinitions;
     const automations = [...clientDefinitions, ...reviewDefinitions].map((definition) => {
       const delivery = deliveryMap.get(`${row._id}|${definition.key}`);
