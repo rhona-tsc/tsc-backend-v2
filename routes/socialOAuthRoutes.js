@@ -37,9 +37,9 @@ const providerConfig = {
   },
 };
 
-const oauthState = (provider, musicianId) =>
+const oauthState = (provider, musicianId, bookingStories = false) =>
   jwt.sign(
-    { provider, musicianId: String(musicianId), purpose: "social_oauth" },
+    { provider, musicianId: String(musicianId), purpose: "social_oauth", bookingStories },
     process.env.JWT_SECRET,
     { expiresIn: "15m" },
   );
@@ -169,7 +169,9 @@ router.get("/:provider/start", musicianAuth, async (req, res) => {
     return res.status(503).json({ success: false, message: `${provider} connection is not configured yet` });
   }
 
-  const state = oauthState(provider, req.userId);
+  const bookingStories = req.query.bookingStories === 'true';
+  if (bookingStories && (!['admin','superadmin','tsc_admin'].includes(String(req.user?.role).toLowerCase()) && req.user?.email !== 'hello@thesupremecollective.co.uk')) return res.status(403).json({ message: 'Admin only' });
+  const state = oauthState(provider, req.userId, bookingStories);
   let authUrl;
   if (provider === "meta") {
     authUrl = new URL(`https://www.facebook.com/${META_GRAPH_VERSION}/dialog/oauth`);
@@ -178,7 +180,7 @@ router.get("/:provider/start", musicianAuth, async (req, res) => {
     authUrl.searchParams.set("state", state);
     authUrl.searchParams.set(
       "scope",
-      process.env.META_SOCIAL_SCOPES ||
+      bookingStories ? 'pages_show_list,pages_read_engagement,instagram_basic,instagram_content_publish,pages_manage_posts' : process.env.META_SOCIAL_SCOPES ||
         "pages_show_list,pages_read_engagement,instagram_basic",
     );
   } else {
@@ -237,6 +239,7 @@ router.get("/meta/callback", async (req, res) => {
         socialFeedPreferenceUpdatedAt: new Date(),
       },
     });
+    if (state.bookingStories) return res.redirect('https://admin.thesupremecollective.co.uk/booking-stories?meta=connected');
     return redirectResult(res, "meta", "connected");
   } catch (error) {
     return redirectResult(res, "meta", "error", error.message);
