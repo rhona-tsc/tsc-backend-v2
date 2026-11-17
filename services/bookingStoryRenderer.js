@@ -14,6 +14,8 @@ export async function renderBookingStory(job) {
   if (!managedStoryUrl(job.venuePhotoUrl) || !managedStoryUrl(job.stickerUrl)) throw new Error('Use uploaded story assets.');
   const stickerPath = new URL(job.stickerUrl).pathname.match(/^\/[^/]+\/video\/upload\/v\d+\/(.+)\.[^/.]+$/)?.[1];
   if (!stickerPath) throw new Error('Use an original uploaded transparent video sticker.');
+  const musicPath = job.musicUrl && managedStoryUrl(job.musicUrl) && new URL(job.musicUrl).pathname.match(/^\/[^/]+\/video\/upload\/v\d+\/(.+)\.[^/.]+$/)?.[1];
+  if (!musicPath) throw new Error('Save an upbeat repertoire recording for this act before generating its story.');
   const response = await fetch(job.venuePhotoUrl, { redirect: 'error', signal: AbortSignal.timeout(30000) });
   if (!response.ok) throw new Error('Venue photo could not be downloaded');
   const photo = Buffer.from(await response.arrayBuffer());
@@ -28,7 +30,10 @@ export async function renderBookingStory(job) {
     eager: [{ format: 'mp4', transformation: [
       { overlay: uploaded.public_id.replaceAll('/', ':') }, { width: 1080, height: 1920, crop: 'fill' }, { flags: 'layer_apply' },
       { overlay: `video:${decodeURIComponent(stickerPath).replaceAll('/', ':')}` }, { width: 800, height: 1000, crop: 'fit' },
-      { flags: 'layer_apply', gravity: 'south', y: 290 }, { video_codec: 'h264', quality: 'auto:good' },
+      { flags: 'layer_apply', gravity: 'south', y: 290 },
+      { overlay: `audio:${decodeURIComponent(musicPath).replaceAll('/', ':')}` },
+      { start_offset: Number(job.musicStart) || 0, duration: 5 }, { flags: 'layer_apply', start_offset: 0 },
+      { video_codec: 'h264', audio_codec: 'aac', quality: 'auto:good' },
     ] }],
   });
   const url = result.eager?.[0]?.secure_url;

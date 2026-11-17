@@ -9,6 +9,7 @@ const story = new mongoose.Schema({
   bookingRef: String, actId: mongoose.Schema.Types.ObjectId, actName: String,
   eventDateISO: String, sourceVenueAddress: String, venueName: String, venueLocation: String,
   venuePhotoUrl: String, stickerUrl: String, mediaUrl: String,
+  musicUrl: String, musicTitle: String, musicStart: { type: Number, default: 0 },
   status: { type: String, default: 'needs_assets', index: true },
   confirmed: { type: Boolean, default: false },
   approved: { type: Boolean, default: false },
@@ -37,6 +38,8 @@ export const StoryLease = mongoose.models.StoryLease || mongoose.model('StoryLea
 export const ActStoryAsset = mongoose.models.ActStoryAsset || mongoose.model('ActStoryAsset', new mongoose.Schema({
   actId: { type: mongoose.Schema.Types.ObjectId, unique: true, required: true },
   actName: String, stickerUrl: String, transparencyVerified: { type: Boolean, default: false },
+  musicUrl: String, musicTitle: String, musicStart: { type: Number, default: 0 },
+  musicCleared: { type: Boolean, default: false },
 }, { timestamps: true }));
 
 export const VenueStoryAsset = mongoose.models.VenueStoryAsset || mongoose.model('VenueStoryAsset', new mongoose.Schema({

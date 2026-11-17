@@ -45,12 +45,13 @@ export async function reconcileBookingStories() {
     const row = await Board.findById(job.bookingId).lean();
     const asset = await ActStoryAsset.findOne({ actId: job.actId, transparencyVerified: true });
     const venue = row?.address && await VenueStoryAsset.findOne({ address: row.address.trim().toLowerCase() });
-    if (!asset || (!job.venuePhotoUrl && !venue)) continue;
+    if (!asset || !asset.musicUrl || !asset.musicCleared || (!job.venuePhotoUrl && !venue)) continue;
     const claimed = await BookingStory.findOneAndUpdate({ _id: job._id, status: 'needs_assets' }, { $set: { status: 'rendering' } }, { new: true });
     if (!claimed) continue;
     try {
       if (venue && !claimed.venuePhotoUrl) Object.assign(claimed, { venueName: venue.venueName, venueLocation: venue.venueLocation, venuePhotoUrl: venue.venuePhotoUrl });
       claimed.stickerUrl = asset.stickerUrl;
+      Object.assign(claimed, { musicUrl: asset.musicUrl, musicTitle: asset.musicTitle, musicStart: asset.musicStart });
       claimed.mediaUrl = await renderBookingStory(claimed);
       claimed.approved = settings.autoApprove === true;
       claimed.status = claimed.approved ? 'queued' : 'needs_review'; claimed.lastError = '';

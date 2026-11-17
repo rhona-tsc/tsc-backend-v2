@@ -44,7 +44,8 @@ router.post('/assets', upload.single('file'), action(async (req, res) => {
   if (!req.file) throw new Error('Choose a file');
   const isImage = /^image\/(jpeg|png|webp)$/.test(req.file.mimetype);
   const isVideo = /^video\//.test(req.file.mimetype);
-  if (!isImage && !isVideo) throw new Error('Use a photo or video asset');
+  const isAudio = /^audio\//.test(req.file.mimetype);
+  if (!isImage && !isVideo && !isAudio) throw new Error('Use a photo, video or audio asset');
   const result = await new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream({ folder: 'tsc/booking-story-assets', resource_type: isImage ? 'image' : 'video' }, (e, r) => e ? reject(e) : resolve(r));
     stream.end(req.file.buffer);
@@ -56,6 +57,15 @@ router.put('/act/:id/sticker', action(async (req, res) => {
   const asset = await ActStoryAsset.findOneAndUpdate({ actId: req.params.id }, { $set: {
     actName: String(req.body.actName || ''), stickerUrl: req.body.stickerUrl, transparencyVerified: req.body.transparencyVerified === true,
   } }, { upsert: true, new: true }); res.json({ asset });
+}));
+router.put('/act/:id/music', action(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id) || !managedStoryUrl(req.body.musicUrl) || !String(req.body.musicTitle || '').trim()) throw new Error('Upload a recording and enter the song title');
+  if (req.body.musicCleared !== true) throw new Error('Confirm this recording can be used in the act’s stories');
+  const musicStart = Number(req.body.musicStart || 0);
+  if (!Number.isFinite(musicStart) || musicStart < 0) throw new Error('Choose a valid clip start');
+  const asset = await ActStoryAsset.findOneAndUpdate({ actId: req.params.id }, { $set: { actName: String(req.body.actName || ''), musicUrl: req.body.musicUrl, musicTitle: String(req.body.musicTitle).trim(), musicStart, musicCleared: true } }, { upsert: true, new: true });
+  await BookingStory.updateMany({actId:req.params.id,status:{$in:['needs_assets','needs_review','queued']}},{$set:{mediaUrl:'',approved:false,status:'needs_assets'}});
+  res.json({asset});
 }));
 router.patch('/:id', action(async (req, res) => {
   const job = await BookingStory.findById(req.params.id); if (!job) throw new Error('Story not found');
@@ -84,16 +94,18 @@ router.post('/:id/preview', action(async (req, res) => {
   if (!job) throw new Error('Story not found');
   const asset = await ActStoryAsset.findOne({ actId: job.actId, transparencyVerified: true });
   if (!asset) throw new Error('Save a verified transparent act sticker first');
-  res.json({ mediaUrl: await renderBookingStory({ ...job, stickerUrl: asset.stickerUrl }) });
+  if (!asset.musicCleared) throw new Error('Save the act’s story music first');
+  res.json({ mediaUrl: await renderBookingStory({ ...job, stickerUrl: asset.stickerUrl, musicUrl: asset.musicUrl, musicTitle: asset.musicTitle, musicStart: asset.musicStart }) });
 }));
 router.post('/:id/render', action(async (req, res) => {
   const job = await BookingStory.findById(req.params.id); if (!job) throw new Error('Story not found');
   if (['rendering', 'processing', 'published', 'needs_check'].includes(job.status)) throw new Error('Publication has already started');
   const asset = await ActStoryAsset.findOne({ actId: job.actId });
   if (!asset?.transparencyVerified) throw new Error('Save a verified transparent act sticker first');
+  if (!asset.musicCleared || !asset.musicUrl) throw new Error('Save the act’s story music first');
   const claim = await BookingStory.findOneAndUpdate({ _id: job._id, status: job.status }, { $set: { status: 'rendering' } }, { new: true });
   if (!claim) throw new Error('This story is already being prepared');
-  try { claim.stickerUrl = asset.stickerUrl; claim.mediaUrl = await renderBookingStory(claim); claim.approved = false; claim.status = 'needs_review'; claim.lastError = ''; await claim.save(); res.json({ job: claim }); }
+  try { claim.stickerUrl = asset.stickerUrl; Object.assign(claim, {musicUrl:asset.musicUrl,musicTitle:asset.musicTitle,musicStart:asset.musicStart}); claim.mediaUrl = await renderBookingStory(claim); claim.approved = false; claim.status = 'needs_review'; claim.lastError = ''; await claim.save(); res.json({ job: claim }); }
   catch (e) { claim.status = 'needs_assets'; claim.lastError = e.message; await claim.save(); throw e; }
 }));
 router.post('/:id/publish', action(async (req, res) => {
