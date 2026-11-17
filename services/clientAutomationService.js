@@ -1067,7 +1067,7 @@ export const runClientAutomations = async ({
       attachInvoice = false,
       extrasOnly = false,
     }) => {
-      if (!recipient || !schedule.eligible) {
+      if (!recipient || !schedule.eligible || schedulingRow.automationDeliveries.some(item => item.status === 'sent' && Number(item.automationNumber) === Number(automationNumber))) {
         summary.skipped += 1;
         return;
       }
