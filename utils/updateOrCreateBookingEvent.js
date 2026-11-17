@@ -89,7 +89,9 @@ const lineupFor = (booking = {}, assignedMusicians = []) => {
         .filter(Boolean)
         .filter((value, index, all) => all.indexOf(value) === index)
         .join(" · ");
-      return [name || "Band member", role].filter(Boolean).join(" — ");
+      const musicianId = clean(member?.musicianId || member?.musician?._id);
+      const profile = musicianId ? `${String(process.env.PUBLIC_SITE_URL || 'https://thesupremecollective.co.uk').replace(/\/$/, '')}/musician/${encodeURIComponent(musicianId)}/` : '';
+      return [[name || "Band member", role].filter(Boolean).join(" — "), profile].filter(Boolean).join('\n  ');
     });
 };
 
@@ -147,7 +149,7 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
   }
 
   const cal = google.calendar({ version: "v3", auth: oauth2Client });
-  const calendarId = "primary";
+  const calendarId = clean(booking.calendarId) || "primary";
 
   const ref = bookingRefOf(booking);
   const boardBooking = await BookingBoardItem.findOne({

@@ -524,17 +524,17 @@ export const appendLineToEventDescription = async ({ eventId, line }) => {
   }
 };
 
-export const addAttendeeToEvent = async ({ eventId, email }) => {
+export const addAttendeeToEvent = async ({ eventId, email, calendarId = "primary" }) => {
   console.log(`😈 (controllers/googleController.js) addAttendeeToEvent called at`, new Date().toISOString(), {
     eventId, email,
   });
 
-  const { data: ev } = await calendar.events.get({ calendarId: "primary", eventId });
+  const { data: ev } = await calendar.events.get({ calendarId, eventId });
   const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
   if (!attendees.find(a => a.email?.toLowerCase() === email.toLowerCase())) {
     attendees.push({ email });
     await calendar.events.patch({
-      calendarId: "primary",
+      calendarId,
       eventId,
       requestBody: { attendees },
       sendUpdates: "all",

@@ -9,7 +9,9 @@ import Act from "../models/actModel.js";
 import cloudinary from "../config/cloudinary.js";
 import sendEmail from "../utils/sendEmail.js";
 import { isEncoreBooking } from "../utils/encoreSettlement.js";
-import { buildIntroInvoiceAttachments } from "../utils/introInvoiceAttachment.js";
+import { buildIntroInvoiceAttachments, buildExtrasInvoiceAttachments } from "../utils/introInvoiceAttachment.js";
+import { automation37SendISO } from "../utils/automation37Schedule.js";
+import { prepareEventDetailsReminderRule, renderEventDetailsReminderConditions, eventDetailsExtrasState } from "../utils/automation37Extras.js";
 import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.js";
 import { buildBandSheetShareUrl } from "../utils/bandSheetUrl.js";
 import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
@@ -212,6 +214,28 @@ export const automation14Schedule = (row, todayISO) => {
   return scheduledWindow({ plannedISO: dueISO, todayISO, lastISO: dueISO });
 };
 
+export const eventDetailsReminderSchedule = (row, number, todayISO) => scheduledWindow({
+  plannedISO: Number(number) === 37 ? automation37SendISO(row) : finalDueISO(row),
+  todayISO,
+  lastISO: finalDueISO(row),
+  allowLastDay: Number(number) === 38,
+});
+
+export const buildEventDetailsReminderEmail = (row, savedRule) => {
+  const rule = prepareEventDetailsReminderRule(savedRule);
+  const values = {
+    '{{client_first_name}}': clientNames(row),
+    '{{invoice_due_date}}': ordinalDate(finalDueISO(row)),
+    '{{client_event_sheet_link}}': publicEventSheetUrl(row),
+  };
+  const render = value => Object.entries(values).reduce((result, [tag, replacement]) => result.split(tag).join(replacement),
+    renderEventDetailsReminderConditions(value, row, rule));
+  const subject = render(rule.subject);
+  const text = render(rule.body);
+  if (!subject || !text || /\{\{[^}]+\}\}|\{pulse\.[^}]+\}/.test(`${subject}\n${text}`)) throw new Error('Event sheet reminder has incomplete tags.');
+  return { subject, text, html: emailShell(`<p style="margin:0 0 20px;font-size:16px;line-height:1.7;">${automationBodyToHtml(text)}</p>`) };
+};
+
 const midpointISO = (startValue, endValue) => {
   const startISO = isoDate(startValue);
   const endISO = isoDate(endValue);
@@ -380,7 +404,7 @@ export const buildAutomation16Email = (row) => {
   const requestLabel = specialRequestLabel(row);
   const dueDate = ordinalDate(songRequestDueISO(row));
   const eventSheetUrl = publicEventSheetUrl(row);
-  const subject = `Automated Reminder: Song Suggestions & ${requestLabel} Request Due Soon`;
+  const subject = `Automated Reminder: Song Suggestions & ${requestLabel} Due Soon`;
   const text = [
     `Hi ${names},`, "", "I hope you are doing well.", "",
     `This is a gentle automated reminder that Song Suggestions and the ${requestLabel} are due on the ${dueDate}.`, "",
@@ -404,7 +428,7 @@ export const buildAutomation14Email = (row) => {
   const names = clientNames(row);
   const requestLabel = specialRequestLabel(row);
   const eventSheetUrl = publicEventSheetUrl(row);
-  const subject = `Automated Reminder: Song Suggestions & ${requestLabel} Request Due Today`;
+  const subject = `Automated Reminder: Song Suggestions & ${requestLabel} Due Today`;
   const text = [
     `Hi ${names},`, "", `Your song suggestions and ${requestLabel} are due today. Please add them to the Event Sheet if you have not already done so.`, "",
     `Follow This Link to your Event Sheet: ${eventSheetUrl}`, "",
@@ -971,6 +995,7 @@ export const runClientAutomations = async ({
   deliveryModel = ClientAutomationDelivery,
   emailSender = sendEmail,
   attachmentBuilder = buildIntroInvoiceAttachments,
+  extrasAttachmentBuilder = buildExtrasInvoiceAttachments,
   cloudinaryClient = cloudinary,
   actProfileModel = Act,
   automationConfigModel = AutomationConfig,
@@ -998,7 +1023,7 @@ export const runClientAutomations = async ({
   };
   if (bookingRefs.size) query.bookingRef = { $in: [...bookingRefs] };
   const rows = await bookingModel.find(query).lean();
-  const reviewConfig = rows.some(row => reviewPlanItems(row).length)
+  const reviewConfig = rows.some(row => reviewPlanItems(row).length || isEncoreBooking(row))
     ? await automationConfigModel.findOne({ key: "client-email-rules" }).lean() : null;
   const summary = {
     enabled: true,
@@ -1040,6 +1065,7 @@ export const runClientAutomations = async ({
       schedule,
       email,
       attachInvoice = false,
+      extrasOnly = false,
     }) => {
       if (!recipient || !schedule.eligible) {
         summary.skipped += 1;
@@ -1060,7 +1086,7 @@ export const runClientAutomations = async ({
       }
       try {
         const attachments = attachInvoice
-          ? await attachmentBuilder(row, { cloudinaryClient })
+          ? await (extrasOnly ? extrasAttachmentBuilder : attachmentBuilder)(row, { cloudinaryClient })
           : [];
         if (attachInvoice && !attachments.length) {
           throw new Error("No issued invoice PDF is recorded for this booking.");
@@ -1128,10 +1154,26 @@ export const runClientAutomations = async ({
 
     await sendClientAutomation({
       automationKey: AUTOMATION_14_KEY,
-      automationNumber: AUTOMATION_14_NUMBER,
+      automationNumber: isEncoreBooking(row) ? 36 : AUTOMATION_14_NUMBER,
       schedule: automation14Schedule(row, todayISO),
       email: buildAutomation14Email(row),
     });
+
+    if (isEncoreBooking(row)) {
+      for (const number of [37, 38]) {
+        const rule = reviewConfig?.rules?.find(candidate => Number(candidate.sourceNumber) === number);
+        if (!rule || rule.enabled === false) continue;
+        const schedule = eventDetailsReminderSchedule(row, number, todayISO);
+        if (!schedule.eligible) { summary.skipped += 1; continue; }
+        try {
+          await sendClientAutomation({
+            automationKey: `automation-${number}-event-sheet-playlist`, automationNumber: number,
+            schedule, email: buildEventDetailsReminderEmail(row, rule),
+            attachInvoice: eventDetailsExtrasState(row, rule).shouldAttachInvoice, extrasOnly: true,
+          });
+        } catch { summary.failed += 1; }
+      }
+    }
 
     await sendClientAutomation({
       automationKey: AUTOMATION_30_KEY,

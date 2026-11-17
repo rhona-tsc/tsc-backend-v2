@@ -343,7 +343,7 @@ const completeAcceptedAssignment = async ({
         booking,
         assignedMusicians: board?.assignedMusicians || [],
       });
-      if (eventId && email) await addAttendeeToEvent({ eventId, email });
+      if (eventId && email) await addAttendeeToEvent({ eventId, email, calendarId: booking.calendarId || "primary" });
       try {
         await sendCompletedEventSheetToAcceptedMusician({
           booking,

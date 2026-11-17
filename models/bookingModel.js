@@ -496,6 +496,7 @@ const BookingSchema = new mongoose.Schema(
     bandSheetTokens: { type: [String], default: [], index: true },
     whatsappGroupLink: { type: String, default: "", trim: true },
     calendarEventId: { type: String, default: "", index: true },
+    calendarId: { type: String, default: "" },
     // Admin-editable booking metadata used by the Booking Board. These were
     // previously written by the route but silently discarded by Mongoose.
     eventType: { type: String, default: "" },
