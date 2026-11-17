@@ -5,7 +5,9 @@ import OpenAI from 'openai';
 import { OpenAIRealtimeWS } from 'openai/realtime/ws';
 import { normalizeCallbackPhone } from '../services/incomingEnquiryAssistant.js';
 import { createVoiceConversationTurns } from '../services/voiceConversationTurns.js';
-import { createVoiceEnquiryTools } from '../services/voiceEnquiryStore.js';
+import { createVoiceEnquiryTools,saveVoiceSectionProgress } from '../services/voiceEnquiryStore.js';
+import { createVoiceSectionConversation } from '../services/voiceSectionConversation.js';
+import { VOICE_SECTION_SESSION_INSTRUCTIONS } from '../services/voiceSectionFlow.js';
 import { voiceConnectionConfig, signVoiceBridge, verifyVoiceBridge, buildEnquiryVoiceSession, voiceOpeningEventFor, VOICE_ENQUIRY_NUMBER, VOICE_MAX_SECONDS } from '../services/voiceEnquiryConnection.js';
 import { reserveVoicePilotCall } from '../services/voiceEnquiryPilotLimit.js';
 
@@ -91,7 +93,7 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
   try {
     const handleTool = createVoiceEnquiryTools({ trustedTestCaller: config.testCallers.includes(binding.testCaller) });
     const sessionConfig = buildEnquiryVoiceSession(config);
-    await client.realtime.calls.accept(callId, sessionConfig);
+    await client.realtime.calls.accept(callId, binding.intent==='enquiry'?{...sessionConfig,instructions:VOICE_SECTION_SESSION_INSTRUCTIONS}:sessionConfig);
     binding.callId = callId;
     const connection = await OpenAIRealtimeWS.create(client, { callID: callId, options: { handshakeTimeout: 10000, maxPayload: 1024 * 1024 } });
     const transcript = createTranscript(payload.sid);
@@ -113,7 +115,8 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
     warningTimer.unref?.();
     const timer = setTimeout(end, VOICE_MAX_SECONDS * 1000);
     timer.unref?.();
-    turns = createVoiceConversationTurns({send:event=>connection.send(event),handleTool,callId:payload.sid,callerNumber:binding.testCaller,
+    const createConversation=binding.intent==='enquiry'?createVoiceSectionConversation:createVoiceConversationTurns;
+    turns = createConversation({send:event=>connection.send(event),handleTool,callId:payload.sid,callerNumber:binding.testCaller,saveProgress:saveVoiceSectionProgress,
       openingEvent:voiceOpeningEventFor(binding.intent),instructions:sessionConfig.instructions,onError:()=>{void end();}});
     connection.socket.on('open', () => turns.start());
     connection.on('event', event => turns.accept(event));

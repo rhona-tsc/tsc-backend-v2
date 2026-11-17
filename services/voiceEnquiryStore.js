@@ -52,6 +52,16 @@ export async function saveVoiceBoardRecord(record) {
   }, { upsert: true, new: true, runValidators: true });
 }
 
+export async function saveVoiceSectionProgress(callId, progress, {Model=EnquiryBoardItem}={}) {
+  const allowed=['pending','complete','skipped','needs_followup'];
+  const sectionNames=['name','phone','email','event_date','location','bands','notes','review','availability'];
+  const sections=Object.fromEntries(sectionNames.map(name=>[name,allowed.includes(progress?.sections?.[name])?progress.sections[name]:'pending']));
+  return Model.updateOne({websiteKey:`phone:${callId}`,captureState:'draft'},{$set:{'draftDetails.sectionProgress':{
+    version:1,currentSection:sectionNames.includes(progress?.currentSection)?progress.currentSection:'reason',
+    phase:String(progress?.phase||'').slice(0,60),sections,testMode:true,requestsSent:0,
+  }}});
+}
+
 export async function prepareVoiceAvailability(record) {
   const stored = await EnquiryBoardItem.findOne({ websiteKey: record.websiteKey }).lean();
   if (!stored || stored.enquiryRef !== record.enquiryRef || voicePreviewSnapshot(stored) !== voicePreviewSnapshot(record)) throw new VoiceEnquiryValidationError('The enquiry details changed. Read back and save the current details and band choices again.');

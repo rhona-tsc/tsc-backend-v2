@@ -121,6 +121,7 @@ export function createVoiceConversationTurns({ send, handleTool, callId, callerN
   };
   return {
     start() { if (!started && !closed) { started = true; respond(openingEvent); } },
+    resume(event) { started=true;this.accept(event); },
     accept(event) { queue = queue.then(() => process(event)).catch(error => { closed = true; onError(error); }); },
     async flush() { await queue; },
     async close() { closed = true; await queue; },
