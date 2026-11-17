@@ -59,6 +59,14 @@ export async function fetchInboundMessageTime(sid) {
   return message.dateCreated || null;
 }
 
+// Read-only delivery evidence for the exact original request before a chase.
+export async function fetchWhatsAppMessageStatus(sid) {
+  const client = getTwilioClient();
+  if (!client || !sid) throw new Error("Original WhatsApp delivery cannot be verified");
+  const message = await client.messages(sid).fetch();
+  return { status: message.status, errorCode: message.errorCode, to: message.to };
+}
+
 // -------------------- Helpers --------------------
 // Public site base (for profile links in messages)
 const PUBLIC_SITE_BASE = (

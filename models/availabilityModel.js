@@ -147,6 +147,13 @@ requestId: { type: String, index: true },
     secondAvailabilityReminderSentAt: { type: Date, default: null, index: true },
     finalAvailabilityReminderSentAt: { type: Date, default: null, index: true },
     availabilityReminderFailure: { type: String, default: "" },
+    // Manual/external replies can pause reminders without fabricating a button reply.
+    availabilityRemindersPausedAt: { type: Date, default: null },
+    availabilityRemindersPausedReason: { type: String, default: "" },
+    availabilityReminderAttemptId: { type: String, default: "" },
+    availabilityReminderAttemptStatus: { type: String, default: "" },
+    availabilityReminderAttemptedAt: { type: Date, default: null },
+    availabilityReminderMessageSid: { type: String, default: "" },
     websiteReplies: [
   {
     body: { type: String, required: true },

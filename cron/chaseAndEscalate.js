@@ -2,14 +2,18 @@
 import EnquiryMessage from "../models/EnquiryMessage.js";
 import Musician from "../models/musicianModel.js";
 import AvailabilityModel from "../models/availabilityModel.js";
-import { sendWhatsAppMessage } from "../utils/twilioClient.js";
+import EnquiryBoardItem from "../models/enquiryBoardItem.js";
+import BookingBoardItem from "../models/bookingBoardItem.js";
+import Act from "../models/actModel.js";
+import mongoose from "mongoose";
+import { sendWhatsAppMessage, fetchWhatsAppMessageStatus, toE164 } from "../utils/twilioClient.js";
+import { createAvailabilityReminderRunner } from "../services/availabilityReminderService.js";
 import {
   escalateToNextDeputy,
   reconcilePendingRoleOffer,
   sanitizeFee,
 } from "../controllers/allocationController.js";
 import {
-  automatedEnquiryEligible,
   validAvailabilityRecipientName,
 } from "../utils/enquiryAutomationEligibility.js";
 
@@ -104,7 +108,7 @@ const sendAvailabilityReminder = async ({ row, final = false }) => {
     throw new Error("Availability reminder blocked: recipient name is missing or invalid");
   }
 
-  await sendWhatsAppMessage({
+  return sendWhatsAppMessage({
     to: row.phone,
     contentSid: final ? AVAILABILITY_FINAL_REMINDER_SID : AVAILABILITY_REMINDER_SID,
     allowDefaultContentSid: false,
@@ -133,128 +137,58 @@ const sendAvailabilityReminder = async ({ row, final = false }) => {
   });
 };
 
-const claimAndSendAvailabilityReminder = async ({ row, field, final = false }) => {
-  const claimed = await AvailabilityModel.findOneAndUpdate(
-    { _id: row._id, reply: null, [field]: null },
-    { $set: { [field]: new Date(), availabilityReminderFailure: "" } },
-    { new: true },
-  ).lean();
-  if (!claimed) return false;
-
-  try {
-    await sendAvailabilityReminder({ row: claimed, final });
-    return true;
-  } catch (error) {
-    await AvailabilityModel.updateOne(
-      { _id: row._id },
-      {
-        $set: {
-          [field]: null,
-          availabilityReminderFailure: String(error?.message || error),
-        },
-      },
-    );
-    throw error;
+export const availabilityReminderScopeState = async (row) => {
+  if (!row?.enquiryId || !row.actId || !row.lineupId || !row.dateISO) {
+    return { active: false, reason: "missing-exact-scope" };
   }
+  const references = [{ enquiryRef: row.enquiryId }];
+  if (mongoose.isValidObjectId(row.enquiryId)) {
+    references.push({ _id: row.enquiryId }, { enquiryId: row.enquiryId });
+  }
+  const scope = {
+    enquiryId: row.enquiryId, actId: row.actId,
+    lineupId: row.lineupId, dateISO: row.dateISO,
+  };
+  const enquiry = await EnquiryBoardItem.findOne({
+    $or: references, actId: row.actId, lineupId: String(row.lineupId),
+    eventDateISO: row.dateISO,
+  }).select("status").lean();
+  // Contacted enquiries already have a client/agency response in this workflow.
+  // Closed, converted and uncorrelated enquiries must not restart musician outreach.
+  if (!enquiry || !["open", "qualified"].includes(enquiry.status)) {
+    return { active: false, reason: "enquiry-not-awaiting-availability" };
+  }
+  if (await BookingBoardItem.exists({
+    bookingRef: row.enquiryId, actId: row.actId, eventDateISO: row.dateISO,
+  })) return { active: false, reason: "converted-to-booking" };
+  if (await AvailabilityModel.exists({ ...scope, reply: "yes" })) {
+    return { active: false, reason: "lead-already-confirmed-for-enquiry" };
+  }
+  const act = await Act.findById(row.actId).select("lineups").lean();
+  const lineup = act?.lineups?.find(item =>
+    [String(item._id), String(item.lineupId)].includes(String(row.lineupId)));
+  if (!lineup) return { active: false, reason: "lineup-not-found" };
+  const member = lineup.bandMembers?.find(item =>
+    (item.musicianId && String(item.musicianId) === String(row.musicianId)) ||
+    (toE164(item.phoneNumber || item.phone) && toE164(item.phoneNumber || item.phone) === toE164(row.phone)));
+  if (member?.skipAvailabilityChecks === true) {
+    return { active: false, reason: "musician-outreach-disabled" };
+  }
+  return { active: true };
 };
 
-const runAvailabilityChasers = async (now = Date.now()) => {
-  if (
-    String(process.env.TWILIO_AVAILABILITY_REMINDERS_ENABLED || "true")
-      .trim()
-      .toLowerCase() === "false"
-  ) {
-    console.log("⏸️ Availability reminders are disabled by configuration.");
-    return;
-  }
-
-  const rows = await AvailabilityModel.find({
-    reply: null,
-    confirmedBooking: { $ne: true },
-    requestKey: { $exists: true, $ne: "" },
-    requestId: { $exists: true, $ne: "" },
-    messageSidOut: { $exists: true, $ne: "" },
-    deliveryStatus: { $nin: ["failed", "undelivered"] },
-  })
-    .sort({ createdAt: -1 })
-    .lean();
-
-  const phonesMessagedThisRun = new Set();
-
-  for (const row of rows) {
-    if (!automatedEnquiryEligible(row, now)) {
-      console.log("⏭️ Skipping stale, past-date, or test availability reminder", {
-        availabilityId: row._id,
-        enquiryId: row.enquiryId,
-        actName: row.actName,
-        dateISO: row.dateISO,
-      });
-      continue;
-    }
-    const reminderPhone = String(row.phone || "").replace(/^whatsapp:/i, "");
-    if (!reminderPhone || phonesMessagedThisRun.has(reminderPhone)) {
-      console.log("⏭️ Skipping duplicate availability reminder for this phone in the same run", {
-        availabilityId: row._id,
-        phone: reminderPhone,
-      });
-      continue;
-    }
-    const startedAt = new Date(row.outboundSentAt || row.createdAt || 0).getTime();
-    if (!Number.isFinite(startedAt) || startedAt <= 0) continue;
-    const ageHours = (now - startedAt) / 3_600_000;
-    const firstReminderAt = row.firstAvailabilityReminderSentAt
-      ? new Date(row.firstAvailabilityReminderSentAt).getTime()
-      : 0;
-    const secondReminderAt = row.secondAvailabilityReminderSentAt
-      ? new Date(row.secondAvailabilityReminderSentAt).getTime()
-      : 0;
-    const hoursSinceFirst = firstReminderAt
-      ? (now - firstReminderAt) / 3_600_000
-      : 0;
-    const hoursSinceSecond = secondReminderAt
-      ? (now - secondReminderAt) / 3_600_000
-      : 0;
-
-    try {
-      // Always send the reminders in order. Older enquiries that pre-date this
-      // automation begin with reminder 1 rather than jumping straight to the
-      // final notice after deployment.
-      if (!row.firstAvailabilityReminderSentAt && ageHours >= 24) {
-        const sent = await claimAndSendAvailabilityReminder({
-          row,
-          field: "firstAvailabilityReminderSentAt",
-        });
-        if (sent) phonesMessagedThisRun.add(reminderPhone);
-      } else if (
-        row.firstAvailabilityReminderSentAt &&
-        !row.secondAvailabilityReminderSentAt &&
-        hoursSinceFirst >= 24
-      ) {
-        const sent = await claimAndSendAvailabilityReminder({
-          row,
-          field: "secondAvailabilityReminderSentAt",
-        });
-        if (sent) phonesMessagedThisRun.add(reminderPhone);
-      } else if (
-        row.secondAvailabilityReminderSentAt &&
-        !row.finalAvailabilityReminderSentAt &&
-        hoursSinceSecond >= 24
-      ) {
-        const sent = await claimAndSendAvailabilityReminder({
-          row,
-          field: "finalAvailabilityReminderSentAt",
-          final: true,
-        });
-        if (sent) phonesMessagedThisRun.add(reminderPhone);
-      }
-    } catch (error) {
-      console.error("❌ Availability reminder failed", {
-        availabilityId: row._id,
-        error: error?.message || error,
-      });
-    }
-  }
-};
+export const runAvailabilityChasers = createAvailabilityReminderRunner({
+  Availability: AvailabilityModel,
+  getScopeState: availabilityReminderScopeState,
+  getOriginalDelivery: async row => {
+    const original = await fetchWhatsAppMessageStatus(row.messageSidOut);
+    return toE164(original.to) === toE164(row.phone)
+      ? original : { status: "recipient-mismatch" };
+  },
+  sendReminder: sendAvailabilityReminder,
+  enabled: () => String(process.env.TWILIO_AVAILABILITY_REMINDERS_ENABLED || "true")
+    .trim().toLowerCase() !== "false",
+});
 
 export const runChaseAndEscalation = async () => {
   console.log("⏱️ Running chase + escalation cron", new Date().toISOString());
@@ -309,8 +243,6 @@ export const runChaseAndEscalation = async () => {
       console.error("❌ Chase/escalation failed", { messageId: msg._id, error: error?.message });
     }
   }
-
-  await runAvailabilityChasers(now);
 
   console.log("⏱️ Chase + escalation cron finished.");
 };

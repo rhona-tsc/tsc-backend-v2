@@ -51,10 +51,7 @@ test("availability chasers use both approved-template SIDs and no SMS fallback",
   assert.match(source, /HXa063207c0b9e26192622293604b6dac3/);
   assert.match(source, /TWILIO_AVAILABILITY_REMINDERS_ENABLED/);
   assert.match(source, /allowSmsFallback:\s*false/);
-  assert.match(
-    source,
-    /!row\.firstAvailabilityReminderSentAt && ageHours >= 24[\s\S]*hoursSinceFirst >= 24[\s\S]*hoursSinceSecond >= 24/,
-  );
+  assert.match(source, /createAvailabilityReminderRunner/);
 });
 
 test("automated enquiry messaging excludes stale, past-date and test records", () => {

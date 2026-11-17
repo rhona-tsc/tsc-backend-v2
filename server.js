@@ -84,7 +84,7 @@ import {
 
 import { getAvailableActIds } from "./controllers/actAvailabilityController.js";
 import { startRemindersPoller } from "./services/remindersQueue.js";
-import { runChaseAndEscalation } from "./cron/chaseAndEscalate.js";
+import { runChaseAndEscalation, runAvailabilityChasers } from "./cron/chaseAndEscalate.js";
 import actModel from "./models/actModel.js";
 import { runDeputyPayoutRelease } from "./services/deputyPayoutService.js";
 import Booking from "./models/bookingModel.js";
@@ -891,15 +891,25 @@ app.get("/api/availability/process-deferred", async (_req, res) => {
   }
 });
 
-// Run chase & escalation every hour
 // Poll the persistent pricing schedule; a database lease prevents overlapping runs.
 cron.schedule("* * * * *", () => {
   runMasterSupplierPricingSync().catch(error => console.error('Master pricing worker unavailable:', error.message));
 }, { timezone: "Europe/London" });
 
+// Booking-role chase/escalation keeps its existing hourly schedule.
 cron.schedule("0 * * * *", async () => {
   await runChaseAndEscalation();
 });
+
+// A pending availability request gets its first chase after three hours.
+// The runner enforces London quiet hours and atomically claims each exact request.
+cron.schedule("*/5 * * * *", async () => {
+  try {
+    await runAvailabilityChasers();
+  } catch (error) {
+    console.error("Availability chaser failed", error?.message || error);
+  }
+}, { timezone: "Europe/London", noOverlap: true });
 
 // Originals automation only updates workflow state and queues notifications.
 // It never sends messages directly and is disabled unless deliberately enabled.
