@@ -33,10 +33,10 @@ export async function renderBookingStory(job) {
     await page.setContent(storyTemplate(job, `data:image/jpeg;base64,${photo.toString('base64')}`), { waitUntil: 'load' });
     await page.screenshot({ path: path.join(folder, 'background.png') }); await browser.close(); browser = null;
     const result = path.join(folder, 'story.mp4');
-    await promisify(execFile)(ffmpeg, ['-y', '-loop', '1', '-i', path.join(folder, 'background.png'),
+    await promisify(execFile)(ffmpeg, ['-y', '-filter_complex_threads', '1', '-loop', '1', '-i', path.join(folder, 'background.png'),
       '-stream_loop', '-1', '-c:v', 'libvpx-vp9', '-i', path.join(folder, 'sticker.webm'),
       '-filter_complex', '[1:v]scale=800:1000:force_original_aspect_ratio=decrease,format=rgba[s];[0:v][s]overlay=(W-w)/2:H-h-290:shortest=1,format=yuv420p[v]',
-      '-map', '[v]', '-t', '10', '-r', '30', '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-movflags', '+faststart', '-an', result], { timeout: 240000 });
+      '-map', '[v]', '-t', '10', '-r', '30', '-c:v', 'libx264', '-preset', 'fast', '-threads', '1', '-crf', '20', '-movflags', '+faststart', '-an', result], { timeout: 240000 });
     const upload = await cloudinary.uploader.upload(result, { resource_type: 'video', folder: 'tsc/booking-stories', public_id: `${job._id}-${Date.now()}` });
     return upload.secure_url;
   } finally { if (browser) await browser.close(); await rm(folder, { recursive: true, force: true }); }
