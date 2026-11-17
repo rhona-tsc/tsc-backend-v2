@@ -1,4 +1,4 @@
-import { startVoiceCallReview, createStoredCallTranscript, finishVoiceCallReview } from '../services/voiceCallReview.js';
+import { startVoiceCallReview, createStoredCallTranscript, finishVoiceCallReview,readVoiceIntake } from '../services/voiceCallReview.js';
 import express from 'express';
 import twilio from 'twilio';
 import OpenAI from 'openai';
@@ -8,16 +8,27 @@ import { createVoiceConversationTurns } from '../services/voiceConversationTurns
 import { createVoiceEnquiryTools,saveVoiceSectionProgress } from '../services/voiceEnquiryStore.js';
 import { createVoiceSectionConversation } from '../services/voiceSectionConversation.js';
 import { VOICE_SECTION_SESSION_INSTRUCTIONS } from '../services/voiceSectionFlow.js';
-import { voiceConnectionConfig, signVoiceBridge, verifyVoiceBridge, buildEnquiryVoiceSession, voiceOpeningEventFor, VOICE_ENQUIRY_NUMBER, VOICE_MAX_SECONDS } from '../services/voiceEnquiryConnection.js';
+import { voiceConnectionConfig, signVoiceBridge, verifyVoiceBridge, buildEnquiryVoiceSession, voiceOpeningEventFor, VOICE_ENQUIRY_NUMBER, VOICE_MAX_SECONDS,VOICE_WEBHOOK_OVERRIDES } from '../services/voiceEnquiryConnection.js';
 import { reserveVoicePilotCall } from '../services/voiceEnquiryPilotLimit.js';
 import {VOICEMAIL_GREETING,VOICEMAIL_THANKS,queueVoiceRecording} from '../services/voiceVoicemail.js';
 
-export function createVoiceEnquiryRouter({ reservePilotCall = reserveVoicePilotCall, startReview = startVoiceCallReview, createTranscript = createStoredCallTranscript, finishReview = finishVoiceCallReview,queueRecording=queueVoiceRecording } = {}) {
+export function createVoiceEnquiryRouter({ reservePilotCall = reserveVoicePilotCall, startReview = startVoiceCallReview, createTranscript = createStoredCallTranscript, finishReview = finishVoiceCallReview,queueRecording=queueVoiceRecording,readIntake=readVoiceIntake } = {}) {
 const router = express.Router();
 const sessions = new Map();
 let reserving = false;
 const path = '/api/voice-enquiries';
-router.get('/health',(_req,res)=>{const config=voiceConnectionConfig();res.json({enabled:config.enabled&&config.ready,mode:config.mode,testMode:true,recordsNewMessages:config.mode==='voicemail'});});
+router.get('/health',(_req,res)=>{const config=voiceConnectionConfig();res.set('Cache-Control','no-store').json({enabled:config.enabled&&config.ready,mode:config.mode,testMode:true,recordsNewMessages:config.mode==='voicemail'});});
+const failureXml=()=>{const xml=new twilio.twiml.VoiceResponse();xml.say({voice:'Polly.Amy',language:'en-GB'},"Sorry, The Supreme Collective's message service is temporarily unavailable. We can't confirm that your message was received. Please try calling again shortly.");xml.hangup();return xml.toString();};
+router.use('/twilio',(req,res,next)=>{
+  res.set('Cache-Control','no-store');const send=res.send.bind(res);
+  res.send=body=>{if(typeof body==='string'&&Buffer.byteLength(body)>48*1024){res.status(503).type('text/xml');return send(failureXml());}return send(body);};
+  next();
+});
+function messageXml(config){const xml=new twilio.twiml.VoiceResponse();
+  xml.say({voice:'Polly.Amy',language:'en-GB'},VOICEMAIL_GREETING);
+  xml.record({maxLength:VOICE_MAX_SECONDS,timeout:10,finishOnKey:'#',playBeep:true,trim:'do-not-trim',transcribe:false,method:'POST',action:`${config.base}${path}/twilio/message-finished${VOICE_WEBHOOK_OVERRIDES}`,recordingStatusCallback:`${config.base}${path}/twilio/recording${VOICE_WEBHOOK_OVERRIDES}`,recordingStatusCallbackMethod:'POST',recordingStatusCallbackEvent:'completed absent'});
+  xml.hangup();return xml.toString();
+}
 
 function sayContact(res) {
   const xml = new twilio.twiml.VoiceResponse();
@@ -39,16 +50,20 @@ router.post('/twilio/incoming', express.urlencoded({ extended: false, limit: '16
   if(config.mode==='voicemail'){
     const now=Date.now(),sid=req.body.CallSid;
     for(const [key,value] of sessions)if(value.expiresAt<now)sessions.delete(key);
-    if(sessions.has(sid))return res.sendStatus(409);
+    let existing;
+    try{existing=sessions.get(sid)?.intent==='voicemail'?{}:await readIntake(sid,from);}catch{return res.status(503).type('text/xml').send(failureXml());}
+    if(existing){
+      if(existing.recording?.sid||existing.recording?.status==='absent'){xml.say({voice:'Polly.Amy',language:'en-GB'},VOICEMAIL_THANKS);xml.hangup();return res.type('text/xml').send(xml.toString());}
+      sessions.set(sid,{intent:'voicemail',expiresAt:now+(VOICE_MAX_SECONDS+60)*1000});
+      return res.type('text/xml').send(messageXml(config));
+    }
     if(reserving||sessions.size)return sayContact(res);
     reserving=true;let reserved=false;
     try{reserved=await reservePilotCall({projectId:config.projectId,callSid:sid,endsAt:config.testEndsAt,now});}catch{}finally{reserving=false;}
     if(!reserved)return sayContact(res);
     try{await startReview({callSid:sid,caller:from,intent:'voicemail'});}catch{return sayContact(res);}
     sessions.set(sid,{intent:'voicemail',expiresAt:now+(VOICE_MAX_SECONDS+60)*1000});
-    xml.say({voice:'Polly.Amy',language:'en-GB'},VOICEMAIL_GREETING);
-    xml.record({maxLength:VOICE_MAX_SECONDS,timeout:10,finishOnKey:'#',playBeep:true,trim:'do-not-trim',transcribe:false,method:'POST',action:`${config.base}${path}/twilio/message-finished`,recordingStatusCallback:`${config.base}${path}/twilio/recording`,recordingStatusCallbackMethod:'POST',recordingStatusCallbackEvent:'completed absent'});
-    xml.hangup();return res.type('text/xml').send(xml.toString());
+    return res.type('text/xml').send(messageXml(config));
   }
   if (!['1', '2'].includes(req.body.Digits)) {
     const gather = xml.gather({ input: 'dtmf', numDigits: 1, timeout: 8, method: 'POST', action: `${path}/twilio/incoming` });
@@ -162,6 +177,7 @@ router.post('/openai/webhook', express.raw({ type: 'application/json', limit: '6
   }
 });
 
+router.use((error,req,res,next)=>{if(!req.path.startsWith('/twilio/'))return next(error);if(res.headersSent)return res.end();return res.status(503).type('text/xml').send(failureXml());});
 return router;
 }
 

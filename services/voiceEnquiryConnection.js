@@ -3,6 +3,7 @@ import { normalizeCallbackPhone, ENQUIRY_ASSISTANT_GREETING, ENQUIRY_ASSISTANT_I
 
 export const VOICE_ENQUIRY_NUMBER = '+447594223200';
 export const VOICE_MAX_SECONDS = 360;
+export const VOICE_WEBHOOK_OVERRIDES = '#ct=3000&rt=5000&tt=15000&rc=2&rp=all&e=dublin,ashburn';
 
 export function voiceConnectionConfig(env = process.env) {
   const split = value => String(value || '').split(',').map(normalizeCallbackPhone).filter(Boolean);

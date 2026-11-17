@@ -71,6 +71,10 @@ export async function startVoiceCallReview({ callSid, caller, intent }) {
 export function createStoredCallTranscript(callSid) {
   return createCallTranscript({ persist: data => calls().updateOne({ _id: voiceCallRef(callSid) }, { $set: { ...data, transcriptCount: data.turns.length, status: 'in_progress', updatedAt: new Date() } }) });
 }
+export async function readVoiceIntake(callSid,caller){
+  if(!/^CA[a-f\d]{32}$/i.test(callSid||''))return null;
+  return calls().findOne({_id:voiceCallRef(callSid),caller,intent:'voicemail',startedAt:{$gt:new Date(Date.now()-10*60000)},expiresAt:{$gt:new Date()}},{projection:{recording:1,status:1},maxTimeMS:1500});
+}
 
 export function managementCallEmail(call, enquiry) {
   const date = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' }).format(call.startedAt);

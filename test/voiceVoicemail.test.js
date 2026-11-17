@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import {Readable} from 'node:stream';
 import {createVoiceEnquiryRouter} from '../routes/voiceEnquiryRoutes.js';
 import musicianAuth from '../middleware/musicianAuth.js';
-import {VOICEMAIL_GREETING,VOICEMAIL_THANKS,queueVoiceRecording,processVoiceMessage,downloadTwilioRecording,publicVoiceRecording,createVoiceAudioHandler,voicemailDraft} from '../services/voiceVoicemail.js';
+import {VOICEMAIL_GREETING,VOICEMAIL_THANKS,queueVoiceRecording,processVoiceMessage,downloadTwilioRecording,publicVoiceRecording,createVoiceAudioHandler,voicemailDraft,recoverVoiceRecording} from '../services/voiceVoicemail.js';
 const sid=`CA${'a'.repeat(32)}`,recordingSid=`RE${'b'.repeat(32)}`,account=`AC${'c'.repeat(32)}`;
 const row=()=>({_id:'PHONE-111111111111',intent:'voicemail',callSid:sid,expiresAt:new Date(Date.now()+86400000),recording:{sid:recordingSid,attempts:1,durationSeconds:20}});
 const settings={VOICE_ENQUIRY_MODE:'voicemail',VOICE_ENQUIRY_ENABLED:'true',VOICE_ENQUIRY_PUBLIC_BASE_URL:'https://example.com',VOICE_ENQUIRY_TWILIO_NUMBER:'+447700900100',OPENAI_VOICE_API_KEY:'test-unused-key',OPENAI_VOICE_WEBHOOK_SECRET:'test-unused-secret',TWILIO_AUTH_TOKEN:'test-token',TWILIO_ACCOUNT_SID:account,VOICE_ENQUIRY_BRIDGE_SECRET:'test-only-secret-at-least-32-characters',VOICE_ENQUIRY_PROJECT_ID:'proj_example',VOICE_ENQUIRY_TEST_CALLERS:'+447700900123',VOICE_ENQUIRY_TEST_END_AT:new Date(Date.now()+3600000).toISOString()};
@@ -15,7 +15,7 @@ async function listen(app){const server=app.listen(0,'127.0.0.1');await new Prom
 
 test('recording pilot gives notice before the tone, captures one uninterrupted message and never starts the chat',async()=>{
  const restore=setEnv(settings),app=express();let reserved=0,started=0,queued=0;
- app.use('/api/voice-enquiries',createVoiceEnquiryRouter({reservePilotCall:async()=>{reserved++;return true;},startReview:async data=>{assert.equal(data.intent,'voicemail');started++;},queueRecording:async()=>{queued++;return true;}}));
+ app.use('/api/voice-enquiries',createVoiceEnquiryRouter({readIntake:async()=>null,reservePilotCall:async()=>{reserved++;return true;},startReview:async data=>{assert.equal(data.intent,'voicemail');started++;},queueRecording:async()=>{queued++;return true;}}));
  const http=await listen(app);const post=async(path,body,signed=true)=>fetch(`${http.base}/api/voice-enquiries/twilio/${path}`,{method:'POST',body:new URLSearchParams(body),headers:signed?{'X-Twilio-Signature':twilio.getExpectedTwilioSignature(settings.TWILIO_AUTH_TOKEN,`https://example.com/api/voice-enquiries/twilio/${path}`,body)}:{}});
  const body={CallSid:sid,From:'+447700900123',To:'+447700900100'};
  try{
@@ -24,7 +24,7 @@ test('recording pilot gives notice before the tone, captures one uninterrupted m
   assert.doesNotMatch(await(await post('incoming',{...body,From:'+447700900999'})).text(),/<Record/);assert.equal(reserved,0);
   const xml=await(await post('incoming',body)).text();assert.match(xml,/recorded and transcribed/);assert.ok(xml.indexOf('recorded and transcribed')<xml.indexOf('<Record'));
   assert.match(xml,/<Record[^>]+maxLength="360"/);assert.match(xml,/timeout="10"/);assert.match(xml,/finishOnKey="#"/);assert.match(xml,/Polly.Amy/);assert.doesNotMatch(xml,/<Sip|<Dial|<Gather/);assert.equal(reserved,1);assert.equal(started,1);
-  assert.equal((await post('incoming',body)).status,409);assert.equal(reserved,1);
+  const retried=await post('incoming',body);assert.equal(retried.status,200);assert.match(await retried.text(),/<Record/);assert.equal(reserved,1);assert.equal(started,1);assert.ok(Buffer.byteLength(xml)<4096);
   const callback={CallSid:sid,AccountSid:account,RecordingSid:recordingSid,RecordingStatus:'completed',RecordingDuration:'20'};
   process.env.VOICE_ENQUIRY_TEST_END_AT=new Date(1).toISOString(); // Already-authorized messages still finish after intake closes.
   assert.equal((await post('recording',callback,false)).status,403);assert.equal(queued,0);
@@ -80,4 +80,29 @@ test('recording summaries expose availability and expiry, not file IDs or provid
  const r=row();r.recording.fileId='private-file';r.recording.providerUrl='private-provider-url';const summary=publicVoiceRecording(r);assert.equal(summary.available,true);assert.doesNotMatch(JSON.stringify(summary),/private|REbbbb/);r.expiresAt=new Date(1);assert.equal(publicVoiceRecording(r).available,false);
  const draft=voicemailDraft('I want a wedding band',{...extracted,eventDateISO:'2028-12-14'});assert.equal(draft.eventDateISO,undefined);
  assert.match(VOICEMAIL_GREETING,/recorded and transcribed/);assert.match(VOICEMAIL_THANKS,/pilot test/);
+});
+
+test('intake resumes a reserved call after a process restart and never records over a completed message',async()=>{
+ const restore=setEnv(settings);let existing={},reserved=0;const app=express();
+ app.use('/api/voice-enquiries',createVoiceEnquiryRouter({readIntake:async(id,caller)=>{assert.equal(id,sid);assert.equal(caller,'+447700900123');return existing;},reservePilotCall:async()=>{reserved++;return true;}}));
+ const http=await listen(app);const body={CallSid:sid,From:'+447700900123',To:'+447700900100'};
+ const post=()=>fetch(`${http.base}/api/voice-enquiries/twilio/incoming`,{method:'POST',body:new URLSearchParams(body),headers:{'X-Twilio-Signature':twilio.getExpectedTwilioSignature(settings.TWILIO_AUTH_TOKEN,'https://example.com/api/voice-enquiries/twilio/incoming',body)}});
+ try{assert.match(await(await post()).text(),/<Record/);assert.equal(reserved,0);}finally{await http.close();}
+ const app2=express();existing={recording:{sid:recordingSid}};app2.use('/api/voice-enquiries',createVoiceEnquiryRouter({readIntake:async()=>existing,reservePilotCall:async()=>{reserved++;return true;}}));const http2=await listen(app2);
+ try{const response=await fetch(`${http2.base}/api/voice-enquiries/twilio/incoming`,{method:'POST',body:new URLSearchParams(body),headers:{'X-Twilio-Signature':twilio.getExpectedTwilioSignature(settings.TWILIO_AUTH_TOKEN,'https://example.com/api/voice-enquiries/twilio/incoming',body)}});const xml=await response.text();assert.match(xml,/message has been saved/);assert.doesNotMatch(xml,/<Record/);assert.equal(reserved,0);}finally{await http2.close();restore();}
+});
+
+test('database and malformed-request errors return a small non-cacheable failure response without recording or consuming a call',async()=>{
+ const restore=setEnv(settings),app=express();let reserved=0;
+ app.use('/api/voice-enquiries',createVoiceEnquiryRouter({readIntake:async()=>{throw Error('PRIVATE INTERNAL ERROR '+ 'x'.repeat(70000));},reservePilotCall:async()=>{reserved++;return true;}}));const http=await listen(app);
+ const body={CallSid:sid,From:'+447700900123',To:'+447700900100'};
+ const post=params=>fetch(`${http.base}/api/voice-enquiries/twilio/incoming`,{method:'POST',body:new URLSearchParams(params),headers:{'X-Twilio-Signature':twilio.getExpectedTwilioSignature(settings.TWILIO_AUTH_TOKEN,'https://example.com/api/voice-enquiries/twilio/incoming',params)}});
+ try{for(const params of [body,{...body,oversized:'x'.repeat(25000)}]){const response=await post(params),xml=await response.text();assert.equal(response.status,503);assert.match(response.headers.get('cache-control'),/no-store/);assert.ok(Buffer.byteLength(xml)<1024);assert.match(xml,/can&apos;t confirm|can’t confirm|can't confirm/);assert.doesNotMatch(xml,/PRIVATE|<Record|Error:|stack/);}assert.equal(reserved,0);}finally{await http.close();restore();}
+});
+
+test('missed recording callbacks recover only the matching completed voicemail without reserving a call',async()=>{
+ const r=row();delete r.recording;let queued;
+ const result=await recoverVoiceRecording(r,{list:async id=>{assert.equal(id,sid);return [{sid:'wrong',callSid:'another-call',status:'completed'},{sid:recordingSid,callSid:sid,status:'completed',duration:'20'}];},queue:async body=>{queued=body;return true;}});
+ assert.equal(result,true);assert.equal(queued.CallSid,sid);assert.equal(queued.RecordingSid,recordingSid);
+ assert.equal(await recoverVoiceRecording({...r,intent:'enquiry'},{list:async()=>{throw Error('Must not read another call type');}}),false);
 });

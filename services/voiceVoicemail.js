@@ -65,6 +65,12 @@ export async function queueVoiceRecording(body,{calls=collection()}={}) {
   await calls.updateOne({_id:row._id,'recording.sid':{$exists:false}},{$set:{recording,status:'message_processing'}});
   return true;
 }
+export async function recoverVoiceRecording(row,{list=callSid=>twilio(process.env.TWILIO_ACCOUNT_SID,process.env.TWILIO_AUTH_TOKEN).recordings.list({callSid,limit:2}),queue=queueVoiceRecording}={}){
+  if(row.intent!=='voicemail'||!/^CA[a-f\d]{32}$/i.test(row.callSid||'')||+new Date(row.expiresAt)<=Date.now())return false;
+  const recordings=await list(row.callSid);
+  const recording=recordings.find(item=>item.callSid===row.callSid&&item.status==='completed');
+  return recording?queue({CallSid:row.callSid,RecordingSid:recording.sid,RecordingStatus:'completed',RecordingDuration:recording.duration}):false;
+}
 
 export async function downloadTwilioRecording(row,{request=fetch,client=twilio(process.env.TWILIO_ACCOUNT_SID,process.env.TWILIO_AUTH_TOKEN)}={}) {
   const account=process.env.TWILIO_ACCOUNT_SID,sid=row.recording.sid;
@@ -141,6 +147,7 @@ export function startVoiceVoicemailWorker(){
       const calls=collection(),now=new Date();
       const row=await calls.findOneAndUpdate({intent:'voicemail',expiresAt:{$gt:now},'recording.sid':{$exists:true},'recording.status':{$ne:'absent'},'recording.attempts':{$lt:3},'voicemail.status':{$nin:['ready_for_review','needs_review']},$or:[{'voicemail.claimUntil':{$exists:false}},{'voicemail.claimUntil':{$lt:now}}]},{$set:{'voicemail.status':'processing','voicemail.claimUntil':new Date(Date.now()+5*60000)},$inc:{'recording.attempts':1}},{returnDocument:'after',includeResultMetadata:false});
       if(row)await processVoiceMessage(row);
+      const waiting=await calls.findOneAndUpdate({intent:'voicemail',expiresAt:{$gt:now},startedAt:{$lt:new Date(Date.now()-90000)},'recording.status':{$exists:false},$and:[{$or:[{'voicemail.recoveryAttempts':{$exists:false}},{'voicemail.recoveryAttempts':{$lt:10}}]},{$or:[{'voicemail.lastRecoveryAt':{$exists:false}},{'voicemail.lastRecoveryAt':{$lt:new Date(Date.now()-60000)}}]}]},{$set:{'voicemail.lastRecoveryAt':now},$inc:{'voicemail.recoveryAttempts':1}},{returnDocument:'after',includeResultMetadata:false});if(waiting)await recoverVoiceRecording(waiting);
       const absent=await calls.findOneAndUpdate({intent:'voicemail','recording.status':'absent',notificationStatus:'pending'},{$set:{'voicemail.status':'no_message'}},{returnDocument:'after',includeResultMetadata:false});if(absent)await finishVoiceCallReview(absent.callSid,{status:'no_message'});
       const unfinished=await calls.findOne({intent:'voicemail',startedAt:{$lt:new Date(Date.now()-10*60000)},'recording.status':{$exists:false},notificationStatus:'pending'});if(unfinished)await finishVoiceCallReview(unfinished.callSid,{status:'no_recording_received'});
       // Retry removal only for this app's safely stored recordings, never other Twilio recordings.
