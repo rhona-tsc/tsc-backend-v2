@@ -10,6 +10,7 @@ import { deliverOriginalReferrals } from "./services/originalsReferralService.js
 import { deliverOriginalChatNotifications } from "./services/originalsChatNotificationService.js";
 // backend/server.js
 import express from "express";
+import mongoose from 'mongoose';
 import cors from "cors";
 import "dotenv/config";
 import requireStaffAuth from "./middleware/requireStaffAuth.js";
@@ -50,6 +51,8 @@ import availabilityRoutes from "./routes/availability.js";
 import paymentsRouter from "./routes/payments.js";
 import accountRouter from "./routes/accountRoute.js";
 import bookingBoardRoutes from "./routes/bookingBoardRoutes.js";
+import bookingStoryRoutes from './routes/bookingStoryRoutes.js';
+import { reconcileBookingStories, runBookingStoryQueue } from './services/bookingStoryQueue.js';
 import uploadRoutes from "./routes/upload.js";
 import newsletterRoutes from "./routes/newsletterRoutes.js";
 import v2Routes from "./routes/v2.js";
@@ -765,6 +768,15 @@ app.use("/api/booking", bookingRoutes);
 app.use("/api/payments", paymentsRouter);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/board/bookings", bookingBoardRoutes);
+app.use('/api/booking-stories', bookingStoryRoutes);
+cron.schedule('* * * * *', () => {
+  if (mongoose.connection.readyState !== 1) return;
+  runBookingStoryQueue().catch(e => console.error('Booking story queue:', e.message));
+});
+cron.schedule('*/5 * * * *', () => {
+  if (mongoose.connection.readyState !== 1) return;
+  reconcileBookingStories().catch(e => console.error('Booking story reconciliation:', e.message));
+});
 
 app.use("/api/newsletter", newsletterRoutes);
 app.use("/api/noticeboard", noticeRoutes);

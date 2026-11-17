@@ -8,6 +8,7 @@ import { isBespokeLineup, normaliseBespokeLineup, updateBespokeSummary } from ".
 import mongoose from "mongoose";
 import BookingBoardItem from "../models/bookingBoardItem.js";
 import Booking from "../models/bookingModel.js";
+import { enqueueBookingStory } from '../services/bookingStoryQueue.js';
 import AvailabilityModel from "../models/availabilityModel.js";
 import ClientAutomationDelivery from "../models/clientAutomationDeliveryModel.js";
 import actModel from "../models/actModel.js";
@@ -2842,6 +2843,7 @@ router.post("/", musicianAuth, async (req, res) => {
       await boardRow.save();
     }
 
+    await enqueueBookingStory(boardRow.toObject()).catch(error => console.error('Story enqueue deferred:', error.message));
     return res.json({
       success: true,
       operation: existingBoardRow ? "updated" : "created",
