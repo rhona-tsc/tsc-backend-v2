@@ -17,6 +17,7 @@ test('only secured future bookings are eligible, including on manual publish',()
 test('public details exclude customer information and approval is required',()=>{
  assert.deepEqual(publicStoryDetails({actName:'Act',eventDateISO:'2027-01-16',bookerName:'Private',email:'private@example.org'}),{actName:'Act',eventDateISO:'2027-01-16',venueName:'',venueLocation:''});
  assert.equal(Boolean(storyReady({confirmed:true,approved:false,mediaUrl:'https://a',platforms:['instagram']})),false);
+ assert.equal(Boolean(storyReady({confirmed:true,approved:true,holdForReview:true,mediaUrl:'https://a',platforms:['instagram']})),false);
  assert.equal(storyComplete({platforms:['instagram','facebook'],instagram:{state:'published'},facebook:{state:'pending'}}),false);
 });
 test('Instagram processing resumes its existing container and never republishes recorded success',async()=>{

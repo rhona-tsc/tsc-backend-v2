@@ -13,6 +13,7 @@ const story = new mongoose.Schema({
   status: { type: String, default: 'needs_assets', index: true },
   confirmed: { type: Boolean, default: false },
   approved: { type: Boolean, default: false },
+  holdForReview: { type: Boolean, default: false },
   notBefore: Date, publishedAt: Date, lastError: String,
   platforms: { type: [String], default: ['instagram', 'facebook'] },
   instagram: { type: destination, default: () => ({}) },

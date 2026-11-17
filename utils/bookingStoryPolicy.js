@@ -13,7 +13,7 @@ export function storyEligible(row, core, now = new Date()) {
   return core?.status === 'confirmed';
 }
 export function storyReady(job) {
-  return job.confirmed && job.approved && /^https:\/\//.test(job.mediaUrl || '') && job.platforms?.length > 0;
+  return job.confirmed && job.approved && !job.holdForReview && /^https:\/\//.test(job.mediaUrl || '') && job.platforms?.length > 0;
 }
 export function storyComplete(job) {
   return job.platforms.every(p => job[p]?.state === 'published');

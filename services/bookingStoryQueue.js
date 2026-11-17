@@ -53,7 +53,7 @@ export async function reconcileBookingStories() {
       claimed.stickerUrl = asset.stickerUrl;
       Object.assign(claimed, { musicUrl: asset.musicUrl, musicTitle: asset.musicTitle, musicStart: asset.musicStart });
       claimed.mediaUrl = await renderBookingStory(claimed);
-      claimed.approved = settings.autoApprove === true;
+      claimed.approved = settings.autoApprove === true && claimed.holdForReview !== true;
       claimed.status = claimed.approved ? 'queued' : 'needs_review'; claimed.lastError = '';
     } catch (e) { claimed.status = 'needs_assets'; claimed.lastError = e.message; }
     await claimed.save(); break;

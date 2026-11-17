@@ -81,7 +81,8 @@ router.patch('/:id', action(async (req, res) => {
     job.platforms = [...new Set(req.body.platforms)]; job.approved = false;
   }
   if (req.body.notBefore !== undefined) job.notBefore = req.body.notBefore ? new Date(req.body.notBefore) : null;
-  if (req.body.approved !== undefined) job.approved = req.body.approved === true;
+  if (req.body.holdForReview !== undefined) job.holdForReview = req.body.holdForReview === true;
+  if (req.body.approved !== undefined) { job.approved = req.body.approved === true; if (job.approved) job.holdForReview = false; }
   job.status = req.body.skip ? 'skipped' : !job.confirmed ? 'awaiting_confirmation' : job.mediaUrl && job.approved ? 'queued' : 'needs_assets';
   await job.save();
   const row = await Board.findById(job.bookingId).select('address').lean();
