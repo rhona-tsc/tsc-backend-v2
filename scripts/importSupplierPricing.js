@@ -8,7 +8,7 @@ import Act from '../models/actModel.js';
 import ActCard from '../models/actCard.model.js';
 import ActFilterCard from '../models/ActFilterCard.js';
 import { buildCard } from '../services/buildActFilterCard.js';
-import { minimumSupplierPrice } from '../utils/supplierPricing.js';
+import { minimumCustomerPrice } from '../utils/supplierPricing.js';
 
 const [planPath, backupPath, mode] = process.argv.slice(2);
 assert(planPath && backupPath, 'Specify a reviewed plan and new backup path.');
@@ -25,7 +25,7 @@ try {
       assert(ids.has(id), 'Selected lineup no longer exists');
       assert(Object.values(lineup.counties).every(price => typeof price === 'number' && Number.isFinite(price) && price > 0));
     }
-    assert.equal(item.minDisplayPrice, Math.ceil(minimumSupplierPrice(item) * 1.33));
+    assert.equal(item.minDisplayPrice, minimumCustomerPrice(item));
     documents.push(act);
   }
   if (mode === '--apply') {

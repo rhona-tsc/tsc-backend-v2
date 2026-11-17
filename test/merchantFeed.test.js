@@ -41,3 +41,14 @@ test('text stays in one product row and quoted descriptions round-trip correctly
   assert.throws(() => buildMerchantFeed([]), /No publishable products/);
   assert.throws(() => buildMerchantFeed([{ ...act, status: 'draft' }]), /No publishable products/);
 });
+
+
+test('Google uses the current direct website saving even if a display cache is still old', () => {
+  const priced = { ...act, minDisplayPrice: 3671, supplierPricing: { lineups: {
+    six: { counties: { London: 2760, Kent: 2900 } }
+  } } };
+  assert.equal(rows([priced])[0].price, '3571.00 GBP');
+  priced.supplierPricing.lineups.six.counties.London = 2800;
+  assert.equal(rows([priced])[0].price, '3624.00 GBP');
+  assert.equal(priced.minDisplayPrice, 3671);
+});

@@ -1,3 +1,4 @@
+import { minimumCustomerPrice } from '../utils/supplierPricing.js';
 import { publicActStatuses } from '../utils/publicActStatuses.js';
 
 const origin = 'https://thesupremecollective.co.uk';
@@ -24,7 +25,7 @@ export function merchantProduct(act) {
   const description = plain(act.tscDescription);
   // This is the website's customer-facing starting price, already marked up.
   // Do not export supplier rates or apply the company margin a second time.
-  const price = Number(act.minDisplayPrice);
+  const price = Number(minimumCustomerPrice(act) ?? act.minDisplayPrice);
   const image = [...(act.coverImage || []), ...(act.images || [])]
     .map(item => publicImage(item?.url)).find(Boolean);
   if (!publicActStatuses.includes(act.status) || act.isTest === true ||

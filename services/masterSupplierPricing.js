@@ -1,4 +1,4 @@
-import { countyKey, minimumSupplierPrice } from '../utils/supplierPricing.js';
+import { countyKey, minimumSupplierPrice, minimumCustomerPrice } from '../utils/supplierPricing.js';
 
 export const MASTER_PRICING_ID = '1L6cim0tjAgs4CQ6kd1xi7m0IbqbESt6R1WQeoNQwE_c';
 export const MASTER_PRICING_SHEET_ID = 1750402781;
@@ -72,7 +72,7 @@ export function buildMasterPricingPlan({ rows, acts, sheetTitle = 'County prices
     next.sourceSheetId = MASTER_PRICING_SHEET_ID;
     next.sourceSheet = sheetTitle;
     next.minimumSupplierPrice = minimumSupplierPrice({ supplierPricing: next });
-    const minDisplayPrice = Math.ceil(next.minimumSupplierPrice * 1.33);
+    const minDisplayPrice = minimumCustomerPrice({ supplierPricing: next });
     const metadataChanged = before.sourceAct !== sourceAct || before.sourceSheetId !== MASTER_PRICING_SHEET_ID || before.sourceSheet !== sheetTitle;
     if (actChangedRates || metadataChanged || act.minDisplayPrice !== minDisplayPrice || before.minimumSupplierPrice !== next.minimumSupplierPrice) {
       next.importedAt = readAt;

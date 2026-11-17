@@ -8,7 +8,7 @@ router.get('/acts.tsv', async (_req, res) => {
   res.set('Cache-Control', 'no-store, max-age=0');
   try {
     const acts = await Act.find({ status: { $in: publicActStatuses }, isTest: { $ne: true } })
-      .select('_id tscName tscDescription slug status isTest minDisplayPrice coverImage.url images.url')
+      .select('_id tscName tscDescription slug status isTest minDisplayPrice supplierPricing coverImage.url images.url')
       .sort({ slug: 1 }).lean();
     const feed = buildMerchantFeed(acts);
     res.set('Content-Type', 'text/tab-separated-values; charset=utf-8');

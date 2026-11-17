@@ -1,5 +1,5 @@
 import { websiteActView } from '../utils/websiteLineups.js';
-import { minimumSupplierPrice } from '../utils/supplierPricing.js';
+import { minimumSupplierPrice, minimumCustomerPrice } from '../utils/supplierPricing.js';
 // services/buildActFilterCard.js
 import { normalizeSetlistControl } from '../utils/setlistControl.js';
 // ESM module
@@ -455,9 +455,9 @@ export function buildCard(act) {
       : undefined;
 
   // Prefer explicitly-set manual display price, else derived basePrice
-  const minDisplayPrice = isNum(act?.minDisplayPrice)
+  const minDisplayPrice = minimumCustomerPrice(act) ?? (isNum(act?.minDisplayPrice)
     ? Number(act.minDisplayPrice)
-    : Number(basePrice) || 0;
+    : Number(basePrice) || 0);
 
   return {
     // identity / display

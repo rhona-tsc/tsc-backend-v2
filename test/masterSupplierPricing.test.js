@@ -19,7 +19,7 @@ test('column G updates every matched county and applies the customer markup once
   assert.equal(next.supplierPricing.lineups['reviewed-lineup'].counties.London, 1500);
   assert.equal(next.supplierPricing.lineups['reviewed-lineup'].counties.Kent, 1600);
   assert.equal(next.basePrice, 1500);
-  assert.equal(next.minDisplayPrice, 1995);
+  assert.equal(next.minDisplayPrice, 1945);
   assert.equal(JSON.stringify(act), snapshot);
   assert(!JSON.stringify(p).includes('PRIVATE'));
 });
@@ -27,7 +27,7 @@ test('column G updates every matched county and applies the customer markup once
 test('unchanged prices are idempotent after the source metadata is installed', () => {
   const first = plan();
   assert.equal(first.summary.changedRates, 0);
-  const saved = { ...act, supplierPricing: first.changes[0].pricingFields.supplierPricing };
+  const saved = { ...act, ...first.changes[0].pricingFields };
   const next = plan(source, [saved], '2026-11-17T00:00:00Z');
   assert.equal(next.changes.length, 0);
   assert.equal(saved.supplierPricing.sourceSheetId, MASTER_PRICING_SHEET_ID);
@@ -56,7 +56,7 @@ test('missing, duplicate and invalid rates stop the plan before any prices can c
 
 test('previously unavailable counties may gain a rate without deleting known rates', () => {
   const p = plan([...source, rate('Somerset', '£900.50'), rate('Devon', '—')]);
-  assert.equal(p.changes[0].pricingFields.minDisplayPrice, Math.ceil(900.5 * 1.33));
+  assert.equal(p.changes[0].pricingFields.minDisplayPrice, Math.ceil(900.5 * 1.33) - 50);
   assert.equal(p.changes[0].pricingFields.supplierPricing.lineups['reviewed-lineup'].counties.Devon, undefined);
   assert.equal(p.summary.changedRates, 1);
 });
