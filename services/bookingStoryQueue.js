@@ -20,16 +20,18 @@ export async function enqueueBookingStory(row) {
       if (!['published', 'skipped'].includes(existing.status)) { existing.status = 'ineligible'; existing.confirmed = false; await existing.save(); }
     } else if (!['published', 'processing', 'needs_check'].includes(existing.status)) {
       // Date/act changes invalidate the rendered announcement and its approval.
-      if (existing.eventDateISO !== row.eventDateISO || String(existing.actId || '') !== String(row.actId || '')) {
+      if (existing.eventDateISO !== row.eventDateISO || String(existing.actId || '') !== String(row.actId || '') || (existing.sourceVenueAddress && existing.sourceVenueAddress !== (row.address || ''))) {
         existing.mediaUrl = ''; existing.approved = false; existing.status = 'needs_assets';
+        if (existing.sourceVenueAddress !== (row.address || '')) { existing.venueName = ''; existing.venueLocation = ''; existing.venuePhotoUrl = ''; }
       }
-      Object.assign(existing, { actName: details.actName, eventDateISO: details.eventDateISO, actId: row.actId, confirmed }); await existing.save();
+      if (['awaiting_confirmation', 'ineligible'].includes(existing.status)) existing.status = 'needs_assets';
+      Object.assign(existing, { sourceVenueAddress: row.address || '', actName: details.actName, eventDateISO: details.eventDateISO, actId: row.actId, confirmed }); await existing.save();
     }
     return existing;
   }
   try {
     return await BookingStory.create({ bookingId: row._id, bookingRef: row.bookingRef, actId: row.actId,
-      ...details, confirmed, status: confirmed ? 'needs_assets' : 'awaiting_confirmation' });
+      ...details, sourceVenueAddress: row.address || '', confirmed, status: confirmed ? 'needs_assets' : 'awaiting_confirmation' });
   } catch (e) { if (e.code === 11000) return BookingStory.findOne({ bookingId: row._id }); throw e; }
 }
 export async function reconcileBookingStories() {
@@ -78,7 +80,7 @@ export async function runBookingStoryQueue({ manualStoryId, now = new Date() } =
     if (['published', 'skipped', 'needs_check', 'ineligible'].includes(job.status)) return { state: job.status };
     const row = await Board.findById(job.bookingId).lean();
     const core = row?.bookingId && await Booking.findById(row.bookingId).select('status').lean();
-    if (!storyEligible(row, core, now) || job.eventDateISO !== row.eventDateISO || String(job.actId || '') !== String(row.actId || '')) {
+    if (!storyEligible(row, core, now) || job.eventDateISO !== row.eventDateISO || String(job.actId || '') !== String(row.actId || '') || (job.sourceVenueAddress && job.sourceVenueAddress !== (row.address || ''))) {
       job.status = 'ineligible'; job.approved = false; await job.save(); return { state: 'ineligible' };
     }
     if (!storyReady(job)) return { state: 'not_ready' };

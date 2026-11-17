@@ -7,7 +7,7 @@ const destination = new mongoose.Schema({
 const story = new mongoose.Schema({
   bookingId: { type: mongoose.Schema.Types.ObjectId, required: true, unique: true },
   bookingRef: String, actId: mongoose.Schema.Types.ObjectId, actName: String,
-  eventDateISO: String, venueName: String, venueLocation: String,
+  eventDateISO: String, sourceVenueAddress: String, venueName: String, venueLocation: String,
   venuePhotoUrl: String, stickerUrl: String, mediaUrl: String,
   status: { type: String, default: 'needs_assets', index: true },
   confirmed: { type: Boolean, default: false },

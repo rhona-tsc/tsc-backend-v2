@@ -21,7 +21,7 @@ export async function publisherConnection(settings, { revealToken = false } = {}
   const ready = matches && !expired && !missing.length && Boolean(c?.accessTokenEncrypted);
   const result = { ready, instagramId: c?.accountId || '', pageId: c?.pageId || '', missing,
     reason: !matches ? 'Choose and verify the TSC publishing account.' : expired ? 'Meta connection expired. Reconnect.'
-      : missing.length ? `Reconnect Meta with publishing access: ${missing.join(', ')}` : '', };
+      : missing.length ? 'Reconnect Meta to allow posting stories to Instagram and Facebook.' : '', };
   if (revealToken && ready) result.token = decryptSocialToken(c.accessTokenEncrypted);
   return result;
 }
