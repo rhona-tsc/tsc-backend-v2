@@ -15,6 +15,11 @@ test('Encore sequence sends two song reminders and two event-sheet reminders exa
     for(const date of ['2026-12-09','2026-12-16','2026-12-31','2027-01-07','2027-01-07'])await runClientAutomations({...options,now:new Date(date+'T12:00:00Z')});
     assert.deepEqual([...records.values()].map(d=>d.automationNumber),[16,36,37,38]);
     assert.equal(messages.length,4);
+    const sentSongReminder=records.get('automation-14-song-requests-due-today');
+    records.delete('automation-14-song-requests-due-today');
+    records.set('legacy-manual-backfill-36',sentSongReminder);
+    await runClientAutomations({...options,now:new Date('2026-12-16T12:00:00Z')});
+    assert.equal(messages.length,4,'a backfilled sent record with a legacy key must not resend');
     assert.ok(messages.every(m=>!m.attachments));
     assert.ok(messages.every(m=>!/balance|invoice is attached/i.test(m.text)));
     assert.ok(messages.every(m=>!m.subject.includes('Request Request')));
