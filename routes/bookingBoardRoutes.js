@@ -3186,6 +3186,8 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
         message: `Complete the following booking fields first: ${missing.join(", ")}.`,
       });
     }
+    // Validate before sending so an invalid imported row cannot cause an unrecorded delivery.
+    await row.validate();
     const attachments = await buildIntroInvoiceAttachments(
       rowData,
       { cloudinaryClient: cloudinary },
