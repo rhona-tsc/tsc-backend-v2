@@ -1,3 +1,5 @@
+import {getRosterPolicy} from '../services/rosterEligibilityService.js';
+import {eligibleRosterDeputies,rosterEligibility} from '../utils/rosterEligibility.js';
 import { resolveAutomaticDeputyPrice, performanceLineupSize } from '../services/automaticDeputyPricing.js';
 import { availabilityReplyIntent, availabilityButtonIntent, selectAvailabilityReplyTarget, recordAvailabilityReply, queueAvailabilityInbound } from "../services/availabilityInboundReply.js";
 import { interceptAvailabilityTest } from '../services/availabilityRequestTestPreview.js';
@@ -1651,6 +1653,7 @@ export async function notifyDeputies({
     existingPhonesAgg.map((p) => (p._id || "").replace(/\s+/g, "")),
   );
 
+  const rosterPolicy = await getRosterPolicy(act._id);
   let totalSent = 0;
 
   for (const vocalist of targetVocalists) {
@@ -1663,7 +1666,10 @@ export async function notifyDeputies({
         ? customDeputyList
         : vocalist.deputies || [];
 
+    const eligibleDeputies = eligibleRosterDeputies({member:vocalist,lineup,policy:rosterPolicy,address:formattedAddress,county:countyFromAddress(formattedAddress)?.county});
+    const allowed = new Set(eligibleDeputies.map(d=>String(d.musicianId || d.id || d._id || d.phoneNumber)));
     for (const deputy of deputiesToContact) {
+      if(!allowed.has(String(deputy.musicianId || deputy.id || deputy._id || deputy.phoneNumber))) continue;
       const cleanPhone = normalizePhone(
         deputy.phoneNumber || deputy.phone || "",
       );
@@ -1833,7 +1839,8 @@ export async function triggerNextDeputy({
   );
 
   // 🧹 Filter deputies that haven’t been contacted yet
-  const remaining = (vocalist.deputies || []).filter((d) => {
+  const rosterPolicy = await getRosterPolicy(act._id);
+  const remaining = eligibleRosterDeputies({member:vocalist,lineup,policy:rosterPolicy,address:formattedAddress,county:countyFromAddress(formattedAddress)?.county}).filter((d) => {
     const phone = (d.phoneNumber || d.phone || "").replace(/\s+/g, "");
     return phone && !excludePhones.includes(phone);
   });

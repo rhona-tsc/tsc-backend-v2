@@ -1,3 +1,5 @@
+import {getRosterPolicy,bookingRosterEligibility} from '../services/rosterEligibilityService.js';
+import {rosterEligibility,eligibleRosterDeputies,selectRosterMember} from '../utils/rosterEligibility.js';
 // backend/controllers/allocationController.js
 import Act from "../models/actModel.js";
 import Musician from "../models/musicianModel.js";
@@ -926,7 +928,8 @@ export const listRoleCandidates = async (req, res) => {
     const query = String(req.query?.query || "").trim();
     const roleRegex = new RegExp(escapeRegex(role), "i");
     const textRegex = query ? new RegExp(escapeRegex(query), "i") : null;
-    const { lineup } = await getActLineupContext(board);
+    const { act, lineup } = await getActLineupContext(board);
+    const rosterPolicy = act ? await getRosterPolicy(act._id) : null;
     const roleMembers = (lineup?.bandMembers || []).filter((member) =>
       roleRegex.test(String(member?.instrument || member?.role || "")),
     );
@@ -1053,7 +1056,10 @@ export const listRoleCandidates = async (req, res) => {
           matchedPrimaryMember?.lastName,
         ].filter(Boolean).join(" ").trim();
         const bookingConflict = conflictById.get(id) || "";
-        const isUnavailable = unavailableIds.has(id) || Boolean(bookingConflict);
+        const rosterMember = matchedPrimaryMember || roleMembers.find(m=>(m.deputies || []).some(d=>String(d.musicianId || d._id || d.id || "")===id));
+        const eligibility = rosterEligibility({candidate:musician,member:rosterMember,lineup,assignments:board.assignedMusicians || [],policy:rosterPolicy,address:board.address || board.venueAddress,county:board.county,roleSlotId:req.query?.roleSlotId});
+        const regionalOrder = rosterMember ? eligibleRosterDeputies({member:rosterMember,lineup,policy:rosterPolicy,address:board.address || board.venueAddress,county:board.county,assignments:board.assignedMusicians || []}).findIndex(d=>String(d.musicianId || d._id || d.id || "")===id) : -1;
+        const isUnavailable = unavailableIds.has(id) || Boolean(bookingConflict) || !eligibility.eligible;
         const roleMatch = [
           ...(Array.isArray(musician.instrumentation)
             ? musician.instrumentation.map((entry) => entry?.instrument)
@@ -1071,7 +1077,9 @@ export const listRoleCandidates = async (req, res) => {
           source: isPrimary ? "primary" : deputyIds.has(id) ? "act_deputy" : "search",
           roleMatch,
           available: !isUnavailable,
-          unavailableReason: bookingConflict
+          rosterEligible: eligibility.eligible,
+          regionalOrder: regionalOrder < 0 ? 9999 : regionalOrder,
+          unavailableReason: !eligibility.eligible ? eligibility.reason : bookingConflict
             ? `Already allocated to ${bookingConflict}`
             : unavailableIds.has(id)
               ? "Unavailable or already accepted another booking on this date"
@@ -1083,6 +1091,7 @@ export const listRoleCandidates = async (req, res) => {
         return Number(b.available) - Number(a.available) ||
           Number(b.roleMatch) - Number(a.roleMatch) ||
           sourceRank[a.source] - sourceRank[b.source] ||
+          a.regionalOrder - b.regionalOrder ||
           a.name.localeCompare(b.name);
       });
 
@@ -1308,6 +1317,8 @@ export const offerBookingRole = async (req, res) => {
           "TBC",
       ).trim();
     }
+    const rosterCheck = await bookingRosterEligibility({act,lineup,board,candidate:musician,member:originalBandMember,roleSlotId,address});
+    if(!rosterCheck.eligible) return res.status(409).json({success:false,code:"ROSTER_INELIGIBLE",message:rosterCheck.reason});
     const name = musicianDisplayName(musician);
     const smsBody = buildBookingSMS({
       firstName: firstNameOf(musician),
@@ -1433,13 +1444,15 @@ export const confirmBookingRole = async (req, res) => {
     if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
 
     const roleSlotId = String(req.body?.roleSlotId || buildRoleSlotId(role));
-    const { lineup } = await getActLineupContext(board);
+    const { act, lineup } = await getActLineupContext(board);
     const originalBandMember = findOriginalBandMemberForSlot({
       lineup,
       role,
       roleSlotId,
       requestedId: req.body?.originalBandMemberId,
     });
+    const rosterCheck = act ? await bookingRosterEligibility({act,lineup,board,candidate:musician,member:originalBandMember,roleSlotId}) : {eligible:true};
+    if(!rosterCheck.eligible) return res.status(409).json({success:false,code:'ROSTER_INELIGIBLE',message:rosterCheck.reason});
     const duties = Array.from(new Set(
       (Array.isArray(req.body?.duties) ? req.body.duties : [])
         .map((value) => String(value || "").trim())
@@ -1743,7 +1756,10 @@ export const triggerBookingRequests = async (req, res) => {
       bookingRef ||
       null;
 
-    for (const m of members) {
+    const rosterPolicy = await getRosterPolicy(act._id);
+    for (const originalMember of members) {
+      const m=selectRosterMember({member:originalMember,lineup,policy:rosterPolicy,address});
+      if(!m) continue;
       const roleLower = String(m?.instrument || "")
         .trim()
         .toLowerCase();
@@ -1823,6 +1839,7 @@ export const triggerBookingRequests = async (req, res) => {
           enquiryId: requestId,
           bookingRef: resolvedBookingRef,
           phone,
+          originalBandMemberId: originalMember._id,
           duties: m.instrument || "",
           fee: memberFee ? String(memberFee) : undefined,
           formattedDate,
@@ -2196,6 +2213,17 @@ export const twilioInboundBooking = async (req, res) => {
         ["accepted", "confirmed"].includes(String(currentSlot.status || "").toLowerCase()) &&
         String(currentSlot.musicianId || "") !== String(msg.musicianId || "");
 
+      const acceptanceContext = currentBoard ? await getActLineupContext(currentBoard) : {};
+      const acceptanceMember = acceptanceContext.lineup?.bandMembers?.find(m=>String(m._id)===String(msg.originalBandMemberId));
+      const acceptingProfile = msg.musicianId ? await Musician.findById(msg.musicianId).lean() : null;
+      const eligibility = acceptanceContext.act && acceptingProfile ? await bookingRosterEligibility({act:acceptanceContext.act,lineup:acceptanceContext.lineup,board:currentBoard,candidate:acceptingProfile,member:acceptanceMember,roleSlotId:msg.roleSlotId,address:msg.formattedAddress}) : {eligible:true};
+      if(!eligibility.eligible) {
+        await EnquiryMessage.updateOne({_id:msg._id},{$set:{reply:'unavailable',repliedAt:new Date()}});
+        await updateBoardRoleSlot(msg,{status:'declined',respondedAt:new Date()});
+        await escalateToNextDeputy(msg);
+        await sendInboundAcknowledgement({to:msg.phone || fromRaw,body:'This lineup needs a different combination of musicians. Management will review the allocation. Thank you for replying.',isWhatsApp:/^whatsapp:/i.test(fromRaw)||Boolean(req.body?.WaId)});
+        return res.status(200).send('<Response/>');
+      }
       if (isWonByAnother) {
         await EnquiryMessage.updateOne(
           { _id: msg._id },
@@ -2505,7 +2533,9 @@ export async function escalateToNextDeputy(msg) {
       return false;
     }
 
-    const deputies = current.deputies || [];
+    const rosterPolicy = await getRosterPolicy(act._id);
+    const rosterBoard = msg.bookingBoardItemId ? await bookingBoardItem.findById(msg.bookingBoardItemId).lean() : await resolveBoardItem(msg.bookingRef);
+    const deputies = eligibleRosterDeputies({member:current,lineup,policy:rosterPolicy,address:msg.formattedAddress || msg.meta?.MetaAddress,assignments:rosterBoard?.assignedMusicians || [],roleSlotId:msg.roleSlotId});
     if (!deputies.length) {
       console.log("ℹ️ No deputies — posting role to deputy job board");
       await postExhaustedRoleToDeputyBoard(msg, act);
@@ -2757,7 +2787,10 @@ export async function sendBookingRequestToLineup({ actId, lineupId, date, addres
 
   let sent = 0;
 
-  for (const m of members) {
+  const rosterPolicy = await getRosterPolicy(act._id);
+  for (const originalMember of members) {
+    const m=selectRosterMember({member:originalMember,lineup,policy:rosterPolicy,address});
+    if(!m) continue;
     const role = String(m?.instrument || "").trim().toLowerCase();
     if (!role || role === "manager" || role === "admin") continue; // performers only
 
@@ -2775,7 +2808,7 @@ export async function sendBookingRequestToLineup({ actId, lineupId, date, addres
     else if (!phone.startsWith("+")) phone = `+${phone}`;
 
     // fee = SAME logic as enquiry
-    const finalFee = resolvedFees.get(m);
+    const finalFee = resolvedFees.get(originalMember);
 
     // Keep a copy of the request for the message history. It is never used as
     // an automatic SMS fallback.

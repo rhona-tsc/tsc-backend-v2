@@ -1,6 +1,7 @@
 import express from "express";
 import authUser from "../middleware/auth.js";
 import {
+  updateRosterPolicy,
   copyFirstLineupDeputies,
   copyDeputiesFromAct,
   listRegularDeputies,
@@ -21,6 +22,7 @@ router.get("/unsubscribe", showRegularDeputyUnsubscribe);
 router.post("/unsubscribe", unsubscribeRegularDeputy);
 router.use(authUser);
 router.get("/", listRegularDeputies);
+router.put("/acts/:actId/policy", updateRosterPolicy);
 router.get("/musicians/search", searchRegularDeputyMusicians);
 router.post("/acts/:actId/copy-first-lineup", copyFirstLineupDeputies);
 router.post("/acts/:actId/copy-from-act", copyDeputiesFromAct);

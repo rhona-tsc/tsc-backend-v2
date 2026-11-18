@@ -1,3 +1,5 @@
+import ActRosterPolicy from '../models/actRosterPolicy.js';
+import {ROSTER_REGIONS} from '../utils/rosterEligibility.js';
 import { musicianEmailPreferencesUrl } from '../utils/musicianEmailPreferences.js';
 import { musicianOpportunityAllowed } from '../services/musicianEmailPreferenceService.js';
 import { musicianDirectoryVisibility } from '../services/musicianDirectoryVisibility.js';
@@ -40,6 +42,8 @@ const copyDeputySnapshot = (deputy) => ({
   email: clean(deputy?.email).toLowerCase(),
   phoneNumber: clean(deputy?.phoneNumber),
   image: clean(deputy?.image),
+  regions: deputy?.regions,
+  regionalPriority: deputy?.regionalPriority,
 });
 const hashToken = (token) => crypto.createHash("sha256").update(token).digest("hex");
 const emailHash = (email) => hashToken(normalise(email));
@@ -202,7 +206,9 @@ export const listRegularDeputies = async (req, res) => {
     const deputyAccountById = new Map(
       deputyAccounts.map((musician) => [String(musician._id), musician]),
     );
+    const policies = await ActRosterPolicy.find({actId: {$in: acts.map(a=>a._id)}}).lean();
     const safeActs = acts.map((act) => ({
+      rosterPolicy: policies.find(p=>String(p.actId)===String(act._id)) || {exclusions:[]},
       _id: act._id,
       name: act.tscName || act.name || "Unnamed act",
       status: act.status,
@@ -223,6 +229,7 @@ export const listRegularDeputies = async (req, res) => {
           return {
           memberId: member._id,
           role: member.instrument,
+          regions: member.regions || [],
           roleLabel,
           essentialAdditionalRoles,
           primary: {
@@ -237,6 +244,8 @@ export const listRegularDeputies = async (req, res) => {
             firstName: deputy.firstName || "",
             lastName: deputy.lastName || "",
             image: deputy.image || "",
+            regions: deputy.regions || [],
+            regionalPriority: deputy.regionalPriority || {},
             invitePending:
               deputyAccountById.has(deputyId(deputy)) &&
               deputyAccountById.get(deputyId(deputy))?.hasSetPassword !== true,
@@ -547,14 +556,27 @@ export const updateRegularDeputyRole = async (req, res) => {
     if (![actId, lineupId, memberId].every(validId)) return res.status(400).json({ success: false, message: "Invalid act role" });
     const action = clean(req.body?.action);
     const musicianId = clean(req.body?.musicianId);
-    if (!["replace_primary", "add_deputy", "remove_deputy", "reorder_deputies"].includes(action)) return res.status(400).json({ success: false, message: "Invalid update action" });
+    if (!["reorder_regional_deputies", "set_regions", "replace_primary", "add_deputy", "remove_deputy", "reorder_deputies"].includes(action)) return res.status(400).json({ success: false, message: "Invalid update action" });
     const act = await actModel.findById(actId);
     const lineup = act?.lineups?.id(lineupId);
     const member = lineup?.bandMembers?.id(memberId);
     if (!act || !lineup || !member) return res.status(404).json({ success: false, message: "Act role not found" });
 
     let selectedMusician = null;
-    if (action === "reorder_deputies") {
+    if(action === "reorder_regional_deputies") {
+      const region=req.body?.region, ids=req.body?.musicianIds;
+      if(!ROSTER_REGIONS.includes(region)||!Array.isArray(ids)) return res.status(400).json({success:false,message:'Choose a region and deputy order'});
+      const eligible=(member.deputies || []).filter(d=>!d.regions?.length || d.regions.includes(region));
+      const currentIds=eligible.map(deputyId);
+      if(ids.length!==currentIds.length || new Set(ids).size!==ids.length || currentIds.some(id=>!ids.includes(id))) return res.status(409).json({success:false,message:'Deputy list changed. Refresh before reordering.'});
+      eligible.forEach(d=>{d.regionalPriority={...(d.regionalPriority?.toObject?.() || d.regionalPriority || {}),[region]:ids.indexOf(deputyId(d))};});
+    } else if (action === "set_regions") {
+      const regions = req.body?.regions;
+      if (!Array.isArray(regions) || regions.some(r=>!ROSTER_REGIONS.includes(r)) || new Set(regions).size!==regions.length) return res.status(400).json({success:false,message:"Choose valid regions"});
+      const target = req.body?.primary === true ? member : (member.deputies || []).find(d=>deputyId(d)===musicianId);
+      if (!target) return res.status(404).json({success:false,message:"Deputy not found"});
+      target.regions=regions;
+    } else if (action === "reorder_deputies") {
       const requestedOrder = Array.isArray(req.body?.musicianIds)
         ? req.body.musicianIds.map(clean).filter(Boolean)
         : [];
@@ -586,6 +608,10 @@ export const updateRegularDeputyRole = async (req, res) => {
       selectedMusician = await musicianModel.findById(musicianId).lean();
       if (!selectedMusician) return res.status(404).json({ success: false, message: "Musician not found" });
       const snapshot = musicianSnapshot(selectedMusician);
+      if (action === 'add_deputy' && req.body?.regions !== undefined) {
+        if(!Array.isArray(req.body.regions) || req.body.regions.some(r=>!ROSTER_REGIONS.includes(r))) return res.status(400).json({success:false,message:'Choose valid deputy regions'});
+        snapshot.regions=[...new Set(req.body.regions)];
+      }
       if (action === "replace_primary") {
         member.musicianId = snapshot.musicianId;
         member.firstName = snapshot.firstName;
@@ -908,4 +934,17 @@ export const submitActMemberDetailsRequest = async (req, res) => {
     console.error("❌ submitActMemberDetailsRequest error:", error);
     return res.status(500).json({ success: false, message: "Failed to save your details" });
   }
+};
+
+export const updateRosterPolicy = async (req,res) => {
+  if(!requireAdmin(req,res)) return;
+  const exclusions=req.body?.exclusions;
+  if(!validId(req.params.actId) || !Array.isArray(exclusions) || exclusions.length>30) return res.status(400).json({success:false,message:'Invalid roster rules'});
+  const person=p=>p && (validId(p.musicianId) || clean(p.name)) && (!p.aliases || (Array.isArray(p.aliases) && p.aliases.every(a=>typeof a==='string')));
+  if(exclusions.some(r=>!person(r.person)||!Array.isArray(r.withPeople)||!r.withPeople.length||r.withPeople.some(p=>!person(p))||!clean(r.reason))) return res.status(400).json({success:false,message:'Each rule needs a musician, excluded colleagues and a reason'});
+  try {
+    if(!await actModel.exists({_id:req.params.actId})) return res.status(404).json({success:false,message:'Act not found'});
+    const policy=await ActRosterPolicy.findOneAndUpdate({actId:req.params.actId},{$set:{exclusions}},{upsert:true,new:true,runValidators:true});
+    return res.json({success:true,policy});
+  } catch(error){return res.status(500).json({success:false,message:'Could not save roster rules'});}
 };

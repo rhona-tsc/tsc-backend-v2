@@ -346,6 +346,7 @@ minDisplayPrice: { type: Number, default: null },
         bandMembers: [
           {
             musicianId: { type: String, default: "" },
+            regions: { type: [String], enum: ["south", "north", "scotland"], default: undefined },
             firstName: { type: String },
             lastName: { type: String },
             phoneNumber: { type: String },
@@ -399,6 +400,8 @@ minDisplayPrice: { type: Number, default: null },
                 id: { type: String },          // you use id/_id interchangeably in UI
                 _id: { type: String },         // keep if you're passing it
                 musicianId: { type: String },  // optional
+                regions: { type: [String], enum: ["south", "north", "scotland"], default: undefined },
+                regionalPriority: { south: Number, north: Number, scotland: Number },
 
                 // manual deputies
                 clientKey: { type: String },   // used for stable keys in your UI
