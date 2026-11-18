@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildRegionalRoster } from "../utils/buildRegionalRoster.js";
+import { websiteActView } from "../utils/websiteLineups.js";
 let next = 0;
 const newId = () => `id-${++next}`;
 const profiles = {
@@ -104,4 +105,23 @@ test("a conflicting existing lineup size blocks mutation rather than silently ch
       }),
     /Review 6-Piece/,
   );
+});
+test("an allocation-only trombone option stays available to admin without publishing an unpriced website lineup", () => {
+  const prepare = (act) =>
+    buildRegionalRoster({
+      act,
+      roster: {
+        ...roster,
+        extraLineup: { ...roster.extraLineup, allocationOnly: true },
+      },
+      resolvePerson: (n) => profiles[n],
+      newId,
+      newLineupId: newId,
+    });
+  const first = prepare({ ...act, hiddenWebsiteLineupIds: ["already-hidden"] });
+  assert.equal(first.lineups.length, 5);
+  assert.equal(websiteActView(first).lineups.length, 4);
+  assert.ok(first.hiddenWebsiteLineupIds.includes("already-hidden"));
+  const second = prepare(first);
+  assert.deepEqual(second.hiddenWebsiteLineupIds, first.hiddenWebsiteLineupIds);
 });

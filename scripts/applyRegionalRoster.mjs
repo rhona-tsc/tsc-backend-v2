@@ -100,6 +100,7 @@ try {
       BSON.EJSON.stringify({
         actId: act._id,
         lineups: act.lineups,
+        hiddenWebsiteLineupIds: act.hiddenWebsiteLineupIds,
         policy: oldPolicy,
       }),
       { mode: 0o600 },
@@ -110,13 +111,23 @@ try {
     const session = client.startSession();
     try {
       await session.withTransaction(async () => {
-        const updated = await db
-          .collection("acts")
-          .updateOne(
-            { _id: act._id, lineups: act.lineups },
-            { $set: { lineups: result.lineups, updatedAt: new Date() } },
-            { session },
-          );
+        const updated = await db.collection("acts").updateOne(
+          {
+            _id: act._id,
+            lineups: act.lineups,
+            hiddenWebsiteLineupIds: act.hiddenWebsiteLineupIds ?? {
+              $exists: false,
+            },
+          },
+          {
+            $set: {
+              lineups: result.lineups,
+              hiddenWebsiteLineupIds: result.hiddenWebsiteLineupIds,
+              updatedAt: new Date(),
+            },
+          },
+          { session },
+        );
         if (updated.matchedCount !== 1)
           throw Error("Act changed since review; no roster changes applied");
         const policies = db.collection("actrosterpolicies");
@@ -157,10 +168,17 @@ try {
     }
     const saved = await db
       .collection("acts")
-      .findOne({ _id: act._id }, { projection: { lineups: 1 } });
+      .findOne(
+        { _id: act._id },
+        { projection: { lineups: 1, hiddenWebsiteLineupIds: 1 } },
+      );
     const digest = (v) =>
       createHash("sha256").update(JSON.stringify(v)).digest("hex");
-    if (digest(saved.lineups) !== digest(result.lineups))
+    if (
+      digest(saved.lineups) !== digest(result.lineups) ||
+      digest(saved.hiddenWebsiteLineupIds) !==
+        digest(result.hiddenWebsiteLineupIds)
+    )
       throw Error("Read-back verification failed; use the saved backup");
     report.applied = true;
     report.backup = backup;

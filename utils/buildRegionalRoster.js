@@ -179,8 +179,18 @@ export function buildRegionalRoster({
       a.name.localeCompare(b.name) ||
       a.regions.join(",").localeCompare(b.regions.join(",")),
   );
+  // An allocation-only addition must not publish an unpriced website option.
+  const hiddenWebsiteLineupIds = [...(act.hiddenWebsiteLineupIds || [])];
+  if (ninth?.allocationOnly) {
+    const optional = lineups.find(
+      (l) => Number(String(l.actSize).match(/\d+/)?.[0]) === ninth.size,
+    );
+    const key = String(optional.lineupId || optional._id);
+    if (!hiddenWebsiteLineupIds.includes(key)) hiddenWebsiteLineupIds.push(key);
+  }
   return {
     lineups,
+    hiddenWebsiteLineupIds,
     policy: { exclusions: roster.exclusions, pendingMatches: uniquePending },
     summary: {
       lineups: lineups.map((l) => ({
