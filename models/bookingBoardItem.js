@@ -315,6 +315,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
     },
     clientEmails: [EmailSchema],
     clientEmail: { type: String },
+    automationCcEmails: { type: [String], default: [] },
     clientPhone: { type: String, default: "" },
     clientAddress: { type: String, default: "" },
     // Optional payer details used only for extras invoices and receipts.

@@ -69,3 +69,9 @@ test('main invoice includes extras only when explicitly selected', async () => {
   assert.match(text, /Parking/);
   assert.match(text, /Total due\s*£2,019\.24/);
 });
+test('client bank override displays domestic and international details together',async()=>{
+ const text=await render({...fixture(),contactRole:'agent',eventDateISO:'2026-12-31',invoiceDueDateISO:'2026-12-24',paymentInstructions:{accountName:'Rhona Gill Downie',bankName:'Barclays — THE BARCLAYS BANK A/C',sortCode:'20-44-91',accountNumber:'30465151',iban:'GB26BARC20449130465151',swiftBic:'BARCGB22'}});
+ for(const value of ['Rhona Gill Downie','20-44-91','30465151','GB26BARC20449130465151','BARCGB22'])assert.ok(text.includes(value));
+ assert.doesNotMatch(text,/Mettle/);
+ assert.match(text,/24 December 2026/);
+});

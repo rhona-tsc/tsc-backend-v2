@@ -1,3 +1,4 @@
+import { automationCc } from "../utils/automationCc.js";
 import { enableBirthdayReviewSequence } from "../services/birthdayReviewSequenceService.js";
 // routes/bookingBoardRoutes.js
 
@@ -277,7 +278,7 @@ export const buildIntroEmail = (row) => {
       </div>`;
   }
   const invoiceUrl = getIntroInvoiceUrl(row);
-  return { recipient, subject, text, html, invoiceUrl };
+  return { recipient, cc: automationCc(row, recipient), subject, text, html, invoiceUrl };
 };
 
 export const buildMusicianCancellationEmail = (row, musician, cancellationFeeAmount = 0) => {
@@ -2812,7 +2813,7 @@ router.post("/", musicianAuth, async (req, res) => {
         }
       };
       [
-        "bookerName", "clientFirstNames", "clientEmail", "clientEmails",
+        "bookerName", "clientFirstNames", "clientEmail", "clientEmails", "automationCcEmails",
         "clientPhone", "clientAddress", "contactRole", "agent", "eventType",
         "originalBookingTotal", "grossValue", "netCommission", "accounting", "depositInvoice",
         "paymentInstructions", "invoiceDateISO", "songSuggestionsDueDateISO",
@@ -3029,6 +3030,7 @@ router.get("/:id/intro-email/preview", musicianAuth, async (req, res) => {
       success: true,
       preview: {
         to: email.recipient,
+        cc: email.cc,
         subject: email.subject,
         html: email.html,
         text: email.text,
@@ -3190,6 +3192,7 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
     );
     const result = await sendEmail({
       to: email.recipient,
+      cc: email.cc,
       bcc: "hello@thesupremecollective.co.uk",
       subject: email.subject,
       html: email.html,
@@ -3211,6 +3214,7 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
         },
         {
           $set: {
+            cc: email.cc,
             automationNumber: INTRO_EMAIL_AUTOMATION_NUMBER,
             bookingRef: cleanString(row.bookingRef),
             recipient: email.recipient,

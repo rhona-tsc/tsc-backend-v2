@@ -849,7 +849,8 @@ const getDueDateThursdayWeekBefore = (eventDateValue) => {
 };
 
 const getSafeInvoiceDueDate = (row, eventDateValue) => {
-  return finalDetailsDueISO({ ...row, eventDateISO: eventDateValue });
+  return (row?.contactRole === "agent" && /^\d{4}-\d{2}-\d{2}$/.test(row.invoiceDueDateISO || "") ? row.invoiceDueDateISO : "")
+    || finalDetailsDueISO({ ...row, eventDateISO: eventDateValue });
 };
 
 const firstNonEmpty = (...values) =>
@@ -2028,37 +2029,17 @@ export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       const bankDetails = Object.keys(customBank).length
         ? customBank
         : invoiceCompany.bank || {};
-      doc.text(
-        `Account name: ${bankDetails.accountName || invoiceCompany.name}`,
-        cardX + 26,
-        paymentY + 16,
-      );
-      if (bankDetails.bankName) {
-        doc.text(
-          `Bank: ${bankDetails.bankName}`,
-          cardX + 26,
-          paymentY + 30,
-        );
-      }
-      doc.text(
-        bankDetails.iban
-          ? `IBAN: ${bankDetails.iban}`
-          : `Sort code: ${bankDetails.sortCode || ""}`,
-        cardX + 26,
-        paymentY + 44,
-      );
-      doc.text(
-        bankDetails.swiftBic
-          ? `SWIFT/BIC: ${bankDetails.swiftBic}`
-          : `Account number: ${bankDetails.accountNumber || ""}`,
-        cardX + 26,
-        paymentY + 58,
-      );
-      doc.text(
+      const bankLines = [
+        `Account holder: ${bankDetails.accountName || invoiceCompany.name}`,
+        ...(bankDetails.bankName ? [`Bank: ${bankDetails.bankName}`] : []),
+        ...(bankDetails.sortCode || bankDetails.accountNumber
+          ? [`Sort code: ${bankDetails.sortCode || ""} | Account: ${bankDetails.accountNumber || ""}`] : []),
+        ...(bankDetails.iban ? [`IBAN: ${bankDetails.iban}`] : []),
+        ...(bankDetails.swiftBic ? [`SWIFT/BIC: ${bankDetails.swiftBic}`] : []),
         `Payment reference: ${bankDetails.paymentReference || paymentReference}`,
-        cardX + 26,
-        paymentY + 72,
-      );
+      ];
+      doc.fontSize(8.5);
+      bankLines.forEach((line, index) => doc.text(line, cardX + 26, paymentY + 16 + index * 12, { width: 290 }));
     }
 
     doc

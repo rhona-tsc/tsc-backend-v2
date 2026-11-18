@@ -11,6 +11,7 @@ const ClientAutomationDeliverySchema = new mongoose.Schema(
     },
     bookingRef: { type: String, default: "", trim: true },
     recipient: { type: String, required: true, lowercase: true, trim: true },
+    cc: { type: [String], default: [] },
     subject: { type: String, default: "" },
     scheduledForISO: { type: String, default: "" },
     status: {

@@ -56,3 +56,10 @@ test('the new birthday template sends from the saved central rule, without enrol
  corporate.options.automationConfigModel=f.options.automationConfigModel;
  await corporate.run('2027-01-03');assert.equal(corporate.sent.length,0);
 });
+
+test('booking review copies the specifically configured office contact and records it', async t=>{
+ enable(t);const f=fixture();f.rows[0].automationCcEmails=['office@bubblesanimation.com'];
+ await f.run('2027-01-03');
+ assert.deepEqual(f.sent[0].cc,['office@bubblesanimation.com']);
+ assert.deepEqual([...f.records.values()].find(r=>r.status==='sent').cc,['office@bubblesanimation.com']);
+});

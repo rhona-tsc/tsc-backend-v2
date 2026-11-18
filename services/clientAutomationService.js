@@ -1,3 +1,4 @@
+import { automationCc } from "../utils/automationCc.js";
 import { AutomationConfig } from "../models/automationConfigModel.js";
 import { exclusiveReviewPlan, reviewPlanItems, reviewPlanSchedule, renderReviewPlanEmail } from "../utils/reviewRequestPlan.js";
 import { automationBodyToHtml } from "../utils/automationEmailTemplate.js";
@@ -1093,6 +1094,7 @@ export const runClientAutomations = async ({
         }
         const result = await emailSender({
           to: recipient,
+          cc: automationCc(row, recipient),
           bcc: "hello@thesupremecollective.co.uk",
           subject: email.subject,
           html: email.html,
@@ -1104,6 +1106,7 @@ export const runClientAutomations = async ({
         delivery.sentAt = new Date();
         delivery.messageId = result.messageId || "";
         delivery.invoiceAttached = attachInvoice;
+        delivery.cc = automationCc(row, recipient);
         await delivery.save();
         summary.sent += 1;
         schedulingRow.automationDeliveries.push({ automationNumber, status: "sent", sentAt: todayISO });
