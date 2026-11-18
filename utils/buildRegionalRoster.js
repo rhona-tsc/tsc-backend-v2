@@ -128,6 +128,10 @@ export function buildRegionalRoster({
       const member = findMember(l, role);
       if (!member) continue;
       member.regions = role.primaryRegions || [];
+      const primaryProfile = role.primary ? resolvePerson(role.primary) : null;
+      if (primaryProfile) {
+        member.musicianId = String(primaryProfile._id);
+      }
       if (role.primary && !member.musicianId && !resolvePerson(role.primary))
         pending.push({
           name: role.primary,
@@ -188,10 +192,30 @@ export function buildRegionalRoster({
     const key = String(optional.lineupId || optional._id);
     if (!hiddenWebsiteLineupIds.includes(key)) hiddenWebsiteLineupIds.push(key);
   }
+  const linkedRulePerson = (person) => {
+    if (person.musicianId) return person;
+    const profile = resolvePerson(person.name);
+    if (!profile) return person;
+    const display = personName(snapshot(profile));
+    return {
+      ...person,
+      musicianId: String(profile._id),
+      aliases: [...new Set([...(person.aliases || []), display])].filter(
+        (name) => name && name !== person.name,
+      ),
+    };
+  };
   return {
     lineups,
     hiddenWebsiteLineupIds,
-    policy: { exclusions: roster.exclusions, pendingMatches: uniquePending },
+    policy: {
+      exclusions: (roster.exclusions || []).map((rule) => ({
+        ...rule,
+        person: linkedRulePerson(rule.person),
+        withPeople: rule.withPeople.map(linkedRulePerson),
+      })),
+      pendingMatches: uniquePending,
+    },
     summary: {
       lineups: lineups.map((l) => ({
         size: l.actSize,

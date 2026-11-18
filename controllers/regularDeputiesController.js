@@ -67,7 +67,7 @@ const WEBSITE_URL = "https://thesupremecollective.co.uk";
 const INSTAGRAM_ICON_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777056960/instagram-icon_rtespa.png";
 const YOUTUBE_ICON_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777056960/1_lo9yf6.png";
 const WEBSITE_ICON_URL = "https://res.cloudinary.com/dvcgr3fyd/image/upload/v1777207820/website-icon_nuahjk.png";
-const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl, email, isPreview = false }) => {
+export const deputyInviteEmail = ({ recipientName, actName, roleName, setupUrl, email, isPreview = false }) => {
   const unsubscribeUrl = isPreview ? '#' : musicianEmailPreferencesUrl(email);
   const unsubscribeLabel = isPreview
     ? "Unsubscribe from deputy invitations (disabled in this test)"

@@ -125,3 +125,53 @@ test("an allocation-only trombone option stays available to admin without publis
   const second = prepare(first);
   assert.deepEqual(second.hiddenWebsiteLineupIds, first.hiddenWebsiteLineupIds);
 });
+test("a verified original profile links the existing slot without changing its name, fee or contact details", () => {
+  const input = {
+    ...act,
+    lineups: act.lineups.map((l) => ({
+      ...l,
+      bandMembers: [
+        ...l.bandMembers,
+        {
+          _id: "old-keys",
+          instrument: "Keyboard",
+          firstName: "Renes",
+          lastName: "Original display name",
+          fee: 275,
+          email: "preserved@example.test",
+          deputies: [],
+        },
+      ],
+    })),
+  };
+  const result = run(input),
+    member = result.lineups[0].bandMembers.at(-1);
+  assert.equal(member.musicianId, "renes");
+  assert.equal(member.lastName, "Original display name");
+  assert.equal(member.email, "preserved@example.test");
+  assert.equal(member.fee, 275);
+  assert.equal(
+    result.policy.pendingMatches.some((p) => p.name === "Renes BBWI"),
+    false,
+  );
+});
+test("allocation restrictions follow matched profile IDs and their display names", () => {
+  const result = buildRegionalRoster({
+    act,
+    roster: {
+      ...roster,
+      exclusions: [
+        {
+          person: { name: "Renes BBWI" },
+          withPeople: [{ name: "Matt Cook" }],
+          reason: "Reviewed pairing restriction",
+        },
+      ],
+    },
+    resolvePerson: (n) => profiles[n],
+    newId,
+    newLineupId: newId,
+  });
+  assert.equal(result.policy.exclusions[0].person.musicianId, "renes");
+  assert.equal(result.policy.exclusions[0].withPeople[0].musicianId, "matt");
+});
