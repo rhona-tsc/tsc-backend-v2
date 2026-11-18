@@ -54,7 +54,7 @@ const shiftISODate = (value, days) => {
 };
 
 const finalDueISO = (row = {}) =>
-  finalDetailsDueISO(row) || isoDate(row?.invoiceDueDateISO);
+  (row.contactRole === "agent" && isoDate(row?.invoiceDueDateISO)) || finalDetailsDueISO(row) || isoDate(row?.invoiceDueDateISO);
 
 const firstName = (value) => clean(value).split(/\s+/)[0] || "";
 

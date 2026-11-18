@@ -51,3 +51,11 @@ test('Encore intro copy never asks for original balance or claims deposit receip
     assert.doesNotMatch(email.html, /invoice for the balance|sending over the deposit/);
   }
 });
+
+test('agent intro uses explicit agreed deadlines without claiming an unverified deposit receipt', () => {
+  const email = buildIntroEmail({agent:'Direct',contactRole:'agent',actName:'Magnolia Sky',clientFirstNames:'Trevor',clientEmail:'example@example.test',eventType:"New Year celebrations",eventDateISO:'2026-12-31',songSuggestionsDueDateISO:'2026-11-30',invoiceDueDateISO:'2026-12-24',bookingRef:'EXAMPLE'});
+  assert.match(email.text,/30th November 2026/);
+  assert.match(email.text,/24th December 2026/);
+  assert.match(email.text,/for your clients and their guests/);
+  assert.doesNotMatch(email.text,/sending over the deposit|receipt for the deposit|around a week|attached invoice/);
+});
