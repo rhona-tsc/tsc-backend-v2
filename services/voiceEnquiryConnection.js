@@ -11,7 +11,7 @@ export function voiceConnectionConfig(env = process.env) {
   try { const u = new URL(env.VOICE_ENQUIRY_PUBLIC_BASE_URL); if (u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash) base = u.origin; } catch {}
   const config = {
     enabled: env.VOICE_ENQUIRY_ENABLED === 'true', base,
-    mode: env.VOICE_ENQUIRY_MODE === 'conversation' ? 'conversation' : 'voicemail',
+    mode: env.VOICE_ENQUIRY_MODE === 'conversation' ? 'conversation' : env.VOICE_ENQUIRY_MODE === 'voicemail' ? 'voicemail' : 'guided',
     twilioNumber: normalizeCallbackPhone(env.VOICE_ENQUIRY_TWILIO_NUMBER),
     apiKey: env.OPENAI_VOICE_API_KEY || '', webhookSecret: env.OPENAI_VOICE_WEBHOOK_SECRET || '',
     twilioToken: env.TWILIO_AUTH_TOKEN || '', bridgeSecret: env.VOICE_ENQUIRY_BRIDGE_SECRET || '',

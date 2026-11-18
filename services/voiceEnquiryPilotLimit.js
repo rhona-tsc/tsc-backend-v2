@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 
-// User approved three further calls on 12 November and two on 17 November, within the original £10.
+// User approved three further calls on 12 November, two on 17 November and two on 18 November, within the original £10.
 // Preserve the same project meter and all previously consumed calls.
-export const VOICE_PILOT_MAX_CALLS = 10;
+export const VOICE_PILOT_MAX_CALLS = 12;
 
 // One allowance per project, across restarts/replicas. Keep this meter after expiry.
 export async function reserveVoicePilotCall({ projectId, callSid, endsAt, now = Date.now(), collection }) {
