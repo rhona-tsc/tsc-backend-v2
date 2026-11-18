@@ -6,7 +6,7 @@ import {createVoiceEnquiryRouter} from '../routes/voiceEnquiryRoutes.js';
 import {voiceCallRef,managementCallEmail} from '../services/voiceCallReview.js';
 import {voiceConnectionConfig} from '../services/voiceEnquiryConnection.js';
 import {GUIDED_QUESTIONS,guidedQuestionXml,guidedClosing,guidedConsent,publicGuidedReview,publicGuidedRecording} from '../services/voiceGuidedFlow.js';
-import {initializeGuidedIntake,readGuidedIntake,acceptGuidedAnswer,acceptGuidedConsent,queueGuidedRecording,closeGuidedIntake,processGuidedAnswer,finalizeGuidedIntake,literalGuidedFields} from '../services/voiceGuidedIntake.js';
+import {initializeGuidedIntake,readGuidedIntake,acceptGuidedAnswer,acceptGuidedConsent,queueGuidedRecording,closeGuidedIntake,processGuidedAnswer,finalizeGuidedIntake,literalGuidedFields,guidedContactPreferences} from '../services/voiceGuidedIntake.js';
 const sid=`CA${'a'.repeat(32)}`,account=`AC${'b'.repeat(32)}`,record=i=>`RE${i.toString(16).padStart(32,'0')}`;
 const get=(obj,path)=>path.split('.').reduce((v,k)=>v?.[k],obj);
 function set(obj,path,value){const keys=path.split('.');let target=obj;for(const k of keys.slice(0,-1))target=target[k]||=( {} );target[keys.at(-1)]=structuredClone(value);}
@@ -44,14 +44,14 @@ test('signed complete call advances in order; action retries, callback races and
    assert.equal(collection.row().guided.step,step);
    const next=await post(`guided/answer/${step}`,data);assert.equal(next.status,200);const xml=await next.text();
    assert.equal(collection.row().guided.step,step+1);
-   assert.match(xml,step<6?new RegExp(`guided/answer/${step+1}#`):/may we email you quotes/);
+   assert.match(xml,step<6?new RegExp(`guided/answer/${step+1}#`):/saved your answers and follow-up preferences/);if(step===6)assert.doesNotMatch(xml,/<Record|<Gather|Finally, may/);
    assert.equal((await post(`guided/answer/${step}`,data)).status,200);assert.equal(collection.row().guided.step,step+1);
    assert.equal((await post(`guided/recording/${step}`,{...callback,RecordingSid:record(99)})).status,404);
   }
   const ending=await(await post('guided/consent',{...ingress,Digits:'3'})).text();
-  assert.match(ending,/phone follow-up only/);assert.match(ending,/pilot test/);assert.doesNotMatch(ending,/<Record|<Gather|send confirmed availability|all the information/);
-  assert.equal(collection.row().guided.status,'complete');assert.deepEqual(collection.row().guided.consent.emailQuotes,false);assert.equal(collection.row().guided.consent.phoneFollowup,true);
-  await post('guided/consent',{...ingress,Digits:'1'});assert.equal(collection.row().guided.consent.emailQuotes,false);assert.equal(reserved,1);
+  assert.match(ending,/saved your answers and follow-up preferences/);assert.match(ending,/pilot test/);assert.doesNotMatch(ending,/<Record|<Gather|send confirmed availability|all the information/);
+  assert.equal(collection.row().guided.status,'complete');assert.equal(collection.row().guided.version,2);assert.equal(collection.row().guided.consent,undefined);
+  await post('guided/consent',{...ingress,Digits:'1'});assert.equal(collection.row().guided.consent,undefined);assert.equal(reserved,1);
  }finally{server.closeAllConnections();await new Promise(r=>server.close(r));restore();}
 });
 
@@ -121,4 +121,28 @@ test('an interpretation outage still saves literal contact, event and budget fie
  assert.equal(literalGuidedFields(row).clientEmail,'mary.example@example.com');
  await finalizeGuidedIntake(row,{collection,extract:async()=>{throw Error('unavailable');},saveDraft:async(id,draft)=>{saved=draft;},saveConsent:async()=>{},lookupBands:async()=>{throw Error('No guesses on interpreter failure');},finish:async()=>{finished++;}});
  assert.equal(saved.clientName,'Mary Example');assert.equal(saved.clientEmail,'mary.example@example.com');assert.equal(saved.clientPhone,'+447700900123');assert.equal(saved.eventDateISO,'2028-07-14');assert.equal(saved.maxBudget,4000);assert.match(saved.address,/Example Hall/);assert.match(saved.requirements,/DJ add-on/);assert.equal(finished,1);assert.equal(collection.row().guided.interpretationStatus,'needs_review');assert.match(collection.row().voicemail.lastError,/original recordings are saved/);
+});
+
+
+test('contact questions ask the follow-up purpose at that stage and need no final permission question',()=>{
+ assert.match(GUIDED_QUESTIONS[1].prompt,/follow up.*by phone/);assert.match(GUIDED_QUESTIONS[1].prompt,/no phone calls/);
+ assert.match(GUIDED_QUESTIONS[2].prompt,/quotes by email/);assert.match(GUIDED_QUESTIONS[2].prompt,/no email quotes/);
+ const row={...fresh(),guided:{version:2,step:7,status:'complete',answers:{}}};
+ const xml=guidedQuestionXml(row,{base:'https://example.com'});assert.match(xml,/Thank you/);assert.doesNotMatch(xml,/<Gather|Finally|press 1|chosen not/);
+});
+
+test('recorded contact answers distinguish channel permission, refusals and unclear replies',()=>{
+ const row={...fresh(),guided:{version:2,answers:{phone:{transcript:'Use this number please'},email:{transcript:'mary@example.com'}}}};
+ assert.deepEqual(guidedContactPreferences(row),{emailQuotes:true,phoneFollowup:true,method:'recorded_contact_answers'});
+ row.guided.answers.phone.transcript="My number is 07700900123 but please don't call me";row.guided.answers.email.transcript='No email quotes thank you';
+ assert.deepEqual(guidedContactPreferences(row),{emailQuotes:false,phoneFollowup:false,method:'recorded_contact_answers'});
+ row.guided.answers.phone.transcript='Maybe, I am not sure';delete row.guided.answers.email;
+ assert.deepEqual(guidedContactPreferences(row),{emailQuotes:null,phoneFollowup:null,method:'recorded_contact_answers'});
+ const review=publicGuidedReview({...row,guided:{...row.guided,consent:guidedContactPreferences(row)}});assert.equal(review.consent.phoneFollowup,null);assert.equal(review.consent.emailQuotes,null);
+});
+
+test('version two saves earlier contact permissions on complete and interrupted drafts without trusting the model for consent',async()=>{
+ const row={...fresh(),guided:{version:2,status:'interrupted',answers:{phone:{transcript:'Yes, use this number please',status:'stored'},email:{transcript:'No email quotes',status:'stored'}}}},collection=memory(row);let saved,consent;
+ await finalizeGuidedIntake(row,{collection,extract:async()=>{throw Error('interpretation unavailable');},saveDraft:async(id,draft)=>{saved=draft;},saveConsent:async(id,value)=>{consent=value;},finish:async()=>{}});
+ assert.equal(saved.preferredContactMethod,'phone');assert.equal(saved.clientPhone,'+447700900123');assert.equal(consent.emailQuotes,false);assert.equal(consent.phoneFollowup,true);assert.equal(consent.method,'recorded_contact_answers');assert.equal(collection.row().guided.consent.phoneFollowup,true);
 });

@@ -20,7 +20,7 @@ const post=(...args)=>{const handler=args.pop();router.post(...args,(req,res,nex
 const sessions = new Map();
 let reserving = false;
 const path = '/api/voice-enquiries';
-router.get('/health',(_req,res)=>{const config=voiceConnectionConfig();res.set('Cache-Control','no-store').json({enabled:config.enabled&&config.ready,mode:config.mode,testMode:true,recordsNewMessages:['voicemail','guided'].includes(config.mode),questionByQuestion:config.mode==='guided'});});
+router.get('/health',(_req,res)=>{const config=voiceConnectionConfig();res.set('Cache-Control','no-store').json({enabled:config.enabled&&config.ready,mode:config.mode,testMode:true,recordsNewMessages:['voicemail','guided'].includes(config.mode),questionByQuestion:config.mode==='guided',guidedFlowVersion:2});});
 const failureXml=()=>{const xml=new twilio.twiml.VoiceResponse();xml.say({voice:'Polly.Amy',language:'en-GB'},"Sorry, The Supreme Collective's message service is temporarily unavailable. We can't confirm that your message was received. Please try calling again shortly.");xml.hangup();return xml.toString();};
 router.use('/twilio',(req,res,next)=>{
   res.set('Cache-Control','no-store');const send=res.send.bind(res);
@@ -117,6 +117,7 @@ post('/twilio/guided/answer/:step',express.urlencoded({extended:false,limit:'16k
   const config=voiceConnectionConfig();if(!validGuidedCallback(req,config))return res.sendStatus(403);
   if(!/^[0-6]$/.test(req.params.step))return res.sendStatus(400);
   const row=await guided.answer(req.body.CallSid,Number(req.params.step),req.body);if(!row)return res.sendStatus(404);
+  if(row.guided.status!=='collecting')sessions.delete(req.body.CallSid);
   return res.type('text/xml').send(guidedQuestionXml(row,config,{notice:req.body.Digits&&req.body.Digits!=='hangup'?'Thank you.':''}));
 });
 post('/twilio/guided/recording/:step',express.urlencoded({extended:false,limit:'16kb'}),async(req,res)=>{

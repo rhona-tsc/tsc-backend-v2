@@ -1,11 +1,12 @@
 import mongoose from 'mongoose';
 import twilio from 'twilio';
 import {voiceCallRef,finishVoiceCallReview} from './voiceCallReview.js';
-import {GUIDED_QUESTIONS,guidedConsent,guidedRemaining} from './voiceGuidedFlow.js';
+import {GUIDED_QUESTIONS,guidedConsent,guidedRemaining,guidedPermissionLabel} from './voiceGuidedFlow.js';
 import {downloadTwilioRecording,storeVoiceAudio,readVoiceAudio,removeVoiceProviderCopy,transcribeVoicemail,extractVoicemailFields,voicemailDraft} from './voiceVoicemail.js';
 import {saveVoiceDraft,lookupVoiceBands} from './voiceEnquiryStore.js';
 import {normalizeBandSearch} from './voiceBandMatching.js';
 import EnquiryBoardItem from '../models/enquiryBoardItem.js';
+import {normalizeCallbackPhone} from './incomingEnquiryAssistant.js';
 const calls=()=>mongoose.connection.db.collection('voice_call_reviews');
 const liveFilter=callSid=>({_id:voiceCallRef(callSid),intent:'guided_enquiry',expiresAt:{$gt:new Date()}});
 const validSid=sid=>/^CA[a-f\d]{32}$/i.test(sid||'');
@@ -15,7 +16,7 @@ export async function readGuidedIntake(callSid,{collection=calls()}={}){
   return collection.findOne(liveFilter(callSid),{maxTimeMS:1500});
 }
 export async function initializeGuidedIntake(callSid,{collection=calls()}={}){
-  await collection.updateOne({...liveFilter(callSid),guided:{$exists:false}},{$set:{guided:{version:1,step:0,status:'collecting',answers:{},consentAttempts:0},status:'in_progress'}},{maxTimeMS:1500});
+  await collection.updateOne({...liveFilter(callSid),guided:{$exists:false}},{$set:{guided:{version:2,step:0,status:'collecting',answers:{},consentAttempts:0},status:'in_progress'}},{maxTimeMS:1500});
   return readGuidedIntake(callSid,{collection});
 }
 export async function closeGuidedIntake(callSid,reason='interrupted',{collection=calls()}={}){
@@ -47,11 +48,12 @@ export async function acceptGuidedAnswer(callSid,step,body,{collection=calls()}=
   const key=GUIDED_QUESTIONS[step].key;
   await collection.updateOne({...liveFilter(callSid),[`guided.answers.${key}.sid`]:body.RecordingSid},{$set:{[`guided.answers.${key}.endedWithHash`]:body.Digits==='#'}},{maxTimeMS:1500});
   if(body.Digits==='hangup')return closeGuidedIntake(callSid,'interrupted',{collection});
-  await collection.updateOne({...liveFilter(callSid),'guided.step':step,'guided.status':'collecting'},{$inc:{'guided.step':1},$set:{'guided.lastAnswerAt':new Date()}},{maxTimeMS:1500});
+  const finished=row.guided.version>=2&&step===GUIDED_QUESTIONS.length-1;
+  await collection.updateOne({...liveFilter(callSid),'guided.step':step,'guided.status':'collecting'},{$inc:{'guided.step':1},$set:{'guided.lastAnswerAt':new Date(),...(finished?{'guided.status':'complete','guided.closedAt':new Date(),status:'message_processing'}:{})}},{maxTimeMS:1500});
   return readGuidedIntake(callSid,{collection});
 }
 export async function acceptGuidedConsent(callSid,digit,{collection=calls()}={}){
-  const row=await readGuidedIntake(callSid,{collection});if(!row||row.guided.step!==GUIDED_QUESTIONS.length||row.guided.status!=='collecting')return row;
+  const row=await readGuidedIntake(callSid,{collection});if(!row||row.guided.version>=2||row.guided.step!==GUIDED_QUESTIONS.length||row.guided.status!=='collecting')return row;
   const consent=guidedConsent(digit);
   if(!consent){
     await collection.updateOne({...liveFilter(callSid),'guided.status':'collecting'},{$inc:{'guided.consentAttempts':1}},{maxTimeMS:1500});
@@ -95,23 +97,40 @@ export function literalGuidedFields(row){
   const numberWords=['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve'];
   return {clientName:name,clientPhone:phone?.[0]||'',clientEmail:email,eventDateISO:iso,address:text('location'),styles:[],mustHaveInstruments:[],preferredSize:size?`${Number(size[1])||numberWords.indexOf(size[1].toLowerCase())}-piece`:'',maxBudget:budget?Number((budget[1]||budget[2]).replace(/,/g,'')):0,topic:'client_event',reason:'Guided band enquiry',notes:guidedTranscript(row),bandNames:[]};
 }
+// The contact prompts explicitly ask callers to supply a number/address only if
+// they want that enquiry follow-up. Refusals and uncertainty override supplied details.
+export function guidedContactPreferences(row){
+  const literal=literalGuidedFields(row),answer=key=>String(row.guided.answers?.[key]?.transcript||'').trim();
+  const uncertain=text=>/\b(?:not sure|unsure|maybe|possibly|haven't decided)\b/i.test(text);
+  const yes=text=>/^(?:yes|yeah|yep|sure|okay|ok|absolutely|that's fine|that is fine)\b/i.test(text)||/\b(?:happy|fine|okay|ok) (?:for|to|with)\b/i.test(text);
+  const phone=answer('phone'),email=answer('email');
+  const refusal=text=>/^(?:no|nope)\b|\b(?:do not|don't|not happy|rather not|prefer not|not comfortable|not okay)\b/i.test(text);
+  const allAnswers=GUIDED_QUESTIONS.map(q=>String(row.guided.answers?.[q.key]?.transcript||'')).join(' \n ');
+  const phoneRevoked=/\b(?:no phone calls|(?:do not|don't) (?:call|phone) (?:me|us)|no (?:phone|telephone) follow[- ]?up)\b/i.test(allAnswers);
+  const emailRevoked=/\b(?:no email quotes|(?:do not|don't) email (?:me|us)|(?:do not|don't) send (?:me |us )?(?:quotes by email|email quotes))\b/i.test(allAnswers);
+  const phoneNo=phoneRevoked||refusal(phone)||/\bno (?:phone|calls?|callback)|\b(?:email|whats ?app) only\b/i.test(phone);
+  const emailNo=emailRevoked||refusal(email)||/\bno (?:email|quotes)|\b(?:phone|calls?|whats ?app) only\b/i.test(email);
+  const phoneProvided=!!normalizeCallbackPhone(literal.clientPhone)||/\buse (?:this|the same|my calling) number\b/i.test(phone)&&!!normalizeCallbackPhone(row.caller);
+  return {emailQuotes:emailNo?false:!email?null:uncertain(email)?null:yes(email)||!!literal.clientEmail?true:null,phoneFollowup:phoneNo?false:!phone?null:uncertain(phone)?null:yes(phone)||phoneProvided?true:null,method:'recorded_contact_answers'};
+}
 export async function finalizeGuidedIntake(row,{collection=calls(),extract=extractVoicemailFields,saveDraft=saveVoiceDraft,lookupBands=lookupVoiceBands,finish=finishVoiceCallReview,saveConsent=async(sid,consent)=>EnquiryBoardItem.updateOne({websiteKey:`phone:${sid}`,captureState:'draft'},{$set:{'draftDetails.guidedConsent':consent}})}={}){
   const transcript=guidedTranscript(row),turns=guidedTurns(row);
   try{
     const literal=literalGuidedFields(row);let interpretationUnavailable=false,extracted=literal;
     // The recording and literal answers are useful on their own; model interpretation is optional.
     await saveDraft(row.callSid,voicemailDraft(transcript,literal));
-    try{if(transcript)extracted={...literal,...await extract(transcript,{additionalInstructions:'This message is a labelled questionnaire. Name, phone, email, event date and event location must come ONLY from their respective labelled answers. Do not use question text as caller facts. Keep specific song requests, DJ add-ons, modern/classic style nuances and any uncertainty in notes. Contact permissions are stored separately by keypad; do not infer consent from this transcript.'})};}catch{interpretationUnavailable=true;}
+    try{if(transcript)extracted={...literal,...await extract(transcript,{additionalInstructions:'This message is a labelled questionnaire. Name, phone, email, event date and event location must come ONLY from their respective labelled answers. Do not use question text as caller facts. Keep specific song requests, DJ add-ons, modern/classic style nuances and any uncertainty in notes. Contact permissions are handled separately by the application; do not infer consent from this transcript.'})};}catch{interpretationUnavailable=true;}
     // Keep exact literal contact values when they are recognizable; never use a different section.
     for(const key of ['clientName','clientPhone','clientEmail'])if(literal[key])extracted[key]=literal[key];
     const draft=voicemailDraft(transcript,extracted);
     for(const [key,field] of [['name','clientName'],['phone','clientPhone'],['email','clientEmail'],['event_date','eventDateISO'],['location','address'],['location','postcode']])if(!row.guided.answers?.[key]?.transcript)delete draft[field];
     const phone=row.guided.answers?.phone?.transcript||'';
     if(/\buse (?:this|the same|my calling) number\b/i.test(phone)&&/^\+\d{10,15}$/.test(row.caller||''))draft.clientPhone=row.caller;
-    const permission=row.guided.consent;
+    const permission=row.guided.version>=2?guidedContactPreferences(row):row.guided.consent;
+    if(row.guided.version>=2)await collection.updateOne(liveFilter(row.callSid),{$set:{'guided.consent':permission}});
     if(permission?.emailQuotes&&draft.clientEmail)draft.preferredContactMethod='email';else if(permission?.phoneFollowup&&draft.clientPhone)draft.preferredContactMethod='phone';
-    draft.requirements=[guidedTranscript(row),draft.requirements,permission?`Caller follow-up permission by keypad: email quotes ${permission.emailQuotes?'yes':'no'}; phone ${permission.phoneFollowup?'yes':'no'}.`:'Follow-up permission not completed; do not contact until reviewed.'].filter(Boolean).join('; ').slice(0,2000);
-    await saveDraft(row.callSid,draft);await saveConsent(row.callSid,permission?{emailQuotes:permission.emailQuotes,phoneFollowup:permission.phoneFollowup,method:'keypad',at:permission.at}:{emailQuotes:false,phoneFollowup:false,method:'not_completed'});
+    draft.requirements=[guidedTranscript(row),draft.requirements,permission?`Caller follow-up permission (${permission.method||'keypad'}): email quotes ${guidedPermissionLabel(permission.emailQuotes)}; phone ${guidedPermissionLabel(permission.phoneFollowup)}.`:'Follow-up permission not completed; do not contact until reviewed.'].filter(Boolean).join('; ').slice(0,2000);
+    await saveDraft(row.callSid,draft);await saveConsent(row.callSid,permission?{emailQuotes:permission.emailQuotes,phoneFollowup:permission.phoneFollowup,method:permission.method||'keypad',...(permission.at?{at:permission.at}:{})}:{emailQuotes:false,phoneFollowup:false,method:'not_completed'});
     let suggestions=[];const criteria=normalizeBandSearch(draft);
     if(!interpretationUnavailable&&extracted.topic==='client_event'&&!criteria.unknown.length&&(criteria.styles.length||criteria.mustHaveInstruments.length||draft.preferredSize||draft.preferredBands)){
       for(const query of extracted.bandNames?.length?extracted.bandNames.slice(0,3):['']){const found=await lookupBands({...criteria,query});suggestions.push(...(found.bands||[]));}suggestions=[...new Map(suggestions.map(b=>[b.actId,b])).values()].slice(0,3);
