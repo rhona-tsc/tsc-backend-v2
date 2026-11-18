@@ -818,6 +818,7 @@ const buildBlockedAutomation4Alert = (row, missing) => {
 };
 
 export const APPROVED_CLIENT_AUTOMATION_EMAILS = [
+  "f.a.podd@gmail.com",
   "susie@tigproductions.co.uk",
   "james@tlfservices.co.uk",
   "georgia.hyndman@ukimediaevents.com",
