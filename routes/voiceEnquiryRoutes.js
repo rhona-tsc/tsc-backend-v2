@@ -1,4 +1,6 @@
-import {selectGuidedRoute,prepareGuidedCallbackSlots,selectGuidedCallbackSlot,readGuidedCallbackTimes} from '../services/voiceGuidedCallback.js';
+import {enforceLiveVoiceDuration} from '../services/voiceLiveCall.js';
+import {reserveLiveVoiceCall,VOICE_LIVE_MONTHLY_LIMIT_PENCE} from '../services/voiceLiveBudget.js';
+import {selectGuidedRoute,prepareGuidedCallbackSlots,selectGuidedCallbackSlot,readGuidedCallbackTimes,completeGuidedCallbackBooking} from '../services/voiceGuidedCallback.js';
 import {guidedQuestionXml,GUIDED_ANSWER_INSTRUCTIONS} from '../services/voiceGuidedFlow.js';
 import {initializeGuidedIntake,readGuidedIntake,acceptGuidedAnswer,acceptGuidedConsent,queueGuidedRecording,closeGuidedIntake} from '../services/voiceGuidedIntake.js';
 import { startVoiceCallReview, createStoredCallTranscript, finishVoiceCallReview,readVoiceIntake } from '../services/voiceCallReview.js';
@@ -15,13 +17,14 @@ import { voiceConnectionConfig, signVoiceBridge, verifyVoiceBridge, buildEnquiry
 import { reserveVoicePilotCall } from '../services/voiceEnquiryPilotLimit.js';
 import {VOICEMAIL_GREETING,VOICEMAIL_THANKS,queueVoiceRecording} from '../services/voiceVoicemail.js';
 
-export function createVoiceEnquiryRouter({ reservePilotCall = reserveVoicePilotCall, startReview = startVoiceCallReview, createTranscript = createStoredCallTranscript, finishReview = finishVoiceCallReview,queueRecording=queueVoiceRecording,readIntake=readVoiceIntake,guided={initialize:initializeGuidedIntake,read:readGuidedIntake,answer:acceptGuidedAnswer,consent:acceptGuidedConsent,recording:queueGuidedRecording,close:closeGuidedIntake},callback={route:selectGuidedRoute,prepare:prepareGuidedCallbackSlots,select:selectGuidedCallbackSlot,times:readGuidedCallbackTimes} } = {}) {
+export function createVoiceEnquiryRouter({ reservePilotCall = reserveVoicePilotCall,reserveLiveCall=reserveLiveVoiceCall,limitLiveDuration=enforceLiveVoiceDuration, startReview = startVoiceCallReview, createTranscript = createStoredCallTranscript, finishReview = finishVoiceCallReview,queueRecording=queueVoiceRecording,readIntake=readVoiceIntake,guided={initialize:initializeGuidedIntake,read:readGuidedIntake,answer:acceptGuidedAnswer,consent:acceptGuidedConsent,recording:queueGuidedRecording,close:closeGuidedIntake},callback={route:selectGuidedRoute,prepare:prepareGuidedCallbackSlots,select:selectGuidedCallbackSlot,times:readGuidedCallbackTimes,book:completeGuidedCallbackBooking} } = {}) {
 const router = express.Router();
 const post=(...args)=>{const handler=args.pop();router.post(...args,(req,res,next)=>Promise.resolve().then(()=>handler(req,res,next)).catch(next));};
 const sessions = new Map();
 let reserving = false;
 const path = '/api/voice-enquiries';
-router.get('/health',(_req,res)=>{const config=voiceConnectionConfig();res.set('Cache-Control','no-store').json({enabled:config.enabled&&config.ready,mode:config.mode,testMode:true,recordsNewMessages:['voicemail','guided'].includes(config.mode),questionByQuestion:config.mode==='guided',guidedFlowVersion:3});});
+router.get('/health',(_req,res)=>{const config=voiceConnectionConfig();res.set('Cache-Control','no-store').json({enabled:config.enabled&&config.ready,mode:config.mode,testMode:!config.live,monthlyLimitGBP:config.live?VOICE_LIVE_MONTHLY_LIMIT_PENCE/100:null,recordsNewMessages:['voicemail','guided'].includes(config.mode),questionByQuestion:config.mode==='guided',guidedFlowVersion:3});});
+const rejectXml=()=>{const xml=new twilio.twiml.VoiceResponse();xml.reject({reason:'busy'});return xml.toString();};
 const failureXml=()=>{const xml=new twilio.twiml.VoiceResponse();xml.say({voice:'Polly.Amy',language:'en-GB'},"Sorry, The Supreme Collective's message service is temporarily unavailable. We can't confirm that your message was received. Please try calling again shortly.");xml.hangup();return xml.toString();};
 router.use('/twilio',(req,res,next)=>{
   res.set('Cache-Control','no-store');const send=res.send.bind(res);
@@ -45,11 +48,11 @@ function sayContact(res) {
 // Mount this router BEFORE the application's general JSON body parser.
 post('/twilio/incoming', express.urlencoded({ extended: false, limit: '16kb' }), async (req, res) => {
   const config = voiceConnectionConfig();
-  if (!config.enabled || !config.ready) return res.sendStatus(503);
+  if (!config.enabled || !config.ready) return config.liveRequested?res.type('text/xml').send(rejectXml()):res.sendStatus(503);
   const valid = twilio.validateRequest(config.twilioToken, req.get('X-Twilio-Signature') || '', `${config.base}${path}/twilio/incoming`, req.body);
   if (!valid) return res.sendStatus(403);
   const from = normalizeCallbackPhone(req.body.From);
-  if (normalizeCallbackPhone(req.body.To) !== config.twilioNumber || !config.testCallers.includes(from) || !/^CA[0-9a-f]{32}$/i.test(req.body.CallSid || '')) return sayContact(res);
+  if (normalizeCallbackPhone(req.body.To) !== config.twilioNumber || !config.live&&!config.testCallers.includes(from) || !/^CA[0-9a-f]{32}$/i.test(req.body.CallSid || '')) return config.live?res.type('text/xml').send(rejectXml()):sayContact(res);
   const xml = new twilio.twiml.VoiceResponse();
   if(config.mode==='guided'){
     const now=Date.now(),sid=req.body.CallSid;
@@ -57,15 +60,16 @@ post('/twilio/incoming', express.urlencoded({ extended: false, limit: '16kb' }),
     let row=await readIntake(sid,from);
     if(row&&row.intent!=='guided_enquiry'){xml.say({voice:'Polly.Amy',language:'en-GB'},VOICEMAIL_THANKS);xml.hangup();return res.type('text/xml').send(xml.toString());}
     if(!row){
-      if(reserving||sessions.size)return sayContact(res);
+      if(reserving||sessions.size>=(config.live?2:1))return config.live?res.type('text/xml').send(rejectXml()):sayContact(res);
       reserving=true;
       try{
-        if(!await reservePilotCall({projectId:config.projectId,callSid:sid,endsAt:config.testEndsAt,now}))return sayContact(res);
-        await startReview({callSid:sid,caller:from,intent:'guided_enquiry'});
+        const reserved=config.live?await reserveLiveCall({projectId:config.projectId,callSid:sid,now:new Date(now)}):await reservePilotCall({projectId:config.projectId,callSid:sid,endsAt:config.testEndsAt,now});
+        if(!reserved)return config.live?res.type('text/xml').send(rejectXml()):sayContact(res);
+        await startReview({callSid:sid,caller:from,intent:'guided_enquiry',testMode:!config.live});
         row=await guided.initialize(sid);
       }finally{reserving=false;}
     }
-    if(!row?.guided)return res.status(503).type('text/xml').send(failureXml());
+    if(!row?.guided)return config.live?res.type('text/xml').send(rejectXml()):res.status(503).type('text/xml').send(failureXml());
     sessions.set(sid,{intent:'guided_enquiry',expiresAt:+new Date(row.startedAt)+(VOICE_MAX_SECONDS+60)*1000});
     return res.type('text/xml').send(guidedQuestionXml(row,config,{opening:row.guided.version<3&&row.guided.step===0}));
   }
@@ -116,13 +120,15 @@ function validGuidedCallback(req,config){
 }
 post('/twilio/guided/route',express.urlencoded({extended:false,limit:'16kb'}),async(req,res)=>{
   const config=voiceConnectionConfig();if(!validGuidedCallback(req,config))return res.sendStatus(403);
-  const before=await guided.read(req.body.CallSid),row=await callback.route(req.body.CallSid,req.body.Digits);if(!row)return res.sendStatus(404);
+  const before=await guided.read(req.body.CallSid);
+  if(before?.testMode===false&&!await limitLiveDuration(before)){await guided.close(req.body.CallSid);const xml=new twilio.twiml.VoiceResponse();xml.say({voice:'Polly.Amy',language:'en-GB'},'Sorry, the phone assistant is temporarily unavailable. Please use the contact page at the supreme collective dot co dot uk.');xml.hangup();return res.type('text/xml').send(xml.toString());}
+  const row=await callback.route(req.body.CallSid,req.body.Digits);if(!row)return res.sendStatus(404);
   if(row.guided.kind==='callback')void callback.prepare(req.body.CallSid).catch(()=>{});
   return res.type('text/xml').send(guidedQuestionXml(row,config,{notice:before?.guided.route==='menu'?GUIDED_ANSWER_INSTRUCTIONS:''}));
 });
 post('/twilio/guided/callback-times',express.urlencoded({extended:false,limit:'16kb'}),async(req,res)=>{
   const config=voiceConnectionConfig();if(!validGuidedCallback(req,config))return res.sendStatus(403);
-  const row=await callback.times(req.body.CallSid);if(!row)return res.sendStatus(404);
+  let row=await callback.times(req.body.CallSid);if(row?.testMode===false&&row.guided.callback?.phase==='booking')row=await callback.book(req.body.CallSid);if(!row)return res.sendStatus(404);
   if(row.guided.callback?.phase==='loading')void callback.prepare(req.body.CallSid).catch(()=>{});
   return res.type('text/xml').send(guidedQuestionXml(row,config));
 });
@@ -242,7 +248,7 @@ post('/openai/webhook', express.raw({ type: 'application/json', limit: '64kb' })
   }
 });
 
-router.use((error,req,res,next)=>{if(!req.path.startsWith('/twilio/'))return next(error);if(res.headersSent)return res.end();return res.status(503).type('text/xml').send(failureXml());});
+router.use((error,req,res,next)=>{if(!req.path.startsWith('/twilio/'))return next(error);if(res.headersSent)return res.end();const config=voiceConnectionConfig();return config.liveRequested?res.type('text/xml').send(rejectXml()):res.status(503).type('text/xml').send(failureXml());});
 return router;
 }
 

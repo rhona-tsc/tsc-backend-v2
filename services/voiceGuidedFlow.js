@@ -32,7 +32,7 @@ export function guidedRouteXml(row,config){
 export function callbackTimesXml(row,config){
   const xml=new twilio.twiml.VoiceResponse(),voice={voice:'Polly.Amy',language:'en-GB'},state=row.guided.callback||{},root=`${config.base}/api/voice-enquiries/twilio/guided`;
   if(guidedRemaining(row)<90){xml.say(voice,guidedClosing(row));xml.hangup();return xml.toString();}
-  if(state.phase==='selected'){xml.say(voice,`Thank you. Your callback request for ${state.selected.label} and your reason for calling have been saved for the team. This is a pilot test, so the appointment is a proposal only and has not been booked in the calendar.`);xml.hangup();return xml.toString();}
+  if(state.phase==='selected'){xml.say(voice,guidedClosing(row));xml.hangup();return xml.toString();}
   if(state.phase==='ready'){
     const gather=xml.gather({input:'dtmf',numDigits:1,timeout:15,actionOnEmptyResult:true,method:'POST',action:`${root}/callback-choice/${state.menuId}${VOICE_WEBHOOK_OVERRIDES}`});
     const choices=(state.slots||[]).map((slot,index)=>`Press ${index+1} for ${slot.spokenLabel||slot.label}.`).join(' ');
@@ -48,6 +48,10 @@ export function guidedConsent(digit){
   return {emailQuotes:['1','2'].includes(digit),phoneFollowup:['1','3'].includes(digit),method:'keypad',choice:digit};
 }
 export function guidedClosing(row){
+  if(row.testMode===false){
+    if(row.guided?.kind==='callback'){const callback=row.guided.callback;return callback?.booking?.status==='booked'?`Thank you. Your twenty-minute callback is booked for ${callback.selected.spokenLabel||callback.selected.label}, UK time. We have saved your reason for calling. Someone from the team will call you then. Thank you for your call today.`:'Thank you. Your callback details and reason for calling have been saved. Someone from the team will review your request and confirm a suitable time with you. Thank you for your call today.';}
+    return 'Thank you. Your answers and follow-up preferences have been saved. The team will review your enquiry and get back to you using the contact preferences you gave. Thank you for your call today. We really look forward to helping with your event.';
+  }
   if(row.guided?.kind==='callback')return row.guided.callback?.phase==='selected'?`Thank you. Your callback request for ${row.guided.callback.selected.label} and your reason for calling have been saved for the team. This is a pilot test, so the appointment is a proposal only and has not been booked in the calendar.`:"Thank you. Your callback details and reason for calling have been saved for the team to review. This is a pilot test, so no appointment has been booked in the calendar.";
   if(row.guided?.status!=='complete')return "Thank you. The answers recorded so far have been saved for the team to review. This is a pilot test, so no customer emails or band requests will be sent. Thank you for your call today.";
   if(row.guided.version>=2)return "Thank you. We have saved your answers and follow-up preferences for the team to review. This is a pilot test, so no customer emails or band requests will be sent. Thank you for your call today. We really look forward to helping with your event.";

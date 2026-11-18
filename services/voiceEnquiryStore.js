@@ -21,9 +21,9 @@ export async function lookupVoiceBands(criteria, selection) {
   return matchVoiceBands(acts.map(websiteActView), criteria, selection);
 }
 
-export async function saveVoiceDraft(callId, draft = {}, { Model = EnquiryBoardItem, now = new Date() } = {}) {
+export async function saveVoiceDraft(callId, draft = {}, { Model = EnquiryBoardItem, now = new Date(),testMode=true } = {}) {
   const ref = buildVoiceBoardRecord(callId, {}, now).enquiryRef;
-  const notes = ['[AI PHONE PILOT TEST — UNCONFIRMED DRAFT; not a qualified enquiry or advertising conversion]',
+  const notes = [testMode?'[AI PHONE PILOT TEST — UNCONFIRMED DRAFT; not a qualified enquiry or advertising conversion]':'[AI PHONE ENQUIRY — UNCONFIRMED DRAFT; review before quoting or contacting bands]',
     'Call details saved so far. Confirm every detail before contacting the client or requesting bands.',
     draft.clientName && `Caller-supplied name: ${draft.clientName}`, draft.clientPhone && `Unconfirmed callback: ${draft.clientPhone}`,
     draft.clientEmail && `Unconfirmed email: ${draft.clientEmail}`, draft.requirements && `Requirements: ${draft.requirements}`,
@@ -33,8 +33,8 @@ export async function saveVoiceDraft(callId, draft = {}, { Model = EnquiryBoardI
   try {
     return await Model.findOneAndUpdate({ websiteKey: `phone:${callId}`, captureState: { $ne: 'confirmed' } }, {
       $setOnInsert: { websiteKey: `phone:${callId}`, enquiryRef: ref, enquiryDateISO: now.toISOString().slice(0,10), agent: 'Direct', status: 'open' },
-      $set: { ...draft, marketingSource: 'Phone — AI pilot test', captureState: 'draft', contactConfirmed: false, emailConfirmed: false, notes,
-        draftDetails: { fields: draft, unconfirmed: true, updatedAt: now.toISOString(), contactDeclined: !!draft.contactDeclined, qualified: false, availabilityRequestsSent: 0 } },
+      $set: { ...draft, marketingSource:testMode?'Phone — AI pilot test':'Phone — AI assistant', captureState: 'draft', contactConfirmed: false, emailConfirmed: false, notes,
+        draftDetails: { fields: draft, unconfirmed: true, updatedAt: now.toISOString(), contactDeclined: !!draft.contactDeclined, qualified: false, testMode, availabilityRequestsSent: 0 } },
     }, { upsert: true, new: true, runValidators: true });
   } catch (error) {
     if(error.code !== 11000) throw error;

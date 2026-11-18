@@ -7,7 +7,7 @@ import {saveVoiceDraft,lookupVoiceBands} from './voiceEnquiryStore.js';
 import {normalizeBandSearch} from './voiceBandMatching.js';
 import EnquiryBoardItem from '../models/enquiryBoardItem.js';
 import {normalizeCallbackPhone} from './incomingEnquiryAssistant.js';
-import {prepareGuidedCallbackSlots} from './voiceGuidedCallback.js';
+import {prepareGuidedCallbackSlots,completeGuidedCallbackBooking} from './voiceGuidedCallback.js';
 const calls=()=>mongoose.connection.db.collection('voice_call_reviews');
 const liveFilter=callSid=>({_id:voiceCallRef(callSid),intent:'guided_enquiry',expiresAt:{$gt:new Date()}});
 const validSid=sid=>/^CA[a-f\d]{32}$/i.test(sid||'');
@@ -114,7 +114,7 @@ export function guidedContactPreferences(row){
   const phoneProvided=!!normalizeCallbackPhone(literal.clientPhone)||/\buse (?:this|the same|my calling) number\b/i.test(phone)&&!!normalizeCallbackPhone(row.caller);
   return {emailQuotes:emailNo?false:!email?null:uncertain(email)?null:yes(email)||!!literal.clientEmail?true:null,phoneFollowup:phoneNo?false:!phone?null:uncertain(phone)?null:yes(phone)||phoneProvided?true:null,method:'recorded_contact_answers'};
 }
-export async function finalizeGuidedIntake(row,{collection=calls(),extract=extractVoicemailFields,saveDraft=saveVoiceDraft,lookupBands=lookupVoiceBands,finish=finishVoiceCallReview,saveAppointment=async(sid,appointment)=>EnquiryBoardItem.updateOne({websiteKey:`phone:${sid}`,captureState:'draft'},{$set:{callAppointment:appointment}}),saveConsent=async(sid,consent)=>EnquiryBoardItem.updateOne({websiteKey:`phone:${sid}`,captureState:'draft'},{$set:{'draftDetails.guidedConsent':consent}})}={}){
+export async function finalizeGuidedIntake(row,{collection=calls(),extract=extractVoicemailFields,saveDraft=(id,draft)=>saveVoiceDraft(id,draft,{testMode:row.testMode!==false}),lookupBands=lookupVoiceBands,finish=finishVoiceCallReview,saveAppointment=async(sid,appointment)=>EnquiryBoardItem.updateOne({websiteKey:`phone:${sid}`,captureState:'draft'},{$set:{callAppointment:appointment}}),saveConsent=async(sid,consent)=>EnquiryBoardItem.updateOne({websiteKey:`phone:${sid}`,captureState:'draft'},{$set:{'draftDetails.guidedConsent':consent}})}={}){
   const transcript=guidedTranscript(row),turns=guidedTurns(row);
   try{
     const literal=literalGuidedFields(row);let interpretationUnavailable=false,extracted=literal;
@@ -133,7 +133,7 @@ export async function finalizeGuidedIntake(row,{collection=calls(),extract=extra
     draft.requirements=[guidedTranscript(row),draft.requirements,permission?`Caller follow-up permission (${permission.method||'keypad'}): email quotes ${guidedPermissionLabel(permission.emailQuotes)}; phone ${guidedPermissionLabel(permission.phoneFollowup)}.`:'Follow-up permission not completed; do not contact until reviewed.'].filter(Boolean).join('; ').slice(0,2000);
     if(row.guided.kind==='callback'){draft.enquiryTopic='human_callback';draft.callbackReason=row.guided.answers?.callback_reason?.transcript||'';draft.requirements=[draft.requirements,row.guided.answers?.callback_preference?.transcript?`Preferred callback time: ${row.guided.answers.callback_preference.transcript}`:''].filter(Boolean).join('; ').slice(0,2000);}
     await saveDraft(row.callSid,draft);
-    if(row.guided.kind==='callback'&&row.guided.callback?.selected)await saveAppointment(row.callSid,{...row.guided.callback.selected,testMode:true,status:'proposed',bookingConfirmed:false,confirmed:false});
+    if(row.guided.kind==='callback'&&row.guided.callback?.selected)await saveAppointment(row.callSid,{...row.guided.callback.selected,testMode:row.testMode!==false,status:row.testMode===false&&row.guided.callback.booking?.status==='booked'?'booked':'proposed',bookingConfirmed:row.testMode===false&&row.guided.callback.booking?.status==='booked',confirmed:row.testMode===false&&row.guided.callback.booking?.status==='booked'});
     await saveConsent(row.callSid,permission?{emailQuotes:permission.emailQuotes,phoneFollowup:permission.phoneFollowup,method:permission.method||'keypad',...(permission.at?{at:permission.at}:{})}:{emailQuotes:false,phoneFollowup:false,method:'not_completed'});
     let suggestions=[];const criteria=normalizeBandSearch(draft);
     if(row.guided.kind!=='callback'&&!interpretationUnavailable&&extracted.topic==='client_event'&&!criteria.unknown.length&&(criteria.styles.length||criteria.mustHaveInstruments.length||draft.preferredSize||draft.preferredBands)){
@@ -163,6 +163,7 @@ export function startGuidedVoiceWorker(){
         const state=await twilio(process.env.TWILIO_ACCOUNT_SID,process.env.TWILIO_AUTH_TOKEN).calls(row.callSid).fetch();
         if(['completed','busy','failed','no-answer','canceled'].includes(state.status)||guidedRemaining(row)<1)await closeGuidedIntake(row.callSid,'interrupted',{collection});
       }
+      if(row.testMode===false&&row.guided.callback?.phase==='booking')await completeGuidedCallbackBooking(row.callSid,{collection});
       if(row.guided.kind==='callback'&&row.guided.callback?.phase==='loading')await prepareGuidedCallbackSlots(row.callSid,{collection});
       // One bounded answer at a time. A durable private copy always precedes provider cleanup.
       const answer=guidedQuestions(row).find(q=>row.guided.answers?.[q.key]?.sid&&['queued'].includes(row.guided.answers[q.key].status)&&(row.guided.answers[q.key].attempts||0)<3);

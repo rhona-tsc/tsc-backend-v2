@@ -11,6 +11,7 @@ export function voiceConnectionConfig(env = process.env) {
   try { const u = new URL(env.VOICE_ENQUIRY_PUBLIC_BASE_URL); if (u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash) base = u.origin; } catch {}
   const config = {
     enabled: env.VOICE_ENQUIRY_ENABLED === 'true', base,
+    liveRequested:env.VOICE_ENQUIRY_LIVE_ENABLED==='true',
     mode: env.VOICE_ENQUIRY_MODE === 'conversation' ? 'conversation' : env.VOICE_ENQUIRY_MODE === 'voicemail' ? 'voicemail' : 'guided',
     twilioNumber: normalizeCallbackPhone(env.VOICE_ENQUIRY_TWILIO_NUMBER),
     apiKey: env.OPENAI_VOICE_API_KEY || '', webhookSecret: env.OPENAI_VOICE_WEBHOOK_SECRET || '',
@@ -21,8 +22,10 @@ export function voiceConnectionConfig(env = process.env) {
     model: env.OPENAI_VOICE_MODEL || 'gpt-realtime-2.1-mini',
     testEndsAt: Date.parse(env.VOICE_ENQUIRY_TEST_END_AT || ''),
   };
-  config.ready = !!(config.base && config.twilioNumber && config.apiKey && config.webhookSecret && config.twilioToken && config.projectId && config.bridgeSecret.length >= 32 && config.testCallers.length && Number.isFinite(config.testEndsAt) && config.testEndsAt > Date.now());
-  // This first implementation is deliberately test-caller-only, even if enabled.
+  config.live=config.liveRequested&&config.mode==='guided'&&config.twilioNumber==='+447453423200';
+  config.ready = config.live?!!(config.base&&config.twilioToken&&config.apiKey&&config.projectId):!config.liveRequested&&!!(config.base && config.twilioNumber && config.apiKey && config.webhookSecret && config.twilioToken && config.projectId && config.bridgeSecret.length >= 32 && config.testCallers.length && Number.isFinite(config.testEndsAt) && config.testEndsAt > Date.now());
+  // Live operation is restricted to the guided recorder on its dedicated number.
+  // Conversation and old voicemail modes never inherit public access.
   if (config.humanNumber === VOICE_ENQUIRY_NUMBER) config.humanNumber = '';
   return config;
 }

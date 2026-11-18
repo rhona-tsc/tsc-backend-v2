@@ -1,3 +1,5 @@
+import {voiceConnectionConfig} from './voiceEnquiryConnection.js';
+import {liveVoiceBudgetStatus} from './voiceLiveBudget.js';
 import {publicGuidedReview,publicGuidedRecording,guidedPermissionLabel} from './voiceGuidedFlow.js';
 import { saveVoiceDraft } from './voiceEnquiryStore.js';
 import crypto from 'node:crypto';
@@ -18,7 +20,8 @@ export async function voiceFollowupReadiness() {
   const mail = async () => { try { await nodemailer.createTransport({ host: config.host, port: config.port, secure: config.port === 465, auth: { user: config.user, pass: config.pass }, connectionTimeout: 5000, socketTimeout: 6000 }).verify(); return 'ready'; } catch { return 'needs_attention'; } };
   const calendar = async () => { try { const date = new Date(); date.setUTCDate(date.getUTCDate()+((8-date.getUTCDay())%7 || 7)); await lookupVoiceCallSlots({dateISO:date.toISOString().slice(0,10)}); return 'ready'; } catch { return 'needs_attention'; } };
   const [managementEmail, callbackCalendar] = await Promise.all([mail(),calendar()]);
-  return { managementEmail, callbackCalendar, venueSearchConfigured: !!process.env.GOOGLE_MAPS_API_KEY, recipient: VOICE_MANAGEMENT_EMAIL, testMode: true };
+  const voiceConfig=voiceConnectionConfig();let usage;try{usage=voiceConfig.live?await liveVoiceBudgetStatus({projectId:voiceConfig.projectId}):null;}catch{usage={needsAttention:true};}
+  return { managementEmail, callbackCalendar, liveBudget:usage, venueSearchConfigured: !!process.env.GOOGLE_MAPS_API_KEY, recipient: VOICE_MANAGEMENT_EMAIL, testMode:!voiceConfig.live };
 }
 
 export function createCallTranscript({ persist, now = () => new Date() }) {
@@ -63,11 +66,11 @@ export function createCallTranscript({ persist, now = () => new Date() }) {
   };
 }
 
-export async function startVoiceCallReview({ callSid, caller, intent }) {
+export async function startVoiceCallReview({ callSid, caller, intent,testMode=true }) {
   if (!/^CA[a-f\d]{32}$/i.test(callSid)) throw new Error('Invalid call reference.');
-  await saveVoiceDraft(callSid, {});
+  await saveVoiceDraft(callSid, {},{testMode});
   await calls().createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-  await calls().updateOne({ _id: voiceCallRef(callSid) }, { $setOnInsert: { callSid, caller, intent, startedAt: new Date(), status: 'connecting', testMode: true, turns: [], expiresAt: new Date(Date.now()+90*86400000), notificationStatus: 'pending' } }, { upsert: true });
+  await calls().updateOne({ _id: voiceCallRef(callSid) }, { $setOnInsert: { callSid, caller, intent, startedAt: new Date(), status: 'connecting', testMode, turns: [], expiresAt: new Date(Date.now()+90*86400000), notificationStatus: 'pending' } }, { upsert: true });
 }
 export function createStoredCallTranscript(callSid) {
   return createCallTranscript({ persist: data => calls().updateOne({ _id: voiceCallRef(callSid) }, { $set: { ...data, transcriptCount: data.turns.length, status: 'in_progress', updatedAt: new Date() } }) });
@@ -79,21 +82,22 @@ export async function readVoiceIntake(callSid,caller){
 
 export function managementCallEmail(call, enquiry) {
   const date = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' }).format(call.startedAt);
+  const appointmentNote=call.testMode===false?(enquiry?.callAppointment?.status==='booked'?'(booked in the callback calendar)':'(callback request; check calendar status)'):'(test proposal; not booked)';
   const lines = [
-    'AI PHONE PILOT TEST — no musician or customer messages were sent.', `Call: ${date} UK time`, `Reference: ${call._id}`, `Status: ${call.status}`,
+    call.testMode===false?'AI PHONE ENQUIRY — recorded details require review before quoting or requesting bands.':'AI PHONE PILOT TEST — no musician or customer messages were sent.', `Call: ${date} UK time`, `Reference: ${call._id}`, `Status: ${call.status}`,
     enquiry?.captureState === 'draft' ? 'UNCONFIRMED DRAFT — details may be incomplete or misheard; review the transcript and confirm before following up.' : '',
     ['voicemail','guided_enquiry'].includes(call.intent)?`RECORDED MESSAGE — ${(call.recording?.fileId||Object.values(call.guided?.answers||{}).some(a=>a.fileId))?'Private audio is available in the call review for 90 days.':'Recording is not yet available; check the processing status.'}\nCaller ID (unconfirmed): ${call.caller||'Withheld'}\nProcessing: ${call.voicemail?.status||'pending'}\nNo customer emails or musician requests have been sent.`:'',
     call.intent==='guided_enquiry'?`GUIDED ANSWERS — ${call.guided?.status}. Follow-up permission: email quotes ${call.guided?.consent?guidedPermissionLabel(call.guided.consent.emailQuotes):'not completed'}; phone ${call.guided?.consent?guidedPermissionLabel(call.guided.consent.phoneFollowup):'not completed'}. Listen to each answer in the protected call review; contact details remain unverified.`:'',
     enquiry?.draftDetails?.sectionProgress ? `Enquiry sections: ${Object.entries(enquiry.draftDetails.sectionProgress.sections||{}).map(([name,status])=>`${name}: ${status}`).join('; ')}` : '',
-    enquiry ? `Name: ${enquiry.clientName || 'Not captured'}\nPhone: ${enquiry.clientPhone || 'Not captured'}\nEmail: ${enquiry.clientEmail || 'Not supplied'}\nPreferred follow-up: ${enquiry.preferredContactMethod || 'Not specified'}\nEvent: ${enquiry.eventDateISO || 'Not captured'}\nVenue: ${enquiry.address || 'Not captured'}\nCounty: ${enquiry.county || 'Needs confirmation'}\nPostcode: ${enquiry.postcode || 'Needs confirmation'}\nBudget: ${enquiry.maxBudget ? `£${enquiry.maxBudget}` : 'Not supplied'}\nHopes to book: ${enquiry.decisionWindow || 'Not supplied'}\nSelected bands: ${(enquiry.selectedBands || []).map(item=>item.name).join(', ') || 'None selected'}\nAvailability previews: ${enquiry.availabilityRequestTest?.requests?.length || 0}; 0 sent\nCallback appointment: ${enquiry.callAppointment?.label || 'None'}${enquiry.callAppointment ? ' (test proposal; not booked)' : ''}\n\n${enquiry.notes || ''}` : 'No confirmed enquiry was saved. Review the transcript for incomplete details.',
+    enquiry ? `Name: ${enquiry.clientName || 'Not captured'}\nPhone: ${enquiry.clientPhone || 'Not captured'}\nEmail: ${enquiry.clientEmail || 'Not supplied'}\nPreferred follow-up: ${enquiry.preferredContactMethod || 'Not specified'}\nEvent: ${enquiry.eventDateISO || 'Not captured'}\nVenue: ${enquiry.address || 'Not captured'}\nCounty: ${enquiry.county || 'Needs confirmation'}\nPostcode: ${enquiry.postcode || 'Needs confirmation'}\nBudget: ${enquiry.maxBudget ? `£${enquiry.maxBudget}` : 'Not supplied'}\nHopes to book: ${enquiry.decisionWindow || 'Not supplied'}\nSelected bands: ${(enquiry.selectedBands || []).map(item=>item.name).join(', ') || 'None selected'}\nAvailability previews: ${enquiry.availabilityRequestTest?.requests?.length || 0}; 0 sent\nCallback appointment: ${enquiry.callAppointment?.label || 'None'}${enquiry.callAppointment ? ' '+appointmentNote : ''}\n\n${enquiry.notes || ''}` : 'No confirmed enquiry was saved. Review the transcript for incomplete details.',
     enquiry?.voicePriceEstimates?.length ? `Website estimates checked (not bookings):\n${enquiry.voicePriceEstimates.map(quote=>`${quote.bandName}, ${quote.performerCount}-piece, ${quote.county}, ${quote.eventDateISO}: £${quote.priceGBP}, calculated travel included`).join('\n')}` : '',
     `Transcript: ${call.turns?.length || 0} turns${call.transcriptHasGaps ? '; capture gaps need review' : ''}${call.transcriptLimited ? '; capture limit reached' : ''}.`,
     'Review the call and all prepared band requests before contacting the client:', `https://admin.thesupremecollective.co.uk/enquiry-board?callReview=${call._id}`,
-    'No live availability replies are expected in test mode. A prepared preview is not a sent request or a confirmed band.',
+    call.testMode===false?'Band availability and client quotes require team review; nothing has been sent to bands or customers by this intake.':'No live availability replies are expected in test mode. A prepared preview is not a sent request or a confirmed band.',
     call.voicemail?.suggestedBands?.length?`Catalogue suggestions for TEAM REVIEW ONLY (not client selections, checked availability or quoted prices): ${call.voicemail.suggestedBands.map(b=>b.name).join(', ')}`:'',
     call.voicemail?.transcript?`Recorded message transcript (unconfirmed; listen to the audio to check spelling):\n${call.voicemail.transcript}`:'',
   ];
-  return { to: VOICE_MANAGEMENT_EMAIL, subject: `[AI test call] ${enquiry?.captureState === 'draft' ? 'Draft enquiry — ' : ''}${enquiry?.clientName || 'Incomplete enquiry'} — ${call._id}`, text: lines.join('\n\n') };
+  return { to: VOICE_MANAGEMENT_EMAIL, subject: `${call.testMode===false?'[AI call]':'[AI test call]'} ${enquiry?.captureState === 'draft' ? 'Draft enquiry — ' : ''}${enquiry?.clientName || 'Incomplete enquiry'} — ${call._id}`, text: lines.join('\n\n') };
 }
 export async function finishVoiceCallReview(callSid, { status = 'completed', sendMail } = {}) {
   const id = voiceCallRef(callSid);
@@ -112,13 +116,13 @@ export async function finishVoiceCallReview(callSid, { status = 'completed', sen
 
 export async function listVoiceCallReviews() {
   const reviews = await calls().find({ expiresAt: { $gt: new Date() } }, { projection: { callSid: 0, caller: 0, turns: 0,recording:0,guided:0 } }).sort({ startedAt: -1 }).limit(30).toArray();
-  const old = await EnquiryBoardItem.find({ marketingSource: 'Phone — AI pilot test', enquiryRef: { $nin: reviews.map(item => item._id) } }).select('enquiryRef clientName createdAt').sort({ createdAt: -1 }).limit(10).lean();
+  const old = await EnquiryBoardItem.find({ marketingSource:{$in:['Phone — AI pilot test','Phone — AI assistant']}, enquiryRef: { $nin: reviews.map(item => item._id) } }).select('enquiryRef clientName createdAt').sort({ createdAt: -1 }).limit(10).lean();
   return [...reviews, ...old.map(item => ({ _id: item.enquiryRef, clientName: item.clientName, startedAt: item.createdAt, status: 'no_transcript', transcriptCount: 0 }))].sort((a,b)=>+new Date(b.startedAt)-+new Date(a.startedAt)).slice(0,30);
 }
 export async function readVoiceCallReview(ref) {
   if (!/^PHONE-[A-F\d]{12}$/.test(ref || '')) return null;
   const call = await calls().findOne({ _id: ref, expiresAt: { $gt: new Date() } }, { projection: { callSid: 0 } });
-  const enquiry = await EnquiryBoardItem.findOne({ enquiryRef: ref, marketingSource: 'Phone — AI pilot test' }).select('enquiryRef clientName clientEmail clientPhone eventDateISO address county postcode venueConfirmation preferredContactMethod callbackReason enquiryTopic decisionWindow styles preferredSize maxBudget selectedBands availabilityRequestTest callAppointment captureState draftDetails voicePriceEstimates notes createdAt').lean();
+  const enquiry = await EnquiryBoardItem.findOne({ enquiryRef: ref, marketingSource:{$in:['Phone — AI pilot test','Phone — AI assistant']} }).select('enquiryRef clientName clientEmail clientPhone eventDateISO address county postcode venueConfirmation preferredContactMethod callbackReason enquiryTopic decisionWindow styles preferredSize maxBudget selectedBands availabilityRequestTest callAppointment captureState draftDetails voicePriceEstimates notes createdAt').lean();
   if (!call && !enquiry) return null;
   const result = { ...(call || { _id: ref, startedAt: enquiry?.createdAt, status: 'no_transcript', turns: [] }), enquiry };
   if(['voicemail','guided_enquiry'].includes(call?.intent))result.detectedCallerNumber=call.caller||'';
