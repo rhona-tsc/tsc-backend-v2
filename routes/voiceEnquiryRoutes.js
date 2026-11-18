@@ -1,4 +1,5 @@
-import {guidedQuestionXml} from '../services/voiceGuidedFlow.js';
+import {selectGuidedRoute,prepareGuidedCallbackSlots,selectGuidedCallbackSlot,readGuidedCallbackTimes} from '../services/voiceGuidedCallback.js';
+import {guidedQuestionXml,GUIDED_ANSWER_INSTRUCTIONS} from '../services/voiceGuidedFlow.js';
 import {initializeGuidedIntake,readGuidedIntake,acceptGuidedAnswer,acceptGuidedConsent,queueGuidedRecording,closeGuidedIntake} from '../services/voiceGuidedIntake.js';
 import { startVoiceCallReview, createStoredCallTranscript, finishVoiceCallReview,readVoiceIntake } from '../services/voiceCallReview.js';
 import express from 'express';
@@ -14,13 +15,13 @@ import { voiceConnectionConfig, signVoiceBridge, verifyVoiceBridge, buildEnquiry
 import { reserveVoicePilotCall } from '../services/voiceEnquiryPilotLimit.js';
 import {VOICEMAIL_GREETING,VOICEMAIL_THANKS,queueVoiceRecording} from '../services/voiceVoicemail.js';
 
-export function createVoiceEnquiryRouter({ reservePilotCall = reserveVoicePilotCall, startReview = startVoiceCallReview, createTranscript = createStoredCallTranscript, finishReview = finishVoiceCallReview,queueRecording=queueVoiceRecording,readIntake=readVoiceIntake,guided={initialize:initializeGuidedIntake,read:readGuidedIntake,answer:acceptGuidedAnswer,consent:acceptGuidedConsent,recording:queueGuidedRecording,close:closeGuidedIntake} } = {}) {
+export function createVoiceEnquiryRouter({ reservePilotCall = reserveVoicePilotCall, startReview = startVoiceCallReview, createTranscript = createStoredCallTranscript, finishReview = finishVoiceCallReview,queueRecording=queueVoiceRecording,readIntake=readVoiceIntake,guided={initialize:initializeGuidedIntake,read:readGuidedIntake,answer:acceptGuidedAnswer,consent:acceptGuidedConsent,recording:queueGuidedRecording,close:closeGuidedIntake},callback={route:selectGuidedRoute,prepare:prepareGuidedCallbackSlots,select:selectGuidedCallbackSlot,times:readGuidedCallbackTimes} } = {}) {
 const router = express.Router();
 const post=(...args)=>{const handler=args.pop();router.post(...args,(req,res,next)=>Promise.resolve().then(()=>handler(req,res,next)).catch(next));};
 const sessions = new Map();
 let reserving = false;
 const path = '/api/voice-enquiries';
-router.get('/health',(_req,res)=>{const config=voiceConnectionConfig();res.set('Cache-Control','no-store').json({enabled:config.enabled&&config.ready,mode:config.mode,testMode:true,recordsNewMessages:['voicemail','guided'].includes(config.mode),questionByQuestion:config.mode==='guided',guidedFlowVersion:2});});
+router.get('/health',(_req,res)=>{const config=voiceConnectionConfig();res.set('Cache-Control','no-store').json({enabled:config.enabled&&config.ready,mode:config.mode,testMode:true,recordsNewMessages:['voicemail','guided'].includes(config.mode),questionByQuestion:config.mode==='guided',guidedFlowVersion:3});});
 const failureXml=()=>{const xml=new twilio.twiml.VoiceResponse();xml.say({voice:'Polly.Amy',language:'en-GB'},"Sorry, The Supreme Collective's message service is temporarily unavailable. We can't confirm that your message was received. Please try calling again shortly.");xml.hangup();return xml.toString();};
 router.use('/twilio',(req,res,next)=>{
   res.set('Cache-Control','no-store');const send=res.send.bind(res);
@@ -66,7 +67,7 @@ post('/twilio/incoming', express.urlencoded({ extended: false, limit: '16kb' }),
     }
     if(!row?.guided)return res.status(503).type('text/xml').send(failureXml());
     sessions.set(sid,{intent:'guided_enquiry',expiresAt:+new Date(row.startedAt)+(VOICE_MAX_SECONDS+60)*1000});
-    return res.type('text/xml').send(guidedQuestionXml(row,config,{opening:row.guided.step===0}));
+    return res.type('text/xml').send(guidedQuestionXml(row,config,{opening:row.guided.version<3&&row.guided.step===0}));
   }
   if(config.mode==='voicemail'){
     const now=Date.now(),sid=req.body.CallSid;
@@ -113,6 +114,26 @@ post('/twilio/incoming', express.urlencoded({ extended: false, limit: '16kb' }),
 function validGuidedCallback(req,config){
   return !!config.base&&!!config.twilioToken&&twilio.validateRequest(config.twilioToken,req.get('X-Twilio-Signature')||'',`${config.base}${path}${req.path}`,req.body)&&req.body.AccountSid===process.env.TWILIO_ACCOUNT_SID;
 }
+post('/twilio/guided/route',express.urlencoded({extended:false,limit:'16kb'}),async(req,res)=>{
+  const config=voiceConnectionConfig();if(!validGuidedCallback(req,config))return res.sendStatus(403);
+  const before=await guided.read(req.body.CallSid),row=await callback.route(req.body.CallSid,req.body.Digits);if(!row)return res.sendStatus(404);
+  if(row.guided.kind==='callback')void callback.prepare(req.body.CallSid).catch(()=>{});
+  return res.type('text/xml').send(guidedQuestionXml(row,config,{notice:before?.guided.route==='menu'?GUIDED_ANSWER_INSTRUCTIONS:''}));
+});
+post('/twilio/guided/callback-times',express.urlencoded({extended:false,limit:'16kb'}),async(req,res)=>{
+  const config=voiceConnectionConfig();if(!validGuidedCallback(req,config))return res.sendStatus(403);
+  const row=await callback.times(req.body.CallSid);if(!row)return res.sendStatus(404);
+  if(row.guided.callback?.phase==='loading')void callback.prepare(req.body.CallSid).catch(()=>{});
+  return res.type('text/xml').send(guidedQuestionXml(row,config));
+});
+post('/twilio/guided/callback-choice/:menuId',express.urlencoded({extended:false,limit:'16kb'}),async(req,res)=>{
+  const config=voiceConnectionConfig();if(!validGuidedCallback(req,config))return res.sendStatus(403);
+  if(!/^[a-f\d]{24}$/i.test(req.params.menuId))return res.sendStatus(400);
+  const row=await callback.select(req.body.CallSid,req.params.menuId,req.body.Digits);if(!row)return res.sendStatus(404);
+  if(row.guided.status!=='collecting')sessions.delete(req.body.CallSid);
+  if(row.guided.callback?.phase==='loading')void callback.prepare(req.body.CallSid).catch(()=>{});
+  return res.type('text/xml').send(guidedQuestionXml(row,config));
+});
 post('/twilio/guided/answer/:step',express.urlencoded({extended:false,limit:'16kb'}),async(req,res)=>{
   const config=voiceConnectionConfig();if(!validGuidedCallback(req,config))return res.sendStatus(403);
   if(!/^[0-6]$/.test(req.params.step))return res.sendStatus(400);

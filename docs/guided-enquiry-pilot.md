@@ -13,3 +13,12 @@ Literal section answers are saved before optional model interpretation. If inter
 There is no customer email/WhatsApp, musician availability dispatch, calendar write, booking or advertising conversion path in this flow. Contact permissions refer only to this enquiry, not marketing subscriptions. Every enquiry remains a draft and all details require review.
 
 The user approved two further test calls on 18 November within the original £10 envelope. The persistent meter is preserved (10 calls used at implementation); the cap is now 12. No automated phone call should be placed to verify deployment. Use GET health checks and local signed webhook fixtures; the user makes the physical test calls.
+
+
+## Non-enquiry callback route — flow version 3
+
+The introduction now discloses recording before the keypad menu. Pressing 1 selects a callback about something other than a new band enquiry; staying on the line enters the existing band questionnaire. Route selection is stored once and cannot be changed by a retried webhook.
+
+The callback branch records full name, preferred phone number (or an explicit request to use caller ID), and a brief reason for the call. The same protected audio player can replay the reason. Background calendar lookup offers up to three actual 20-minute slots within Monday–Thursday 10am–4pm Europe/London, respecting current busy events and the existing 30-minute lead time. Calendar event titles/details never reach the call or board. The caller can choose a numbered option, request later options, or leave a preferred time. A chosen slot is rechecked, and stale menu IDs cannot select a different option. Failed/slow calendar access switches to a preferred-time recording rather than invented availability.
+
+All selected times are TEST PROPOSALS: no Google Calendar event, invitation or customer/musician message is created. A selected time is saved on the draft enquiry as `callAppointment` with `bookingConfirmed:false`. The brief reason is stored in `callbackReason`, notes, transcript and management summary. Callback drafts are categorised as `human_callback`; they do not trigger band matching or advertising conversions. Public-number activation remains on hold and no test allowance is added by this change.

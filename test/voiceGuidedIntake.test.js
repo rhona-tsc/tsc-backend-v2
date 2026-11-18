@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import twilio from 'twilio';
 import {createVoiceEnquiryRouter} from '../routes/voiceEnquiryRoutes.js';
+import {selectGuidedRoute} from '../services/voiceGuidedCallback.js';
 import {voiceCallRef,managementCallEmail} from '../services/voiceCallReview.js';
 import {voiceConnectionConfig} from '../services/voiceEnquiryConnection.js';
 import {GUIDED_QUESTIONS,guidedQuestionXml,guidedClosing,guidedConsent,publicGuidedReview,publicGuidedRecording} from '../services/voiceGuidedFlow.js';
@@ -13,6 +14,7 @@ function set(obj,path,value){const keys=path.split('.');let target=obj;for(const
 function match(row,filter){return Object.entries(filter).every(([key,value])=>{const actual=get(row,key);if(value&&typeof value==='object'&&!(value instanceof Date))return Object.entries(value).every(([op,arg])=>op==='$exists'?(actual!==undefined)===arg:op==='$ne'?actual!==arg:op==='$gt'?actual>arg:false);return actual===value;});}
 function memory(initial){let row=structuredClone(initial);return {row:()=>row,findOne:async filter=>match(row,filter)?structuredClone(row):null,updateOne:async(filter,update)=>{if(!match(row,filter))return {matchedCount:0};for(const [path,value]of Object.entries(update.$set||{}))set(row,path,value);for(const [path,value]of Object.entries(update.$inc||{}))set(row,path,(get(row,path)||0)+value);return {matchedCount:1};}};}
 function fresh(){return {_id:voiceCallRef(sid),callSid:sid,caller:'+447700900123',intent:'guided_enquiry',startedAt:new Date(),expiresAt:new Date(Date.now()+86400000),notificationStatus:'pending'};}
+async function initializeEnquiry(id,{collection}){await initializeGuidedIntake(id,{collection});await collection.updateOne({_id:voiceCallRef(id)},{$set:{'guided.version':2,'guided.route':'selected'}});return readGuidedIntake(id,{collection});}
 const settings={VOICE_ENQUIRY_ENABLED:'true',VOICE_ENQUIRY_PUBLIC_BASE_URL:'https://example.com',VOICE_ENQUIRY_TWILIO_NUMBER:'+447700900100',OPENAI_VOICE_API_KEY:'test-unused-key',OPENAI_VOICE_WEBHOOK_SECRET:'test-unused-secret',TWILIO_AUTH_TOKEN:'test-token',TWILIO_ACCOUNT_SID:account,VOICE_ENQUIRY_BRIDGE_SECRET:'test-only-secret-at-least-32-characters',VOICE_ENQUIRY_PROJECT_ID:'proj_example',VOICE_ENQUIRY_TEST_CALLERS:'+447700900123',VOICE_ENQUIRY_TEST_END_AT:new Date(Date.now()+3600000).toISOString(),VOICE_ENQUIRY_MODE:'guided'};
 const env=()=>{const before=Object.fromEntries(Object.keys(settings).map(k=>[k,process.env[k]]));Object.assign(process.env,settings);return()=>{for(const [k,v]of Object.entries(before))v===undefined?delete process.env[k]:process.env[k]=v;};};
 const body=(i,digits='#')=>({CallSid:sid,AccountSid:account,From:'+447700900123',To:'+447700900100',RecordingSid:record(i+1),RecordingDuration:'12',Digits:digits});
@@ -27,7 +29,7 @@ test('guided flow is the default, asks exactly one question, has no silence-base
 
 test('signed complete call advances in order; action retries, callback races and restarts cannot skip or replace answers',async()=>{
  const restore=env(),collection=memory(fresh());let reserved=0,started=0;
- const guided={initialize:id=>initializeGuidedIntake(id,{collection}),read:id=>readGuidedIntake(id,{collection}),answer:(id,step,data)=>acceptGuidedAnswer(id,step,data,{collection}),consent:(id,digit)=>acceptGuidedConsent(id,digit,{collection}),recording:(id,step,data)=>queueGuidedRecording(id,step,data,{collection}),close:id=>closeGuidedIntake(id,'interrupted',{collection})};
+ const guided={initialize:id=>initializeEnquiry(id,{collection}),read:id=>readGuidedIntake(id,{collection}),answer:(id,step,data)=>acceptGuidedAnswer(id,step,data,{collection}),consent:(id,digit)=>acceptGuidedConsent(id,digit,{collection}),recording:(id,step,data)=>queueGuidedRecording(id,step,data,{collection}),close:id=>closeGuidedIntake(id,'interrupted',{collection})};
  const app=express();app.use('/api/voice-enquiries',createVoiceEnquiryRouter({guided,readIntake:async()=>started?structuredClone(collection.row()):null,startReview:async()=>{started++;},reservePilotCall:async()=>{reserved++;return true;}}));
  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
  const post=async(path,data,signed=true)=>{const endpoint=`/api/voice-enquiries/twilio/${path}`;return fetch(`http://127.0.0.1:${server.address().port}${endpoint}`,{method:'POST',body:new URLSearchParams(data),headers:signed?{'X-Twilio-Signature':twilio.getExpectedTwilioSignature(settings.TWILIO_AUTH_TOKEN,`https://example.com${endpoint}`,data)}:{}});};
@@ -56,13 +58,13 @@ test('signed complete call advances in order; action retries, callback races and
 });
 
 test('hangup keeps the answer, closes an incomplete draft and never infers permission',async()=>{
- const collection=memory(fresh());await initializeGuidedIntake(sid,{collection});
+ const collection=memory(fresh());await initializeEnquiry(sid,{collection});
  const row=await acceptGuidedAnswer(sid,0,body(0,'hangup'),{collection});
  assert.equal(row.guided.status,'interrupted');assert.equal(row.guided.answers.name.sid,record(1));assert.equal(row.guided.consent,undefined);assert.doesNotMatch(guidedClosing(row),/all the information|inbox/);
 });
 
 test('unknown steps, mismatched calls and out-of-order actions cannot record data in the wrong section',async()=>{
- const collection=memory(fresh());await initializeGuidedIntake(sid,{collection});
+ const collection=memory(fresh());await initializeEnquiry(sid,{collection});
  assert.equal(await queueGuidedRecording(sid,1,{...body(1),RecordingStatus:'completed'},{collection}),false);
  assert.equal(await queueGuidedRecording(sid,0,{...body(0),CallSid:'wrong',RecordingStatus:'completed'},{collection}),false);
  assert.equal(await queueGuidedRecording(sid,0,{...body(0),RecordingDuration:'1000',RecordingStatus:'completed'},{collection}),false);
@@ -102,7 +104,7 @@ test('public call review and playback choices never leak provider IDs or private
 });
 
 test('an empty recorded answer is marked missing and # still moves on without inventing its contents',async()=>{
- const collection=memory(fresh());await initializeGuidedIntake(sid,{collection});
+ const collection=memory(fresh());await initializeEnquiry(sid,{collection});
  await queueGuidedRecording(sid,0,{CallSid:sid,RecordingStatus:'absent'},{collection});
  const data=body(0);delete data.RecordingSid;
  const row=await acceptGuidedAnswer(sid,0,data,{collection});assert.equal(row.guided.step,1);assert.equal(row.guided.answers.name.status,'absent');

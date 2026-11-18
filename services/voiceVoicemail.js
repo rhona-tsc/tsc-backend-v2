@@ -8,7 +8,7 @@ import twilio from 'twilio';
 import {voiceCallRef, finishVoiceCallReview} from './voiceCallReview.js';
 import {saveVoiceDraft, lookupVoiceBands} from './voiceEnquiryStore.js';
 import {normalizeVoiceDraft} from './incomingEnquiryAssistant.js';
-import {GUIDED_QUESTIONS} from './voiceGuidedFlow.js';
+import {GUIDED_RECORDING_KEYS} from './voiceGuidedFlow.js';
 import {normalizeBandSearch, VOICE_SEARCH_STYLES} from './voiceBandMatching.js';
 
 export const VOICEMAIL_GREETING="Hi, I'm the AI assistant for The Supreme Collective. Your message will be recorded and transcribed for the team. Please tell us your reason for calling. For band availability, please include your name, event date, venue or location, any bands or music styles you have in mind, and your email address and phone number. Please spell your email address slowly. Leave your message after the tone, then press the hash key when you've finished, or simply hang up.";
@@ -99,7 +99,7 @@ export async function openVoiceAudio(ref,part){
   if(!row)return null;
   let fileId=row.recording?.fileId;
   if(row.intent==='guided_enquiry'){
-    if(typeof part!=='string'||!GUIDED_QUESTIONS.some(q=>q.key===part))return null;
+    if(typeof part!=='string'||!GUIDED_RECORDING_KEYS.includes(part))return null;
     fileId=row.guided?.answers?.[part]?.fileId;
   }else if(part)return null;
   if(!fileId)return null;

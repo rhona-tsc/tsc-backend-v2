@@ -1,12 +1,13 @@
 import mongoose from 'mongoose';
 import twilio from 'twilio';
 import {voiceCallRef,finishVoiceCallReview} from './voiceCallReview.js';
-import {GUIDED_QUESTIONS,guidedConsent,guidedRemaining,guidedPermissionLabel} from './voiceGuidedFlow.js';
+import {GUIDED_QUESTIONS,GUIDED_RECORDING_KEYS,guidedQuestions,guidedConsent,guidedRemaining,guidedPermissionLabel} from './voiceGuidedFlow.js';
 import {downloadTwilioRecording,storeVoiceAudio,readVoiceAudio,removeVoiceProviderCopy,transcribeVoicemail,extractVoicemailFields,voicemailDraft} from './voiceVoicemail.js';
 import {saveVoiceDraft,lookupVoiceBands} from './voiceEnquiryStore.js';
 import {normalizeBandSearch} from './voiceBandMatching.js';
 import EnquiryBoardItem from '../models/enquiryBoardItem.js';
 import {normalizeCallbackPhone} from './incomingEnquiryAssistant.js';
+import {prepareGuidedCallbackSlots} from './voiceGuidedCallback.js';
 const calls=()=>mongoose.connection.db.collection('voice_call_reviews');
 const liveFilter=callSid=>({_id:voiceCallRef(callSid),intent:'guided_enquiry',expiresAt:{$gt:new Date()}});
 const validSid=sid=>/^CA[a-f\d]{32}$/i.test(sid||'');
@@ -16,7 +17,7 @@ export async function readGuidedIntake(callSid,{collection=calls()}={}){
   return collection.findOne(liveFilter(callSid),{maxTimeMS:1500});
 }
 export async function initializeGuidedIntake(callSid,{collection=calls()}={}){
-  await collection.updateOne({...liveFilter(callSid),guided:{$exists:false}},{$set:{guided:{version:2,step:0,status:'collecting',answers:{},consentAttempts:0},status:'in_progress'}},{maxTimeMS:1500});
+  await collection.updateOne({...liveFilter(callSid),guided:{$exists:false}},{$set:{guided:{version:3,route:'menu',kind:'enquiry',step:0,status:'collecting',answers:{},consentAttempts:0},status:'in_progress'}},{maxTimeMS:1500});
   return readGuidedIntake(callSid,{collection});
 }
 export async function closeGuidedIntake(callSid,reason='interrupted',{collection=calls()}={}){
@@ -27,13 +28,13 @@ export async function closeGuidedIntake(callSid,reason='interrupted',{collection
 // The signed callback's step is the only association between a recording and a question.
 // A recording can never be relabelled or replace a previous answer on a retry.
 export async function queueGuidedRecording(callSid,step,body,{collection=calls(),fromAction=false}={}){
-  if(!validSid(callSid)||!Number.isInteger(step)||!GUIDED_QUESTIONS[step]||body.CallSid!==callSid)return false;
+  if(!validSid(callSid)||!Number.isInteger(step)||step<0||step>6||body.CallSid!==callSid)return false;
   if(!fromAction&&!['completed','absent'].includes(body.RecordingStatus))return false;
   const sid=body.RecordingSid,absent=body.RecordingStatus==='absent'||fromAction&&!recordingSid(sid);
   if(!recordingSid(sid)&&!absent)return false;
   const seconds=Number(body.RecordingDuration||0);if(!Number.isFinite(seconds)||seconds<0||seconds>100)return false;
   const row=await readGuidedIntake(callSid,{collection});if(!row||step>row.guided.step)return false;
-  const key=GUIDED_QUESTIONS[step].key,existing=row.guided.answers?.[key];
+  const key=guidedQuestions(row)[step]?.key;if(!key)return false;const existing=row.guided.answers?.[key];
   if(existing?.sid){if(existing.sid!==sid)return false;return true;}
   if(existing?.status==='absent')return absent;
   const answer={...(recordingSid(sid)?{sid}:{}),status:absent?'absent':'queued',durationSeconds:seconds,attempts:0,receivedAt:new Date(),endedWithHash:fromAction&&body.Digits==='#'};
@@ -41,15 +42,15 @@ export async function queueGuidedRecording(callSid,step,body,{collection=calls()
   return true;
 }
 export async function acceptGuidedAnswer(callSid,step,body,{collection=calls()}={}){
-  const row=await readGuidedIntake(callSid,{collection});if(!row||!GUIDED_QUESTIONS[step])return null;
+  const row=await readGuidedIntake(callSid,{collection});if(!row||!guidedQuestions(row)[step]||row.guided.route==='menu')return null;
   if(step<row.guided.step)return row; // A retried action renders the current question, never skips one.
   if(step!==row.guided.step||row.guided.status!=='collecting')return row;
   if(!await queueGuidedRecording(callSid,step,body,{collection,fromAction:true}))return row;
-  const key=GUIDED_QUESTIONS[step].key;
+  const key=guidedQuestions(row)[step].key;
   await collection.updateOne({...liveFilter(callSid),[`guided.answers.${key}.sid`]:body.RecordingSid},{$set:{[`guided.answers.${key}.endedWithHash`]:body.Digits==='#'}},{maxTimeMS:1500});
   if(body.Digits==='hangup')return closeGuidedIntake(callSid,'interrupted',{collection});
-  const finished=row.guided.version>=2&&step===GUIDED_QUESTIONS.length-1;
-  await collection.updateOne({...liveFilter(callSid),'guided.step':step,'guided.status':'collecting'},{$inc:{'guided.step':1},$set:{'guided.lastAnswerAt':new Date(),...(finished?{'guided.status':'complete','guided.closedAt':new Date(),status:'message_processing'}:{})}},{maxTimeMS:1500});
+  const finished=row.guided.version>=2&&step===guidedQuestions(row).length-1;
+  await collection.updateOne({...liveFilter(callSid),'guided.step':step,'guided.status':'collecting'},{$inc:{'guided.step':1},$set:{'guided.lastAnswerAt':new Date(),...(row.guided.kind==='callback'&&step===2?{'guided.callback.answersReady':true}:{}),...(finished?{'guided.status':'complete','guided.closedAt':new Date(),status:'message_processing'}:{})}},{maxTimeMS:1500});
   return readGuidedIntake(callSid,{collection});
 }
 export async function acceptGuidedConsent(callSid,digit,{collection=calls()}={}){
@@ -63,10 +64,10 @@ export async function acceptGuidedConsent(callSid,digit,{collection=calls()}={})
   return readGuidedIntake(callSid,{collection});
 }
 export function guidedTranscript(row){
-  return GUIDED_QUESTIONS.filter(q=>row.guided.answers?.[q.key]).map(q=>`${q.label}: ${row.guided.answers[q.key].transcript||'[Answer not transcribed; listen to its recording]'}`).join('\n');
+  return guidedQuestions(row).filter(q=>row.guided.answers?.[q.key]).map(q=>`${q.label}: ${row.guided.answers[q.key].transcript||'[Answer not transcribed; listen to its recording]'}`).join('\n');
 }
 export function guidedTurns(row){
-  return GUIDED_QUESTIONS.flatMap((q,index)=>{const a=row.guided.answers?.[q.key];return a?[{itemId:`guided_prompt_${q.key}`,sequence:index*2+1,role:'assistant',text:q.prompt},{itemId:`guided_answer_${q.key}`,sequence:index*2+2,role:'user',text:a.transcript||'',transcriptionPending:!a.transcript&&!['needs_review','absent'].includes(a.status),transcriptionFailed:['needs_review','absent'].includes(a.status)}]:[];});
+  return guidedQuestions(row).flatMap((q,index)=>{const a=row.guided.answers?.[q.key];return a?[{itemId:`guided_prompt_${q.key}`,sequence:index*2+1,role:'assistant',text:q.prompt},{itemId:`guided_answer_${q.key}`,sequence:index*2+2,role:'user',text:a.transcript||'',transcriptionPending:!a.transcript&&!['needs_review','absent'].includes(a.status),transcriptionFailed:['needs_review','absent'].includes(a.status)}]:[];});
 }
 export async function processGuidedAnswer(row,key,{collection=calls(),download=downloadTwilioRecording,storeAudio=storeVoiceAudio,loadAudio=readVoiceAudio,removeCopy=removeVoiceProviderCopy,transcribe=transcribeVoicemail}={}){
   const part=row.guided.answers[key],record={...row,recording:part},prefix=`guided.answers.${key}`;
@@ -95,7 +96,7 @@ export function literalGuidedFields(row){
   if(!iso){const m=date.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(January|February|March|April|May|June|July|August|September|October|November|December)\s*,?\s*(20\d{2})\b/i);if(m){const month=['january','february','march','april','may','june','july','august','september','october','november','december'].indexOf(m[2].toLowerCase())+1;iso=`${m[3]}-${String(month).padStart(2,'0')}-${m[1].padStart(2,'0')}`;}}
   const preferences=text('preferences'),budget=preferences.match(/£\s*([\d,]+)|\b([\d,]+)\s*(?:pounds|GBP)\b/i),size=preferences.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]+(?:piece|band members?|musicians?)\b/i);
   const numberWords=['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve'];
-  return {clientName:name,clientPhone:phone?.[0]||'',clientEmail:email,eventDateISO:iso,address:text('location'),styles:[],mustHaveInstruments:[],preferredSize:size?`${Number(size[1])||numberWords.indexOf(size[1].toLowerCase())}-piece`:'',maxBudget:budget?Number((budget[1]||budget[2]).replace(/,/g,'')):0,topic:'client_event',reason:'Guided band enquiry',notes:guidedTranscript(row),bandNames:[]};
+  return {clientName:name,clientPhone:phone?.[0]||'',clientEmail:email,eventDateISO:iso,address:text('location'),styles:[],mustHaveInstruments:[],preferredSize:size?`${Number(size[1])||numberWords.indexOf(size[1].toLowerCase())}-piece`:'',maxBudget:budget?Number((budget[1]||budget[2]).replace(/,/g,'')):0,topic:row.guided.kind==='callback'?'human_callback':'client_event',reason:row.guided.kind==='callback'?text('callback_reason'):'Guided band enquiry',notes:guidedTranscript(row),bandNames:[]};
 }
 // The contact prompts explicitly ask callers to supply a number/address only if
 // they want that enquiry follow-up. Refusals and uncertainty override supplied details.
@@ -105,7 +106,7 @@ export function guidedContactPreferences(row){
   const yes=text=>/^(?:yes|yeah|yep|sure|okay|ok|absolutely|that's fine|that is fine)\b/i.test(text)||/\b(?:happy|fine|okay|ok) (?:for|to|with)\b/i.test(text);
   const phone=answer('phone'),email=answer('email');
   const refusal=text=>/^(?:no|nope)\b|\b(?:do not|don't|not happy|rather not|prefer not|not comfortable|not okay)\b/i.test(text);
-  const allAnswers=GUIDED_QUESTIONS.map(q=>String(row.guided.answers?.[q.key]?.transcript||'')).join(' \n ');
+  const allAnswers=guidedQuestions(row).map(q=>String(row.guided.answers?.[q.key]?.transcript||'')).join(' \n ');
   const phoneRevoked=/\b(?:no phone calls|(?:do not|don't) (?:call|phone) (?:me|us)|no (?:phone|telephone) follow[- ]?up)\b/i.test(allAnswers);
   const emailRevoked=/\b(?:no email quotes|(?:do not|don't) email (?:me|us)|(?:do not|don't) send (?:me |us )?(?:quotes by email|email quotes))\b/i.test(allAnswers);
   const phoneNo=phoneRevoked||refusal(phone)||/\bno (?:phone|calls?|callback)|\b(?:email|whats ?app) only\b/i.test(phone);
@@ -113,7 +114,7 @@ export function guidedContactPreferences(row){
   const phoneProvided=!!normalizeCallbackPhone(literal.clientPhone)||/\buse (?:this|the same|my calling) number\b/i.test(phone)&&!!normalizeCallbackPhone(row.caller);
   return {emailQuotes:emailNo?false:!email?null:uncertain(email)?null:yes(email)||!!literal.clientEmail?true:null,phoneFollowup:phoneNo?false:!phone?null:uncertain(phone)?null:yes(phone)||phoneProvided?true:null,method:'recorded_contact_answers'};
 }
-export async function finalizeGuidedIntake(row,{collection=calls(),extract=extractVoicemailFields,saveDraft=saveVoiceDraft,lookupBands=lookupVoiceBands,finish=finishVoiceCallReview,saveConsent=async(sid,consent)=>EnquiryBoardItem.updateOne({websiteKey:`phone:${sid}`,captureState:'draft'},{$set:{'draftDetails.guidedConsent':consent}})}={}){
+export async function finalizeGuidedIntake(row,{collection=calls(),extract=extractVoicemailFields,saveDraft=saveVoiceDraft,lookupBands=lookupVoiceBands,finish=finishVoiceCallReview,saveAppointment=async(sid,appointment)=>EnquiryBoardItem.updateOne({websiteKey:`phone:${sid}`,captureState:'draft'},{$set:{callAppointment:appointment}}),saveConsent=async(sid,consent)=>EnquiryBoardItem.updateOne({websiteKey:`phone:${sid}`,captureState:'draft'},{$set:{'draftDetails.guidedConsent':consent}})}={}){
   const transcript=guidedTranscript(row),turns=guidedTurns(row);
   try{
     const literal=literalGuidedFields(row);let interpretationUnavailable=false,extracted=literal;
@@ -130,9 +131,12 @@ export async function finalizeGuidedIntake(row,{collection=calls(),extract=extra
     if(row.guided.version>=2)await collection.updateOne(liveFilter(row.callSid),{$set:{'guided.consent':permission}});
     if(permission?.emailQuotes&&draft.clientEmail)draft.preferredContactMethod='email';else if(permission?.phoneFollowup&&draft.clientPhone)draft.preferredContactMethod='phone';
     draft.requirements=[guidedTranscript(row),draft.requirements,permission?`Caller follow-up permission (${permission.method||'keypad'}): email quotes ${guidedPermissionLabel(permission.emailQuotes)}; phone ${guidedPermissionLabel(permission.phoneFollowup)}.`:'Follow-up permission not completed; do not contact until reviewed.'].filter(Boolean).join('; ').slice(0,2000);
-    await saveDraft(row.callSid,draft);await saveConsent(row.callSid,permission?{emailQuotes:permission.emailQuotes,phoneFollowup:permission.phoneFollowup,method:permission.method||'keypad',...(permission.at?{at:permission.at}:{})}:{emailQuotes:false,phoneFollowup:false,method:'not_completed'});
+    if(row.guided.kind==='callback'){draft.enquiryTopic='human_callback';draft.callbackReason=row.guided.answers?.callback_reason?.transcript||'';draft.requirements=[draft.requirements,row.guided.answers?.callback_preference?.transcript?`Preferred callback time: ${row.guided.answers.callback_preference.transcript}`:''].filter(Boolean).join('; ').slice(0,2000);}
+    await saveDraft(row.callSid,draft);
+    if(row.guided.kind==='callback'&&row.guided.callback?.selected)await saveAppointment(row.callSid,{...row.guided.callback.selected,testMode:true,status:'proposed',bookingConfirmed:false,confirmed:false});
+    await saveConsent(row.callSid,permission?{emailQuotes:permission.emailQuotes,phoneFollowup:permission.phoneFollowup,method:permission.method||'keypad',...(permission.at?{at:permission.at}:{})}:{emailQuotes:false,phoneFollowup:false,method:'not_completed'});
     let suggestions=[];const criteria=normalizeBandSearch(draft);
-    if(!interpretationUnavailable&&extracted.topic==='client_event'&&!criteria.unknown.length&&(criteria.styles.length||criteria.mustHaveInstruments.length||draft.preferredSize||draft.preferredBands)){
+    if(row.guided.kind!=='callback'&&!interpretationUnavailable&&extracted.topic==='client_event'&&!criteria.unknown.length&&(criteria.styles.length||criteria.mustHaveInstruments.length||draft.preferredSize||draft.preferredBands)){
       for(const query of extracted.bandNames?.length?extracted.bandNames.slice(0,3):['']){const found=await lookupBands({...criteria,query});suggestions.push(...(found.bands||[]));}suggestions=[...new Map(suggestions.map(b=>[b.actId,b])).values()].slice(0,3);
     }
     await collection.updateOne(liveFilter(row.callSid),{$set:{turns,transcriptCount:turns.length,transcriptHasGaps:turns.some(t=>t.transcriptionPending||t.transcriptionFailed),'guided.processingStatus':'ready_for_review','guided.interpretationStatus':interpretationUnavailable?'needs_review':'complete',voicemail:{transcript,status:'ready_for_review',suggestedBands:suggestions,missing:['clientName','clientEmail','clientPhone','eventDateISO','address'].filter(k=>!draft[k]),reviewRequired:true,messagesSent:0,...(interpretationUnavailable?{lastError:'Automatic field interpretation is unavailable. Literal answers and original recordings are saved; review them before following up.'}:{})}}});
@@ -151,20 +155,21 @@ export function startGuidedVoiceWorker(){
     try{
       const collection=calls(),now=new Date();
       const row=await collection.findOneAndUpdate({intent:'guided_enquiry',expiresAt:{$gt:now},'guided.processingStatus':{$nin:['ready_for_review','needs_review']},$or:[{'guided.claimUntil':{$exists:false}},{'guided.claimUntil':{$lt:now}}]},{$set:{'guided.claimUntil':new Date(Date.now()+3*60000)}},{returnDocument:'after',includeResultMetadata:false});
-      const retained=await collection.findOne({intent:'guided_enquiry',expiresAt:{$gt:now},$or:GUIDED_QUESTIONS.map(q=>({[`guided.answers.${q.key}.fileId`]:{$exists:true},[`guided.answers.${q.key}.providerCopyRemoved`]:{$ne:true}}))});
-      if(retained){const q=GUIDED_QUESTIONS.find(q=>retained.guided.answers?.[q.key]?.fileId&&!retained.guided.answers[q.key].providerCopyRemoved);if(q&&await removeVoiceProviderCopy({...retained,recording:retained.guided.answers[q.key]}))await collection.updateOne(liveFilter(retained.callSid),{$set:{[`guided.answers.${q.key}.providerCopyRemoved`]:true}});}
+      const retained=await collection.findOne({intent:'guided_enquiry',expiresAt:{$gt:now},$or:GUIDED_RECORDING_KEYS.map(key=>({[`guided.answers.${key}.fileId`]:{$exists:true},[`guided.answers.${key}.providerCopyRemoved`]:{$ne:true}}))});
+      if(retained){const key=GUIDED_RECORDING_KEYS.find(key=>retained.guided.answers?.[key]?.fileId&&!retained.guided.answers[key].providerCopyRemoved);if(key&&await removeVoiceProviderCopy({...retained,recording:retained.guided.answers[key]}))await collection.updateOne(liveFilter(retained.callSid),{$set:{[`guided.answers.${key}.providerCopyRemoved`]:true}});}
       if(!row)return;
       if(row.guided.status==='collecting'){
         // No call is created: read the existing provider call so a hangup during a prompt is saved too.
         const state=await twilio(process.env.TWILIO_ACCOUNT_SID,process.env.TWILIO_AUTH_TOKEN).calls(row.callSid).fetch();
         if(['completed','busy','failed','no-answer','canceled'].includes(state.status)||guidedRemaining(row)<1)await closeGuidedIntake(row.callSid,'interrupted',{collection});
       }
+      if(row.guided.kind==='callback'&&row.guided.callback?.phase==='loading')await prepareGuidedCallbackSlots(row.callSid,{collection});
       // One bounded answer at a time. A durable private copy always precedes provider cleanup.
-      const answer=GUIDED_QUESTIONS.find(q=>row.guided.answers?.[q.key]?.sid&&['queued'].includes(row.guided.answers[q.key].status)&&(row.guided.answers[q.key].attempts||0)<3);
+      const answer=guidedQuestions(row).find(q=>row.guided.answers?.[q.key]?.sid&&['queued'].includes(row.guided.answers[q.key].status)&&(row.guided.answers[q.key].attempts||0)<3);
       if(answer){await collection.updateOne(liveFilter(row.callSid),{$inc:{[`guided.answers.${answer.key}.attempts`]:1}});row.guided.answers[answer.key].attempts=(row.guided.answers[answer.key].attempts||0)+1;await processGuidedAnswer(row,answer.key,{collection});}
       let current=await readGuidedIntake(row.callSid,{collection});
       // Recover at most one missing callback using the only unassigned completed Record on this call.
-      const key=GUIDED_QUESTIONS[current.guided.step]?.key;
+      const key=guidedQuestions(current)[current.guided.step]?.key;
       if(current.guided.status!=='collecting'&&key&&!current.guided.answers?.[key]&&+new Date(current.guided.closedAt)<Date.now()-15000){
         const recordings=await twilio(process.env.TWILIO_ACCOUNT_SID,process.env.TWILIO_AUTH_TOKEN).recordings.list({callSid:row.callSid,limit:15});
         const known=new Set(Object.values(current.guided.answers||{}).map(a=>a.sid));const unknown=recordings.filter(r=>r.callSid===row.callSid&&r.status==='completed'&&!known.has(r.sid));

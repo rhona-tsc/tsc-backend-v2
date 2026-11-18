@@ -118,7 +118,7 @@ export async function listVoiceCallReviews() {
 export async function readVoiceCallReview(ref) {
   if (!/^PHONE-[A-F\d]{12}$/.test(ref || '')) return null;
   const call = await calls().findOne({ _id: ref, expiresAt: { $gt: new Date() } }, { projection: { callSid: 0 } });
-  const enquiry = await EnquiryBoardItem.findOne({ enquiryRef: ref, marketingSource: 'Phone — AI pilot test' }).select('enquiryRef clientName clientEmail clientPhone eventDateISO address county postcode venueConfirmation preferredContactMethod decisionWindow styles preferredSize maxBudget selectedBands availabilityRequestTest callAppointment captureState draftDetails voicePriceEstimates notes createdAt').lean();
+  const enquiry = await EnquiryBoardItem.findOne({ enquiryRef: ref, marketingSource: 'Phone — AI pilot test' }).select('enquiryRef clientName clientEmail clientPhone eventDateISO address county postcode venueConfirmation preferredContactMethod callbackReason enquiryTopic decisionWindow styles preferredSize maxBudget selectedBands availabilityRequestTest callAppointment captureState draftDetails voicePriceEstimates notes createdAt').lean();
   if (!call && !enquiry) return null;
   const result = { ...(call || { _id: ref, startedAt: enquiry?.createdAt, status: 'no_transcript', turns: [] }), enquiry };
   if(['voicemail','guided_enquiry'].includes(call?.intent))result.detectedCallerNumber=call.caller||'';

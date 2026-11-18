@@ -33,13 +33,13 @@ export function appointmentSlots(input, { events = [], now = new Date() } = {}) 
   }
   return result;
 }
-export async function lookupVoiceCallSlots(input, { now = new Date(), loadEvents } = {}) {
+export async function lookupVoiceCallSlots(input, { now = new Date(), loadEvents, timeoutMs = 6000 } = {}) {
   const window = appointmentWindow(input, now);
   if (!CALL_SCHEDULE.days.includes(window.weekday)) return { slots: [], schedule: CALL_SCHEDULE, testMode: true, bookingConfirmed: false, reason: 'Human calls are Monday to Thursday, 10am to 4pm UK time.' };
   const load = loadEvents || (async () => {
     const auth = new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, process.env.GOOGLE_REDIRECT_URI);
     auth.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
-    const response = await google.calendar({ version: 'v3', auth }).events.list({ calendarId: CALL_CALENDAR_ID, timeMin: window.start.toISOString(), timeMax: window.end.toISOString(), singleEvents: true, maxResults: 250, fields: 'nextPageToken,items(status,transparency,start,end,attendees(self,responseStatus))' }, { timeout: 6000 });
+    const response = await google.calendar({ version: 'v3', auth }).events.list({ calendarId: CALL_CALENDAR_ID, timeMin: window.start.toISOString(), timeMax: window.end.toISOString(), singleEvents: true, maxResults: 250, fields: 'nextPageToken,items(status,transparency,start,end,attendees(self,responseStatus))' }, { timeout: Math.min(6000,Math.max(500,timeoutMs)) });
     if (response.data.nextPageToken) throw new Error('Calendar has too many entries to verify safely.');
     return response.data.items || [];
   });
