@@ -4,7 +4,7 @@ import {bookLiveVoiceCallback,voiceCallbackEventId,liveCallbackContact} from '..
 import {enforceLiveVoiceDuration} from '../services/voiceLiveCall.js';
 import {voiceCallRef,managementCallEmail} from '../services/voiceCallReview.js';
 import {voiceConnectionConfig} from '../services/voiceEnquiryConnection.js';
-import {guidedClosing} from '../services/voiceGuidedFlow.js';
+import {guidedClosing,publicGuidedReview} from '../services/voiceGuidedFlow.js';
 import {saveVoiceDraft} from '../services/voiceEnquiryStore.js';import {createVoiceEnquiryRouter} from '../routes/voiceEnquiryRoutes.js';
 const sid=n=>`CA${n.toString(16).padStart(32,'0')}`;
 function meter(){const rows=new Map();const matches=(r,f)=>r&&Object.entries(f).every(([k,v])=>v?.$lte!==undefined?r[k]<=v.$lte:v?.$ne!==undefined?!r[k]?.includes(v.$ne):Array.isArray(r[k])?r[k].includes(v):r[k]===v);return {rows,updateOne:async(f,u)=>{if(!rows.has(f._id))rows.set(f._id,{_id:f._id,...structuredClone(u.$setOnInsert)});},findOne:async f=>{const r=rows.get(f._id);return matches(r,f)?structuredClone(r):null;},findOneAndUpdate:async(f,u)=>{const r=rows.get(f._id);if(!matches(r,f))return null;for(const [k,v]of Object.entries(u.$inc||{}))r[k]=(r[k]||0)+v;for(const[k,v]of Object.entries(u.$push||{}))r[k].push(v);return structuredClone(r);}};}
@@ -56,4 +56,8 @@ test('real drafts and management summaries have live labels while remaining unco
  let saved;await saveVoiceDraft(sid(1),{clientName:'Mary'}, {testMode:false,Model:{findOneAndUpdate:async(f,u)=>{saved=u;return u;}}});assert.equal(saved.$set.marketingSource,'Phone — AI assistant');assert.equal(saved.$set.captureState,'draft');assert.equal(saved.$set.contactConfirmed,false);assert.doesNotMatch(saved.$set.notes,/PILOT TEST/);
  const row={...bookingRow(),startedAt:new Date(),status:'guided_answers_saved'},email=managementCallEmail(row,{clientName:'Mary',captureState:'draft',callAppointment:{...slot,status:'booked',testMode:false}});assert.match(email.subject,/\[AI call\]/);assert.doesNotMatch(email.text,/AI PHONE PILOT TEST|test proposal; not booked/);assert.match(email.text,/booked in the callback calendar/);
  row.guided.callback.booking={status:'needs_review'};assert.doesNotMatch(guidedClosing(row),/is booked|pilot test/);row.guided.callback.booking={status:'booked'};assert.match(guidedClosing(row),/callback is booked/);
+});
+
+test('callback review reflects only a calendar-confirmed live booking',()=>{
+ const row=bookingRow();row.guided.answers={};assert.equal(publicGuidedReview(row).callback.bookingConfirmed,false);row.guided.callback.booking={status:'booked'};assert.equal(publicGuidedReview(row).callback.bookingConfirmed,true);assert.equal(publicGuidedReview({...row,testMode:true}).callback.bookingConfirmed,false);
 });
