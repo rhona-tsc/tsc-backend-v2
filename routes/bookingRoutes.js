@@ -25,6 +25,7 @@ import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
 import { PDFDocument as PDFLibDocument, StandardFonts, rgb } from "pdf-lib";
 import crypto from "crypto";
+import multer from "multer";
 import { buildBandEventSheetEmailHtml } from "../utils/tscEmailBranding.js";
 import {
   buildBandSheetPdfUrl,
@@ -206,6 +207,7 @@ export const withConfirmedAllocation = async (booking, { BoardModel = BookingBoa
   return {
     ...plain,
     ...(board?._id ? { bookingBoardId: String(board._id) } : {}),
+    ...(board?.paymentInstructions?.paymentMethod === "bank_transfer" ? { balancePaymentMethod: "invoice" } : {}),
     ...(board?.bookingRef ? { bookingRef: board.bookingRef } : {}),
     ...(board?.clientFirstNames || board?.bookerName
       ? {
@@ -2011,6 +2013,18 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
     { showFallback: true },
   );
 
+  const tickets = Array.isArray(booking.bandTravelTickets) ? booking.bandTravelTickets : [];
+  if (tickets.length) {
+    sectionTitle("Travel tickets", 100);
+    doc.fontSize(10).fillColor(grey).text("Open the attached tickets below. Keep booking references private.");
+    for (const ticket of tickets) {
+      ensureSpace(45);
+      const token = cleanBandSheetToken(booking.eventSheet?.bandSheetToken || booking.bandSheetTokens?.[0]);
+      const url = `https://tsc-backend-v2.onrender.com/api/booking/band-sheet/${encodeURIComponent(token)}/tickets/${ticket.fileId}`;
+      doc.moveDown(0.5).fontSize(11).fillColor("#1649be").text(`${ticket.musicianName} — ${ticket.label || "Flight ticket"}`, { link: url, underline: true });
+    }
+  }
+
   const excludedKeys = new Set([
     "parking_num_cars",
     "parkingNumCars",
@@ -2161,12 +2175,39 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
   return appendVenueDocumentAppendix(basePdf, answers);
 };
 
+const ticketUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+router.post("/:id/travel-tickets", verifyToken, ticketUpload.single("ticket"), async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer.subarray(0, 5).equals(Buffer.from("%PDF-"))) return res.status(400).json({ message: "Please attach a PDF ticket" });
+    const booking = await Booking.findById(req.params.id).select("+bandTravelTickets");
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
+    const musicianName = String(req.body.musicianName || "").trim();
+    if (!musicianName) return res.status(400).json({ message: "Musician name is required" });
+    const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: "bandTravelTickets" });
+    const stream = bucket.openUploadStream(req.file.originalname, { contentType: "application/pdf", metadata: { bookingId: String(booking._id) } });
+    await new Promise((resolve, reject) => { stream.on("finish", resolve); stream.on("error", reject); stream.end(req.file.buffer); });
+    booking.bandTravelTickets.push({ fileId: String(stream.id), musicianName, label: String(req.body.label || "Flight ticket"), uploadedAt: new Date() });
+    await booking.save();
+    res.json({ success: true, tickets: booking.bandTravelTickets });
+  } catch (error) { res.status(500).json({ message: "Could not attach travel ticket" }); }
+});
+router.get("/band-sheet/:token/tickets/:fileId", async (req, res) => {
+  try {
+    const booking = await Booking.findOne(bandSheetTokenLookup(req.params.token)).select("+bandTravelTickets").lean();
+    const ticket = booking?.bandTravelTickets?.find(item => String(item.fileId) === req.params.fileId);
+    if (!ticket || !mongoose.isValidObjectId(ticket.fileId)) return res.status(404).send("Ticket not found");
+    const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: "bandTravelTickets" });
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": "inline; filename=travel-ticket.pdf", "Cache-Control": "private, no-store" });
+    bucket.openDownloadStream(new mongoose.Types.ObjectId(ticket.fileId)).on("error", () => { if (!res.headersSent) res.status(404).end(); else res.end(); }).pipe(res);
+  } catch (error) { res.status(500).send("Could not open travel ticket"); }
+});
+
 router.get("/band-sheet/:token", async (req, res) => {
   try {
     const token = String(req.params?.token || "").trim();
     if (!token) return res.status(404).send("Band event sheet not found");
 
-    const booking = await Booking.findOne(bandSheetTokenLookup(token)).lean();
+    const booking = await Booking.findOne(bandSheetTokenLookup(token)).select("+bandTravelTickets").lean();
     if (!booking) return res.status(404).send("Band event sheet not found");
 
     const bookingForPdf = await withConfirmedAllocation(booking);

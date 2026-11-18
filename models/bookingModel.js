@@ -490,6 +490,8 @@ const BookingSchema = new mongoose.Schema(
 
     // Event sheet
     eventSheet: EventSheetSchema,
+    // Band-only attachments; excluded from client booking responses.
+    bandTravelTickets: { type: [mongoose.Schema.Types.Mixed], default: [], select: false },
     // Permanent registry of every band-sheet token issued for this booking.
     // It deliberately lives outside eventSheet so an event-sheet replacement
     // cannot invalidate links already sent to musicians or calendar guests.

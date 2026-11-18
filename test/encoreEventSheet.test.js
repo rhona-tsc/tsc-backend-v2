@@ -59,3 +59,8 @@ test('agent intro uses explicit agreed deadlines without claiming an unverified 
   assert.match(email.text,/for your clients and their guests/);
   assert.doesNotMatch(email.text,/sending over the deposit|receipt for the deposit|around a week|attached invoice/);
 });
+
+test('explicit bank-transfer booking exposes the invoice route and paid deposit',async()=>{
+ const result=await withConfirmedAllocation({bookingId:'EXAMPLE'},dependencies({...board,agent:'Direct',grossValue:3610,originalBookingTotal:3610,payments:{depositChargedAmount:500},paymentInstructions:{paymentMethod:'bank_transfer'}}));
+ assert.equal(result.balancePaymentMethod,'invoice');assert.equal(result.totals.depositAmount,500);assert.equal(result.totals.remainingAmount,3110);
+});
