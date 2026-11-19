@@ -1,6 +1,10 @@
 import { resolveAutomaticDeputyPrice, performanceLineupSize } from '../services/automaticDeputyPricing.js';
 import { availabilityReplyIntent, availabilityButtonIntent, selectAvailabilityReplyTarget, recordAvailabilityReply, queueAvailabilityInbound } from "../services/availabilityInboundReply.js";
 import { interceptAvailabilityTest } from '../services/availabilityRequestTestPreview.js';
+import { prepareAvailabilityDispatch, assertAvailabilityContactAllowed,
+  assertApprovedAvailabilityRecipient, approvedAvailabilityFee,
+  availabilityEnquiryDuties, validateAvailabilityDispatchRecipients,
+  priorAvailabilityDeclines } from '../services/availabilityDispatchSafety.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import { encoreRequestEnquiryScope } from '../services/enquiryAvailabilityTracking.js';
@@ -3466,6 +3470,26 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     /* 🎤 MULTI-VOCALIST HANDLING (Lead only)                         */
     /* -------------------------------------------------------------- */
     const vocalists = sortedVocalContacts(lineup);
+    const dispatch = prepareAvailabilityDispatch({ body, lineup, dateISO });
+    // Validate the whole approved recipient list before any reservation or escalation.
+    if (body.source === 'encore_enquiry_board' || body.approvedOffer || body.approvedOffers) {
+      await validateAvailabilityDispatchRecipients(dispatch, {
+        dateISO, approval: body.contactPolicyApproval,
+        resolveCanonical: async (member, phone) => {
+          const byPhone = await findCanonicalMusicianByPhone(phone);
+          if (byPhone || !member.email) return byPhone;
+          return Musician.findOne({ email: String(member.email).trim().toLowerCase() })
+            .select('_id firstName lastName email phone phoneNumber phoneNormalized').lean();
+        },
+        loadPriorReplies: async (musicianId, phone) => {
+          const prior = await AvailabilityModel.find({ dateISO,
+            $or: [{ phone }, ...(musicianId ? [{ musicianId }] : [])],
+            reply: { $in: ['no', 'unavailable'] } })
+            .select('_id reply formattedAddress address messageSidOut outboundSentAt replyHistory').lean();
+          return priorAvailabilityDeclines(prior, fullFormattedAddress);
+        },
+      });
+    }
     const recordUnavailableRegular = async ({ member, phone, musicianId, slotIndex }) => {
       if (!phone) return;
       await AvailabilityModel.findOneAndUpdate(
@@ -3479,12 +3503,10 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       );
     };
 
-    if (!isDeputy && vocalists.length > 1) {
+    if (!isDeputy && !dispatch.single && vocalists.length > 1) {
       const results = [];
 
-      for (let i = 0; i < vocalists.length; i++) {
-        const vMember = vocalists[i];
-        const slotIndexForThis = i;
+      for (const { member: vMember, slotIndex: slotIndexForThis, offer: approvedOffer } of dispatch.primary) {
 
         const phone = normalizePhone(vMember.phone || vMember.phoneNumber);
         if (!phone) {
@@ -3544,6 +3566,9 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
         }
 
         realMusicianId = musicianDoc?._id || null;
+        assertApprovedAvailabilityRecipient(approvedOffer, realMusicianId, phone);
+        assertAvailabilityContactAllowed({ ...vMember, ...musicianDoc,
+          musicianId: realMusicianId }, dateISO, body.contactPolicyApproval);
 
         const shouldAlwaysSkip =
   Boolean(musicianDoc?.skipAvailabilityChecks) &&
@@ -3808,7 +3833,8 @@ if (shouldAlwaysSkip) {
           console.warn("⚠️ Prior-reply check (multi) failed:", e?.message || e);
         }
 
-        const finalFee = await feeForMember(vMember);
+        const finalFee = approvedOffer ? approvedAvailabilityFee(approvedOffer) : await feeForMember(vMember);
+        const roleStr = availabilityEnquiryDuties(body, vMember);
 
         const now = new Date();
 
@@ -3862,7 +3888,7 @@ if (shouldAlwaysSkip) {
           clientName: resolvedClientName || "",
           clientEmail: resolvedClientEmail || "",
           actName: act?.tscName || act?.name || "",
-          duties: vMember.instrument || "Vocalist",
+          duties: roleStr,
           fee: String(finalFee),
           updatedAt: now,
           selectedVocalistName: displayNameForLead,
@@ -3907,7 +3933,7 @@ if (shouldAlwaysSkip) {
         const outboundMessage = `Hi ${
           vMember.firstName || "there"
         }, you've received an enquiry for a gig on ${formattedDate} in ${shortAddress} at a rate of £${finalFee} for ${
-          vMember.instrument
+          roleStr
         } duties with ${act.tscName || act.name}. Please indicate your availability 💫`;
 
         // Send interactive WA
@@ -3920,13 +3946,13 @@ if (shouldAlwaysSkip) {
           member: vMember,
           address: metaAddress,
           dateISO,
-          role: vMember.instrument,
+          role: roleStr,
           variables: {
             firstName: nameBits.firstName || "Musician",
             date: formattedDate,
             location: shortAddress,
             fee: String(finalFee),
-            role: vMember.instrument,
+            role: roleStr,
             actName: act.tscName || act.name,
           },
           requestId,
@@ -3939,7 +3965,7 @@ if (shouldAlwaysSkip) {
             actName: act.tscName || act.name,
             date: formattedDate,
             address: shortAddress,
-            duties: vMember.instrument,
+            duties: roleStr,
             fee: finalFee,
           },
         });
@@ -4001,11 +4027,9 @@ if (shouldAlwaysSkip) {
     /* -------------------------------------------------------------- */
 
     // ✅ Allow caller to explicitly target a vocalist member
-    const targetedFromBody = body?.targetMember || body?.targetVocalist || null;
-
     const targetMember = isDeputy
       ? deputy
-      : targetedFromBody || findVocalistPhone(act, lineupKey)?.vocalist;
+      : dispatch.single?.member;
 
     const bandMemberId = targetMember?._id || null; // traceability only
 
@@ -4052,8 +4076,7 @@ if (shouldAlwaysSkip) {
     );
     if (!phone) throw new Error("Missing phone");
 
-    const singleSlotIndex =
-      typeof body.slotIndex === "number" ? body.slotIndex : 0;
+    const singleSlotIndex = dispatch.single.slotIndex;
 
     let canonical = await findCanonicalMusicianByPhone(phone);
 
@@ -4116,6 +4139,10 @@ if (shouldAlwaysSkip) {
 
     // ✅ Resolve a real musicianId (never fall back to bandMemberId)
     const realMusicianId = canonical?._id || targetMember?.musicianId || null;
+    const approvedOffer = dispatch.single.offer;
+    assertApprovedAvailabilityRecipient(approvedOffer, realMusicianId, phone);
+    assertAvailabilityContactAllowed({ ...targetMember, ...canonical,
+      musicianId: realMusicianId }, dateISO, body.contactPolicyApproval);
 
     const shouldAlwaysSkip =
   Boolean(canonical?.skipAvailabilityChecks) &&
@@ -4399,7 +4426,9 @@ if (!isDeputy && shouldAlwaysSkip) {
     let finalFee;
     let feeBreakdown = null;
 
-    if (isDeputy && body?.automaticDeputy === true) {
+    if (approvedOffer) {
+      finalFee = approvedAvailabilityFee(approvedOffer);
+    } else if (isDeputy && body?.automaticDeputy === true) {
       feeBreakdown = await resolveAutomaticDeputyPrice({
         musician: canonical, county: countyFromAddress(fullFormattedAddress)?.county,
         dateISO, actName: act.tscName || act.name || '', bandSize: performanceLineupSize(lineup),
@@ -4491,8 +4520,7 @@ if (!isDeputy && shouldAlwaysSkip) {
       reply: null,
     };
 
-    const roleStr =
-      body?.inheritedDuties || targetMember.instrument || "Performance";
+    const roleStr = availabilityEnquiryDuties(body, targetMember);
 
     const setAlways = {
       isDeputy: !!isDeputy,
@@ -4655,6 +4683,8 @@ if (!isDeputy && shouldAlwaysSkip) {
     return { success: true, sent: 1 };
   } catch (err) {
     console.error("❌ triggerAvailabilityRequest error:", err);
+    if (res && String(err.code || '').startsWith('AVAILABILITY_'))
+      return res.status(409).json({ success: false, sent: 0, code: err.code, message: err.message });
     if (res)
       return res.status(500).json({ success: false, message: err.message });
     return { success: false, sent: 0, code: err.code || null, error: err.message };
