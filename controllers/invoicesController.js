@@ -1,3 +1,4 @@
+import { balanceDueISO } from '../utils/balanceDueDate.js';
 // controllers/invoicesController.js
 import { startOfDay, subDays, subHours, isValid, parseISO } from "date-fns";
 import { isEncoreBooking } from "../utils/encoreSettlement.js";
@@ -175,17 +176,6 @@ export const scheduleBalance = async (req, res) => {
         .json({ success: false, message: "Invalid eventDateISO." });
     }
 
-    const computedDue = parseISO(finalDetailsDueISO({
-      eventDateISO,
-      bookingDateISO: metadata?.bookingDateISO || new Date().toISOString(),
-    }));
-    const dueAt = dueAtISO ? parseISO(dueAtISO) : computedDue;
-    if (!isValid(dueAt)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid dueAtISO." });
-    }
-
     const booking = await Booking.findOne({
       $or: [{ bookingId }, { _id: bookingId }],
     });
@@ -194,6 +184,10 @@ export const scheduleBalance = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Booking not found." });
     }
+    const computedDue = parseISO(balanceDueISO({ ...booking.toObject(), eventDateISO }));
+    // The server is authoritative; old browser helpers must not postpone payment.
+    const dueAt = booking.paymentTermsVersion ? computedDue : (dueAtISO ? parseISO(dueAtISO) : computedDue);
+    if (!isValid(dueAt)) return res.status(400).json({success:false,message:'Invalid balance due date.'});
     if (isEncoreBooking(booking)) return res.status(409).json({ success: false, message: "Payment arranged through Encore. Use the extras invoice." });
     booking.balanceDueAt = dueAt;
     booking.balanceAmountPence = amountPence;
@@ -848,10 +842,7 @@ const getDueDateThursdayWeekBefore = (eventDateValue) => {
   ].join("-");
 };
 
-const getSafeInvoiceDueDate = (row, eventDateValue) => {
-  return (row?.contactRole === "agent" && /^\d{4}-\d{2}-\d{2}$/.test(row.invoiceDueDateISO || "") ? row.invoiceDueDateISO : "")
-    || finalDetailsDueISO({ ...row, eventDateISO: eventDateValue });
-};
+const getSafeInvoiceDueDate = (row, eventDateValue) => balanceDueISO({ ...row, eventDateISO: eventDateValue });
 
 const firstNonEmpty = (...values) =>
   values.find((value) => String(value || "").trim()) || "";

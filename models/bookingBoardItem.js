@@ -302,6 +302,7 @@ const BookingBoardItemSchema = new mongoose.Schema(
     invoiceDateISO: { type: String }, // when invoice was generated
     songSuggestionsDueDateISO: { type: String }, // authoritative song/request deadline
 
+    paymentTermsVersion: { type: String, default: undefined },
     invoiceDueDateISO: { type: String }, // payment due date
     originalBookingTotal: { type: Number, default: undefined },
     grossValue: { type: Number, default: 0 },

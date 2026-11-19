@@ -369,6 +369,7 @@ const BookingSchema = new mongoose.Schema(
     // Entertainment Nation, Encore or Direct). Keeping it on the core
     // booking prevents the board mirror and the checkout booking from
     // disagreeing after an inline edit.
+    paymentTermsVersion: { type: String, default: undefined },
     agent: { type: String, default: "Direct", trim: true },
 
     // User

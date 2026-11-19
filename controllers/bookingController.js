@@ -1,3 +1,4 @@
+import { balanceDueISO, newBalanceDueISO, BALANCE_PAYMENT_POLICY } from '../utils/balanceDueDate.js';
 import { linkBookingEnquiries } from '../services/websiteEnquiryService.js';
 import { loadVocalistChoices, validateVocalistSelection } from "../services/vocalistChoiceService.js";
 import { verifiedInitialPayment, paidBookingMeasurement } from "../utils/bookingMeasurement.js";
@@ -1349,6 +1350,7 @@ export const createCheckoutSession = async (req, res) => {
     const enquiryLinks = await linkBookingEnquiries({ email: userEmail, date, address: venueAddress || venue,
       actsSummary: actsSummaryWithPerf || actsSummary, attribution: req.body.attribution });
     await Booking.create({
+      paymentTermsVersion: BALANCE_PAYMENT_POLICY,
       ...enquiryLinks,
       bookingId,
       actsSummary: actsSummaryWithPerf || actsSummary || [],
@@ -1708,6 +1710,8 @@ const completeBooking = async (req, res) => {
     try {
       html = await ejs.renderFile(templatePath, {
         bookingId: order.bookingId,
+        balancePaymentDueISO: balanceDueISO(order),
+        paymentTermsVersion: order.paymentTermsVersion,
         userAddress: order.userAddress,
         venueAddress: order.venueAddress,
         eventType: order.eventType,
@@ -1841,15 +1845,15 @@ const completeBooking = async (req, res) => {
       <a href="https://calendly.com/thesupremecollective/call">https://calendly.com/thesupremecollective/call</a>
     </p>
 
-    <p>The invoice for the balance, which is due 2 weeks before the performance, can be found on the Event Sheet.</p>
+    <p>The invoice for the balance, which is due on ${fmt(new Date(`${balanceDueISO(order)}T12:00:00Z`))}, can be found on the Event Sheet.</p>
 
     <p><strong>Key dates for your diary</strong>:</p>
     <ul>
       <li>Song suggestions and First Dance (if Wedding) / Off-repertoire request (if not a wedding) due by <strong>${fmt(
         fourWeeksBefore,
       )}</strong></li>
-      <li>Completed Event Sheet (including playlists) and balance due by <strong>${fmt(
-        twoWeeksBefore,
+      <li>Completed Event Sheet (including playlists) due by <strong>${fmt(
+        new Date(`${finalDetailsDueISO(order)}T12:00:00Z`),
       )}</strong></li>
     </ul>
 
@@ -2011,6 +2015,8 @@ export const previewContractHtml = async (req, res) => {
 
     const html = await ejs.renderFile(viewPath, {
       bookingId: booking.bookingId || bookingMongoId,
+      balancePaymentDueISO: balanceDueISO(booking),
+        paymentTermsVersion: booking.paymentTermsVersion,
       userAddress: booking.userAddress,
       actsSummary: booking.actsSummary,
 
@@ -2051,6 +2057,8 @@ export const generateContractPdf = async (req, res) => {
 
     const html = await ejs.renderFile(viewPath, {
       bookingId: booking.bookingId || bookingMongoId,
+      balancePaymentDueISO: balanceDueISO(booking),
+        paymentTermsVersion: booking.paymentTermsVersion,
       userAddress: booking.userAddress,
       actsSummary: booking.actsSummary,
 
@@ -2256,6 +2264,7 @@ const manualCreateBooking = async (req, res) => {
     // ------------------------------
     const effectiveDate = eventDate || date; // accept either
     const newBooking = new Booking({
+      paymentTermsVersion: BALANCE_PAYMENT_POLICY,
       act: resolvedActId,
       lineupId: resolvedLineupId,
 
@@ -2441,6 +2450,7 @@ export const createBooking = async (req, res) => {
 
     // ── Create and save booking ────────────────────────────────────────────────
     const newBooking = new Booking({
+      paymentTermsVersion: BALANCE_PAYMENT_POLICY,
       act,
       date: eventDate,
       venue,
@@ -2488,7 +2498,7 @@ export const createBooking = async (req, res) => {
 
     // If deposit flow, compute balance fields now (stored on booking for boards/ops)
     if (!requiresFullPayment) {
-      const balanceDueAt = startOfDay(new Date(`${finalDetailsDueISO({
+      const balanceDueAt = startOfDay(new Date(`${newBalanceDueISO({
         eventDateISO: selectedDate,
         bookingDateISO: new Date().toISOString(),
       })}T12:00:00.000Z`));
@@ -2876,6 +2886,8 @@ async function upsertBoardRowFromBooking(booking) {
       $setOnInsert: {
         bookingRef,
         createdAt: new Date(),
+        paymentTermsVersion: booking.paymentTermsVersion,
+        invoiceDueDateISO: balanceDueISO(booking),
       },
       $set: {
         actId, // used by allocation refresher
@@ -3666,6 +3678,8 @@ export const completeBookingV2 = async (req, res) => {
     try {
       html = await ejs.renderFile(templatePath, {
         bookingId: booking.bookingId,
+        balancePaymentDueISO: balanceDueISO(booking),
+        paymentTermsVersion: booking.paymentTermsVersion,
         userAddress: booking.userAddress,
 
         actsSummary: booking.actsSummary,
@@ -3825,6 +3839,8 @@ export const getBookingMeasurement = async (req, res) => {
     }
     return res.json({ success: true, verified: true, bookingRef: booking.bookingId,
       eventDate: booking.eventDateISO || booking.date || null,
+      balanceDueDateISO: balanceDueISO(booking),
+      eventSheetDueDateISO: finalDetailsDueISO({...booking,eventDateISO: isoDateOnly(booking.eventDateISO || booking.date)}),
       measurement: paidBookingMeasurement(session, booking) });
   } catch (err) {
     return res.status(502).json({ success: false, message: "We couldn't verify your payment yet. Please try again." });

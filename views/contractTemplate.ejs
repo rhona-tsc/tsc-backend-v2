@@ -72,8 +72,8 @@
     const bookingTotalDisplay = fullAmount;
     const depositDisplay = `£${chargedAmount.toFixed(2)}`;
     const outstandingDisplay = `£${outstanding.toFixed(2)}`;
-    const balanceDueDateDisplay = outstanding > 0 && eventDate
-      ? new Date(new Date(eventDate).getTime() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString("en-GB")
+    const balanceDueDateDisplay = outstanding > 0 && typeof balancePaymentDueISO !== "undefined" && balancePaymentDueISO
+      ? new Date(`${balancePaymentDueISO}T12:00:00Z`).toLocaleDateString("en-GB", { timeZone: "UTC" })
       : "N/A";
 
     const clientFullName =
@@ -420,6 +420,7 @@
 
     <p><strong>4 | Fees and payment</strong></p>
     <p>4.1 The total booking fee, payment schedule and due dates are shown in the booking summary.</p>
+    <% if (typeof paymentTermsVersion !== "undefined" && paymentTermsVersion === "four-week-thursday-v1") { %><p>For new direct bookings, the balance is due on or before the Thursday at least four weeks before the event (or the preceding working day if closed). Bookings made within 28 days of the event require full payment at booking. Any separately agreed agency payment schedule is shown in the booking summary.</p><% } %>
     <p>4.2 Unless otherwise agreed in writing, all payments must be made in cleared funds by the due date stated in this Contract or on the relevant invoice or payment link.</p>
     <p>4.3 Where Stripe, bank transfer or another payment method is offered, the Client must use the payment method authorised by the Agent.</p>
     <p>4.4 Unless specifically included in the booking summary, additional costs such as extended performance time, extra production, extra services, parking reimbursement or client-requested upgrades are not included in the original booking fee.</p>

@@ -134,9 +134,10 @@ export const generateForecastEventsFromBooking = (booking = {}) => {
 
   if (fallbackBalance > 0 && !booking.balancePaid) {
     const expectedDate =
-      booking.expectedBalanceDate ||
+      booking.expectedBalanceDate || booking.invoiceDueDateISO || booking.balanceDueAt ||
       getExpectedBalanceDateForSource({
         source: booking.source || booking.agent,
+        paymentTermsVersion: booking.paymentTermsVersion,
         eventDate: booking.eventDate,
         bookingMadeDate: booking.bookingMadeDate || booking.createdAt,
       }) ||

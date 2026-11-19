@@ -1,3 +1,4 @@
+import { newBalanceDueISO, BALANCE_PAYMENT_POLICY } from './balanceDueDate.js';
 const normaliseSource = (source = "") =>
   String(source || "")
     .trim()
@@ -43,10 +44,12 @@ export const getExpectedBalanceDateForSource = ({
   source,
   eventDate,
   bookingMadeDate,
+  paymentTermsVersion,
 }) => {
   if (!eventDate) return undefined;
 
   const sourceKey = normaliseSource(source);
+  if (paymentTermsVersion === BALANCE_PAYMENT_POLICY && !["encore", "wedding jam"].includes(sourceKey)) return new Date(`${newBalanceDueISO({source,eventDate,bookingDateISO:bookingMadeDate})}T12:00:00Z`);
 
   const fiveDaysAfter = ["encore", "wedding jam"];
 

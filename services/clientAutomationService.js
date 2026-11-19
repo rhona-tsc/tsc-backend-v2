@@ -1,3 +1,4 @@
+import { balanceDueISO, balanceReminderISO, BALANCE_PAYMENT_POLICY } from '../utils/balanceDueDate.js';
 import { automationCc } from "../utils/automationCc.js";
 import { AutomationConfig } from "../models/automationConfigModel.js";
 import { exclusiveReviewPlan, reviewPlanItems, reviewPlanSchedule, renderReviewPlanEmail } from "../utils/reviewRequestPlan.js";
@@ -55,7 +56,7 @@ const shiftISODate = (value, days) => {
 };
 
 const finalDueISO = (row = {}) =>
-  (row.contactRole === "agent" && isoDate(row?.invoiceDueDateISO)) || finalDetailsDueISO(row) || isoDate(row?.invoiceDueDateISO);
+  (row.paymentTermsVersion !== BALANCE_PAYMENT_POLICY && row.contactRole === "agent" && isoDate(row?.invoiceDueDateISO)) || finalDetailsDueISO(row) || isoDate(row?.invoiceDueDateISO);
 
 const firstName = (value) => clean(value).split(/\s+/)[0] || "";
 
@@ -118,12 +119,12 @@ const rowEmails = (row = {}) => [
 ].map(lower).filter(Boolean);
 
 export const automation10Schedule = (row, todayISO) => {
-  const invoiceDueISO = finalDueISO(row);
+  const invoiceDueISO = balanceDueISO(row);
   const today = isoDate(todayISO);
   if (!invoiceDueISO || !today) {
     return { eligible: false, reason: "missing_date", plannedISO: "" };
   }
-  const plannedISO = shiftISODate(invoiceDueISO, -7);
+  const plannedISO = balanceReminderISO(row);
   if (today < plannedISO) {
     return { eligible: false, reason: "not_due", plannedISO };
   }
@@ -282,7 +283,7 @@ export const automation21Schedule = (row, todayISO) => {
 };
 
 export const automation11Schedule = (row, todayISO) => scheduledWindow({
-  plannedISO: finalDueISO(row),
+  plannedISO: balanceDueISO(row),
   todayISO,
   lastISO: isoDate(row?.eventDateISO || row?.eventDate || row?.date),
   allowLastDay: false,
@@ -447,7 +448,16 @@ export const buildAutomation14Email = (row) => {
   return { subject, text, html };
 };
 
+const buildBalancePaymentEmail = (row, dueToday) => {
+ const name=firstName(clientNames(row)) || 'there';
+ const due=ordinalDate(balanceDueISO(row));
+ const subject=dueToday ? 'Automated Reminder: Balance Payment Due' : 'Automated Reminder: Balance Payment Coming Due';
+ const lines=[`Hi ${name},`,`Just a gentle reminder that the balance for your booking is due on ${due}.`,'Please find your invoice attached, including the bank transfer details.','If you have already paid, thank you—please disregard this reminder.',`Your completed event sheet and playlists have a separate deadline of ${ordinalDate(finalDetailsDueISO(row))}.`,`EVENT SHEET: ${publicEventSheetUrl(row)}`,'Any questions, please reply to this email.','Warmest wishes,','Rhona ✨'];
+ return {subject,text:lines.join('\n\n'),html:emailShell(lines.map(emailParagraph).join(''))};
+};
+
 export const buildAutomation11Email = (row) => {
+  if (row.paymentTermsVersion === BALANCE_PAYMENT_POLICY) return buildBalancePaymentEmail(row, true);
   const name = firstName(clientNames(row)) || "there";
   const eventSheetUrl = publicEventSheetUrl(row);
   const subject = "Automated Reminder: Playlist(s), Event Sheet & Balance Now Due";
@@ -658,6 +668,7 @@ export const buildAutomation26Email = (row) => {
 };
 
 export const buildAutomation10Email = (row) => {
+  if (row.paymentTermsVersion === BALANCE_PAYMENT_POLICY) return buildBalancePaymentEmail(row, false);
   const name = clean(row?.clientFirstNames || row?.bookerName || "there").split(/\s+|&/)[0];
   const dueDate = ordinalDate(finalDueISO(row));
   const eventSheetUrl = publicEventSheetUrl(row);

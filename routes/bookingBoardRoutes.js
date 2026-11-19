@@ -1,3 +1,4 @@
+import { balanceDueISO, BALANCE_PAYMENT_POLICY } from '../utils/balanceDueDate.js';
 import { automationCc } from "../utils/automationCc.js";
 import { enableBirthdayReviewSequence } from "../services/birthdayReviewSequenceService.js";
 // routes/bookingBoardRoutes.js
@@ -200,13 +201,13 @@ export const buildIntroEmail = (row) => {
     : "Off Repertoire";
   const paymentParagraph = isEncoreBooking(row)
     ? "Payment for your original booking is arranged through Encore. Any extras agreed separately are invoiced directly."
-    : "Please also find linked below the invoice for the balance, which is due around a week before the performance. The BACS details are on the footer of the attached invoice.";
+    : `Please also find linked below the invoice for the balance, which is due on ${formatEmailBodyDate(balanceDueISO(row))}. The BACS details are on the footer of the attached invoice.`;
   const paragraphs = [
     `Allow me to introduce myself, my name is Rhona, I am the band manager for ${actName}. Thank you for booking the band - we're excited to be delivering the entertainment for you at your ${eventType}, and I'm very much looking forward to sorting out the fine details for the entertainment in the run-up.`,
     "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and kindly fill in the blanks directly into the document. The event sheet will auto-save, so you can just close it when you're done. I'll review the details you provide, and I'll be back in touch if I've any questions for you or vice versa.",
     "Also please feel free to email or WhatsApp if you've any urgent questions or requests. Or alternatively, you can schedule a call with me directly in my calendar: https://calendly.com/thesupremecollective/call",
     paymentParagraph,
-    `Key dates include:\n- Song suggestions and ${specialRequestLabel} request due on the ${songDue}\n- Completed event sheet (including playlists)${isEncoreBooking(row) ? "" : ", and balance"} due on the ${finalDetailsDue}`,
+    `Key dates include:\n- Song suggestions and ${specialRequestLabel} request due on the ${songDue}\n- Completed event sheet (including playlists) due on the ${finalDetailsDue}`,
     "You'll also receive a few emails from me in the run up to the performance date as reminders to submit certain bits of information to the event sheet just to keep everything on track.",
     "Hopefully, everything makes sense, but any questions, don't hesitate!",
   ];
@@ -243,8 +244,8 @@ export const buildIntroEmail = (row) => {
         ? new Date(bookingDate.getTime() + Math.ceil((eventDate - bookingDate) / 2))
         : null;
     const formatDate = (value) => formatEmailBodyDate(value);
-    const invoiceDue = row?.invoiceDueDateISO
-      ? new Date(`${row.invoiceDueDateISO}T12:00:00Z`)
+    const invoiceDue = finalDetailsDueISO(row)
+      ? new Date(`${finalDetailsDueISO(row)}T12:00:00Z`)
       : null;
     const specialRequestLabel = /wedding/i.test(eventType)
       ? "First Dance request"
@@ -253,7 +254,7 @@ export const buildIntroEmail = (row) => {
       isEncoreBooking(row) ? `Thank you for booking ${actName} through Encore. We are looking forward to performing for your clients and their guests.` : `Thank you for booking ${actName} for your clients and their guests. We are looking forward to the performances and to finalising the event details with you.`,
       "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and kindly fill in the blanks directly into the document. The event sheet will auto-save, you can tick off each section when you're done, and then 'Notify Band' when complete. At this point I'll check over the details and see if I or the band have any questions for you or vice versa.",
       "Also please feel free to email or WhatsApp if you've any urgent questions or requests. Or alternatively, you can schedule a call with me directly in my calendar: https://calendly.com/thesupremecollective/call",
-      isEncoreBooking(row) ? paymentParagraph : `The contractual balance is due on ${formatEmailBodyDate(row.invoiceDueDateISO || finalDetailsDueISO(row))}. ${row?.importMetadata?.balanceInvoiceVerified ? "Please find the balance invoice attached, including the bank transfer details." : "Please refer to the agreed payment details; the balance invoice will be supplied separately."}`,
+      isEncoreBooking(row) ? paymentParagraph : `The contractual balance is due on ${formatEmailBodyDate(balanceDueISO(row))}. ${row?.importMetadata?.balanceInvoiceVerified ? "Please find the balance invoice attached, including the bank transfer details." : "Please refer to the agreed payment details; the balance invoice will be supplied separately."}`,
       `Key dates include:\n- Song suggestions and ${specialRequestLabel} due on the ${formatDate(songDue)}\n- Completed event sheet (including playlists) due on the ${formatDate(invoiceDue)}`,
       "You'll also receive a few emails from me in the run up to the performance date as reminders to submit certain bits of information to the event sheet just to keep everything on track.",
       "Hopefully, everything makes sense, but any questions, don't hesitate!",
@@ -2707,14 +2708,20 @@ router.post("/", musicianAuth, async (req, res) => {
     );
 
     // --------- 2) Upsert BookingBoardItem (UI row) ----------
-    const calculatedInvoiceDueDateISO = finalDetailsDueISO({
+    const paymentTermsVersion = existingBoardRow?.paymentTermsVersion || (!(existingBoardRow?.introEmailSentAt || existingBoardRow?.importMetadata?.paymentTermsCommunicatedAt) ? BALANCE_PAYMENT_POLICY : undefined);
+    const calculatedInvoiceDueDateISO = balanceDueISO({
+      paymentTermsVersion, agent: normaliseAgent(payload.agent),
+      invoiceDueDateISO: existingBoardRow?.introEmailSentAt ? existingBoardRow.invoiceDueDateISO : payload.invoiceDueDateISO,
       eventDateISO,
       bookingDateISO: payload.bookingDateISO,
       enquiryDateISO: payload.enquiryDateISO,
       createdAt: existingBoardRow?.createdAt || new Date(),
     });
 
+    if (paymentTermsVersion) await Booking.updateOne({_id:booking._id},{$set:{paymentTermsVersion, ...(calculatedInvoiceDueDateISO ? {balanceDueAt:new Date(`${calculatedInvoiceDueDateISO}T12:00:00Z`)} : {})}});
+
     const boardPatch = {
+      paymentTermsVersion,
       bookingId: booking._id, // ObjectId ref to Booking
       ...(linkedAct ? { actId: linkedAct._id } : {}),
       lineupId: linkedLineupId,
@@ -3785,7 +3792,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         body.invoiceDueDateISO !== undefined
           ? String(body.invoiceDueDateISO || "").slice(0, 10)
           : deadlineInputsChanged
-            ? finalDetailsDueISO({
+            ? balanceDueISO({
+                ...existingMirrorRow,
+                invoiceDueDateISO: undefined,
                 eventDateISO: isoDateOnly(
                   savedBooking?.eventDate ||
                     savedBooking?.date ||
@@ -4021,12 +4030,13 @@ router.patch("/:id", musicianAuth, async (req, res) => {
     ) {
       const existingDeadlineRow = await BookingBoardItem.findById(req.params.id)
         .select(
-          "eventDateISO bookingDateISO enquiryDateISO invoiceDueDateISO createdAt",
+          "eventDateISO bookingDateISO enquiryDateISO invoiceDueDateISO createdAt paymentTermsVersion agent",
         )
         .lean();
-      const recalculatedInvoiceDueDateISO = finalDetailsDueISO({
+      const recalculatedInvoiceDueDateISO = balanceDueISO({
         ...existingDeadlineRow,
         ...bodyWithoutBookingDetails,
+        invoiceDueDateISO: undefined,
       });
       if (recalculatedInvoiceDueDateISO) {
         bodyWithoutBookingDetails.invoiceDueDateISO =
