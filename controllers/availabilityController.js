@@ -3,6 +3,7 @@ import {eligibleRosterDeputies,rosterEligibility} from '../utils/rosterEligibili
 import { resolveAutomaticDeputyPrice, performanceLineupSize } from '../services/automaticDeputyPricing.js';
 import { availabilityReplyIntent, availabilityButtonIntent, selectAvailabilityReplyTarget, recordAvailabilityReply, queueAvailabilityInbound } from "../services/availabilityInboundReply.js";
 import { interceptAvailabilityTest } from '../services/availabilityRequestTestPreview.js';
+import { availabilityCalendarContact } from '../services/availabilityCalendarContact.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import { encoreRequestEnquiryScope } from '../services/enquiryAvailabilityTracking.js';
@@ -4926,33 +4927,6 @@ export const processAvailabilityReplyFlow = async ({
     musician = await Musician.findById(updated.musicianId).lean();
   }
 
-  if (!musician && updated?.musicianName) {
-    const parts = String(updated.musicianName).trim().split(/\s+/);
-    musician = await Musician.findOne({
-      $or: [
-        { name: updated.musicianName },
-        { firstName: new RegExp(parts[0] || "", "i") },
-        { lastName: new RegExp(parts.slice(-1)[0] || "", "i") },
-      ],
-    })
-      .select(
-        "email firstName lastName musicianSlug musicianProfileImageUpload musicianProfileImage profileImage profilePicture profilePhoto photoUrl imageUrl _id",
-      )
-      .lean();
-  }
-
-  const bits = await getDeputyDisplayBits({
-    ...((musician && musician.toObject ? musician.toObject() : musician) || {}),
-    ...((updated && updated.toObject ? updated.toObject() : updated) || {}),
-  });
-
-  const emailForInvite =
-    bits?.resolvedEmail ||
-    musician?.email ||
-    updated?.musicianEmail ||
-    updated?.email ||
-    "hello@thesupremecollective.co.uk";
-
   const actId = String(updated.actId);
   const dateISO = updated.dateISO;
   const toE164 = normE164(updated.phone || fromRaw);
@@ -4967,7 +4941,23 @@ export const processAvailabilityReplyFlow = async ({
     console.warn("⚠️ Failed to resolve act from updated.actId:", err.message);
   }
 
+  let emailForInvite = null;
+  let calendarIdentityHoldReason = "";
+  try {
+    emailForInvite = availabilityCalendarContact({ request: updated, musician, act });
+    if (!emailForInvite) calendarIdentityHoldReason = "No verified email matches the availability respondent.";
+  } catch (err) {
+    calendarIdentityHoldReason = err.message;
+    console.warn("Calendar invitation held:", err.message);
+  }
+
   if (reply === "yes") {
+    let calendarInviteCreated = false;
+    if (!emailForInvite) {
+      await AvailabilityModel.updateOne({ _id: updated._id }, {
+        $set: { calendarInviteIdentityHoldReason: calendarIdentityHoldReason },
+      });
+    }
     const { createCalendarInvite, cancelCalendarInvite } =
       await import("./googleController.js");
 
@@ -5043,7 +5033,7 @@ export const processAvailabilityReplyFlow = async ({
           actId,
           dateISO,
           email: emailForInvite,
-          summary: `Enquiry — NOT CONFIRMED | ${possessiveClient} ${eventType} | ${calendarActName}`,
+          summary: `Enquiry Only | ${possessiveClient} ${eventType} | ${calendarActName}`,
           description: [
             "AVAILABILITY ENQUIRY ONLY — this is not a confirmed booking. Your availability reply does not confirm an allocation. We will contact you separately if you are selected and booked.",
             "This provisional hold expires after 7 days unless you have been confirmed for the booking. We will send a calendar cancellation when it expires.",
@@ -5059,13 +5049,16 @@ export const processAvailabilityReplyFlow = async ({
           address: boardBooking?.address || updated.formattedAddress || "TBC",
           fee,
         });
+        calendarInviteCreated = true;
 
         await AvailabilityModel.updateOne(
           { _id: updated._id },
           {
             $set: {
               calendarEventId: event?.id || event?.data?.id || null,
+              musicianEmail: emailForInvite,
               calendarInviteEmail: emailForInvite,
+              calendarInviteIdentityHoldReason: "",
               calendarInviteSentAt: new Date(),
               calendarStatus: "needsAction",
             },
@@ -5078,7 +5071,9 @@ export const processAvailabilityReplyFlow = async ({
 
     await sendWhatsAppText(
       toE164,
-      "Super — we’ll send a diary invite to log the enquiry for your records.",
+      calendarInviteCreated
+        ? "Super — we’ll send a diary invite to log the enquiry for your records."
+        : "Thanks — we’ve logged your availability for this enquiry.",
     );
 
     await AvailabilityModel.updateOne(
