@@ -1,3 +1,4 @@
+import { syncAdditionalBookingSessions } from './additionalBookingSessions.js';
 import { google } from "googleapis";
 import crypto from "crypto";
 import Booking from "../models/bookingModel.js";
@@ -257,6 +258,7 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
         { $set: { calendarEventId: resolvedEventId } },
       );
     }
+    await syncAdditionalBookingSessions({cal,calendarId,booking,assignments:assignedMusicians});
     return resolvedEventId;
   }
 
@@ -273,5 +275,6 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
     { $set: { calendarEventId: newEventId } },
   );
 
+  await syncAdditionalBookingSessions({cal,calendarId,booking,assignments:assignedMusicians});
   return newEventId;
 }
