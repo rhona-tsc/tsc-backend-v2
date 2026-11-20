@@ -659,6 +659,13 @@ export const inviteOriginalMusician = async (req, res) => {
       expiresAt: round.closesAt,
       emailPending: true,
     });
+    // Compete with cancellation of an unused round. A late invitation cannot
+    // leave a musician invited to a role the owner has just removed.
+    const open = await originalRoundModel.updateOne({ _id: round._id, state: { $in: ['open', 'reopened'] } }, { $inc: { invitationSerial: 1 } });
+    if (!open.matchedCount) {
+      await originalInvitationModel.updateOne({ _id: invitation._id }, { $set: { state: 'cancelled', emailPending: false } });
+      return res.status(409).json({ success: false, message: 'This round has just closed. Refresh before inviting someone.' });
+    }
     await audit({ projectId: round.projectId, roundId: round._id, type: "private_invitation_created", user: req.user, metadata: { invitationId: String(invitation._id), invitedMusicianId, roleName } });
     return res.status(201).json({ success: true, invitation });
   } catch (error) {

@@ -55,7 +55,7 @@ test('submitted, accepted and disputed material, current rounds and held places 
  for(const state of['active','submitted']){const s=base();s.reservations=[{roleName:'Bass',state,expiresAt:'2030-01-01'}];assert.equal(originalRoleManagement(s,now).roles[1].canRemove,false);}
  const s=base();s.futureReservations=[{roleName:'Bass',state:'waiting'}];assert.match(originalRoleManagement(s,now).roles[1].removeReason,/advance/);
  s.futureReservations[0].state='released';assert.equal(originalRoleManagement(s,now).roles[1].canRemove,true);
- assert.match(originalRoleManagement(s,now).roles[0].removeReason,/current round/);
+ assert.match(originalRoleManagement(s,now).roles[0].removeReason,/round/);
 });
 test('last role, last draft foundation and credit or production stages are protected',()=>{
  const s=base();s.project.state='draft';s.project.currentRoundId=null;s.rounds=[];s.project.sourceType='none';assert.match(originalRoleManagement(s,now).roles[0].removeReason,/foundation/);

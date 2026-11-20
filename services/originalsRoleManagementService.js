@@ -13,6 +13,10 @@ export function originalRoleManagement(snapshot, now = new Date()) {
     reason,
     roles: roles.map(role => {
       const matches = item => key(item.roleName) === key(role.name);
+      const isCurrent = currentNames.some(name => key(name) === key(role.name));
+      const unusedCurrentRound = isCurrent && current.type === 'instrument' && ['open', 'reopened'].includes(current.state)
+        && !current.clockStartedAt && !reservations.some(item => String(item.roundId) === String(current._id))
+        && !submissions.some(item => String(item.roundId) === String(current._id));
       const protectedSubmission = submissions.some(item => matches(item) && ['submitted', 'accepted', 'retraction_requested'].includes(item.state));
       const heldReservation = reservations.some(item => matches(item) && ((item.state === 'active' && new Date(item.expiresAt) > now)
         || (item.state === 'submitted' && !submissions.some(sub => String(sub.reservationId) === String(item._id) && ['rejected', 'withdrawn', 'retracted'].includes(sub.state)))));
@@ -21,10 +25,10 @@ export function originalRoleManagement(snapshot, now = new Date()) {
         : heldReservation ? 'Someone has an active recording place for this part. It must be released or expire first.'
         : futureReservations.some(item => matches(item) && item.state === 'waiting') ? 'Someone has an advance place for this part. They must release it first.'
         : invitations.some(item => matches(item) && String(item.roundId) === String(project.currentRoundId) && ['pending', 'accepted'].includes(item.state) && (!item.expiresAt || new Date(item.expiresAt) > now)) ? 'This part has an active invitation in the current round.'
-        : currentNames.some(name => key(name) === key(role.name)) ? 'This part is in the current round. Move to the next stage before removing an unused part.'
+        : isCurrent && !unusedCurrentRound ? 'This part is in a round that has started. Finish the round before removing it.'
         : roles.length <= 1 ? 'Keep at least one part in the project.'
         : ['draft', 'changes_requested'].includes(project.state) && ['none', 'video_demo'].includes(project.sourceType || (project.hasInitialStem ? 'final_eligible_stem' : 'none')) && role.foundationEligible && !roles.some(other => key(other.name) !== key(role.name) && other.foundationEligible) ? 'Keep at least one foundation part so the project can start.' : '');
-      return { name: role.name, canRemove: !removeReason, removeReason };
+      return { name: role.name, canRemove: !removeReason, removeReason, removesCurrentRound: !removeReason && unusedCurrentRound };
     }),
   };
 }

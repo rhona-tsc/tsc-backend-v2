@@ -26,6 +26,7 @@ const originalRoundSchema = new mongoose.Schema(
     openedAt: { type: Date, default: null },
     lastSubmissionAt: { type: Date, default: null },
     submissionSerial: { type: Number, default: 0 },
+    invitationSerial: { type: Number, default: 0 },
     closesAt: { type: Date, default: null },
     clockStartedAt: { type: Date, default: null },
     closedAt: { type: Date, default: null },

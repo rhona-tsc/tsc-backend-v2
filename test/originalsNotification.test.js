@@ -3,29 +3,17 @@ import assert from "node:assert/strict";
 import {
   buildOriginalProjectApprovedEmail,
   collectOriginalsNotificationRecipients,
-  isOriginalsPreviewNotificationEmail,
 } from "../services/originalsNotificationService.js";
 
-test("Originals launch notifications are limited to the private preview audience", () => {
-  assert.equal(isOriginalsPreviewNotificationEmail("tscRhona@gmail.com"), true);
-  assert.equal(isOriginalsPreviewNotificationEmail("tsc+test@gmail.com"), true);
-  assert.equal(isOriginalsPreviewNotificationEmail("ordinary@gmail.com"), false);
-  assert.equal(isOriginalsPreviewNotificationEmail("musician@example.com"), false);
-});
-
-test("preview notification recipients include fixed addresses and de-duplicate musician records", () => {
-  const recipients = collectOriginalsNotificationRecipients([
-    { email: "TSCRhona@gmail.com", firstName: "Test Rhona" },
-    { email: "tscrhona@gmail.com", firstName: "Duplicate" },
-    { email: "rhona@thesupremecollective.co.uk", firstName: "Rhona" },
-    { email: "someone@example.com", firstName: "No" },
+test('project announcements reach approved musicians beyond the old preview list', () => {
+  const recipients=collectOriginalsNotificationRecipients([
+    {_id:'1',email:'ordinary@gmail.com',role:'musician',status:'approved'},
+    {_id:'2',email:'ORDINARY@gmail.com',role:'musician',status:'approved'},
+    {_id:'3',email:'pending@gmail.com',role:'musician',status:'pending'},
+    {_id:'4',email:'private@gmail.com',role:'musician',status:'approved',privateTestProfile:true},
+    {_id:'5',email:'hello@thesupremecollective.co.uk',role:'admin',status:'approved'},
   ]);
-  assert.deepEqual(recipients.map((item) => item.email), [
-    "ewanneilmcintosh@gmail.com",
-    "hello@thesupremecollective.co.uk",
-    "rhona@thesupremecollective.co.uk",
-    "tscrhona@gmail.com",
-  ]);
+  assert.deepEqual(recipients.map(item=>item.email),['ordinary@gmail.com']);
 });
 
 test("approved project email links directly to the workspace and lists roles", () => {

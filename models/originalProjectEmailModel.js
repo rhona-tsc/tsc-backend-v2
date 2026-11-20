@@ -19,6 +19,8 @@ const schema = new mongoose.Schema({
   html: { type: String, required: true },
   state: { type: String, enum: ['queued', 'sending', 'sent', 'failed', 'cancelled'], default: 'queued' },
   attempts: { type: Number, default: 0 },
+  messageId: { type: String, default: '' },
+  sentAt: { type: Date, default: null },
   sendAfter: { type: Date, default: Date.now },
   leaseToken: { type: String, default: '' },
   leaseExpiresAt: { type: Date, default: null },

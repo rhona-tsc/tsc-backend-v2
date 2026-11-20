@@ -27,9 +27,13 @@ export async function advanceOriginalRound({ projectId, fromRoundId, type, roleN
       if (String(project.currentRoundId) !== String(fromRoundId)) throw conflict('The project has already moved to another round. Refresh the workspace.');
       if (['cancelled', 'archived', 'paused', 'approved_master'].includes(project.state)) throw conflict('This project cannot open another round right now');
       const previous = await Round.findById(project.currentRoundId).session(session);
-      if (!previous || !['open', 'reopened', 'review', 'closed'].includes(previous.state)) throw conflict('The current round is unavailable');
+      const unusedPartRemoved = previous?.state === 'cancelled' && previous.closeReason === 'requested_part_removed'
+        && previous.type === 'instrument' && !project.requestedRoles.some(role => key(role.name) === key(previous.roleName));
+      if (!previous || (!['open', 'reopened', 'review', 'closed'].includes(previous.state) && !unusedPartRemoved)) throw conflict('The current round is unavailable');
       const accepted = await Submission.find({ projectId: project._id, roundId: previous._id, state: 'accepted' }).session(session).lean();
-      if (!accepted.length) throw conflict('Approve a submission in the current round before opening the next one');
+      if (!accepted.length && !unusedPartRemoved) throw conflict('Approve a submission in the current round before opening the next one');
+      if (unusedPartRemoved && (await Submission.exists({ roundId: previous._id }).session(session)
+        || await Reservation.exists({ roundId: previous._id, state: { $in: ['active', 'submitted'] } }).session(session))) throw conflict('The removed round has participant activity. Ask TSC to review it before continuing.');
       if (['mix', 'master'].includes(type)) await requireOriginalTemporaryReplacements({ projectId: project._id, session });
       let nextRole;
       if (type === 'instrument') {

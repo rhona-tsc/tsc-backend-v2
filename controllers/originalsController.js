@@ -432,12 +432,13 @@ export const resendOriginalProjectLaunchNotifications = async (req, res) => {
       fromState: project.state,
       toState: project.state,
       metadata: {
+        queued: notification.queued,
         attempted: notification.attempted,
         sent: notification.sent,
         failed: notification.failed,
       },
     });
-    return res.json({ success: notification.sent > 0, notification });
+    return res.json({ success: true, notification });
   } catch (error) {
     console.error("❌ resendOriginalProjectLaunchNotifications error:", error);
     return res.status(500).json({ success: false, message: "Failed to send Originals project notifications" });

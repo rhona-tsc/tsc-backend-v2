@@ -1,12 +1,14 @@
 import crypto from 'node:crypto';
 import ProjectEmail from '../models/originalProjectEmailModel.js';
+import Preferences from '../models/musicianEmailPreferenceModel.js';
+import { planOriginalsLaunchAudience } from './originalsLaunchAudienceService.js';
 import Project from '../models/originalProjectModel.js';
 import Musician from '../models/musicianModel.js';
 import Submission from '../models/originalSubmissionModel.js';
 import sendEmail from '../utils/sendEmail.js';
 import { buildOriginalsEmail } from '../utils/originalsEmailTemplate.js';
 import { isOriginalsEnabled } from './originalsPolicyService.js';
-import { buildOriginalProjectApprovedEmail, collectOriginalsNotificationRecipients, PREVIEW_EMAIL_PATTERN } from './originalsNotificationService.js';
+import { buildOriginalProjectApprovedEmail, collectOriginalsNotificationRecipients } from './originalsNotificationService.js';
 import { buildOriginalSubmissionConfirmationEmail } from '../utils/originalsSubmissionConfirmationEmail.js';
 
 export const buildOriginalProjectModerationEmail = project => {
@@ -21,7 +23,7 @@ export const buildOriginalProjectModerationEmail = project => {
 
 async function insertEmail(repository, record) {
   // Retried requests and worker reconciliation must not requeue delivered mail.
-  try { await repository.updateOne({ eventKey: record.eventKey }, { $setOnInsert: record }, { upsert: true }); }
+  try { return await repository.updateOne({ eventKey: record.eventKey }, { $setOnInsert: record }, { upsert: true }); }
   catch (error) { if (error.code !== 11000) throw error; }
 }
 
@@ -35,15 +37,21 @@ export async function queueOriginalProjectModerationEmail({ project, emailReposi
   return { queued: 1 };
 }
 
-export async function queueOriginalProjectLaunchEmails({ project, emailRepository = ProjectEmail, musicianRepository = Musician }) {
-  // Use the same private-preview audience as the existing announcement button.
-  const records = await musicianRepository.find({ email: { $regex: PREVIEW_EMAIL_PATTERN } }).select('email firstName').lean();
-  const recipients = collectOriginalsNotificationRecipients(records);
+export async function queueOriginalProjectLaunchEmails({ project, emailRepository = ProjectEmail, musicianRepository = Musician, preferenceRepository = Preferences }) {
+  const [records, preferences] = await Promise.all([
+    musicianRepository.find({ profileDeletedAt: null, privateTestProfile: { $ne: true } })
+      .select('_id email firstName role status profileDeletedAt privateTestProfile').lean(),
+    preferenceRepository.find({}).lean(),
+  ]);
+  const recipients = collectOriginalsNotificationRecipients(records, preferences);
+  let queued = 0;
   for (const recipient of recipients) {
     const { subject, text, html } = buildOriginalProjectApprovedEmail({ project, firstName: recipient.firstName });
-    await insertEmail(emailRepository, { projectId: project._id, kind: 'launch', eventKey: `launch:${project._id}:${recipient.email}`, to: recipient.email, subject, text, html });
+    const result = await insertEmail(emailRepository, { projectId: project._id, kind: 'launch', musicianId: recipient.musicianId,
+      eventKey: `launch:${project._id}:${recipient.email}`, to: recipient.email, subject, text, html });
+    queued += result?.upsertedCount || 0;
   }
-  return { queued: recipients.length };
+  return { queued, eligible: recipients.length };
 }
 
 export const buildOriginalSubmissionEmail = ({ project, submission }) => {
@@ -87,7 +95,7 @@ export async function queueOriginalSubmissionConfirmation({ submission, emailRep
   });
 }
 
-export async function deliverOriginalProjectEmails({ emailSender = sendEmail, emailRepository = ProjectEmail, projectRepository = Project, musicianRepository = Musician, submissionRepository = Submission, now = new Date(), limit = 25 } = {}) {
+export async function deliverOriginalProjectEmails({ emailSender = sendEmail, emailRepository = ProjectEmail, projectRepository = Project, musicianRepository = Musician, submissionRepository = Submission, now = new Date(), limit = 50, preferenceRepository = Preferences } = {}) {
   if (!isOriginalsEnabled()) return;
   // Repairs a submit/save succeeded but queue-write failed interruption. Historical
   // pending projects also get one review alert; resolved projects are excluded.
@@ -95,7 +103,7 @@ export async function deliverOriginalProjectEmails({ emailSender = sendEmail, em
   for (const project of pending) await queueOriginalProjectModerationEmail({ project, emailRepository });
   const launches = await projectRepository.find({ 'moderation.status': 'approved', 'moderation.launchEmailPending': true }).lean();
   for (const project of launches) {
-    await queueOriginalProjectLaunchEmails({ project, emailRepository, musicianRepository });
+    await queueOriginalProjectLaunchEmails({ project, emailRepository, musicianRepository, preferenceRepository });
     await projectRepository.updateOne({ _id: project._id }, { $set: { 'moderation.launchEmailPending': false } });
   }
   // The marker is saved with the recording, so a queue outage or interrupted
@@ -128,6 +136,13 @@ export async function deliverOriginalProjectEmails({ emailSender = sendEmail, em
         ? project.state === 'pending_moderation' && project.moderation?.status === 'pending' && new Date(project.moderation.submittedAt).getTime() === new Date(job.submittedAt).getTime()
         : project.moderation?.status === 'approved' && !['cancelled', 'archived', 'paused'].includes(project.state));
       let to = job.to;
+      if (job.kind === 'launch' && eligible) {
+        const recipient = job.musicianId
+          ? await musicianRepository.findById(job.musicianId).select('_id email firstName role status profileDeletedAt privateTestProfile').lean()
+          : await musicianRepository.findOne({ email: job.to }).select('_id email firstName role status profileDeletedAt privateTestProfile').lean();
+        // Never redirect an old queued announcement to a changed email address.
+        eligible = recipient && planOriginalsLaunchAudience([recipient]).recipients.some(item => item.email === job.to);
+      }
       if (job.kind === 'submission') {
         const submission = await submissionRepository.findById(job.submissionId).lean();
         eligible = project && submission && String(project._id) === String(submission.projectId) && String(project.ownerId) === String(job.ownerId)
@@ -173,7 +188,7 @@ export async function deliverOriginalProjectEmails({ emailSender = sendEmail, em
       if (!eligible) { await emailRepository.updateOne(filter, { $set: { state: 'cancelled', leaseExpiresAt: null } }); continue; }
       const result = await emailSender({ musicianPreferences: true, ...(job.kind === 'launch' ? { opportunityCategory: 'originals' } : {}), to, subject: job.subject, text: job.text, html: job.html });
       if (!result?.ok) throw new Error(result?.error || 'Email was not accepted');
-      await emailRepository.updateOne(filter, { $set: { state: result.skipped ? 'cancelled' : 'sent', leaseExpiresAt: null, lastError: '' } });
+      await emailRepository.updateOne(filter, { $set: { state: result.skipped ? 'cancelled' : 'sent', leaseExpiresAt: null, lastError: '', messageId: result.messageId || '', sentAt: result.skipped ? null : new Date() } });
     } catch (error) {
       if (job.attempts >= 5) console.error('Originals project email exhausted delivery retries:', job._id, error.message);
       await emailRepository.updateOne(filter, { $set: { state: job.attempts >= 5 ? 'failed' : 'queued', leaseExpiresAt: null, sendAfter: new Date(now.getTime() + 300000), lastError: String(error.message).slice(0, 500) } });

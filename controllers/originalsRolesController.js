@@ -6,6 +6,7 @@ import { requireOriginalProjectManager } from '../services/originalsAccessServic
 import { getOriginalsUserId } from '../services/originalsPolicyService.js';
 import { loadOriginalMembership } from '../services/originalsMembershipService.js';
 import { originalRoleManagement, originalRoleName, sameOriginalRole } from '../services/originalsRoleManagementService.js';
+import { removeUnusedOriginalRound } from '../services/originalsRemoveUnusedRoundService.js';
 
 export async function changeOriginalProjectRole(req, res) {
   try {
@@ -27,6 +28,10 @@ export async function changeOriginalProjectRole(req, res) {
       if (await Asset.exists({ projectId: project._id, kind: 'temporary_stem', state: 'active', replacementRoleName: existing.name })) return res.status(409).json({ success: false, message: 'This role must replace a temporary stem. Approve its replacement before removing the role.' });
       const rule = management.roles.find(role => sameOriginalRole(role.name, existing.name));
       if (!rule?.canRemove) return res.status(409).json({ success: false, message: rule?.removeReason || 'This part cannot be removed.' });
+      if (rule.removesCurrentRound) {
+        const result = await removeUnusedOriginalRound({ projectId: project._id, fromRoundId: project.currentRoundId, roleName: existing.name, user: req.user });
+        return res.json({ success: true, ...result });
+      }
       roles.splice(roles.indexOf(existing), 1);
     }
     if (action === 'set_order') {

@@ -1,45 +1,11 @@
 import { originalOwnerDisplayName } from "./originalsPolicyService.js";
-import musicianModel from "../models/musicianModel.js";
-import sendEmail from "../utils/sendEmail.js";
+import { planOriginalsLaunchAudience } from "./originalsLaunchAudienceService.js";
 import { buildOriginalsEmail } from '../utils/originalsEmailTemplate.js';
 
 const clean = (value) => String(value || "").trim();
-const normaliseEmail = (value) => clean(value).toLowerCase();
 
-const EXACT_PREVIEW_EMAILS = [
-  "hello@thesupremecollective.co.uk",
-  "rhona@thesupremecollective.co.uk",
-  "ewanneilmcintosh@gmail.com",
-];
-
-export const PREVIEW_EMAIL_PATTERN = /^(?:tsc[^@]*@gmail\.com|hello@thesupremecollective\.co\.uk|rhona@thesupremecollective\.co\.uk|ewanneilmcintosh@gmail\.com)$/i;
-
-const FALLBACK_NAMES = new Map([
-  ["hello@thesupremecollective.co.uk", "there"],
-  ["rhona@thesupremecollective.co.uk", "Rhona"],
-  ["ewanneilmcintosh@gmail.com", "Ewan"],
-]);
-
-export const isOriginalsPreviewNotificationEmail = (email) =>
-  PREVIEW_EMAIL_PATTERN.test(normaliseEmail(email));
-
-export const collectOriginalsNotificationRecipients = (records = []) => {
-  const recipients = new Map(
-    EXACT_PREVIEW_EMAILS.map((email) => [
-      email,
-      { email, firstName: FALLBACK_NAMES.get(email) || "there" },
-    ]),
-  );
-
-  records.forEach((record) => {
-    const email = normaliseEmail(record?.email);
-    if (!isOriginalsPreviewNotificationEmail(email)) return;
-    const firstName = clean(record?.firstName) || recipients.get(email)?.firstName || "there";
-    recipients.set(email, { email, firstName });
-  });
-
-  return [...recipients.values()].sort((a, b) => a.email.localeCompare(b.email));
-};
+export const collectOriginalsNotificationRecipients = (records = [], preferences = []) =>
+  planOriginalsLaunchAudience(records, preferences).recipients;
 
 export const buildOriginalProjectApprovedEmail = ({ project, firstName = "there" } = {}) => {
   const adminBase = clean(process.env.ADMIN_FRONTEND_URL || "https://admin.thesupremecollective.co.uk").replace(/\/$/, "");
@@ -54,37 +20,9 @@ export const buildOriginalProjectApprovedEmail = ({ project, firstName = "there"
   }), projectUrl };
 };
 
-export const sendOriginalProjectApprovedNotifications = async ({
-  project,
-  emailSender = sendEmail,
-  musicianRepository = musicianModel,
-} = {}) => {
-  const records = await musicianRepository
-    .find({ email: { $regex: PREVIEW_EMAIL_PATTERN } })
-    .select("email firstName")
-    .lean();
-  const recipients = collectOriginalsNotificationRecipients(records);
-  const results = await Promise.all(recipients.map(async (recipient) => {
-    const message = buildOriginalProjectApprovedEmail({ project, firstName: recipient.firstName });
-    const result = await emailSender({
-      musicianPreferences: true, opportunityCategory: "originals",
-      to: recipient.email,
-      subject: message.subject,
-      text: message.text,
-      html: message.html,
-    });
-    return {
-      email: recipient.email,
-      ok: result?.ok === true,
-      messageId: result?.messageId || "",
-      error: result?.ok === true ? "" : result?.error || result?.reason || "Email was not accepted",
-    };
-  }));
-
-  return {
-    attempted: results.length,
-    sent: results.filter((item) => item.ok).length,
-    failed: results.filter((item) => !item.ok).length,
-    results,
-  };
+// Re-announcing reconciles the durable queue; it never bypasses sent receipts.
+export const sendOriginalProjectApprovedNotifications = async (options = {}) => {
+  const { queueOriginalProjectLaunchEmails } = await import('./originalsProjectEmailService.js');
+  const result = await queueOriginalProjectLaunchEmails(options);
+  return { ...result, attempted: result.eligible, sent: 0, failed: 0 };
 };
