@@ -1,3 +1,4 @@
+import {bookingBoardInvoiceCompany} from '../utils/bookingBoardInvoiceCompany.js';
 import { balanceDueISO, BALANCE_PAYMENT_POLICY } from '../utils/balanceDueDate.js';
 import { automationCc } from "../utils/automationCc.js";
 import { enableBirthdayReviewSequence } from "../services/birthdayReviewSequenceService.js";
@@ -453,7 +454,7 @@ const parseEntertainmentNationBooking = (contractText) => {
     commissionGross: 0,
     passThroughGross: supplierFee,
     vatRate: 0,
-    invoiceCompany: "TSC",
+    invoiceCompany: "BMM",
     currency: "GBP",
     lineupSelected: lineup,
     lineupComposition: lineup
@@ -470,7 +471,7 @@ const parseEntertainmentNationBooking = (contractText) => {
     performancePlan: captureLine(text, "Performance Plan"),
     performanceArea: captureLine(text, "Performance Area Required"),
     accounting: {
-      invoiceCompany: "TSC",
+      invoiceCompany: "BMM",
       paymentStage: "",
       vatRate: 0,
       commissionGross: 0,
@@ -964,7 +965,7 @@ const normaliseImportRow = (item = {}) => {
 
   return {
     bookingRef,
-    invoiceCompany: cleanString(item.invoiceCompany || item.invoice_company || "TSC").toUpperCase() === "BMM" ? "BMM" : "TSC",
+    invoiceCompany: cleanString(item.invoiceCompany || item.invoice_company || "BMM").toUpperCase() === "BMM" ? "BMM" : "TSC",
     bookerName: cleanString(item.bookerName || item.clientName),
     clientFirstNames: cleanString(
       item.clientFirstNames || item.clientName || item.bookerName,
@@ -1018,7 +1019,7 @@ const normaliseImportRow = (item = {}) => {
       bandPaymentsSent: Boolean(item.bandPaymentsSent),
     },
     accounting: {
-      invoiceCompany: cleanString(item.invoiceCompany || item.invoice_company || "TSC").toUpperCase() === "BMM" ? "BMM" : "TSC",
+      invoiceCompany: cleanString(item.invoiceCompany || item.invoice_company || "BMM").toUpperCase() === "BMM" ? "BMM" : "TSC",
       paymentStage: "",
       vatRate,
       commissionGross,
@@ -2606,11 +2607,7 @@ router.post("/", musicianAuth, async (req, res) => {
     const bookingPatch = {
       bookingId: bookingRef,
       invoiceCompany:
-        String(payload.invoiceCompany || payload.accounting?.invoiceCompany || "TSC")
-          .trim()
-          .toUpperCase() === "BMM"
-          ? "BMM"
-          : "TSC",
+        bookingBoardInvoiceCompany(payload, existingBoardRow || existingBooking || {}),
       createdManually: true,
       agent: normaliseAgent(payload.agent),
       ...(linkedAct
@@ -2735,11 +2732,7 @@ router.post("/", musicianAuth, async (req, res) => {
         ? { siteAutomationsEnabled }
         : {}),
       invoiceCompany:
-        String(payload.invoiceCompany || payload.accounting?.invoiceCompany || "TSC")
-          .trim()
-          .toUpperCase() === "BMM"
-          ? "BMM"
-          : "TSC",
+        bookingBoardInvoiceCompany(payload, existingBoardRow || existingBooking || {}),
 
       bookerName: String(payload.bookerName || "").trim(),
       clientFirstNames: String(
@@ -4305,6 +4298,7 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
         ).trim();
         const siteAutomationsEnabled = readSiteAutomationsEnabled(row);
 
+        const existingInvoiceCompany = bookingBoardInvoiceCompany({}, await BookingBoardItem.findOne({bookingRef}).select("invoiceCompany accounting.invoiceCompany").lean() || {});
         const boardPatch = {
           bookingRef,
           ...(siteAutomationsEnabled !== undefined
@@ -4312,7 +4306,7 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
             : {}),
 
           invoiceCompany:
-            String(row.invoiceCompany || row["Invoice Company"] || "TSC")
+            String(row.invoiceCompany || row["Invoice Company"] || existingInvoiceCompany)
               .trim()
               .toUpperCase() === "BMM"
               ? "BMM"
@@ -4367,7 +4361,7 @@ router.post("/bulk-import-csv", musicianAuth, async (req, res) => {
 
           accounting: {
             invoiceCompany:
-              String(row.invoiceCompany || row["Invoice Company"] || "TSC")
+              String(row.invoiceCompany || row["Invoice Company"] || existingInvoiceCompany)
                 .trim()
                 .toUpperCase() === "BMM"
                 ? "BMM"
@@ -4508,13 +4502,14 @@ for (const [index, row] of usableRecords.entries()) {
       calcVatFromVatInclusiveGross(commissionGross, vatRate);
     const siteAutomationsEnabled = readSiteAutomationsEnabled(row);
 
+    const existingInvoiceCompany = bookingBoardInvoiceCompany({}, await BookingBoardItem.findOne({bookingRef}).select("invoiceCompany accounting.invoiceCompany").lean() || {});
     const boardPatch = {
       bookingRef,
       ...(siteAutomationsEnabled !== undefined
         ? { siteAutomationsEnabled }
         : {}),
       invoiceCompany:
-        String(row.invoiceCompany || row["Invoice Company"] || "TSC")
+        String(row.invoiceCompany || row["Invoice Company"] || existingInvoiceCompany)
           .trim()
           .toUpperCase() === "BMM"
           ? "BMM"
@@ -4534,7 +4529,7 @@ for (const [index, row] of usableRecords.entries()) {
 
       accounting: {
         invoiceCompany:
-          String(row.invoiceCompany || row["Invoice Company"] || "TSC")
+          String(row.invoiceCompany || row["Invoice Company"] || existingInvoiceCompany)
             .trim()
             .toUpperCase() === "BMM"
             ? "BMM"
@@ -4644,6 +4639,9 @@ router.post("/bulk-import", musicianAuth, async (req, res) => {
           throw new Error("Missing bookingRef/ref/reference.");
         }
 
+        const existingInvoiceRow = await BookingBoardItem.findOne({bookingRef:row.bookingRef}).select("invoiceCompany accounting.invoiceCompany").lean();
+        row.invoiceCompany = bookingBoardInvoiceCompany({...item,invoiceCompany:item.invoiceCompany||item.invoice_company},existingInvoiceRow||{});
+        row.accounting.invoiceCompany = row.invoiceCompany;
         const saved = await BookingBoardItem.findOneAndUpdate(
           { bookingRef: row.bookingRef },
           {

@@ -239,7 +239,7 @@ const AccountingSchema = new mongoose.Schema(
     invoiceCompany: {
       type: String,
       enum: ["TSC", "BMM"],
-      default: "TSC",
+      default: "BMM",
     },
     paymentStage: { type: String, default: "" },
     vatRate: { type: Number, default: 0.2 },
