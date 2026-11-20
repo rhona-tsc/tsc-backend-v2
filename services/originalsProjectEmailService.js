@@ -190,8 +190,17 @@ export async function deliverOriginalProjectEmails({ emailSender = sendEmail, em
       if (!result?.ok) throw new Error(result?.error || 'Email was not accepted');
       await emailRepository.updateOne(filter, { $set: { state: result.skipped ? 'cancelled' : 'sent', leaseExpiresAt: null, lastError: '', messageId: result.messageId || '', sentAt: result.skipped ? null : new Date() } });
     } catch (error) {
+      const providerBackoff = job.kind === 'launch' && /too many login attempts|daily.{0,30}(?:limit|quota)|sending quota exceeded/i.test(String(error.message));
+      const dailyQuota = /daily|sending quota/i.test(String(error.message));
+      const retryAt = new Date(now.getTime() + (providerBackoff ? (dailyQuota ? 24 : 1) * 3600000 : 300000));
       if (job.attempts >= 5) console.error('Originals project email exhausted delivery retries:', job._id, error.message);
-      await emailRepository.updateOne(filter, { $set: { state: job.attempts >= 5 ? 'failed' : 'queued', leaseExpiresAt: null, sendAfter: new Date(now.getTime() + 300000), lastError: String(error.message).slice(0, 500) } });
+      await emailRepository.updateOne(filter, { $set: { state: !providerBackoff && job.attempts >= 5 ? 'failed' : 'queued', leaseExpiresAt: null, sendAfter: retryAt, lastError: String(error.message).slice(0, 500) } });
+      if (providerBackoff) {
+        // An account-level throttle is not a rejection of each musician. Stop
+        // this batch and defer all launch mail rather than hammering logins.
+        await emailRepository.updateMany({ kind: 'launch', state: 'queued', sendAfter: { $lt: retryAt } }, { $set: { sendAfter: retryAt } });
+        return { deferredUntil: retryAt };
+      }
     }
   }
 }

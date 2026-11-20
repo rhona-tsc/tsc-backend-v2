@@ -13,6 +13,7 @@ const preferenceRepository = { find: () => ({ lean: async () => [] }) };
 function repositories(initial = project()) {
   const jobs = new Map(); let current = initial;
   const emailRepository = {
+    async updateMany(_filter, update) { for (const job of jobs.values()) if (job.kind === 'launch' && job.state === 'queued') Object.assign(job, update.$set); },
     async updateOne(filter, update) {
       if (update.$setOnInsert) {
         if (jobs.has(filter.eventKey)) return { upsertedCount: 0 };
@@ -136,4 +137,13 @@ test('the administrator announcement action reuses the queue and cannot resend c
  assert.equal(first.queued,1);const job=[...repo.jobs.values()][0];job.state='sent';job.messageId='<confirmed>';
  const repeated=await sendOriginalProjectApprovedNotifications({project:project(),...repo});
  assert.equal(repeated.queued,0);assert.equal(repo.jobs.size,1);assert.equal(job.state,'sent');assert.equal(job.messageId,'<confirmed>');
+});
+test('a Google login throttle stops the batch and defers remaining announcements for an hour',async()=>{
+ const p=project();p.state='role_round_open';p.moderation.status='approved';const repo=repositories(p);
+ await queueOriginalProjectLaunchEmails({project:p,...repo});let calls=0;
+ const result=await deliverOriginalProjectEmails({...repo,now,emailSender:async()=>{calls++;return{ok:false,error:'Invalid login: 454-4.7.0 Too many login attempts, please try again later.'};}});
+ assert.equal(calls,1);assert.equal(+result.deferredUntil,+now+3600000);
+ const job=[...repo.jobs.values()][0];assert.equal(job.state,'queued');assert.equal(+job.sendAfter,+now+3600000);
+ await deliverOriginalProjectEmails({...repo,now,emailSender:async()=>{throw new Error('Cooldown must not be bypassed');}});
+ assert.equal(job.attempts,1);
 });

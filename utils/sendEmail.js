@@ -29,6 +29,7 @@ const pass = normPass(
   const key = `${user}|${pass}`;
 
   if (!_cachedTransporter || _cachedKey !== key) {
+    _cachedTransporter?.close?.();
     _cachedKey = key;
 
     // Never log secrets — only safe metadata
@@ -43,6 +44,13 @@ const pass = normPass(
       host: "smtp.gmail.com",
       port: 465,
       secure: true,
+      // Reuse authenticated connections instead of logging in for every
+      // message in a project announcement batch.
+      pool: true,
+      maxConnections: 1,
+      maxMessages: 100,
+      rateDelta: 1000,
+      rateLimit: 1,
       auth: { user, pass },
     });
   }
