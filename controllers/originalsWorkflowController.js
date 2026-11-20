@@ -657,7 +657,7 @@ export const inviteOriginalMusician = async (req, res) => {
       roleName,
       message: clean(req.body?.message),
       expiresAt: round.closesAt,
-      emailPending: true,
+      emailPending: false,
     });
     // Compete with cancellation of an unused round. A late invitation cannot
     // leave a musician invited to a role the owner has just removed.
@@ -666,6 +666,8 @@ export const inviteOriginalMusician = async (req, res) => {
       await originalInvitationModel.updateOne({ _id: invitation._id }, { $set: { state: 'cancelled', emailPending: false } });
       return res.status(409).json({ success: false, message: 'This round has just closed. Refresh before inviting someone.' });
     }
+    await originalInvitationModel.updateOne({ _id: invitation._id, state: 'pending' }, { $set: { emailPending: true } });
+    invitation.emailPending = true;
     await audit({ projectId: round.projectId, roundId: round._id, type: "private_invitation_created", user: req.user, metadata: { invitationId: String(invitation._id), invitedMusicianId, roleName } });
     return res.status(201).json({ success: true, invitation });
   } catch (error) {
