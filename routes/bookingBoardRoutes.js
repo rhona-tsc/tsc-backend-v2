@@ -1210,8 +1210,13 @@ const sanitizeBookingPatch = (body = {}) => {
 
 export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
   const patch = sanitizeBookingPatch(normaliseBespokeLineup(rawPatch));
+  // Imported bookings can store the contract value in amount without a payment.
+  // Only legacy records with a confirmed payment may use it as a charge.
+  const legacyCharge = isEncoreBooking(bookingDoc) ? 0
+    : bookingDoc.payment === true || bookingDoc.paymentStatus === "paid"
+      ? bookingDoc.amount : undefined;
   const previousGross = Number(bookingDoc?.totals?.fullAmount ?? bookingDoc?.amount ?? bookingDoc?.fee ?? 0) || 0;
-  const previousCharged = Number(bookingDoc?.totals?.chargedAmount ?? (isEncoreBooking(bookingDoc) ? 0 : bookingDoc?.amount) ?? bookingDoc?.totals?.depositAmount ?? 0) || 0;
+  const previousCharged = Number(bookingDoc?.totals?.chargedAmount ?? legacyCharge ?? bookingDoc?.totals?.depositAmount ?? 0) || 0;
   const previouslyPaid = bookingDoc.balancePaid === true || bookingDoc.balanceStatus === "paid" || bookingDoc?.totals?.balancePaid === true;
 
   const requestedEventDate = patch.eventDateISO || patch.eventDate || patch.date;
@@ -1365,7 +1370,7 @@ export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
 
   const charged =
     Number(
-      bookingDoc?.totals?.chargedAmount ?? (isEncoreBooking(bookingDoc) ? 0 : bookingDoc?.amount) ?? deposit ?? 0,
+      bookingDoc?.totals?.chargedAmount ?? legacyCharge ?? deposit ?? 0,
     ) || 0;
 
   const computedBalance = Math.max(0, gross - charged);

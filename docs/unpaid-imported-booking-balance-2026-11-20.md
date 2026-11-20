@@ -1,0 +1,9 @@
+# Unpaid imported booking balance
+
+Booking 260927276335 (Rhythm Mystique, 21 November 2026) displayed zero outstanding despite the user's confirmation that payment had not been received. Both linked records had `balancePaid: true`; the core still had `payment: false` and `paymentStatus: unpaid`, and the board's payment receipt flags were false with no receipt URL or received-at timestamp. Its £2,172 imported contract amount had also been recorded as a £2,172 charge.
+
+The exact linked core and board rows were corrected in one transaction with timestamp/amount/payment-evidence assertions and a private before/patch audit at `~/.codex/booking-corrections/2026-11-20T15-55-05-865Z-260927276335.json`. Core charged amount is now zero, outstanding £2,172, balance-paid flags false; board balance-paid is false. Contract price and all other booking details remain intact. No payment, invoice, receipt or message was created. The live event sheet was checked and displays £2,172 outstanding.
+
+`applyBookingPatch` previously fell back to `amount` as the received charge for non-Encore bookings, even when an imported booking was unpaid. The fallback now requires an existing legacy payment confirmation (`payment: true` or `paymentStatus: paid`). Explicit charged totals, paid deposits, existing bank settlements and Encore handling are preserved. This prevents unrelated edits manufacturing a paid balance on an unpaid imported booking; it does not retroactively reinterpret other stored payment records.
+
+Validation: 36 tests passed across bookingPayments, bookingContractImport, bespokeLineup and bookingBalanceCheckout. Tests run with a dummy Stripe key and stub persistence; no payment requests are issued. New regression cases cover missing/partial totals on an unpaid £2,172 import, genuine legacy full payments and a £500 recorded deposit. `git diff --check` passed.

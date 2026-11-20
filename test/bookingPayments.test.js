@@ -39,3 +39,27 @@ test('a partial total edit cannot zero the contract price or discard received pa
   await applyBookingPatch(doc, { totals: { depositAmount: 980.76 } });
   assert.equal(doc.totals.fullAmount, 2972); assert.equal(doc.totals.chargedAmount, 980.76); assert.equal(doc.balanceAmountPence, 199124); assert.equal(doc.balancePaid, false);
 });
+
+test('an unpaid imported contract amount is never inferred to be a received payment', async () => {
+  for (const totals of [undefined, { fullAmount: 2172 }, { fullAmount: 2172, depositAmount: 0 }]) {
+    const doc = noDatabaseSave(hydrated({ amount: 2172, payment: false, paymentStatus: 'unpaid', totals }));
+    await applyBookingPatch(doc, { notes: 'Updated event details' });
+    assert.equal(doc.totals.chargedAmount, 0);
+    assert.equal(doc.totals.remainingAmount, 2172);
+    assert.equal(doc.balanceAmountPence, 217200);
+    assert.equal(doc.balancePaid, false);
+  }
+});
+
+test('confirmed legacy charges and explicitly recorded deposits remain recognised', async () => {
+  for (const confirmation of [{ payment: true }, { paymentStatus: 'paid' }]) {
+    const doc = noDatabaseSave(hydrated({ amount: 2172, totals: undefined, ...confirmation }));
+    await applyBookingPatch(doc, { notes: 'Updated event details' });
+    assert.equal(doc.totals.chargedAmount, 2172);
+    assert.equal(doc.balancePaid, true);
+  }
+  const doc = noDatabaseSave(hydrated({ amount: 2172, payment: false, paymentStatus: 'unpaid', totals: { fullAmount: 2172, depositAmount: 500 } }));
+  await applyBookingPatch(doc, { notes: 'Updated event details' });
+  assert.equal(doc.totals.chargedAmount, 500);
+  assert.equal(doc.totals.remainingAmount, 1672);
+});
