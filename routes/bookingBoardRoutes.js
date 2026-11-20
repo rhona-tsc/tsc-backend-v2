@@ -181,7 +181,7 @@ export const buildIntroEmail = (row) => {
   const clientNames = cleanString(
     row?.clientFirstNames || row?.bookerName || "there",
   );
-  const firstName = clientNames.split(/\s+|&/)[0] || "there";
+  const firstName = cleanString(row?.clientFirstNames) || clientNames.split(/\s+|&/)[0] || "there";
   const actName = resolveBookedActName({ board: row }) || "the band";
   const eventType = normalizeEventType(row?.eventType) || "event";
   const date = row?.eventDateISO

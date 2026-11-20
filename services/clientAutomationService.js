@@ -1,3 +1,4 @@
+import {hasSeparateDetailsReminders, separateDetailsEmail, referralSendISO, referralEmail} from '../utils/bookingClientSequence.js';
 import { balanceDueISO, balanceReminderISO, BALANCE_PAYMENT_POLICY } from '../utils/balanceDueDate.js';
 import { automationCc } from "../utils/automationCc.js";
 import { AutomationConfig } from "../models/automationConfigModel.js";
@@ -829,6 +830,7 @@ const buildBlockedAutomation4Alert = (row, missing) => {
 };
 
 export const APPROVED_CLIENT_AUTOMATION_EMAILS = [
+  "heatherhooper112@gmail.com",
   "f.a.podd@gmail.com",
   "susie@tigproductions.co.uk",
   "james@tlfservices.co.uk",
@@ -840,6 +842,7 @@ export const APPROVED_CLIENT_AUTOMATION_EMAILS = [
 ];
 
 export const APPROVED_CLIENT_AUTOMATION_BOOKING_REFS = [
+  "260508260869",
   "kPjj6",
   "BBM 497 DESIGN",
   "260927276335",
@@ -1037,7 +1040,7 @@ export const runClientAutomations = async ({
   };
   if (bookingRefs.size) query.bookingRef = { $in: [...bookingRefs] };
   const rows = await bookingModel.find(query).lean();
-  const reviewConfig = rows.some(row => reviewPlanItems(row).length || isEncoreBooking(row))
+  const reviewConfig = rows.some(row => reviewPlanItems(row).length || isEncoreBooking(row) || hasSeparateDetailsReminders(row) || row.importMetadata?.referralEmailEnabled)
     ? await automationConfigModel.findOne({ key: "client-email-rules" }).lean() : null;
   const summary = {
     enabled: true,
@@ -1174,6 +1177,19 @@ export const runClientAutomations = async ({
       schedule: automation14Schedule(row, todayISO),
       email: buildAutomation14Email(row),
     });
+
+    if (hasSeparateDetailsReminders(row) && !isEncoreBooking(row)) {
+      for (const number of [37,38]) {
+        const email=separateDetailsEmail(row,number);
+        await sendClientAutomation({automationKey:`automation-${number}-event-sheet-playlist`,automationNumber:number,schedule:eventDetailsReminderSchedule(row,number,todayISO),email:{...email,html:emailShell(automationBodyToHtml(email.text))}});
+      }
+    }
+    const referralISO=referralSendISO(row);
+    const referralRule=reviewConfig?.rules?.find(rule=>Number(rule.sourceNumber)===23);
+    if(referralISO && referralRule?.enabled!==false && referralRule) {
+      const email=referralEmail(row,referralRule,resolveBookedActName({board:row})||'the band');
+      await sendClientAutomation({automationKey:'automation-23-wedding-referral',automationNumber:23,schedule:scheduledWindow({plannedISO:referralISO,todayISO,lastISO:shiftISODate(referralISO,30)}),email:{...email,html:emailShell(automationBodyToHtml(email.text))}});
+    }
 
     if (isEncoreBooking(row)) {
       for (const number of [37, 38]) {

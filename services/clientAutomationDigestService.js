@@ -1,3 +1,4 @@
+import {hasSeparateDetailsReminders,referralSendISO} from '../utils/bookingClientSequence.js';
 import { reviewPlanItems, reviewPlanSchedule } from "../utils/reviewRequestPlan.js";
 import { isEncoreBooking } from "../utils/encoreSettlement.js";
 import BookingBoardItem from "../models/bookingBoardItem.js";
@@ -121,7 +122,8 @@ export const buildClientAutomationDigest = ({ rows = [], deliveries = [], todayI
       ...baseDefinitions.map(d => d.number === 14 ? {...d,number:36} : d),
       ...(baseDefinitions.some(d=>d.number===16)?[37,38]:[]).map(number => ({number,key:`automation-${number}-event-sheet-playlist`,name:number===37?'Event sheet and playlist due soon':'Event sheet and playlist due today',schedule:(booking,today)=>eventDetailsReminderSchedule(booking,number,today)})),
     ] : baseDefinitions;
-    const automations = [...clientDefinitions, ...reviewDefinitions].map((definition) => {
+    const additionalDefinitions = [...(hasSeparateDetailsReminders(row)&&!isEncoreBooking(row)?[37,38].map(number=>({number,key:`automation-${number}-event-sheet-playlist`,name:'Event sheet and playlists',schedule:(booking,today)=>eventDetailsReminderSchedule(booking,number,today)})):[]),...(referralSendISO(row)?[{number:23,key:'automation-23-wedding-referral',name:'Wedding referral',schedule:booking=>({plannedISO:referralSendISO(booking),reason:'scheduled'})}]:[])];
+    const automations = [...clientDefinitions, ...reviewDefinitions, ...additionalDefinitions].map((definition) => {
       const delivery = deliveryMap.get(`${row._id}|${definition.key}`);
       const status = scheduleStatus({ row: schedulingRow, definition, todayISO, delivery, allowlisted });
       const plannedISO = definition.schedule
