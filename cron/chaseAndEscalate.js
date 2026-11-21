@@ -8,6 +8,7 @@ import Act from "../models/actModel.js";
 import mongoose from "mongoose";
 import { sendWhatsAppMessage, fetchWhatsAppMessageStatus, toE164 } from "../utils/twilioClient.js";
 import { createAvailabilityReminderRunner } from "../services/availabilityReminderService.js";
+import { findPriorAvailabilityDecline } from '../services/availabilityPriorDeclines.js';
 import {
   escalateToNextDeputy,
   reconcilePendingRoleOffer,
@@ -141,6 +142,10 @@ export const availabilityReminderScopeState = async (row) => {
   if (!row?.enquiryId || !row.actId || !row.lineupId || !row.dateISO) {
     return { active: false, reason: "missing-exact-scope" };
   }
+  if (await findPriorAvailabilityDecline({
+    dateISO: row.dateISO, musicianId: row.musicianId,
+    phone: row.phone, formattedAddress: row.formattedAddress,
+  })) return { active: false, reason: "musician-declined-date-or-location" };
   const references = [{ enquiryRef: row.enquiryId }];
   if (mongoose.isValidObjectId(row.enquiryId)) {
     references.push({ _id: row.enquiryId }, { enquiryId: row.enquiryId });
