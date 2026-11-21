@@ -14,9 +14,12 @@ export function extrasWithPaymentFraction(extras = [], paid = false) {
     const received = Math.min(Math.max(0, Number(extra.paidAmount) || 0), gross);
     const fraction = (paid ? received : gross - received) / gross;
     if (!fraction) return [];
-    return [{ ...extra, price: round(gross * fraction), quantity: 1,
-      passThroughGross: round(Number(extra.passThroughGross || 0) * fraction),
-      managementGross: round(Number(extra.managementGross || 0) * fraction), paidAmount: 0 }];
+    const amount = round(gross * fraction);
+    const management = Math.min(amount, round(Math.min(gross, Math.max(0, Number(extra.managementGross || 0))) * fraction));
+    // Allocate the remaining penny to the supplier side so the buckets always
+    // equal this payment, including legacy quantity-based supplier amounts.
+    return [{ ...extra, price: amount, quantity: 1,
+      passThroughGross: round(amount - management), managementGross: management, paidAmount: 0 }];
   });
 }
 export function hasFullExtrasPayment(row) {

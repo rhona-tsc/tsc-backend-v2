@@ -19,3 +19,8 @@ test('receipt rows require recorded payment and leave fully paid receipts intact
  const row={extrasPaid:false};assert.equal(partialExtrasReceiptRow(row,[{price:100}]),null);
  const paid={extrasPaid:true};assert.equal(partialExtrasReceiptRow(paid,[{price:100}]),paid);
 });
+
+test('fractional fee allocations reconcile to the remaining penny',()=>{
+ const [row]=extrasWithPaymentFraction([{price:0.02,passThroughGross:0.01,managementGross:0.01,paidAmount:0.01}]);
+ assert.equal(row.price,0.01);assert.equal(row.passThroughGross+row.managementGross,0.01);
+});
