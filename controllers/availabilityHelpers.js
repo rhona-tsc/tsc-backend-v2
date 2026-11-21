@@ -4,6 +4,7 @@ import { findPersonByPhone } from "../utils/findPersonByPhone.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import EnquiryMessage from "../models/EnquiryMessage.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js";
+import { assertNoPriorAvailabilityDecline } from '../services/availabilityPriorDeclines.js';
 /* -------------------------- phone normalisation -------------------------- */
 
 const firstNameOf = (p) => {
@@ -218,12 +219,18 @@ export const notifyDeputyOneShot = async ({
     const phoneE164 = toE164(phoneRaw);
     if (!phoneE164) throw new Error("Deputy has no phone");
 
+    await assertNoPriorAvailabilityDecline({
+      dateISO, musicianId: deputy?.musicianId || deputy?._id,
+      phone: phoneE164, formattedAddress,
+    });
+
     const enquiryId = String(Date.now());
     const availabilityDoc = await AvailabilityModel.findOneAndUpdate(
       { enquiryId },
       {
         $setOnInsert: {
           enquiryId,
+          dateISO,
           actId: act?._id || null,
           lineupId,
           musicianId: deputy?.musicianId || deputy?._id || null,

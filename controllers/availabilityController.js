@@ -4,6 +4,7 @@ import { resolveAutomaticDeputyPrice, performanceLineupSize } from '../services/
 import { availabilityReplyIntent, availabilityButtonIntent, selectAvailabilityReplyTarget, recordAvailabilityReply, queueAvailabilityInbound } from "../services/availabilityInboundReply.js";
 import { interceptAvailabilityTest } from '../services/availabilityRequestTestPreview.js';
 import { availabilityCalendarContact } from '../services/availabilityCalendarContact.js';
+import { findPriorAvailabilityDecline, assertNoPriorAvailabilityDecline } from '../services/availabilityPriorDeclines.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 import AvailabilityModel from "../models/availabilityModel.js";
 import { encoreRequestEnquiryScope } from '../services/enquiryAvailabilityTracking.js';
@@ -2566,21 +2567,8 @@ const extractUKPostcode = (s = "") => {
   return m ? m[1].replace(/\s+/, " ") : "";
 };
 
-async function findDateLevelUnavailable({ dateISO, canonicalId, phone }) {
-  const or = [];
-  if (canonicalId) or.push({ musicianId: canonicalId });
-  if (phone) or.push({ phone });
-
-  if (!or.length) return null;
-
-  return AvailabilityModel.findOne({
-    v2: true,
-    dateISO,
-    reply: "unavailable",
-    $or: or,
-  })
-    .sort({ updatedAt: -1, createdAt: -1 })
-    .lean();
+async function findDateLevelUnavailable({ dateISO, canonicalId, phone, formattedAddress }) {
+  return findPriorAvailabilityDecline({ dateISO, musicianId: canonicalId, phone, formattedAddress });
 }
 
 export const ensureVocalistAvailabilityForLineup = async (req, res) => {
@@ -3680,6 +3668,7 @@ if (shouldAlwaysSkip) {
           dateISO,
           canonicalId: realMusicianId,
           phone,
+          formattedAddress: fullFormattedAddress,
         });
 
         if (dateLevelUnavailable) {
@@ -4125,6 +4114,12 @@ if (shouldAlwaysSkip) {
     // ✅ Resolve a real musicianId (never fall back to bandMemberId)
     const realMusicianId = canonical?._id || targetMember?.musicianId || null;
 
+    // Automatic callbacks, internal helpers and API requests all pass here.
+    // A different act/enquiry or skipDuplicateCheck must not bypass a prior NO.
+    if (isDeputy) await assertNoPriorAvailabilityDecline({
+      dateISO, musicianId: realMusicianId, phone, formattedAddress: fullFormattedAddress,
+    });
+
     const shouldAlwaysSkip =
   Boolean(canonical?.skipAvailabilityChecks) &&
   (
@@ -4288,6 +4283,7 @@ if (!isDeputy && shouldAlwaysSkip) {
         dateISO,
         canonicalId: realMusicianId,
         phone,
+        formattedAddress: fullFormattedAddress,
       });
 
       if (dateLevelUnavailable) {
@@ -4546,6 +4542,11 @@ if (!isDeputy && shouldAlwaysSkip) {
       requestId,
     });
 
+    // Pricing may have awaited remote sheet reads. Check again before creating
+    // a new request, so a decline arriving during pricing still stops dispatch.
+    await assertNoPriorAvailabilityDecline({
+      dateISO, musicianId: realMusicianId, phone, formattedAddress: fullFormattedAddress,
+    });
     const reservation = await reserveAvailabilityRequest(AvailabilityModel, query, setOnInsert, setAlways);
     if (!reservation.reserved) {
       const result = { success: true, sent: 0, skipped: 'already_requested_for_slot', requestKey };
