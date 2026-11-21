@@ -25,7 +25,8 @@ test('canonical identity works after a phone change and phone-only legacy record
     assert.equal(availabilityPhone(phone), person.phone);
     assert.equal(availabilityPersonMatches(decline({ musicianId: null, phone }), person), true);
   }
-  assert.equal(availabilityPersonMatches(decline({ musicianId: 'another-person' }), person), false);
+  assert.equal(availabilityPersonMatches(decline({ musicianId: 'legacy-duplicate-profile' }), person), true);
+  assert.equal(availabilityPersonMatches(decline({ musicianId: 'another-person', phone: '+447000000002' }), person), false);
   assert.equal(availabilityPersonMatches(decline({ musicianId: null, phone: '+447000000002',
     musicianName: 'Richard Marshall' }), person), false);
 });

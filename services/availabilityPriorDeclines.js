@@ -22,8 +22,10 @@ function phonePattern(value) {
 export function availabilityPersonMatches(row, person) {
   const earlierId = clean(row.musicianId);
   const targetId = clean(person.musicianId);
-  // A namesake, or a reused number owned by another canonical musician, is not a match.
-  if (earlierId && targetId) return earlierId === targetId;
+  if (earlierId && targetId && earlierId === targetId) return true;
+  // Duplicate legacy profiles can have different IDs for the same contact.
+  // The exact recipient number still declined; don't contact it again. Names
+  // alone never establish identity, and conflicting ownership needs staff review.
   const earlierPhone = availabilityPhone(row.phone);
   return Boolean(earlierPhone && earlierPhone === availabilityPhone(person.phone));
 }
