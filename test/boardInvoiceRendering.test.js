@@ -75,3 +75,37 @@ test('client bank override displays domestic and international details together'
  assert.doesNotMatch(text,/Mettle/);
  assert.match(text,/24 December 2026/);
 });
+
+const extrasFixture = () => ({ ...fixture(), bookingRef: 'BBM 407 LIGHTFOOT', invoiceType: 'extras',
+  extras: [
+    { name: 'Lunch Allowance', price: 20, quantity: 1, passThroughGross: 20, managementGross: 0, paidAmount: 20, paidAt: '2026-11-18T12:00:00Z' },
+    { name: 'Parking', price: 28, quantity: 3, passThroughGross: 28, managementGross: 0 },
+    { name: 'Parking', price: 34, quantity: 1, passThroughGross: 34, managementGross: 0 },
+    { name: 'Wireless Mic', price: 125, quantity: 1, passThroughGross: 50, managementGross: 75 },
+  ] });
+test('extras preserve supplier and management splits while subtracting only the recorded lunch payment', async () => {
+  const bmm = { ...company, brand: 'BMM', vatRate: 0.2 };
+  const row = extrasFixture(); const split = buildBoardInvoiceSplit(row, bmm);
+  assert.equal(split.gross, 263); assert.equal(split.passThroughGross, 188);
+  assert.equal(split.managementGross, 75); assert.equal(split.managementVat, 12.5);
+  assert.equal(split.paidAmount, 20); assert.equal(split.amountDue, 243);
+  assert.equal(split.outstandingPassThroughGross, 168); assert.equal(split.outstandingManagementGross, 75);
+  const { text, numpages } = await parse(Uint8Array.from(await makeInvoicePdfBuffer(row, split, bmm)), { version: 'v2.0.550' });
+  assert.equal(numpages, 1); assert.match(text, /Total due\s*£243\.00/);
+  assert.match(text, /Invoice total\s*£263\.00/); assert.match(text, /Paid: Lunch Allowance/);
+  assert.match(text, /18 November 2026/); assert.match(text, /-£20\.00/);
+  assert.match(text, /Invoice ref: BBM 407 LIGHTFOOT-EXTRAS/);
+  assert.match(text, /Supplier fees\s*£188\.00/);
+  assert.doesNotMatch(text, /deposits|refundable|Deposit already paid/i);
+});
+test('a refundable deposit is labelled only when an actual refundable deposit is present', async () => {
+  const text = await render({ ...fixture(), invoiceType:'extras', extras:[{name:'Equipment security deposit',price:50,quantity:1,passThroughGross:50,refundableDeposit:true}] });
+  assert.match(text,/Refundable deposits\s*£50\.00/); assert.match(text,/Total due\s*£50\.00/);
+});
+test('the existing lunch receipt does not claim that newly added unpaid extras were paid', async () => {
+  const { partialExtrasReceiptRow } = await import('../utils/extraInvoicePayments.js');
+  const row = partialExtrasReceiptRow({...extrasFixture(), documentType:'receipt'}, extrasFixture().extras);
+  const text = await render(row);
+  assert.match(text,/Total paid\s*£20\.00/); assert.match(text,/18 November 2026/);
+  assert.doesNotMatch(text,/Parking|Wireless Mic|£263\.00|£243\.00/);
+});

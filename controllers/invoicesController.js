@@ -1,3 +1,4 @@
+import { extraPayments, extrasWithPaymentFraction, partialExtrasReceiptRow } from '../utils/extraInvoicePayments.js';
 import { balanceDueISO } from '../utils/balanceDueDate.js';
 // controllers/invoicesController.js
 import { startOfDay, subDays, subHours, isValid, parseISO } from "date-fns";
@@ -949,7 +950,8 @@ const buildExtraAccountingLines = (invoiceExtras, vatRate = 0.2) => {
       );
 
       if (explicitPassThrough > 0) {
-        passThroughGross += explicitPassThrough;
+        if (refundableDeposit) refundableDepositGross += explicitPassThrough;
+        else passThroughGross += explicitPassThrough;
         lines.push({
           description,
           qty,
@@ -1072,6 +1074,9 @@ export const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
   if (invoiceType === "extras") {
     const { invoiceExtras } = getInvoiceExtrasAndAdjustment(rowForInvoice);
     const extraAccounting = buildExtraAccountingLines(invoiceExtras, vatRate);
+    const payments = extraPayments(invoiceExtras);
+    const paidAmount = round2(payments.reduce((sum, payment) => sum + payment.amount, 0));
+    const outstanding = buildExtraAccountingLines(extrasWithPaymentFraction(invoiceExtras), vatRate);
 
     return {
       gross: extraAccounting.gross,
@@ -1090,6 +1095,12 @@ export const buildBoardInvoiceSplit = (rowForInvoice, invoiceCompany) => {
       passThroughGross: extraAccounting.passThroughGross,
       refundableDepositGross: extraAccounting.refundableDepositGross,
       extraLines: extraAccounting.lines,
+      payments, paidAmount, amountDue: round2(Math.max(0, extraAccounting.gross - paidAmount)),
+      outstandingPassThroughGross: outstanding.passThroughGross,
+      outstandingManagementGross: outstanding.managementGross,
+      outstandingManagementNet: outstanding.managementNet,
+      outstandingManagementVat: outstanding.managementVat,
+      outstandingRefundableDepositGross: outstanding.refundableDepositGross,
     };
   }
 
@@ -1395,12 +1406,17 @@ export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         align: "right",
       },
     );
-    doc
-      .font("Helvetica")
-      .fontSize(isDepositInvoice || String(invoiceRef).length > 25 ? 8 : 10)
-      .fillColor(text);
+    const referenceText = `${isReceipt ? "Receipt" : "Invoice"} ref: ${invoiceRef}`;
+    let referenceFontSize = isDepositInvoice ? 8 : 10;
+    doc.font("Helvetica").fontSize(referenceFontSize).fillColor(text);
+    while (doc.widthOfString(referenceText) > 190 && referenceFontSize > 7) {
+      referenceFontSize -= 0.5;
+      doc.fontSize(referenceFontSize);
+    }
+    const referenceHeight = doc.heightOfString(referenceText, { width: 190 });
+    const issueDateY = cardY + 46 + Math.max(15, referenceHeight + 4);
     doc.text(
-      `${isReceipt ? "Receipt" : "Invoice"} ref: ${invoiceRef}`,
+      referenceText,
       cardX + cardW - 230,
       cardY + 46,
       {
@@ -1418,7 +1434,7 @@ export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
           new Date(),
       )}`,
       cardX + cardW - 230,
-      cardY + 61,
+      issueDateY,
       {
         width: 190,
         align: "right",
@@ -1440,7 +1456,7 @@ export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
           )}`
         : `Due date: ${formatInvoiceDate(dueDate) || "TBC"}`,
       cardX + cardW - 230,
-      cardY + 76,
+      issueDateY + 15,
       {
         width: 190,
         align: "right",
@@ -1624,6 +1640,8 @@ export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
             managementAmount,
             amount: quotedGross,
             refundableDeposit,
+            paidAmount: Math.min(Math.max(0, Number(extra.paidAmount || 0)), quotedGross),
+            paidAt: extra.paidAt,
           };
         })
         .filter(Boolean);
@@ -1718,7 +1736,11 @@ export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     let y = tableY + 28;
 
     rows.forEach((item, index) => {
-      const rowH = 30;
+      const paymentNote = !isReceipt && Number(item.paidAmount || 0) > 0
+        ? `Paid ${formatMoney(item.paidAmount)}${item.paidAt ? ` on ${formatInvoiceDate(item.paidAt)}` : ''}` : '';
+      const description = `${item.description}${paymentNote ? `\n${paymentNote}` : ''}`;
+      doc.font("Helvetica-Bold").fontSize(8.5);
+      const rowH = Math.max(30, doc.heightOfString(description, { width: descW - 14 }) + 18);
 
       doc
         .rect(tableX, y, tableW, rowH)
@@ -1729,7 +1751,7 @@ export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         .font("Helvetica-Bold")
         .fontSize(8.5);
 
-      doc.text(item.description, tableX + 10, y + 9, {
+      doc.text(description, tableX + 10, y + 9, {
         width: descW - 14,
       });
 
@@ -1816,7 +1838,7 @@ export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
       let offsetY = totalsY;
 
       if (Number(split.passThroughGross || 0) !== 0) {
-        doc.text("Pass-through / deposits", totalsX, offsetY, { width: 125 });
+        doc.text("Supplier fees", totalsX, offsetY, { width: 125 });
         doc.text(formatMoney(split.passThroughGross), totalsX + 125, offsetY, {
           width: 90,
           align: "right",
@@ -1846,7 +1868,25 @@ export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
         }
       }
 
-      // Removed refundable deposit line (was here)
+      if (Number(split.refundableDepositGross || 0) > 0) {
+        doc.text("Refundable deposits", totalsX, offsetY, { width: 125 });
+        doc.text(formatMoney(split.refundableDepositGross), totalsX + 125, offsetY, { width: 90, align: "right" });
+        offsetY += 18;
+      }
+      if (!isReceipt && Number(split.paidAmount || 0) > 0) {
+        doc.text("Invoice total", totalsX, offsetY, { width: 125 });
+        doc.text(formatMoney(split.gross), totalsX + 125, offsetY, { width: 90, align: "right" });
+        offsetY += 18;
+        for (const payment of split.payments || []) {
+          const label = `Paid: ${payment.description}${payment.paidAt ? ` (${formatInvoiceDate(payment.paidAt)})` : ''}`;
+          doc.fontSize(9);
+          const height = Math.max(18, doc.heightOfString(label, { width: 125 }) + 5);
+          doc.text(label, totalsX, offsetY, { width: 125 });
+          doc.text(`-${formatMoney(payment.amount)}`, totalsX + 125, offsetY, { width: 90, align: "right" });
+          offsetY += height;
+          doc.fontSize(10);
+        }
+      }
 
       totalsLineY = offsetY + 4;
       totalLabelY = offsetY + 16;
@@ -1960,7 +2000,7 @@ export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
     });
     doc.text(
       formatMoney(
-        isExtrasInvoice ? split.gross : split.amountDue ?? split.gross,
+        isExtrasInvoice && isReceipt ? split.gross : split.amountDue ?? split.gross,
       ),
       totalsX + 125,
       totalLabelY,
@@ -2047,7 +2087,7 @@ export const makeInvoicePdfBuffer = (row, split, invoiceCompany) =>
             ? "Thank you, payment has been received. This receipt relates to additional services and/or equipment hire for the event."
             : "Thank you, payment has been received. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee."
           : isExtrasInvoice
-            ? "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the management fee element; pass-through costs and refundable deposits are separated in the table."
+            ? `Please use the payment reference above so we can match your payment quickly. VAT is charged only on the management fee element. Supplier fees${Number(split.refundableDepositGross || 0) > 0 ? ' and refundable deposits are' : ' are'} shown separately in the table.`
             : "Please use the payment reference above so we can match your payment quickly. VAT is charged only on the music management element. The band fee is shown separately as a pass-through artist fee.",
         cardX + 270,
         vatNoteY,
@@ -2307,7 +2347,7 @@ export const createBoardInvoice = async (req, res) => {
         0,
         Math.round(
           Number(
-            isExtrasInvoice ? split.gross : split.amountDue ?? split.gross,
+            split.amountDue ?? split.gross,
           ) * 100,
         ),
       );
@@ -2329,6 +2369,12 @@ export const createBoardInvoice = async (req, res) => {
         );
       }
 
+      const paymentSplit = isExtrasInvoice && split.paidAmount > 0 ? {
+        ...split, managementGross: split.outstandingManagementGross, managementVat: split.outstandingManagementVat,
+        commissionGross: split.outstandingManagementGross, commissionNet: split.outstandingManagementNet,
+        commissionVat: split.outstandingManagementVat, passThroughGross: split.outstandingPassThroughGross,
+        refundableDepositGross: split.outstandingRefundableDepositGross,
+      } : split;
       const checkoutMetadata = {
         category: "board_invoice",
         payment_stage: "board_invoice",
@@ -2342,16 +2388,16 @@ export const createBoardInvoice = async (req, res) => {
         ),
         invoiceCompany: invoiceCompany.brand,
         amount_pence: String(amountPence),
-        management_gross: String(Number(split.managementGross || 0).toFixed(2)),
-        management_vat: String(Number(split.managementVat || 0).toFixed(2)),
+        management_gross: String(Number(paymentSplit.managementGross || 0).toFixed(2)),
+        management_vat: String(Number(paymentSplit.managementVat || 0).toFixed(2)),
         refundable_deposit_gross: String(
-          Number(split.refundableDepositGross || 0).toFixed(2),
+          Number(paymentSplit.refundableDepositGross || 0).toFixed(2),
         ),
-        commission_gross: String(Number(split.commissionGross || 0).toFixed(2)),
-        commission_vat: String(Number(split.commissionVat || 0).toFixed(2)),
-        commission_net: String(Number(split.commissionNet || 0).toFixed(2)),
+        commission_gross: String(Number(paymentSplit.commissionGross || 0).toFixed(2)),
+        commission_vat: String(Number(paymentSplit.commissionVat || 0).toFixed(2)),
+        commission_net: String(Number(paymentSplit.commissionNet || 0).toFixed(2)),
         pass_through_gross: String(
-          Number(split.passThroughGross || 0).toFixed(2),
+          Number(paymentSplit.passThroughGross || 0).toFixed(2),
         ),
       };
 
@@ -2689,7 +2735,7 @@ export const serveBoardReceiptPdf = async (req, res) => {
       return res.status(409).send("The original booking payment is arranged through Encore. Use the extras invoice.");
     }
 
-    const rowForInvoice = {
+    let rowForInvoice = {
       ...row,
       documentType: "receipt",
       invoiceType: invoiceTypeNorm,
@@ -2702,6 +2748,10 @@ export const serveBoardReceiptPdf = async (req, res) => {
         }),
     };
 
+    if (invoiceTypeNorm === 'extras') {
+      rowForInvoice = partialExtrasReceiptRow(rowForInvoice, getInvoiceExtrasAndAdjustment(rowForInvoice).invoiceExtras);
+      if (!rowForInvoice) return res.status(409).send('No extras payment is recorded for this receipt.');
+    }
     const invoiceCompany = getInvoiceCompany(rowForInvoice);
     const split = buildBoardInvoiceSplit(rowForInvoice, invoiceCompany);
     if (invoiceTypeNorm === "deposit") {
