@@ -1,3 +1,5 @@
+import musicianAuth from '../middleware/musicianAuth.js';
+import { withdrawMyBooking } from '../controllers/allocationController.js';
 // routes/bookingRoutes.js
 import express from "express";
 import { buildEventSheetUrl } from "../utils/publicSiteUrl.js";
@@ -44,6 +46,8 @@ import { resolveBookedActName } from "../utils/bookingDisplayName.js";
 import { isEncoreBooking, resolveEncoreSettlement } from "../utils/encoreSettlement.js";
 import { effectiveLineupRoles, lineupDisplayLabel, bookingExtras, additionalMusicianRoles } from "../utils/bookingLineupAdditions.js";
 const router = express.Router();
+// Older cached musician portals used this path. Keep the same ownership checks.
+router.post('/bookings/:id/withdraw', musicianAuth, withdrawMyBooking);
 router.get("/measurement", getBookingMeasurement);
 
 const formatOrdinalDate = (value, { weekday = false } = {}) => {

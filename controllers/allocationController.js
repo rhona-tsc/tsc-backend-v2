@@ -1,3 +1,4 @@
+import { ownsBookingAssignment, isWithdrawalTarget, withdrawalAvailabilityRecord } from '../utils/bookingWithdrawal.js';
 import {getRosterPolicy,bookingRosterEligibility} from '../services/rosterEligibilityService.js';
 import {rosterEligibility,eligibleRosterDeputies,selectRosterMember} from '../utils/rosterEligibility.js';
 // backend/controllers/allocationController.js
@@ -465,10 +466,13 @@ const updateBoardRoleSlot = async (msg, changes = {}) => {
     : await resolveBoardItem(msg?.bookingRef);
   if (!board || !msg?.roleSlotId) return null;
 
+  if (["offered", "accepted", "confirmed"].includes(changes.status)) changes = {
+    ...changes, withdrawnAt: null, withdrawalReason: "", withdrawalSource: "",
+  };
   const apply = (entries = []) => {
     let matched = false;
     const updated = entries.map((entry) => {
-      if (entry?.roleSlotId === msg.roleSlotId || entry?.offerRequestId === msg.enquiryId) {
+      if (entry?.roleSlotId === msg.roleSlotId || (msg.enquiryId && entry?.offerRequestId === msg.enquiryId)) {
         matched = true;
         return { ...(entry.toObject?.() || entry), ...changes };
       }
@@ -624,17 +628,17 @@ const closeCompetingRoleOffers = async (winner) => {
   );
 };
 
-const musicianMatchesAssignment = (entry = {}, user = {}) => {
-  const userId = String(user?.musicianId || user?._id || user?.id || "");
-  const email = String(user?.email || "").trim().toLowerCase();
-  return Boolean(
-    (userId && String(entry?.musicianId || "") === userId) ||
-      (email && String(entry?.email || "").trim().toLowerCase() === email),
-  );
-};
+const musicianMatchesAssignment = ownsBookingAssignment;
 
 export const withdrawAllocatedBooking = async ({ board, assignment, user, reason = "", source = "portal" }) => {
   const now = new Date();
+  const unavailable = withdrawalAvailabilityRecord({ board, assignment,
+    phone: normalizePhone(assignment.phone || ''), reason, source, now });
+  // Also record manual allocations that have no original offer/availability row.
+  // This is date-specific and sends no message to the withdrawing musician.
+  await AvailabilityModel.findOneAndUpdate({ requestKey: unavailable.requestKey }, {
+    $set: unavailable, $setOnInsert: { createdAt: now },
+  }, { upsert: true, new: true, runValidators: true });
   const allocationPools = [
     ...(board.assignedMusicians || []),
     ...(board.bookingMusicians || []),
@@ -650,9 +654,7 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
   const deputyJobId = assignment?.deputyJobId || null;
   const apply = (entries = []) =>
     entries.map((entry) =>
-      (roleSlotId && String(entry?.roleSlotId || "") === roleSlotId) ||
-      (offerRequestId && String(entry?.offerRequestId || "") === offerRequestId) ||
-      musicianMatchesAssignment(entry, user)
+      isWithdrawalTarget(entry, assignment, user)
         ? {
             ...(entry.toObject?.() || entry),
             status: "withdrawn",
@@ -795,7 +797,7 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
         {
           $set: {
             reply: "no",
-            status: "withdrawn",
+            status: "unavailable",
             repliedAt: now,
             updatedAt: now,
           },
@@ -824,7 +826,10 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
     duties: role,
     fee: assignment?.totalFee || assignment?.fee || 0,
     formattedAddress: board.address || board.venue || "",
-    meta: { MetaISODate: board.eventDateISO },
+    meta: { MetaISODate: board.eventDateISO, county: board.county || '',
+      callTime: board.arrivalTime || board.performanceTimes?.arrivalTime || '',
+      startTime: board.startTime || board.performanceTimes?.startTime || '',
+      finishTime: board.finishTime || board.performanceTimes?.finishTime || '' },
   };
   const { act } = await getActLineupContext(board);
   const job = await postExhaustedRoleToDeputyBoard(fallbackMessage, act);
@@ -841,11 +846,17 @@ export const withdrawMyBooking = async (req, res) => {
       ...(board.bandLineup || []),
       ...(board.bookingDetails?.assignedMusicians || []),
     ];
+    const requestedSlot = String(req.body?.roleSlotId || "");
+    const ownsRequestedSlot = entry => musicianMatchesAssignment(entry, req.user) &&
+      (!requestedSlot || String(entry.roleSlotId || '') === requestedSlot);
     const assignment = pools.find(
-      (entry) => musicianMatchesAssignment(entry, req.user) &&
+      (entry) => ownsRequestedSlot(entry) &&
         ["accepted", "confirmed"].includes(String(entry?.status || "").toLowerCase()),
     );
     if (!assignment) {
+      const previous = pools.find(entry => ownsRequestedSlot(entry) && entry.withdrawnAt);
+      if (previous) return res.json({ success: true, alreadyWithdrawn: true,
+        message: "You have already withdrawn from this gig. TSC is arranging cover.", reallocationRoute: "already_withdrawn" });
       return res.status(404).json({ success: false, message: "No confirmed allocation was found for your profile." });
     }
     const result = await withdrawAllocatedBooking({
@@ -886,6 +897,10 @@ const postExhaustedRoleToDeputyBoard = async (msg, act) => {
     venue: msg.formattedAddress || msg.meta?.MetaAddress || "",
     location: msg.formattedAddress || msg.meta?.MetaAddress || "",
     locationName: msg.formattedAddress || msg.meta?.MetaAddress || "",
+    county: msg.meta?.county || "",
+    callTime: msg.meta?.callTime || "",
+    startTime: msg.meta?.startTime || "",
+    finishTime: msg.meta?.finishTime || "",
     jobType: "booked",
     fee,
     deputyNetAmount: fee,
