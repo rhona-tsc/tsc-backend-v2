@@ -1,6 +1,6 @@
 import Board from '../models/bookingBoardItem.js';
 import Job from '../models/deputyJobModel.js';
-import {getActLineupContext} from './allocationController.js';
+import {getActLineupContext,resolveBoardItem} from './allocationController.js';
 import {bookingRolePlan,assignmentForSlot,confirmedAllocation} from '../utils/bookingAllocationPolicy.js';
 import {upcomingAllocationReview,allocationReviewSummary} from '../services/bookingAllocationReview.js';
 export const allocationAdmin=(req,res,next)=>{
@@ -9,7 +9,7 @@ export const allocationAdmin=(req,res,next)=>{
 };
 export async function allocationReview(req,res){try{return res.json({success:true,bookings:allocationReviewSummary(await upcomingAllocationReview())});}catch(e){return res.status(500).json({success:false,message:e.message});}}
 export async function setAllocationHold(req,res){try{
- const board=await Board.findById(req.params.id);if(!board)return res.status(404).json({success:false,message:'Booking not found'});
+ const board=await resolveBoardItem(req.params.id);if(!board)return res.status(404).json({success:false,message:'Booking not found'});
  const {lineup}=await getActLineupContext(board);const plan=bookingRolePlan(board,lineup);
  const slot=plan.find(s=>s.roleSlotId===req.body.roleSlotId);if(!slot)return res.status(400).json({success:false,message:'Choose a valid booking role'});
  const active=req.body.active===true,reason=String(req.body.reason||'').trim(),now=new Date();

@@ -93,3 +93,12 @@ test('the deadline worker posts only eligible unfilled roles and respects holds,
  const result=await runBookingAllocationEscalation({review:async()=>rows,postRole:async msg=>{posted.push(msg);return{_id:'job'};},locks:{findOneAndUpdate:async()=>({}),deleteOne:async()=>{unlocked=true;}},jobs:{find:async()=>[]}});
  assert.equal(posted.length,1);assert.equal(posted[0].fee,400);assert.equal(unlocked,true);assert.deepEqual(result.outcomes.filter(x=>x.blocked).map(x=>x.blocked),['held','client_approval_required','fee_not_recorded']);
 });
+
+test('a richer core booking cannot overwrite the board’s role hold with an empty array',async()=>{
+ const {mergeRowData}=await import('../routes/bookingBoardRoutes.js');
+ const hold={roleSlotId:'keyboard-1',active:true,reason:'Waiting for client'};
+ const board={_id:boardId,bookingBoardItemId:boardId,allocationHolds:[hold]};
+ const core={_id:'core-booking',allocationHolds:[]};
+ assert.deepEqual(mergeRowData(core,board).allocationHolds,[hold]);
+ assert.deepEqual(mergeRowData(board,core).allocationHolds,[hold]);
+});

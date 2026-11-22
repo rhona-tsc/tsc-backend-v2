@@ -1584,6 +1584,7 @@ export const mergeRowData = (preferred, secondary) => {
     // either copy must survive the merge so an opted-out booking never appears
     // eligible because the other (possibly legacy) copy omitted the field.
     siteAutomationsEnabled: mergeSiteAutomationsEnabled(preferred, secondary),
+    allocationHolds: boardSource?.allocationHolds || preferred?.allocationHolds || secondary?.allocationHolds || [],
     invoiceCompany:
       preferred?.invoiceCompany ||
       preferred?.accounting?.invoiceCompany ||

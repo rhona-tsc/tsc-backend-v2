@@ -266,7 +266,7 @@ const findOriginalBandMemberForSlot = ({ lineup, role, roleSlotId, requestedId }
   return matching[occurrence] || matching[0] || null;
 };
 
-const resolveBoardItem = async (rawId) => {
+export const resolveBoardItem = async (rawId) => {
   if (!rawId) return null;
   const value = String(rawId).trim();
   const conditions = [{ bookingRef: value }];
