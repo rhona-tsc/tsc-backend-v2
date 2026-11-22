@@ -388,6 +388,11 @@ const BookingBoardItemSchema = new mongoose.Schema(
     manualAdjustmentAmount: { type: Number, default: 0 },
     mainInvoiceIncludesExtras: { type: Boolean, default: false },
     allocation: AllocationSchema,
+    allocationHolds: [{
+      _id: false, roleSlotId: {type:String,required:true}, role:String,
+      active: {type:Boolean,default:true}, reason:String, until:Date,
+      heldAt:Date, heldBy:String, releasedAt:Date, releasedBy:String,
+    }],
     review: ReviewSchema,
     reviewRequestPlan: {
       type: new mongoose.Schema({

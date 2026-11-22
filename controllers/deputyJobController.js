@@ -1,3 +1,6 @@
+import BookingAllocationBoard from '../models/bookingBoardItem.js';
+import {activeAllocationHold as bookingRoleHold} from '../utils/bookingAllocationPolicy.js';
+const deputyRoleOnHold=async job=>{if(!job?.automation?.bookingBoardItemId)return false;const board=await BookingAllocationBoard.findById(job.automation.bookingBoardItemId).lean();return Boolean(board&&bookingRoleHold(board,job.automation.roleSlotId));};
 import { musicianEmailPreferencesUrl } from '../utils/musicianEmailPreferences.js';
 import { visibleDeputyJob } from '../utils/deputyJobVisibility.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
@@ -3509,6 +3512,7 @@ export const applyToDeputyJob = async (req, res) => {
   try {
     const job = await deputyJobModel.findById(req.params.id);
 
+    if(await deputyRoleOnHold(job))return res.status(409).json({success:false,message:"This allocation is on hold. Release the hold before continuing."});
     if (!job) {
       return res.status(404).json({
         success: false,
@@ -4710,6 +4714,7 @@ export const confirmDeputyAllocation = async (req, res) => {
     const { musicianId } = req.body || {};
     const job = await deputyJobModel.findById(req.params.id);
 
+    if(await deputyRoleOnHold(job))return res.status(409).json({success:false,message:"This allocation is on hold. Release the hold before continuing."});
     if (!job) {
       return res
         .status(404)
@@ -5045,6 +5050,7 @@ export const rematchAndSendDeputyJobNotifications = async (req, res) => {
   try {
     const job = await deputyJobModel.findById(req.params.id);
 
+    if(await deputyRoleOnHold(job))return res.status(409).json({success:false,message:"This allocation is on hold. Release the hold before continuing."});
     if (!job) {
       return res.status(404).json({
         success: false,
@@ -6610,6 +6616,7 @@ export const resendDeputyJobNotifications = async (req, res) => {
   try {
     const job = await deputyJobModel.findById(req.params.id);
 
+    if(await deputyRoleOnHold(job))return res.status(409).json({success:false,message:"This allocation is on hold. Release the hold before continuing."});
     if (!job) {
       return res.status(404).json({
         success: false,
@@ -6790,6 +6797,7 @@ export const sendRemainingDeputyJobNotifications = async (req, res) => {
   try {
     const job = await deputyJobModel.findById(req.params.id);
 
+    if(await deputyRoleOnHold(job))return res.status(409).json({success:false,message:"This allocation is on hold. Release the hold before continuing."});
     if (!job) {
       return res.status(404).json({
         success: false,
@@ -7447,6 +7455,7 @@ export const manualAllocateDeputyJob = async (req, res) => {
     } = req.body || {};
     const job = await deputyJobModel.findById(req.params.id);
 
+    if(await deputyRoleOnHold(job))return res.status(409).json({success:false,message:"This allocation is on hold. Release the hold before continuing."});
     if (!job) {
       return res.status(404).json({
         success: false,
@@ -7783,6 +7792,7 @@ export const retryFailedDeputyJobNotifications = async (req, res) => {
   try {
     const job = await deputyJobModel.findById(req.params.id);
 
+    if(await deputyRoleOnHold(job))return res.status(409).json({success:false,message:"This allocation is on hold. Release the hold before continuing."});
     if (!job) {
       return res.status(404).json({
         success: false,

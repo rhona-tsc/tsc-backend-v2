@@ -20,13 +20,13 @@ async function setup(t) {
  t.mock.method(console,'log',()=>{});t.mock.method(console,'warn',()=>{});
  const keys=assignment(),other={...keys,role:'Guitar',roleSlotId:'guitar-1'};
  const rows=[keys,other,{...keys,musicianId:'444444444444444444444444',email:'someoneelse@example.test',role:'Drums',roleSlotId:'drums-1'}];
- const board={_id:boardId,bookingRef:'EXAMPLE-BOOKING',actId,eventDateISO:'2099-12-31',address:'Example venue',county:'Hertfordshire',arrivalTime:'17:00',assignedMusicians:rows.map(x=>({...x})),bookingMusicians:rows.map(x=>({...x})),bandLineup:rows.map(x=>({...x})),bookingDetails:{assignedMusicians:rows.map(x=>({...x}))},allocation:{},save:async()=>{}};
+ const board={_id:boardId,bookingRef:'EXAMPLE-BOOKING',actId,eventDateISO:'2099-12-31',address:'Example venue',county:'Hertfordshire',arrivalTime:'17:00',assignedMusicians:rows.map(x=>({...x})),bookingMusicians:rows.map(x=>({...x})),bandLineup:rows.map(x=>({...x})),bookingDetails:{assignedMusicians:rows.map(x=>({...x}))},allocation:{},allocationHolds:[],lineupComposition:['Keyboard','Guitar','Drums'],save:async()=>{}};
  let availability=[],jobs=[];
- t.mock.method(Board,'findOne',async()=>board);t.mock.method(Board,'findById',async()=>board);
+ t.mock.method(Board,'findOne',async()=>board);t.mock.method(Board,'findById',()=>({lean:async()=>board,then:(resolve,reject)=>Promise.resolve(board).then(resolve,reject)}));
  t.mock.method(Act,'findById',()=>({lean:async()=>({_id:actId,tscName:'Example band',lineups:[]})}));
  t.mock.method(Message,'findOne',()=>({sort:async()=>null}));
  t.mock.method(Availability,'findOneAndUpdate',async(_filter,update)=>{availability.push(update.$set);return update.$set});
- t.mock.method(Job,'findOne',async()=>null);
+ t.mock.method(Job,'findOne',async()=>jobs[0]||null);
  t.mock.method(Job,'create',async value=>{const job={...value,_id:'555555555555555555555555'};jobs.push(job);return job;});
  const app=express();app.use(express.json());app.use('/api/allocations',allocationRoutes);app.use('/api/booking',bookingRoutes);
  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>server.close(r)));
@@ -34,7 +34,7 @@ async function setup(t) {
  const request=async(path,user=person,body={roleSlotId:'keyboard-1',reason:'Out of the country'})=>{
   const r=await fetch(`${url}${path}/bookings/EXAMPLE-BOOKING/withdraw`,{method:'POST',headers:{'Content-Type':'application/json',...(user?{Authorization:`Bearer ${jwt.sign({id:user},process.env.JWT_SECRET)}`}:{})},body:JSON.stringify(body)});return{status:r.status,data:await r.json()};
  };
- return{board,availability,jobs,request};
+ return{board,availability,jobs,request,url};
 }
 test('current and cached portal URLs both withdraw only the owned keyboard role and open a deputy job',async t=>{
  for(const prefix of ['/api/allocations','/api/booking']) {
@@ -66,4 +66,30 @@ test('manual withdrawal records a stable date-specific unavailability without pr
  const recipient={musicianId:assignment().musicianId,phone:row.phone,dateISO:row.dateISO};
  assert.equal(isExplicitAvailabilityDecline(row,recipient),true);
  assert.throws(()=>withdrawalAvailabilityRecord({board:{_id:boardId},assignment:assignment()}),/event date/);
+});
+
+test('role holds require admin access, a reason and an unfilled role, and preserve fee and other roles',async t=>{
+ const f=await setup(t);t.mock.method(Job,'updateMany',async()=>({modifiedCount:0}));
+ const post=async(body,role='admin')=>{
+  const r=await fetch(`${f.url}/api/allocations/bookings/${boardId}/hold`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${jwt.sign({id:person,role},process.env.JWT_SECRET)}`},body:JSON.stringify(body)});return {status:r.status,data:await r.json()};
+ };
+ assert.equal((await post({roleSlotId:'keyboard-1',active:true,reason:'Client checking'},'musician')).status,403);
+ assert.equal((await post({roleSlotId:'keyboard-1',active:true,reason:'Client checking'})).status,409);
+ f.board.assignedMusicians[0].status='offered';
+ assert.equal((await post({roleSlotId:'keyboard-1',active:true})).status,400);
+ assert.equal((await post({roleSlotId:'keyboard-1',active:true,reason:'Client checking',until:'2000-01-01'})).status,400);
+ const held=await post({roleSlotId:'keyboard-1',active:true,reason:'Client checking'});
+ assert.equal(held.status,200);assert.equal(held.data.allocationHolds[0].active,true);
+ assert.equal(f.board.assignedMusicians[0].fee,400);assert.equal(f.board.assignedMusicians[1].status,'confirmed');
+ const released=await post({roleSlotId:'keyboard-1',active:false});assert.equal(released.status,200);assert.equal(released.data.allocationHolds[0].active,false);
+});
+
+test('the deadline worker posts only eligible unfilled roles and respects holds, client approval and missing fees',async t=>{
+ const {runBookingAllocationEscalation}=await import('../services/bookingAllocationReview.js');
+ const posted=[];let unlocked=false;
+ const slot={role:'Keyboard',roleSlotId:'keyboard-1',fee:400};
+ const row={board:{_id:boardId,bookingRef:'EXAMPLE',eventDateISO:'2099-12-31',address:'Venue'},act:{_id:actId},urgent:true,slots:[slot]};
+ const rows=[row,{...row,slots:[{...slot,hold:{reason:'Waiting'}}]},{...row,slots:[{...slot,clientApprovalRequired:true}]},{...row,slots:[{...slot,fee:0}]},{...row,urgent:false}];
+ const result=await runBookingAllocationEscalation({review:async()=>rows,postRole:async msg=>{posted.push(msg);return{_id:'job'};},locks:{findOneAndUpdate:async()=>({}),deleteOne:async()=>{unlocked=true;}},jobs:{find:async()=>[]}});
+ assert.equal(posted.length,1);assert.equal(posted[0].fee,400);assert.equal(unlocked,true);assert.deepEqual(result.outcomes.filter(x=>x.blocked).map(x=>x.blocked),['held','client_approval_required','fee_not_recorded']);
 });

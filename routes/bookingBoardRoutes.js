@@ -1960,6 +1960,7 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     balanceInvoicePdfUrl: doc?.balanceInvoicePdfUrl || "",
 
     allocation: doc?.allocation || { status: "in_progress" },
+    allocationHolds: doc?.allocationHolds || [],
     review: doc?.review || { requestedCount: 0, received: false },
     reviewRequestPlan: doc?.reviewRequestPlan,
     referralDiscountCode: doc?.referralDiscountCode || "",

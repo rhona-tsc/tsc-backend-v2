@@ -1,3 +1,4 @@
+import {allocationAdmin,allocationReview,setAllocationHold} from '../controllers/allocationManagementController.js';
 // backend/routes/allocationRoutes.js
 import express from "express";
 import { triggerBookingRequests, twilioInboundBooking, listRoleCandidates, offerBookingRole, confirmBookingRole, withdrawMyBooking } from "../controllers/allocationController.js";
@@ -5,6 +6,8 @@ import musicianAuth from "../middleware/musicianAuth.js";
 
 const router = express.Router();
 
+router.get("/review",musicianAuth,allocationAdmin,allocationReview);
+router.post("/bookings/:id/hold",musicianAuth,allocationAdmin,setAllocationHold);
 router.get("/role-candidates", musicianAuth, listRoleCandidates);
 router.post("/offer-role", musicianAuth, offerBookingRole);
 router.post("/confirm-role", musicianAuth, confirmBookingRole);

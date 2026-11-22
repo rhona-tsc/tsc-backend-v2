@@ -1,3 +1,4 @@
+import {activeAllocationHold} from '../utils/bookingAllocationPolicy.js';
 // cron/chaseAndEscalate.js
 import EnquiryMessage from "../models/EnquiryMessage.js";
 import Musician from "../models/musicianModel.js";
@@ -205,6 +206,8 @@ export const runChaseAndEscalation = async () => {
   }).sort({ createdAt: 1 }).lean();
 
   for (const msg of messages) {
+    const holdBoard=msg.bookingBoardItemId?await BookingBoardItem.findById(msg.bookingBoardItemId).lean():null;
+    if(holdBoard && activeAllocationHold(holdBoard,msg.roleSlotId)) continue;
     const reconciliation = await reconcilePendingRoleOffer(msg);
     if (reconciliation?.resolved) {
       console.log("✅ Skipping chase: booking role is already allocated", {

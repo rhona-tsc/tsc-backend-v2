@@ -58,6 +58,7 @@ autoEscalatedAt: { type: Date, default: null },
 reconciledFromAllocationAt: { type: Date, default: null },
     // Metadata for matching / diagnostics
     meta: {
+      allocationHoldReply: Boolean,
       actName: String,
       MetaActId: String,
       MetaISODate: String,   // yyyy-mm-dd

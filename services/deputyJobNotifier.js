@@ -1,3 +1,5 @@
+import BookingBoardItem from '../models/bookingBoardItem.js';
+import {activeAllocationHold} from '../utils/bookingAllocationPolicy.js';
 import { musicianOpportunityAllowed } from './musicianEmailPreferenceService.js';
 import { findPriorAvailabilityDecline } from './availabilityPriorDeclines.js';
 import { musicianEmailPreferencesUrl } from '../utils/musicianEmailPreferences.js';
@@ -636,6 +638,12 @@ export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => 
           continue;
         }
 
+        if(job.automation?.bookingBoardItemId){
+          const board=await BookingBoardItem.findById(job.automation.bookingBoardItemId).lean();
+          if(board&&activeAllocationHold(board,job.automation.roleSlotId)){
+            results.push({musicianId,email,phone,channel:'email',status:'skipped',sentAt:new Date(),error:'Allocation role is on hold'});continue;
+          }
+        }
         const applyUrl = `${frontendBaseUrl}/deputy-jobs/${job?._id}`;
         const subject = formatEmailSubject(job);
         const text = buildTextEmail({ musician, job, applyUrl });

@@ -1,3 +1,4 @@
+import {runBookingAllocationEscalation} from './services/bookingAllocationReview.js';
 import { startMemoryMonitor } from "./utils/memoryMonitor.js";
 import { deliverOriginalRoundLifecycleNotifications } from "./services/originalsRoundLifecycleNotificationService.js";
 import { originalStemChatActivity } from "./services/originalsStemChatActivityService.js";
@@ -913,6 +914,12 @@ app.get("/api/availability/process-deferred", async (_req, res) => {
 cron.schedule("* * * * *", () => {
   runMasterSupplierPricingSync().catch(error => console.error('Master pricing worker unavailable:', error.message));
 }, { timezone: "Europe/London" });
+
+// Publish unfilled booked roles at seven days; holds and client approvals win.
+cron.schedule("*/15 * * * *", async()=>{
+ try { await runBookingAllocationEscalation(); }
+ catch(error){console.error('Booking allocation deadline check failed:',error.message);}
+},{timezone:"Europe/London",noOverlap:true});
 
 // Booking-role chase/escalation keeps its existing hourly schedule.
 cron.schedule("0 * * * *", async () => {

@@ -364,6 +364,7 @@ const deputyJobSchema = new mongoose.Schema(
       default: false,
     },
     automation: {
+      allocationHold: {type:Boolean,default:false},
       source: { type: String, default: "" },
       bookingBoardItemId: {
         type: mongoose.Schema.Types.ObjectId,

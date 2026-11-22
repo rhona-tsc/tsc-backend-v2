@@ -1,3 +1,7 @@
+import {activeAllocationHold,withinAllocationWeek} from '../utils/bookingAllocationPolicy.js';
+import {normaliseAllocationRole} from '../utils/allocationRoles.js';
+import {actRoleDeputies} from '../utils/actRoleDeputies.js';
+import {findPriorAvailabilityDecline} from '../services/availabilityPriorDeclines.js';
 import { ownsBookingAssignment, isWithdrawalTarget, withdrawalAvailabilityRecord } from '../utils/bookingWithdrawal.js';
 import {getRosterPolicy,bookingRosterEligibility} from '../services/rosterEligibilityService.js';
 import {rosterEligibility,eligibleRosterDeputies,selectRosterMember} from '../utils/rosterEligibility.js';
@@ -287,7 +291,7 @@ const resolveSourceBooking = async (board, select = "") => {
   return query.lean();
 };
 
-const getActLineupContext = async (board) => {
+export const getActLineupContext = async (board) => {
   let linkedBooking = null;
   const boardActId =
     board?.actId || board?.actsSummary?.[0]?.actId || board?.actsSummary?.[0]?._id;
@@ -521,6 +525,7 @@ export const reconcilePendingRoleOffer = async (msg) => {
     ? await bookingBoardItem.findById(msg.bookingBoardItemId)
     : await resolveBoardItem(msg.bookingRef);
   if (!board) return { board: null, resolved: false };
+  if (activeAllocationHold(board,msg.roleSlotId)) return {board,resolved:true,held:true};
   const messageRole = String(msg?.meta?.role || msg?.duties || "")
     .split("·")[0]
     .trim()
@@ -730,7 +735,9 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
     return { route: "manager_approval_required" };
   }
 
-  if (deputyJobId && mongoose.isValidObjectId(deputyJobId)) {
+  if (activeAllocationHold(board, roleSlotId)) return {route:"allocation_held"};
+
+  if (withinAllocationWeek(board.eventDateISO) && deputyJobId && mongoose.isValidObjectId(deputyJobId)) {
     const job = await DeputyJob.findById(deputyJobId);
     if (job) {
       job.status = "open";
@@ -823,17 +830,26 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
     bookingBoardItemId: board._id,
     bookingRef: board.bookingRef,
     roleSlotId: roleSlotId || buildRoleSlotId(role, 0),
+    actId: board.actId || board.actsSummary?.[0]?.actId,
+    lineupId: board.lineupId || board.actsSummary?.[0]?.lineupId,
+    musicianId: assignment.musicianId, phone: assignment.phone,
+    originalBandMemberId: assignment.originalBandMemberId,
+    formattedDate: formatWithOrdinal(board.eventDateISO),
     duties: role,
     fee: assignment?.totalFee || assignment?.fee || 0,
     formattedAddress: board.address || board.venue || "",
-    meta: { MetaISODate: board.eventDateISO, county: board.county || '',
+    meta: { role, actName: board.actTscName || board.actName, MetaISODate: board.eventDateISO, county: board.county || '',
       callTime: board.arrivalTime || board.performanceTimes?.arrivalTime || '',
       startTime: board.startTime || board.performanceTimes?.startTime || '',
       finishTime: board.finishTime || board.performanceTimes?.finishTime || '' },
   };
-  const { act } = await getActLineupContext(board);
-  const job = await postExhaustedRoleToDeputyBoard(fallbackMessage, act);
-  return { route: "job_board_created", job };
+  const { act, lineup } = await getActLineupContext(board);
+  fallbackMessage.actId = act?._id;
+  fallbackMessage.lineupId = lineup?._id || fallbackMessage.lineupId;
+  const sent = await escalateToNextDeputy(fallbackMessage);
+  if (sent) return {route:"act_deputy_chain"};
+  const job = await DeputyJob.findOne({"automation.bookingBoardItemId":board._id,"automation.roleSlotId":fallbackMessage.roleSlotId,status:{$in:["open","allocated","filled"]}});
+  return {route:job ? "job_board_created":"allocation_needs_review",job};
 };
 
 export const withdrawMyBooking = async (req, res) => {
@@ -877,7 +893,9 @@ export const withdrawMyBooking = async (req, res) => {
   }
 };
 
-const postExhaustedRoleToDeputyBoard = async (msg, act) => {
+export const postExhaustedRoleToDeputyBoard = async (msg, act) => {
+  if(msg.bookingBoardItemId){const current=await bookingBoardItem.findById(msg.bookingBoardItemId).lean();if(current&&activeAllocationHold(current,msg.roleSlotId))return null;}
+  if(!(Number(msg.fee)>0))return null;
   const existing = await DeputyJob.findOne({
     "automation.bookingBoardItemId": msg.bookingBoardItemId || null,
     "automation.roleSlotId": msg.roleSlotId || "",
@@ -885,7 +903,7 @@ const postExhaustedRoleToDeputyBoard = async (msg, act) => {
   });
   if (existing) return existing;
 
-  const role = String(msg.duties || "Musician").trim();
+  const role = String(msg.meta?.role || String(msg.duties || "Musician").split(" · ")[0]).trim();
   const eventDate = String(msg.meta?.MetaISODate || "").slice(0, 10);
   const fee = Number(msg.fee || 0) || 0;
   const job = await DeputyJob.create({
@@ -909,7 +927,7 @@ const postExhaustedRoleToDeputyBoard = async (msg, act) => {
     status: "open",
     workflowStage: "applications_open",
     previewMode: false,
-    notes: `Automatically posted after the act's deputy list was exhausted. Booking ${msg.bookingRef || ""}.`,
+    notes: `Automatically posted ${msg.meta?.escalationReason || "after the act deputy list was exhausted"}. Booking ${msg.bookingRef || ""}.`,
     automation: {
       source: "booking_allocation",
       bookingBoardItemId: msg.bookingBoardItemId || null,
@@ -1169,6 +1187,7 @@ export const offerBookingRole = async (req, res) => {
     const roleSlotId = String(
       req.body?.roleSlotId || buildRoleSlotId(role, Number(req.body?.slotIndex || 0)),
     );
+    if (activeAllocationHold(board, roleSlotId)) return res.status(409).json({success:false,message:"This role is on hold. Release its allocation hold first."});
     const fee = Number(req.body?.fee || 0) || 0;
     if (!hasPositiveAllocationFee(fee)) {
       return allocationFeeRequiredResponse(res);
@@ -1459,6 +1478,7 @@ export const confirmBookingRole = async (req, res) => {
     if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
 
     const roleSlotId = String(req.body?.roleSlotId || buildRoleSlotId(role));
+    if (activeAllocationHold(board, roleSlotId)) return res.status(409).json({success:false,message:"This role is on hold. Release its allocation hold first."});
     const { act, lineup } = await getActLineupContext(board);
     const originalBandMember = findOriginalBandMemberForSlot({
       lineup,
@@ -1473,6 +1493,7 @@ export const confirmBookingRole = async (req, res) => {
         .map((value) => String(value || "").trim())
         .filter(Boolean),
     ));
+    if (activeAllocationHold(board, roleSlotId)) return res.status(409).json({success:false,message:"This role is on hold. Release its allocation hold first."});
     const fee = Number(req.body?.fee || 0) || 0;
     if (!hasPositiveAllocationFee(fee)) {
       return allocationFeeRequiredResponse(res);
@@ -2218,6 +2239,11 @@ export const twilioInboundBooking = async (req, res) => {
       const currentBoard = msg.bookingBoardItemId
         ? await bookingBoardItem.findById(msg.bookingBoardItemId)
         : await resolveBoardItem(msg.bookingRef);
+      if(currentBoard && activeAllocationHold(currentBoard,msg.roleSlotId)) {
+        await EnquiryMessage.updateOne({_id:msg._id},{$set:{reply:"yes",repliedAt:new Date(),"meta.allocationHoldReply":true}});
+        await sendInboundAcknowledgement({to:msg.phone || fromRaw,body:"Thank you for replying. This role is currently on hold while management reviews the booking. We will confirm with you separately.",isWhatsApp:/^whatsapp:/i.test(fromRaw)||Boolean(req.body?.WaId)});
+        return res.status(200).send("<Response/>");
+      }
       const currentSlot = (currentBoard?.assignedMusicians || []).find(
         (entry) =>
           String(entry?.roleSlotId || "") === String(msg.roleSlotId || "") ||
@@ -2501,7 +2527,7 @@ const booking = msg?.bookingRef
   }
 };
 
-export async function escalateToNextDeputy(msg) {
+export async function escalateToNextDeputy(msg, {dryRun=false}={}) {
   try {
     console.log("🟡 escalateToNextDeputy v2 → starting", {
       msgId: msg._id,
@@ -2528,69 +2554,49 @@ export async function escalateToNextDeputy(msg) {
 
     if (!lineup) {
       console.warn("❗ escalateToNextDeputy: lineup missing");
+      await postExhaustedRoleToDeputyBoard(msg, act);
       return false;
     }
 
+    // Act forms also carry a UUID lineupId; message records require the subdocument ObjectId.
+    msg={...(msg.toObject?.()||msg),lineupId:lineup._id||msg.lineupId};
     const members = lineup.bandMembers || [];
 
-    // Identify the current musician in the lineup
-    const current = members.find((m) => {
-      if (msg.originalBandMemberId && String(m._id) === String(msg.originalBandMemberId)) {
-        return true;
-      }
-      const phones = normalizeFrom(m.phoneNumber || m.phone);
-      return phones.includes(msg.phone);
-    });
-
-    if (!current) {
-      console.warn("❗ escalateToNextDeputy: could not match current musician by phone");
-      await postExhaustedRoleToDeputyBoard(msg, act);
-      return false;
-    }
-
-    const rosterPolicy = await getRosterPolicy(act._id);
     const rosterBoard = msg.bookingBoardItemId ? await bookingBoardItem.findById(msg.bookingBoardItemId).lean() : await resolveBoardItem(msg.bookingRef);
-    const deputies = eligibleRosterDeputies({member:current,lineup,policy:rosterPolicy,address:msg.formattedAddress || msg.meta?.MetaAddress,assignments:rosterBoard?.assignedMusicians || [],roleSlotId:msg.roleSlotId});
-    if (!deputies.length) {
-      console.log("ℹ️ No deputies — posting role to deputy job board");
-      await postExhaustedRoleToDeputyBoard(msg, act);
+    if (!rosterBoard || rosterBoard.bookingStatus === "cancelled" || rosterBoard.cancellation?.cancelledAt) return false;
+    if (activeAllocationHold(rosterBoard, msg.roleSlotId)) return false;
+    const role=String(msg.meta?.role || String(msg.duties||"").split(" · ")[0]).trim();
+    if (rosterBoard.allocation?.managerApprovalRequired && isVocalRole(role)) return false;
+    if (withinAllocationWeek(msg.meta?.MetaISODate)) {
+      if(dryRun)return {route:"job_board",reason:"within_seven_days"};
+      await postExhaustedRoleToDeputyBoard({...msg,meta:{...msg.meta,escalationReason:"because the role is unfilled within seven days of the event"}},act);
       return false;
     }
-
-    // ---------------------------------------------------
-    // 2. Find the FIRST deputy who hasn’t been contacted yet
-    // ---------------------------------------------------
-    const contactedPhones = await EnquiryMessage.distinct("phone", {
-      actId: msg.actId,
-      lineupId: msg.lineupId,
-      "meta.MetaISODate": msg.meta?.MetaISODate,
-      ...(msg.roleSlotId ? { roleSlotId: msg.roleSlotId } : {}),
-    });
-
-    let nextDep = deputies.find((d) => {
-      const raw = (d.phoneNumber || d.phone || "").replace(/\s+/g, "");
-      const norm =
-        raw.startsWith("+") ? raw :
-        raw.startsWith("0") ? raw.replace(/^0/, "+44") :
-        raw.startsWith("44") ? `+${raw}` : `+${raw}`;
-
-      return !contactedPhones.includes(norm);
-    });
-
-    if (!nextDep) {
-      console.log("ℹ️ All deputies contacted — posting role to deputy job board.");
-      await postExhaustedRoleToDeputyBoard(msg, act);
-      return false;
+    const current=members.find(m=>msg.originalBandMemberId && String(m._id)===String(msg.originalBandMemberId))
+      || members.find(m=>normaliseAllocationRole(m.instrument||m.role).toLowerCase()===normaliseAllocationRole(role).toLowerCase());
+    const rosterPolicy=await getRosterPolicy(act._id);
+    const deputies=actRoleDeputies({act,lineup,member:current,role,policy:rosterPolicy,board:rosterBoard,roleSlotId:msg.roleSlotId});
+    const history=await EnquiryMessage.find({bookingBoardItemId:rosterBoard._id,roleSlotId:msg.roleSlotId}).lean();
+    // A retry must not create a second request while another deputy is pending.
+    if(history.some(h=>String(h._id)!==String(msg._id)&&!h.reply&&!h.autoEscalatedAt&&!h.reminderPausedAt&&['queued','pending','sent','delivered','read'].includes(h.deliveryStatus))) return true;
+    let nextDep,phone;
+    for(const deputy of deputies){
+      let candidate=deputy;
+      const id=String(deputy.musicianId||'');
+      const lookup=id&&mongoose.isValidObjectId(id)?{_id:id}:deputy.email?{email:String(deputy.email).trim().toLowerCase()}:null;
+      if(lookup){const profile=await Musician.findOne(lookup).select('firstName lastName email phone phoneNumber basicInfo').lean();if(profile)candidate={...deputy,...candidateContact(profile),musicianId:profile._id,firstName:profile.firstName||deputy.firstName,lastName:profile.lastName||deputy.lastName};}
+      const targetPhone=normalizePhone(candidate.phone||candidate.phoneNumber);
+      if(!/^\+\d{10,15}$/.test(targetPhone))continue;
+      const targetId=String(candidate.musicianId||'');
+      if(history.some(h=>normalizePhone(h.phone)===targetPhone||(targetId&&String(h.musicianId)===targetId)))continue;
+      if((rosterBoard.assignedMusicians||[]).some(a=>a.withdrawnAt&&(String(a.musicianId)===targetId||normalizePhone(a.phone)===targetPhone)))continue;
+      if(await findPriorAvailabilityDecline({musicianId:targetId,phone:targetPhone,dateISO:msg.meta.MetaISODate,formattedAddress:msg.formattedAddress}))continue;
+      const conflict=await bookingBoardItem.exists({_id:{$ne:rosterBoard._id},eventDateISO:msg.meta.MetaISODate,bookingStatus:{$ne:'cancelled'},assignedMusicians:{$elemMatch:{musicianId:targetId,status:{$in:['confirmed','accepted']}}}});
+      if(conflict)continue;
+      nextDep=candidate;phone=targetPhone;break;
     }
-
-    // ---------------------------------------------------
-    // 3. Format deputy phone
-    // ---------------------------------------------------
-    let raw = (nextDep.phoneNumber || nextDep.phone || "").replace(/\s+/g, "");
-    let phone =
-      raw.startsWith("+") ? raw :
-      raw.startsWith("0") ? raw.replace(/^0/, "+44") :
-      raw.startsWith("44") ? `+${raw}` : `+${raw}`;
+    if(!nextDep){if(dryRun)return {route:"job_board",reason:"act_deputies_exhausted"};await postExhaustedRoleToDeputyBoard(msg,act);return false;}
+    if(dryRun)return {route:"act_deputy",musicianId:nextDep.musicianId,name:[nextDep.firstName,nextDep.lastName].filter(Boolean).join(" "),phone};
 
     // ---------------------------------------------------
     // 4. Create new EnquiryMessage for this deputy
@@ -2607,7 +2613,7 @@ export async function escalateToNextDeputy(msg) {
       bookingRef: msg.bookingRef || null,
       bookingBoardItemId: msg.bookingBoardItemId || null,
       roleSlotId: msg.roleSlotId || "",
-      originalBandMemberId: msg.originalBandMemberId || current._id || null,
+      originalBandMemberId: msg.originalBandMemberId || current?._id || null,
       candidateSource: "act_deputy",
       phone,
       duties: msg.duties,
@@ -2713,6 +2719,7 @@ export async function escalateToNextDeputy(msg) {
       phone,
       status: "offered",
       candidateSource: "act_deputy",
+      deputyJobId: null,
       offerRequestId: newBookingId,
       offeredAt: new Date(),
       respondedAt: null,
@@ -2740,7 +2747,7 @@ export async function escalateToNextDeputy(msg) {
     // ---------------------------------------------------
     // 6. Mark previous message auto-escalated
     // ---------------------------------------------------
-    await EnquiryMessage.updateOne(
+    if(msg._id) await EnquiryMessage.updateOne(
       { _id: msg._id },
       { $set: { autoEscalatedAt: new Date() } }
     );
@@ -2956,7 +2963,7 @@ async function refreshAllocationForActDate(actId, dateISO) {
 
     await bookingBoardItem.updateMany(
       { actId, eventDateISO: dateISO },
-      { $set: { allocation: { status, lastCheckedAt: new Date() } } }
+      { $set: { "allocation.status": status, "allocation.lastCheckedAt": new Date() } }
     );
   } catch (e) {
     console.warn("⚠️ refreshAllocationForActDate failed:", e?.message || e);
