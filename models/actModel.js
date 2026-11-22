@@ -309,6 +309,7 @@ minDisplayPrice: { type: Number, default: null },
     lineups: [
       {
         lineupId: { type: String, default: () => uuidv4(), index: true },
+        websiteVisibility: { type: String, enum: ['public', 'enquiry'], default: 'public' },
         actSize: { type: String },
         spaceRequired: { type: String },
         coverOverhead: booleanField(),

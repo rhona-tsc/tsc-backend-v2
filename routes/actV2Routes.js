@@ -28,6 +28,7 @@ import { upsertActCardFromAct } from "../services/actCard.service.js";
 import { searchActCards } from "../controllers/actCardController.js";
 import { normalizeSetlistControl } from '../utils/setlistControl.js';
 import requireAnyAuth from "../middleware/requireAnyAuth.js";
+import { enquiryLineupLink } from '../controllers/enquiryLineupLinkController.js';
 
 /* ------------------------------- LOG HELPERS ------------------------------ */
 const inspect = (obj, depth = 6) =>
@@ -54,6 +55,7 @@ const wrap = (label, fn) => async (req, res, next) => {
 
 // Global request banner for everything under this router
 const router = express.Router();
+router.get('/enquiry-lineup-link', enquiryLineupLink);
 router.use((req, res, next) => {
   req._rid = req._rid || makeRid();
   req._t0 = Date.now();

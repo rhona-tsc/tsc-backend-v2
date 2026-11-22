@@ -1,3 +1,6 @@
+import { isEnquiryOnlyLineup } from '../utils/websiteLineups.js';
+import { lineupsForEnquiry, bespokeLineupDescription, bespokeBookingAction, htmlEscape } from '../utils/enquiryLineupPresentation.js';
+import EnquiryBoardItem from '../models/enquiryBoardItem.js';
 import { namedEnquiryCounty, resolveEnquiryLocation, requireEnquiryLocation, countyVocalistTravel } from '../services/enquiryLocation.js';
 import {getRosterPolicy} from '../services/rosterEligibilityService.js';
 import {eligibleRosterDeputies,rosterEligibility} from '../utils/rosterEligibility.js';
@@ -1214,6 +1217,7 @@ export const sendExampleGoodNewsEmail = async (req, res) => {
 
 
     const generateLineupDescriptionForEmail = (lineupLike) => {
+      if (isEnquiryOnlyLineup(lineupLike)) return htmlEscape(bespokeLineupDescription(lineupLike).description);
       const members = Array.isArray(lineupLike?.bandMembers)
         ? lineupLike.bandMembers
         : [];
@@ -6641,6 +6645,7 @@ export async function buildAvailabilityBadgeFromRows({
 }
 
 const generateLineupDescriptionForEmail = (lineup) => {
+  if (isEnquiryOnlyLineup(lineup)) return htmlEscape(bespokeLineupDescription(lineup).description);
   const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
 
   const norm = (s = "") => String(s || "").trim();
@@ -6784,7 +6789,7 @@ export async function rebuildAndApplyAvailabilityBadge({
 
   const actDoc = await Act.findById(actId)
     .select(
-      "+availabilityBadgesMeta lineups tscName name slug tscSlug formattedAddress venueAddress " +
+      "+availabilityBadgesMeta hiddenWebsiteLineupIds lineups tscName name slug tscSlug formattedAddress venueAddress " +
         "coverImage images profileImage description tscDescription paSystem lightingSystem " +
         "extras numberOfSets lengthOfSets repertoire tscRepertoire selectedSongs repertoireByYear " +
         "setlist offRepertoireRequests useCountyTravelFee countyFees travelModel costPerMile",
@@ -7605,6 +7610,8 @@ const renderActExtrasHtml = async (
       ).length;
     };
 
+    const selectedLineupIsBespoke = isEnquiryOnlyLineup(selectedLineup);
+    const emailLineups = lineupsForEnquiry(actDoc, contextLineupId);
     const selectedLineupCount = lineupMemberCount(selectedLineup);
     const formatLineupSize = (lineup, memberCount = lineupMemberCount(lineup)) =>
       (
@@ -7612,12 +7619,11 @@ const renderActExtrasHtml = async (
         (memberCount ? `${memberCount}-piece` : "selected lineup")
       ).replace(/-piece\b/i, "-piece");
 
-    const selectedLineupSize = formatLineupSize(
-      selectedLineup,
-      selectedLineupCount,
-    );
+    const selectedLineupSize = selectedLineupIsBespoke
+      ? bespokeLineupDescription(selectedLineup).label.toLowerCase()
+      : formatLineupSize(selectedLineup, selectedLineupCount);
 
-    const lineupSizeCounts = (actDoc.lineups || []).reduce((counts, lineup) => {
+    const lineupSizeCounts = emailLineups.reduce((counts, lineup) => {
       const size = formatLineupSize(lineup);
       counts.set(size, (counts.get(size) || 0) + 1);
       return counts;
@@ -7678,6 +7684,16 @@ const renderActExtrasHtml = async (
       selectedDate: String(dateISO), selectedAddress: String(selectedAddress || "") };
     const cartUrl = `${SITE}cart?payload=${encodeURIComponent(JSON.stringify(cartPayload))}`;
 
+    const matchingBoard = selectedLineupIsBespoke && contextEnquiryId
+      ? await EnquiryBoardItem.findOne({ enquiryRef: String(contextEnquiryId), actId,
+          lineupId: String(selectedLineup._id), eventDateISO: dateISO }).select('agent enquiryRef').lean()
+      : null;
+    const bespokeAction = selectedLineupIsBespoke ? bespokeBookingAction({
+      lineup: selectedLineup, enquiryRef: contextEnquiryId, agent: matchingBoard?.agent,
+      dateISO, actName: actDoc.tscName || actDoc.name,
+    }) : null;
+    const bookingButton = (url, label) => `<div style="margin:10px 0 16px;"><a href="${htmlEscape(url)}" style="display:inline-block;background-color:#ff6667;color:#fff;padding:12px 20px;text-decoration:none;border-radius:6px;font-weight:600;">${htmlEscape(label)} →</a></div>`;
+
     const normKey = (s = "") =>
       s
         .toString()
@@ -7707,8 +7723,14 @@ const renderActExtrasHtml = async (
         : `Up to 3×40-minute or 2×60-minute live sets`;
 
     const lineupQuotes = await Promise.all(
-      (actDoc.lineups || []).map(async (lu) => {
+      emailLineups.map(async (lu) => {
         try {
+          if (isEnquiryOnlyLineup(lu)) {
+            // A member fee sum is not a client-approved bespoke quote. Keep its
+            // commercial terms and booking on the original enquiry channel.
+            const { description } = bespokeLineupDescription(lu);
+            return { html: `<strong>Your bespoke lineup</strong><br/>${htmlEscape(description)}<br/><span>Fee, timings and inclusions as set out in your personalised quote.</span>${bookingButton(bespokeAction.url, bespokeAction.label)}` };
+          }
           const description = generateLineupDescriptionForEmail(lu);
 
           let travelTotal = "price TBC";
@@ -7834,6 +7856,19 @@ const renderActExtrasHtml = async (
       const year = d.getFullYear();
       return `${day}${suffix} ${month} ${year}`;
     })();
+
+    const quoteInclusionsHtml = selectedLineupIsBespoke
+      ? '<p>Your personalised quote sets out the performance times, equipment, travel and any extras for this bespoke lineup.</p>'
+      : `<h4 style="margin-top:25px;">Included in your quote:</h4>
+                  <ul>
+                    <li>${setsLine}</li>
+                    ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
+                    <li>Band arrival from 5pm and finish by midnight as standard</li>
+                    <li>Or up to 7 hours on site if earlier arrival is needed</li>
+                    ${offRepLine ? `<li>${offRepLine}</li>` : ""}
+                    ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
+                    <li>Travel to ${selectedAddress || "TBC"}</li>
+                  </ul>`;
 
     const clientUserId =
       availabilityRecord?.userId ||
@@ -8077,10 +8112,8 @@ const renderActExtrasHtml = async (
                 to: clientEmail,
               });
 
-              const actExtrasHtml = await renderActExtrasHtml(
-                actDoc,
-                selectedAddress,
-                selectedLineup,
+              const actExtrasHtml = selectedLineupIsBespoke ? '' : await renderActExtrasHtml(
+                actDoc, selectedAddress, selectedLineup,
               );
 
               const emailResult = await sendClientEmail({
@@ -8122,22 +8155,11 @@ const renderActExtrasHtml = async (
                       : ""
                   }
 
-                  <h4 style="margin-top:25px;">Included in your quote:</h4>
-                  <ul>
-                    <li>${setsLine}</li>
-                    ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
-                    <li>Band arrival from 5pm and finish by midnight as standard</li>
-                    <li>Or up to 7 hours on site if earlier arrival is needed</li>
-                    ${offRepLine ? `<li>${offRepLine}</li>` : ""}
-                    ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
-                    <li>Travel to ${selectedAddress || "TBC"}</li>
-                  </ul>
+                  ${quoteInclusionsHtml}
 
                   ${actExtrasHtml}
 
-                  <div style="margin-top:30px;">
-                    <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
-                  </div>
+                  ${selectedLineupIsBespoke ? '' : bookingButton(cartUrl, 'Book now')}
 
                   <p style="margin-top:16px;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
                   <p>If you have any questions, just reply — we’re always happy to help.</p>
@@ -8238,12 +8260,10 @@ const renderActExtrasHtml = async (
                     ).length
                   : 1;
 
-              const deputyAvailabilityCopy = `<strong>${actDoc.tscName || actDoc.name} is available</strong> as a <strong>${selectedLineupSize}</strong> for your event.<br/><br/>The band's usual ${vocalistCount > 1 ? "vocalists aren’t" : "vocalist isn’t"} available on your date. Their trusted deputy vocalists below have confirmed availability. View their profiles, then choose your favourite ${vocalistCount > 1 ? "vocalists" : "vocalist"} at checkout — one for each vocal role. Your booking confirmation will record who you choose.`;
+              const deputyAvailabilityCopy = `<strong>${actDoc.tscName || actDoc.name} is available</strong> as a <strong>${selectedLineupSize}</strong> for your event.<br/><br/>The band's usual ${vocalistCount > 1 ? "vocalists aren’t" : "vocalist isn’t"} available on your date. Their trusted deputy vocalists below have confirmed availability. View their profiles, then choose your favourite ${vocalistCount > 1 ? "vocalists" : "vocalist"} ${selectedLineupIsBespoke ? 'through your original enquiry' : 'at checkout'} — one for each vocal role. Your booking confirmation will record who you choose.`;
 
-              const actExtrasHtml = await renderActExtrasHtml(
-                actDoc,
-                selectedAddress,
-                selectedLineup,
+              const actExtrasHtml = selectedLineupIsBespoke ? '' : await renderActExtrasHtml(
+                actDoc, selectedAddress, selectedLineup,
               );
 
               const emailResult = await sendClientEmail({
@@ -8285,22 +8305,11 @@ const renderActExtrasHtml = async (
                       : ""
                   }
 
-                  <h4 style="margin-top:25px;">Included in your quote:</h4>
-                  <ul>
-                    <li>${setsLine}</li>
-                    ${paSize ? `<li>A ${paSize} PA system${lightSize ? ` and a ${lightSize} lighting setup` : ""}</li>` : ""}
-                    <li>Band arrival from 5pm and finish by midnight as standard</li>
-                    <li>Or up to 7 hours on site if earlier arrival is needed</li>
-                    ${offRepLine ? `<li>${offRepLine}</li>` : ""}
-                    ${tailoringExact ? `<li>${tailoringExact}</li>` : ""}
-                    <li>Travel to ${selectedAddress || "TBC"}</li>
-                  </ul>
+                  ${quoteInclusionsHtml}
 
                   ${actExtrasHtml}
 
-                  <div style="margin-top:30px;">
-                    <a href="${cartUrl}" style="display:inline-block; background-color:#ff6667; color:white; padding:12px 28px; text-decoration:none; border-radius:6px; font-weight:600; line-height:1;">Book Now →</a>
-                  </div>
+                  ${selectedLineupIsBespoke ? '' : bookingButton(cartUrl, 'Book now')}
 
                   <p style="margin-top:16px;">We operate on a first-booked-first-served basis, so we recommend securing your band quickly to avoid disappointment.</p>
                   <p>If you have any questions, just reply — we’re always happy to help.</p>

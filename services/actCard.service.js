@@ -1,4 +1,5 @@
 import actCardModel from "../models/actCard.model.js";
+import { websiteActView } from '../utils/websiteLineups.js';
 import { normalizeSetlistControl } from '../utils/setlistControl.js';
 import { normalize } from "../utils/normalize.js";
 
@@ -101,6 +102,7 @@ const pickInstruments = (act) => {
 };
 
 export async function upsertActCardFromAct(act) {
+  act = websiteActView(act);
   const { raw: genres,        norm: genres_norm }        = pickGenres(act);
   const { raw: lineupSizes,   norm: lineupSizes_norm }   = pickLineupSizes(act);
   const { raw: instruments,   norm: instruments_norm }   = pickInstruments(act);

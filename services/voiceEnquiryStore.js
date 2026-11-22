@@ -13,7 +13,7 @@ import { VoiceEnquiryValidationError } from './incomingEnquiryAssistant.js';
 import { createEnquiryToolHandler, buildVoiceBoardRecord } from './incomingEnquiryAssistant.js';
 
 // Never load musician names, contacts, fees, availability or customer records for search.
-export const VOICE_CATALOGUE_FIELDS = '_id tscName slug status isTest genre genres hiddenWebsiteLineupIds lineups._id lineups.lineupId lineups.actSize lineups.bandMembers.instrument';
+export const VOICE_CATALOGUE_FIELDS = '_id tscName slug status isTest genre genres hiddenWebsiteLineupIds lineups._id lineups.lineupId lineups.websiteVisibility lineups.actSize lineups.bandMembers.instrument';
 
 export async function lookupVoiceBands(criteria, selection) {
   const acts = await Act.find({ status: { $in: ['approved', 'live', 'approved_changes_pending', 'live_changes_pending'] }, isTest: { $ne: true } })

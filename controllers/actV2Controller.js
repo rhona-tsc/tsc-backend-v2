@@ -692,7 +692,8 @@ export const getActByIdV2 = async (req, res) => {
       countyTravelSettingsCount: Object.keys(act?.countyTravelSettings || {}).length,
     });
 
-    return res.status(200).json({ success: true, act });
+    const staffOrOwner = ['admin', 'agent', 'staff'].includes(String(req.user?.role || '').toLowerCase()) || canAccessAct(act, authUserId);
+    return res.status(200).json({ success: true, act: staffOrOwner ? act : websiteActView(act) });
   } catch (err) {
     console.error("❌ Error fetching act:", err);
     return res.status(500).json({ success: false, error: "failed_to_fetch_act" });
@@ -999,7 +1000,11 @@ export const getAllActsV2 = async (req, res) => {
         "testimonials.rating": 1,
       };
 
-    if (!mineFlag) projection.hiddenWebsiteLineupIds = 1;
+    if (!mineFlag) {
+      projection.hiddenWebsiteLineupIds = 1;
+      // Include the visibility flag even in lightweight card/list projections.
+      if (!projection.lineups) projection['lineups.websiteVisibility'] = 1;
+    }
 
     group("🧾 Projection in use");
     dbg(p(projection));
