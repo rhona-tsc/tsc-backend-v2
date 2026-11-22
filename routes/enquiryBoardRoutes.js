@@ -1,3 +1,4 @@
+import { enquiryLocationEligibility, requireEnquiryLocation } from '../services/enquiryLocation.js';
 import { listVoiceCallReviews, readVoiceCallReview, voiceFollowupReadiness } from '../services/voiceCallReview.js';
 import {createVoiceAudioHandler} from '../services/voiceVoicemail.js';
 import { lookupVoiceBookingEquipment } from '../services/voiceBookingEquipmentStore.js';
@@ -68,6 +69,24 @@ router.post('/equipment-test/lookup', musicianAuth, async (req, res) => {
   if (!isTSCAdmin(req.user) && !isAgent(req.user)) return res.sendStatus(403);
   try { res.json({ success: true, result: await lookupVoiceBookingEquipment(req.body, { trustedTestOperator: true }) }); }
   catch { res.status(400).json({ success: false, message: 'Confirm the exact booking reference and date, or ask management to review the record.' }); }
+});
+
+// Management search includes exact location requirements, without sending requests.
+router.get('/acts/search', musicianAuth, async (req, res) => {
+  if (!isTSCAdmin(req.user) && !isAgent(req.user)) return res.sendStatus(403);
+  const q = clean(req.query.q);
+  if (q.length < 2) return res.json({ success: true, acts: [] });
+  try {
+    const term = new RegExp(escapeRegex(q), 'i');
+    const acts = await Act.find({ $or: [{ name: term }, { tscName: term }], isTest: { $ne: true } })
+      .select('_id name tscName useCountyTravelFee enquiryLocationMode countyFees lineups._id lineups.lineupId lineups.actSize lineups.bandMembers').limit(25).lean();
+    res.json({ success: true, acts: acts.map(act => {
+      const lineups = (act.lineups || []).map(lineup => ({ _id: lineup._id, lineupId: lineup.lineupId, actSize: lineup.actSize,
+        locationEligibility: enquiryLocationEligibility(act, lineup, { address: req.query.address, county: req.query.county }) }));
+      return { _id: act._id, name: act.name, tscName: act.tscName, lineups,
+        locationEligibility: lineups.find(l => l.locationEligibility.eligible)?.locationEligibility || lineups[0]?.locationEligibility || { eligible: false, reason: 'No configured lineup.' } };
+    }) });
+  } catch { res.status(500).json({ success: false, message: 'Could not check band location requirements.' }); }
 });
 
 router.get('/preferences/options', musicianAuth, async (req, res) => {
@@ -582,6 +601,11 @@ router.post("/", musicianAuth, async (req, res) => {
     if (payload.lineupId && !chosenLineup) return res.status(400).json({ success: false, message: 'Selected lineup does not belong to this act.' });
     const chosenLineupId = idToString(chosenLineup?._id || chosenLineup?.lineupId) || null;
     if (chosenLineupId) payload.lineupId = chosenLineupId;
+    try {
+      const location = requireEnquiryLocation(act, chosenLineup, { address: payload.address, county: payload.county });
+      payload.address = location.address;
+      payload.county = location.county;
+    } catch (error) { return res.status(400).json({ success: false, message: error.message }); }
     const row = await EnquiryBoardItem.create(payload);
     const createdRow = mapBoardRow(row.toObject ? row.toObject() : row);
 
@@ -595,6 +619,7 @@ router.post("/", musicianAuth, async (req, res) => {
           dateISO: payload.eventDateISO,
           formattedAddress: payload.address,
           address: payload.address,
+          county: payload.county,
           clientName: payload.clientName,
           clientEmail: payload.clientEmail,
           enquiryId: createdRow.enquiryRef,
