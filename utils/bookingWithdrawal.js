@@ -23,7 +23,10 @@ export function withdrawalAvailabilityRecord({ board, assignment, phone, reason,
     musicianName: assignment.name || [assignment.firstName, assignment.lastName].filter(Boolean).join(' '),
     musicianEmail: email(assignment), actName: board.actTscName || board.actName || '',
     duties: assignment.role || assignment.instrument || 'Musician', fee: String(assignment.totalFee || assignment.fee || ''),
-    reply: 'no', status: 'unavailable', repliedAt: now, updatedAt: now,
+    reply: 'unavailable', status: 'unavailable', repliedAt: now, updatedAt: now,
+    replyHistory: [{ reply: 'unavailable', occurredAt: now, receivedAt: now,
+      source: source || 'musician_portal', body: String(reason || '').trim(),
+      evidence: 'Confirmed booking withdrawal' }],
     inbound: { source, body: String(reason || '').trim(), readByAdmin: false },
   };
 }

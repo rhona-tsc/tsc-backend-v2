@@ -1,4 +1,5 @@
 import { musicianOpportunityAllowed } from './musicianEmailPreferenceService.js';
+import { findPriorAvailabilityDecline } from './availabilityPriorDeclines.js';
 import { musicianEmailPreferencesUrl } from '../utils/musicianEmailPreferences.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";
 // services/deputyJobNotifier.js
@@ -621,6 +622,17 @@ export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => 
 
         if (!await musicianOpportunityAllowed(email, 'deputy')) {
           results.push({ musicianId, email, phone, channel: 'email', status: 'skipped', sentAt: new Date(), error: 'Unsubscribed from deputy opportunity emails' });
+          continue;
+        }
+
+        // A recorded withdrawal/decline must also apply to public deputy emails.
+        if (job.eventDate && (musicianId || phone) && await findPriorAvailabilityDecline({
+          musicianId: String(musicianId || ''), phone,
+          dateISO: String(job.eventDate).slice(0, 10),
+          formattedAddress: buildLocation(job),
+        })) {
+          results.push({ musicianId, email, phone, channel: 'email', status: 'skipped',
+            sentAt: new Date(), error: 'Already unavailable for this date or location' });
           continue;
         }
 

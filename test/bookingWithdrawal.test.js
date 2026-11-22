@@ -7,6 +7,7 @@ import Act from '../models/actModel.js';
 import Availability from '../models/availabilityModel.js';
 import Message from '../models/EnquiryMessage.js';
 import Job from '../models/deputyJobModel.js';
+import {isExplicitAvailabilityDecline} from '../services/availabilityPriorDeclines.js';
 import { ownsBookingAssignment, isWithdrawalTarget, withdrawalAvailabilityRecord } from '../utils/bookingWithdrawal.js';
 process.env.JWT_SECRET='withdrawal-route-test';
 process.env.STRIPE_SECRET_KEY='sk_test_withdrawal';process.env.STRIPE_SECRET_KEY_V2='sk_test_withdrawal';
@@ -40,7 +41,7 @@ test('current and cached portal URLs both withdraw only the owned keyboard role 
   await t.test(prefix,async t=>{
    const f=await setup(t);const r=await f.request(prefix);
    assert.equal(r.status,200);assert.equal(r.data.success,true);assert.equal(r.data.reallocationRoute,'job_board_created');
-   assert.equal(f.availability.length,1);assert.equal(f.availability[0].reply,'no');assert.equal(f.availability[0].status,'unavailable');assert.equal(f.availability[0].dateISO,'2099-12-31');
+   assert.equal(f.availability.length,1);assert.equal(f.availability[0].reply,'unavailable');assert.equal(f.availability[0].status,'unavailable');assert.equal(f.availability[0].dateISO,'2099-12-31');
    for(const entries of [f.board.assignedMusicians,f.board.bookingMusicians,f.board.bandLineup,f.board.bookingDetails.assignedMusicians]){
     assert.ok(entries[0].withdrawnAt);assert.equal(entries[0].status,'posted_to_job_board');assert.equal(entries[1].status,'confirmed');assert.equal(entries[2].status,'confirmed');
    }
@@ -61,6 +62,8 @@ test('ownership supports exact account email but never name-only matching or ano
 });
 test('manual withdrawal records a stable date-specific unavailability without pretending a message was sent',()=>{
  const row=withdrawalAvailabilityRecord({board:{_id:boardId,bookingRef:'EXAMPLE',eventDateISO:'2099-12-31',actId},assignment:assignment(),phone:'+447000000001',reason:'Away',source:'admin_whatsapp',now:new Date()});
- assert.equal(row.reply,'no');assert.equal(row.status,'unavailable');assert.equal(row.musicianId,person);assert.equal(row.outboundSentAt,undefined);assert.equal(row.inbound.body,'Away');
+ assert.equal(row.reply,'unavailable');assert.equal(row.status,'unavailable');assert.equal(row.musicianId,person);assert.equal(row.outboundSentAt,undefined);assert.equal(row.inbound.body,'Away');
+ const recipient={musicianId:assignment().musicianId,phone:row.phone,dateISO:row.dateISO};
+ assert.equal(isExplicitAvailabilityDecline(row,recipient),true);
  assert.throws(()=>withdrawalAvailabilityRecord({board:{_id:boardId},assignment:assignment()}),/event date/);
 });
