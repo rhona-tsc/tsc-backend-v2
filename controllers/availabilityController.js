@@ -1,3 +1,4 @@
+import { namedEnquiryCounty, resolveEnquiryLocation, requireEnquiryLocation, countyVocalistTravel } from '../services/enquiryLocation.js';
 import {getRosterPolicy} from '../services/rosterEligibilityService.js';
 import {eligibleRosterDeputies,rosterEligibility} from '../utils/rosterEligibility.js';
 import { resolveAutomaticDeputyPrice, performanceLineupSize } from '../services/automaticDeputyPricing.js';
@@ -1473,7 +1474,7 @@ export function countyFromAddress(address = "") {
   const outcode = (extractOutcode(address) || "").toUpperCase();
   if (!outcode) {
     console.warn("⚠️ [countyFromAddress] No outcode extracted");
-    return { outcode: "", county: "" };
+    return { outcode: "", county: namedEnquiryCounty(address) };
   }
 
   const table = Array.isArray(postcodes) ? postcodes[0] || {} : postcodes || {};
@@ -3285,6 +3286,7 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
     const fullFormattedAddress = (
       formattedAddress ||
       address ||
+      body.county ||
       act?.formattedAddress ||
       act?.venueAddress ||
       ""
@@ -3311,11 +3313,12 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
 
     const { county: derivedCountyRaw } =
       countyFromAddress(fullFormattedAddress) || {};
-    const derivedCounty = toTitleCaseCounty(derivedCountyRaw);
+    const initialLocation = resolveEnquiryLocation({ address: fullFormattedAddress, county: body.county });
+    const derivedCounty = toTitleCaseCounty(initialLocation.county || derivedCountyRaw);
     const derivedPostcode = extractUKPostcode(fullFormattedAddress);
 
     const shortAddress =
-      [derivedCounty, derivedPostcode].filter(Boolean).join(", ") || "TBC";
+      [derivedCounty, derivedPostcode || initialLocation.outcode].filter(Boolean).join(", ") || "TBC";
 
     const metaAddress = fullFormattedAddress || shortAddress || "TBC";
 
@@ -3390,6 +3393,8 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
       ? lineup.bandMembers
       : [];
 
+    const enquiryLocation = requireEnquiryLocation(act, lineup, { address: fullFormattedAddress, county: body.county });
+
     /* -------------------------------------------------------------- */
     /* 💰 Fee calculation helper                                      */
     /* -------------------------------------------------------------- */
@@ -3422,8 +3427,12 @@ export const triggerAvailabilityRequest = async (reqOrArgs, maybeRes) => {
             .reduce((sum, r) => sum + Number(r.additionalFee), 0)
         : 0;
 
-      const { county: selectedCounty } =
-        countyFromAddress(fullFormattedAddress) || {};
+      const selectedCounty = enquiryLocation.county || countyFromAddress(fullFormattedAddress)?.county;
+      if (enquiryLocation.precision === 'county') {
+        const travel = countyVocalistTravel(act, member, selectedCounty);
+        if (travel === null) throw new Error(`Confirm vocalist travel for ${selectedCounty} before requesting availability.`);
+        return baseFee + essentialExtras + Math.ceil(travel);
+      }
       const selectedDate = dateISO;
 
       let travelFee = 0;

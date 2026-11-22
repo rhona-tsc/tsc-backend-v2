@@ -210,6 +210,7 @@ slug: { type: String, default: "" },
     createdByEmail: { type: String, index: true }, // ✅ indexed for search/filter
     useMUTravelRates: { type: Boolean },
     useCountyTravelFee: { type: Boolean },
+    enquiryLocationMode: { type: String, enum: ['auto', 'county', 'postcode', 'full_postcode'], default: 'auto' },
     useDifferentTeamForNorthernGigs: {
       type: Boolean,
       default: false,
