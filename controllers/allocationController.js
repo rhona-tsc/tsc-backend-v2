@@ -1,4 +1,4 @@
-import {activeAllocationHold,withinAllocationWeek} from '../utils/bookingAllocationPolicy.js';
+import {activeAllocationHold,withinAllocationWeek,vocalistAllocationBlocked} from '../utils/bookingAllocationPolicy.js';
 import {normaliseAllocationRole} from '../utils/allocationRoles.js';
 import {actRoleDeputies} from '../utils/actRoleDeputies.js';
 import {findPriorAvailabilityDecline} from '../services/availabilityPriorDeclines.js';
@@ -525,7 +525,7 @@ export const reconcilePendingRoleOffer = async (msg) => {
     ? await bookingBoardItem.findById(msg.bookingBoardItemId)
     : await resolveBoardItem(msg.bookingRef);
   if (!board) return { board: null, resolved: false };
-  if (activeAllocationHold(board,msg.roleSlotId)) return {board,resolved:true,held:true};
+  if (activeAllocationHold(board,msg.roleSlotId)||vocalistAllocationBlocked(board,msg.meta?.role||String(msg.duties||" ").split(" · ")[0])) return {board,resolved:true,held:true};
   const messageRole = String(msg?.meta?.role || msg?.duties || "")
     .split("·")[0]
     .trim()
@@ -736,6 +736,7 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
   }
 
   if (activeAllocationHold(board, roleSlotId)) return {route:"allocation_held"};
+  if(vocalistAllocationBlocked(board,role))return {route:"vocalist_confirmation_required"};
 
   if (withinAllocationWeek(board.eventDateISO) && deputyJobId && mongoose.isValidObjectId(deputyJobId)) {
     const job = await DeputyJob.findById(deputyJobId);
@@ -894,7 +895,7 @@ export const withdrawMyBooking = async (req, res) => {
 };
 
 export const postExhaustedRoleToDeputyBoard = async (msg, act) => {
-  if(msg.bookingBoardItemId){const current=await bookingBoardItem.findById(msg.bookingBoardItemId).lean();if(current&&activeAllocationHold(current,msg.roleSlotId))return null;}
+  if(msg.bookingBoardItemId){const current=await bookingBoardItem.findById(msg.bookingBoardItemId).lean();if(current&&(activeAllocationHold(current,msg.roleSlotId)||vocalistAllocationBlocked(current,msg.meta?.role||String(msg.duties||" ").split(" · ")[0])))return null;}
   if(!(Number(msg.fee)>0))return null;
   const existing = await DeputyJob.findOne({
     "automation.bookingBoardItemId": msg.bookingBoardItemId || null,
@@ -1188,6 +1189,7 @@ export const offerBookingRole = async (req, res) => {
       req.body?.roleSlotId || buildRoleSlotId(role, Number(req.body?.slotIndex || 0)),
     );
     if (activeAllocationHold(board, roleSlotId)) return res.status(409).json({success:false,message:"This role is on hold. Release its allocation hold first."});
+    if(vocalistAllocationBlocked(board,role))return res.status(409).json({success:false,code:"VOCALIST_CONFIRMATION_REQUIRED",message:"Confirm at least one booked lead vocalist and resolve client approval before inviting instrumentalists."});
     const fee = Number(req.body?.fee || 0) || 0;
     if (!hasPositiveAllocationFee(fee)) {
       return allocationFeeRequiredResponse(res);
@@ -1714,7 +1716,9 @@ export const triggerBookingRequests = async (req, res) => {
       return res.json({ success: false, message: "No lineup found for act" });
     }
 
-    const members = Array.isArray(lineup.bandMembers) ? lineup.bandMembers : [];
+    let members = Array.isArray(lineup.bandMembers) ? lineup.bandMembers : [];
+    const allocationBoard = bookingId||bookingRef ? await resolveBoardItem(bookingId||bookingRef) : await bookingBoardItem.findOne({actId:act._id,eventDateISO:dateISO,bookingStatus:{$ne:'cancelled'}}).lean();
+    members=members.filter(m=>!vocalistAllocationBlocked(allocationBoard||{lineupComposition:members.map(p=>p.instrument)},m.instrument,lineup));
     if (!members.length) {
       return res.json({
         success: false,
@@ -2567,6 +2571,7 @@ export async function escalateToNextDeputy(msg, {dryRun=false}={}) {
     if (activeAllocationHold(rosterBoard, msg.roleSlotId)) return false;
     const role=String(msg.meta?.role || String(msg.duties||"").split(" · ")[0]).trim();
     if (rosterBoard.allocation?.managerApprovalRequired && isVocalRole(role)) return false;
+    if(vocalistAllocationBlocked(rosterBoard,role,lineup))return false;
     if (withinAllocationWeek(msg.meta?.MetaISODate)) {
       if(dryRun)return {route:"job_board",reason:"within_seven_days"};
       await postExhaustedRoleToDeputyBoard({...msg,meta:{...msg.meta,escalationReason:"because the role is unfilled within seven days of the event"}},act);
@@ -2783,7 +2788,10 @@ export async function sendBookingRequestToLineup({ actId, lineupId, date, addres
       ) || allLineups[0]) 
     : allLineups[0];
 
-  const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+  const allBookingMembers = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
+  let members = allBookingMembers;
+  const allocationBoard=await bookingBoardItem.findOne({actId:act._id,eventDateISO:dateISO,bookingStatus:{$ne:'cancelled'}}).lean();
+  members=members.filter(m=>!vocalistAllocationBlocked(allocationBoard||{lineupComposition:members.map(p=>p.instrument)},m.instrument,lineup));
   const contentSid = process.env.TWILIO_INSTRUMENTALIST_BOOKING_REQUEST_SID; // HXcd99249…
 
   // Resolve every performer fee before sending anything. This makes the
@@ -2793,7 +2801,7 @@ export async function sendBookingRequestToLineup({ actId, lineupId, date, addres
     const role = String(member?.instrument || "").trim().toLowerCase();
     if (!role || role === "manager" || role === "admin") continue;
     const finalFee = await _finalFeeForMember({
-      act, lineup, members, member, address, dateISO,
+      act, lineup, members:allBookingMembers, member, address, dateISO,
     });
     if (!hasPositiveAllocationFee(finalFee)) {
       return {

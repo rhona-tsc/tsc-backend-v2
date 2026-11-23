@@ -36,3 +36,16 @@ export function assignmentForSlot(board,slot,plan=[]) {
  return null;
 }
 export const confirmedAllocation=a=>Boolean(a&&!a.withdrawnAt&&['confirmed','accepted'].includes(String(a.status).toLowerCase()));
+
+// Backing vocals do not secure the act's advertised lead singer.
+export const leadVocalRole=role=>/\b(?:vocals?|vocalist|singer)\b/i.test(String(role||''))&&!/\bbacking\b/i.test(String(role||''));
+export function vocalistAllocationBlocked(board,role,lineup=null) {
+ if(leadVocalRole(role))return false;
+ const assignments=bookingAssignments(board||{});
+ const roles=bookingRolePlan(board||{},lineup).map(s=>s.role);
+ const hasLead=roles.some(leadVocalRole)||assignments.some(a=>leadVocalRole(a.role||a.instrument));
+ // A known instrumental-only lineup has no singer prerequisite.
+ if(!hasLead&&roles.length)return false;
+ if(board?.allocation?.managerApprovalRequired)return true;
+ return !assignments.some(a=>confirmedAllocation(a)&&leadVocalRole(a.role||a.instrument));
+}

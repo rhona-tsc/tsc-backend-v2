@@ -1,6 +1,6 @@
 import BookingAllocationBoard from '../models/bookingBoardItem.js';
-import {activeAllocationHold as bookingRoleHold} from '../utils/bookingAllocationPolicy.js';
-const deputyRoleOnHold=async job=>{if(!job?.automation?.bookingBoardItemId)return false;const board=await BookingAllocationBoard.findById(job.automation.bookingBoardItemId).lean();return Boolean(board&&bookingRoleHold(board,job.automation.roleSlotId));};
+import {activeAllocationHold as bookingRoleHold,vocalistAllocationBlocked} from '../utils/bookingAllocationPolicy.js';
+const deputyRoleOnHold=async job=>{if(!job?.automation?.bookingBoardItemId)return false;const board=await BookingAllocationBoard.findById(job.automation.bookingBoardItemId).lean();return Boolean(board&&(bookingRoleHold(board,job.automation.roleSlotId)||vocalistAllocationBlocked(board,job.instrument||job.requiredInstruments?.[0]||job.title)));};
 import { musicianEmailPreferencesUrl } from '../utils/musicianEmailPreferences.js';
 import { visibleDeputyJob } from '../utils/deputyJobVisibility.js';
 import { cloudinaryImage } from "../utils/cloudinaryImage.js";

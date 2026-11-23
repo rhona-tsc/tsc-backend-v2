@@ -1,5 +1,5 @@
 import BookingBoardItem from '../models/bookingBoardItem.js';
-import {activeAllocationHold} from '../utils/bookingAllocationPolicy.js';
+import {activeAllocationHold,vocalistAllocationBlocked} from '../utils/bookingAllocationPolicy.js';
 import { musicianOpportunityAllowed } from './musicianEmailPreferenceService.js';
 import { findPriorAvailabilityDecline } from './availabilityPriorDeclines.js';
 import { musicianEmailPreferencesUrl } from '../utils/musicianEmailPreferences.js';
@@ -640,7 +640,7 @@ export const notifyMusiciansAboutDeputyJob = async ({ job, musicians = [] }) => 
 
         if(job.automation?.bookingBoardItemId){
           const board=await BookingBoardItem.findById(job.automation.bookingBoardItemId).lean();
-          if(board&&activeAllocationHold(board,job.automation.roleSlotId)){
+          if(board&&(activeAllocationHold(board,job.automation.roleSlotId)||vocalistAllocationBlocked(board,job.instrument||job.requiredInstruments?.[0]||job.title))){
             results.push({musicianId,email,phone,channel:'email',status:'skipped',sentAt:new Date(),error:'Allocation role is on hold'});continue;
           }
         }
