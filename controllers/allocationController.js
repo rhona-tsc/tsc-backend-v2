@@ -1,5 +1,6 @@
 import {activeAllocationHold,withinAllocationWeek,vocalistAllocationBlocked} from '../utils/bookingAllocationPolicy.js';
 import {normaliseAllocationRole} from '../utils/allocationRoles.js';
+import {confirmedBookingAvailabilityWrite, syncConfirmedBookingAssignments} from '../services/manualBookingConfirmation.js';
 import {actRoleDeputies} from '../utils/actRoleDeputies.js';
 import {findPriorAvailabilityDecline} from '../services/availabilityPriorDeclines.js';
 import { ownsBookingAssignment, isWithdrawalTarget, withdrawalAvailabilityRecord } from '../utils/bookingWithdrawal.js';
@@ -1550,6 +1551,8 @@ export const confirmBookingRole = async (req, res) => {
         : {}),
     };
     await board.save();
+    const sourceBooking = await resolveSourceBooking(board);
+    await syncConfirmedBookingAssignments({board, booking: sourceBooking, BookingModel: Booking});
     await closeCompetingRoleOffers({
       bookingRef: board.bookingRef,
       roleSlotId,
@@ -1590,42 +1593,12 @@ export const confirmBookingRole = async (req, res) => {
       );
     }
 
-    const dateISO = String(board.eventDateISO || "").slice(0, 10);
-    const availabilityFilter = {
-      musicianId: musician._id,
-      ...(dateISO ? { dateISO } : {}),
-      $or: [
-        { bookingId: board.bookingRef || String(board._id) },
-        { phone: contact.phone },
-      ],
-    };
+    const availabilityWrite = confirmedBookingAvailabilityWrite({
+      board, candidate, contact, eventId: confirmation.eventId, email: confirmation.email,
+    });
     await AvailabilityModel.findOneAndUpdate(
-      availabilityFilter,
-      {
-        $set: {
-          reply: "yes",
-          status: "accepted",
-          confirmedBooking: true,
-          repliedAt: candidate.respondedAt,
-          updatedAt: new Date(),
-          bookingId: board.bookingRef || String(board._id),
-          calendarEventId: confirmation.eventId || null,
-          calendarInviteEmail: confirmation.email || contact.email || "",
-          calendarInviteSentAt:
-            confirmation.eventId && (confirmation.email || contact.email)
-              ? new Date()
-              : null,
-          calendarStatus: "accepted",
-        },
-        $setOnInsert: {
-          phone: contact.phone || "",
-          musicianName: candidate.name || musicianDisplayName(musician),
-          duties: role,
-          dateISO,
-          formattedDate: dateISO,
-          formattedAddress: board.address || board.venue || "",
-        },
-      },
+      availabilityWrite.filter,
+      availabilityWrite.update,
       { new: true, upsert: true, setDefaultsOnInsert: true },
     );
     if (confirmation.eventId && confirmation.email) {

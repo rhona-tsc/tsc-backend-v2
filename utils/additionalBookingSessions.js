@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {buildBandSheetShareUrl} from './bandSheetUrl.js';
+import {calendarMusicianProfiles,calendarMusicianProfileUrl} from './calendarMusicianProfiles.js';
 const clean = value => String(value || '').trim();
 const accepted = member => ['accepted','confirmed'].includes(clean(member.status).toLowerCase());
 
@@ -8,11 +9,12 @@ const accepted = member => ['accepted','confirmed'].includes(clean(member.status
 export async function syncAdditionalBookingSessions({cal,calendarId,booking,assignments=[]}) {
   const sessions=booking?.eventSheet?.answers?.additional_calendar_sessions;
   if(!Array.isArray(sessions)) return;
+  const publicMembers = await calendarMusicianProfiles(assignments.filter(accepted));
   for(const session of sessions) {
     if(!session.key || !/^\d{4}-\d{2}-\d{2}$/.test(session.dateISO || '') ||
        !/^\d{2}:\d{2}$/.test(session.arrivalTime || '') || !/^\d{2}:\d{2}$/.test(session.endTime || '')) continue;
     const allowed=new Set((session.musicianIds || []).map(String));
-    const members=assignments.filter(member=>accepted(member)&&allowed.has(String(member.musicianId))&&clean(member.email));
+    const members=publicMembers.filter(member=>allowed.has(String(member.musicianId))&&clean(member.email));
     const eventId='tsc'+crypto.createHash('sha256').update(`${booking._id}:${session.key}`).digest('hex').slice(0,40);
     let existing;
     try {existing=(await cal.events.get({calendarId,eventId})).data;}
@@ -22,7 +24,6 @@ export async function syncAdditionalBookingSessions({cal,calendarId,booking,assi
       continue;
     }
     const bandLink=booking.eventSheet?.bandSheetToken ? buildBandSheetShareUrl(booking.eventSheet.bandSheetToken) : '';
-    const publicBase=clean(process.env.PUBLIC_SITE_URL || 'https://thesupremecollective.co.uk').replace(/\/$/,'');
     const attendees=members.map(member=>{
       const email=clean(member.email).toLowerCase();
       const prior=existing?.attendees?.find(item=>item.email?.toLowerCase()===email);
@@ -30,7 +31,7 @@ export async function syncAdditionalBookingSessions({cal,calendarId,booking,assi
     });
     const requestBody={
       summary:clean(session.title), location:clean(session.location || booking.venueAddress || booking.venue),
-      description:[`Parent booking: ${booking.bookingId}`,clean(session.notes),'',...members.map(member=>`${clean(member.name)} — ${clean(member.role || member.instrument)}\n${publicBase}/musician/${encodeURIComponent(member.musicianId)}/`),'',`BAND EVENT SHEET: ${bandLink}`].join('\n'),
+      description:[`Parent booking: ${booking.bookingId}`,clean(session.notes),'',...members.map(member=>[`${clean(member.name)} — ${clean(member.role || member.instrument)}`,calendarMusicianProfileUrl(member)].filter(Boolean).join('\n')),'',`BAND EVENT SHEET: ${bandLink}`].join('\n'),
       start:{dateTime:`${session.dateISO}T${session.arrivalTime}:00`,timeZone:'Europe/London'},
       end:{dateTime:`${session.dateISO}T${session.endTime}:00`,timeZone:'Europe/London'},
       attendees,extendedProperties:{private:{parentBookingRef:clean(booking.bookingId),additionalSessionKey:clean(session.key)}}

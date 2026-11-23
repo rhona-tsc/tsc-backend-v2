@@ -8,6 +8,7 @@ import { buildBandSheetShareUrl, getBandSheetOrigin } from "./bandSheetUrl.js";
 import { bandSheetTokenPersistenceUpdate } from "./bandSheetTokenRegistry.js";
 import { resolveBookedActName } from "./bookingDisplayName.js";
 import { extractBookingRefFromCalendarEvent } from "./calendarBookingIdentity.js";
+import { calendarMusicianProfiles, calendarMusicianProfileUrl } from './calendarMusicianProfiles.js';
 
 const clean = (value = "") => String(value || "").trim();
 
@@ -68,7 +69,7 @@ const eventTimes = (booking = {}) => {
   };
 };
 
-const lineupFor = (booking = {}, assignedMusicians = []) => {
+const lineupFor = async (booking = {}, assignedMusicians = []) => {
   const candidates = [
     assignedMusicians,
     booking.assignedMusicians,
@@ -76,8 +77,9 @@ const lineupFor = (booking = {}, assignedMusicians = []) => {
     booking.bookingMusicians,
     booking?.bookingDetails?.assignedMusicians,
   ].find((items) => Array.isArray(items) && items.length) || [];
-  return candidates
-    .filter((member) => ["accepted", "confirmed"].includes(clean(member?.status).toLowerCase()))
+  const members = await calendarMusicianProfiles(candidates
+    .filter((member) => ["accepted", "confirmed"].includes(clean(member?.status).toLowerCase())));
+  return members
     .map((member) => {
       const name = clean(
         member?.name || [member?.firstName, member?.lastName].filter(Boolean).join(" "),
@@ -90,8 +92,7 @@ const lineupFor = (booking = {}, assignedMusicians = []) => {
         .filter(Boolean)
         .filter((value, index, all) => all.indexOf(value) === index)
         .join(" · ");
-      const musicianId = clean(member?.musicianId || member?.musician?._id);
-      const profile = musicianId ? `${String(process.env.PUBLIC_SITE_URL || 'https://thesupremecollective.co.uk').replace(/\/$/, '')}/musician/${encodeURIComponent(musicianId)}/` : '';
+      const profile = calendarMusicianProfileUrl(member);
       return [[name || "Band member", role].filter(Boolean).join(" — "), profile].filter(Boolean).join('\n  ');
     });
 };
@@ -175,7 +176,7 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
   );
   const times = eventTimes(calendarBooking);
   if (!times.dateISO) throw new Error("Booking has no event date for calendar update");
-  const lineup = lineupFor(calendarBooking, assignedMusicians);
+  const lineup = await lineupFor(calendarBooking, assignedMusicians);
 
   const clientName = calendarClientName(calendarBooking);
   const possessiveClient = /s$/i.test(clientName)
