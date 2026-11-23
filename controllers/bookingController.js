@@ -887,54 +887,9 @@ async function upsertCalendarForConfirmedBooking({
     new Date().toISOString(),
     { actId, lineupId, venue },
   );
-  const dateISO = new Date(booking.date).toISOString().slice(0, 10);
-
-  // find an existing availability YES event if any
-  const avail = await AvailabilityModel.findOne({
-    actId,
-    dateISO,
-    reply: "yes",
-    calendarEventId: { $ne: null },
-  })
-    .sort({ updatedAt: -1 })
-    .lean();
-
-  const attendees = await buildAttendees({ actId, lineupId, bandLineup });
-
-  if (avail?.calendarEventId) {
-    await updateCalendarEvent({
-      eventId: avail.calendarEventId,
-      addAttendees: attendees,
-    });
-    // also mirror the eventId onto the booking for convenience
-    await Booking.updateOne(
-      { _id: booking._id },
-      { $set: { calendarEventId: avail.calendarEventId } },
-    );
-    return { updatedEventId: avail.calendarEventId, createdEventId: null };
-  }
-
-  // Create fresh event if none exists
-  const start = new Date(`${dateISO}T17:00:00Z`);
-  const end = new Date(`${dateISO}T22:59:00Z`);
-
-  const act = await Act.findById(actId).lean();
-  const created = await createCalendarInvite({
-    enquiryId: booking._id?.toString?.() || `BOOK_${Date.now()}`,
-    email: attendees[0]?.email || undefined, // seed with at least one
-    summary: `TSC: Booking — ${act?.tscName || act?.name || "Act"}`,
-    description: `Confirmed booking: ${venue || ""}`,
-    startTime: start.toISOString(),
-    endTime: end.toISOString(),
-    attendees,
-  });
-
-  await Booking.updateOne(
-    { _id: booking._id },
-    { $set: { calendarEventId: created?.id || null } },
-  );
-
-  return { updatedEventId: null, createdEventId: created?.id || null };
+  const eventId=await updateOrCreateBookingEvent({booking,
+    assignedMusicians:booking.assignedMusicians || []});
+  return {updatedEventId:eventId,createdEventId:null};
 }
 
 // ---------------- Stripe checkout → pending booking ----------------

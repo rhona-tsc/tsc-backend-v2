@@ -1716,24 +1716,10 @@ export const triggerBookingRequests = async (req, res) => {
       });
     }
 
-    // Only create/update the shared event after all performer fees pass the
-    // preflight check, so a blocked request has no external side effects.
-    const event = dryRun
-      ? { id: `dryrun_${actId}_${dateISO}` }
-      : (await ensureBookingEvent({ actId, dateISO, address })).event;
-
-    console.log(
-      `🦚 triggerBookingRequests: sending to ${members.length} members`,
-      {
-        actName: act.tscName || act.name,
-        lineupId: lineup._id || lineup.lineupId,
-      }
-    );
-
     const ts = Date.now();
     const sent = [];
 
-    const booking =
+    const booking = allocationBoard ? await resolveSourceBooking(allocationBoard) :
       bookingId || bookingRef
         ? await Booking.findOne({
             $or: [
@@ -1768,6 +1754,12 @@ export const triggerBookingRequests = async (req, res) => {
       bookingId ||
       bookingRef ||
       null;
+
+    // Every booking offer shares the booking's own diary event. Do not create
+    // a second generic event keyed only by act and date.
+    const event = dryRun ? {id:`dryrun_${actId}_${dateISO}`} :
+      (await ensureBookingEvent({booking,bookingRef:resolvedBookingRef,
+        assignedMusicians:allocationBoard?.assignedMusicians || []})).event;
 
     const rosterPolicy = await getRosterPolicy(act._id);
     for (const originalMember of members) {

@@ -2375,13 +2375,12 @@ const syncBookedDeputyToBookingBoard = async (job, musician) => {
   if (board.actId && board.eventDateISO && email) {
     try {
       const event = await ensureBookingEvent({
-        actId: board.actId,
-        dateISO: board.eventDateISO,
-        address: board.address || board.venue || "",
+        bookingRef: board.bookingRef,
+        assignedMusicians: board.assignedMusicians,
       });
-      const eventId = event?.id || event?.data?.id || event;
+      const eventId = event?.event?.id;
       if (eventId) {
-        await addAttendeeToEvent({ eventId, email });
+        await addAttendeeToEvent({ eventId, email, calendarId: event.calendarId });
         const phone = musician?.phone || musician?.phoneNumber || "";
         if (phone) {
           await AvailabilityModel.findOneAndUpdate(

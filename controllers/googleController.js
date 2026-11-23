@@ -3,6 +3,7 @@ import { google } from 'googleapis';
 import { v4 as uuidv4 } from 'uuid';
 import { hashBase36 } from "../utils/hash.js";
 import AvailabilityModel from '../models/availabilityModel.js';
+import Booking from '../models/bookingModel.js';
 import { toE164 } from '../utils/twilioClient.js';
 import crypto from "crypto";
 
@@ -377,10 +378,10 @@ export async function updateCalendarEvent({ eventId, ensureAttendees = [] }) {
   });
 }
 
-export async function reinstateCalendarAttendee({ eventId, email }) {
+export async function reinstateCalendarAttendee({ eventId, email, calendarId }) {
   if (!eventId || !email) return null;
   const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-  const calendarId = "primary";
+  calendarId ||= await calendarForSavedBookingEvent(eventId);
   const ev = await calendar.events.get({ calendarId, eventId });
   const target = String(email).trim().toLowerCase();
   const attendees = (ev.data.attendees || []).map((attendee) =>
@@ -442,67 +443,21 @@ export const handleGoogleWebhook = async (req, res) => {
   }
 };
 
-export const ensureBookingEvent = async ({ actId, dateISO, address }) => {
-  console.log(`😈 (controllers/googleController.js) ensureBookingEvent called at`, new Date().toISOString(), {
-    actId, dateISO, address,
-  });
+export const ensureBookingEvent = async ({booking,bookingRef,assignedMusicians=[]}) => {
+  const source = booking || (bookingRef ? await Booking.findOne({
+    $or:[{bookingId:String(bookingRef)},{bookingRef:String(bookingRef)}],
+  }).lean() : null);
+  if(!source) throw new Error('Link a confirmed booking reference before creating a diary invitation.');
+  const {updateOrCreateBookingEvent}=await import('../utils/updateOrCreateBookingEvent.js');
+  const eventId=await updateOrCreateBookingEvent({booking:source,assignedMusicians});
+  const calendarId=source.calendarId;
+  const event=(await calendar.events.get({calendarId,eventId})).data;
+  return {event,calendarId,created:false};
+};
 
-  const ok = await debugGoogleAuth("ensureBookingEvent");
-  if (!ok) throw new Error("Google auth not ready (refresh token issue)");
-
-  const start = new Date(`${dateISO}T00:00:00.000Z`);
-  const end = new Date(`${dateISO}T23:59:59.000Z`);
-  const { data } = await calendar.events.list({
-    calendarId: "primary",
-    timeMin: start.toISOString(),
-    timeMax: end.toISOString(),
-    maxResults: 50,
-    singleEvents: false,
-    showDeleted: false,
-    q: "TSC:",
-  });
-
-  const items = data.items || [];
-  let found = null;
-  for (const ev of items) {
-    const priv = ev.extendedProperties?.private || {};
-    if (priv.actId === String(actId) && priv.kind === "booking") {
-      found = ev;
-      break;
-    }
-  }
-
-  if (found) {
-    if (found.summary !== "TSC: Confirmed Booking") {
-      await calendar.events.patch({
-        calendarId: "primary",
-        eventId: found.id,
-        requestBody: { summary: "TSC: Confirmed Booking" },
-        sendUpdates: "all",
-      });
-      found.summary = "TSC: Confirmed Booking";
-    }
-    return { event: found, created: false };
-  }
-
-  const newEvt = {
-    summary: "TSC: Confirmed Booking",
-    description: `Booking created • ${address || ""}`,
-    start: { dateTime: `${dateISO}T17:00:00.000Z` },
-    end: { dateTime: `${dateISO}T23:59:00.000Z` },
-    attendees: [],
-    extendedProperties: {
-      private: { actId: String(actId), dateISO, kind: "booking" },
-    },
-  };
-
-  const ins = await calendar.events.insert({
-    calendarId: "primary",
-    requestBody: newEvt,
-    sendUpdates: "all",
-  });
-
-  return { event: ins.data, created: true };
+const calendarForSavedBookingEvent = async eventId => {
+  const booking=await Booking.findOne({calendarEventId:eventId}).select('calendarId').lean();
+  return booking?.calendarId || 'primary';
 };
 
 export const appendLineToEventDescription = async ({ eventId, line }) => {
@@ -510,13 +465,14 @@ export const appendLineToEventDescription = async ({ eventId, line }) => {
     eventId, line,
   });
 
-  const { data: ev } = await calendar.events.get({ calendarId: "primary", eventId });
+  const calendarId=await calendarForSavedBookingEvent(eventId);
+  const { data: ev } = await calendar.events.get({ calendarId, eventId });
   const desc = ev.description || "";
   const lines = new Set(desc.split(/\r?\n/).map(s => s.trim()).filter(Boolean));
   if (!lines.has(line.trim())) {
     const merged = [...lines, line].join("\n");
     await calendar.events.patch({
-      calendarId: "primary",
+      calendarId,
       eventId,
       requestBody: { description: merged },
       sendUpdates: "none",
@@ -524,7 +480,8 @@ export const appendLineToEventDescription = async ({ eventId, line }) => {
   }
 };
 
-export const addAttendeeToEvent = async ({ eventId, email, calendarId = "primary" }) => {
+export const addAttendeeToEvent = async ({ eventId, email, calendarId }) => {
+  calendarId ||= await calendarForSavedBookingEvent(eventId);
   console.log(`😈 (controllers/googleController.js) addAttendeeToEvent called at`, new Date().toISOString(), {
     eventId, email,
   });

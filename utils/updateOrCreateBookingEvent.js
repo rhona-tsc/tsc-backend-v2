@@ -7,9 +7,8 @@ import { oauth2Client } from "../controllers/googleController.js";
 import { buildBandSheetShareUrl, getBandSheetOrigin } from "./bandSheetUrl.js";
 import { bandSheetTokenPersistenceUpdate } from "./bandSheetTokenRegistry.js";
 import { resolveBookedActName } from "./bookingDisplayName.js";
-import { extractBookingRefFromCalendarEvent } from "./calendarBookingIdentity.js";
 import { calendarMusicianProfiles, calendarMusicianProfileUrl } from './calendarMusicianProfiles.js';
-import {bookingCalendarAttendees,syncBookingCalendarMirrors} from './bookingCalendarMirrors.js';
+import {upsertSharedBookingCalendar} from './sharedBookingCalendar.js';
 
 const clean = (value = "") => String(value || "").trim();
 
@@ -152,7 +151,6 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
   }
 
   const cal = google.calendar({ version: "v3", auth: oauth2Client });
-  const calendarId = clean(booking.calendarId) || "primary";
 
   const ref = bookingRefOf(booking);
   const boardBooking = await BookingBoardItem.findOne({
@@ -168,8 +166,6 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
     calendarEventId: booking.calendarEventId,
   };
 
-  let eventId = booking.calendarEventId || null;
-  let linkedEvent = null;
   const summaryName = clean(
     resolveBookedActName({ board: boardBooking, booking: calendarBooking }) ||
       firstAct(calendarBooking)?.actName ||
@@ -212,6 +208,7 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
     extendedProperties: {
       private: {
         bookingRef: ref,
+        bookingRecordId: String(booking._id || ""),
         actId:
           calendarBooking.actId ||
           firstAct(calendarBooking)?.actId ||
@@ -222,68 +219,15 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
     },
   };
 
-  // A stale event id must never be allowed to redirect one booking's updates
-  // into another booking. Prefer the embedded booking reference over the id.
-  if (eventId && ref) {
-    try {
-      const linked = await cal.events.get({ calendarId, eventId });
-      const linkedRef = extractBookingRefFromCalendarEvent(linked.data);
-      if (linkedRef && linkedRef !== ref) eventId = null;
-      else linkedEvent = linked.data;
-    } catch (error) {
-      if (Number(error?.code || error?.status) === 404) eventId = null;
-      else throw error;
-    }
-  }
-
-  if (!eventId && ref) {
-    const matching = await cal.events.list({
-      calendarId,
-      privateExtendedProperty: [`bookingRef=${ref}`],
-      singleEvents: true,
-      maxResults: 2,
-      showDeleted: false,
-    });
-    eventId = matching.data.items?.[0]?.id || null;
-  }
-
-  // 1️⃣ UPDATE existing event
-  if (eventId) {
-    if (!linkedEvent) linkedEvent = (await cal.events.get({calendarId,eventId})).data;
-    const assignments = assignedMusicians.length ? assignedMusicians : calendarBooking.assignedMusicians || [];
-    eventPayload.attendees = bookingCalendarAttendees(linkedEvent.attendees,assignments);
-    const updated = await cal.events.patch({
-      calendarId,
-      eventId,
-      requestBody: eventPayload,
-      sendUpdates: 'all',
-    });
-
-    const resolvedEventId = updated.data.id;
-    if (resolvedEventId !== booking.calendarEventId) {
-      await Booking.collection.updateOne(
-        booking._id ? { _id: booking._id } : { bookingId: ref },
-        { $set: { calendarEventId: resolvedEventId } },
-      );
-    }
-    await syncAdditionalBookingSessions({cal,calendarId,booking,assignments:assignedMusicians});
-    await syncBookingCalendarMirrors({cal,booking,calendarId,eventId:resolvedEventId,payload:eventPayload,assignments});
-    return resolvedEventId;
-  }
-
-  // 2️⃣ CREATE brand-new event (fallback)
-  const created = await cal.events.insert({
-    calendarId,
-    requestBody: eventPayload,
-  });
-
-  const newEventId = created.data.id;
-
+  const assignments = assignedMusicians.length ? assignedMusicians : calendarBooking.assignedMusicians || [];
+  const resolved = await upsertSharedBookingCalendar({cal,booking,ref,payload:eventPayload,assignments});
   await Booking.collection.updateOne(
-    { _id: booking._id },
-    { $set: { calendarEventId: newEventId } },
+    booking._id ? {_id:booking._id} : {bookingId:ref},
+    {$set:{calendarEventId:resolved.eventId,calendarId:resolved.calendarId}},
   );
-
-  await syncAdditionalBookingSessions({cal,calendarId,booking,assignments:assignedMusicians});
-  return newEventId;
+  // Callers may immediately add a recipient; give them the resolved calendar.
+  booking.calendarId = resolved.calendarId;
+  booking.calendarEventId = resolved.eventId;
+  await syncAdditionalBookingSessions({cal,calendarId:resolved.calendarId,booking,assignments});
+  return resolved.eventId;
 }
