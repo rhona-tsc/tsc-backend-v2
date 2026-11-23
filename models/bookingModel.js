@@ -500,6 +500,13 @@ const BookingSchema = new mongoose.Schema(
     whatsappGroupLink: { type: String, default: "", trim: true },
     calendarEventId: { type: String, default: "", index: true },
     calendarId: { type: String, default: "" },
+    // Explicitly reconciled copies on other diaries (e.g. an older TSC Gigs
+    // invitation). Keep their lineup current without creating new events.
+    calendarMirrors: [{
+      _id: false,
+      calendarId: {type: String, required: true},
+      eventId: {type: String, required: true},
+    }],
     // Admin-editable booking metadata used by the Booking Board. These were
     // previously written by the route but silently discarded by Mongoose.
     eventType: { type: String, default: "" },

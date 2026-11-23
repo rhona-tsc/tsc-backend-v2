@@ -9,6 +9,7 @@ import { bandSheetTokenPersistenceUpdate } from "./bandSheetTokenRegistry.js";
 import { resolveBookedActName } from "./bookingDisplayName.js";
 import { extractBookingRefFromCalendarEvent } from "./calendarBookingIdentity.js";
 import { calendarMusicianProfiles, calendarMusicianProfileUrl } from './calendarMusicianProfiles.js';
+import {bookingCalendarAttendees,syncBookingCalendarMirrors} from './bookingCalendarMirrors.js';
 
 const clean = (value = "") => String(value || "").trim();
 
@@ -168,6 +169,7 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
   };
 
   let eventId = booking.calendarEventId || null;
+  let linkedEvent = null;
   const summaryName = clean(
     resolveBookedActName({ board: boardBooking, booking: calendarBooking }) ||
       firstAct(calendarBooking)?.actName ||
@@ -227,6 +229,7 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
       const linked = await cal.events.get({ calendarId, eventId });
       const linkedRef = extractBookingRefFromCalendarEvent(linked.data);
       if (linkedRef && linkedRef !== ref) eventId = null;
+      else linkedEvent = linked.data;
     } catch (error) {
       if (Number(error?.code || error?.status) === 404) eventId = null;
       else throw error;
@@ -246,10 +249,14 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
 
   // 1️⃣ UPDATE existing event
   if (eventId) {
+    if (!linkedEvent) linkedEvent = (await cal.events.get({calendarId,eventId})).data;
+    const assignments = assignedMusicians.length ? assignedMusicians : calendarBooking.assignedMusicians || [];
+    eventPayload.attendees = bookingCalendarAttendees(linkedEvent.attendees,assignments);
     const updated = await cal.events.patch({
       calendarId,
       eventId,
       requestBody: eventPayload,
+      sendUpdates: 'all',
     });
 
     const resolvedEventId = updated.data.id;
@@ -260,6 +267,7 @@ export async function updateOrCreateBookingEvent({ booking, assignedMusicians = 
       );
     }
     await syncAdditionalBookingSessions({cal,calendarId,booking,assignments:assignedMusicians});
+    await syncBookingCalendarMirrors({cal,booking,calendarId,eventId:resolvedEventId,payload:eventPayload,assignments});
     return resolvedEventId;
   }
 
