@@ -72,3 +72,18 @@ test('only administrators can change cancellation notices, including dotted-fiel
     if (previousSecret === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = previousSecret;
   }
 });
+
+
+test('a cancellation notice survives core Booking document serialization without changing the fee or payment received', async () => {
+  const [{default:Booking},{applyBookingPatch}] = await Promise.all([import('../models/bookingModel.js'),import('../routes/bookingBoardRoutes.js')]);
+  const booking = new Booking({bookingId:'CORE-DEMO',agent:'Wedissimo',amount:3000,totals:{fullAmount:3000,depositAmount:500,chargedAmount:500,remainingAmount:2500}});
+  booking.save = async function () { return this; };
+  const summary = 'This booking has its own cancellation conditions.';
+  const saved = await applyBookingPatch(booking,{musicianCancellationPolicy:{summary,paymentBasis:'receipts_share'}});
+  const reloaded = Booking.hydrate(saved.toObject());
+  assert.equal(reloaded.musicianCancellationPolicy.summary,summary);
+  assert.equal(reloaded.musicianCancellationPolicy.paymentBasis,'receipts_share');
+  assert.equal(reloaded.totals.fullAmount,3000);
+  assert.equal(reloaded.totals.chargedAmount,500);
+  assert.equal(reloaded.totals.remainingAmount,2500);
+});

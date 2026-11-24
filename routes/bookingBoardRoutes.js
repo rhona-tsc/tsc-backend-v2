@@ -1240,7 +1240,6 @@ export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
 
   const scalarFields = [
     "agent",
-    "musicianCancellationPolicy",
     "clientAddress",
     "county",
     "lineupSelected",
@@ -1263,6 +1262,10 @@ export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
       bookingDoc[field] = patch[field];
     }
   });
+
+  if (patch.musicianCancellationPolicy !== undefined) {
+    bookingDoc.musicianCancellationPolicy = normaliseMusicianCancellationPolicy(patch.musicianCancellationPolicy);
+  }
 
   if (Array.isArray(patch.lineupComposition)) {
     bookingDoc.lineupComposition = patch.lineupComposition
