@@ -5,6 +5,7 @@ import { enableBirthdayReviewSequence } from "../services/birthdayReviewSequence
 // routes/bookingBoardRoutes.js
 
 import express from "express";
+import { musicianCancellationNotice, normaliseMusicianCancellationPolicy } from "../utils/musicianCancellationPolicy.js";
 import { isEncoreBooking } from "../utils/encoreSettlement.js";
 import { effectiveLineupRoles } from "../utils/bookingLineupAdditions.js";
 import { isBespokeLineup, normaliseBespokeLineup, updateBespokeSummary } from "../utils/bespokeLineup.js";
@@ -155,7 +156,7 @@ const AGENT_NAMES = [
   "Fully Funktional", "Function Central", "LMM", "Poptop", "Scarlettte",
   "Silk Street", "Soul Eras", "St Barts", "Staar Productions", "Stormont",
   "The Supreme Collective", "UKBride", "UKBride Lead", "Warble", "Wedding Fair",
-  "Wedding Jam",
+  "Wedding Jam", "Wedissimo",
 ];
 const AGENT_ALIASES = new Map([
   ["encore", "Encore"],
@@ -1239,6 +1240,7 @@ export const applyBookingPatch = async (bookingDoc, rawPatch = {}) => {
 
   const scalarFields = [
     "agent",
+    "musicianCancellationPolicy",
     "clientAddress",
     "county",
     "lineupSelected",
@@ -1913,6 +1915,7 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     grossValue,
     ...(doc.totals?.bookingTotal != null ? { originalBookingTotal: Number(doc.totals.bookingTotal) } : {}),
     netCommission: Number(doc?.netCommission || 0) || 0,
+    musicianCancellationPolicy: doc?.musicianCancellationPolicy,
     agent: normaliseAgent(doc?.agent),
     eventType:
       doc?.eventType ||
@@ -2162,7 +2165,8 @@ router.get("/mine", musicianAuth, async (req, res) => {
       .limit(200)
       .lean();
 
-    return res.json({ success: true, rows, bookings: rows });
+    const bookings = rows.map(row => ({ ...row, musicianCancellationNotice: musicianCancellationNotice(row) }));
+    return res.json({ success: true, rows: bookings, bookings });
   } catch (error) {
     console.error("❌ GET /board/bookings/mine failed:", error);
     return res.status(500).json({
@@ -2403,6 +2407,8 @@ const skip = (page - 1) * limit;
         });
       }
     }
+
+    rows.forEach(row => { row.musicianCancellationNotice = musicianCancellationNotice(row); });
 
     // Sort
     const dir = String(sortDir).toLowerCase() === "desc" ? -1 : 1;
@@ -3607,6 +3613,13 @@ router.patch("/:id", musicianAuth, async (req, res) => {
   });
   try {
     const rawBody = { ...req.body };
+    const cancellationKeys = Object.keys(rawBody).filter(key => key === "musicianCancellationPolicy" || key.startsWith("musicianCancellationPolicy."));
+    if (cancellationKeys.length) {
+      if (!isTSCAdmin(req.user)) return res.status(403).json({ success: false, message: "Only an administrator can edit musician cancellation terms." });
+      if (cancellationKeys.some(key => key !== "musicianCancellationPolicy")) return res.status(400).json({ success: false, message: "Save the complete cancellation policy." });
+      try { rawBody.musicianCancellationPolicy = normaliseMusicianCancellationPolicy(rawBody.musicianCancellationPolicy); }
+      catch (error) { return res.status(400).json({ success: false, message: error.message }); }
+    }
     if (Object.keys(rawBody).some(key => key === "reviewRequestPlan" || key.startsWith("reviewRequestPlan.")) && !isTSCAdmin(req.user)) {
       return res.status(403).json({ success: false, message: "Only an administrator can edit the review email sequence." });
     }
@@ -3835,6 +3848,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
           ? { enquiryDateISO: String(body.enquiryDateISO || "").slice(0, 10) }
           : {}),
         ...(body.originalBookingTotal != null ? { originalBookingTotal: Number(body.originalBookingTotal) } : {}),
+        ...(body.musicianCancellationPolicy !== undefined ? { musicianCancellationPolicy: body.musicianCancellationPolicy } : {}),
         ...(body.agent !== undefined ? { agent: normaliseAgent(body.agent) } : {}),
         ...(body.actName !== undefined ? { actName: body.actName } : {}),
         ...(body.actTscName !== undefined ? { actTscName: body.actTscName } : {}),
@@ -3962,6 +3976,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         success: true,
         row: {
           ...mergedResponseRow,
+          musicianCancellationNotice: musicianCancellationNotice(mergedResponseRow),
           ...(body.payments && isPlainObject(body.payments)
             ? { payments: body.payments }
             : {}),
@@ -4147,7 +4162,7 @@ router.patch("/:id", musicianAuth, async (req, res) => {
 
     return res.json({
       success: true,
-      row,
+      row: { ...row.toObject(), musicianCancellationNotice: musicianCancellationNotice(row) },
       source: "board",
     });
   } catch (e) {

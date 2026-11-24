@@ -1,3 +1,4 @@
+import { musicianCancellationNotice } from "../utils/musicianCancellationPolicy.js";
 import musicianAuth from '../middleware/musicianAuth.js';
 import { withdrawMyBooking } from '../controllers/allocationController.js';
 // routes/bookingRoutes.js
@@ -211,6 +212,7 @@ export const withConfirmedAllocation = async (booking, { BoardModel = BookingBoa
   return {
     ...plain,
     ...(board?._id ? { bookingBoardId: String(board._id) } : {}),
+    ...(board?.musicianCancellationPolicy ? { musicianCancellationPolicy: board.musicianCancellationPolicy } : {}),
     ...(board?.paymentInstructions?.paymentMethod === "bank_transfer" ? { balancePaymentMethod: "invoice" } : {}),
     ...(board?.bookingRef ? { bookingRef: board.bookingRef } : {}),
     ...(board?.clientFirstNames || board?.bookerName
@@ -1745,6 +1747,20 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
       });
   });
   doc.y = summaryTop + summaryBoxHeight + 18;
+
+  const cancellation = musicianCancellationNotice(booking);
+  if (cancellation) {
+    sectionTitle("Cancellation terms for musicians", 230);
+    labelValue("Client cancellation", cancellation.summary);
+    labelValue("Your cancellation payment", cancellation.paymentText);
+    labelValue("If these terms do not work for you", cancellation.withdrawalText);
+    ensureSpace(45);
+    doc.font("Helvetica-Bold").fontSize(11).fillColor("#1649be")
+      .text("Open Your Gigs to review or withdraw from this gig", left, doc.y, {
+        link: cancellation.withdrawalUrl, underline: true, width: contentWidth,
+      });
+    doc.moveDown(0.6);
+  }
 
   sectionTitle("Event overview");
   labelValue("Event type", eventType, { showFallback: true });

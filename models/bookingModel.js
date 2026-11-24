@@ -370,6 +370,11 @@ const BookingSchema = new mongoose.Schema(
     // booking prevents the board mirror and the checkout booking from
     // disagreeing after an inline edit.
     paymentTermsVersion: { type: String, default: undefined },
+    musicianCancellationPolicy: {
+      summary: { type: String, default: "", maxlength: 4000 },
+      paymentBasis: { type: String, enum: ["existing_terms", "receipts_share"], default: "existing_terms" },
+      version: { type: String, default: "" },
+    },
     agent: { type: String, default: "Direct", trim: true },
 
     // User

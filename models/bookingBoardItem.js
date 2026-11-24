@@ -311,6 +311,11 @@ const BookingBoardItemSchema = new mongoose.Schema(
     originalBookingTotal: { type: Number, default: undefined },
     grossValue: { type: Number, default: 0 },
     netCommission: { type: Number, default: 0 }, // agency commission amount £
+    musicianCancellationPolicy: {
+      summary: { type: String, default: "", maxlength: 4000 },
+      paymentBasis: { type: String, enum: ["existing_terms", "receipts_share"], default: "existing_terms" },
+      version: { type: String, default: "" },
+    },
     agent: { type: String }, // e.g. "Encore", "TSC Direct", "Other Agent"
     contactRole: {
       type: String,
