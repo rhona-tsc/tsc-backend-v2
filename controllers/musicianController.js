@@ -1366,13 +1366,20 @@ const registerDeputy = async (req, res) => {
         .filter((item) => item.url);
     };
 
+    // Musicians submit files through the private upload endpoint. Keep old
+    // links for staff migration, but do not accept new URL submissions or
+    // let a stale profile form overwrite staff-managed video records.
+    const canManageVideoLinks = ["agent", "admin", "superadmin", "moderator"].includes(
+      String(req.user?.role || req.user?.userRole || "").toLowerCase(),
+    );
+    const videoInputs = canManageVideoLinks ? body : {};
     const functionBandVideoLinks = mergeVideoModeration(parseArrayField(
-      body.functionBandVideoLinks,
+      videoInputs.functionBandVideoLinks,
       musician.functionBandVideoLinks || [],
     ), musician.functionBandVideoLinks);
 
     const tscApprovedFunctionBandVideoLinks = parseArrayField(
-      body.tscApprovedFunctionBandVideoLinks,
+      videoInputs.tscApprovedFunctionBandVideoLinks,
       musician.tscApprovedFunctionBandVideoLinks || [],
     )
       .map((x) => ({
@@ -1383,12 +1390,12 @@ const registerDeputy = async (req, res) => {
       .filter((x) => x.url);
 
     const originalBandVideoLinks = mergeVideoModeration(parseArrayField(
-      body.originalBandVideoLinks,
+      videoInputs.originalBandVideoLinks,
       musician.originalBandVideoLinks || [],
     ), musician.originalBandVideoLinks);
 
     const tscApprovedOriginalBandVideoLinks = parseArrayField(
-      body.tscApprovedOriginalBandVideoLinks,
+      videoInputs.tscApprovedOriginalBandVideoLinks,
       musician.tscApprovedOriginalBandVideoLinks || [],
     )
       .map((x) => ({
@@ -1399,7 +1406,7 @@ const registerDeputy = async (req, res) => {
       .filter((x) => x.url);
 
     const socialHighlightPostLinks = parseArrayField(
-      body.socialHighlightPostLinks,
+      videoInputs.socialHighlightPostLinks,
       musician.socialHighlightPostLinks || [],
     )
       .map((item) => ({
