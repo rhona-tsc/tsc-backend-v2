@@ -1,3 +1,4 @@
+import {isDirectPaymentSource} from '../utils/balanceDueDate.js';
 import {clientEventSheetUrl} from '../utils/bookingClientLinks.js';
 import {bookingBoardInvoiceCompany} from '../utils/bookingBoardInvoiceCompany.js';
 import { balanceDueISO, BALANCE_PAYMENT_POLICY } from '../utils/balanceDueDate.js';
@@ -203,8 +204,14 @@ export const buildIntroEmail = (row) => {
   const paymentParagraph = isEncoreBooking(row)
     ? "Payment for your original booking is arranged through Encore. Any extras agreed separately are invoiced directly."
     : `Please also find linked below the invoice for the balance, which is due on ${formatEmailBodyDate(balanceDueISO(row))}. The BACS details are on the footer of the attached invoice.`;
+  const familiarClient = row?.contactRole !== 'agent' && isDirectPaymentSource(row?.agent || row?.source || 'Direct');
+  const depositReceived = row?.depositInvoice?.status === 'paid' || Number(row?.payments?.depositChargedAmount || 0) > 0;
+  const contractSigned = Boolean(row?.importMetadata?.contractSignedAt || row?.contractSignedAt);
+  const familiarOpening = depositReceived && contractSigned
+    ? `Thank you for paying the deposit and signing the contract for ${actName}. We're looking forward to providing the entertainment for your ${eventType}!`
+    : `Thank you for booking ${actName}. We're looking forward to providing the entertainment for your ${eventType}!`;
   const paragraphs = [
-    `Allow me to introduce myself, my name is Rhona, I am the band manager for ${actName}. Thank you for booking the band - we're excited to be delivering the entertainment for you at your ${eventType}, and I'm very much looking forward to sorting out the fine details for the entertainment in the run-up.`,
+    familiarClient ? familiarOpening : `Allow me to introduce myself, my name is Rhona, I am the band manager for ${actName}. Thank you for booking the band - we're excited to be delivering the entertainment for you at your ${eventType}, and I'm very much looking forward to sorting out the fine details for the entertainment in the run-up.`,
     "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and kindly fill in the blanks directly into the document. The event sheet will auto-save, so you can just close it when you're done. I'll review the details you provide, and I'll be back in touch if I've any questions for you or vice versa.",
     "Also please feel free to email or WhatsApp if you've any urgent questions or requests. Or alternatively, you can schedule a call with me directly in my calendar: https://calendly.com/thesupremecollective/call",
     paymentParagraph,
@@ -262,7 +269,7 @@ export const buildIntroEmail = (row) => {
     ];
     text = [
       `Hi ${firstName},`, "", paragraphs[0], "", paragraphs[1], "",
-      `EVENT SHEET: ${eventSheetLink}`, "", paragraphs[2], "", paragraphs[3], "",
+      `Follow This Link to your Event Sheet: ${eventSheetLink}`, "", paragraphs[2], "", paragraphs[3], "",
       paragraphs[4], "", paragraphs[5], "", paragraphs[6], "",
       "Warmest wishes,", "Rhona ✨",
     ].join("\n");
@@ -272,7 +279,7 @@ export const buildIntroEmail = (row) => {
         <div style="max-width:720px;margin:0;background:#fff;padding:0;">
           ${p(`Hi ${firstName},`)}
           ${p(paragraphs[0])}${p(paragraphs[1])}
-          <p style="margin:0 0 18px;font-size:15px;line-height:1.8;"><strong>EVENT SHEET:</strong> <a href="${escapeEmailHtml(eventSheetLink)}" style="color:#ff6667;font-weight:700;">Open your editable event sheet</a></p>
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.8;"><strong>EVENT SHEET:</strong> <a href="${escapeEmailHtml(eventSheetLink)}" style="color:#ff6667;font-weight:700;">Follow This Link to your Event Sheet</a></p>
           ${p(paragraphs[2])}${p(paragraphs[3])}${p(paragraphs[4])}${p(paragraphs[5])}${p(paragraphs[6])}
           <p style="margin:0 0 18px;font-size:15px;line-height:1.7;">Warmest wishes,<br />Rhona ✨</p>
           ${buildTscEmailFooter()}

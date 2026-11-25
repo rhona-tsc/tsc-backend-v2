@@ -452,7 +452,7 @@ const buildBalancePaymentEmail = (row, dueToday) => {
  const name=firstName(clientNames(row)) || 'there';
  const due=ordinalDate(balanceDueISO(row));
  const subject=dueToday ? 'Automated Reminder: Balance Payment Due' : 'Automated Reminder: Balance Payment Coming Due';
- const lines=[`Hi ${name},`,`Just a gentle reminder that the balance for your booking is due on ${due}.`,'Please find your invoice attached, including the bank transfer details.','If you have already paid, thank you—please disregard this reminder.',`Your completed event sheet and playlists have a separate deadline of ${ordinalDate(finalDetailsDueISO(row))}.`,`EVENT SHEET: ${publicEventSheetUrl(row)}`,'Any questions, please reply to this email.','Warmest wishes,','Rhona ✨'];
+ const lines=[`Hi ${name},`,`Just a gentle reminder that the balance for your booking is due on ${due}.`,'Please find your invoice attached, including the bank transfer details.','If you have already paid, thank you—please disregard this reminder.',`Your completed event sheet and playlists have a separate deadline of ${ordinalDate(finalDetailsDueISO(row))}.`,`Follow This Link to your Event Sheet: ${publicEventSheetUrl(row)}`,'Any questions, please reply to this email.','Warmest wishes,','Rhona ✨'];
  return {subject,text:lines.join('\n\n'),html:emailShell(lines.map(emailParagraph).join(''))};
 };
 
@@ -686,7 +686,7 @@ export const buildAutomation10Email = (row) => {
     "",
     "The Event Sheet should also be complete by this date, to ensure the band has everything they need to carry out a successful performance.",
     "",
-    `EVENT SHEET: ${eventSheetUrl}`,
+    `Follow This Link to your Event Sheet: ${eventSheetUrl}`,
     "",
     "Finally, the balance should also be settled by this date. The issued invoice is attached and includes the BACS details.",
     "",
@@ -707,7 +707,7 @@ export const buildAutomation10Email = (row) => {
         ${paragraph(`Just a gentle reminder that the Spotify playlist(s) are due next week on ${dueDate}.`)}
         ${hasDj ? paragraph("As a band-member DJ service is booked, the advance DJ requests are also due on this date.") : ""}
         ${paragraph("The Event Sheet should also be complete by this date, to ensure the band has everything they need to carry out a successful performance.")}
-        <p style="margin:0 0 18px;font-size:15px;line-height:1.8;"><strong>EVENT SHEET:</strong> <a href="${escapeEmailHtml(eventSheetUrl)}" style="color:#ff6667;font-weight:700;">Open your editable event sheet</a></p>
+        <p style="margin:0 0 18px;font-size:15px;line-height:1.8;"><strong>EVENT SHEET:</strong> <a href="${escapeEmailHtml(eventSheetUrl)}" style="color:#ff6667;font-weight:700;">Follow This Link to your Event Sheet</a></p>
         ${paragraph("Finally, the balance should also be settled by this date. The issued invoice is attached and includes the BACS details.")}
         ${paragraph("If you have already submitted your playlist link(s), completed the Event Sheet, and paid the balance, please disregard this email.")}
         <p style="margin:0 0 18px;font-size:15px;line-height:1.8;">If you would like to run through your Event Sheet with me over the phone, please feel free to <a href="https://calendly.com/thesupremecollective/call" style="color:#ff6667;font-weight:700;">book a slot directly in my calendar</a>.</p>
@@ -760,7 +760,7 @@ export const buildAutomation4Email = (row) => {
     "",
     `It's time to check the song suggestions and requests from the Event Sheet, make any amendments needed to the draft setlist, and note any key changes directly in the spreadsheet. Once you're done, please let the band know in the WhatsApp group so everyone has ample time to prepare for the gig.`,
     "",
-    `EVENT SHEET: ${eventSheetUrl}`,
+    `Follow This Link to your Event Sheet: ${eventSheetUrl}`,
     `DRAFT SETLIST: ${draftSetlistUrl}`,
     `WHATSAPP GROUP: ${whatsappUrl}`,
     "",
