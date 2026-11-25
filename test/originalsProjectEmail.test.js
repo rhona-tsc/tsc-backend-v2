@@ -12,6 +12,7 @@ const musicianRepository = {
 const preferenceRepository = { find: () => ({ lean: async () => [] }) };
 function repositories(initial = project()) {
   const jobs = new Map(); let current = initial;
+  const assetRepository = { findOne: () => ({ sort: () => ({ lean: async () => null }) }) };
   const emailRepository = {
     async updateMany(_filter, update) { for (const job of jobs.values()) if (job.kind === 'launch' && job.state === 'queued') Object.assign(job, update.$set); },
     async updateOne(filter, update) {
@@ -38,7 +39,7 @@ function repositories(initial = project()) {
     async updateOne() { current.moderation.launchEmailPending = false; },
   };
   const submissionRepository = { find: () => ({ limit: () => ({ lean: async () => [] }) }) };
-  return { jobs, emailRepository, projectRepository, musicianRepository, preferenceRepository, submissionRepository, setProject(value) { current = value; } };
+  return { jobs, emailRepository, projectRepository, musicianRepository, preferenceRepository, assetRepository, submissionRepository, setProject(value) { current = value; } };
 }
 
 test('moderation alert contains an escaped brief and a direct review link', () => {

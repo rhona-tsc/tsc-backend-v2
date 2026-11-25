@@ -5,11 +5,13 @@ import { planOriginalsLaunchAudience } from './originalsLaunchAudienceService.js
 import Project from '../models/originalProjectModel.js';
 import Musician from '../models/musicianModel.js';
 import Submission from '../models/originalSubmissionModel.js';
+import Asset from '../models/originalAssetModel.js';
 import sendEmail from '../utils/sendEmail.js';
 import { buildOriginalsEmail } from '../utils/originalsEmailTemplate.js';
 import { isOriginalsEnabled } from './originalsPolicyService.js';
 import { buildOriginalProjectApprovedEmail, collectOriginalsNotificationRecipients } from './originalsNotificationService.js';
 import { buildOriginalSubmissionConfirmationEmail } from '../utils/originalsSubmissionConfirmationEmail.js';
+import { createOriginalsEmailPlaybackToken, originalsEmailPlaybackUrls } from './originalsEmailPlaybackService.js';
 
 export const buildOriginalProjectModerationEmail = project => {
   const url = `${String(process.env.ADMIN_FRONTEND_URL || 'https://admin.thesupremecollective.co.uk').replace(/\/$/, '')}/originals/moderation#project-${encodeURIComponent(String(project._id))}`;
@@ -37,16 +39,18 @@ export async function queueOriginalProjectModerationEmail({ project, emailReposi
   return { queued: 1 };
 }
 
-export async function queueOriginalProjectLaunchEmails({ project, emailRepository = ProjectEmail, musicianRepository = Musician, preferenceRepository = Preferences }) {
-  const [records, preferences] = await Promise.all([
+export async function queueOriginalProjectLaunchEmails({ project, emailRepository = ProjectEmail, musicianRepository = Musician, preferenceRepository = Preferences, assetRepository = Asset }) {
+  const [records, preferences, guide] = await Promise.all([
     musicianRepository.find({ profileDeletedAt: null, privateTestProfile: { $ne: true } })
       .select('_id email firstName role status profileDeletedAt privateTestProfile').lean(),
     preferenceRepository.find({}).lean(),
+    assetRepository.findOne({ projectId: project._id, state: 'active', kind: 'guide_track', mimeType: /^audio\// }).sort({ createdAt: 1 }).lean(),
   ]);
   const recipients = collectOriginalsNotificationRecipients(records, preferences);
   let queued = 0;
   for (const recipient of recipients) {
-    const { subject, text, html } = buildOriginalProjectApprovedEmail({ project, firstName: recipient.firstName });
+    const playback = guide ? originalsEmailPlaybackUrls(createOriginalsEmailPlaybackToken({ projectId: project._id, assetId: guide._id, musicianId: recipient.musicianId })) : null;
+    const { subject, text, html } = buildOriginalProjectApprovedEmail({ project, firstName: recipient.firstName, playback, guide });
     const result = await insertEmail(emailRepository, { projectId: project._id, kind: 'launch', musicianId: recipient.musicianId,
       eventKey: `launch:${project._id}:${recipient.email}`, to: recipient.email, subject, text, html });
     queued += result?.upsertedCount || 0;
@@ -95,7 +99,7 @@ export async function queueOriginalSubmissionConfirmation({ submission, emailRep
   });
 }
 
-export async function deliverOriginalProjectEmails({ emailSender = sendEmail, emailRepository = ProjectEmail, projectRepository = Project, musicianRepository = Musician, submissionRepository = Submission, now = new Date(), limit = 50, preferenceRepository = Preferences } = {}) {
+export async function deliverOriginalProjectEmails({ emailSender = sendEmail, emailRepository = ProjectEmail, projectRepository = Project, musicianRepository = Musician, assetRepository = Asset, submissionRepository = Submission, now = new Date(), limit = 50, preferenceRepository = Preferences } = {}) {
   if (!isOriginalsEnabled()) return;
   // Repairs a submit/save succeeded but queue-write failed interruption. Historical
   // pending projects also get one review alert; resolved projects are excluded.
@@ -103,7 +107,7 @@ export async function deliverOriginalProjectEmails({ emailSender = sendEmail, em
   for (const project of pending) await queueOriginalProjectModerationEmail({ project, emailRepository });
   const launches = await projectRepository.find({ 'moderation.status': 'approved', 'moderation.launchEmailPending': true }).lean();
   for (const project of launches) {
-    await queueOriginalProjectLaunchEmails({ project, emailRepository, musicianRepository, preferenceRepository });
+    await queueOriginalProjectLaunchEmails({ project, emailRepository, musicianRepository, preferenceRepository, assetRepository });
     await projectRepository.updateOne({ _id: project._id }, { $set: { 'moderation.launchEmailPending': false } });
   }
   // The marker is saved with the recording, so a queue outage or interrupted

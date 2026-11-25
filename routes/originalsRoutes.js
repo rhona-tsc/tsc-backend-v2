@@ -3,6 +3,7 @@ import { editOriginalProjectSubmission, saveOriginalProjectSubmission } from '..
 import { allowOriginalInvitationRequest } from "../services/originalsInvitationAccessService.js";
 import { deleteOriginalUploadedRecording } from '../controllers/originalsDraftAssetController.js';
 import { getOriginalStemPreview, confirmOriginalStemReview, streamOriginalAudio } from '../controllers/originalsRecordingController.js';
+import { showOriginalsEmailListeningPage, streamOriginalsEmailRecording } from '../controllers/originalsEmailPlaybackController.js';
 import { changeOriginalProjectRole } from '../controllers/originalsRolesController.js';
 import { getOriginalReviewStatus } from '../controllers/originalsReviewController.js';
 import { getOriginalChatUnread, readOriginalChat } from '../controllers/originalsChatReadController.js';
@@ -58,6 +59,11 @@ import {
 } from "../controllers/originalsCreditsController.js";
 
 const router = express.Router();
+
+// Signed email links must work without a dashboard session. The controller
+// independently checks the token, project state and current guide asset.
+router.get('/email-listen/:token', showOriginalsEmailListeningPage);
+router.get('/email-listen/:token/audio', streamOriginalsEmailRecording);
 
 router.use(authUser);
 router.use(async (req, res, next) => {

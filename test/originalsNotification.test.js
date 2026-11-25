@@ -28,8 +28,22 @@ test("approved project email links directly to the workspace and lists roles", (
     firstName: "Ewan",
   });
   assert.match(message.subject, /Soulful Test/);
-  assert.match(message.text, /Seeking: Keys, Vocals/);
+  assert.match(message.text, /Recording order: 1\. Keys, 2\. Vocals/);
   assert.match(message.projectUrl, /\/originals\/project123$/);
+});
+
+test('project email progressively enhances a private guide with a listening fallback', () => {
+  const message = buildOriginalProjectApprovedEmail({
+    project: { _id: 'project123', title: '<Soul Guide>', requestedRoles: [{ name: 'Drums' }, { name: 'Bass' }] },
+    playback: { audioUrl: 'https://api.example/audio?x=1&y=2', listenUrl: 'https://api.example/listen?x=1&y=2' },
+    guide: { mimeType: 'audio/wav' },
+  });
+  assert.match(message.html, /<audio controls/);
+  assert.match(message.html, /Play the guide track/);
+  assert.match(message.html, /audio\/wav/);
+  assert.match(message.html, /x=1&amp;y=2/);
+  assert.doesNotMatch(message.html, /<Soul Guide>/);
+  assert.match(message.text, /Play the guide recording:/);
 });
 
 test('project emails abbreviate owner surnames and preserve anonymous credit names', () => {
