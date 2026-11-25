@@ -1,3 +1,4 @@
+import {clientEventSheetUrl, externalClientLink, clientAutomationReviewPending} from '../utils/bookingClientLinks.js';
 import {hasSeparateDetailsReminders, separateDetailsEmail, referralSendISO, referralEmail} from '../utils/bookingClientSequence.js';
 import { balanceDueISO, balanceReminderISO, BALANCE_PAYMENT_POLICY } from '../utils/balanceDueDate.js';
 import { automationCc } from "../utils/automationCc.js";
@@ -344,9 +345,7 @@ const publicEventSheetUrl = (row) => {
       process.env.FRONTEND_URL ||
       "https://thesupremecollective.co.uk",
   ).replace(/\/$/, "");
-  return row?.bookingRef
-    ? `${base}/event-sheet/${encodeURIComponent(row.bookingRef)}`
-    : clean(row?.eventSheetLink);
+  return clientEventSheetUrl(row, base);
 };
 
 const internalEventSheetUrl = (row) =>
@@ -839,6 +838,7 @@ export const APPROVED_CLIENT_AUTOMATION_EMAILS = [
   "meganltompkins2716@hotmail.com",
   "sarah.murphy11@hotmail.co.uk",
   "sue_young1576@hotmail.com",
+  "two.brewers@brunningandprice.co.uk",
 ];
 
 export const APPROVED_CLIENT_AUTOMATION_BOOKING_REFS = [
@@ -851,6 +851,7 @@ export const APPROVED_CLIENT_AUTOMATION_BOOKING_REFS = [
   "260115241436",
   "261011277662",
   "UUZfW",
+  "BBM 499 BREWERS",
 ];
 
 const configuredAllowlist = () => new Set([
@@ -1071,6 +1072,7 @@ export const runClientAutomations = async ({
   };
 
   for (const row of rows) {
+    if (clientAutomationReviewPending(row)) { summary.skipped += 1; continue; }
     const deliveryQuery = typeof deliveryModel.find === "function"
       ? deliveryModel.find({ bookingId: row._id, status: "sent" }) : null;
     const priorDeliveries = deliveryQuery ? await deliveryQuery.lean() : row.automationDeliveries || [];
@@ -1102,10 +1104,14 @@ export const runClientAutomations = async ({
         return;
       }
       try {
-        const attachments = attachInvoice
+        const linkedInvoice = !extrasOnly && externalClientLink(row, 'invoice');
+        if (attachInvoice && linkedInvoice) {
+          email = {...email, text: email.text.replace(/invoice attached/gi, 'invoice linked below').replace(/attached invoice/gi, 'linked invoice') + `\n\nOpen your invoice: ${linkedInvoice}`, html: email.html.replace(/invoice attached/gi, 'invoice linked below').replace(/attached invoice/gi, 'linked invoice') + emailLink('Open your invoice', linkedInvoice)};
+        }
+        const attachments = attachInvoice && !linkedInvoice
           ? await (extrasOnly ? extrasAttachmentBuilder : attachmentBuilder)(row, { cloudinaryClient })
           : [];
-        if (attachInvoice && !attachments.length) {
+        if (attachInvoice && !linkedInvoice && !attachments.length) {
           throw new Error("No issued invoice PDF is recorded for this booking.");
         }
         const result = await emailSender({
@@ -1121,7 +1127,7 @@ export const runClientAutomations = async ({
         delivery.status = "sent";
         delivery.sentAt = new Date();
         delivery.messageId = result.messageId || "";
-        delivery.invoiceAttached = attachInvoice;
+        delivery.invoiceAttached = attachments.length > 0;
         delivery.cc = automationCc(row, recipient);
         await delivery.save();
         summary.sent += 1;

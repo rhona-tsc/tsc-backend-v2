@@ -1,3 +1,4 @@
+import {clientEventSheetUrl} from '../utils/bookingClientLinks.js';
 import {bookingBoardInvoiceCompany} from '../utils/bookingBoardInvoiceCompany.js';
 import { balanceDueISO, BALANCE_PAYMENT_POLICY } from '../utils/balanceDueDate.js';
 import { automationCc } from "../utils/automationCc.js";
@@ -192,9 +193,7 @@ export const buildIntroEmail = (row) => {
   const publicSiteBase = cleanString(
     process.env.PUBLIC_SITE_URL || process.env.FRONTEND_URL || "https://thesupremecollective.co.uk",
   ).replace(/\/$/, "");
-  const eventSheetLink = row?.bookingRef
-    ? `${publicSiteBase}/event-sheet/${encodeURIComponent(row.bookingRef)}`
-    : cleanString(row?.eventSheetLink);
+  const eventSheetLink = clientEventSheetUrl(row, publicSiteBase);
   const subject = `${actName} & your ${eventType} on ${date}`;
   const songDue = formatEmailBodyDate(row?.songSuggestionsDueDateISO);
   const finalDetailsDue = formatEmailBodyDate(finalDetailsDueISO(row));
@@ -3181,7 +3180,7 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
     if (!row) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
-    if (row.introEmailSentAt) {
+    if (row.introEmailSentAt || row.importMetadata?.introAlreadySent === true) {
       return res.status(409).json({
         success: false,
         message: `The intro email was already sent to ${row.introEmailSentTo || "this client"}.`,
@@ -3223,6 +3222,10 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
     row.introEmailSentAt = new Date();
     row.introEmailSentTo = email.recipient;
     row.introEmailMessageId = result.messageId || "";
+    if (row.importMetadata?.clientAutomationReviewPending) {
+      row.importMetadata.clientAutomationReviewPending = false;
+      row.markModified("importMetadata");
+    }
     await row.save();
     try {
       await ClientAutomationDelivery.findOneAndUpdate(

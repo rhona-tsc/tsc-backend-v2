@@ -1,3 +1,4 @@
+import {externalClientLink} from '../utils/bookingClientLinks.js';
 import { extraPayments, extrasWithPaymentFraction, partialExtrasReceiptRow } from '../utils/extraInvoicePayments.js';
 import { balanceDueISO } from '../utils/balanceDueDate.js';
 // controllers/invoicesController.js
@@ -2784,6 +2785,8 @@ export const serveBoardInvoicePdf = async (req, res) => {
     if (!row) return res.status(404).send("Invoice not found");
 
     const invoiceTypeNorm = String(req.query?.invoiceType || "main").toLowerCase();
+    const sharedInvoice = externalClientLink(row, 'invoice');
+    if (invoiceTypeNorm === 'main' && sharedInvoice) return res.redirect(302, sharedInvoice);
     if (isEncoreBooking(row) && invoiceTypeNorm !== "extras") {
       return res.status(409).send("The original booking payment is arranged through Encore. Use the extras invoice.");
     }

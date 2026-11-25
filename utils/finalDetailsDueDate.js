@@ -116,6 +116,8 @@ export const thursdayInWeekBeforeISO = (eventDateValue) => {
 };
 
 export const finalDetailsDueISO = (row = {}) => {
+  const agreed = isoDate(row.importMetadata?.clientEventSheetDueDateISO);
+  if (agreed) return agreed;
   const eventISO = isoDate(row.eventDateISO || row.eventDate || row.date);
   if (!eventISO) return "";
   const standardISO = thursdayInWeekBeforeISO(eventISO);
