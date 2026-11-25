@@ -8,6 +8,13 @@ const DeferredAvailabilitySchema = new mongoose.Schema(
     actId: { type: mongoose.Schema.Types.ObjectId, index: true, required: true },
     lineupId: { type: mongoose.Schema.Types.ObjectId, index: true },
     availabilityId: { type: mongoose.Schema.Types.ObjectId, index: true }, // AvailabilityModel _id
+    enquiryId: { type: String, index: true },
+    requestId: { type: String },
+    requestKey: { type: String },
+    messageSidOut: { type: String },
+    outboundSentAt: { type: Date },
+    fee: { type: String },
+    duties: { type: String },
     dateISO: { type: String, index: true, required: true },
     phone: { type: String, index: true, required: true },
     slotIndex: { type: Number, default: 0, index: true },

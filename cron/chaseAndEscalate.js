@@ -1,3 +1,4 @@
+import { availabilityEnquiryScopeState } from '../services/availabilityEnquiryScope.js';
 import {activeAllocationHold} from '../utils/bookingAllocationPolicy.js';
 // cron/chaseAndEscalate.js
 import EnquiryMessage from "../models/EnquiryMessage.js";
@@ -139,49 +140,8 @@ const sendAvailabilityReminder = async ({ row, final = false }) => {
   });
 };
 
-export const availabilityReminderScopeState = async (row) => {
-  if (!row?.enquiryId || !row.actId || !row.lineupId || !row.dateISO) {
-    return { active: false, reason: "missing-exact-scope" };
-  }
-  if (await findPriorAvailabilityDecline({
-    dateISO: row.dateISO, musicianId: row.musicianId,
-    phone: row.phone, formattedAddress: row.formattedAddress,
-  })) return { active: false, reason: "musician-declined-date-or-location" };
-  const references = [{ enquiryRef: row.enquiryId }];
-  if (mongoose.isValidObjectId(row.enquiryId)) {
-    references.push({ _id: row.enquiryId }, { enquiryId: row.enquiryId });
-  }
-  const scope = {
-    enquiryId: row.enquiryId, actId: row.actId,
-    lineupId: row.lineupId, dateISO: row.dateISO,
-  };
-  const enquiry = await EnquiryBoardItem.findOne({
-    $or: references, actId: row.actId, lineupId: String(row.lineupId),
-    eventDateISO: row.dateISO,
-  }).select("status").lean();
-  // Contacted enquiries already have a client/agency response in this workflow.
-  // Closed, converted and uncorrelated enquiries must not restart musician outreach.
-  if (!enquiry || !["open", "qualified"].includes(enquiry.status)) {
-    return { active: false, reason: "enquiry-not-awaiting-availability" };
-  }
-  if (await BookingBoardItem.exists({
-    bookingRef: row.enquiryId, actId: row.actId, eventDateISO: row.dateISO,
-  })) return { active: false, reason: "converted-to-booking" };
-  if (await AvailabilityModel.exists({ ...scope, reply: "yes" })) {
-    return { active: false, reason: "lead-already-confirmed-for-enquiry" };
-  }
-  const act = await Act.findById(row.actId).select("lineups").lean();
-  const lineup = act?.lineups?.find(item =>
-    [String(item._id), String(item.lineupId)].includes(String(row.lineupId)));
-  if (!lineup) return { active: false, reason: "lineup-not-found" };
-  const member = lineup.bandMembers?.find(item =>
-    (item.musicianId && String(item.musicianId) === String(row.musicianId)) ||
-    (toE164(item.phoneNumber || item.phone) && toE164(item.phoneNumber || item.phone) === toE164(row.phone)));
-  if (member?.skipAvailabilityChecks === true) {
-    return { active: false, reason: "musician-outreach-disabled" };
-  }
-  return { active: true };
-};
+export { availabilityEnquiryScopeState as availabilityReminderScopeState };
+const availabilityReminderScopeState = availabilityEnquiryScopeState;
 
 export const runAvailabilityChasers = createAvailabilityReminderRunner({
   Availability: AvailabilityModel,

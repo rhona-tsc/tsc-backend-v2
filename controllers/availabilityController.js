@@ -1,3 +1,6 @@
+import { createDeputyEscalationService, deputyEscalationEligibility } from '../services/availabilityDeputyEscalationService.js';
+import { availabilityEnquiryScopeState } from '../services/availabilityEnquiryScope.js';
+import { scheduledDeputyOffer } from '../services/scheduledDeputyOffer.js';
 import { isEnquiryOnlyLineup } from '../utils/websiteLineups.js';
 import { lineupsForEnquiry, bespokeLineupDescription, bespokeBookingAction, htmlEscape } from '../utils/enquiryLineupPresentation.js';
 import EnquiryBoardItem from '../models/enquiryBoardItem.js';
@@ -18,6 +21,7 @@ import Musician from "../models/musicianModel.js";
 import {
   sendSMSMessage,
   fetchInboundMessageTime,
+  fetchWhatsAppMessageStatus,
   sendWhatsAppText,
 } from "../utils/twilioClient.js";
 import DeferredAvailability from "../models/deferredAvailabilityModel.js";
@@ -120,197 +124,34 @@ function isBlockedRecipient(emailLike = "") {
 // ───────────────────────────────────────────────────────────────────────────────
 // 3h escalation helpers
 // ───────────────────────────────────────────────────────────────────────────────
-const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+const deputyEscalations = createDeputyEscalationService({
+  Availability: AvailabilityModel,
+  Deferred: DeferredAvailability,
+  getScopeState: row => availabilityEnquiryScopeState(row, { checkRecipient: false, allowContacted: true }),
+  getOriginalDelivery: async row => {
+    const message = await fetchWhatsAppMessageStatus(row.messageSidOut);
+    const normalized = value => String(value || '').replace(/\D/g, '').replace(/^0(?=7)/, '44');
+    return normalized(message?.to) === normalized(row.phone)
+      ? message : { status: 'recipient-mismatch' };
+  },
+  notifyDeputies: options => notifyDeputies(options),
+});
 
-/** Upsert a "ping deputies in 3h if no reply" job for a LEAD vocalist */
-export async function scheduleDeputyEscalation({
-  availabilityId,
-  actId,
-  lineupId,
-  dateISO,
-  phone,
-  slotIndex = 0,
-  formattedAddress = "TBC",
-  clientName = "",
-  clientEmail = "",
-}) {
-  try {
-    const dueAt = new Date(Date.now() + THREE_HOURS_MS);
-
-    await DeferredAvailability.findOneAndUpdate(
-      {
-        reason: "no-reply-3h",
-        actId,
-        dateISO,
-        phone,
-        slotIndex,
-        status: { $in: ["pending", "processing"] },
-      },
-      {
-        $setOnInsert: {
-          availabilityId,
-          lineupId,
-          formattedAddress,
-          clientName,
-          clientEmail,
-          dueAt,
-          status: "pending",
-        },
-        $set: {
-          // if it already exists as pending/processing, refresh the dueAt forward
-          dueAt,
-        },
-      },
-      { new: true, upsert: true },
-    );
-
-    console.log("⏱️ [scheduleDeputyEscalation] job scheduled for", {
-      actId,
-      dateISO,
-      slotIndex,
-      phone,
-      dueAt,
-    });
-  } catch (e) {
-    console.warn("⚠️ [scheduleDeputyEscalation] failed:", e.message);
+export async function scheduleDeputyEscalation(options) {
+  try { return await deputyEscalations.schedule(options); }
+  catch (error) {
+    console.warn('[scheduleDeputyEscalation] held:', error.message);
+    return { scheduled: false, reason: error.message };
   }
 }
 
-/** Cancel any pending 3h escalation for a LEAD row (call on any reply) */
-export async function cancelDeputyEscalation({
-  actId,
-  dateISO,
-  phone,
-  slotIndex = 0,
-}) {
-  try {
-    const res = await DeferredAvailability.updateMany(
-      {
-        reason: "no-reply-3h",
-        actId,
-        dateISO,
-        phone,
-        slotIndex,
-        status: { $in: ["pending", "processing"] },
-      },
-      { $set: { status: "cancelled", processedAt: new Date() } },
-    );
-    if (res.modifiedCount) {
-      console.log("🧯 [cancelDeputyEscalation] cancelled", {
-        actId,
-        dateISO,
-        slotIndex,
-        phone,
-        cancelled: res.modifiedCount,
-      });
-    }
-  } catch (e) {
-    console.warn("⚠️ [cancelDeputyEscalation] failed:", e.message);
-  }
+export async function cancelDeputyEscalation(options) {
+  try { return await deputyEscalations.cancel(options); }
+  catch (error) { console.warn('[cancelDeputyEscalation] held:', error.message); }
 }
 
-/** Worker: processes due jobs and calls notifyDeputies if the lead hasn't replied */
-export async function processDueDeputyEscalations({ maxBatch = 20 } = {}) {
-  const now = new Date();
-
-  for (let i = 0; i < maxBatch; i++) {
-    // atomically claim one job
-    const job = await DeferredAvailability.findOneAndUpdate(
-      { status: "pending", dueAt: { $lte: now } },
-      { $set: { status: "processing", processingStartedAt: new Date() } },
-      { sort: { dueAt: 1 }, new: true },
-    );
-
-    if (!job) break; // nothing due
-
-    try {
-      // Try to fetch the original availability row (most accurate)
-      const row = job.availabilityId
-        ? await AvailabilityModel.findById(job.availabilityId).lean()
-        : await AvailabilityModel.findOne({
-            actId: job.actId,
-            dateISO: job.dateISO,
-            phone: job.phone,
-            slotIndex: job.slotIndex,
-            v2: true,
-          })
-            .sort({ createdAt: -1 })
-            .lean();
-
-      // If lead already replied, or deputies were already contacted, do nothing
-      if (row?.reply) {
-        await DeferredAvailability.updateOne(
-          { _id: job._id },
-          {
-            $set: {
-              status: "processed",
-              processedAt: new Date(),
-              error: "lead_already_replied",
-            },
-          },
-        );
-        continue;
-      }
-
-      const deputiesExist = await AvailabilityModel.exists({
-        actId: job.actId,
-        dateISO: job.dateISO,
-        slotIndex: job.slotIndex,
-        isDeputy: true,
-      });
-
-      if (deputiesExist) {
-        await DeferredAvailability.updateOne(
-          { _id: job._id },
-          {
-            $set: {
-              status: "processed",
-              processedAt: new Date(),
-              error: "already_escalated",
-            },
-          },
-        );
-        continue;
-      }
-
-      // Call your existing helper – we pass slotIndex so the right vocalist's deputies are pinged
-      await notifyDeputies({
-        actId: job.actId,
-        lineupId: row?.lineupId || job.lineupId || null,
-        dateISO: job.dateISO,
-        formattedAddress:
-          row?.formattedAddress || job.formattedAddress || "TBC",
-        clientName: row?.clientName || job.clientName || "",
-        clientEmail: row?.clientEmail || job.clientEmail || "",
-        slotIndex: typeof job.slotIndex === "number" ? job.slotIndex : null,
-        skipDuplicateCheck: false,
-        skipIfUnavailable: false,
-        enquiryId: row?.enquiryId || null,
-      });
-
-      await DeferredAvailability.updateOne(
-        { _id: job._id },
-        { $set: { status: "processed", processedAt: new Date() } },
-      );
-
-      console.log(
-        "📣 [processDueDeputyEscalations] deputies pinged (no reply in 3h)",
-        {
-          actId: job.actId,
-          dateISO: job.dateISO,
-          slotIndex: job.slotIndex,
-        },
-      );
-    } catch (e) {
-      console.error("❌ [processDueDeputyEscalations] job failed", e);
-      await DeferredAvailability.updateOne(
-        { _id: job._id },
-        {
-          $set: { status: "error", error: e.message, processedAt: new Date() },
-        },
-      );
-    }
-  }
+export async function processDueDeputyEscalations(options) {
+  return deputyEscalations.processDue(options);
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -1537,6 +1378,8 @@ export async function notifyDeputies({
   skipIfUnavailable = true, // currently unused in this snippet
   customDeputyList = null,
   enquiryId = null,
+  leadAvailabilityId = null,
+  inheritLeadOffer = false,
 }) {
   console.log("📢 [notifyDeputies] START", {
     actId,
@@ -1715,6 +1558,15 @@ export async function notifyDeputies({
       });
 
       try {
+        let offer = {};
+        if (inheritLeadOffer) {
+          const lead = leadAvailabilityId ? await AvailabilityModel.findById(leadAvailabilityId).lean() : null;
+          if (!lead || String(lead.actId) !== String(actId) || String(lead.lineupId) !== String(lineupId) ||
+              lead.dateISO !== dateISO || lead.enquiryId !== inheritedEnquiryId || lead.slotIndex !== targetSlotIndex ||
+              deputyEscalationEligibility(lead) ||
+              !(await availabilityEnquiryScopeState(lead, { checkRecipient: false, allowContacted: true })).active) break;
+          offer = scheduledDeputyOffer(lead, deputy);
+        }
         const outcome = await triggerAvailabilityRequest({
           automaticDeputy: true,
           automaticDeputyEssentialRoles: vocalist.additionalRoles || [],
@@ -1752,6 +1604,7 @@ export async function notifyDeputies({
           },
 
           inheritedDuties: vocalist.instrument || "Vocalist",
+          ...offer,
           skipDuplicateCheck: false,
         });
         if (!outcome?.success || !outcome?.sent) {
@@ -1773,7 +1626,8 @@ export async function notifyDeputies({
       } catch (error) {
         if (
           error?.code === "DEPUTY_IDENTITY_MISMATCH" ||
-          error?.code === "DEPUTY_NOT_ELIGIBLE_FOR_VOCAL_SLOT"
+          error?.code === "DEPUTY_NOT_ELIGIBLE_FOR_VOCAL_SLOT" ||
+          error?.code === "AVAILABILITY_CONTACT_RESTRICTED"
         ) {
           console.error(
             "🛑 [notifyDeputies] Skipping deputy with mismatched contact identity",
@@ -1800,6 +1654,7 @@ export async function notifyDeputies({
   }
 
   console.log("✅ [notifyDeputies] COMPLETE", { deputiesContacted: totalSent });
+  return { sent: totalSent };
 }
 
 export async function triggerNextDeputy({
@@ -4464,7 +4319,7 @@ if (!isDeputy && shouldAlwaysSkip) {
         }
       }
 
-      finalFee = Math.round(parsedBase + travelFee);
+      finalFee = Math.round((parsedBase + travelFee) * 100) / 100;
 
       console.log("💷 Deputy fee (inherit + travel)", {
         parsedBase,
@@ -5098,6 +4953,9 @@ export const processAvailabilityReplyFlow = async ({
     );
 
     await cancelDeputyEscalation({
+      availabilityId: updated._id,
+      enquiryId: updated.enquiryId,
+      lineupId: updated.lineupId,
       actId,
       dateISO,
       phone: updated.phone,
@@ -5328,6 +5186,9 @@ export const processAvailabilityReplyFlow = async ({
     }
 
     await cancelDeputyEscalation({
+      availabilityId: updated._id,
+      enquiryId: updated.enquiryId,
+      lineupId: updated.lineupId,
       actId,
       dateISO,
       phone: updated.phone,

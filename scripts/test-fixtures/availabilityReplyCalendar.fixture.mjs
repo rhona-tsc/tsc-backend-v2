@@ -30,6 +30,7 @@ mock.module('../../controllers/googleController.js', { namedExports: {
 } });
 mock.module('../../utils/sendEmail.js', { defaultExport: noExternal });
 mock.module('../../utils/twilioClient.js', { defaultExport: {}, namedExports: {
+    fetchWhatsAppMessageStatus: () => { throw new Error("No provider calls allowed in calendar fixture"); },
   sendWhatsAppMessage: noExternal, sendSMSMessage: noExternal,
   sendWhatsAppText: async (phone, body) => { acknowledgements.push({ phone, body }); },
   fetchInboundMessageTime: noExternal, fetchTwilioConversation: noExternal,
