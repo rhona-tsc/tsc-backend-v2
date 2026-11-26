@@ -2,6 +2,7 @@ import { changeOriginalRevision } from '../controllers/originalsRevisionControll
 import { editOriginalProjectSubmission, saveOriginalProjectSubmission } from '../controllers/originalsController.js';
 import { allowOriginalInvitationRequest } from "../services/originalsInvitationAccessService.js";
 import { deleteOriginalUploadedRecording } from '../controllers/originalsDraftAssetController.js';
+import { removeOriginalGuide } from '../controllers/originalsGuideController.js';
 import { getOriginalStemPreview, confirmOriginalStemReview, streamOriginalAudio } from '../controllers/originalsRecordingController.js';
 import { showOriginalsEmailListeningPage, streamOriginalsEmailRecording } from '../controllers/originalsEmailPlaybackController.js';
 import { changeOriginalProjectRole } from '../controllers/originalsRolesController.js';
@@ -132,6 +133,7 @@ router.get("/projects/:id/workspace", getOriginalProjectWorkspace);
 router.get("/projects/:id/review-status", getOriginalReviewStatus);
 router.post("/projects/:id/assets", upload.single("file"), uploadOriginalAsset);
 router.delete('/assets/:assetId', deleteOriginalUploadedRecording);
+router.delete('/assets/:assetId/guide', removeOriginalGuide);
 router.get("/assets/:assetId/access", accessOriginalAsset);
 router.get('/assets/:assetId/audio', streamOriginalAudio);
 router.get('/assets/:assetId/recording-preview', getOriginalStemPreview);
