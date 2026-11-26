@@ -465,7 +465,7 @@ const completeAcceptedAssignment = async ({
   return { eventId, email };
 };
 
-const updateBoardRoleSlot = async (msg, changes = {}) => {
+export const updateBoardRoleSlot = async (msg, changes = {}) => {
   const board = msg?.bookingBoardItemId
     ? await bookingBoardItem.findById(msg.bookingBoardItemId)
     : await resolveBoardItem(msg?.bookingRef);
@@ -518,7 +518,8 @@ const updateBoardRoleSlot = async (msg, changes = {}) => {
     lastCheckedAt: new Date(),
   };
   await board.save();
-
+  const booking = await resolveSourceBooking(board);
+  await syncConfirmedBookingAssignments({board,booking,BookingModel:Booking});
   return board;
 };
 

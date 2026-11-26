@@ -87,6 +87,17 @@ test('website quick-reply corrections withdraw confirmed allocations and mirror 
  assert.equal(await withdrawBookingForAvailability(row,'noloc'),true);
  assert.equal(f.availability.length,count);
 });
+test('replacement offers and acceptances update every saved booking allocation mirror',async t=>{
+ const f=await setup(t);const {updateBoardRoleSlot}=await import('../controllers/allocationController.js');
+ const replacement='777777777777777777777777';
+ await updateBoardRoleSlot({bookingBoardItemId:boardId,roleSlotId:'keyboard-1'},{musicianId:replacement,name:'Replacement Musician',status:'offered'});
+ await updateBoardRoleSlot({bookingBoardItemId:boardId,roleSlotId:'keyboard-1'},{musicianId:replacement,name:'Replacement Musician',status:'confirmed'});
+ const write=f.coreWrites.at(-1);
+ for(const field of ['assignedMusicians','bookingMusicians','bandLineup','bookingDetails.assignedMusicians']){
+  assert.equal(write[field][0].musicianId,replacement);assert.equal(write[field][0].status,'confirmed');assert.equal(write[field][0].fee,400);
+  assert.equal(write[field][1].musicianId,person);assert.equal(write[field][1].status,'confirmed');
+ }
+});
 
 test('role holds require admin access, a reason and an unfilled role, and preserve fee and other roles',async t=>{
  const f=await setup(t);t.mock.method(Job,'updateMany',async()=>({modifiedCount:0}));
