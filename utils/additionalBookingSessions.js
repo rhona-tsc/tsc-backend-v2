@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import {buildBandSheetShareUrl} from './bandSheetUrl.js';
-import {calendarMusicianProfiles,calendarMusicianProfileUrl} from './calendarMusicianProfiles.js';
+import {calendarMusicianProfiles,calendarMusicianProfileUrl,calendarMusicianDisplayName} from './calendarMusicianProfiles.js';
 const clean = value => String(value || '').trim();
 const accepted = member => ['accepted','confirmed'].includes(clean(member.status).toLowerCase());
 
@@ -31,7 +31,7 @@ export async function syncAdditionalBookingSessions({cal,calendarId,booking,assi
     });
     const requestBody={
       summary:clean(session.title), location:clean(session.location || booking.venueAddress || booking.venue),
-      description:[`Parent booking: ${booking.bookingId}`,clean(session.notes),'',...members.map(member=>[`${clean(member.name)} — ${clean(member.role || member.instrument)}`,calendarMusicianProfileUrl(member)].filter(Boolean).join('\n')),'',`BAND EVENT SHEET: ${bandLink}`].join('\n'),
+      description:[`Parent booking: ${booking.bookingId}`,clean(session.notes),'',...members.map(member=>[`${calendarMusicianDisplayName(member)} — ${clean(member.role || member.instrument)}`,calendarMusicianProfileUrl(member)].filter(Boolean).join('\n')),'',`BAND EVENT SHEET: ${bandLink}`].join('\n'),
       start:{dateTime:`${session.dateISO}T${session.arrivalTime}:00`,timeZone:'Europe/London'},
       end:{dateTime:`${session.dateISO}T${session.endTime}:00`,timeZone:'Europe/London'},
       attendees,extendedProperties:{private:{parentBookingRef:clean(booking.bookingId),additionalSessionKey:clean(session.key)}}

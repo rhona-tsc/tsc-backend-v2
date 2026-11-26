@@ -27,6 +27,6 @@ export function withdrawalAvailabilityRecord({ board, assignment, phone, reason,
     replyHistory: [{ reply: 'unavailable', occurredAt: now, receivedAt: now,
       source: source || 'musician_portal', body: String(reason || '').trim(),
       evidence: 'Confirmed booking withdrawal' }],
-    inbound: { source, body: String(reason || '').trim(), readByAdmin: false },
+    inbound: { source, body: String(reason || '').trim() || 'Musician withdrew availability for this confirmed booking.', readByAdmin: false },
   };
 }

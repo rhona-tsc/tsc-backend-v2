@@ -4692,6 +4692,10 @@ export const processAvailabilityReplyFlow = async ({
 }) => {
   const currentReplyFilter = { _id: updated._id, ...(updated.inbound?.sid ? { "inbound.sid": updated.inbound.sid } : {}), reply: updated.reply };
   if (!await AvailabilityModel.exists(currentReplyFilter)) return;
+  if(updated?.bookingId && ['no','noloc','nolocation','unavailable'].includes(reply)) {
+    const {withdrawBookingForAvailability}=await import('./allocationController.js');
+    if(await withdrawBookingForAvailability(updated,reply))return;
+  }
   const pickPicLocal = (m = {}) =>
     m.photoUrl ||
     m.musicianProfileImageUpload ||
@@ -5489,6 +5493,11 @@ export const twilioInbound = async (req, res) => {
           /^whatsapp:/i.test(String(bodyObj?.From || "")) ||
           Boolean(bodyObj?.WaId);
         const usedQuickReply = Boolean(btnId || btnText);
+        if(/^CAL_(?:YES|NO|LOC):/i.test(btnId)) {
+          const {handleCalendarDeclineReply}=await import('../services/calendarDeclineService.js');
+          await handleCalendarDeclineReply({payload:btnId,from:fromRaw,sid:bodyObj.MessageSid});
+          return;
+        }
 
         // Deterministic join to the exact outbound message we sent
         const repliedSid =
