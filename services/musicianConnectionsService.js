@@ -1,3 +1,6 @@
+import { mergePerformanceBookings } from './historicalMusicianPerformanceService.js';
+import { confirmedRoster, completedBooking } from '../utils/performanceRoster.js';
+export { confirmedRoster, completedBooking } from '../utils/performanceRoster.js';
 import mongoose from 'mongoose';
 
 const text = value => String(value || '').trim();
@@ -26,16 +29,6 @@ export function splitBandMemberships(musician, acts) {
   const unique = list => [...new Map(list.map(a => [a._id, a])).values()].sort((a,b) => a.name.localeCompare(b.name));
   return { regularBands: unique(regularBands), deputyBands: unique(deputyBands) };
 }
-export function confirmedRoster(booking) {
-  const rows = booking.assignedMusicians?.length ? booking.assignedMusicians : booking.bookingDetails?.assignedMusicians?.length ? booking.bookingDetails.assignedMusicians : booking.bookingMusicians?.length ? booking.bookingMusicians : booking.bandLineup || [];
-  return rows.filter(m => ['accepted', 'confirmed', 'completed'].includes(text(m.status).toLowerCase()) && (!m.withdrawnAt || new Date(m.acceptedAt || m.respondedAt || 0) > new Date(m.withdrawnAt)));
-}
-export function completedBooking(booking, today) {
-  if (['cancelled', 'canceled', 'provisional', 'enquiry', 'declined'].includes(text(booking.bookingStatus || booking.status).toLowerCase())) return false;
-  const value = booking.eventDateISO || booking.date || booking.eventDate || booking.bookingDetails?.eventDate;
-  const date = value instanceof Date ? value.toISOString().slice(0,10) : text(value).slice(0,10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(date) && date < today;
-}
 export const musicianConnectionCard = m => ({
   _id: String(m._id), name: [m.firstName, text(m.lastName).slice(0,1)].filter(Boolean).join(' '),
   image: image(m.profilePhoto) || image(m.profilePicture) || image(m.additionalImages),
@@ -54,13 +47,40 @@ export async function getMusicianConnections(musician, { includeMusicians = true
   const bands = splitBandMemberships(musician, acts);
   if (!includeMusicians) return { ...bands, musicians: [] };
   const today = new Intl.DateTimeFormat('en-CA', { timeZone:'Europe/London', year:'numeric', month:'2-digit', day:'2-digit' }).format(now);
-  const [board, core] = await Promise.all(['bookingboarditems', 'bookings'].map(collection => db.collection(collection).find(identityQuery(identities, rosterPaths)).project({bookingRef:1, bookingId:1, sourceBookingId:1, eventDateISO:1, date:1, eventDate:1, status:1, bookingStatus:1, assignedMusicians:1, bookingDetails:1, bookingMusicians:1, bandLineup:1}).maxTimeMS(10000).toArray()));
-  // The booking board is authoritative when an older core booking also exists.
-  const bookings = [...board, ...core.filter(b => !board.some(row => String(row.bookingId || row.sourceBookingId || '') === String(b._id) || (row.bookingRef && row.bookingRef === b.bookingRef)))];
+  let [board, core] = await Promise.all(['bookingboarditems', 'bookings'].map(collection => db.collection(collection).find(identityQuery(identities, rosterPaths)).project({bookingRef:1, bookingId:1, sourceBookingId:1, eventDateISO:1, date:1, eventDate:1, status:1, bookingStatus:1, assignedMusicians:1, bookingDetails:1, bookingMusicians:1, bandLineup:1}).maxTimeMS(10000).toArray()));
+  // Also load authoritative rows that removed this musician: querying only the
+  // subject's roster would otherwise resurrect a stale source booking.
+  if (core.length) {
+    const coreIds = core.map(b => String(b._id));
+    const refs = core.flatMap(b => [b.bookingRef, b.bookingId]).filter(Boolean).map(String);
+    const counterpartRows = await db.collection('bookingboarditems').find({$or:[
+      {bookingId:{$in:coreIds.flatMap(id=>mongoose.isValidObjectId(id)?[id,new mongoose.Types.ObjectId(id)]:[id])}},
+      {sourceBookingId:{$in:coreIds.flatMap(id=>mongoose.isValidObjectId(id)?[id,new mongoose.Types.ObjectId(id)]:[id])}},
+      {bookingRef:{$in:refs}},
+    ]}).project({bookingRef:1,bookingId:1,sourceBookingId:1,eventDateISO:1,date:1,eventDate:1,status:1,bookingStatus:1,assignedMusicians:1,bookingDetails:1,bookingMusicians:1,bandLineup:1}).maxTimeMS(10000).toArray();
+    board = [...new Map([...board,...counterpartRows].map(b=>[String(b._id),b])).values()];
+  }
+  const bookings = mergePerformanceBookings(board,core);
   const peers = bookings.filter(b => completedBooking(b, today)).flatMap(b => {
     const roster = confirmedRoster(b);
     return roster.some(m => matchesMusician(m, identities)) ? roster.filter(m => !matchesMusician(m, identities)) : [];
   });
+  const history = await db.collection('musicianperformancehistories').find({musicianIds:{$in:[...identities.ids]},status:'verified',eventDateISO:{$lt:today}})
+    .project({musicianIds:1,bookingRef:1,bookingRecordId:1}).maxTimeMS(10000).toArray();
+  const linkedRefs = [...new Set(history.map(row=>row.bookingRef).filter(Boolean))];
+  const linkedRows = linkedRefs.length ? await db.collection('bookingboarditems').find({bookingRef:{$in:linkedRefs}})
+    .project({bookingRef:1,eventDateISO:1,status:1,bookingStatus:1,assignedMusicians:1,bookingDetails:1,bookingMusicians:1,bandLineup:1}).maxTimeMS(10000).toArray() : [];
+  for (const record of history) {
+    const linked = linkedRows.find(row=>row.bookingRef === record.bookingRef);
+    // Linked bookings continue to use the current final allocation, including
+    // cancellations and withdrawals, rather than a frozen calendar snapshot.
+    if (linked) {
+      if (!completedBooking(linked,today)) continue;
+      const hasAllocation = [linked.assignedMusicians,linked.bookingDetails?.assignedMusicians,linked.bookingMusicians,linked.bandLineup].some(rows=>rows?.some(m=>m && typeof m.status === 'string'));
+      if (hasAllocation) continue; // Already reconciled through bookings above.
+    }
+    for (const musicianId of record.musicianIds || []) if (!identities.ids.has(String(musicianId))) peers.push({musicianId});
+  }
   if (!peers.length) return {...bands, musicians:[]};
   const peerIds = peers.map(p => String(p.musicianId || '')).filter(id => mongoose.isValidObjectId(id)).map(id => new mongoose.Types.ObjectId(id));
   const peerEmails = [...new Set(peers.map(p => email(p.email)).filter(Boolean))];
