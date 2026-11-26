@@ -1,4 +1,5 @@
 import { musicianDirectoryVisibility, canSeeMusicianInDirectory } from '../services/musicianDirectoryVisibility.js';
+import { findMusicianByIdOrSlug } from '../services/musicianIdentityService.js';
 import express from "express";
 import Stripe from "stripe";
 import multer from "multer";
@@ -58,18 +59,6 @@ if (!stripeSecretKey) {
 
 const isObjectIdLike = (value = "") => mongoose.Types.ObjectId.isValid(String(value || ""));
 
-const findMusicianByIdOrSlug = async (value) => {
-  const raw = String(value || "").trim();
-  if (!raw) return null;
-
-  if (isObjectIdLike(raw)) {
-    const byId = await musicianModel.findById(raw).lean();
-    if (byId) return byId;
-  }
-
-  return musicianModel.findOne({ musicianSlug: raw.toLowerCase() }).lean();
-};
-
 const sanitizePublicMusician = (doc) => {
   if (!doc || doc.privateTestProfile || doc.profileDeletedAt) return null;
   const publicFields = [
@@ -87,6 +76,10 @@ const sanitizePublicMusician = (doc) => {
     "profilePhoto",
     "coverHeroImage",
     "additionalImages",
+    "digitalWardrobeBlackTie",
+    "digitalWardrobeFormal",
+    "digitalWardrobeSmartCasual",
+    "digitalWardrobeSessionAllBlack",
     "instrumentation",
     "vocals",
     "other_skills",
@@ -961,7 +954,7 @@ router.get("/profile/:idOrSlug", async (req, res) => {
       isCanonicalMatch: Boolean(doc.musicianSlug)
         ? String(idOrSlug) === String(doc.musicianSlug)
         : String(idOrSlug) === String(doc._id),
-      shouldRedirectToSlug: isObjectIdLike(idOrSlug) && !!doc.musicianSlug,
+      shouldRedirectToSlug: !!doc.musicianSlug && String(idOrSlug) !== doc.musicianSlug,
     });
   } catch (err) {
     console.error("❌ Error fetching musician profile:", err);
@@ -1011,7 +1004,7 @@ const readProtectedMusicianByIdOrSlug = async (req, res) => {
       isCanonicalMatch: Boolean(doc.musicianSlug)
         ? String(idOrSlug) === String(doc.musicianSlug)
         : String(idOrSlug) === String(doc._id),
-      shouldRedirectToSlug: isObjectIdLike(idOrSlug) && !!doc.musicianSlug,
+      shouldRedirectToSlug: !!doc.musicianSlug && String(idOrSlug) !== doc.musicianSlug,
     });
   } catch (err) {
     console.error("❌ Error fetching protected musician profile:", err);
@@ -1489,7 +1482,7 @@ const readMusicianByIdOrSlug = async (req, res) => {
       isCanonicalMatch: Boolean(doc.musicianSlug)
         ? String(idOrSlug) === String(doc.musicianSlug)
         : String(idOrSlug) === String(doc._id),
-      shouldRedirectToSlug: isObjectIdLike(idOrSlug) && !!doc.musicianSlug,
+      shouldRedirectToSlug: !!doc.musicianSlug && String(idOrSlug) !== doc.musicianSlug,
     });
   } catch (err) {
     console.error("❌ Error fetching musician profile (legacy):", err);

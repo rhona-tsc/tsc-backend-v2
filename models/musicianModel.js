@@ -74,6 +74,12 @@ const musicianSchema = new mongoose.Schema(
     },
     musicianId: { type: mongoose.Schema.Types.ObjectId, index: true },
     musicianSlug: { type: String, unique: true, sparse: true, index: true },
+    mergedIntoMusicianId: { type: mongoose.Schema.Types.ObjectId, ref: 'musician', index: true },
+    mergedAt: { type: Date },
+    mergedProfileIds: { type: [String], default: undefined },
+    mergedProfileSlugs: { type: [String], default: undefined, index: true },
+    mergedProfileEmails: { type: [String], default: undefined },
+    mergedProfileContacts: { type: [mongoose.Schema.Types.Mixed], default: undefined },
 
     tagLine: { type: String, maxlength: 160 },
     tagLineSource: {
