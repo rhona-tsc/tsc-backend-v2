@@ -1,3 +1,4 @@
+import {sharedEmergencyNumber} from '../utils/emergencyLine.js';
 import { balanceDueISO, newBalanceDueISO, BALANCE_PAYMENT_POLICY } from '../utils/balanceDueDate.js';
 import { linkBookingEnquiries } from '../services/websiteEnquiryService.js';
 import { loadVocalistChoices, validateVocalistSelection } from "../services/vocalistChoiceService.js";
@@ -3067,6 +3068,7 @@ export const ensureEmergencyContact = async (req, res) => {
     // If already present, refresh the routing targets from the current
     // confirmed allocation and mirror it to the event sheet.
     if (book?.contactRouting?.ivrCode && book?.contactRouting?.proxyNumber) {
+      book.contactRouting.proxyNumber = sharedEmergencyNumber();
       if (targets.length) {
         book.contactRouting.targets = targets;
       }
@@ -3074,11 +3076,14 @@ export const ensureEmergencyContact = async (req, res) => {
       book.eventSheet.emergencyContact = mirrorEmergencyContact(
         book.contactRouting,
       );
-      await book.save();
+      await Booking.findByIdAndUpdate(book._id, { $set: {
+        contactRouting: book.contactRouting.toObject?.() || book.contactRouting,
+        'eventSheet.emergencyContact': book.eventSheet.emergencyContact,
+      } });
       return res.json({ success: true, booking: book });
     }
 
-    if (!process.env.TWILIO_SHARED_IVR_NUMBER) {
+    if (!sharedEmergencyNumber()) {
       return res.status(500).json({
         success: false,
         message: "TWILIO_SHARED_IVR_NUMBER is not configured",
@@ -3094,7 +3099,10 @@ export const ensureEmergencyContact = async (req, res) => {
         message: "The booking needs a valid event date before its emergency line can be created.",
       });
     }
-    await book.save();
+    await Booking.findByIdAndUpdate(book._id, { $set: {
+        contactRouting: book.contactRouting.toObject?.() || book.contactRouting,
+        'eventSheet.emergencyContact': book.eventSheet.emergencyContact,
+      } });
 
     return res.json({
       success: true,

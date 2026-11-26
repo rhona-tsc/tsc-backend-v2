@@ -1,3 +1,4 @@
+import voiceIvrRoutes from './routes/voiceIvr.js';
 import {runBookingAllocationEscalation} from './services/bookingAllocationReview.js';
 import { startMemoryMonitor } from "./utils/memoryMonitor.js";
 import { deliverOriginalRoundLifecycleNotifications } from "./services/originalsRoundLifecycleNotificationService.js";
@@ -615,6 +616,7 @@ app.use("/api/finance", requireStaffAuth);
 app.use('/api/voice-enquiries', voiceEnquiryRoutes);
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ extended: true, limit: "100mb" }));
+app.use(voiceIvrRoutes);
 
 /* -------------------------------------------------------------------------- */
 /*                         DB + Cloudinary boot/config                         */

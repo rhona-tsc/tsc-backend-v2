@@ -5,6 +5,15 @@ import Booking from "../models/bookingModel.js";
 import { DateTime } from "luxon";
 
 const router = express.Router();
+// Only Twilio's signed webhooks may resolve codes or initiate forwarding.
+router.use('/voice/ivr', express.urlencoded({extended:false,limit:'16kb'}), (req,res,next) => {
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const base = String(process.env.BACKEND_PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/,'');
+  if (!token || !twilio.validateRequest(token,req.get('X-Twilio-Signature') || '',base+req.originalUrl,req.body || {})) return res.sendStatus(403);
+  res.set('Cache-Control','no-store');
+  next();
+});
+
 const TZ = "Europe/London";
 const VOICEMAIL_MAXLEN = 90;     // seconds
 const LEG_TIMEOUT_SEC = 20;      // ring each target this long
@@ -15,7 +24,7 @@ function withinWindow(book) {
   const now = DateTime.now().setZone(TZ);
   const from = book?.contactRouting?.activeFrom ? DateTime.fromJSDate(book.contactRouting.activeFrom).setZone(TZ) : null;
   const until = book?.contactRouting?.activeUntil ? DateTime.fromJSDate(book.contactRouting.activeUntil).setZone(TZ) : null;
-  if (!from || !until) return false;
+  if (book?.contactRouting?.active === false || !from || !until) return false;
   return now >= from && now <= until;
 }
 
@@ -90,7 +99,7 @@ router.post("/voice/ivr", async (req, res) => {
 router.post("/voice/ivr/hunt", async (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
   const code = String(req.query.code || req.body.code || "").replace(/\D+/g, "");
-  const idx = Number(req.query.idx ?? req.body.idx ?? 0) || 0;
+  const idx = Math.max(0, Math.floor(Number(req.query.idx ?? req.body.idx ?? 0) || 0));
 
   const booking = await loadBookingByCode(code);
   if (!booking) {
@@ -98,6 +107,10 @@ router.post("/voice/ivr/hunt", async (req, res) => {
     return res.type("text/xml").send(twiml.toString());
   }
 
+  if (!withinWindow(booking)) {
+    sayHang(twiml, "This emergency line is not active for this event at the moment.");
+    return res.type("text/xml").send(twiml.toString());
+  }
   const targets = asArray(booking?.contactRouting?.targets).sort((a, b) => (a?.priority ?? 1) - (b?.priority ?? 1));
   const target = targets[idx];
 
@@ -141,7 +154,7 @@ router.post("/voice/ivr/hunt", async (req, res) => {
 router.post("/voice/ivr/hunt-result", async (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
   const code = String(req.query.code || req.body.code || "").replace(/\D+/g, "");
-  const idx = Number(req.query.idx ?? req.body.idx ?? 0) || 0;
+  const idx = Math.max(0, Math.floor(Number(req.query.idx ?? req.body.idx ?? 0) || 0));
 
   // Twilio sends DialCallStatus: completed | no-answer | busy | failed | canceled
   const status = String(req.body?.DialCallStatus || "").toLowerCase();

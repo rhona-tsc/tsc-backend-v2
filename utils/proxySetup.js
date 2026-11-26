@@ -1,3 +1,5 @@
+import {sharedEmergencyNumber} from './emergencyLine.js';
+import crypto from 'node:crypto';
 // utils/proxySetup.js
 import { DateTime } from "luxon";
 
@@ -30,13 +32,13 @@ export function setSharedIVR(book, { targets } = {}) {
   const activeFrom = gigStart.minus({ days: 1 }).set({ hour: 17 });
   const activeUntil = gigStart.plus({ days: 1 }).set({ hour: 2 });
 
-  const ivrCode = ("" + Math.floor(100000 + Math.random()*900000)).slice(0,5); // 5 digits
+  const ivrCode = String(book.contactRouting?.ivrCode || crypto.randomInt(10000, 100000));
 
   book.contactRouting = {
     ...(book.contactRouting || {}),
     provider: "twilio",
     mode: "shared_ivr",
-    proxyNumber: process.env.TWILIO_SHARED_IVR_NUMBER, // "+44..."
+    proxyNumber: sharedEmergencyNumber(), // "+44..."
     ivrCode,
     activeFrom: activeFrom.toJSDate(),
     activeUntil: activeUntil.toJSDate(),
@@ -50,7 +52,7 @@ export function setSharedIVR(book, { targets } = {}) {
 
   book.eventSheet = book.eventSheet || {};
   book.eventSheet.emergencyContact = {
-    number: process.env.TWILIO_SHARED_IVR_NUMBER,
+    number: sharedEmergencyNumber(),
     ivrCode,
     note: book.eventSheet.emergencyContact?.note
       || "Emergency contact active from 5pm the day before and on the event day.",
