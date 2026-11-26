@@ -8,6 +8,7 @@ import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import { autosaveMusicianMedia, emailContract } from "../controllers/musicianController.js";
 import upload from "../middleware/multer.js";
+import receiveMusicianVideo from '../middleware/musicianVideoUpload.js';
 import agentAuth from "../middleware/agentAuth.js";
 import verifyToken from "../middleware/musicianAuth.js";
 import musicianModel from "../models/musicianModel.js";
@@ -39,6 +40,7 @@ import {
   refreshMusicianVideoSubmission,
   setPreferredMusicianVideo,
   uploadMusicianVideo,
+  authoriseMusicianVideoUpload,
   getMusicianVideoThumbnail,
   uploadMusicianVideoThumbnail,
   reviewMusicianVideoThumbnail,
@@ -52,7 +54,7 @@ const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: "2024-06-20" })
   : null;
 
-router.post("/:id/video-submissions", verifyToken, upload.single("video"), uploadMusicianVideo);
+router.post("/:id/video-submissions", verifyToken, authoriseMusicianVideoUpload, receiveMusicianVideo, uploadMusicianVideo);
 router.get("/:id/video-submissions", verifyToken, listMyMusicianVideos);
 router.post("/:id/video-submissions/:submissionId/refresh", verifyToken, refreshMusicianVideoSubmission);
 router.patch("/:id/video-submissions/:submissionId/preferred", verifyToken, setPreferredMusicianVideo);

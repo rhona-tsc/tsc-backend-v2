@@ -1,6 +1,9 @@
 import { getMusicianConnections } from '../services/musicianConnectionsService.js';
 import mongoose from "mongoose";
 import { v2 as cloudinary } from "cloudinary";
+import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { VIDEO_MIMES } from '../middleware/musicianVideoUpload.js';
 import musicianModel from "../models/musicianModel.js";
 import musicianVideoSubmissionModel from "../models/musicianVideoSubmissionModel.js";
 import { extractModerationFlags, getAzureVideoIndex, submitVideoToAzure } from "../services/videoModerationService.js";
@@ -11,7 +14,6 @@ import {
   withApplicantPriority,
 } from "../services/deputyApplicantPriorityService.js";
 
-const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
 const clean = (value = "") => String(value || "").trim();
 
 const requesterId = (req) => clean(req.user?.id || req.user?._id || req.user?.musicianId);
@@ -20,7 +22,16 @@ const isAgent = (req) => ["agent", "admin", "superadmin"].includes(requesterRole
 
 const canAccessMusician = (req, musicianId) => isAgent(req) || requesterId(req) === String(musicianId);
 
+export const authoriseMusicianVideoUpload = (req, res, next) => {
+  const musicianId = clean(req.params.id || requesterId(req));
+  if (!mongoose.Types.ObjectId.isValid(musicianId) || !canAccessMusician(req, musicianId)) {
+    return res.status(403).json({ success: false, message: "You cannot upload videos for this profile" });
+  }
+  next();
+};
+
 const uploadPrivateVideo = (file, musicianId) => new Promise((resolve, reject) => {
+  const source = createReadStream(file.path);
   const stream = cloudinary.uploader.upload_stream(
     {
       folder: `musician-video-submissions/${musicianId}`,
@@ -29,9 +40,13 @@ const uploadPrivateVideo = (file, musicianId) => new Promise((resolve, reject) =
       use_filename: false,
       unique_filename: true,
     },
-    (error, result) => error ? reject(error) : resolve(result),
+    (error, result) => {
+      if (error) { source.destroy(error); reject(error); }
+      else resolve(result);
+    },
   );
-  stream.end(file.buffer);
+  // pipeline honours backpressure and closes both streams on a transfer error.
+  pipeline(source, stream).catch(reject);
 });
 
 const signedMediaUrl = (submission, expiresInSeconds = 3600) => cloudinary.utils.private_download_url(
@@ -179,6 +194,8 @@ export const uploadMusicianVideo = async (req, res) => {
   } catch (error) {
     console.error("Musician video upload failed:", error);
     return res.status(500).json({ success: false, message: error.message || "Video upload failed" });
+  } finally {
+    await req.cleanupVideoUpload?.().catch(error => console.error('Video temporary-file cleanup failed:', error.code));
   }
 };
 
