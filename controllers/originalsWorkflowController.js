@@ -92,7 +92,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
       originalReservationModel.find({ projectId: project._id }).sort({ createdAt: -1 }).lean(),
       originalSubmissionModel.find({ projectId: project._id }).sort({ submittedAt: -1 }).lean(),
       originalAssetModel.find({ projectId: project._id, state: { $ne: "deleted" } })
-        .select("kind originalName mimeType bytes finalEligible replacementRoleName createdEntirelyWithAi alignmentReviewRequired alignmentReview state ownerId roundId reservationId createdAt")
+        .select("kind originalName mimeType bytes finalEligible replacementRoleName createdEntirelyWithAi songwritingClaim alignmentReviewRequired alignmentReview state ownerId roundId reservationId createdAt")
         .sort({ createdAt: -1 }).lean(),
       canManage ? originalNotificationModel.find({ projectId: project._id, template: { $ne: 'originals_signed_agreement_copy' } }).sort({ createdAt: -1 }).limit(50).lean() : [],
       canManage ? originalInvitationModel.find({ projectId: project._id })
@@ -131,6 +131,10 @@ export const uploadOriginalAsset = async (req, res) => {
     if (!ASSET_KINDS.has(kind)) return res.status(400).json({ success: false, message: "Invalid asset type" });
     if (kind === 'initial_stem' && ![true, 'true'].includes(req.body?.finalStemConfirmed)) return res.status(400).json({ success: false, message: 'Confirm this is a stem intended for the final production, or upload it as a reference-only idea or guide.' });
     const isStem = ["initial_stem", "temporary_stem", "take_stem", "click_track"].includes(kind);
+    const songwritingInput = req.body?.songwritingClaim;
+    const songwritingReference = ['initial_stem', 'temporary_stem', 'guide_track', 'demo', 'video_submission'].includes(kind);
+    if (songwritingInput !== undefined && songwritingReference && ![true, false, 'true', 'false'].includes(songwritingInput)) return res.status(400).json({ success: false, message: 'Choose Yes or No for the songwriting credit request.' });
+    const songwritingClaim = songwritingReference && songwritingInput !== undefined ? [true, 'true'].includes(songwritingInput) : null;
     const replacementRoleName = kind === "temporary_stem" ? validateOriginalTemporaryStem(project, req.body?.replacementRoleName) : "";
     const declaration = req.body?.createdEntirelyWithAi;
     if (declaration !== undefined && (!isStem || ![true, false, "true", "false"].includes(declaration))) {
@@ -172,6 +176,7 @@ export const uploadOriginalAsset = async (req, res) => {
       ownerId,
       kind,
       createdEntirelyWithAi,
+      songwritingClaim,
       alignmentReviewRequired: kind === "take_stem",
       originalName: req.file.originalname,
       mimeType: req.file.mimetype,
@@ -187,23 +192,23 @@ export const uploadOriginalAsset = async (req, res) => {
       : await originalAssetModel.create(assetData);
     if (["initial_stem", "guide_track", "demo", "voice_note", "video_submission", "click_track"].includes(kind)) {
       project.initialAssetIds.addToSet(asset._id);
+      // A declaration for this file may add a claim. A later reference-only
+      // upload must not withdraw songwriting already claimed on other material.
+      if (songwritingClaim === true) project.ownerSongwritingClaim = true;
       if (kind === "initial_stem") {
         project.hasInitialStem = true;
         project.sourceType = "final_eligible_stem";
-        if (req.body?.songwritingClaim !== undefined) project.ownerSongwritingClaim = [true, "true"].includes(req.body.songwritingClaim);
       }
       if (kind === "guide_track" && !['final_eligible_stem', 'temporary_stem'].includes(project.sourceType)) {
         project.sourceType = "guide_track";
         project.hasInitialStem = true;
-        if (req.body?.songwritingClaim !== undefined) project.ownerSongwritingClaim = [true, "true"].includes(req.body.songwritingClaim);
       }
       if (kind === "video_submission" && !['final_eligible_stem', 'temporary_stem', 'guide_track'].includes(project.sourceType)) {
         project.sourceType = "video_demo";
-        project.ownerSongwritingClaim = req.body?.songwritingClaim === "true";
       }
       await project.save();
     }
-    await audit({ projectId: project._id, roundId, reservationId, type: "asset_uploaded", user: req.user, metadata: { assetId: String(asset._id), kind, ...(isStem ? { createdEntirelyWithAi } : {}) } });
+    await audit({ projectId: project._id, roundId, reservationId, type: "asset_uploaded", user: req.user, metadata: { assetId: String(asset._id), kind, ...(songwritingReference ? { songwritingClaim } : {}), ...(isStem ? { createdEntirelyWithAi } : {}) } });
     return res.status(201).json({ success: true, asset: { _id: asset._id, kind, originalName: asset.originalName, bytes: asset.bytes, replacementRoleName: asset.replacementRoleName, finalEligible: asset.finalEligible, createdEntirelyWithAi: asset.createdEntirelyWithAi, alignmentReviewRequired: asset.alignmentReviewRequired } });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ success: false, message: error.message, code: error.code });

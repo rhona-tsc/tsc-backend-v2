@@ -22,6 +22,7 @@ const originalAssetSchema = new mongoose.Schema(
     replacementRoleName: { type: String, trim: true, maxlength: 80, default: '', required: function () { return this.kind === 'temporary_stem'; } },
     // Uploader declaration only; null means it was not recorded for this file.
     createdEntirelyWithAi: { type: Boolean, default: null },
+    songwritingClaim: { type: Boolean, default: null },
     alignmentReviewRequired: { type: Boolean, default: false },
     alignmentReview: {
       contextKey: { type: String, default: '' },

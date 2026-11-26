@@ -25,7 +25,7 @@ export async function saveOriginalTemporaryStem({ projectId, data, songwritingCl
       project.initialAssetIds = [...(project.initialAssetIds || []), asset._id];
       project.hasInitialStem = true;
       if (project.sourceType !== 'final_eligible_stem') project.sourceType = 'temporary_stem';
-      if (songwritingClaim !== undefined) project.ownerSongwritingClaim = [true, 'true'].includes(songwritingClaim);
+      if ([true, 'true'].includes(songwritingClaim)) project.ownerSongwritingClaim = true;
       if (typeof project.increment === 'function') project.increment(); else project.__v = (project.__v || 0) + 1;
       // The same project write is also used by round advancement, so a late
       // upload cannot slip in after the final-mix replacement check.

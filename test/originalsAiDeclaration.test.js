@@ -132,6 +132,22 @@ test('uploading someone’s reference does not automatically claim its songwriti
  const res=response(); await uploadOriginalAsset(req,res);
  assert.equal(res.code,201); assert.equal(savedProject.ownerSongwritingClaim,false);
 });
+test('each reference can request songwriting even after production stems, without later No erasing the claim', async t => {
+ const { saves, events } = setupUpload(t); const savedProject=project(); savedProject.sourceType='final_eligible_stem'; savedProject.ownerSongwritingClaim=false;
+ t.mock.method(Project,'findById',async()=>savedProject);
+ for (const kind of ['guide_track','demo','video_submission']) {
+   const req=request(kind); req.body.songwritingClaim='true'; if(kind==='video_submission')req.file.mimetype='video/mp4';
+   const res=response(); await uploadOriginalAsset(req,res);
+   assert.equal(res.code,201); assert.equal(savedProject.ownerSongwritingClaim,true); assert.equal(saves.mock.calls.at(-1).arguments[0].songwritingClaim,true);
+   assert.equal(events.mock.calls.at(-1).arguments[0].metadata.songwritingClaim,true);
+ }
+ const req=request('guide_track'); req.body.songwritingClaim='false'; const res=response(); await uploadOriginalAsset(req,res);
+ assert.equal(res.code,201);assert.equal(savedProject.ownerSongwritingClaim,true);assert.equal(saves.mock.calls.at(-1).arguments[0].songwritingClaim,false);
+});
+test('invalid songwriting choices are rejected before uploading', async t => {
+ const { uploads }=setupUpload(t); const req=request('guide_track');req.body.songwritingClaim='maybe';const res=response();await uploadOriginalAsset(req,res);
+ assert.equal(res.code,400);assert.equal(uploads.mock.callCount(),0);
+});
 
 test('adding guide and video references after production stems does not change the project back to a reference-only start', async t => {
  setupUpload(t); const savedProject=project();
