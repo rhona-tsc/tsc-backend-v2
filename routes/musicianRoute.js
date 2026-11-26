@@ -1,3 +1,4 @@
+import { getMusicianConnections } from '../services/musicianConnectionsService.js';
 import { musicianDirectoryVisibility, canSeeMusicianInDirectory } from '../services/musicianDirectoryVisibility.js';
 import { findMusicianByIdOrSlug } from '../services/musicianIdentityService.js';
 import express from "express";
@@ -947,6 +948,18 @@ router.get("/", async (req, res) => {
   } catch (err) {
     console.error("❌ Error listing musicians:", err);
     res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Public cards contain no roster contacts or private test profiles.
+router.get('/profile/:idOrSlug/connections', async (req, res) => {
+  try {
+    const musician = await findMusicianByIdOrSlug(req.params.idOrSlug);
+    if (!sanitizePublicMusician(musician)) return res.status(404).json({ message: 'Musician not found' });
+    return res.json(await getMusicianConnections(musician));
+  } catch (error) {
+    console.error('Could not load musician connections:', error.message);
+    return res.status(500).json({ message: 'Could not load musician connections' });
   }
 });
 

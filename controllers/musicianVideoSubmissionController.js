@@ -1,9 +1,10 @@
+import { getMusicianConnections } from '../services/musicianConnectionsService.js';
 import mongoose from "mongoose";
 import { v2 as cloudinary } from "cloudinary";
 import musicianModel from "../models/musicianModel.js";
 import musicianVideoSubmissionModel from "../models/musicianVideoSubmissionModel.js";
 import { extractModerationFlags, getAzureVideoIndex, submitVideoToAzure } from "../services/videoModerationService.js";
-import { buildAnonymousYoutubeMetadata, publishVideoToYoutube, setYoutubeVideoThumbnail } from "../services/youtubeVideoService.js";
+import { buildAnonymousYoutubeMetadata, publishVideoToYoutube, setYoutubeVideoThumbnail, updateYoutubeVideoMetadata, youtubeVisibility, isVocalist, publicMusicianRole } from "../services/youtubeVideoService.js";
 import { thumbnailMediaUrl, uploadPrivateThumbnail, isSupportedThumbnail } from "../services/musicianVideoThumbnailService.js";
 import {
   getActiveApplicantPriorities,
@@ -57,6 +58,8 @@ const serialise = (submission, { includeAccessUrl = false } = {}) => ({
   azureState: submission.azureState,
   youtubeUrl: submission.youtubeUrl,
   youtubeTitle: submission.youtubeTitle,
+  youtubePrivacyStatus: submission.youtubePrivacyStatus,
+  youtubeStudioUrl: submission.youtubeVideoId ? `https://studio.youtube.com/video/${encodeURIComponent(submission.youtubeVideoId)}/edit` : "",
   createdAt: submission.createdAt,
   updatedAt: submission.updatedAt,
   thumbnailSource: submission.thumbnailPublicId ? "custom" : "automatic",
@@ -326,14 +329,14 @@ export const getMusicianVideoForReview = async (req, res) => {
   }
 };
 
-export const listMusicianVideoSubmissionsForReview = async (_req, res) => {
+export const listMusicianVideoSubmissionsForReview = async (req, res) => {
   try {
     const submissions = await musicianVideoSubmissionModel
-      .find({ $or: [
+      .find(req.query?.includePublished === "true" ? { status: { $ne: "rejected" } } : { $or: [
         { status: { $in: ["processing", "manual_required", "ready_for_review", "publishing", "failed"] } },
         { thumbnailReviewStatus: "pending" },
       ] })
-      .populate("musicianId", "firstName lastName email musicianSlug")
+      .populate("musicianId", "firstName lastName email musicianSlug instrumentation vocals privateTestProfile")
       .sort({ createdAt: -1 });
     const priorityMap = await getActiveApplicantPriorities(
       submissions.map((item) => item.musicianId?._id || item.musicianId),
@@ -344,6 +347,8 @@ export const listMusicianVideoSubmissionsForReview = async (_req, res) => {
           {
             ...serialise(item, { includeAccessUrl: true }),
             musician: item.musicianId,
+            isVocalist: isVocalist(item.musicianId),
+            musicianRole: publicMusicianRole(item.musicianId),
           },
           priorityMap,
           item.musicianId?._id || item.musicianId,
@@ -365,7 +370,7 @@ export const listMusicianVideoSubmissionsForReview = async (_req, res) => {
 
 export const reviewMusicianVideoSubmission = async (req, res) => {
   try {
-    const submission = await musicianVideoSubmissionModel.findById(req.params.submissionId);
+    let submission = await musicianVideoSubmissionModel.findById(req.params.submissionId);
     if (!submission) return res.status(404).json({ success: false, message: "Video submission not found" });
     const decision = clean(req.body?.decision).toLowerCase();
     if (!['approve', 'reject'].includes(decision)) return res.status(400).json({ success: false, message: "Choose approve or reject" });
@@ -379,30 +384,40 @@ export const reviewMusicianVideoSubmission = async (req, res) => {
     }
     const musician = await musicianModel.findById(submission.musicianId);
     if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
-    if (submission.thumbnailPublicId && submission.thumbnailReviewStatus === "pending") {
+    if (submission.thumbnailPublicId && submission.thumbnailReviewStatus !== "approved") {
       return res.status(409).json({ success: false, message: "Check and approve the custom thumbnail before publishing this video" });
     }
-    submission.status = "publishing";
-    submission.moderationReason = "Approved; publishing to the TSC YouTube channel";
-    submission.reviewedAt = new Date();
-    submission.reviewedBy = requesterId(req) || null;
-    await submission.save();
+    submission = await musicianVideoSubmissionModel.findOneAndUpdate(
+      { _id: submission._id, status: { $ne: "publishing" } },
+      { $set: { status: "publishing", moderationReason: "Approved; publishing to the TSC YouTube channel", reviewedAt: new Date(), reviewedBy: requesterId(req) || null } },
+      { new: true },
+    );
+    if (!submission) return res.status(409).json({ success: false, message: "This video is already being published" });
     try {
-      const metadata = buildAnonymousYoutubeMetadata({ musician, submission });
+      const connections = await getMusicianConnections(musician, { includeMusicians: false });
+      const metadata = buildAnonymousYoutubeMetadata({ musician, submission, bands: [...connections.regularBands, ...connections.deputyBands] });
+      const privacyStatus = youtubeVisibility(musician);
       const youtube = submission.youtubeVideoId
         ? { id: submission.youtubeVideoId, url: submission.youtubeUrl }
-        : await publishVideoToYoutube({ mediaUrl: signedMediaUrl(submission, 7200), metadata });
+        : await publishVideoToYoutube({ mediaUrl: signedMediaUrl(submission, 7200), metadata, privacyStatus });
+      if (submission.youtubeVideoId && (JSON.stringify(submission.youtubeMetadata) !== JSON.stringify(metadata) || submission.youtubePrivacyStatus !== privacyStatus)) {
+        await updateYoutubeVideoMetadata({ videoId: youtube.id, metadata, privacyStatus });
+      }
       submission.youtubeVideoId = youtube.id;
       submission.youtubeUrl = youtube.url;
       submission.youtubeTitle = metadata.title;
+      submission.youtubeMetadata = metadata;
+      submission.youtubePrivacyStatus = youtube.privacyStatus || privacyStatus;
       // Keep the uploaded video ID even if setting its thumbnail needs a retry.
       await submission.save();
-      if (submission.thumbnailPublicId && submission.thumbnailReviewStatus === "approved") {
+      if (submission.youtubePrivacyStatus !== privacyStatus) throw new Error(`YouTube retained ${submission.youtubePrivacyStatus} visibility; ${privacyStatus} publishing needs attention in YouTube Studio`);
+      {
         await setYoutubeVideoThumbnail({ videoId: youtube.id, mediaUrl: await thumbnailMediaUrl(submission) });
       }
       submission.status = "published";
       submission.publishedAt = new Date();
-      submission.moderationReason = "Approved and published to the TSC YouTube channel";
+      submission.error = "";
+      submission.moderationReason = musician.privateTestProfile ? "Approved; private test video uploaded to TSC YouTube" : "Approved and uploaded as unlisted to the TSC YouTube channel";
       const field = submission.category === "original" ? "tscApprovedOriginalBandVideoLinks" : "tscApprovedFunctionBandVideoLinks";
       const publishedVideo = { title: metadata.title, url: youtube.url, provider: "youtube", accessStatus: "accessible", moderationStatus: "approved", moderationReason: "Approved from direct upload", manuallyReviewedAt: new Date() };
       const otherVideos = (musician[field] || []).filter((video) => video.url !== youtube.url);

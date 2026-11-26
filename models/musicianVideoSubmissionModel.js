@@ -44,6 +44,8 @@ const musicianVideoSubmissionSchema = new mongoose.Schema(
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
     youtubeVideoId: { type: String, default: "" },
     youtubeUrl: { type: String, default: "" },
+    youtubeMetadata: { type: mongoose.Schema.Types.Mixed, default: null },
+    youtubePrivacyStatus: { type: String, default: "" },
     youtubeTitle: { type: String, default: "" },
     publishedAt: { type: Date, default: null },
     error: { type: String, default: "" },
