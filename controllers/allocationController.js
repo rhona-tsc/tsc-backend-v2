@@ -465,7 +465,7 @@ const completeAcceptedAssignment = async ({
   return { eventId, email };
 };
 
-const updateBoardRoleSlot = async (msg, changes = {}) => {
+export const updateBoardRoleSlot = async (msg, changes = {}) => {
   const board = msg?.bookingBoardItemId
     ? await bookingBoardItem.findById(msg.bookingBoardItemId)
     : await resolveBoardItem(msg?.bookingRef);
@@ -518,6 +518,8 @@ const updateBoardRoleSlot = async (msg, changes = {}) => {
     lastCheckedAt: new Date(),
   };
   await board.save();
+  const booking = await resolveSourceBooking(board);
+  await syncConfirmedBookingAssignments({board,booking,BookingModel:Booking});
   return board;
 };
 
@@ -636,10 +638,12 @@ const closeCompetingRoleOffers = async (winner) => {
 
 const musicianMatchesAssignment = ownsBookingAssignment;
 
-export const withdrawAllocatedBooking = async ({ board, assignment, user, reason = "", source = "portal" }) => {
+export const withdrawAllocatedBooking = async ({ board, assignment, user, reason = "", source = "portal", availabilityReply = 'unavailable' }) => {
   const now = new Date();
   const unavailable = withdrawalAvailabilityRecord({ board, assignment,
     phone: normalizePhone(assignment.phone || ''), reason, source, now });
+  unavailable.reply = availabilityReply === 'no' ? 'no' : 'unavailable';
+  unavailable.replyHistory[0].reply = unavailable.reply;
   // Also record manual allocations that have no original offer/availability row.
   // This is date-specific and sends no message to the withdrawing musician.
   await AvailabilityModel.findOneAndUpdate({ requestKey: unavailable.requestKey }, {
@@ -701,6 +705,14 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
       : {}),
   };
   await board.save();
+
+  // A withdrawal must be visible on both representations of an imported gig.
+  const sourceBooking = await resolveSourceBooking(board);
+  await syncConfirmedBookingAssignments({board, booking: sourceBooking, BookingModel: Booking});
+  await AvailabilityModel.updateMany({bookingId:String(board.bookingRef || board._id),musicianId:assignment.musicianId},
+    {$set:{calendarCancellationConfirmationPending:false}});
+  if(mongoose.connection.readyState===1) await mongoose.connection.db.collection('calendardeclineconfirmations').updateMany(
+    {boardId:board._id,musicianId:assignment.musicianId,state:'pending'},{$set:{state:'handled',reason:'Explicit booking withdrawal received',handledAt:now}});
 
   if (needsVocalistApproval) {
     const adminEmail = String(
@@ -837,7 +849,7 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
     musicianId: assignment.musicianId, phone: assignment.phone,
     originalBandMemberId: assignment.originalBandMemberId,
     formattedDate: formatWithOrdinal(board.eventDateISO),
-    duties: role,
+    duties: [role,...(assignment.duties || [])].filter(Boolean).join(' · '),
     fee: assignment?.totalFee || assignment?.fee || 0,
     formattedAddress: board.address || board.venue || "",
     meta: { role, actName: board.actTscName || board.actName, MetaISODate: board.eventDateISO, county: board.county || '',
@@ -853,6 +865,19 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
   const job = await DeputyJob.findOne({"automation.bookingBoardItemId":board._id,"automation.roleSlotId":fallbackMessage.roleSlotId,status:{$in:["open","allocated","filled"]}});
   return {route:job ? "job_board_created":"allocation_needs_review",job};
 };
+
+// Confirmed booking corrections use the same deputy route as the Bookings page.
+export async function withdrawBookingForAvailability(updated, reply) {
+  if(!updated?.bookingId || !['no','noloc','nolocation','unavailable'].includes(reply)) return false;
+  const board=await resolveBoardItem(updated.bookingId);if(!board || board.bookingStatus==='cancelled')return false;
+  const user={musicianId:updated.musicianId,email:updated.musicianEmail||updated.calendarInviteEmail};
+  const pools=[...(board.assignedMusicians||[]),...(board.bookingMusicians||[]),...(board.bandLineup||[]),...(board.bookingDetails?.assignedMusicians||[])];
+  const seen=new Set();
+  const owned=pools.filter(a=>{const key=a.roleSlotId||a.role; if(seen.has(key)||!ownsBookingAssignment(a,user))return false;seen.add(key);return !a.withdrawnAt&&['confirmed','accepted'].includes(a.status);});
+  if(!owned.length)return pools.some(a=>ownsBookingAssignment(a,user)&&a.withdrawnAt);
+  for(const assignment of owned)await withdrawAllocatedBooking({board,assignment,user,availabilityReply:reply==='unavailable'?'unavailable':'no',reason:updated.inbound?.body || 'Availability withdrawn by musician',source:updated.inbound?.source || 'availability_reply'});
+  return true;
+}
 
 export const withdrawMyBooking = async (req, res) => {
   try {
@@ -2091,6 +2116,11 @@ export const twilioInboundBooking = async (req, res) => {
     // 1️⃣ Determine musician reply type
     // ---------------------------------------------------------
     const rawReply = buttonPayload || buttonText || bodyText || "";
+    if(/^CAL_(?:YES|NO|LOC):/i.test(rawReply)) {
+      const {handleCalendarDeclineReply}=await import('../services/calendarDeclineService.js');
+      await handleCalendarDeclineReply({payload:rawReply,from:fromRaw,sid:req.body?.MessageSid});
+      return res.status(200).send('<Response/>');
+    }
     const calendarCancelYes = /calendar[_ -]?cancel[_ -]?yes|yes,? i['’]?m unavailable(?: now)?/i.test(rawReply);
     const calendarCancelNo = /calendar[_ -]?cancel[_ -]?no|no,? (?:please )?reinstate(?: invite)?/i.test(rawReply);
     if (calendarCancelYes || calendarCancelNo) {
@@ -2558,6 +2588,7 @@ export async function escalateToNextDeputy(msg, {dryRun=false}={}) {
       const targetPhone=normalizePhone(candidate.phone||candidate.phoneNumber);
       if(!/^\+\d{10,15}$/.test(targetPhone))continue;
       const targetId=String(candidate.musicianId||'');
+      if((targetId && targetId===String(msg.musicianId||'')) || (targetPhone && targetPhone===normalizePhone(msg.phone)))continue;
       if(history.some(h=>normalizePhone(h.phone)===targetPhone||(targetId&&String(h.musicianId)===targetId)))continue;
       if((rosterBoard.assignedMusicians||[]).some(a=>a.withdrawnAt&&(String(a.musicianId)===targetId||normalizePhone(a.phone)===targetPhone)))continue;
       if(await findPriorAvailabilityDecline({musicianId:targetId,phone:targetPhone,dateISO:msg.meta.MetaISODate,formattedAddress:msg.formattedAddress}))continue;

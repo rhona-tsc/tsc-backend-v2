@@ -7,7 +7,7 @@ import { oauth2Client } from "../controllers/googleController.js";
 import { buildBandSheetShareUrl, getBandSheetOrigin } from "./bandSheetUrl.js";
 import { bandSheetTokenPersistenceUpdate } from "./bandSheetTokenRegistry.js";
 import { resolveBookedActName } from "./bookingDisplayName.js";
-import { calendarMusicianProfiles, calendarMusicianProfileUrl } from './calendarMusicianProfiles.js';
+import { calendarMusicianProfiles, calendarMusicianProfileUrl, calendarMusicianDisplayName } from './calendarMusicianProfiles.js';
 import {upsertSharedBookingCalendar} from './sharedBookingCalendar.js';
 
 const clean = (value = "") => String(value || "").trim();
@@ -81,9 +81,7 @@ const lineupFor = async (booking = {}, assignedMusicians = []) => {
     .filter((member) => ["accepted", "confirmed"].includes(clean(member?.status).toLowerCase())));
   return members
     .map((member) => {
-      const name = clean(
-        member?.name || [member?.firstName, member?.lastName].filter(Boolean).join(" "),
-      );
+      const name = calendarMusicianDisplayName(member);
       const duties = Array.isArray(member?.duties)
         ? member.duties.map(clean).filter(Boolean)
         : [];

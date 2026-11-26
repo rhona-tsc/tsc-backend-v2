@@ -1,3 +1,4 @@
+import {runCalendarDeclineReconciliation} from './services/calendarDeclineService.js';
 import voiceIvrRoutes from './routes/voiceIvr.js';
 import {runBookingAllocationEscalation} from './services/bookingAllocationReview.js';
 import { startMemoryMonitor } from "./utils/memoryMonitor.js";
@@ -1049,6 +1050,12 @@ cron.schedule("*/30 * * * *", async () => {
   } catch (err) {
     console.error("❌ [CRON] Badge refresh failed:", err);
   }
+});
+
+// Persisted jobs keep their due time through missed pushes and restarts.
+cron.schedule('* * * * *', async () => {
+  try { await runCalendarDeclineReconciliation(); }
+  catch(error) { console.error('Calendar decline worker failed:',error.message); }
 });
 
 // Re-register Google Calendar webhook daily at 03:00 UTC

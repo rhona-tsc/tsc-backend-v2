@@ -1,0 +1,19 @@
+import test from 'node:test';import assert from 'node:assert/strict';import mongoose from 'mongoose';import {google} from 'googleapis';import {v2 as cloudinary} from 'cloudinary';
+import Video from '../models/musicianVideoSubmissionModel.js';import Musician from '../models/musicianModel.js';import {reviewMusicianVideoSubmission} from '../controllers/musicianVideoSubmissionController.js';
+const res=()=>({code:200,status(n){this.code=n;return this},json(body){this.body=body;return this}});
+function setup(t,{privateTest=false}={}){
+ process.env.YOUTUBE_CLIENT_ID='test';process.env.YOUTUBE_CLIENT_SECRET='test';process.env.YOUTUBE_REFRESH_TOKEN='test';
+ const video={_id:'222222222222222222222222',musicianId:'111111111111111111111111',status:'ready_for_review',cloudinaryPublicId:'staged',generatedThumbnailUrl:'https://example.com/thumb',category:'function',save:async()=>{}};
+ const musician={_id:video.musicianId,status:'approved',privateTestProfile:privateTest,firstName:'Sarah',lastName:'Smith',musicianSlug:'sarah-s',instrumentation:[{instrument:'Bass Guitar'}],save:async()=>{}};
+ t.mock.method(Video,'findById',async()=>video);t.mock.method(Musician,'findById',async()=>musician);t.mock.method(Video,'findOneAndUpdate',async(_,update)=>{if(video.status==='publishing')return null;Object.assign(video,update.$set);return video});
+ t.mock.method(mongoose.connection,'collection',()=>({find:()=>({project(){return this},maxTimeMS(){return this},async toArray(){return []}})}));
+ t.mock.method(cloudinary.utils,'private_download_url',()=> 'https://example.com/video');t.mock.method(globalThis,'fetch',async()=>new Response('bytes'));
+ const calls={upload:0,thumbnail:0,update:0};let failThumbnail=false;
+ t.mock.method(google,'youtube',()=>({videos:{insert:async request=>{calls.upload++;assert.equal(request.requestBody.status.privacyStatus,privateTest?'private':'unlisted');return {data:{id:'new-video',status:{privacyStatus:privateTest?'private':'unlisted'}}}},update:async()=>{calls.update++;return {data:{status:{privacyStatus:privateTest?'private':'unlisted'}}}}},thumbnails:{set:async()=>{calls.thumbnail++;if(failThumbnail)throw Error('temporary thumbnail error')}}}));
+ const invoke=async()=>{const r=res();await reviewMusicianVideoSubmission({params:{submissionId:video._id},body:{decision:'approve'},user:{id:'333333333333333333333333',role:'admin'}},r);return r};
+ return {video,musician,calls,invoke,failThumbnail:()=>{failThumbnail=true},allowThumbnail:()=>{failThumbnail=false}};
+}
+test('approval publishes bio/tags and automatic thumbnail and attaches the unlisted video',async t=>{const f=setup(t);const r=await f.invoke();assert.equal(r.code,200);assert.equal(f.video.youtubePrivacyStatus,'unlisted');assert.match(f.video.youtubeMetadata.description,/\/musician\/sarah-s/);assert.equal(f.calls.thumbnail,1);assert.equal(f.musician.tscApprovedFunctionBandVideoLinks[0].url,'https://youtu.be/new-video');});
+test('thumbnail failure keeps uploaded ID so retry cannot upload a second copy',async t=>{const f=setup(t);f.failThumbnail();assert.equal((await f.invoke()).code,503);assert.equal(f.video.youtubeVideoId,'new-video');f.allowThumbnail();assert.equal((await f.invoke()).code,200);assert.equal(f.calls.upload,1);});
+test('private test profiles upload privately and never become public',async t=>{const f=setup(t,{privateTest:true});assert.equal((await f.invoke()).code,200);assert.equal(f.video.youtubePrivacyStatus,'private');});
+test('pending or rejected thumbnails and simultaneous publish calls are blocked',async t=>{const f=setup(t);f.video.thumbnailPublicId='custom';f.video.thumbnailReviewStatus='rejected';assert.equal((await f.invoke()).code,409);f.video.thumbnailPublicId='';f.video.status='publishing';assert.equal((await f.invoke()).code,409);assert.equal(f.calls.upload,0);});

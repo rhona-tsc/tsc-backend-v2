@@ -1,4 +1,5 @@
 import { canSeeMusicianInDirectory, musicianDirectoryVisibility } from '../services/musicianDirectoryVisibility.js';
+import { findMusicianByIdOrSlug, resolveMergedMusician } from '../services/musicianIdentityService.js';
 // musicianController.js
 import Stripe from "stripe";
 import validator from "validator";
@@ -862,15 +863,7 @@ async function getDeputyById(req, res) {
 
     const isObjectId = mongoose.isValidObjectId(identifier);
 
-    let deputy = null;
-
-    if (isObjectId) {
-      deputy = await musicianModel.findById(identifier).lean();
-    }
-
-    if (!deputy) {
-      deputy = await musicianModel.findOne({ musicianSlug: identifier }).lean();
-    }
+    const deputy = await findMusicianByIdOrSlug(identifier);
 
     // Optional: access control — allow self or agents
     const me = req.user; // set by verifyToken
@@ -879,7 +872,7 @@ async function getDeputyById(req, res) {
     );
     const meSlug = String(me?.musicianSlug || "").trim();
 
-    const isSelfById = isObjectId && meId === identifier;
+    const isSelfById = meId === String(deputy?._id || '') || (isObjectId && meId === identifier);
     const isSelfBySlug = !!meSlug && meSlug === identifier;
     const isSelf = isSelfById || isSelfBySlug;
     const isAgent = (me?.role || me?.userRole || "").toLowerCase() === "agent";
@@ -2071,11 +2064,11 @@ const loginMusician = async (req, res) => {
     console.log("🔍 Attempting login for:", normEmail);
 
     // 🔥 2) Find musician safely
-    const user = await musicianModel.findOne({
+    const loginAccount = await musicianModel.findOne({
       email: normEmail,
     });
 
-    if (!user || user.profileDeletedAt) {
+    if (!loginAccount || (loginAccount.profileDeletedAt && !loginAccount.mergedIntoMusicianId)) {
       console.warn("❌ No user found for email:", normEmail);
       return res.status(404).json({
         success: false,
@@ -2084,7 +2077,7 @@ const loginMusician = async (req, res) => {
     }
 
     // 🔥 3) Validate password
-    const isMatch = await bcrypt.compare(password, user.password);
+    const isMatch = !!loginAccount.password && await bcrypt.compare(password, loginAccount.password);
     if (!isMatch) {
       console.warn("❌ Wrong password for:", normEmail);
       return res.status(401).json({
@@ -2092,6 +2085,10 @@ const loginMusician = async (req, res) => {
         message: "Incorrect password",
       });
     }
+
+    // Verify the original account's password before following a merge pointer.
+    const user = await resolveMergedMusician(loginAccount);
+    if (!user) return res.status(404).json({ success: false, message: 'No account found for that email' });
 
     // 🔥 4) Create access token (no password included!)
     const accessToken = jwt.sign(
@@ -2550,6 +2547,7 @@ const listPendingDeputies = async (req, res) => {
     const deputies = await musicianModel.find({
       status: "pending",
       role: "musician",
+      profileDeletedAt: null,
     });
     res.json({ success: true, deputies });
   } catch (err) {
@@ -2754,7 +2752,7 @@ const refreshAccessToken = async (req, res) => {
             .status(403)
             .json({ success: false, message: "Invalid refresh token" });
 
-        const user = await musicianModel.findById(decoded.id);
+        const user = await findMusicianByIdOrSlug(decoded.id);
         if (!user)
           return res
             .status(404)

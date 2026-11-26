@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {calendarMusicianProfiles,calendarMusicianProfileUrl} from '../utils/calendarMusicianProfiles.js';
+import {calendarMusicianProfiles,calendarMusicianProfileUrl,calendarMusicianDisplayName} from '../utils/calendarMusicianProfiles.js';
 
 const greg='6ac8e16b884d0ae986191b1f',david='6afdf8456466d0601dc60e3d';
 test('calendar links use current canonical slugs, with a single lookup for the lineup',async()=>{
@@ -19,4 +19,11 @@ test('missing profiles/slugs never fall back to a database ID or a guessed name'
 test('roster-only musicians with an explicit slug need no database ID lookup',async()=>{
   const members=await calendarMusicianProfiles([{name:'Sarah',musicianSlug:'sarah-i'}],{loadProfiles:async()=>{throw Error('not required');}});
   assert.match(calendarMusicianProfileUrl(members[0]),/\/musician\/sarah-i\/$/);
+});
+test('calendar musician names use first name and last initial for structured and legacy records',()=>{
+ assert.equal(calendarMusicianDisplayName({firstName:'Ewan',lastName:'McIntosh',name:'Ewan McIntosh'}),'Ewan M.');
+ assert.equal(calendarMusicianDisplayName({name:'David Asafu-Adjaye'}),'David A.');
+ assert.equal(calendarMusicianDisplayName({firstName:'Sarah Isabella',lastName:'Smith'}),'Sarah Isabella S.');
+ assert.equal(calendarMusicianDisplayName({name:'Keyboard replacement pending confirmation'}),'Keyboard replacement pending confirmation');
+ assert.equal(calendarMusicianDisplayName({name:'Paolo M.'}),'Paolo M.');
 });

@@ -1,4 +1,6 @@
+import { getMusicianConnections } from '../services/musicianConnectionsService.js';
 import { musicianDirectoryVisibility, canSeeMusicianInDirectory } from '../services/musicianDirectoryVisibility.js';
+import { findMusicianByIdOrSlug } from '../services/musicianIdentityService.js';
 import express from "express";
 import Stripe from "stripe";
 import multer from "multer";
@@ -37,6 +39,9 @@ import {
   refreshMusicianVideoSubmission,
   setPreferredMusicianVideo,
   uploadMusicianVideo,
+  getMusicianVideoThumbnail,
+  uploadMusicianVideoThumbnail,
+  reviewMusicianVideoThumbnail,
 } from "../controllers/musicianVideoSubmissionController.js";
 
 const router = express.Router();
@@ -51,24 +56,20 @@ router.post("/:id/video-submissions", verifyToken, upload.single("video"), uploa
 router.get("/:id/video-submissions", verifyToken, listMyMusicianVideos);
 router.post("/:id/video-submissions/:submissionId/refresh", verifyToken, refreshMusicianVideoSubmission);
 router.patch("/:id/video-submissions/:submissionId/preferred", verifyToken, setPreferredMusicianVideo);
+const thumbnailUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+router.get("/:id/video-submissions/:submissionId/thumbnail", verifyToken, getMusicianVideoThumbnail);
+router.post("/:id/video-submissions/:submissionId/thumbnail", verifyToken, (req, res, next) => {
+  thumbnailUpload.single("thumbnail")(req, res, error => error
+    ? res.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ success: false, message: "Choose one JPG, PNG or WebP thumbnail, up to 5 MB" })
+    : next());
+}, uploadMusicianVideoThumbnail);
+router.patch("/:id/video-submissions/:submissionId/thumbnail/review", verifyToken, reviewMusicianVideoThumbnail);
 
 if (!stripeSecretKey) {
   console.warn("⚠️ STRIPE_SECRET_KEY missing — Stripe routes will be limited/disabled.");
 }
 
 const isObjectIdLike = (value = "") => mongoose.Types.ObjectId.isValid(String(value || ""));
-
-const findMusicianByIdOrSlug = async (value) => {
-  const raw = String(value || "").trim();
-  if (!raw) return null;
-
-  if (isObjectIdLike(raw)) {
-    const byId = await musicianModel.findById(raw).lean();
-    if (byId) return byId;
-  }
-
-  return musicianModel.findOne({ musicianSlug: raw.toLowerCase() }).lean();
-};
 
 const sanitizePublicMusician = (doc) => {
   if (!doc || doc.privateTestProfile || doc.profileDeletedAt) return null;
@@ -87,6 +88,10 @@ const sanitizePublicMusician = (doc) => {
     "profilePhoto",
     "coverHeroImage",
     "additionalImages",
+    "digitalWardrobeBlackTie",
+    "digitalWardrobeFormal",
+    "digitalWardrobeSmartCasual",
+    "digitalWardrobeSessionAllBlack",
     "instrumentation",
     "vocals",
     "other_skills",
@@ -946,6 +951,18 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Public cards contain no roster contacts or private test profiles.
+router.get('/profile/:idOrSlug/connections', async (req, res) => {
+  try {
+    const musician = await findMusicianByIdOrSlug(req.params.idOrSlug);
+    if (!sanitizePublicMusician(musician)) return res.status(404).json({ message: 'Musician not found' });
+    return res.json(await getMusicianConnections(musician));
+  } catch (error) {
+    console.error('Could not load musician connections:', error.message);
+    return res.status(500).json({ message: 'Could not load musician connections' });
+  }
+});
+
 // GET /api/musician/profile/:idOrSlug
 router.get("/profile/:idOrSlug", async (req, res) => {
   try {
@@ -961,7 +978,7 @@ router.get("/profile/:idOrSlug", async (req, res) => {
       isCanonicalMatch: Boolean(doc.musicianSlug)
         ? String(idOrSlug) === String(doc.musicianSlug)
         : String(idOrSlug) === String(doc._id),
-      shouldRedirectToSlug: isObjectIdLike(idOrSlug) && !!doc.musicianSlug,
+      shouldRedirectToSlug: !!doc.musicianSlug && String(idOrSlug) !== doc.musicianSlug,
     });
   } catch (err) {
     console.error("❌ Error fetching musician profile:", err);
@@ -1011,7 +1028,7 @@ const readProtectedMusicianByIdOrSlug = async (req, res) => {
       isCanonicalMatch: Boolean(doc.musicianSlug)
         ? String(idOrSlug) === String(doc.musicianSlug)
         : String(idOrSlug) === String(doc._id),
-      shouldRedirectToSlug: isObjectIdLike(idOrSlug) && !!doc.musicianSlug,
+      shouldRedirectToSlug: !!doc.musicianSlug && String(idOrSlug) !== doc.musicianSlug,
     });
   } catch (err) {
     console.error("❌ Error fetching protected musician profile:", err);
@@ -1489,7 +1506,7 @@ const readMusicianByIdOrSlug = async (req, res) => {
       isCanonicalMatch: Boolean(doc.musicianSlug)
         ? String(idOrSlug) === String(doc.musicianSlug)
         : String(idOrSlug) === String(doc._id),
-      shouldRedirectToSlug: isObjectIdLike(idOrSlug) && !!doc.musicianSlug,
+      shouldRedirectToSlug: !!doc.musicianSlug && String(idOrSlug) !== doc.musicianSlug,
     });
   } catch (err) {
     console.error("❌ Error fetching musician profile (legacy):", err);

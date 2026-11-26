@@ -7,6 +7,7 @@ import Act from '../models/actModel.js';
 import Availability from '../models/availabilityModel.js';
 import Message from '../models/EnquiryMessage.js';
 import Job from '../models/deputyJobModel.js';
+import Booking from '../models/bookingModel.js';
 import {isExplicitAvailabilityDecline} from '../services/availabilityPriorDeclines.js';
 import { ownsBookingAssignment, isWithdrawalTarget, withdrawalAvailabilityRecord } from '../utils/bookingWithdrawal.js';
 process.env.JWT_SECRET='withdrawal-route-test';
@@ -26,7 +27,11 @@ async function setup(t) {
  t.mock.method(Act,'findById',()=>({lean:async()=>({_id:actId,tscName:'Example band',lineups:[]})}));
  t.mock.method(Message,'findOne',()=>({sort:async()=>null}));
  t.mock.method(Availability,'findOneAndUpdate',async(_filter,update)=>{availability.push(update.$set);return update.$set});
- t.mock.method(Job,'findOne',async()=>jobs[0]||null);
+ t.mock.method(Availability,'updateMany',async()=>({modifiedCount:0}));
+ t.mock.method(Booking,'findOne',()=>({lean:async()=>({_id:'core-booking'})}));
+ const coreWrites=[];
+ t.mock.method(Booking.collection,'updateOne',async(_filter,update)=>{coreWrites.push(update.$set);return {modifiedCount:1};});
+ t.mock.method(Job,'findOne',async query=>jobs.find(job=>job.automation?.roleSlotId===query['automation.roleSlotId'])||null);
  t.mock.method(Job,'create',async value=>{const job={...value,_id:'555555555555555555555555'};jobs.push(job);return job;});
  const app=express();app.use(express.json());app.use('/api/allocations',allocationRoutes);app.use('/api/booking',bookingRoutes);
  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>server.close(r)));
@@ -34,7 +39,7 @@ async function setup(t) {
  const request=async(path,user=person,body={roleSlotId:'keyboard-1',reason:'Out of the country'})=>{
   const r=await fetch(`${url}${path}/bookings/EXAMPLE-BOOKING/withdraw`,{method:'POST',headers:{'Content-Type':'application/json',...(user?{Authorization:`Bearer ${jwt.sign({id:user},process.env.JWT_SECRET)}`}:{})},body:JSON.stringify(body)});return{status:r.status,data:await r.json()};
  };
- return{board,availability,jobs,request,url};
+ return{board,availability,jobs,request,url,coreWrites};
 }
 test('current and cached portal URLs both withdraw only the owned keyboard role and open a deputy job',async t=>{
  for(const prefix of ['/api/allocations','/api/booking']) {
@@ -42,6 +47,8 @@ test('current and cached portal URLs both withdraw only the owned keyboard role 
    const f=await setup(t);const r=await f.request(prefix);
    assert.equal(r.status,200);assert.equal(r.data.success,true);assert.equal(r.data.reallocationRoute,'job_board_created');
    assert.equal(f.availability.length,1);assert.equal(f.availability[0].reply,'unavailable');assert.equal(f.availability[0].status,'unavailable');assert.equal(f.availability[0].dateISO,'2099-12-31');
+   assert.equal(f.coreWrites[0].assignedMusicians[0].status,'withdrawn');
+   assert.equal(f.coreWrites[0].assignedMusicians[1].status,'confirmed');
    for(const entries of [f.board.assignedMusicians,f.board.bookingMusicians,f.board.bandLineup,f.board.bookingDetails.assignedMusicians]){
     assert.ok(entries[0].withdrawnAt);assert.equal(entries[0].status,'posted_to_job_board');assert.equal(entries[1].status,'confirmed');assert.equal(entries[2].status,'confirmed');
    }
@@ -66,6 +73,30 @@ test('manual withdrawal records a stable date-specific unavailability without pr
  const recipient={musicianId:assignment().musicianId,phone:row.phone,dateISO:row.dateISO};
  assert.equal(isExplicitAvailabilityDecline(row,recipient),true);
  assert.throws(()=>withdrawalAvailabilityRecord({board:{_id:boardId},assignment:assignment()}),/event date/);
+});
+
+test('website quick-reply corrections withdraw confirmed allocations and mirror core status before deputy routing',async t=>{
+ const f=await setup(t);const {withdrawBookingForAvailability}=await import('../controllers/allocationController.js');
+ const row={bookingId:'EXAMPLE-BOOKING',musicianId:person,inbound:{source:'website-quick-reply',body:'Unavailable for this venue'}};
+ assert.equal(await withdrawBookingForAvailability(row,'yes'),false);
+ assert.equal(await withdrawBookingForAvailability(row,'noloc'),true);
+ assert.equal(f.availability[0].reply,'no');
+ assert.equal(f.coreWrites[0].assignedMusicians[0].status,'withdrawn');
+ assert.equal(f.jobs.length,2); // This musician held two distinct roles in the fixture.
+ const count=f.availability.length;
+ assert.equal(await withdrawBookingForAvailability(row,'noloc'),true);
+ assert.equal(f.availability.length,count);
+});
+test('replacement offers and acceptances update every saved booking allocation mirror',async t=>{
+ const f=await setup(t);const {updateBoardRoleSlot}=await import('../controllers/allocationController.js');
+ const replacement='777777777777777777777777';
+ await updateBoardRoleSlot({bookingBoardItemId:boardId,roleSlotId:'keyboard-1'},{musicianId:replacement,name:'Replacement Musician',status:'offered'});
+ await updateBoardRoleSlot({bookingBoardItemId:boardId,roleSlotId:'keyboard-1'},{musicianId:replacement,name:'Replacement Musician',status:'confirmed'});
+ const write=f.coreWrites.at(-1);
+ for(const field of ['assignedMusicians','bookingMusicians','bandLineup','bookingDetails.assignedMusicians']){
+  assert.equal(write[field][0].musicianId,replacement);assert.equal(write[field][0].status,'confirmed');assert.equal(write[field][0].fee,400);
+  assert.equal(write[field][1].musicianId,person);assert.equal(write[field][1].status,'confirmed');
+ }
 });
 
 test('role holds require admin access, a reason and an unfilled role, and preserve fee and other roles',async t=>{
