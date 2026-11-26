@@ -38,6 +38,9 @@ import {
   refreshMusicianVideoSubmission,
   setPreferredMusicianVideo,
   uploadMusicianVideo,
+  getMusicianVideoThumbnail,
+  uploadMusicianVideoThumbnail,
+  reviewMusicianVideoThumbnail,
 } from "../controllers/musicianVideoSubmissionController.js";
 
 const router = express.Router();
@@ -52,6 +55,14 @@ router.post("/:id/video-submissions", verifyToken, upload.single("video"), uploa
 router.get("/:id/video-submissions", verifyToken, listMyMusicianVideos);
 router.post("/:id/video-submissions/:submissionId/refresh", verifyToken, refreshMusicianVideoSubmission);
 router.patch("/:id/video-submissions/:submissionId/preferred", verifyToken, setPreferredMusicianVideo);
+const thumbnailUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+router.get("/:id/video-submissions/:submissionId/thumbnail", verifyToken, getMusicianVideoThumbnail);
+router.post("/:id/video-submissions/:submissionId/thumbnail", verifyToken, (req, res, next) => {
+  thumbnailUpload.single("thumbnail")(req, res, error => error
+    ? res.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ success: false, message: "Choose one JPG, PNG or WebP thumbnail, up to 5 MB" })
+    : next());
+}, uploadMusicianVideoThumbnail);
+router.patch("/:id/video-submissions/:submissionId/thumbnail/review", verifyToken, reviewMusicianVideoThumbnail);
 
 if (!stripeSecretKey) {
   console.warn("⚠️ STRIPE_SECRET_KEY missing — Stripe routes will be limited/disabled.");

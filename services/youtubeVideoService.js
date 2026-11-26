@@ -32,6 +32,12 @@ export const inspectYoutubeVideo = async (videoId) => {
   };
 };
 
+export const setYoutubeVideoThumbnail = async ({ videoId, mediaUrl }) => {
+  const response = await fetch(mediaUrl, { signal: AbortSignal.timeout(30000) });
+  if (!response.ok || !response.body) throw new Error("Could not read the video thumbnail");
+  await getYoutube().thumbnails.set({ videoId, media: { mimeType: "image/jpeg", body: Readable.fromWeb(response.body) } });
+};
+
 const clean = (value = "") => String(value || "").replace(/\s+/g, " ").trim();
 
 export const buildAnonymousYoutubeMetadata = ({ musician, submission }) => {

@@ -3,7 +3,8 @@ import { v2 as cloudinary } from "cloudinary";
 import musicianModel from "../models/musicianModel.js";
 import musicianVideoSubmissionModel from "../models/musicianVideoSubmissionModel.js";
 import { extractModerationFlags, getAzureVideoIndex, submitVideoToAzure } from "../services/videoModerationService.js";
-import { buildAnonymousYoutubeMetadata, publishVideoToYoutube } from "../services/youtubeVideoService.js";
+import { buildAnonymousYoutubeMetadata, publishVideoToYoutube, setYoutubeVideoThumbnail } from "../services/youtubeVideoService.js";
+import { thumbnailMediaUrl, uploadPrivateThumbnail, isSupportedThumbnail } from "../services/musicianVideoThumbnailService.js";
 import {
   getActiveApplicantPriorities,
   withApplicantPriority,
@@ -58,8 +59,80 @@ const serialise = (submission, { includeAccessUrl = false } = {}) => ({
   youtubeTitle: submission.youtubeTitle,
   createdAt: submission.createdAt,
   updatedAt: submission.updatedAt,
+  thumbnailSource: submission.thumbnailPublicId ? "custom" : "automatic",
+  thumbnailUpdatedAt: submission.thumbnailUpdatedAt,
+  thumbnailOriginalName: submission.thumbnailOriginalName,
+  thumbnailReviewStatus: submission.thumbnailReviewStatus,
+  thumbnailReviewReason: submission.thumbnailReviewReason,
   ...(includeAccessUrl ? { accessUrl: signedMediaUrl(submission, 300), accessUrlExpiresInSeconds: 300 } : {}),
 });
+
+const accessibleVideo = async (req) => {
+  const submission = await musicianVideoSubmissionModel.findById(req.params.submissionId);
+  if (!submission || (req.params.id && String(submission.musicianId) !== String(req.params.id))) return null;
+  if (!canAccessMusician(req, submission.musicianId)) return null;
+  return submission;
+};
+
+export const getMusicianVideoThumbnail = async (req, res) => {
+  try {
+    const submission = await accessibleVideo(req);
+    if (!submission) return res.status(404).json({ success: false, message: "Video not found" });
+    const response = await fetch(await thumbnailMediaUrl(submission), { signal: AbortSignal.timeout(30000) });
+    if (!response.ok) throw new Error("Thumbnail is not ready yet");
+    const bytes = Buffer.from(await response.arrayBuffer());
+    res.set({ "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff" });
+    return res.send(bytes);
+  } catch {
+    return res.status(503).json({ success: false, message: "Thumbnail is temporarily unavailable" });
+  }
+};
+
+export const uploadMusicianVideoThumbnail = async (req, res) => {
+  try {
+    const submission = await accessibleVideo(req);
+    if (!submission) return res.status(404).json({ success: false, message: "Video not found" });
+    if (!isSupportedThumbnail(req.file)) return res.status(415).json({ success: false, message: "Choose a JPG, PNG or WebP image" });
+    if (req.file.size > 5 * 1024 * 1024) return res.status(413).json({ success: false, message: "Thumbnail must be 5 MB or smaller" });
+    if (submission.status === "publishing") return res.status(409).json({ success: false, message: "Please wait until video publishing finishes" });
+    const image = await uploadPrivateThumbnail(req.file, submission.musicianId);
+    const saved = await musicianVideoSubmissionModel.findOneAndUpdate(
+      { _id: submission._id, status: { $ne: "publishing" } },
+      { $set: {
+        thumbnailPublicId: image.public_id, thumbnailFormat: image.format || "jpg",
+        thumbnailOriginalName: clean(req.file.originalname).slice(0, 240), thumbnailUpdatedAt: new Date(),
+        thumbnailReviewStatus: "pending", thumbnailReviewReason: "TSC will check that the thumbnail contains no text or branding",
+      } }, { new: true },
+    );
+    if (!saved) return res.status(409).json({ success: false, message: "Video publishing has started; please try again once it finishes" });
+    return res.json({ success: true, submission: serialise(saved) });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Could not save the thumbnail. Please try another image." });
+  }
+};
+
+export const reviewMusicianVideoThumbnail = async (req, res) => {
+  try {
+    if (!isAgent(req)) return res.status(403).json({ success: false, message: "Staff access required" });
+    const submission = await accessibleVideo(req);
+    if (!submission?.thumbnailPublicId) return res.status(404).json({ success: false, message: "Custom thumbnail not found" });
+    const decision = req.body?.decision;
+    if (!["approve", "reject"].includes(decision)) return res.status(400).json({ success: false, message: "Choose approve or reject" });
+    if (decision === "approve" && submission.youtubeVideoId) {
+      await setYoutubeVideoThumbnail({ videoId: submission.youtubeVideoId, mediaUrl: await thumbnailMediaUrl(submission) });
+    }
+    const saved = await musicianVideoSubmissionModel.findOneAndUpdate(
+      { _id: submission._id, thumbnailPublicId: submission.thumbnailPublicId },
+      { $set: { thumbnailReviewStatus: decision === "approve" ? "approved" : "rejected",
+        thumbnailReviewReason: decision === "approve" ? "Thumbnail checked by TSC" : "Please upload a thumbnail without text or branding" } },
+      { new: true },
+    );
+    if (!saved) return res.status(409).json({ success: false, message: "The thumbnail changed while you were reviewing it; please check the new image" });
+    return res.json({ success: true, submission: serialise(saved) });
+  } catch (error) {
+    return res.status(503).json({ success: false, message: "Could not apply the thumbnail. It remains saved for review." });
+  }
+};
 
 export const uploadMusicianVideo = async (req, res) => {
   try {
@@ -256,7 +329,10 @@ export const getMusicianVideoForReview = async (req, res) => {
 export const listMusicianVideoSubmissionsForReview = async (_req, res) => {
   try {
     const submissions = await musicianVideoSubmissionModel
-      .find({ status: { $in: ["processing", "manual_required", "ready_for_review", "publishing", "failed"] } })
+      .find({ $or: [
+        { status: { $in: ["processing", "manual_required", "ready_for_review", "publishing", "failed"] } },
+        { thumbnailReviewStatus: "pending" },
+      ] })
       .populate("musicianId", "firstName lastName email musicianSlug")
       .sort({ createdAt: -1 });
     const priorityMap = await getActiveApplicantPriorities(
@@ -303,6 +379,9 @@ export const reviewMusicianVideoSubmission = async (req, res) => {
     }
     const musician = await musicianModel.findById(submission.musicianId);
     if (!musician) return res.status(404).json({ success: false, message: "Musician not found" });
+    if (submission.thumbnailPublicId && submission.thumbnailReviewStatus === "pending") {
+      return res.status(409).json({ success: false, message: "Check and approve the custom thumbnail before publishing this video" });
+    }
     submission.status = "publishing";
     submission.moderationReason = "Approved; publishing to the TSC YouTube channel";
     submission.reviewedAt = new Date();
@@ -310,10 +389,17 @@ export const reviewMusicianVideoSubmission = async (req, res) => {
     await submission.save();
     try {
       const metadata = buildAnonymousYoutubeMetadata({ musician, submission });
-      const youtube = await publishVideoToYoutube({ mediaUrl: signedMediaUrl(submission, 7200), metadata });
+      const youtube = submission.youtubeVideoId
+        ? { id: submission.youtubeVideoId, url: submission.youtubeUrl }
+        : await publishVideoToYoutube({ mediaUrl: signedMediaUrl(submission, 7200), metadata });
       submission.youtubeVideoId = youtube.id;
       submission.youtubeUrl = youtube.url;
       submission.youtubeTitle = metadata.title;
+      // Keep the uploaded video ID even if setting its thumbnail needs a retry.
+      await submission.save();
+      if (submission.thumbnailPublicId && submission.thumbnailReviewStatus === "approved") {
+        await setYoutubeVideoThumbnail({ videoId: youtube.id, mediaUrl: await thumbnailMediaUrl(submission) });
+      }
       submission.status = "published";
       submission.publishedAt = new Date();
       submission.moderationReason = "Approved and published to the TSC YouTube channel";

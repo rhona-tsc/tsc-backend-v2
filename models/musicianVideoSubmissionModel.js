@@ -22,6 +22,13 @@ const musicianVideoSubmissionSchema = new mongoose.Schema(
     cloudinaryPublicId: { type: String, required: true },
     cloudinaryFormat: { type: String, default: "" },
     cloudinaryResourceType: { type: String, default: "video" },
+    generatedThumbnailUrl: { type: String, default: "" },
+    thumbnailPublicId: { type: String, default: "" },
+    thumbnailFormat: { type: String, default: "jpg" },
+    thumbnailOriginalName: { type: String, default: "" },
+    thumbnailUpdatedAt: { type: Date, default: null },
+    thumbnailReviewStatus: { type: String, enum: ["", "pending", "approved", "rejected"], default: "" },
+    thumbnailReviewReason: { type: String, default: "" },
     status: {
       type: String,
       enum: ["processing", "manual_required", "ready_for_review", "publishing", "published", "rejected", "failed"],
