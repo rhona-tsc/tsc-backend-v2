@@ -38,14 +38,15 @@ export function originalParticipation(snapshot, musicianId, now = new Date()) {
   };
 }
 
-export async function loadOriginalMembership(project) {
+export async function loadOriginalMembership(project, session) {
   const projectId = project._id;
+  const read = query => (session ? query.session(session) : query).lean();
   const [rounds, reservations, submissions, invitations, futureReservations] = await Promise.all([
-    Round.find({ projectId }).select('_id state type roleName eligibleRoles clockStartedAt closeReason').lean(),
-    Reservation.find({ projectId }).select('_id musicianId roundId roleName state expiresAt anonymous creditName createdAt updatedAt').lean(),
-    Submission.find({ projectId }).select('musicianId roundId reservationId roleName state selectionMode decidedAt createdAt updatedAt').lean(),
-    Invitation.find({ projectId }).select('invitedMusicianId roundId roleName state expiresAt createdAt').lean(),
-    Future.find({ projectId, state: 'waiting' }).select('musicianId roleName state').lean(),
+    read(Round.find({ projectId }).select('_id state type roleName eligibleRoles clockStartedAt closeReason')),
+    read(Reservation.find({ projectId }).select('_id musicianId roundId roleName state expiresAt anonymous creditName createdAt updatedAt')),
+    read(Submission.find({ projectId }).select('musicianId roundId reservationId roleName state selectionMode decidedAt createdAt updatedAt')),
+    read(Invitation.find({ projectId }).select('invitedMusicianId roundId roleName state expiresAt createdAt')),
+    read(Future.find({ projectId, state: 'waiting' }).select('musicianId roleName state')),
   ]);
   return { project, rounds, reservations, submissions, invitations, futureReservations };
 }

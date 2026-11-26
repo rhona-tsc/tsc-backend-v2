@@ -12,6 +12,7 @@ import { isOriginalsEnabled } from './originalsPolicyService.js';
 import { buildOriginalProjectApprovedEmail, collectOriginalsNotificationRecipients } from './originalsNotificationService.js';
 import { buildOriginalSubmissionConfirmationEmail } from '../utils/originalsSubmissionConfirmationEmail.js';
 import { createOriginalsEmailPlaybackToken, originalsEmailPlaybackUrls } from './originalsEmailPlaybackService.js';
+import { loadOriginalMembership, originalParticipation } from './originalsMembershipService.js';
 
 export const buildOriginalProjectModerationEmail = project => {
   const url = `${String(process.env.ADMIN_FRONTEND_URL || 'https://admin.thesupremecollective.co.uk').replace(/\/$/, '')}/originals/moderation#project-${encodeURIComponent(String(project._id))}`;
@@ -140,6 +141,11 @@ export async function deliverOriginalProjectEmails({ emailSender = sendEmail, em
         ? project.state === 'pending_moderation' && project.moderation?.status === 'pending' && new Date(project.moderation.submittedAt).getTime() === new Date(job.submittedAt).getTime()
         : project.moderation?.status === 'approved' && !['cancelled', 'archived', 'paused'].includes(project.state));
       let to = job.to;
+      if (job.kind === 'project_update' && eligible) {
+        const recipient = await musicianRepository.findById(job.musicianId).select('email profileDeletedAt').lean();
+        eligible = recipient && !recipient.profileDeletedAt && String(recipient.email || '').trim().toLowerCase() === job.to
+          && originalParticipation(await loadOriginalMembership(project), job.musicianId, now).notify;
+      }
       if (job.kind === 'launch' && eligible) {
         const recipient = job.musicianId
           ? await musicianRepository.findById(job.musicianId).select('_id email firstName role status profileDeletedAt privateTestProfile').lean()

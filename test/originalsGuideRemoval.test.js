@@ -46,3 +46,9 @@ test('audit failure rolls back guide removal', async t => {
   await removeOriginalGuide({ params: { assetId: guideId }, user: { id: owner } }, res);
   assert.equal(res.code, 500); assert.equal(store.data.assets[0].state, 'active');
 });
+test('temporary starting stems can also be removed without touching approved stems', async t => {
+  const store = setup(t); store.data.assets[0].kind = 'temporary_stem';
+  const res = response();
+  await removeOriginalGuide({ params: { assetId: guideId }, user: { id: owner } }, res);
+  assert.equal(res.code, 200); assert.equal(store.data.assets[0].state, 'hidden');
+});

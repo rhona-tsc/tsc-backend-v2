@@ -3,6 +3,7 @@ import { editOriginalProjectSubmission, saveOriginalProjectSubmission } from '..
 import { allowOriginalInvitationRequest } from "../services/originalsInvitationAccessService.js";
 import { deleteOriginalUploadedRecording } from '../controllers/originalsDraftAssetController.js';
 import { removeOriginalGuide } from '../controllers/originalsGuideController.js';
+import { renameOriginalProject } from '../controllers/originalsRenameController.js';
 import { getOriginalStemPreview, confirmOriginalStemReview, streamOriginalAudio } from '../controllers/originalsRecordingController.js';
 import { showOriginalsEmailListeningPage, streamOriginalsEmailRecording } from '../controllers/originalsEmailPlaybackController.js';
 import { changeOriginalProjectRole } from '../controllers/originalsRolesController.js';
@@ -116,6 +117,7 @@ router.get("/projects", listOriginalProjects);
 router.get("/mine", listMyOriginalProjects);
 router.post("/projects", createOriginalProject);
 router.patch("/projects/:id", updateOriginalProject);
+router.patch('/projects/:id/details', renameOriginalProject);
 router.post('/projects/:id/edit-draft', editOriginalProjectSubmission);
 router.patch('/projects/:id/draft', saveOriginalProjectSubmission);
 router.post("/projects/:id/roles", changeOriginalProjectRole);

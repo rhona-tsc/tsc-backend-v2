@@ -17,7 +17,7 @@ export async function removeOriginalGuide(req, res) {
       const project = await Project.findById(asset.projectId).session(session);
       if (!project) throw Object.assign(new Error('Project not found'), { status: 404 });
       if (String(project.ownerId) !== userId && !canModerateOriginals(req.user)) throw Object.assign(new Error('Only the project owner or an administrator can remove guides'), { status: 403 });
-      if (!['guide_track', 'demo', 'voice_note', 'video_submission'].includes(asset.kind) || asset.reservationId) throw Object.assign(new Error('Only project reference guides can be removed here'), { status: 409 });
+      if (!['guide_track', 'demo', 'voice_note', 'video_submission', 'temporary_stem'].includes(asset.kind) || asset.reservationId) throw Object.assign(new Error('Only project guides and temporary starting stems can be removed here'), { status: 409 });
       const removed = await Asset.updateOne({ _id: asset._id, state: 'active' }, { $set: { state: 'hidden' } }, { session });
       if (removed.matchedCount !== 1) throw Object.assign(new Error('This guide has changed. Refresh and try again.'), { status: 409 });
       await Project.updateOne({ _id: project._id }, { $pull: { initialAssetIds: asset._id } }, { session });
