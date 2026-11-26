@@ -3038,13 +3038,15 @@ export const ensureEmergencyContact = async (req, res) => {
       board?.bookingMusicians,
       board?.bandLineup,
     ].find((items) => Array.isArray(items) && items.length) || [];
+    const hasBoardAssignments = [board?.assignedMusicians, board?.bookingMusicians, board?.bandLineup]
+      .some(Array.isArray);
     const confirmedAssignments = savedAssignments.filter((member) =>
       ["accepted", "confirmed"].includes(
         String(member?.status || "").trim().toLowerCase(),
       ),
     );
     const assignedMusicians = await resolveAssignedMusiciansFromBooking(
-      savedAssignments.length
+      hasBoardAssignments
         ? { assignedMusicians: confirmedAssignments }
         : book.toObject
           ? book.toObject()
@@ -3070,7 +3072,7 @@ export const ensureEmergencyContact = async (req, res) => {
     // confirmed allocation and mirror it to the event sheet.
     if (book?.contactRouting?.ivrCode && book?.contactRouting?.proxyNumber) {
       book.contactRouting.proxyNumber = sharedEmergencyNumber();
-      if (targets.length) {
+      if (hasBoardAssignments || targets.length) {
         book.contactRouting.targets = targets;
       }
       book.eventSheet = book.eventSheet || {};
