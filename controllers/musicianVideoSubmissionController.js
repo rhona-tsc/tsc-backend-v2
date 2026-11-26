@@ -179,10 +179,53 @@ export const listMyMusicianVideos = async (req, res) => {
 
 export const refreshMusicianVideoSubmission = async (req, res) => {
   try {
-    const submission = await musicianVideoSubmissionModel.findById(req.params.submissionId);
+    let submission = await musicianVideoSubmissionModel.findById(req.params.submissionId);
     if (!submission) return res.status(404).json({ success: false, message: "Video submission not found" });
     if (!canAccessMusician(req, submission.musicianId)) return res.status(403).json({ success: false, message: "Forbidden" });
-    if (!submission.azureVideoId) return res.json({ success: true, submission: serialise(submission) });
+    if (["rejected", "publishing", "published"].includes(submission.status)) {
+      return res.json({ success: true, submission: serialise(submission) });
+    }
+    if (!submission.azureVideoId) {
+      // Claim the retry before contacting Azure so simultaneous refreshes cannot
+      // start multiple billable indexing jobs for the same saved upload.
+      const claimed = await musicianVideoSubmissionModel.findOneAndUpdate(
+        {
+          _id: submission._id,
+          azureVideoId: { $in: ["", null] },
+          status: { $in: ["manual_required", "failed"] },
+          reviewedAt: null,
+          youtubeVideoId: { $in: ["", null] },
+        },
+        { $set: { status: "processing", azureState: "Starting", moderationReason: "Automated text and identity checks are starting", error: "" } },
+        { new: true },
+      );
+      if (!claimed) {
+        submission = await musicianVideoSubmissionModel.findById(submission._id) || submission;
+        return res.json({ success: true, submission: serialise(submission) });
+      }
+      submission = claimed;
+      try {
+        const azure = await submitVideoToAzure({
+          mediaUrl: signedMediaUrl(submission),
+          name: submission.suppliedTitle || "Musician showreel",
+        });
+        if (!azure.id && !azure.videoId) throw new Error("Azure did not return a video id");
+        submission.azureVideoId = azure.id || azure.videoId;
+        submission.azureState = azure.state || "Uploaded";
+        submission.moderationFlags = [];
+        submission.azureProcessedAt = null;
+        submission.moderationReason = "Automated text and identity checks are running";
+        await submission.save();
+      } catch (error) {
+        submission.status = "manual_required";
+        submission.azureState = "";
+        submission.error = error.message;
+        submission.moderationReason = `Automatic checking could not start: ${error.message}`;
+        await submission.save();
+        throw error;
+      }
+      return res.json({ success: true, submission: serialise(submission) });
+    }
     const index = await getAzureVideoIndex(submission.azureVideoId);
     submission.azureState = index.state || "Unknown";
     if (String(index.state).toLowerCase() === "processed") {
