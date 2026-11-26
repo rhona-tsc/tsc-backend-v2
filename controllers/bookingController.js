@@ -113,7 +113,7 @@ function compactAssignedMusician(value = {}) {
   };
 }
 
-async function resolveAssignedMusiciansFromBooking(booking = {}) {
+export async function resolveAssignedMusiciansFromBooking(booking = {}) {
   const raw = [];
 
   if (Array.isArray(booking.assignedMusicians)) raw.push(...booking.assignedMusicians);
@@ -188,6 +188,7 @@ async function resolveAssignedMusiciansFromBooking(booking = {}) {
         ...(doc || {}),
         ...entry,
         musicianId: id || entry?.musicianId,
+        phone: entry?.phone || entry?.phoneNumber || doc?.phone || doc?.phoneNumber || "",
       });
     })
     .filter(Boolean);
@@ -3060,7 +3061,7 @@ export const ensureEmergencyContact = async (req, res) => {
           name: member.name,
           role: member.role || member.instrument || "Band member",
           phone,
-          priority: index + 1,
+          priority: book.contactRouting?.targets?.find(target => String(target.musicianId) === String(member.musicianId))?.priority || index + 1,
         };
       })
       .filter(Boolean);
