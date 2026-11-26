@@ -47,3 +47,9 @@ test('button parsing and active allocation deduplication do not guess identities
  assert.deepEqual(calendarDeclineButton('CAL_LOC:'+person),{id:person,reply:'no'});assert.equal(calendarDeclineButton('unavailable'),null);assert.equal(activeCalendarAssignments(null).length,0);
  const f=fixture();assert.equal(activeCalendarAssignments(f.board).length,1);
 });
+test('legacy calendar matching requires a whole client name, postcode and one unique same-day booking',async()=>{
+ const f=fixture();f.event.description='EVENT SHEET: To follow';f.event.start={dateTime:'2026-12-10T17:00:00Z'};f.event.location='Venue, RH5 6HS';f.board.address='Venue, RH5 6HS';f.board.clientFirstNames='Ann';f.event.summary="Joanne's Wedding";
+ assert.equal(await f.service.boardFor(f.event),null);
+ f.event.summary="Ann's Wedding";assert.equal(await f.service.boardFor(f.event),f.board);
+ f.rows.bookingboarditems.push({...f.board,_id:'333333333333333333333333'});assert.equal(await f.service.boardFor(f.event),null);
+});

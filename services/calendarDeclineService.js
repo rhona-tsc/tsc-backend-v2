@@ -47,7 +47,8 @@ export function createCalendarDeclineService({ db, calendar, send, withdraw, tem
         const candidates=await boards.find({eventDateISO:day}).toArray();
         const matches=candidates.filter(candidate=>{
           const first=clean(candidate.clientFirstNames || candidate.bookerName).split(/\s|&/)[0].toLowerCase();
-          return first.length>=3&&!['client','customer'].includes(first)&&clean(event.summary).toLowerCase().includes(first)
+          const titleWords=clean(event.summary).toLowerCase().split(/[^\p{L}\p{N}-]+/u);
+          return first.length>=3&&!['client','customer'].includes(first)&&titleWords.includes(first)
             &&postcode(candidate.address || candidate.venue)===eventPostcode;
         });
         if(matches.length===1)board=matches[0];
