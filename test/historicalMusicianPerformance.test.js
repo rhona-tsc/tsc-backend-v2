@@ -48,3 +48,20 @@ test('an authoritative board withdrawal suppresses stale source-booking connecti
  const db={collection(name){return{find(){const rows=name==='bookings'?[core]:name==='bookingboarditems'?(boardCalls++?[board]:[]):[];return{project(){return this},maxTimeMS(){return this},async toArray(){return rows}}}}}};
  assert.deepEqual((await getMusicianConnections(subject,{db,now:new Date('2026-11-26T12:00Z')})).musicians,[]);
 });
+
+test('explicit act roster IDs recover old contact emails without guessing or resolving shared aliases',()=>{
+ const aliases=[{musicianId:profiles[0]._id,email:'older-address@example.com'}];
+ const index=buildHistoricalIdentityIndex(profiles,aliases);
+ assert.equal(index.resolveEmail('older-address@example.com'),profiles[0]._id);
+ assert.equal(buildHistoricalIdentityIndex(profiles,[...aliases,{musicianId:profiles[1]._id,email:'older-address@example.com'}]).resolveEmail('older-address@example.com'),'');
+ assert.equal(buildHistoricalIdentityIndex(profiles,[{musicianId:'unknown',email:'older-address@example.com'}]).resolveEmail('older-address@example.com'),'');
+});
+test('the full primary calendar needs performance evidence and never treats availability or organizers as performers',()=>{
+ const personal=event({calendarCategory:'performance',description:'',summary:'Private birthday party'});
+ assert.equal(run({events:[personal]}).records.length,0);
+ assert.equal(run({events:[{...personal,description:'Soundcheck 17:00; set times 19:00'}]}).records.length,1);
+ assert.equal(run({events:[{...personal,summary:'Known Band wedding'}],actNames:['Known Band']}).records.length,1);
+ assert.equal(run({events:[event({calendarCategory:'availability'})]}).records.length,0);
+ const e=event();e.attendees[1].organizer=true;assert.equal(run({events:[e]}).records.length,0);
+ assert.equal(run({events:[{...personal,calendarId:'c_0kbngahob779qdifdav366hqtc@group.calendar.google.com'}]}).records.length,1);
+});

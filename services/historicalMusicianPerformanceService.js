@@ -1,13 +1,13 @@
 import crypto from 'node:crypto';
 import { completedBooking, confirmedRoster } from '../utils/performanceRoster.js';
 
-export const HISTORY_VERSION = 1;
+export const HISTORY_VERSION = 2;
 export const historyEmail = value => String(value || '').trim().toLowerCase().replace(/@googlemail\.com$/, '@gmail.com');
 const key = value => String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const id = value => String(value || '');
 const clientKey = value => key(String(value || '').replace(/[’']s\b/g, '').replace(/\b(?:\d+(?:st|nd|rd|th)?\s+)?(?:wedding|anniversary|birthday|corporate\s+event|party|reception)(?:\s+party)?\s*$/i, '').trim());
 const allocationRows = b => b.assignedMusicians?.length ? b.assignedMusicians : b.bookingDetails?.assignedMusicians?.length ? b.bookingDetails.assignedMusicians : b.bookingMusicians?.length ? b.bookingMusicians : b.bandLineup || [];
-export function buildHistoricalIdentityIndex(profiles) {
+export function buildHistoricalIdentityIndex(profiles, contacts = []) {
   const byId = new Map(profiles.map(m => [id(m._id), m]));
   const emails = new Map(), ids = new Map();
   const add = (map, value, canonical) => { if (!value) return; if (!map.has(value)) map.set(value, new Set()); map.get(value).add(canonical); };
@@ -27,6 +27,13 @@ export function buildHistoricalIdentityIndex(profiles) {
     for (const value of [profile.email, ...(profile.mergedProfileEmails || []), ...(profile.mergedProfileContacts || []).map(c => c.email)].map(historyEmail)) add(emails, value, canonicalId);
   }
   const unique = values => values?.size === 1 ? [...values][0] : '';
+  // Only explicit saved musician IDs may supply an older contact alias.
+  // Names or a shared telephone number never merge people or login accounts.
+  for (const contact of contacts) {
+    const canonical = unique(ids.get(id(contact.musicianId)));
+    if (canonical && contact.email) add(emails, historyEmail(contact.email), canonical);
+  }
+
   return {
     resolveEmail: value => unique(emails.get(historyEmail(value))),
     ambiguousEmail: value => (emails.get(historyEmail(value))?.size || 0) > 1,
@@ -77,8 +84,8 @@ function matchBooking(event, date, bookings) {
   });
   return matches.length === 1 ? {booking:matches[0]} : {ambiguous:matches.length > 1 || sameDate.some(b => venue && key(b.address || b.venueAddress || b.venue || b.bookingDetails?.venueAddress) === venue)};
 }
-export function buildHistoricalPerformances({ events, profiles, board = [], core = [], today }) {
-  const identity = buildHistoricalIdentityIndex(profiles);
+export function buildHistoricalPerformances({ events, profiles, board = [], core = [], contacts = [], actNames = [], today }) {
+  const identity = buildHistoricalIdentityIndex(profiles, contacts);
   const bookings = mergePerformanceBookings(board, core);
   const records = [], review = [];
   const rejectedTitle = /\b(reminder|catch up|call|meeting|rehearsal|accounts|invoice|quote|enquiry|unavailable|cancelled|canceled|hold)\b/i;
@@ -86,6 +93,7 @@ export function buildHistoricalPerformances({ events, profiles, board = [], core
     const date = calendarEventDate(event);
     const sourceKey = `${event.calendarId}:${event.id}`;
     const hold = (reason, extra={}) => review.push({sourceKey,date,title:event.summary,reason,...extra});
+    if (event.calendarCategory && event.calendarCategory !== 'performance') {hold('Not a performance calendar');continue;}
     if (!date || date >= today || event.status !== 'confirmed' || rejectedTitle.test(event.summary || '')) { hold('Not a completed confirmed gig'); continue; }
     const match = matchBooking(event,date,bookings);
     if (match.ambiguous) {hold('More than one booking matches');continue;}
@@ -103,7 +111,12 @@ export function buildHistoricalPerformances({ events, profiles, board = [], core
       if (person) { musicians.add(person); evidence.set(person,'accepted_gig_invitation'); }
       else (identity.ambiguousEmail(guest.email) ? ambiguous : unresolved).push(historyEmail(guest.email));
     }
-    const gigMarker = /event\s*sheet|booking\s*ref/i.test(event.description || '') || Boolean(booking) || (event.location && /\b(wedding|party|birthday|corporate|gig|anniversary|reception|festival|concert|christmas|nye|nyd|ball|awards|launch|performance)\b/i.test(event.summary || ''));
+    const detail = String(event.description || '').replace(/<[^>]+>/g,' ');
+    const performanceTerms = /\b(?:band members|soundcheck|set times|line[ -]?up|lead vocal|bass guitar|live performance|performance times|gig details|on stage|musicians required)\b/i.test(detail);
+    const namedBand = actNames.some(name => String(name).trim().length >= 5 && `${event.summary || ''} ${detail}`.toLowerCase().includes(String(name).trim().toLowerCase()));
+    const trustedGigDiary = event.calendarId === 'c_0kbngahob779qdifdav366hqtc@group.calendar.google.com';
+    const legacyGigTitle = !event.calendarCategory && event.location && /\b(wedding|party|birthday|corporate|gig|anniversary|reception|festival|concert|christmas|nye|nyd|ball|awards|launch|performance)\b/i.test(event.summary || '');
+    const gigMarker = /event\s*sheet|booking\s*ref/i.test(detail) || Boolean(booking) || performanceTerms || namedBand || trustedGigDiary || legacyGigTitle;
     if (!gigMarker) {hold('No reliable gig marker');continue;}
     if (musicians.size < 2) {hold('Fewer than two verified musician identities',{ambiguous,unresolved});continue;}
     records.push({_id:crypto.createHash('sha256').update(sourceKey).digest('hex'),source:'calendar_history',sourceCalendarId:event.calendarId,sourceEventId:event.id,eventDateISO:date,
