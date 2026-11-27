@@ -1,3 +1,4 @@
+import { actCardImage } from '../utils/actCardImage.js';
 import actCardModel from "../models/actCard.model.js";
 import { websiteActView } from '../utils/websiteLineups.js';
 import { normalizeSetlistControl } from '../utils/setlistControl.js';
@@ -107,8 +108,7 @@ export async function upsertActCardFromAct(act) {
   const { raw: lineupSizes,   norm: lineupSizes_norm }   = pickLineupSizes(act);
   const { raw: instruments,   norm: instruments_norm }   = pickInstruments(act);
 
-  const imageUrl =
-    act?.images?.[0]?.url || act?.images?.[0] || act?.heroImage || "";
+  const imageUrl = actCardImage(act);
 
 
 

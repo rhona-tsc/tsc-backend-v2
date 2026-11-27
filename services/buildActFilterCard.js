@@ -1,3 +1,4 @@
+import { actCardImage } from '../utils/actCardImage.js';
 import { websiteActView } from '../utils/websiteLineups.js';
 import { minimumSupplierPrice, minimumCustomerPrice } from '../utils/supplierPricing.js';
 // services/buildActFilterCard.js
@@ -79,14 +80,7 @@ const norm = (s) =>
     .replace(/^-+|-+$/g, "");
 
 /* -------------------------- image & base price ------------------------- */
-function pickCardImage(act) {
-  return (
-    act?.coverImage?.[0]?.url ||
-    act?.images?.[0]?.url ||
-    act?.profileImage?.[0]?.url ||
-    ""
-  );
-}
+const pickCardImage = actCardImage;
 
 function computeBasePriceFromAct(act) {
   const fees = (act?.lineups || []).flatMap((l) => {
