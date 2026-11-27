@@ -74,6 +74,7 @@ async function sendEmail({
   forceCc = null,
   forceBcc = null,
   subjectPrefix = null,
+  messageId,
   musicianPreferences = false,
   opportunityCategory,
 }) {
@@ -161,6 +162,7 @@ originalRecipients: recipients,    });
   }
 
   const mail = {
+    ...(messageId ? { messageId } : {}),
 from:
   from ||
   process.env.EMAIL_FROM ||

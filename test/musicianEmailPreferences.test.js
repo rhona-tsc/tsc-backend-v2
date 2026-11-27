@@ -40,7 +40,7 @@ test('preference links are signed, contain no raw email, and cannot be used as a
  const forged=f.token.slice(0,-8)+'tampered';assert.equal((await f.request(undefined,null,forged)).status,400);assert.equal(f.writes(),0);
 });
 test('opening a link or a scanner GET never changes preferences or deletes a profile',async t=>{
- const f=await setup(t);const res=await f.request();assert.equal(res.status,200);assert.deepEqual(res.data.preferences,{deputyOpportunities:true,originalsOpportunities:true,profileDeleted:false});assert.equal(f.writes(),0);
+ const f=await setup(t);const res=await f.request();assert.equal(res.status,200);assert.deepEqual(res.data.preferences,{deputyOpportunities:true,originalsOpportunities:true,deputyOutcomeUpdates:true,profileDeleted:false});assert.equal(f.writes(),0);
 });
 test('anonymous signed-link unsubscribe choices are independent, persist and can be reversed',async t=>{
  const f=await setup(t);
@@ -83,4 +83,14 @@ test('fallback preferences signing key remains separate from account authenticat
  assert.equal(verifyMusicianEmailPreferencesToken(link),musicianEmailHash('musician@example.test'));
  assert.throws(()=>jwt.verify(link,process.env.JWT_SECRET));
  assert.equal((await f.request(undefined,null,link)).status,200);
+});
+
+
+test('gig-filled updates have an independent opt-out and older forms preserve that choice',async t=>{
+ const f=await setup(t);await f.request({deputyOpportunities:true,originalsOpportunities:true,deputyOutcomeUpdates:false});
+ assert.equal(await musicianOpportunityAllowed('musician@example.test','deputy_outcome'),false);assert.equal(await musicianOpportunityAllowed('musician@example.test','deputy'),true);
+ await f.request({deputyOpportunities:false,originalsOpportunities:true});assert.equal((await f.request()).data.preferences.deputyOutcomeUpdates,false);
+ assert.equal((await f.request({deputyOpportunities:true,originalsOpportunities:true,deputyOutcomeUpdates:'false'})).status,400);
+ const result=await sendEmail({to:'musician@example.test',subject:'Gig filled',text:'Thanks',opportunityCategory:'deputy_outcome'});assert.equal(result.reason,'unsubscribed');
+ await f.request({deputyOpportunities:true,originalsOpportunities:true,deputyOutcomeUpdates:true});assert.equal(await musicianOpportunityAllowed('musician@example.test','deputy_outcome'),true);
 });

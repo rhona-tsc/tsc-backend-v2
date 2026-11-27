@@ -1,5 +1,6 @@
 import {replacementGoesToJobBoard} from '../utils/rosterEligibility.js';
 import { sharedRosterSkillEligibility } from '../utils/sharedRosterSkills.js';
+import { completeDeputyAdvertForAssignment } from '../services/deputyOutcomeEmailService.js';
 import {activeAllocationHold,withinAllocationWeek,vocalistAllocationBlocked,bookingRolePlan} from '../utils/bookingAllocationPolicy.js';
 import {normaliseAllocationRole} from '../utils/allocationRoles.js';
 import {confirmedBookingAvailabilityWrite, syncConfirmedBookingAssignments} from '../services/manualBookingConfirmation.js';
@@ -339,6 +340,7 @@ const completeAcceptedAssignment = async ({
   musician = null,
   manualConfirmation = false,
 }) => {
+  await completeDeputyAdvertForAssignment({ board, assignment });
   const booking = await resolveSourceBooking(board);
   const email = String(
     assignment?.email || musician?.email || musician?.basicInfo?.email || "",
@@ -1596,6 +1598,9 @@ export const confirmBookingRole = async (req, res) => {
       status: "confirmed",
       fee,
       totalFee: fee,
+      withdrawnAt: null,
+      withdrawalReason: "",
+      withdrawalSource: "",
       currency: String(req.body?.currency || "GBP").toUpperCase(),
       paymentStatus: "not_due",
       source: "manual_admin_confirmation",

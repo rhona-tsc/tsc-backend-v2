@@ -1,4 +1,5 @@
 import {processPendingBookingRoleUpgrades} from './services/bookingRoleUpgrade.js';
+import {deliverDeputyOutcomeEmails} from './services/deputyOutcomeEmailService.js';
 import {processDependentBookingOffers} from './services/dependentBookingOffer.js';
 import {runCalendarDeclineReconciliation} from './services/calendarDeclineService.js';
 import voiceIvrRoutes from './routes/voiceIvr.js';
@@ -921,6 +922,11 @@ app.get("/api/availability/process-deferred", async (_req, res) => {
 cron.schedule("* * * * *", () => {
   runMasterSupplierPricingSync().catch(error => console.error('Master pricing worker unavailable:', error.message));
 }, { timezone: "Europe/London" });
+
+// Notify other applicants after an allocation, respecting their separate preference.
+cron.schedule('* * * * *', () => {
+  deliverDeputyOutcomeEmails().catch(error => console.error('Deputy outcome emails failed:', error.message));
+}, { timezone: 'Europe/London', noOverlap: true });
 
 // Publish unfilled booked roles at seven days; holds and client approvals win.
 cron.schedule("*/15 * * * *", async()=>{

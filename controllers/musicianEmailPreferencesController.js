@@ -2,7 +2,7 @@ import Preferences from '../models/musicianEmailPreferenceModel.js';
 import Musician from '../models/musicianModel.js';
 import { musicianEmailHash, verifyMusicianEmailPreferencesToken } from '../utils/musicianEmailPreferences.js';
 const userId = user => String(user?._id || user?.id || user?.userId || '');
-const present = record => ({ deputyOpportunities: record?.deputyOpportunities !== false, originalsOpportunities: record?.originalsOpportunities !== false, profileDeleted: Boolean(record?.profileDeletedAt) });
+const present = record => ({ deputyOpportunities: record?.deputyOpportunities !== false, originalsOpportunities: record?.originalsOpportunities !== false, deputyOutcomeUpdates: record?.deputyOutcomeUpdates !== false, profileDeleted: Boolean(record?.profileDeletedAt) });
 async function identity(req) {
   const token = req.method === 'GET' ? req.query.token : req.body.token;
   if (token) return { emailHash: verifyMusicianEmailPreferencesToken(token) };
@@ -24,7 +24,7 @@ export async function saveMusicianEmailPreferences(req, res) {
   res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
   try {
     const { emailHash } = await identity(req);
-    if (typeof req.body.deputyOpportunities !== 'boolean' || typeof req.body.originalsOpportunities !== 'boolean' || (req.body.deleteProfile !== undefined && typeof req.body.deleteProfile !== 'boolean')) return res.status(400).json({ success: false, message: 'Choose your email preferences before saving.' });
+    if (typeof req.body.deputyOpportunities !== 'boolean' || typeof req.body.originalsOpportunities !== 'boolean' || (req.body.deputyOutcomeUpdates !== undefined && typeof req.body.deputyOutcomeUpdates !== 'boolean') || (req.body.deleteProfile !== undefined && typeof req.body.deleteProfile !== 'boolean')) return res.status(400).json({ success: false, message: 'Choose your email preferences before saving.' });
     const existing = await Preferences.findOne({ emailHash }).lean();
     const deletion = req.body.deleteProfile === true;
     if (deletion) {
@@ -35,12 +35,14 @@ export async function saveMusicianEmailPreferences(req, res) {
       const deletedAt = musician.profileDeletedAt || new Date();
       // Remove public visibility while retaining booking, agreement, payment and
       // royalty history linked to this account. Repeating the action is safe.
-      await Preferences.updateOne({ emailHash }, { $set: { deputyOpportunities: false, originalsOpportunities: false, profileDeletedAt: deletedAt } }, { upsert: true });
+      await Preferences.updateOne({ emailHash }, { $set: { deputyOpportunities: false, originalsOpportunities: false, deputyOutcomeUpdates: false, profileDeletedAt: deletedAt } }, { upsert: true });
       await Musician.updateOne({ _id: musician._id }, { $set: { profileDeletedAt: deletedAt } });
-      return res.json({ success: true, preferences: { deputyOpportunities: false, originalsOpportunities: false, profileDeleted: true }, message: 'Your musician profile has been removed from public view and both opportunity email lists. Existing booking and royalty records are retained.' });
+      return res.json({ success: true, preferences: { deputyOpportunities: false, originalsOpportunities: false, deputyOutcomeUpdates: false, profileDeleted: true }, message: 'Your musician profile has been removed from public view and optional musician emails. Existing booking and royalty records are retained.' });
     }
     if (existing?.profileDeletedAt) return res.status(409).json({ success: false, message: 'This profile has been removed. Contact TSC if you would like to rejoin.' });
-    await Preferences.updateOne({ emailHash }, { $set: { deputyOpportunities: req.body.deputyOpportunities, originalsOpportunities: req.body.originalsOpportunities } }, { upsert: true });
-    return res.json({ success: true, preferences: present(req.body), message: 'Your email preferences have been saved.' });
+    const choices = { deputyOpportunities: req.body.deputyOpportunities, originalsOpportunities: req.body.originalsOpportunities,
+      ...(req.body.deputyOutcomeUpdates !== undefined ? { deputyOutcomeUpdates: req.body.deputyOutcomeUpdates } : {}) };
+    await Preferences.updateOne({ emailHash }, { $set: choices }, { upsert: true });
+    return res.json({ success: true, preferences: present({ ...existing, ...choices }), message: 'Your email preferences have been saved.' });
   } catch (error) { return fail(res, error); }
 }

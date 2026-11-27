@@ -87,6 +87,7 @@ const deputyJobNotificationSchema = new mongoose.Schema(
       enum: [
         "job_created_preview",
         "job_created",
+        "application_filled",
         "job_created_corrected",
         "application_received_preview",
         "application_received",
@@ -418,6 +419,7 @@ const deputyJobSchema = new mongoose.Schema(
     bookedMusicianSlug: { type: String, default: "" },
     allocatedMusicianName: { type: String, default: "" },
     allocatedAt: { type: Date, default: null },
+    outcomeUpdatesAllocationAt: { type: Date, default: null },
 
     bookedMusicianId: {
       type: mongoose.Schema.Types.ObjectId,
