@@ -771,7 +771,7 @@ app.use("/api/deputy-jobs", deputyJobRouter);
 app.use("/api/email-preferences", musicianEmailPreferencesRoutes);
 app.use("/api/originals", originalsRoutes);
 // Deployment capability only; no roster or musician data is exposed here.
-app.get('/api/roster-capabilities', (_req,res)=>res.json({version:1,regionalPools:true,allocationExclusions:true,samePersonRoleExclusions:true,bookingRoleUpgrades:true,sharedDeputySkills:true}));
+app.get('/api/roster-capabilities', (_req,res)=>res.json({version:1,regionalPools:true,allocationExclusions:true,samePersonRoleExclusions:true,bookingRoleUpgrades:true,sharedDeputySkills:true,transportPriority:true}));
 app.use("/api/regular-deputies", regularDeputiesRoutes);
 app.use("/api/venues", venueRoutes);
 app.use("/api/locations", locationPageRoutes);

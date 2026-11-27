@@ -22,6 +22,13 @@ const schema = new mongoose.Schema(
       reason: String,
       deputies: [{ musicianId: String, name: String, profileUrl: String }],
     }],
+    transportPreference: {
+      preferLondonCarOwners: Boolean,
+      nonDrivers: [person],
+      londonCarOwners: [person],
+      unconfirmedNames: [String],
+      note: String,
+    },
     pendingMatches: [
       { name: String, role: String, regions: [String], priority: Number },
     ],

@@ -167,6 +167,19 @@ export function rosterEligibility({
   }
   return { eligible: true, reason: "", region: area };
 }
+// Keep the agreed deputy order as the tiebreaker. Transport is a soft
+// preference and uses confirmed evidence, not an assumption about other players.
+export function rosterTransportPriority(candidate, { member, policy, ...context } = {}) {
+  const preference = policy?.transportPreference;
+  if (!preference?.preferLondonCarOwners) return 0;
+  const others = selectedRosterPeople(context.lineup, context.assignments || [], {
+    roleSlotId: context.roleSlotId, memberId: member?._id,
+  });
+  const needsLift = (preference.nonDrivers || []).some(person =>
+    others.some(other => sameRosterPerson(person, other)));
+  if (!needsLift) return 0;
+  return (preference.londonCarOwners || []).some(person => sameRosterPerson(person, candidate)) ? 0 : 1;
+}
 export function eligibleRosterDeputies({ member, ...context } = {}) {
   const region = rosterRegion(context);
   return (member?.deputies || [])
@@ -177,6 +190,7 @@ export function eligibleRosterDeputies({ member, ...context } = {}) {
     )
     .sort(
       (a, b) =>
+        rosterTransportPriority(a.p, { ...context, member }) - rosterTransportPriority(b.p, { ...context, member }) ||
         (a.p.regionalPriority?.[region] ?? a.i) -
         (b.p.regionalPriority?.[region] ?? b.i),
     )
