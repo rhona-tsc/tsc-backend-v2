@@ -103,6 +103,7 @@ export function rosterEligibility({
   county,
   address,
   roleSlotId,
+  leadVocalCount,
 } = {}) {
   member =
     member ||
@@ -125,6 +126,15 @@ export function rosterEligibility({
         : "Confirm the event county before selecting a regional musician",
       region: area,
     };
+  const vocalCount = leadVocalCount ?? (lineup?.bandMembers || [])
+    .filter(m => isLeadVocalPart(m.instrument || m.role)).length;
+  for (const rule of policy?.vocalistLineupRules || []) {
+    if (sameRosterPerson(rule.person, candidate) &&
+        !(rule.allowedVocalistCounts || []).includes(vocalCount)) {
+      return { eligible: false, region: area,
+        reason: rule.reason || `This musician only performs in lineups with ${rule.allowedVocalistCounts.join(' or ')} lead vocalists` };
+    }
+  }
   const people = selectedRosterPeople(lineup, assignments, {
     roleSlotId,
     memberId: member?._id,
@@ -224,4 +234,18 @@ export function selectRosterMember({ member, ...context }) {
         deputies: member.deputies,
       }
     : null;
+}
+
+// Count lead vocal/MC parts, never the instrumentalists' backing vocals.
+export const isLeadVocalPart = role =>
+  /\b(vocals?|vocalist|singer|rapper|mc)\b/i.test(String(role || '')) &&
+  !/\bbacking\b/i.test(String(role || ''));
+
+export function replacementGoesToJobBoard({policy, member, role} = {}) {
+  return (policy?.replacementRouting || []).some(rule => {
+    if (rule.route !== 'job_board') return false;
+    if (rule.original && !sameRosterPerson(rule.original, member)) return false;
+    try { return new RegExp(rule.rolePattern, 'i').test(role || member?.instrument || ''); }
+    catch { return false; }
+  });
 }

@@ -12,6 +12,8 @@ const schema = new mongoose.Schema(
       index: true,
     },
     exclusions: [{ person, withPeople: [person], reason: String }],
+    vocalistLineupRules: [{ person, allowedVocalistCounts: [Number], reason: String }],
+    replacementRouting: [{ original: person, rolePattern: String, route: {type: String, enum: ['job_board']}, reason: String }],
     roleUpgradeTransfers: [{ musicianId: String, fromRole: String, toRolePattern: String }],
     sharedSkillRequirements: [{ skill: String, sourceRolePattern: String }],
     conditionalDeputyPools: [{

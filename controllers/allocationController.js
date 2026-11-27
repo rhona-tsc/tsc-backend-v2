@@ -1,3 +1,4 @@
+import {replacementGoesToJobBoard} from '../utils/rosterEligibility.js';
 import { sharedRosterSkillEligibility } from '../utils/sharedRosterSkills.js';
 import {activeAllocationHold,withinAllocationWeek,vocalistAllocationBlocked,bookingRolePlan} from '../utils/bookingAllocationPolicy.js';
 import {normaliseAllocationRole} from '../utils/allocationRoles.js';
@@ -2629,6 +2630,12 @@ export async function escalateToNextDeputy(msg, {dryRun=false}={}) {
     const current=members.find(m=>msg.originalBandMemberId && String(m._id)===String(msg.originalBandMemberId))
       || members.find(m=>normaliseAllocationRole(m.instrument||m.role).toLowerCase()===normaliseAllocationRole(role).toLowerCase());
     const rosterPolicy=await getRosterPolicy(act._id);
+    if(replacementGoesToJobBoard({policy:rosterPolicy,member:current,role})) {
+      if(dryRun)return {route:'job_board',reason:'role_replacement_policy'};
+      await postExhaustedRoleToDeputyBoard({...msg,meta:{...msg.meta,
+        escalationReason:'because this role is configured to go directly to the job board'}},act);
+      return false;
+    }
     const deputies=actRoleDeputies({act,lineup,member:current,role,policy:rosterPolicy,board:rosterBoard,roleSlotId:msg.roleSlotId});
     const history=await EnquiryMessage.find({bookingBoardItemId:rosterBoard._id,roleSlotId:msg.roleSlotId}).lean();
     // A retry must not create a second request while another deputy is pending.

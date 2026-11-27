@@ -203,3 +203,20 @@ test('an urgent cancellation reopens its existing public job without pausing for
  f.jobs.push(job);f.board.assignedMusicians[0].deputyJobId=job._id;t.mock.method(Job,'findById',async()=>job);
  const result=await f.request('/api/allocations');assert.equal(result.status,200);assert.equal(result.data.reallocationRoute,'job_board_reopened');assert.deepEqual(states,['open']);assert.equal(f.jobs.length,1);assert.equal(job.roleAllocations[0].status,'cancelled');assert.equal(job.applications[0].status,'withdrawn');assert.equal(f.board.assignedMusicians[0].status,'posted_to_job_board');
 });
+
+
+test('configured vocal replacements bypass act deputies beyond seven days and preserve approval and role holds',async t=>{
+ const f=await setup(t);
+ const member={_id:'888888888888888888888888',musicianId:person,instrument:'Lead Male Vocal / Rapper',deputies:[{musicianId:'777777777777777777777777',phone:'+447000000002'}]};
+ t.mock.method(Act,'findById',()=>({lean:async()=>({_id:actId,lineups:[{_id:'999999999999999999999999',bandMembers:[member]}]})}));
+ t.mock.method(Policy,'findOne',()=>({lean:async()=>({replacementRouting:[{original:{musicianId:person},rolePattern:'Male.*Vocal',route:'job_board'}]})}));
+ t.mock.method(Message,'find',()=>{assert.fail('Direct job-board routing must not search the deputy chain')});
+ const {escalateToNextDeputy}=await import('../controllers/allocationController.js');
+ const msg={actId,bookingBoardItemId:boardId,bookingRef:f.board.bookingRef,roleSlotId:'lead-male-vocal-rapper-1',originalBandMemberId:member._id,musicianId:person,fee:400,meta:{role:member.instrument,MetaISODate:f.board.eventDateISO}};
+ assert.deepEqual(await escalateToNextDeputy(msg,{dryRun:true}),{route:'job_board',reason:'role_replacement_policy'});
+ f.board.allocation.managerApprovalRequired=true;
+ assert.equal(await escalateToNextDeputy(msg,{dryRun:true}),false);
+ f.board.allocation.managerApprovalRequired=false;
+ f.board.allocationHolds=[{roleSlotId:msg.roleSlotId,active:true}];
+ assert.equal(await escalateToNextDeputy(msg,{dryRun:true}),false);
+});
