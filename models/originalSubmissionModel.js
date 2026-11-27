@@ -8,7 +8,7 @@ const takeSchema = new mongoose.Schema(
     stemAssetIds: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "originalasset" }], default: undefined, validate: { validator: value => !value || (value.length >= 1 && value.length <= 24 && new Set(value.map(String)).size === value.length), message: "Supply one to 24 distinct tracks" } },
     wetStemAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", default: null },
     effects: { type: String, enum: ['with_effects', 'without_effects', 'not_specified'], default: 'not_specified' },
-    mixdownAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", default: null, required: function () { return this.ownerDocument().listeningMixRequired !== false; } },
+    mixdownAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", default: null, required: function () { return this.groupedContribution || this.ownerDocument().listeningMixRequired !== false; } },
     notes: { type: String, default: "", trim: true, maxlength: 1000 },
   },
   { _id: true },
