@@ -1,5 +1,5 @@
 import Policy from "../models/actRosterPolicy.js";
-import { rosterEligibility } from "../utils/rosterEligibility.js";
+import { rosterEligibilityForBooking } from "../utils/bookingRosterPools.js";
 export const getRosterPolicy = (actId) => Policy.findOne({ actId }).lean();
 export async function bookingRosterEligibility({
   act,
@@ -11,7 +11,8 @@ export async function bookingRosterEligibility({
   address,
 }) {
   const policy = await getRosterPolicy(act._id);
-  return rosterEligibility({
+  return rosterEligibilityForBooking({
+    board,
     policy,
     lineup,
     member,

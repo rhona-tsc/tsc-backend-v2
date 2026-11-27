@@ -393,6 +393,11 @@ const BookingBoardItemSchema = new mongoose.Schema(
     manualAdjustmentAmount: { type: Number, default: 0 },
     mainInvoiceIncludesExtras: { type: Boolean, default: false },
     allocation: AllocationSchema,
+    allocationPoolOverrides: [{
+      _id: false, roleSlotId: {type:String,required:true},
+      regions: [{type:String,enum:['south','north','scotland']}],
+      reason: {type:String,required:true}, approvedBy:String, approvedAt:Date,
+    }],
     allocationHolds: [{
       _id: false, roleSlotId: {type:String,required:true}, role:String,
       active: {type:Boolean,default:true}, reason:String, until:Date,

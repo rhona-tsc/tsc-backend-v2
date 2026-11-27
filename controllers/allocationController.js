@@ -2,6 +2,7 @@ import {activeAllocationHold,withinAllocationWeek,vocalistAllocationBlocked} fro
 import {normaliseAllocationRole} from '../utils/allocationRoles.js';
 import {confirmedBookingAvailabilityWrite, syncConfirmedBookingAssignments} from '../services/manualBookingConfirmation.js';
 import {actRoleDeputies} from '../utils/actRoleDeputies.js';
+import {rosterEligibilityForBooking,eligibleDeputiesForBooking} from '../utils/bookingRosterPools.js';
 import {findPriorAvailabilityDecline} from '../services/availabilityPriorDeclines.js';
 import { ownsBookingAssignment, isWithdrawalTarget, withdrawalAvailabilityRecord } from '../utils/bookingWithdrawal.js';
 import {getRosterPolicy,bookingRosterEligibility} from '../services/rosterEligibilityService.js';
@@ -1117,8 +1118,8 @@ export const listRoleCandidates = async (req, res) => {
         ].filter(Boolean).join(" ").trim();
         const bookingConflict = conflictById.get(id) || "";
         const rosterMember = matchedPrimaryMember || roleMembers.find(m=>(m.deputies || []).some(d=>String(d.musicianId || d._id || d.id || "")===id));
-        const eligibility = rosterEligibility({candidate:musician,member:rosterMember,lineup,assignments:board.assignedMusicians || [],policy:rosterPolicy,address:board.address || board.venueAddress,county:board.county,roleSlotId:req.query?.roleSlotId});
-        const regionalOrder = rosterMember ? eligibleRosterDeputies({member:rosterMember,lineup,policy:rosterPolicy,address:board.address || board.venueAddress,county:board.county,assignments:board.assignedMusicians || []}).findIndex(d=>String(d.musicianId || d._id || d.id || "")===id) : -1;
+        const eligibility = rosterEligibilityForBooking({board,candidate:musician,member:rosterMember,lineup,assignments:board.assignedMusicians || [],policy:rosterPolicy,address:board.address || board.venueAddress,county:board.county,roleSlotId:req.query?.roleSlotId});
+        const regionalOrder = rosterMember ? eligibleDeputiesForBooking({board,roleSlotId:req.query?.roleSlotId,member:rosterMember,lineup,policy:rosterPolicy,address:board.address || board.venueAddress,county:board.county,assignments:board.assignedMusicians || []}).findIndex(d=>String(d.musicianId || d._id || d.id || "")===id) : -1;
         const isUnavailable = unavailableIds.has(id) || Boolean(bookingConflict) || !eligibility.eligible;
         const roleMatch = [
           ...(Array.isArray(musician.instrumentation)
