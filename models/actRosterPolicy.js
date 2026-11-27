@@ -14,6 +14,14 @@ const schema = new mongoose.Schema(
     exclusions: [{ person, withPeople: [person], reason: String }],
     roleUpgradeTransfers: [{ musicianId: String, fromRole: String, toRolePattern: String }],
     sharedSkillRequirements: [{ skill: String, sourceRolePattern: String }],
+    conditionalDeputyPools: [{
+      lineupId: String, memberId: String, lineupLabel: String,
+      sourceRole: String, replacementRole: String,
+      requiresOriginalUnavailable: { name: String, musicianId: String, memberId: String },
+      partnerRolePreference: [String], automaticAllocation: { type: Boolean, default: false },
+      reason: String,
+      deputies: [{ musicianId: String, name: String, profileUrl: String }],
+    }],
     pendingMatches: [
       { name: String, role: String, regions: [String], priority: Number },
     ],
