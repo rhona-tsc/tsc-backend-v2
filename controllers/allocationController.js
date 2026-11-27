@@ -1,8 +1,8 @@
-import {activeAllocationHold,withinAllocationWeek,vocalistAllocationBlocked} from '../utils/bookingAllocationPolicy.js';
+import {activeAllocationHold,withinAllocationWeek,vocalistAllocationBlocked,bookingRolePlan} from '../utils/bookingAllocationPolicy.js';
 import {normaliseAllocationRole} from '../utils/allocationRoles.js';
 import {confirmedBookingAvailabilityWrite, syncConfirmedBookingAssignments} from '../services/manualBookingConfirmation.js';
 import {actRoleDeputies} from '../utils/actRoleDeputies.js';
-import {rosterEligibilityForBooking,eligibleDeputiesForBooking} from '../utils/bookingRosterPools.js';
+import {rosterEligibilityForBooking,eligibleDeputiesForBooking,selectRosterMemberForBooking} from '../utils/bookingRosterPools.js';
 import {findPriorAvailabilityDecline} from '../services/availabilityPriorDeclines.js';
 import { ownsBookingAssignment, isWithdrawalTarget, withdrawalAvailabilityRecord } from '../utils/bookingWithdrawal.js';
 import {getRosterPolicy,bookingRosterEligibility} from '../services/rosterEligibilityService.js';
@@ -1789,7 +1789,8 @@ export const triggerBookingRequests = async (req, res) => {
 
     const rosterPolicy = await getRosterPolicy(act._id);
     for (const originalMember of members) {
-      const m=selectRosterMember({member:originalMember,lineup,policy:rosterPolicy,address,assignments:allocationBoard?.assignedMusicians || []});
+      const bookingSlotId=bookingRolePlan(allocationBoard || {},lineup).find(s=>String(s.member?._id)===String(originalMember._id))?.roleSlotId;
+      const m=selectRosterMemberForBooking({board:allocationBoard,roleSlotId:bookingSlotId,member:originalMember,lineup,policy:rosterPolicy,address,assignments:allocationBoard?.assignedMusicians || []});
       if(!m) continue;
       const roleLower = String(m?.instrument || "")
         .trim()

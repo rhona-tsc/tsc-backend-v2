@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { planBookingRoleUpgrade } from '../utils/bookingRoleUpgrade.js';
 import { selectRosterMember } from '../utils/rosterEligibility.js';
+import { selectRosterMemberForBooking } from '../utils/bookingRosterPools.js';
 const rya = { musicianId: 'rya', firstName: 'Rya', lastName: 'Menat' };
 const greg = { musicianId: 'greg', firstName: 'Greg', lastName: 'Adams', regions: ['south'], regionalPriority: { south: 1 } };
 const frazer = { musicianId: 'frazer', firstName: 'Frazer', lastName: 'Pearce', regions: ['south'], regionalPriority: { south: 2 } };
@@ -67,4 +68,16 @@ test('cancelled bookings and inactive bass allocations cannot transfer roles', (
 test('a missing event county never mixes regional bass pools', () => {
   const result=plan({board:{...board,county:'',address:''}});
   assert.equal(result.nextBass.status,'unfilled');
+});
+
+
+test('upgrade selection and normal offers retain booking-specific pool overrides', () => {
+  const george={musicianId:'george',firstName:'George',lastName:'Lawton',regions:['north'],regionalPriority:{north:0}};
+  const overrideBass={...bass,deputies:[...bass.deputies,george]};
+  const overrideLineup={bandMembers:[overrideBass,mc,singer]};
+  const overrideBoard={...board,allocationPoolOverrides:[{roleSlotId:'bass-guitar-1',regions:['north','south'],reason:'Approved northern pool for this booking'}]};
+  const result=plan({board:overrideBoard,lineup:overrideLineup});
+  assert.equal(result.nextBass.musicianId,'george');
+  assert.equal(selectRosterMemberForBooking({board:overrideBoard,roleSlotId:'bass-guitar-1',member:overrideBass,lineup:overrideLineup,policy,county:'London',assignments:result.assignments}).musicianId,'george');
+  assert.equal(overrideBoard.county,'London');
 });

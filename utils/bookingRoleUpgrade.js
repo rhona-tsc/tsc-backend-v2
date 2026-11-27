@@ -1,6 +1,7 @@
 import { bookingAssignments, bookingRolePlan, activeBooking, confirmedAllocation } from './bookingAllocationPolicy.js';
 import { normaliseAllocationRole } from './allocationRoles.js';
-import { eligibleRosterDeputies, sameRosterPerson } from './rosterEligibility.js';
+import { sameRosterPerson } from './rosterEligibility.js';
+import { eligibleDeputiesForBooking } from './bookingRosterPools.js';
 const plain = x => x?.toObject?.() || x;
 const active = a => !a?.withdrawnAt && !['declined','cancelled','removed','unavailable','withdrawn','replaced'].includes(String(a?.status || '').toLowerCase());
 const role = a => normaliseAllocationRole(a?.role || a?.instrument || '');
@@ -35,7 +36,7 @@ export function planBookingRoleUpgrade({ board, lineup, policy, unavailableMusic
       taggedAt: now,
     };
     if (!bookedVocal) retained.push(newVocal);
-    const candidates = eligibleRosterDeputies({ member: from.member, lineup, policy,
+    const candidates = eligibleDeputiesForBooking({ board, roleSlotId: from.roleSlotId, member: from.member, lineup, policy,
       assignments: retained, county: board.county, address: board.address || board.venueAddress });
     const unavailable = new Set(unavailableMusicianIds.map(String));
     const next = candidates.find(p => !sameRosterPerson(p, person) && !unavailable.has(String(p.musicianId || p.id || p._id))); 

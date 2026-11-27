@@ -1,4 +1,4 @@
-import {ROSTER_REGIONS, rosterEligibility, eligibleRosterDeputies} from './rosterEligibility.js';
+import {ROSTER_REGIONS, rosterEligibility, eligibleRosterDeputies, selectRosterMember, sameRosterPerson} from './rosterEligibility.js';
 
 // Overrides are saved by an administrator for one booking role. Venue details
 // and every other role keep their normal geographic routing.
@@ -25,4 +25,23 @@ export function eligibleDeputiesForBooking({board, roleSlotId, ...context}) {
     }
   }
   return result;
+}
+
+
+// A selected upgrade replacement keeps precedence across explicitly ordered pools.
+export function selectRosterMemberForBooking({board, roleSlotId, member, ...context}) {
+  const selected = (context.assignments || []).find(a => a.source === 'lineup_upgrade' &&
+    !a.withdrawnAt && ['selected','proposed','offered','accepted','confirmed'].includes(a.status) &&
+    String(a.originalBandMemberId || '') === String(member._id || ''));
+  const deputy = selected && (member.deputies || []).find(d => sameRosterPerson(d, selected));
+  if (deputy && rosterEligibilityForBooking({board,roleSlotId,member,candidate:deputy,...context}).eligible)
+    return {...(member.toObject?.() || member),...deputy,_id:member._id,
+      musicianId:deputy.musicianId || deputy.id || deputy._id,
+      instrument:member.instrument,deputies:member.deputies};
+  const regions=bookingPoolRegions(board,roleSlotId);
+  for(const region of regions.length?regions:[undefined]) {
+    const person=selectRosterMember({member,roleSlotId,...context,...(region?{region}:{})});
+    if(person)return person;
+  }
+  return null;
 }
