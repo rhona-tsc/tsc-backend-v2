@@ -1789,7 +1789,7 @@ export const triggerBookingRequests = async (req, res) => {
 
     const rosterPolicy = await getRosterPolicy(act._id);
     for (const originalMember of members) {
-      const m=selectRosterMember({member:originalMember,lineup,policy:rosterPolicy,address});
+      const m=selectRosterMember({member:originalMember,lineup,policy:rosterPolicy,address,assignments:allocationBoard?.assignedMusicians || []});
       if(!m) continue;
       const roleLower = String(m?.instrument || "")
         .trim()

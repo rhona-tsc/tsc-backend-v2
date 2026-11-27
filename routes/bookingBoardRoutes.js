@@ -1,3 +1,4 @@
+import {reconcileBookingRoleUpgrade} from '../services/bookingRoleUpgrade.js';
 import {isDirectPaymentSource} from '../utils/balanceDueDate.js';
 import {clientEventSheetUrl} from '../utils/bookingClientLinks.js';
 import {bookingBoardInvoiceCompany} from '../utils/bookingBoardInvoiceCompany.js';
@@ -2887,7 +2888,7 @@ router.patch("/:id/mark-paid", musicianAuth, async (req, res) => {
       return res.status(403).json({ success: false, message: "Admin only." });
     }
 
-    const row = await BookingBoardItem.findByIdAndUpdate(
+    let row = await BookingBoardItem.findByIdAndUpdate(
       req.params.id,
       {
         $set: {
@@ -3964,7 +3965,9 @@ router.patch("/:id", musicianAuth, async (req, res) => {
       // only the core Booking here used to replace the live row with its
       // legacy act name, billing address and empty allocation arrays until a
       // later refresh (and could make confirmed musicians appear deleted).
-      const updatedMirrorRow = existingMirrorRow
+      const roleUpgrade = isAdmin && existingMirrorRow
+        ? await reconcileBookingRoleUpgrade(existingMirrorRow._id) : null;
+      const updatedMirrorRow = roleUpgrade?.changed ? roleUpgrade.board : existingMirrorRow
         ? {
             ...existingMirrorRow,
             ...mirrorPatch,
@@ -4127,6 +4130,11 @@ router.patch("/:id", musicianAuth, async (req, res) => {
         row,
         bodyWithoutBookingDetails.siteAutomationsEnabled,
       );
+    }
+
+    if (isAdmin) {
+      const roleUpgrade = await reconcileBookingRoleUpgrade(row._id);
+      if (roleUpgrade.changed) row = await BookingBoardItem.findById(row._id);
     }
 
     if (row.bookingId && bodyWithoutBookingDetails.songSuggestionsDueDateISO !== undefined) {

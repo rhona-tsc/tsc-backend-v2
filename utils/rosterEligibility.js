@@ -184,6 +184,15 @@ export function eligibleRosterDeputies({ member, ...context } = {}) {
 }
 
 export function selectRosterMember({ member, ...context }) {
+  const selected = (context.assignments || []).find(a =>
+    a.source === 'lineup_upgrade' && !a.withdrawnAt &&
+    ['selected', 'proposed', 'offered', 'accepted', 'confirmed'].includes(a.status) &&
+    clean(a.originalBandMemberId) === clean(member._id));
+  const selectedDeputy = selected && (member.deputies || []).find(d => sameRosterPerson(d, selected));
+  if (selectedDeputy && rosterEligibility({ ...context, member, candidate: selectedDeputy }).eligible)
+    return { ...(member.toObject?.() || member), ...selectedDeputy,
+      musicianId: id(selectedDeputy), _id: member._id, instrument: member.instrument,
+      deputies: member.deputies };
   if (rosterEligibility({ ...context, member, candidate: member }).eligible)
     return member;
   const deputy = eligibleRosterDeputies({ ...context, member })[0];

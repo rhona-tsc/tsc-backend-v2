@@ -1,3 +1,4 @@
+import {processPendingBookingRoleUpgrades} from './services/bookingRoleUpgrade.js';
 import {runCalendarDeclineReconciliation} from './services/calendarDeclineService.js';
 import voiceIvrRoutes from './routes/voiceIvr.js';
 import {runBookingAllocationEscalation} from './services/bookingAllocationReview.js';
@@ -768,7 +769,7 @@ app.use("/api/deputy-jobs", deputyJobRouter);
 app.use("/api/email-preferences", musicianEmailPreferencesRoutes);
 app.use("/api/originals", originalsRoutes);
 // Deployment capability only; no roster or musician data is exposed here.
-app.get('/api/roster-capabilities', (_req,res)=>res.json({version:1,regionalPools:true,allocationExclusions:true,samePersonRoleExclusions:true}));
+app.get('/api/roster-capabilities', (_req,res)=>res.json({version:1,regionalPools:true,allocationExclusions:true,samePersonRoleExclusions:true,bookingRoleUpgrades:true}));
 app.use("/api/regular-deputies", regularDeputiesRoutes);
 app.use("/api/venues", venueRoutes);
 app.use("/api/locations", locationPageRoutes);
@@ -922,6 +923,12 @@ cron.schedule("* * * * *", () => {
 cron.schedule("*/15 * * * *", async()=>{
  try { await runBookingAllocationEscalation(); }
  catch(error){console.error('Booking allocation deadline check failed:',error.message);}
+},{timezone:"Europe/London",noOverlap:true});
+
+// Upgraded vocalist roles release bass immediately; offers wait for vocal confirmation.
+cron.schedule("* * * * *", async()=>{
+ try { await processPendingBookingRoleUpgrades(); }
+ catch(error){console.error('Booking role upgrade dispatch failed:',error.message);}
 },{timezone:"Europe/London",noOverlap:true});
 
 // Booking-role chase/escalation keeps its existing hourly schedule.

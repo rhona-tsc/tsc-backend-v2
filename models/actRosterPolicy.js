@@ -12,6 +12,7 @@ const schema = new mongoose.Schema(
       index: true,
     },
     exclusions: [{ person, withPeople: [person], reason: String }],
+    roleUpgradeTransfers: [{ musicianId: String, fromRole: String, toRolePattern: String }],
     pendingMatches: [
       { name: String, role: String, regions: [String], priority: Number },
     ],
