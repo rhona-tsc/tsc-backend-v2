@@ -2706,7 +2706,13 @@ export const createBoardInvoice = async (req, res) => {
         : updated?.extrasReceiptPdfUrl,
       previewUrl: isReceipt
         ? `/api/invoices/board-receipt/${row._id}${invoiceTypeNorm !== "main" ? `?invoiceType=${invoiceTypeNorm}` : ""}`
-        : `/api/invoices/board-invoice/${row._id}${invoiceTypeNorm !== "main" ? `?invoiceType=${invoiceTypeNorm}` : ""}`,
+        : `/api/invoices/board-invoice/${row._id}${
+            invoiceTypeNorm !== "main"
+              ? `?invoiceType=${invoiceTypeNorm}`
+              : rowForInvoice.mainInvoiceIncludesExtras === true
+                ? "?includeExtras=1"
+                : ""
+          }`,
       invoiceCompany: invoiceCompany.brand,
       invoiceDateISO,
       invoiceDueDateISO: finalDueDate,
