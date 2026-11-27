@@ -2844,6 +2844,10 @@ async function upsertBoardRowFromBooking(booking) {
         bookingRef,
         createdAt: new Date(),
         paymentTermsVersion: booking.paymentTermsVersion,
+        clientDeadlinePolicy:booking.clientDeadlinePolicy,
+        clientDeadlineISO:booking.clientDeadlineISO,
+        songSuggestionsDueDateISO:booking.songSuggestionsDueDateISO,
+        secureClientUploads:booking.secureClientUploads,
         invoiceDueDateISO: balanceDueISO(booking),
       },
       $set: {

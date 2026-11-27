@@ -20,6 +20,8 @@ import { buildTscEmailFooter, escapeEmailHtml } from "../utils/tscEmailBranding.
 import { buildBandSheetShareUrl } from "../utils/bandSheetUrl.js";
 import { finalDetailsDueISO } from "../utils/finalDetailsDueDate.js";
 import { resolveBookedActName } from "../utils/bookingDisplayName.js";
+import {hasUnifiedClientDeadline} from '../utils/clientDeadlinePolicy.js';
+import {withClientUploadLink} from './eventSheetUploadGrantService.js';
 
 export const AUTOMATION_10_KEY = "automation-10-balance-coming-due";
 export const AUTOMATION_10_NUMBER = 10;
@@ -269,7 +271,7 @@ export const automation21Schedule = (row, todayISO) => {
     blockedISOs.push(other.plannedISO);
     // Client reminders that are catching up today also take priority. The
     // vocalist follow-up has different recipients, so reserve its planned day.
-    if (number !== 4 && other.eligible) blockedISOs.push(other.sendISO);
+    if (number !== 4 && other.eligible && other.plannedISO >= today) blockedISOs.push(other.sendISO);
   }
   const options = { introISO, deadlineISO: dueISO, blockedISOs };
   let plannedISO = collisionFreeAddOnDay({ ...options, plannedISO: midpointISO(introISO, dueISO) });
@@ -456,8 +458,22 @@ const buildBalancePaymentEmail = (row, dueToday) => {
  return {subject,text:lines.join('\n\n'),html:emailShell(lines.map(emailParagraph).join(''))};
 };
 
+export const buildUnifiedDeadlineEmail=(row,dueToday)=>{
+ const due=ordinalDate(row.clientDeadlineISO||balanceDueISO(row));
+ const paid=isBalancePaid(row);
+ const subject=`Song requests, event sheet and playlists due ${dueToday?'today':due}${paid?'':' — balance payment reminder'}`;
+ const lines=[`Hi ${clientNames(row)},`,
+  `Your song suggestions, ${specialRequestLabel(row)}, completed event sheet and playlists are all due ${dueToday?'today':`on ${due}`}.`,
+  paid?'Your balance is recorded as paid—thank you.':`Your outstanding balance is also due on ${due}. Please use the bank details on your invoice.`,
+  'Please complete any outstanding items. If you have already submitted your details, thank you; you can disregard that part of this reminder.',
+  `Follow This Link to your Event Sheet: ${publicEventSheetUrl(row)}`,
+  'Any questions, please reply to this email.','Warmest wishes,','Rhona ✨'];
+ return {subject,text:lines.join('\n\n'),html:emailShell(automationBodyToHtml(lines.join('\n\n')))};
+};
+
 export const buildAutomation11Email = (row) => {
-  if (row.paymentTermsVersion === BALANCE_PAYMENT_POLICY) return buildBalancePaymentEmail(row, true);
+  if(hasUnifiedClientDeadline(row))return buildUnifiedDeadlineEmail(row,true);
+  if (row.paymentTermsVersion === BALANCE_PAYMENT_POLICY || hasSeparateDetailsReminders(row)) return buildBalancePaymentEmail(row, true);
   const name = firstName(clientNames(row)) || "there";
   const eventSheetUrl = publicEventSheetUrl(row);
   const subject = "Automated Reminder: Playlist(s), Event Sheet & Balance Now Due";
@@ -668,7 +684,8 @@ export const buildAutomation26Email = (row) => {
 };
 
 export const buildAutomation10Email = (row) => {
-  if (row.paymentTermsVersion === BALANCE_PAYMENT_POLICY) return buildBalancePaymentEmail(row, false);
+  if(hasUnifiedClientDeadline(row))return buildUnifiedDeadlineEmail(row,false);
+  if (row.paymentTermsVersion === BALANCE_PAYMENT_POLICY || hasSeparateDetailsReminders(row)) return buildBalancePaymentEmail(row, false);
   const name = clean(row?.clientFirstNames || row?.bookerName || "there").split(/\s+|&/)[0];
   const dueDate = ordinalDate(finalDueISO(row));
   const eventSheetUrl = publicEventSheetUrl(row);
@@ -1017,6 +1034,7 @@ export const runClientAutomations = async ({
   cloudinaryClient = cloudinary,
   actProfileModel = Act,
   automationConfigModel = AutomationConfig,
+  clientLinkBuilder = withClientUploadLink,
 } = {}) => {
   if (clean(process.env.CLIENT_AUTOMATIONS_ENABLED).toLowerCase() !== "true") {
     return { enabled: false, considered: 0, sent: 0, skipped: 0, failed: 0 };
@@ -1090,6 +1108,8 @@ export const runClientAutomations = async ({
         summary.skipped += 1;
         return;
       }
+      // Pre-event reminders are not catch-up mail: never send a past scheduled reminder on activation.
+      if([10,11,14,16,36,37,38].includes(Number(automationNumber)) && schedule.plannedISO < todayISO) {summary.skipped+=1;return;}
       const delivery = await claimDelivery({
         deliveryModel,
         row,
@@ -1104,6 +1124,13 @@ export const runClientAutomations = async ({
         return;
       }
       try {
+        if(row.secureClientUploads && !externalClientLink(row,'eventSheet')) {
+          const original=clientEventSheetUrl(row);
+          if(email.text?.includes(original) || email.html?.includes(original)){
+            const linked=await clientLinkBuilder(row),secure=clientEventSheetUrl(linked);
+            email={...email,text:email.text?.split(original).join(secure),html:email.html?.split(original).join(escapeEmailHtml(secure))};
+          }
+        }
         const linkedInvoice = !extrasOnly && externalClientLink(row, 'invoice');
         if (attachInvoice && linkedInvoice) {
           email = {...email, text: email.text.replace(/invoice attached/gi, 'invoice linked below').replace(/attached invoice/gi, 'linked invoice') + `\n\nOpen your invoice: ${linkedInvoice}`, html: email.html.replace(/invoice attached/gi, 'invoice linked below').replace(/attached invoice/gi, 'linked invoice') + emailLink('Open your invoice', linkedInvoice)};
@@ -1161,23 +1188,23 @@ export const runClientAutomations = async ({
       }
     }
 
-    if (isBalancePaid(row) || isEncoreBooking(row)) summary.skipped += 1;
+    if ((isBalancePaid(row) && !hasUnifiedClientDeadline(row)) || isEncoreBooking(row)) summary.skipped += 1;
     else await sendClientAutomation({
       automationKey: AUTOMATION_10_KEY,
       automationNumber: AUTOMATION_10_NUMBER,
       schedule: automation10Schedule(row, todayISO),
       email: buildAutomation10Email(row),
-      attachInvoice: true,
+      attachInvoice: !isBalancePaid(row),
     });
 
-    await sendClientAutomation({
+    if(!hasUnifiedClientDeadline(row)) await sendClientAutomation({
       automationKey: AUTOMATION_16_KEY,
       automationNumber: AUTOMATION_16_NUMBER,
       schedule: automation16Schedule(row, todayISO),
       email: buildAutomation16Email(row),
     });
 
-    await sendClientAutomation({
+    if(!hasUnifiedClientDeadline(row)) await sendClientAutomation({
       automationKey: AUTOMATION_14_KEY,
       automationNumber: isEncoreBooking(row) ? 36 : AUTOMATION_14_NUMBER,
       schedule: automation14Schedule(row, todayISO),
@@ -1252,13 +1279,13 @@ export const runClientAutomations = async ({
       summary.skipped += 1;
     }
 
-    if (isBalancePaid(row) || isEncoreBooking(row)) summary.skipped += 1;
+    if ((isBalancePaid(row) && !hasUnifiedClientDeadline(row)) || isEncoreBooking(row)) summary.skipped += 1;
     else await sendClientAutomation({
       automationKey: AUTOMATION_11_KEY,
       automationNumber: AUTOMATION_11_NUMBER,
       schedule: automation11Schedule(row, todayISO),
       email: buildAutomation11Email(row),
-      attachInvoice: true,
+      attachInvoice: !isBalancePaid(row),
     });
 
     const vocalistSchedule = automation4Schedule(row, todayISO);

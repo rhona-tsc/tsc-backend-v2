@@ -1,5 +1,5 @@
 export const BIRTHDAY_REVIEW_NUMBER = 41;
-export const isBirthdayBooking = (row = {}) => /^birthday(?: party)?$/i.test(String(row.eventType || "").trim());
+export const isBirthdayBooking = (row = {}) => /^(?:\d+(?:st|nd|rd|th)?\s+)?birthday(?: party)?$/i.test(String(row.eventType || "").trim());
 
 // Enrolment is explicit: the template can be shared without opting in other bookings.
 export const birthdayReviewPlan = (now = new Date()) => ({

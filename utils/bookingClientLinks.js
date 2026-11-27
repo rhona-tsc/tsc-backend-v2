@@ -6,7 +6,7 @@ export function externalClientLink(row, kind) {
   catch { return ''; }
 }
 export function clientEventSheetUrl(row, base = 'https://thesupremecollective.co.uk') {
-  return externalClientLink(row, 'eventSheet') || (row?.bookingRef
+  return externalClientLink(row, 'eventSheet') || row?._secureClientEventSheetUrl || (row?.bookingRef
     ? `${base.replace(/\/$/, '')}/event-sheet/${encodeURIComponent(row.bookingRef)}`
     : String(row?.eventSheetLink || '').trim());
 }

@@ -286,7 +286,7 @@ test("the staged runner sends Automation 10 only to the allowlisted booking with
     bookingRef: "BBM 497 DESIGN",
     clientFirstNames: "Susie",
     clientEmail: "susie@tigproductions.co.uk",
-    invoiceDueDateISO: "2026-10-22",
+    invoiceDueDateISO: "2026-10-24",
     siteAutomationsEnabled: true,
     balancePaid: false,
   };
@@ -337,7 +337,7 @@ test("the staged runner sends Automation 10 only to the allowlisted booking with
   });
 });
 
-test("the staged runner sends Susie's six live rules once on their reviewed dates", async () => {
+test("activation skips past advance reminders and sends only the remaining rules once", async () => {
   const previous = {
     enabled: process.env.CLIENT_AUTOMATIONS_ENABLED,
     emails: process.env.CLIENT_AUTOMATION_EMAIL_ALLOWLIST,
@@ -395,14 +395,12 @@ test("the staged runner sends Susie's six live rules once on their reviewed date
   await runClientAutomations({ ...options, now: new Date("2026-10-22T09:05:00.000Z") });
 
   assert.deepEqual([...records.keys()].sort(), [
-    `${AUTOMATION_10_KEY}|susie-booking`,
     `${AUTOMATION_11_KEY}|susie-booking`,
     `${AUTOMATION_14_KEY}|susie-booking`,
-    `${AUTOMATION_16_KEY}|susie-booking`,
     `${AUTOMATION_21_KEY}|susie-booking`,
   ].sort());
-  assert.equal(sent.length, 5);
-  assert.equal(sent.filter((message) => message.attachments?.length).length, 2);
+  assert.equal(sent.length, 3);
+  assert.equal(sent.filter((message) => message.attachments?.length).length, 1);
   assert.ok(sent.every((message) => message.to === "susie@tigproductions.co.uk"));
 
   const envKeys = {

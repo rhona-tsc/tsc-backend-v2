@@ -21,6 +21,7 @@ import ClientAutomationDelivery from "../models/clientAutomationDeliveryModel.js
 import actModel from "../models/actModel.js";
 import musicianModel from "../models/musicianModel.js";
 import musicianAuth from "../middleware/musicianAuth.js";
+import requireStaffAuth from "../middleware/requireStaffAuth.js";
 import { parse } from "csv-parse/sync";
 import financeForecastBookingModel from "../models/financeForecastBookingModel.js";
 import multer from "multer";
@@ -48,6 +49,8 @@ import {
   thursdayInWeekBeforeISO,
 } from "../utils/finalDetailsDueDate.js";
 import { buildWeddingReferralCode, isWeddingBooking } from "../utils/referralDiscountCode.js";
+import {initialClientDeadlineFields,hasUnifiedClientDeadline} from '../utils/clientDeadlinePolicy.js';
+import {withClientUploadLink} from '../services/eventSheetUploadGrantService.js';
 import {
   actReferenceCandidates,
   attachActProfileData,
@@ -216,7 +219,7 @@ export const buildIntroEmail = (row) => {
     "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and kindly fill in the blanks directly into the document. The event sheet will auto-save, so you can just close it when you're done. I'll review the details you provide, and I'll be back in touch if I've any questions for you or vice versa.",
     "Also please feel free to email or WhatsApp if you've any urgent questions or requests. Or alternatively, you can schedule a call with me directly in my calendar: https://calendly.com/thesupremecollective/call",
     paymentParagraph,
-    `Key dates include:\n- Song suggestions and ${specialRequestLabel} request due on the ${songDue}\n- Completed event sheet (including playlists) due on the ${finalDetailsDue}`,
+    hasUnifiedClientDeadline(row)?`Your song suggestions, ${specialRequestLabel} request, completed event sheet, playlists and any outstanding balance all share one deadline: ${formatEmailBodyDate(row.clientDeadlineISO)}.`:`Key dates include:\n- Song suggestions and ${specialRequestLabel} request due on the ${songDue}\n- Completed event sheet (including playlists) due on the ${finalDetailsDue}`,
     "You'll also receive a few emails from me in the run up to the performance date as reminders to submit certain bits of information to the event sheet just to keep everything on track.",
     "Hopefully, everything makes sense, but any questions, don't hesitate!",
   ];
@@ -264,7 +267,7 @@ export const buildIntroEmail = (row) => {
       "I've got a little checklist of things for us to go over beforehand. When you are ready, please click through to the Event Sheet and kindly fill in the blanks directly into the document. The event sheet will auto-save, you can tick off each section when you're done, and then 'Notify Band' when complete. At this point I'll check over the details and see if I or the band have any questions for you or vice versa.",
       "Also please feel free to email or WhatsApp if you've any urgent questions or requests. Or alternatively, you can schedule a call with me directly in my calendar: https://calendly.com/thesupremecollective/call",
       isEncoreBooking(row) ? paymentParagraph : `The contractual balance is due on ${formatEmailBodyDate(balanceDueISO(row))}. ${row?.importMetadata?.balanceInvoiceVerified ? "Please find the balance invoice attached, including the bank transfer details." : "Please refer to the agreed payment details; the balance invoice will be supplied separately."}`,
-      `Key dates include:\n- Song suggestions and ${specialRequestLabel} due on the ${formatDate(songDue)}\n- Completed event sheet (including playlists) due on the ${formatDate(invoiceDue)}`,
+      hasUnifiedClientDeadline(row)?`Song suggestions, ${specialRequestLabel}, the completed event sheet, playlists and any outstanding balance are all due on ${formatEmailBodyDate(row.clientDeadlineISO)}.`:`Key dates include:\n- Song suggestions and ${specialRequestLabel} due on the ${formatDate(songDue)}\n- Completed event sheet (including playlists) due on the ${formatDate(invoiceDue)}`,
       "You'll also receive a few emails from me in the run up to the performance date as reminders to submit certain bits of information to the event sheet just to keep everything on track.",
       "Hopefully, everything makes sense, but any questions, don't hesitate!",
     ];
@@ -1626,6 +1629,9 @@ export const mergeRowData = (preferred, secondary) => {
       boardSource
         ? cleanString(boardSource.invoiceDueDateISO)
         : preferred?.invoiceDueDateISO || secondary?.invoiceDueDateISO,
+    clientDeadlinePolicy:boardSource?.clientDeadlinePolicy || preferred?.clientDeadlinePolicy,
+    clientDeadlineISO:boardSource?.clientDeadlineISO || preferred?.clientDeadlineISO,
+    secureClientUploads:boardSource?.secureClientUploads || preferred?.secureClientUploads,
     introEmailSentAt:
       boardSource?.introEmailSentAt
       || preferred?.introEmailSentAt
@@ -1977,6 +1983,10 @@ const normalizeBookingToBoardRow = (booking, actLookup = new Map()) => {
     allocationHolds: doc?.allocationHolds || [],
     review: doc?.review || { requestedCount: 0, received: false },
     reviewRequestPlan: doc?.reviewRequestPlan,
+    clientDeadlinePolicy:doc?.clientDeadlinePolicy,
+    clientDeadlineISO:doc?.clientDeadlineISO,
+    paymentTermsVersion:doc?.paymentTermsVersion,
+    secureClientUploads:doc?.secureClientUploads,
     referralDiscountCode: doc?.referralDiscountCode || "",
     eventSheet: doc?.eventSheet || {},
     userEmail: doc?.userEmail || "",
@@ -2728,7 +2738,8 @@ router.post("/", musicianAuth, async (req, res) => {
     );
 
     // --------- 2) Upsert BookingBoardItem (UI row) ----------
-    const paymentTermsVersion = existingBoardRow?.paymentTermsVersion || (!(existingBoardRow?.introEmailSentAt || existingBoardRow?.importMetadata?.paymentTermsCommunicatedAt) ? BALANCE_PAYMENT_POLICY : undefined);
+    const termsCommunicated=existingBoardRow?.introEmailSentAt || existingBoardRow?.importMetadata?.paymentTermsCommunicatedAt || existingBoardRow?.importMetadata?.introAlreadySent || payload.introEmailSentAt || payload.importMetadata?.introAlreadySent || payload.importMetadata?.paymentTermsCommunicatedAt;
+    const paymentTermsVersion = existingBoardRow?.paymentTermsVersion || (!termsCommunicated ? BALANCE_PAYMENT_POLICY : undefined);
     const calculatedInvoiceDueDateISO = balanceDueISO({
       paymentTermsVersion, agent: normaliseAgent(payload.agent),
       invoiceDueDateISO: existingBoardRow?.introEmailSentAt ? existingBoardRow.invoiceDueDateISO : payload.invoiceDueDateISO,
@@ -2856,6 +2867,11 @@ router.post("/", musicianAuth, async (req, res) => {
       }
     }
 
+    if(!existingBoardRow && !existingBooking && !payload.importMetadata?.introAlreadySent && !payload.introEmailSentAt){
+      const deadlineFields=initialClientDeadlineFields(boardPatch);
+      Object.assign(boardPatch,deadlineFields);
+      if(deadlineFields.clientDeadlineISO)await Booking.updateOne({_id:booking._id},{$set:deadlineFields});
+    }
     const boardRow = await BookingBoardItem.findOneAndUpdate(
       { bookingRef },
       { $set: boardPatch, $setOnInsert: { createdAt: new Date() } },
@@ -3032,7 +3048,7 @@ router.post("/:id/whatsapp-group", musicianAuth, async (req, res) => {
   }
 });
 
-router.get("/:id/intro-email/preview", musicianAuth, async (req, res) => {
+router.get("/:id/intro-email/preview", requireStaffAuth, async (req, res) => {
   try {
     if (!isTSCAdmin(req.user)) {
       return res.status(403).json({ success: false, message: "Admin only." });
@@ -3041,7 +3057,7 @@ router.get("/:id/intro-email/preview", musicianAuth, async (req, res) => {
     if (!row) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
-    const email = buildIntroEmail(row);
+    const email = buildIntroEmail(await withClientUploadLink(row));
     const missing = [
       !email.recipient && "client email",
       !resolveBookedActName({ board: row }) && "act name",
@@ -3125,7 +3141,7 @@ router.post("/automation-email/test", musicianAuth, async (req, res) => {
   }
 });
 
-router.post("/:id/intro-email/test", musicianAuth, async (req, res) => {
+router.post("/:id/intro-email/test", requireStaffAuth, async (req, res) => {
   try {
     if (!isTSCAdmin(req.user)) {
       return res.status(403).json({ success: false, message: "Admin only." });
@@ -3134,7 +3150,7 @@ router.post("/:id/intro-email/test", musicianAuth, async (req, res) => {
     if (!row) {
       return res.status(404).json({ success: false, message: "Booking not found." });
     }
-    const email = buildIntroEmail(row);
+    const email = buildIntroEmail(await withClientUploadLink(row));
     const missing = [
       !email.recipient && "client email",
       !resolveBookedActName({ board: row }) && "act name",
@@ -3179,7 +3195,7 @@ router.post("/:id/intro-email/test", musicianAuth, async (req, res) => {
   }
 });
 
-router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
+router.post("/:id/intro-email/send", requireStaffAuth, async (req, res) => {
   try {
     if (!isTSCAdmin(req.user)) {
       return res.status(403).json({ success: false, message: "Admin only." });
@@ -3195,7 +3211,7 @@ router.post("/:id/intro-email/send", musicianAuth, async (req, res) => {
       });
     }
     const rowData = row.toObject();
-    const email = buildIntroEmail(rowData);
+    const email = buildIntroEmail(await withClientUploadLink(rowData));
     const missing = [
       !email.recipient && "client email",
       !resolveBookedActName({ board: row }) && "act name",

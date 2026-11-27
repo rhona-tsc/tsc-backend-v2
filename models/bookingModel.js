@@ -1,4 +1,5 @@
 import { marketingAttributionSchema } from './marketingAttributionSchema.js';
+import {initialClientDeadlineFields} from '../utils/clientDeadlinePolicy.js';
 // models/bookingModel.js
 import mongoose from "mongoose";
 
@@ -340,6 +341,9 @@ const BookingTotalsSchema = new mongoose.Schema(
 const BookingSchema = new mongoose.Schema(
   {
     bookingId: { type: String, required: true },
+    clientDeadlinePolicy:String,
+    clientDeadlineISO:String,
+    secureClientUploads:Boolean,
     attribution: { type: marketingAttributionSchema, default: undefined },
     linkedEnquiryRefs: { type: [String], default: undefined },
     linkedMeasurementIds: { type: [String], default: undefined },
@@ -550,6 +554,9 @@ BookingSchema.index(
 
 // in bookingModel.js, after schema definition
 BookingSchema.pre("validate", function (next) {
+  if(this.isNew && !this.clientDeadlinePolicy && this.paymentTermsVersion) {
+    Object.assign(this,initialClientDeadlineFields(this.toObject()));
+  }
   if (this.isNew && this.eventSheet?.scheduleTemplateVersion == null) {
     const savedRows = this.eventSheet?.answers?.schedule_table_rows;
     this.set('eventSheet.scheduleTemplateVersion', Array.isArray(savedRows) && savedRows.length ? 1 : 2);

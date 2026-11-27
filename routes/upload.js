@@ -7,10 +7,22 @@ import { Readable } from "stream";
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import eventSheetUploadAccess from '../middleware/eventSheetUploadAccess.js';
+import requireStaffAuth from '../middleware/requireStaffAuth.js';
+import Booking from '../models/bookingModel.js';
+import mongoose from 'mongoose';
+import {ensureClientUploadLink} from '../services/eventSheetUploadGrantService.js';
 
 const router = express.Router();
+router.post('/event-sheet/:bookingId/client-link',requireStaffAuth,async(req,res)=>{
+ try{
+  const ref=String(req.params.bookingId).trim();
+  const booking=await Booking.findOne(mongoose.isValidObjectId(ref)?{$or:[{_id:ref},{bookingId:ref}]}:{bookingId:ref}).select('_id bookingId eventDateISO date').lean();
+  if(!booking)return res.status(404).json({success:false,message:'Booking not found.'});
+  res.set('Cache-Control','no-store');res.json({success:true,url:await ensureClientUploadLink(booking)});
+ }catch{return res.status(400).json({success:false,message:'A secure link could not be created. Please contact the TSC team.'});}
+});
 // Authorize this specific booking before accepting any file bytes.
-router.get('/event-sheet/:bookingId/access', eventSheetUploadAccess, (_req,res)=>res.json({success:true,allowed:true}));
+router.get('/event-sheet/:bookingId/access', eventSheetUploadAccess, (req,res)=>res.json({success:true,allowed:true,canShareClientLink:req.user?.role==='agent'}));
 router.post('/event-sheet/:bookingId/doc', eventSheetUploadAccess, documentUpload, (req,res)=>{
   if (!req.file) return res.status(400).json({success:false,message:'Please choose a file to upload.'});
   const file=req.file;
