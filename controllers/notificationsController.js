@@ -46,60 +46,9 @@ const cateringHandlers = createCateringHandlers({
 export const sendMenuToBand = cateringHandlers.sendMenuToBand;
 export const sendDietaryToCaterer = cateringHandlers.sendDietaryToCaterer;
 
-export const docSigningRequest = async (req, res) => {
-  try {
-    const { bookingId, _id, to, subject, docName, docUrl, venueEmail } = req.body || {};
-
-    const targetTo = (to && Array.isArray(to) ? to : [to]).filter(Boolean);
-    const ccVenue = (venueEmail || "").trim();
-    const recipients = [...new Set([
-      "hello@thesupremecollective.co.uk",
-      ...targetTo,
-      ...(ccVenue ? [ccVenue] : []),
-    ])];
-
-    const ref = bookingId || _id || "Unknown booking";
-    const emailSubject = subject || `Doc signing requested – ${ref}`;
-
-    const attachments = [];
-    let bodyNote = "";
-
-    if (docUrl && /^https?:\/\//i.test(docUrl)) {
-      try {
-        const resp = await axios.get(docUrl, { responseType: "arraybuffer" });
-        const contentType = resp.headers["content-type"] || "application/pdf";
-        attachments.push({
-          filename: docName || "document.pdf",
-          content: Buffer.from(resp.data),
-          contentType,
-        });
-        bodyNote = `<p>Document attached: <strong>${docName || "file"}</strong></p>`;
-      } catch (e) {
-        console.warn("Could not fetch document to attach; including link:", e?.message);
-        bodyNote = `<p>Document link: <a href="${docUrl}" target="_blank" rel="noreferrer">${docName || docUrl}</a></p>`;
-      }
-    } else if (docUrl) {
-      bodyNote = `<p>Document: <code>${docUrl}</code></p>`;
-    }
-
-    const html = `
-      <p>Hi team,</p>
-      <p>This is the TSC Event Sheet Bot here 👋. The client has requested band signatures on this document for their venue (that may be in cc).</p>
-      <ul>
-        <li><strong>Booking ref:</strong> ${ref}</li>
-      </ul>
-      <p>The TSC Team will follow up to confirm when signed.</p>
-      ${bodyNote}
-      <p>Thanks,<br/>TSC Event Sheet Bot</p>
-    `;
-
-    const result = await sendEmail({to:recipients, subject:emailSubject, html, attachments});
-    if (!result?.ok) {
-      return res.status(500).json({ success: false, message: "Email send failed", error: result?.error?.message });
-    }
-    return res.status(200).json({ success: true, queued: false });
-  } catch (err) {
-    console.error("docSigningRequest error:", err);
-    return res.status(500).json({ success: false, message: "Failed to send doc-signing email." });
-  }
-};
+// Disabled pending a separate review of venue document-signing workflow.
+// Never fetch a request-supplied URL or send an attachment from this endpoint.
+export const docSigningRequest = (_req, res) => res.status(503).json({
+  success: false,
+  message: "Document-signing email requests are temporarily unavailable. Please contact the TSC team.",
+});

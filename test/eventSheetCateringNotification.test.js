@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {notificationBookingQuery,createCateringHandlers,buildCateringMail,cateringDisplayName} from '../services/eventSheetCateringNotification.js';
-const booking={_id:'6ae9feae012132a6f274f0f5',bookingId:'BBM 499 BREWERS',eventDateISO:'2026-12-31',clientName:'Megan',venueAddress:'Tewinbury Farm Hotel'};
+const booking={_id:'6ae9feae012132a6f274f0f5',bookingId:'BBM 499 BREWERS',eventDateISO:'2026-12-31',clientName:'Megan',venueAddress:'Tewinbury Farm Hotel',eventSheet:{answers:{caterer_email:'marry@tewinbury.co.uk'}}};
 const roster=[{name:'Rebecca Waite',instrument:'Trumpet',email:'rebecca@example.test',dietaryRequirements:'Mild allergy to apples and hazelnuts (reported as not serious).'},{name:'Josh Draper',instrument:'Guitar',email:'josh@example.test',dietaryRequirements:'No mushrooms.'}];
 const response=()=>({code:200,status(code){this.code=code;return this;},json(data){this.data=data;return this;}});
 test('a booking reference is never cast as a Mongo ID',()=>{
@@ -27,11 +27,11 @@ test('catering display names keep only the surname initial',()=>{
 test('invalid addresses, missing bookings and empty rosters never send mail',async()=>{
  let calls=0;const h=createCateringHandlers({findBooking:async()=>null,loadRoster:async()=>[],mailer:async()=>{calls++;}});
  let res=response();await h.sendDietaryToCaterer({body:{bookingId:'ref',catererEmail:'x@y.com\nBcc:bad@example.com'}},res);assert.equal(res.code,400);
- res=response();await h.sendDietaryToCaterer({body:{bookingId:'ref',catererEmail:'test@example.com'}},res);assert.equal(res.code,404);assert.equal(calls,0);
+ res=response();await h.sendDietaryToCaterer({body:{bookingId:'ref',catererEmail:'marry@tewinbury.co.uk'}},res);assert.equal(res.code,404);assert.equal(calls,0);
 });
 test('SMTP failures and office-only acceptance cannot report success to the client',async()=>{
  for(const result of [{ok:false,error:'provider error'},{ok:true,accepted:['hello@thesupremecollective.co.uk']}]){
-  const h=createCateringHandlers({findBooking:async()=>booking,loadRoster:async()=>roster,mailer:async()=>result});const res=response();await h.sendDietaryToCaterer({body:{bookingId:'ref',catererEmail:'test@example.com'}},res);assert.equal(res.code,502);assert.equal(res.data.success,false);
+  const h=createCateringHandlers({findBooking:async()=>booking,loadRoster:async()=>roster,mailer:async()=>result});const res=response();await h.sendDietaryToCaterer({body:{bookingId:'ref',catererEmail:'marry@tewinbury.co.uk'}},res);assert.equal(res.code,502);assert.equal(res.data.success,false);
  }
 });
 test('menu sends only to the confirmed roster and includes uploaded menu links',async()=>{
@@ -40,4 +40,13 @@ test('menu sends only to the confirmed roster and includes uploaded menu links',
 test('client notes cannot insert email markup or script links',()=>{
  const m=buildCateringMail({booking,roster,to:'test@example.com',notes:'<img src=x onerror=alert(1)>',menu:{url:'javascript:alert(1)'}});
  assert.match(m.html,/&lt;img/);assert.doesNotMatch(m.html,/href="javascript:/);
+});
+test('an arbitrary recipient is rejected before dietary data is loaded or emailed',async()=>{
+ let loaded=0,sent=0;
+ const h=createCateringHandlers({findBooking:async()=>booking,loadRoster:async()=>{loaded++;return roster;},mailer:async()=>{sent++;return{ok:true};}});
+ for(const method of ['sendDietaryToCaterer','sendMenuToBand']) {
+  const res=response();await h[method]({body:{bookingId:'ref',catererEmail:'unapproved@example.test'}},res);
+  assert.equal(res.code,403);
+ }
+ assert.equal(loaded,0);assert.equal(sent,0);
 });

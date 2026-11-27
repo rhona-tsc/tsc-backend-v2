@@ -37,6 +37,10 @@ export function createCateringHandlers({findBooking,loadRoster,mailer,loadMenuAt
    if((!toBand||caterer)&&!validCatererEmail(caterer))return res.status(400).json({success:false,message:'Please enter a valid caterer email address.'});
    const booking=await findBooking(query);
    if(!booking)return res.status(404).json({success:false,message:'Booking not found. Please refresh the event sheet and try again.'});
+   const savedCaterer=String(booking.eventSheet?.answers?.caterer_email||'').trim().toLowerCase();
+   if ((!toBand || caterer) && (!savedCaterer || caterer.toLowerCase()!==savedCaterer)) {
+    return res.status(403).json({success:false,message:'The recipient must match the caterer saved on this booking. Save the event sheet first.'});
+   }
    const roster=await loadRoster(booking);
    if(!roster.length)return res.status(400).json({success:false,message:'There are no confirmed band members to send dietary details for yet.'});
    const answers=booking.eventSheet?.answers||{};
