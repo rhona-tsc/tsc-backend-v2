@@ -264,6 +264,14 @@ lastLoginAt: { type: Date, default: null, index: true },
       },
     ],
 
+    transport: {
+      canDrive: { type: Boolean, default: undefined },
+      hasCar: { type: Boolean, default: undefined },
+      londonBased: { type: Boolean, default: undefined },
+      confirmedAt: Date,
+      confirmationSource: String,
+    },
+
     address: {
       line1: { type: String, default: "" },
       line2: { type: String, default: "" },

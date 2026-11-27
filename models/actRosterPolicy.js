@@ -24,6 +24,7 @@ const schema = new mongoose.Schema(
     }],
     transportPreference: {
       preferLondonCarOwners: Boolean,
+      rolePattern: String,
       nonDrivers: [person],
       londonCarOwners: [person],
       unconfirmedNames: [String],

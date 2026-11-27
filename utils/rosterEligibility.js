@@ -172,6 +172,10 @@ export function rosterEligibility({
 export function rosterTransportPriority(candidate, { member, policy, ...context } = {}) {
   const preference = policy?.transportPreference;
   if (!preference?.preferLondonCarOwners) return 0;
+  if (preference.rolePattern) {
+    try { if (!new RegExp(preference.rolePattern, 'i').test(member?.instrument || '')) return 0; }
+    catch { return 0; }
+  }
   const others = selectedRosterPeople(context.lineup, context.assignments || [], {
     roleSlotId: context.roleSlotId, memberId: member?._id,
   });

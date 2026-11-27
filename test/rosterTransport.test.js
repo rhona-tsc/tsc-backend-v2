@@ -15,3 +15,5 @@ test('transport priority does not bypass regional membership',()=>{const local={
 test('transport priority does not bypass an allocation exclusion',()=>{const excluded={...policy,exclusions:[{person:{musicianId:'emanuele'},withPeople:[{musicianId:'phoebe'}]}]};assert.deepEqual(names(eligibleRosterDeputies({member,lineup,policy:excluded})),['chris','david','kuba'])});
 test('an available original remains the first selection',()=>assert.equal(selectRosterMember({member,lineup,policy}).musicianId,'connor'));
 test('acts without the preference retain their order',()=>assert.deepEqual(names(eligibleRosterDeputies({member,lineup,policy:{}})),['chris','david','emanuele','kuba']));
+
+test('bass transport is not prioritised when the preference is for keys and drums',()=>{const bass={...member,instrument:'Bass Guitar'};const scoped={...policy,transportPreference:{...policy.transportPreference,rolePattern:'^(Keyboard|Drums)$'}};assert.deepEqual(names(eligibleRosterDeputies({member:bass,lineup,policy:scoped})),['chris','david','emanuele','kuba'])});
