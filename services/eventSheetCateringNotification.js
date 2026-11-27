@@ -7,15 +7,20 @@ export function notificationBookingQuery(value) {
 }
 export const validCatererEmail = value => typeof value==='string' && /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(value.trim());
 const safeUrl = value => {try{const u=new URL(value);return u.protocol==='https:'&&!u.username&&!u.password?u.href:'';}catch{return '';}};
+export const cateringServiceNotes = 'If possible, the band would prefer to eat before performing. Please allow 30 minutes for their meal. If the meal needs to take place during a performance break, the band may need to be fast-tracked. If food is initially served while the band is performing, please keep plates aside for them.';
+export function cateringDisplayName(value = '') {
+ const parts=String(value).trim().split(/\s+/).filter(Boolean);
+ return parts.length > 1 ? `${parts[0]} ${parts.at(-1).charAt(0)}.` : (parts[0] || 'Band member');
+}
 const dateLabel = value => {const day=(value instanceof Date?value.toISOString():String(value||'')).slice(0,10);const date=new Date(day+'T12:00:00Z');return Number.isNaN(date.getTime())?'Date to be confirmed':date.toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric',timeZone:'Europe/London'});};
-export function buildCateringMail({booking,roster,to,menu={},notes='',serviceNotes='',toBand=false}) {
+export function buildCateringMail({booking,roster,to,menu={},notes='',serviceNotes=cateringServiceNotes,toBand=false}) {
  const ref=booking.bookingId||String(booking._id);
  const answers=booking.eventSheet?.answers||{};
  const date=dateLabel(booking.eventDateISO||booking.eventDate||booking.date);
  const title=toBand?'Menu and catering arrangements':'Dietary requirements and service notes';
  const venue=booking.venueAddress||booking.address||booking.venue||'';
  const eventName=booking.clientName||booking.clientFirstNames||'';
- const rows=roster.map(m=>({name:m.name,instrument:m.instrument,diet:m.dietaryRequirements||'To be confirmed'}));
+ const rows=roster.map(m=>({name:cateringDisplayName(m.name),instrument:m.instrument,diet:m.dietaryRequirements||'To be confirmed'}));
  const paragraphs=[`Booking: ${eventName?eventName+' — ':''}${date}`,`Venue: ${venue}`,`Reference: ${ref}`];
  const menuUrl=safeUrl(menu.url),fileUrl=safeUrl(menu.fileUrl);
  const text=[title,...paragraphs,'',...rows.map(r=>`${r.name} (${r.instrument}): ${r.diet}`),'',serviceNotes&&`Service notes: ${serviceNotes}`,notes&&`Catering arrangements: ${notes}`,menuUrl&&`Menu: ${menuUrl}`,fileUrl&&`Uploaded menu: ${fileUrl}`,menu.text&&`Menu details:\n${menu.text}`,'','Warmest wishes,','The Supreme Collective',buildTscEmailFooterText()].filter(Boolean).join('\n');
@@ -39,7 +44,7 @@ export function createCateringHandlers({findBooking,loadRoster,mailer,loadMenuAt
    if(toBand&&!to.length)return res.status(400).json({success:false,message:'No confirmed band email addresses are available.'});
    const menu=body.menu||{};
    const notes=String(body.notes??menu.notes??answers.dietary_notes??'');
-   const serviceNotes=String(body.serviceNotes||'The band may need to be fast-tracked during a short performance break. If food is initially served while the band is performing, please keep plates aside for them.');
+   const serviceNotes=cateringServiceNotes;
    const mail=buildCateringMail({booking,roster,to,menu,notes,serviceNotes,toBand});
    mail.attachments=await loadMenuAttachments(menu.fileUrl);
    if(toBand&&caterer)mail.cc=[caterer,'hello@thesupremecollective.co.uk'];

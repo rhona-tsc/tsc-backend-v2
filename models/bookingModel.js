@@ -226,6 +226,8 @@ const ActSummarySchema = new mongoose.Schema(
 
 const EventSheetSchema = new mongoose.Schema(
   {
+    // No default: older sheets must not acquire the new schedule when read.
+    scheduleTemplateVersion: { type: Number },
     answers: { type: mongoose.Schema.Types.Mixed, default: {} },
     complete: { type: mongoose.Schema.Types.Mixed, default: {} },
     submitted: { type: Boolean, default: false },
@@ -548,6 +550,10 @@ BookingSchema.index(
 
 // in bookingModel.js, after schema definition
 BookingSchema.pre("validate", function (next) {
+  if (this.isNew && this.eventSheet?.scheduleTemplateVersion == null) {
+    const savedRows = this.eventSheet?.answers?.schedule_table_rows;
+    this.set('eventSheet.scheduleTemplateVersion', Array.isArray(savedRows) && savedRows.length ? 1 : 2);
+  }
   const bandSheetToken = String(this.eventSheet?.bandSheetToken || "").trim();
   if (bandSheetToken) {
     const existingTokens = Array.isArray(this.bandSheetTokens)

@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {notificationBookingQuery,createCateringHandlers,buildCateringMail} from '../services/eventSheetCateringNotification.js';
+import {notificationBookingQuery,createCateringHandlers,buildCateringMail,cateringDisplayName} from '../services/eventSheetCateringNotification.js';
 const booking={_id:'6ae9feae012132a6f274f0f5',bookingId:'BBM 499 BREWERS',eventDateISO:'2026-12-31',clientName:'Megan',venueAddress:'Tewinbury Farm Hotel'};
 const roster=[{name:'Rebecca Waite',instrument:'Trumpet',email:'rebecca@example.test',dietaryRequirements:'Mild allergy to apples and hazelnuts (reported as not serious).'},{name:'Josh Draper',instrument:'Guitar',email:'josh@example.test',dietaryRequirements:'No mushrooms.'}];
 const response=()=>({code:200,status(code){this.code=code;return this;},json(data){this.data=data;return this;}});
@@ -14,6 +14,15 @@ test('caterer send uses the object email API, current roster, service notes and 
  const res=response();await h.sendDietaryToCaterer({body:{bookingId:'260115241436',catererEmail:'marry@tewinbury.co.uk',notes:'Pizzas',dietarySummary:[{name:'Stale',diet:'None'}]}},res);
  assert.equal(res.code,200);assert.equal(res.data.success,true);assert.equal(sent.to,'marry@tewinbury.co.uk');assert.equal(sent.cc,'hello@thesupremecollective.co.uk');
  assert.match(sent.html,/No mushrooms/);assert.match(sent.html,/apples and hazelnuts/);assert.doesNotMatch(sent.html,/Stale/);assert.match(sent.text,/Pizzas/);assert.match(sent.text,/keep plates aside/);assert.match(sent.subject,/31 December 2026/);assert.match(sent.html,/TSC_Signature/);
+ for (const body of [sent.html,sent.text]) {
+  assert.match(body,/Rebecca W\./);assert.match(body,/Josh D\./);
+  assert.doesNotMatch(body,/Waite|Draper/);assert.match(body,/prefer to eat before performing/);
+ }
+});
+test('catering display names keep only the surname initial',()=>{
+ assert.equal(cateringDisplayName('  David Asafu-Adjaye  '),'David A.');
+ assert.equal(cateringDisplayName('Rebecca W.'),'Rebecca W.');
+ assert.equal(cateringDisplayName('Rya'),'Rya');
 });
 test('invalid addresses, missing bookings and empty rosters never send mail',async()=>{
  let calls=0;const h=createCateringHandlers({findBooking:async()=>null,loadRoster:async()=>[],mailer:async()=>{calls++;}});
