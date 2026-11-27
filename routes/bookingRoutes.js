@@ -1,4 +1,5 @@
 import { musicianCancellationNotice } from "../utils/musicianCancellationPolicy.js";
+import { getSectionAttachments } from "../utils/eventSheetAttachments.js";
 import musicianAuth from '../middleware/musicianAuth.js';
 import { withdrawMyBooking } from '../controllers/allocationController.js';
 // routes/bookingRoutes.js
@@ -1346,7 +1347,9 @@ const getVenueDocumentsForPdf = (answers = {}) => {
       }]
     : [];
 
-  return [...documents, ...legacyDocument]
+  return [...documents, ...legacyDocument, ...getSectionAttachments(answers).map(document => ({
+    ...document, name: `${document.section}: ${document.name}`,
+  }))]
     .filter((document) => document?.url)
     .filter(
       (document, index, all) =>
@@ -1873,6 +1876,18 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
     { showFallback: true },
   );
 
+  const sectionAttachments = getSectionAttachments(answers);
+  if (sectionAttachments.length) {
+    sectionTitle("Access, parking & room attachments", 90);
+    for (const attachment of sectionAttachments) {
+      ensureSpace(45);
+      doc.moveDown(0.35).fontSize(10).fillColor(coral).text(
+        `${attachment.section}: ${attachment.name}`,
+        { link: attachment.url, underline: true, width: contentWidth },
+      );
+    }
+  }
+
   sectionTitle("Production notes");
   labelValue(
     "Outdoor performance",
@@ -2046,6 +2061,9 @@ export const buildEventSheetPdfBuffer = async (booking, act = null) => {
   }
 
   const excludedKeys = new Set([
+    "location_documents",
+    "parking_documents",
+    "room_area_documents",
     "parking_num_cars",
     "parkingNumCars",
     "schedule_simple_arrival",
