@@ -1,4 +1,5 @@
 import {processPendingBookingRoleUpgrades} from './services/bookingRoleUpgrade.js';
+import {processDependentBookingOffers} from './services/dependentBookingOffer.js';
 import {runCalendarDeclineReconciliation} from './services/calendarDeclineService.js';
 import voiceIvrRoutes from './routes/voiceIvr.js';
 import {runBookingAllocationEscalation} from './services/bookingAllocationReview.js';
@@ -932,6 +933,11 @@ cron.schedule("* * * * *", async()=>{
 },{timezone:"Europe/London",noOverlap:true});
 
 // Booking-role chase/escalation keeps its existing hourly schedule.
+cron.schedule("* * * * *", async () => {
+  try { await processDependentBookingOffers(); }
+  catch (error) { console.error('Dependent booking offer dispatch failed:', error.message); }
+}, { timezone: "Europe/London", noOverlap: true });
+
 cron.schedule("0 * * * *", async () => {
   await runChaseAndEscalation();
 });
