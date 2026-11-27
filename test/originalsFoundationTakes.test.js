@@ -12,6 +12,22 @@ import Event from '../models/originalEventModel.js';
 
 const projectId = '111111111111111111111111', musicianId = '222222222222222222222222', roundId = '333333333333333333333333', reservationId = '444444444444444444444444';
 const stems = ['555555555555555555555551', '555555555555555555555552', '555555555555555555555553'], mix = '666666666666666666666666';
+
+test('24 microphone tracks persist as one grouped contribution with a separate listening mix', async t => {
+  const ids = Array.from({ length: 25 }, (_, index) => (1000 + index).toString(16).padStart(24, '0'));
+  const uploads = ids.map(_id => ({ _id, kind: 'take_stem' })).concat({ _id: mix, kind: 'take_mixdown' });
+  const state = setup(t, 'instrument', uploads);
+  const take = { groupedContribution: true, stemAssetId: ids[0], stemAssetIds: ids.slice(0, 24), mixdownAssetId: mix };
+  let res = await submit([take]); assert.equal(res.code, 201);
+  assert.equal(state.saved.takes.length, 1); assert.equal(state.saved.takes[0].stemAssetIds.length, 24); assert.equal(state.saved.takes[0].groupedContribution, true);
+  assert.equal(String(state.saved.takes[0].mixdownAssetId), mix);
+  state.saved = null;
+  for (const change of [{ stemAssetIds: ids }, { mixdownAssetId: null }, { mixdownAssetId: ids[1] }, { stemAssetIds: [ids[0], ids[0]] }]) {
+    res = await submit([{ ...take, ...change }]); assert.equal(res.code, 400); assert.equal(state.saved, null);
+  }
+  // A group is one option, not 24 separately selectable takes.
+  assert.equal(originalTakeKindsValid([take, { stemAssetId: ids[0] }], uploads, { listeningMixRequired: false }), false);
+});
 const response = () => ({ code: 200, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } });
 function setup(t, type = 'foundation', uploads = stems.map(_id => ({ _id, kind: 'take_stem' }))) {
   const state = { saved: null, reservationSaved: 0, assetQueries: [] };
@@ -68,7 +84,7 @@ test('effects labels persist separately for each stem, including an effects-only
   assert.equal(originalTakeKindsValid([{ stemAssetId: stems[0], effects: 'with_effects' }], assets, { listeningMixRequired: false }), true);
   assert.equal(originalTakeKindsValid([{ stemAssetId: stems[0], effects: 'unknown' }], assets, { listeningMixRequired: false }), false);
 });
-test('the four-stem file limit applies across all options and effects references together', () => {
+test('a multi-track group cannot omit its listening mix', () => {
   const ids = [...stems, mix, "777777777777777777777777"], assets = ids.map(_id => ({ _id, kind: 'take_stem' }));
   const tooMany = [{ stemAssetId: ids[0], stemAssetIds: ids.slice(0, 2) }, { stemAssetId: ids[2], stemAssetIds: [ids[2], ids[3]], wetStemAssetId: ids[4] }];
   assert.equal(originalTakeKindsValid(tooMany, assets, { listeningMixRequired: false }), false);
@@ -99,12 +115,12 @@ test('legacy replacement endpoint uses the timed transactional revision service'
   const res = response(); await replaceOriginalSubmission({ user: { id: musicianId }, params: { submissionId: String(doc._id) }, body: { takes: [{ stemAssetId: stems[0] }] } }, res);
   assert.equal(res.code, 200); assert.equal(String(called.reservationId), reservationId); assert.equal(called.payload.takes[0].stemAssetId, stems[0]); assert.equal(state.reservationSaved, 0);
 });
-test('updated terms describe alignment, four files and timed revisions', () => {
+test('updated terms describe grouped tracks, stereo mixes and timed revisions', () => {
   const agreement = getOriginalAgreement();
-  assert.equal(agreement.version, 'originals-contributor-v0.8');
-  assert.match(agreement.sections[0].text, /separate listening mix is optional/);
+  assert.equal(agreement.version, 'originals-contributor-v0.9');
+  assert.match(agreement.sections[0].text, /24 aligned instrument tracks.*stereo listening mix/);
   assert.match(agreement.sections[0].text, /Review each newly uploaded stem.*zero point.*before submitting/);
-  assert.match(agreement.sections[0].text, /Label each file accordingly.*four-file limit/);
+  assert.match(agreement.sections[0].text, /Label each file accordingly.*24-track limit/);
   assert.equal(getOriginalAgreement('mix').version, 'originals-mix-v0.4');
   assert.equal(getOriginalAgreement('master').version, 'originals-master-v0.4');
 });

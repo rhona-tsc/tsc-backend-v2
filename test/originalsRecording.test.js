@@ -16,6 +16,17 @@ function setup(t){return originalsTransactionStore(t,{
  submissions:[{_id:'accepted',projectId,roleName:'Click',category:'contribution',state:'accepted',takes:[{_id:oldTakeId,stemAssetId:approvedId,wetStemAssetId:'wet'},{_id:'unselected-option',stemAssetId:'unselected'}],selectionMode:'selected_ranges',selectedRanges:[{takeId:oldTakeId,startSeconds:1,endSeconds:3}]}],
 });}
 const req=body=>({params:{assetId:stemId},user:{id:player},body});
+test('recording context uses a grouped listening mix once, preserves ranges and excludes its source tracks', async t => {
+  const s = setup(t), submission = s.data.submissions[0];
+  s.data.assets.push({ _id: 'drum-mix', projectId, kind: 'take_mixdown', state: 'active', finalEligible: false });
+  submission.takes[0].groupedContribution = true; submission.takes[0].mixdownAssetId = 'drum-mix'; submission.takes[0].stemAssetIds = [approvedId, 'wet'];
+  const context = await loadOriginalRecordingContext({ projectId });
+  assert.deepEqual(context.tracks.map(track => String(track._id)), ['drum-mix']);
+  assert.equal(context.tracks[0].contributionMix, true);
+  assert.deepEqual(context.tracks[0].playbackRanges, [{ startSeconds: 1, endSeconds: 3 }]);
+  submission.takes[0].groupedContribution = false;
+  assert.deepEqual((await loadOriginalRecordingContext({ projectId })).tracks.map(track => String(track._id)), [approvedId, 'wet'].sort());
+});
 test('preview context includes only selected approved stems and ranges, excluding alternatives and effects',async t=>{
  setup(t);const res=response();await getOriginalStemPreview(req(),res);assert.equal(res.code,200);assert.deepEqual(res.body.tracks.map(track=>String(track._id)),[approvedId]);assert.deepEqual(res.body.tracks[0].playbackRanges,[{startSeconds:1,endSeconds:3}]);assert.equal(res.body.contextKey.length,64);
  assert.doesNotMatch(JSON.stringify(res.body),/Private alternative|Private effects/);

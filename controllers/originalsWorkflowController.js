@@ -465,14 +465,14 @@ export const submitOriginalTakes = async (req, res) => {
     const assets = await originalAssetModel.find({ _id: { $in: assetIds }, reservationId: reservation._id, ownerId: musicianId, state: "active" }).lean();
     if (assets.length !== new Set(assetIds).size) return res.status(400).json({ success: false, message: "One or more take files are unavailable" });
     if (!originalTakeKindsValid(takes, assets, { listeningMixRequired })) {
-      return res.status(400).json({ success: false, message: listeningMixRequired ? "Each take requires a stem and its listening mix" : "Choose valid stems and any optional listening mixes" });
+      return res.status(400).json({ success: false, message: 'Choose up to 24 distinct tracks across no more than four takes. Each grouped take needs its own listening mix.' });
     }
     await requireOriginalStemReviews({ assets, musicianId });
     const submission = await originalSubmissionCommit.run({ reservationId: reservation._id, musicianId, payload: {
       projectId: reservation.projectId, roundId: reservation.roundId, reservationId: reservation._id,
       musicianId, roleName: reservation.roleName, songwritingChoice, listeningMixRequired, ownerNotificationPending: true, submitterConfirmationPending: true,
       anonymous: reservation.anonymous, creditName: reservation.creditName,
-      takes: takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId || null, stemAssetIds: take.stemAssetIds || [take.stemAssetId], wetStemAssetId: take.wetStemAssetId || null, effects: take.effects || 'not_specified', notes: clean(take.notes) })),
+      takes: takes.map((take, index) => ({ label: clean(take.label) || `Take ${index + 1}`, groupedContribution: take.groupedContribution === true, stemAssetId: take.stemAssetId, mixdownAssetId: take.mixdownAssetId || null, stemAssetIds: take.stemAssetIds || [take.stemAssetId], wetStemAssetId: take.wetStemAssetId || null, effects: take.effects || 'not_specified', notes: clean(take.notes) })),
       notes: clean(req.body?.notes),
     } });
     try { await originalStemChatActivity.publish(submission); }

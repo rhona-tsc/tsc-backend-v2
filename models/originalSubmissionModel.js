@@ -3,8 +3,9 @@ import mongoose from "mongoose";
 const takeSchema = new mongoose.Schema(
   {
     label: { type: String, trim: true, maxlength: 80 },
+    groupedContribution: { type: Boolean, default: false },
     stemAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", required: true },
-    stemAssetIds: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "originalasset" }], default: undefined, validate: { validator: value => !value || (value.length >= 1 && value.length <= 4 && new Set(value.map(String)).size === value.length), message: "Supply one to four distinct stems" } },
+    stemAssetIds: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "originalasset" }], default: undefined, validate: { validator: value => !value || (value.length >= 1 && value.length <= 24 && new Set(value.map(String)).size === value.length), message: "Supply one to 24 distinct tracks" } },
     wetStemAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", default: null },
     effects: { type: String, enum: ['with_effects', 'without_effects', 'not_specified'], default: 'not_specified' },
     mixdownAssetId: { type: mongoose.Schema.Types.ObjectId, ref: "originalasset", default: null, required: function () { return this.ownerDocument().listeningMixRequired !== false; } },
@@ -39,7 +40,9 @@ const originalSubmissionSchema = new mongoose.Schema(
     takes: {
       type: [takeSchema],
       validate: [function validateTakes(value) {
-        return this.outputAssetId ? value.length === 0 : value.length >= 1 && value.length <= 4;
+        if (this.outputAssetId) return value.length === 0;
+        const ids = value.flatMap(take => [...(take.stemAssetIds?.length ? take.stemAssetIds : [take.stemAssetId]), ...(take.wetStemAssetId ? [take.wetStemAssetId] : [])]).map(String);
+        return value.length >= 1 && value.length <= 4 && ids.length <= 24 && new Set(ids).size === ids.length;
       }, "Submit one to four takes, or one production output"],
     },
     notes: { type: String, default: "", trim: true, maxlength: 2000 },

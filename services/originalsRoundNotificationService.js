@@ -19,7 +19,7 @@ export const buildOriginalRoundOpenEmail = ({ project, reservation, firstName = 
   const deadline = new Date(reservation.expiresAt).toLocaleString('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' });
   return buildOriginalsEmail({
     subject: `${reservation.roleName} round is open — your place is reserved`, heading: 'Your recording round is open', firstName,
-    paragraphs: [`The ${reservation.roleName} round for “${project.title}” is now open. Your advance place is now a 24-hour recording reservation, ending ${deadline} (UK time).`, 'Read the latest guidance, upload one to four stems, then submit your contribution. A separate listening mix is optional. Listen to each new stem in the workspace with the available project tracks and confirm that it lines up before submitting.'],
+    paragraphs: [`The ${reservation.roleName} round for “${project.title}” is now open. Your advance place is now a 24-hour recording reservation, ending ${deadline} (UK time).`, 'Read the latest guidance, upload up to 24 tracks grouped as one contribution, plus a stereo listening mix of your part only. Separate single-file alternatives are also supported. Listen to each new stem in the workspace with the available project tracks and confirm that it lines up before submitting.'],
     buttonUrl: url, buttonLabel: 'Open the project and submit your recordings',
     afterButton: ['If you cannot take part, release your reservation in the workspace so someone else can use the place.'],
   });

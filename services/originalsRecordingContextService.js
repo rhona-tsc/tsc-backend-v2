@@ -18,6 +18,13 @@ export function originalRecordingContext({ project, submissions = [], assets = [
       const whole = submission.selectionMode === 'whole_take' && id(take._id) === id(submission.selectedTakeId);
       const ranges = submission.selectionMode === 'selected_ranges' ? (submission.selectedRanges || []).filter(range => id(range.takeId) === id(take._id) && Number.isFinite(range.startSeconds) && Number.isFinite(range.endSeconds) && range.startSeconds >= 0 && range.endSeconds > range.startSeconds).map(({ startSeconds, endSeconds }) => ({ startSeconds, endSeconds })) : [];
       if (!whole && !ranges.length) continue;
+      const mix = take.groupedContribution && available.get(id(take.mixdownAssetId));
+      if (mix?.kind === 'take_mixdown') {
+        replacedRoles.add(roleKey(submission.roleName));
+        const previous = layers.get(id(mix._id));
+        if (!previous || previous.playbackRanges) layers.set(id(mix._id), { ...mix, contributionMix: true, label: `${submission.roleName} — listening mix`, ...(!whole ? { playbackRanges: [...(previous?.playbackRanges || []), ...ranges] } : {}) });
+        continue;
+      }
       for (const stemId of take.stemAssetIds?.length ? take.stemAssetIds : [take.stemAssetId]) {
         const asset = available.get(id(stemId));
         if (!asset || asset.kind !== 'take_stem' || asset.finalEligible === false) continue;
@@ -44,7 +51,7 @@ export async function loadOriginalRecordingContext({ projectId, excludeId, sessi
   const project = await read(Project.findById(projectId), session);
   if (!project) throw Object.assign(new Error('Project not found'), { status: 404 });
   const submissions = await read(Submission.find({ projectId, state: 'accepted' }).select('state category roleName takes selectionMode selectedTakeId selectedRanges'), session);
-  const assets = await read(Asset.find({ projectId, state: 'active', kind: { $in: ['initial_stem', 'temporary_stem', 'take_stem', 'guide_track', 'demo', 'click_track'] } }).select('kind originalName mimeType state finalEligible replacementRoleName createdAt'), session);
+  const assets = await read(Asset.find({ projectId, state: 'active', kind: { $in: ['initial_stem', 'temporary_stem', 'take_stem', 'take_mixdown', 'guide_track', 'demo', 'click_track'] } }).select('kind originalName mimeType state finalEligible replacementRoleName createdAt'), session);
   return originalRecordingContext({ project, submissions, assets, excludeId });
 }
 export async function requireOriginalStemReviews({ assets, musicianId }) {
