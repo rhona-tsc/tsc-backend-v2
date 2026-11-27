@@ -5,6 +5,7 @@ import AvailabilityModel from "../models/availabilityModel.js";
 import EnquiryMessage from "../models/EnquiryMessage.js";
 import { sendWhatsAppMessage } from "../utils/twilioClient.js";
 import { assertNoPriorAvailabilityDecline } from '../services/availabilityPriorDeclines.js';
+import { foxVocalDeputyDuties } from '../services/foxVocalDeputyDuties.js';
 /* -------------------------- phone normalisation -------------------------- */
 
 const firstNameOf = (p) => {
@@ -223,6 +224,15 @@ export const notifyDeputyOneShot = async ({
       dateISO, musicianId: deputy?.musicianId || deputy?._id,
       phone: phoneE164, formattedAddress,
     });
+
+    if (String(act?._id || '') === '681de07addc311a32c271fd9') {
+      const musicianId = deputy?.musicianId || deputy?.id || deputy?._id;
+      const musician = musicianId ? await Musician.findById(musicianId)
+        .select('_id instrumentation').lean() : null;
+      duties = foxVocalDeputyDuties({
+        actId: act._id, isDeputy: true, musicianId, musician, duties,
+      });
+    }
 
     const enquiryId = String(Date.now());
     const availabilityDoc = await AvailabilityModel.findOneAndUpdate(

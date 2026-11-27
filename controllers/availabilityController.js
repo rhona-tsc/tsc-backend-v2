@@ -1,6 +1,7 @@
 import { createDeputyEscalationService, deputyEscalationEligibility } from '../services/availabilityDeputyEscalationService.js';
 import { availabilityEnquiryScopeState } from '../services/availabilityEnquiryScope.js';
 import { scheduledDeputyOffer } from '../services/scheduledDeputyOffer.js';
+import { foxVocalDeputyDuties } from '../services/foxVocalDeputyDuties.js';
 import { isEnquiryOnlyLineup } from '../utils/websiteLineups.js';
 import { lineupsForEnquiry, bespokeLineupDescription, bespokeBookingAction, htmlEscape } from '../utils/enquiryLineupPresentation.js';
 import EnquiryBoardItem from '../models/enquiryBoardItem.js';
@@ -4363,8 +4364,13 @@ if (!isDeputy && shouldAlwaysSkip) {
       reply: null,
     };
 
-    const roleStr =
-      body?.inheritedDuties || targetMember.instrument || "Performance";
+    const roleStr = foxVocalDeputyDuties({
+      actId: act._id,
+      isDeputy: !!isDeputy,
+      musicianId: realMusicianId,
+      musician: canonical,
+      duties: body?.inheritedDuties || targetMember.instrument || "Performance",
+    });
 
     const setAlways = {
       isDeputy: !!isDeputy,

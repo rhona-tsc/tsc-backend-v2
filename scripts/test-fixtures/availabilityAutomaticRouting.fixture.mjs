@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mock } from 'node:test';
 
 const sends = [], reservations = [], prices = [], updates = [];
+const foxGuitarScenario = process.env.FOX_GUITAR_FIXTURE === '1';
 let failHistory = false;
 let duringPricing = () => {};
 const query = value => ({ select() { return this; }, sort() { return this; }, lean: async () => value });
@@ -10,14 +11,16 @@ const richard = { _id: '692ebcf6e7dfeac14dc2168b', musicianId: '692ebcf6e7dfeac1
   status: 'Approved', vocals: { type: ['Lead Vocal'] } };
 const alternatives = [2, 3, 4, 5].map(n => ({ ...richard,
   _id: `692ebcf6e7dfeac14dc2168${n}`, musicianId: `692ebcf6e7dfeac14dc2168${n}`,
-  firstName: `Singer${n}`, phone: `+44700000000${n}`, email: `singer${n}@example.test` }));
+  firstName: `Singer${n}`, phone: `+44700000000${n}`, email: `singer${n}@example.test`,
+  instrumentation: [{ instrument: 'Acoustic Guitar' }] }));
 const people = [richard, ...alternatives];
 const lineup = { _id: '6984e203d245d0c771406d30', bandMembers: [
-  { firstName: 'Primary', instrument: 'Lead vocals/guitar', fee: 300,
+  { firstName: 'Primary', instrument: foxGuitarScenario ? 'Vocalist-Bassist' : 'Lead vocals/guitar', fee: 300,
     phoneNumber: '+447000000009', deputies: people },
   { instrument: 'Bass' }, { instrument: 'Drums' },
 ] };
-const act = { _id: '68541b25e47bb51c79b98121', tscName: 'Fixture Band', lineups: [lineup] };
+const act = { _id: foxGuitarScenario ? '681de07addc311a32c271fd9' : '68541b25e47bb51c79b98121',
+  tscName: 'Fixture Band', lineups: [lineup] };
 let history = [{ _id: 'earlier-no', musicianId: richard._id, phone: richard.phone,
   dateISO: '2027-09-04', enquiryId: 'DIFFERENT-ENQUIRY', actId: 'DIFFERENT-ACT',
   reply: 'unavailable', messageSidOut: 'SIMULATED-OLD', requestId: 'EARLIERNO' }];
@@ -73,6 +76,11 @@ assert.equal(reservations.length, 3);
 assert.equal(prices.includes(richard._id), false);
 assert.equal(reservations.some(r => r.update.$set.musicianId === richard._id), false);
 assert.deepEqual(sends.map(s => s.variables.fee), ['390', '390', '390']);
+if (foxGuitarScenario) {
+  assert.deepEqual(sends.map(s => s.variables.role), Array(3).fill('Lead vocals / acoustic guitar'));
+  assert.deepEqual(sends.map(s => s.opportunityDetails.duties), Array(3).fill('Lead vocals / acoustic guitar'));
+  assert.deepEqual(reservations.map(r => r.update.$set.duties), Array(3).fill('Lead vocals / acoustic guitar'));
+}
 assert.equal(history[0].reply, 'unavailable'); // No manufactured replies or rewritten evidence.
 
 const before = sends.length;
