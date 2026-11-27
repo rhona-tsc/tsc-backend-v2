@@ -355,6 +355,7 @@ const deputyJobSchema = new mongoose.Schema(
         "applications_open",
         "allocated",
         "booking_confirmed",
+        "act_deputy_search",
         "closed",
       ],
       default: "created",

@@ -8,6 +8,8 @@ import Availability from '../models/availabilityModel.js';
 import Message from '../models/EnquiryMessage.js';
 import Job from '../models/deputyJobModel.js';
 import Booking from '../models/bookingModel.js';
+import Musician from '../models/musicianModel.js';
+import Policy from '../models/actRosterPolicy.js';
 import {isExplicitAvailabilityDecline} from '../services/availabilityPriorDeclines.js';
 import { ownsBookingAssignment, isWithdrawalTarget, withdrawalAvailabilityRecord } from '../utils/bookingWithdrawal.js';
 process.env.JWT_SECRET='withdrawal-route-test';
@@ -25,7 +27,9 @@ async function setup(t) {
  let availability=[],jobs=[];
  t.mock.method(Board,'findOne',async()=>board);t.mock.method(Board,'findById',()=>({lean:async()=>board,then:(resolve,reject)=>Promise.resolve(board).then(resolve,reject)}));
  t.mock.method(Act,'findById',()=>({lean:async()=>({_id:actId,tscName:'Example band',lineups:[]})}));
+ t.mock.method(Policy,'findOne',()=>({lean:async()=>null}));
  t.mock.method(Message,'findOne',()=>({sort:async()=>null}));
+ t.mock.method(Message,'exists',async()=>null);
  t.mock.method(Availability,'findOneAndUpdate',async(_filter,update)=>{availability.push(update.$set);return update.$set});
  t.mock.method(Availability,'updateMany',async()=>({modifiedCount:0}));
  t.mock.method(Booking,'findOne',()=>({lean:async()=>({_id:'core-booking'})}));
@@ -132,4 +136,49 @@ test('a richer core booking cannot overwrite the board’s role hold with an emp
  const core={_id:'core-booking',allocationHolds:[]};
  assert.deepEqual(mergeRowData(core,board).allocationHolds,[hold]);
  assert.deepEqual(mergeRowData(board,core).allocationHolds,[hold]);
+});
+
+test('tomorrow’s cancellation tries the next eligible act deputy before the public job board',async t=>{
+ const f=await setup(t);
+ const date=new Date();date.setUTCDate(date.getUTCDate()+1);f.board.eventDateISO=date.toISOString().slice(0,10);
+ const next='777777777777777777777777';
+ const member={_id:'888888888888888888888888',musicianId:person,instrument:'Keyboard',deputies:[{musicianId:next,firstName:'Next',lastName:'Deputy',phone:'+447000000002'}]};
+ t.mock.method(Act,'findById',()=>({lean:async()=>({_id:actId,lineups:[{_id:'999999999999999999999999',bandMembers:[member]}]})}));
+ t.mock.method(Policy,'findOne',()=>({lean:async()=>null}));
+ t.mock.method(Message,'find',()=>({lean:async()=>[]}));
+ t.mock.method(Availability,'find',()=>({select:()=>({lean:async()=>[]})}));
+ t.mock.method(Musician,'findOne',()=>({select:()=>({lean:async()=>({_id:next,firstName:'Next',lastName:'Deputy',phone:'+447000000002'})})}));
+ t.mock.method(Board,'exists',async()=>false);
+ // The same prior-decline reader checks booking requests as well as availability.
+ t.mock.method(Message,'find',()=>({lean:async()=>[],select:()=>({lean:async()=>[]})}));
+ const {escalateToNextDeputy}=await import('../controllers/allocationController.js');
+ const result=await escalateToNextDeputy({actId,bookingBoardItemId:boardId,bookingRef:f.board.bookingRef,roleSlotId:'keyboard-1',musicianId:person,phone:'+447000000001',fee:400,meta:{role:'Keyboard',MetaISODate:f.board.eventDateISO}},{dryRun:true});
+ assert.equal(result.route,'act_deputy');assert.equal(String(result.musicianId),next);assert.equal(f.jobs.length,0);
+});
+
+test('the seven-day job-board worker cannot publish over an unanswered act-deputy request',async t=>{
+ const f=await setup(t);t.mock.method(Message,'exists',async()=>({_id:'pending-deputy'}));
+ const {postExhaustedRoleToDeputyBoard}=await import('../controllers/allocationController.js');
+ const job=await postExhaustedRoleToDeputyBoard({bookingBoardItemId:boardId,bookingRef:'EXAMPLE',roleSlotId:'keyboard-1',fee:400,meta:{role:'Keyboard',MetaISODate:f.board.eventDateISO}},{_id:actId});
+ assert.equal(job,null);assert.equal(f.jobs.length,0);
+});
+
+test('an exhausted act-deputy chain reopens its paused advert instead of creating a duplicate',async t=>{
+ const f=await setup(t);let saved=false;const existing={_id:'555555555555555555555555',status:'closed',workflowStage:'act_deputy_search',save:async()=>{saved=true}};
+ t.mock.method(Job,'findOne',async()=>existing);
+ const {postExhaustedRoleToDeputyBoard}=await import('../controllers/allocationController.js');
+ const job=await postExhaustedRoleToDeputyBoard({bookingBoardItemId:boardId,bookingRef:'EXAMPLE',roleSlotId:'keyboard-1',fee:400,meta:{role:'Keyboard',MetaISODate:f.board.eventDateISO}},{_id:actId});
+ assert.equal(job._id,existing._id);assert.equal(job.status,'open');assert.equal(saved,true);assert.equal(f.jobs.length,0);assert.equal(f.board.assignedMusicians[0].deputyJobId,existing._id);assert.notEqual(f.board.allocation.status,'fully_allocated');
+});
+
+test('a public-job cancellation pauses the advert, releases the old place and falls back only after the act deputies are exhausted',async t=>{
+ const f=await setup(t);const states=[];const job={_id:'555555555555555555555555',status:'filled',workflowStage:'booking_confirmed',allocatedMusicianId:person,bookedMusicianId:person,automation:{roleSlotId:'keyboard-1'},applications:[{musicianId:person,status:'booked'}],roleAllocations:[{musicianId:person,role:'Keyboard',status:'booked'}],save:async()=>{states.push(job.status)}};
+ f.jobs.push(job);f.board.assignedMusicians[0].deputyJobId=job._id;t.mock.method(Job,'findById',async()=>job);
+ const result=await f.request('/api/allocations');
+ assert.equal(result.status,200);assert.deepEqual(states,['closed','open']);assert.equal(job.applications[0].status,'withdrawn');assert.equal(job.roleAllocations[0].status,'cancelled');assert.equal(job.allocatedMusicianId,null);assert.equal(job.bookedMusicianId,null);assert.equal(f.jobs.length,1);
+});
+
+test('a paused deputy search is a valid persisted job workflow state',()=>{
+ const job=new Job({instrument:'Drums',status:'closed',workflowStage:'act_deputy_search'});
+ assert.equal(job.validateSync(),undefined);
 });

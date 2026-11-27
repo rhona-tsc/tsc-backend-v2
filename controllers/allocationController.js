@@ -1,5 +1,5 @@
 import { sharedRosterSkillEligibility } from '../utils/sharedRosterSkills.js';
-import {activeAllocationHold,withinAllocationWeek,vocalistAllocationBlocked,bookingRolePlan} from '../utils/bookingAllocationPolicy.js';
+import {activeAllocationHold,vocalistAllocationBlocked,bookingRolePlan} from '../utils/bookingAllocationPolicy.js';
 import {normaliseAllocationRole} from '../utils/allocationRoles.js';
 import {confirmedBookingAvailabilityWrite, syncConfirmedBookingAssignments} from '../services/manualBookingConfirmation.js';
 import {actRoleDeputies} from '../utils/actRoleDeputies.js';
@@ -512,7 +512,7 @@ export const updateBoardRoleSlot = async (msg, changes = {}) => {
     ["accepted", "confirmed"].includes(item?.status),
   ).length;
   const unresolvedCount = board.assignedMusicians.filter((item) =>
-    ["unfilled", "selected", "offered", "proposed", "declined", "unavailable"].includes(item?.status),
+    ["unfilled", "selected", "offered", "proposed", "declined", "unavailable", "withdrawn", "posted_to_job_board"].includes(item?.status),
   ).length;
   board.allocation = {
     ...(board.allocation?.toObject?.() || board.allocation || {}),
@@ -753,11 +753,13 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
   if (activeAllocationHold(board, roleSlotId)) return {route:"allocation_held"};
   if(vocalistAllocationBlocked(board,role))return {route:"vocalist_confirmation_required"};
 
-  if (withinAllocationWeek(board.eventDateISO) && deputyJobId && mongoose.isValidObjectId(deputyJobId)) {
+  // A cancellation starts with the act's deputy chain, even at short notice.
+  // Pause an earlier public search while those deputies are being contacted.
+  if (deputyJobId && mongoose.isValidObjectId(deputyJobId)) {
     const job = await DeputyJob.findById(deputyJobId);
     if (job) {
-      job.status = "open";
-      job.workflowStage = "applications_open";
+      job.status = "closed";
+      job.workflowStage = "act_deputy_search";
       job.allocatedMusicianId = null;
       job.allocatedMusicianSlug = "";
       job.allocatedMusicianName = "";
@@ -771,8 +773,12 @@ export const withdrawAllocatedBooking = async ({ board, assignment, user, reason
           ? { ...(application.toObject?.() || application), status: "withdrawn", withdrawnAt: now }
           : application,
       );
+      job.roleAllocations = (job.roleAllocations || []).map((allocation) =>
+        musicianMatchesAssignment(allocation, user)
+          ? { ...(allocation.toObject?.() || allocation), status: "cancelled" }
+          : allocation,
+      );
       await job.save();
-      return { route: "job_board_reopened", job };
     }
   }
 
@@ -925,12 +931,33 @@ export const withdrawMyBooking = async (req, res) => {
 export const postExhaustedRoleToDeputyBoard = async (msg, act) => {
   if(msg.bookingBoardItemId){const current=await bookingBoardItem.findById(msg.bookingBoardItemId).lean();if(current&&(activeAllocationHold(current,msg.roleSlotId)||vocalistAllocationBlocked(current,msg.meta?.role||String(msg.duties||" ").split(" · ")[0])))return null;}
   if(!(Number(msg.fee)>0))return null;
+  // The seven-day review must not bypass an outstanding act-deputy offer.
+  if (msg.bookingBoardItemId && await EnquiryMessage.exists({
+    bookingBoardItemId: msg.bookingBoardItemId,
+    roleSlotId: msg.roleSlotId,
+    candidateSource: "act_deputy",
+    reply: null,
+    autoEscalatedAt: null,
+    reminderPausedAt: null,
+    deliveryStatus: { $in: ["queued", "pending", "sent", "delivered", "read"] },
+  })) return null;
   const existing = await DeputyJob.findOne({
     "automation.bookingBoardItemId": msg.bookingBoardItemId || null,
     "automation.roleSlotId": msg.roleSlotId || "",
-    status: { $in: ["open", "allocated", "filled"] },
+    $or: [
+      { status: { $in: ["open", "allocated", "filled"] } },
+      { status: "closed", workflowStage: "act_deputy_search" },
+    ],
   });
-  if (existing) return existing;
+  if (existing) {
+    if (existing.status === "closed" && existing.workflowStage === "act_deputy_search") {
+      existing.status = "open";
+      existing.workflowStage = "applications_open";
+      await existing.save();
+      await updateBoardRoleSlot(msg, { status: "posted_to_job_board", deputyJobId: existing._id });
+    }
+    return existing;
+  }
 
   const role = String(msg.meta?.role || String(msg.duties || "Musician").split(" · ")[0]).trim();
   const eventDate = String(msg.meta?.MetaISODate || "").slice(0, 10);
@@ -2584,11 +2611,6 @@ export async function escalateToNextDeputy(msg, {dryRun=false}={}) {
     const role=String(msg.meta?.role || String(msg.duties||"").split(" · ")[0]).trim();
     if (rosterBoard.allocation?.managerApprovalRequired && isVocalRole(role)) return false;
     if(vocalistAllocationBlocked(rosterBoard,role,lineup))return false;
-    if (withinAllocationWeek(msg.meta?.MetaISODate)) {
-      if(dryRun)return {route:"job_board",reason:"within_seven_days"};
-      await postExhaustedRoleToDeputyBoard({...msg,meta:{...msg.meta,escalationReason:"because the role is unfilled within seven days of the event"}},act);
-      return false;
-    }
     const current=members.find(m=>msg.originalBandMemberId && String(m._id)===String(msg.originalBandMemberId))
       || members.find(m=>normaliseAllocationRole(m.instrument||m.role).toLowerCase()===normaliseAllocationRole(role).toLowerCase());
     const rosterPolicy=await getRosterPolicy(act._id);
