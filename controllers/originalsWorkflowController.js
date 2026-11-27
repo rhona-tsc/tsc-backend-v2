@@ -14,6 +14,7 @@ import { originalTakeAssetIds, originalTakeKindsValid, originalTakeNeedsListenin
 import { queueOriginalChatNotifications, deliverOriginalChatNotifications } from "../services/originalsChatNotificationService.js";
 import { randomUUID } from "node:crypto";
 import { chatUploadError, chatDisplayName, CHAT_ATTACHMENT_LIMIT } from "../services/originalsChatService.js";
+import { addOriginalChatProfiles, originalChatAuthorProfilePath } from '../services/originalsChatProfileService.js';
 import { requireOriginalProjectManager, presentOriginalWorkspace, originalReferenceKinds } from "../services/originalsAccessService.js";
 import mongoose from "mongoose";
 import { v2 as cloudinary } from "cloudinary";
@@ -113,6 +114,7 @@ export const getOriginalProjectWorkspace = async (req, res) => {
     }
     const workspace = presentOriginalWorkspace({ project, rounds, reservations, submissions, assets, notifications, invitations, creditVersions, issues, messages: messages.reverse(), futureReservations }, req.user);
     workspace.assets = await addOriginalAssetCredits({ assets: workspace.assets, project, submissions, reservations });
+    workspace.messages = await addOriginalChatProfiles(workspace.messages);
     workspace.roleProgress = await addOriginalRoleCredits({ roles: workspace.roleProgress, project, submissions, reservations });
     return res.json(workspace);
   } catch (error) {
@@ -227,7 +229,7 @@ export const postOriginalMessage = async (req, res) => {
     if (clientMessageId.length > 100 || clientMessageId.startsWith('system:')) return res.status(400).json({ success: false, message: "Invalid message identifier" });
     if (clientMessageId) {
       const existing = await originalMessageModel.findOne({ projectId: project._id, authorId, clientMessageId });
-      if (existing) return res.status(200).json({ success: true, message: existing });
+      if (existing) return res.status(200).json({ success: true, message: (await addOriginalChatProfiles([existing]))[0] });
     }
     const body = clean(req.body?.body);
     if (body.length > 3000) return res.status(400).json({ success: false, message: "Messages can contain up to 3,000 characters" });
@@ -245,7 +247,7 @@ export const postOriginalMessage = async (req, res) => {
       const voice = await originalAssetModel.findOne({ _id: voiceAssetId, projectId: project._id, kind: "voice_note", ownerId: authorId, state: "active" });
       if (!voice) return res.status(400).json({ success: false, message: "Voice note is unavailable" });
     }
-    const profile = await musicianModel.findById(authorId).select("firstName lastName").lean();
+    const profile = await musicianModel.findById(authorId).select("firstName lastName musicianSlug privateTestProfile profileDeletedAt").lean();
     const isOwner = String(project.ownerId) === authorId;
     const preference = await originalReservationModel.findOne({ projectId: project._id, musicianId: authorId }).sort({ createdAt: -1 }).lean();
     const anonymous = (isOwner && project.ownerAnonymous) || preference?.anonymous || req.body?.anonymous === true;
@@ -265,14 +267,15 @@ export const postOriginalMessage = async (req, res) => {
       if (error.code !== 11000 || !clientMessageId) throw error;
       const existing = await originalMessageModel.findOne({ projectId: project._id, authorId, clientMessageId });
       if (!existing) throw error;
-      return res.status(200).json({ success: true, message: existing });
+      return res.status(200).json({ success: true, message: (await addOriginalChatProfiles([existing]))[0] });
     }
     // Delivery and audit failures must never turn a saved chat message into a failed send.
     try {
       await queueOriginalChatNotifications({ project, message });
       await audit({ projectId: project._id, type: "group_message_posted", user: req.user, metadata: { messageId: String(message._id), hasVoiceNote: Boolean(voiceAssetId) } });
     } catch (error) { console.error("Originals chat follow-up failed after message was saved:", error); }
-    res.status(201).json({ success: true, message });
+    const plainMessage = message.toObject ? message.toObject() : message;
+    res.status(201).json({ success: true, message: { ...plainMessage, authorProfilePath: originalChatAuthorProfilePath(plainMessage, profile) } });
     // The response is already sent; SMTP latency cannot leave the chat composer waiting.
     try { await deliverOriginalChatNotifications({ projectId: project._id }); }
     catch (error) { console.error("Originals chat email delivery will retry:", error); }
@@ -741,7 +744,7 @@ export const getOriginalMessages = async (req, res) => {
     if (!await originalProjectModel.exists({ _id: req.params.id })) return res.status(404).json({ success: false, message: "Originals project not found" });
     const messages = await originalMessageModel.find({ projectId: req.params.id }).sort({ createdAt: -1, _id: -1 }).limit(500).populate("attachmentIds", "kind originalName mimeType bytes state").lean();
     res.set("Cache-Control", "no-store");
-    return res.json({ success: true, messages: messages.reverse() });
+    return res.json({ success: true, messages: await addOriginalChatProfiles(messages.reverse()) });
   } catch (error) {
     console.error("Originals chat load failed:", error);
     return res.status(500).json({ success: false, message: "Could not refresh chat" });
