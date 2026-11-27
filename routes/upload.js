@@ -4,8 +4,25 @@ import requireAnyAuth from "../middleware/requireAnyAuth.js";
 import documentUpload from "../middleware/documentUpload.js";
 import { v2 as cloudinary } from "cloudinary";
 import { Readable } from "stream";
+import path from 'node:path';
+import {randomUUID} from 'node:crypto';
+import eventSheetUploadAccess from '../middleware/eventSheetUploadAccess.js';
 
 const router = express.Router();
+// Authorize this specific booking before accepting any file bytes.
+router.get('/event-sheet/:bookingId/access', eventSheetUploadAccess, (_req,res)=>res.json({success:true,allowed:true}));
+router.post('/event-sheet/:bookingId/doc', eventSheetUploadAccess, documentUpload, (req,res)=>{
+  if (!req.file) return res.status(400).json({success:false,message:'Please choose a file to upload.'});
+  const file=req.file;
+  if (!file.size) return res.status(400).json({success:false,message:'Please choose a non-empty file.'});
+  const publicId=`${req.uploadBooking._id}_${randomUUID()}${path.extname(file.originalname).toLowerCase()}`;
+  const stream=cloudinary.uploader.upload_stream({resource_type:'raw',folder:'event-sheets/docs',public_id:publicId},(error,uploaded)=>{
+    if(error) return res.status(502).json({success:false,message:'The file could not be stored. Please try again shortly.'});
+    console.info('event_sheet_upload', {bookingId:String(req.uploadBooking._id),actorId:String(req.user.id||req.user.userId||''),at:new Date().toISOString()});
+    res.json({success:true,url:uploaded.secure_url,public_id:uploaded.public_id,bytes:uploaded.bytes,originalName:file.originalname});
+  });
+  Readable.from(file.buffer).pipe(stream);
+});
 router.use(requireAnyAuth);
 
 router.post("/menu", documentUpload, async (req, res) => {
