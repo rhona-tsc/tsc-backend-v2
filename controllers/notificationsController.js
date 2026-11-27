@@ -1,196 +1,50 @@
 // controllers/notificationsController.js
 import Booking from "../models/bookingModel.js";
-import Act from "../models/actModel.js";
-import nodemailer from "nodemailer";
 import axios from "axios";
 import sendEmail from "../utils/sendEmail.js";
+import cloudinary from "../config/cloudinary.js";
 
-const buildTransport = () => {
-  // If you haven’t set SMTP, we’ll no-op but still 200 for dev.
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM } = process.env;
-  if (!SMTP_HOST) return null;
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT || 587),
-    secure: Number(SMTP_PORT) === 465,
-    auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASS } : undefined,
+import Board from "../models/bookingBoardItem.js";
+import Musician from "../models/musicianModel.js";
+import {createCateringHandlers} from "../services/eventSheetCateringNotification.js";
+
+export const loadConfirmedCateringRoster = async booking => {
+  const board = await Board.findOne({$or:[{bookingId:booking._id},{sourceBookingId:booking._id},{bookingRef:booking.bookingId}]}).lean();
+  const members = [board?.assignedMusicians,board?.bookingMusicians,board?.bandLineup,booking.assignedMusicians,booking.bandLineup]
+    .find(items => Array.isArray(items) && items.length) || [];
+  const confirmed = members.filter(member => !member.withdrawnAt && ['accepted','confirmed'].includes(String(member.status).toLowerCase()));
+  const profiles = await Musician.find({_id:{$in:confirmed.map(m=>m.musicianId).filter(Boolean)}}).select('firstName lastName email dietaryRequirements').lean();
+  const byId = new Map(profiles.map(p=>[String(p._id),p]));
+  return confirmed.map(member => {
+    const profile=byId.get(String(member.musicianId));
+    return {name:member.name || [profile?.firstName,profile?.lastName].filter(Boolean).join(' '),
+      instrument:member.instrument||member.role||'Musician',email:profile?.email||member.email||'',
+      dietaryRequirements:profile?.dietaryRequirements||member.dietaryRequirements||'To be confirmed'};
   });
 };
-
-const findMemberEmails = async (booking) => {
-  // 1) Prefer populated bandLineup musician docs (if you store them)
-  const emailsFromBandLineup = Array.isArray(booking?.bandLineup)
-    ? booking.bandLineup
-        .map((m) => (typeof m === "object" ? (m.email || m.contactEmail) : null))
-        .filter(Boolean)
-    : [];
-
-  if (emailsFromBandLineup.length) return emailsFromBandLineup;
-
-  // 2) Try to resolve lineup on the Act by lineupId and pull emails
+const loadMenuAttachments = async value => {
+  if (!value) return [];
   try {
-    const actId = booking?.act;
-    const lineupId = booking?.lineupId ||
-      (Array.isArray(booking?.actsSummary) && booking.actsSummary[0]?.lineupId);
-    if (!actId || !lineupId) return [];
-
-    const act = await Act.findById(actId).lean();
-    const lineup = (act?.lineups || []).find(
-      (l) => String(l._id) === String(lineupId) || String(l.lineupId) === String(lineupId)
-    );
-    const members = Array.isArray(lineup?.bandMembers) ? lineup.bandMembers : [];
-    return members.map((m) => m.email || m.contactEmail).filter(Boolean);
-  } catch {
-    return [];
-  }
+    const url = new URL(value);
+    const cloudName = cloudinary.config().cloud_name;
+    const prefix = `/${cloudName}/raw/upload/`;
+    if (url.protocol !== 'https:' || url.hostname !== 'res.cloudinary.com' || url.username || url.password || url.port || url.search || url.hash || !url.pathname.startsWith(prefix)) return [];
+    const asset = url.pathname.slice(prefix.length).match(/^v\d+\/(menus\/[^/]+|event-sheets\/docs\/[^/]+)$/)?.[1];
+    if (!asset) return [];
+    const download = cloudinary.utils.private_download_url(decodeURIComponent(asset), null, {
+      resource_type:'raw',type:'upload',expires_at:Math.floor(Date.now()/1000)+300,
+    });
+    const result = await axios.get(download,{responseType:'arraybuffer',timeout:10000,maxRedirects:0,maxContentLength:20*1024*1024});
+    const type = result.headers['content-type'] || 'application/octet-stream';
+    const extension = type.includes('pdf')?'pdf':type.includes('wordprocessingml')?'docx':type.includes('msword')?'doc':type.includes('png')?'png':type.includes('jpeg')?'jpg':type.includes('webp')?'webp':'bin';
+    return [{filename:`menu.${extension}`,content:Buffer.from(result.data),contentType:type}];
+  } catch (error) { console.warn('Uploaded menu could not be attached; retaining its link:',error.message); return []; }
 };
-
-// Send menu to band (cc caterer)
-export const sendMenuToBand = async (req, res) => {
-  try {
-    const { bookingId, catererEmail, menu = {}, dietarySummary = [] } = req.body || {};
-    if (!bookingId) return res.status(400).json({ success: false, message: "bookingId is required" });
-
-    const booking = await Booking.findOne({ $or: [{ bookingId }, { _id: bookingId }] }).lean();
-    if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
-
-    // Resolve band emails
-    const bandEmails = await findMemberEmails(booking);
-    const recipients = [...new Set([
-      "hello@thesupremecollective.co.uk",
-      ...bandEmails,
-    ])].filter(Boolean);
-
-    const cc = (catererEmail || "").trim();
-
-    // Attach uploaded file if we have a URL
-    const attachments = [];
-    if (menu.fileUrl && /^https?:\/\//i.test(menu.fileUrl)) {
-      try {
-        const resp = await axios.get(menu.fileUrl, { responseType: "arraybuffer" });
-        const contentType = resp.headers["content-type"] || "application/octet-stream";
-        attachments.push({
-          filename: "menu",
-          content: Buffer.from(resp.data),
-          contentType,
-        });
-      } catch (e) {
-        console.warn("Menu fetch failed; will include link only:", e?.message);
-      }
-    }
-
-    // Build a mini dietary table
-    const dietaryHtml = Array.isArray(dietarySummary) && dietarySummary.length
-      ? `<table style="border-collapse:collapse;width:100%;font-size:13px">
-           <thead>
-             <tr><th align="left">Name</th><th align="left">Instrument</th><th align="left">Diet</th></tr>
-           </thead>
-           <tbody>
-             ${dietarySummary.map(r => `
-               <tr>
-                 <td>${r.name || ""}</td>
-                 <td>${r.instrument || ""}</td>
-                 <td>${r.diet || "None stated"}</td>
-               </tr>
-             `).join("")}
-           </tbody>
-         </table>`
-      : "<p>No dietary details yet.</p>";
-
-    const html = `
-      <p>Hi ${booking?.act ? "band" : "team"},</p>
-      <p>Menu for booking <strong>${booking.bookingId || booking._id}</strong>.</p>
-      ${menu.url ? `<p>Menu link: <a href="${menu.url}" target="_blank" rel="noreferrer">${menu.url}</a></p>` : ""}
-      ${menu.text ? `<pre style="white-space:pre-wrap;background:#fafafa;border:1px solid #eee;padding:8px;border-radius:4px">${menu.text}</pre>` : ""}
-      ${menu.notes ? `<p><strong>Notes:</strong> ${menu.notes}</p>` : ""}
-      <h4>Dietary requirements</h4>
-      ${dietaryHtml}
-      <p>Thanks,<br/>TSC Event Sheet Bot</p>
-    `;
-
-    const subject = `Menu – ${booking.bookingId || "booking"}`;
-
-    const to = recipients.join(",");
-    const r = await sendEmail(to, subject, html, attachments, cc ? [cc] : undefined);
-    if (!r?.success) {
-      return res.status(500).json({ success: false, message: "Email send failed", error: r?.error?.message });
-    }
-    return res.json({ success: true });
-  } catch (err) {
-    console.error("sendMenuToBand error:", err);
-    return res.status(500).json({ success: false, message: "Failed to send menu to band" });
-  }
-};
-
-// Send dietary requirements to caterer
-export const sendDietaryToCaterer = async (req, res) => {
-  try {
-    const { bookingId, catererEmail, dietarySummary = [], serviceNotes = "", notes = "", menu = {} } = req.body || {};
-    const to = (catererEmail || "").trim();
-    if (!bookingId || !to) {
-      return res.status(400).json({ success: false, message: "bookingId and catererEmail are required" });
-    }
-
-    const booking = await Booking.findOne({ $or: [{ bookingId }, { _id: bookingId }] }).lean();
-    if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
-
-    // Optional attachment if a fileUrl exists
-    const attachments = [];
-    if (menu.fileUrl && /^https?:\/\//i.test(menu.fileUrl)) {
-      try {
-        const resp = await axios.get(menu.fileUrl, { responseType: "arraybuffer" });
-        const contentType = resp.headers["content-type"] || "application/octet-stream";
-        attachments.push({
-          filename: "menu",
-          content: Buffer.from(resp.data),
-          contentType,
-        });
-      } catch (e) {
-        console.warn("Menu fetch failed for caterer; including link only:", e?.message);
-      }
-    }
-
-    const dietaryHtml = Array.isArray(dietarySummary) && dietarySummary.length
-      ? `<table style="border-collapse:collapse;width:100%;font-size:13px">
-           <thead>
-             <tr><th align="left">Name</th><th align="left">Instrument</th><th align="left">Diet</th></tr>
-           </thead>
-           <tbody>
-             ${dietarySummary.map(r => `
-               <tr>
-                 <td>${r.name || ""}</td>
-                 <td>${r.instrument || ""}</td>
-                 <td>${r.diet || "None stated"}</td>
-               </tr>
-             `).join("")}
-           </tbody>
-         </table>`
-      : "<p>No dietary details yet.</p>";
-
-    const html = `
-      <p>Hello,</p>
-      <p>Dietary requirements and service notes for booking <strong>${booking.bookingId || booking._id}</strong>.</p>
-      ${dietaryHtml}
-      ${serviceNotes ? `<p><strong>Service notes:</strong> ${serviceNotes}</p>` : ""}
-      ${notes ? `<p><strong>Additional notes from client:</strong> ${notes}</p>` : ""}
-      ${menu.url ? `<p>Menu link (if needed): <a href="${menu.url}" target="_blank" rel="noreferrer">${menu.url}</a></p>` : ""}
-      <p>Thanks,<br/>The Supreme Collective</p>
-    `;
-
-    const subject = `Dietary requirements – ${booking.bookingId || "booking"}`;
-
-    // to caterer, cc the office
-    const recipients = to;
-    const r = await sendEmail([recipients, "hello@thesupremecollective.co.uk"].join(","), subject, html, attachments);
-    if (!r?.success) {
-      return res.status(500).json({ success: false, message: "Email send failed", error: r?.error?.message });
-    }
-    return res.json({ success: true });
-  } catch (err) {
-    console.error("sendDietaryToCaterer error:", err);
-    return res.status(500).json({ success: false, message: "Failed to send dietary to caterer" });
-  }
-};
+const cateringHandlers = createCateringHandlers({
+  findBooking:query=>Booking.findOne(query).lean(),loadRoster:loadConfirmedCateringRoster,mailer:sendEmail,loadMenuAttachments,
+});
+export const sendMenuToBand = cateringHandlers.sendMenuToBand;
+export const sendDietaryToCaterer = cateringHandlers.sendDietaryToCaterer;
 
 export const docSigningRequest = async (req, res) => {
   try {
@@ -239,8 +93,8 @@ export const docSigningRequest = async (req, res) => {
       <p>Thanks,<br/>TSC Event Sheet Bot</p>
     `;
 
-    const result = await sendEmail(recipients.join(","), emailSubject, html, attachments);
-    if (!result?.success) {
+    const result = await sendEmail({to:recipients, subject:emailSubject, html, attachments});
+    if (!result?.ok) {
       return res.status(500).json({ success: false, message: "Email send failed", error: result?.error?.message });
     }
     return res.status(200).json({ success: true, queued: false });

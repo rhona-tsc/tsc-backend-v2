@@ -47,6 +47,7 @@ import musicianRouter from "./routes/musicianRoute.js";
 import actV2Routes from "./routes/actV2Routes.js";
 import cartRouter from "./routes/cartRoute.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
+import notificationsRoutes from "./routes/notifications.js";
 import googleRoutes from "./routes/google.js";
 import calendarWebhook from "./routes/calendarWebhook.js";
 import authRoutes from "./routes/authRoutes.js";
@@ -777,6 +778,7 @@ app.use("/api/locations", locationPageRoutes);
 
 app.use("/api/cart", cartRouter);
 app.use("/api/booking", bookingRoutes);
+app.use("/api/notifications", notificationsRoutes);
 app.use("/api/payments", paymentsRouter);
 app.use("/api/invoices", invoiceRoutes);
 app.use("/api/board/bookings", bookingBoardRoutes);
