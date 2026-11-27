@@ -252,3 +252,33 @@ test("no eligible regional deputy never silently falls back to the wrong pool", 
     null,
   );
 });
+
+const rya = { musicianId: 'rya', name: 'Rya / Menat' };
+const garageBass = { _id: 'garage-bass', musicianId: 'ewan', name: 'Ewan McIntosh', instrument: 'Bass Guitar', deputies: [rya] };
+const garageMc = { _id: 'garage-mc', ...rya, instrument: 'MC/Rapper' };
+const garageLineup = { bandMembers: [garageBass, garageMc] };
+const garagePolicy = { exclusions: [{ person: rya, withPeople: [rya], reason: 'Rya cannot cover bass and vocals on the same booking' }] };
+const replacementMc = { musicianId: 'shamyra', name: 'Shamyra Abbott', originalBandMemberId: 'garage-mc', status: 'confirmed' };
+const assignedBass = { ...rya, originalBandMemberId: 'garage-bass', status: 'confirmed' };
+const assignedMc = { ...rya, originalBandMemberId: 'garage-mc', status: 'confirmed' };
+const garageEligibility = (member, assignments = []) => rosterEligibility({ candidate: rya, member, lineup: garageLineup, assignments, policy: garagePolicy });
+
+test('Rya cannot cover bass while he remains the original MC', () => {
+  assert.equal(garageEligibility(garageBass).eligible, false);
+});
+test('Rya may cover bass when an approved replacement covers the MC slot', () => {
+  assert.equal(garageEligibility(garageBass, [replacementMc]).eligible, true);
+});
+test('Rya existing bass allocation remains eligible when he is not the MC', () => {
+  assert.equal(garageEligibility(garageBass, [replacementMc, assignedBass]).eligible, true);
+});
+test('Rya cannot take the MC slot while he is allocated on bass', () => {
+  assert.equal(garageEligibility(garageMc, [assignedBass]).eligible, false);
+});
+test('Rya existing MC allocation does not exclude itself', () => {
+  assert.equal(garageEligibility(garageMc, [assignedMc]).eligible, true);
+});
+test('An inactive Rya bass allocation does not block his MC role', () => {
+  for (const status of ['declined','cancelled','removed','unavailable','withdrawn'])
+    assert.equal(garageEligibility(garageMc, [{ ...assignedBass, status }]).eligible, true);
+});

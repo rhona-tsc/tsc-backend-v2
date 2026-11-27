@@ -139,7 +139,10 @@ export function rosterEligibility({
         people.some((p) =>
           (rule.withPeople || []).some((x) => sameRosterPerson(x, p)),
         )) ||
+      // Self-exclusions use the other-role people above, not the current
+      // role's own existing assignment in the reverse-order check.
       (isOther &&
+        !isSubject &&
         assignments
           .filter(
             (p) =>

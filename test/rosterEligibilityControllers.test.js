@@ -52,7 +52,13 @@ function fixtures(t, county = "London") {
     lineupId: ids.lineup,
     eventDateISO: "2027-06-01",
     address: county,
-    assignedMusicians: [],
+    assignedMusicians: [{
+      musicianId: ids.emma,
+      name: "Emma May Osei-Lah",
+      role: "Lead Female Vocal/Rapper",
+      originalBandMemberId: "777777777777777777777777",
+      status: "confirmed",
+    }],
   };
   t.mock.method(Board, "findOne", async () => board);
   t.mock.method(Act, "findById", () => ({ lean: async () => act }));
