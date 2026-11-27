@@ -1,3 +1,4 @@
+import { sharedRosterSkillEligibility } from '../utils/sharedRosterSkills.js';
 import {activeAllocationHold,withinAllocationWeek,vocalistAllocationBlocked,bookingRolePlan} from '../utils/bookingAllocationPolicy.js';
 import {normaliseAllocationRole} from '../utils/allocationRoles.js';
 import {confirmedBookingAvailabilityWrite, syncConfirmedBookingAssignments} from '../services/manualBookingConfirmation.js';
@@ -5,7 +6,7 @@ import {actRoleDeputies} from '../utils/actRoleDeputies.js';
 import {rosterEligibilityForBooking,eligibleDeputiesForBooking,selectRosterMemberForBooking} from '../utils/bookingRosterPools.js';
 import {findPriorAvailabilityDecline} from '../services/availabilityPriorDeclines.js';
 import { ownsBookingAssignment, isWithdrawalTarget, withdrawalAvailabilityRecord } from '../utils/bookingWithdrawal.js';
-import {getRosterPolicy,bookingRosterEligibility} from '../services/rosterEligibilityService.js';
+import {getRosterPolicy,bookingRosterEligibility,getBookingSkillProfiles} from '../services/rosterEligibilityService.js';
 import {rosterEligibility,eligibleRosterDeputies,selectRosterMember} from '../utils/rosterEligibility.js';
 // backend/controllers/allocationController.js
 import Act from "../models/actModel.js";
@@ -934,7 +935,19 @@ export const postExhaustedRoleToDeputyBoard = async (msg, act) => {
   const role = String(msg.meta?.role || String(msg.duties || "Musician").split(" · ")[0]).trim();
   const eventDate = String(msg.meta?.MetaISODate || "").slice(0, 10);
   const fee = Number(msg.fee || 0) || 0;
+  let essentialRoles=[];
+  if(msg.bookingBoardItemId){
+    const board=await bookingBoardItem.findById(msg.bookingBoardItemId).lean();
+    const policy=await getRosterPolicy(act._id);
+    if(board && policy?.sharedSkillRequirements?.length){
+      const lineup=act.lineups?.find(l=>[l._id,l.lineupId].some(id=>String(id)===String(msg.lineupId)));
+      const profiles=await getBookingSkillProfiles(board);
+      const check=sharedRosterSkillEligibility({board,lineup,policy,candidate:{},roleSlotId:msg.roleSlotId,profiles});
+      if(check.sharedSkillCoverage==='uncovered')essentialRoles=[check.sharedSkill];
+    }
+  }
   const job = await DeputyJob.create({
+    essentialRoles,
     title: `${role} needed for ${act?.tscName || act?.name || "band booking"}`,
     instrument: role,
     requiredInstruments: [role],
@@ -1040,7 +1053,7 @@ export const listRoleCandidates = async (req, res) => {
     const musicians = await Musician.find({
       $or: textFilters || filters,
     })
-      .select("firstName lastName email phone phoneNumber basicInfo instrumentation other_skills profilePhoto")
+      .select("firstName lastName email phone phoneNumber basicInfo instrumentation other_skills capabilities profilePhoto")
       .limit(80)
       .lean();
 
@@ -1092,6 +1105,7 @@ export const listRoleCandidates = async (req, res) => {
       ),
     );
 
+    const sharedProfiles=rosterPolicy?.sharedSkillRequirements?.length ? await getBookingSkillProfiles(board,musicians) : [];
     const candidates = musicians
       .map((musician) => {
         const id = String(musician._id);
@@ -1118,7 +1132,8 @@ export const listRoleCandidates = async (req, res) => {
         ].filter(Boolean).join(" ").trim();
         const bookingConflict = conflictById.get(id) || "";
         const rosterMember = matchedPrimaryMember || roleMembers.find(m=>(m.deputies || []).some(d=>String(d.musicianId || d._id || d.id || "")===id));
-        const eligibility = rosterEligibilityForBooking({board,candidate:musician,member:rosterMember,lineup,assignments:board.assignedMusicians || [],policy:rosterPolicy,address:board.address || board.venueAddress,county:board.county,roleSlotId:req.query?.roleSlotId});
+        let eligibility = rosterEligibilityForBooking({board,candidate:musician,member:rosterMember,lineup,assignments:board.assignedMusicians || [],policy:rosterPolicy,address:board.address || board.venueAddress,county:board.county,roleSlotId:req.query?.roleSlotId});
+        if(eligibility.eligible && rosterPolicy?.sharedSkillRequirements?.length)eligibility={...eligibility,...sharedRosterSkillEligibility({board,lineup,policy:rosterPolicy,candidate:musician,member:rosterMember,roleSlotId:req.query?.roleSlotId,profiles:sharedProfiles})};
         const regionalOrder = rosterMember ? eligibleDeputiesForBooking({board,roleSlotId:req.query?.roleSlotId,member:rosterMember,lineup,policy:rosterPolicy,address:board.address || board.venueAddress,county:board.county,assignments:board.assignedMusicians || []}).findIndex(d=>String(d.musicianId || d._id || d.id || "")===id) : -1;
         const isUnavailable = unavailableIds.has(id) || Boolean(bookingConflict) || !eligibility.eligible;
         const roleMatch = [
@@ -2596,6 +2611,7 @@ export async function escalateToNextDeputy(msg, {dryRun=false}={}) {
       if(await findPriorAvailabilityDecline({musicianId:targetId,phone:targetPhone,dateISO:msg.meta.MetaISODate,formattedAddress:msg.formattedAddress}))continue;
       const conflict=await bookingBoardItem.exists({_id:{$ne:rosterBoard._id},eventDateISO:msg.meta.MetaISODate,bookingStatus:{$ne:'cancelled'},assignedMusicians:{$elemMatch:{musicianId:targetId,status:{$in:['confirmed','accepted']}}}});
       if(conflict)continue;
+      if(rosterPolicy?.sharedSkillRequirements?.length){const check=await bookingRosterEligibility({act,lineup,board:rosterBoard,candidate,member:current,roleSlotId:msg.roleSlotId,address:msg.formattedAddress});if(!check.eligible)continue;}
       nextDep=candidate;phone=targetPhone;break;
     }
     if(!nextDep){if(dryRun)return {route:"job_board",reason:"act_deputies_exhausted"};await postExhaustedRoleToDeputyBoard(msg,act);return false;}

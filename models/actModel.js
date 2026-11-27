@@ -376,6 +376,7 @@ minDisplayPrice: { type: Number, default: null },
               {
                 additionalFee: { type: Number },
                 role: { type: String },
+                deputyRequirement: { type: String, enum: ['always', 'if_uncovered'], default: undefined },
                 isEssential: { ...booleanField(), default: false },
               },
             ],

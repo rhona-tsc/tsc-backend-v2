@@ -218,7 +218,7 @@ export const listRegularDeputies = async (req, res) => {
         actSize: lineup.actSize || "Lineup",
         roles: (lineup.bandMembers || []).filter((member) => clean(member.instrument)).map((member) => {
           const essentialAdditionalRoles = (member.additionalRoles || [])
-            .filter((additionalRole) => additionalRole?.isEssential && clean(additionalRole?.role))
+            .filter((additionalRole) => additionalRole?.isEssential && additionalRole?.deputyRequirement !== 'if_uncovered' && clean(additionalRole?.role))
             .map((additionalRole) => clean(additionalRole.role))
             .filter((additionalRole) => additionalRole.toLowerCase() !== clean(member.instrument).toLowerCase());
           const roleLabel = Array.from(new Set([
